@@ -1,0 +1,30 @@
+appId: app.aiopsterm.desktop
+productName: aiopsterm
+directories:
+  buildResources: resources
+files:
+  - out/**
+  - package.json
+  - '!external-reference/**'
+  - '!docs/**'
+  - '!tests/**'
+  - '!src/**'
+  - '!node_modules/.cache/**'
+asar: true
+npmRebuild: false
+linux:
+  maintainer: dev@aiopsterm.local
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+win:
+  target:
+    - nsis
+  artifactName: ${name}-${version}-setup-${arch}.${ext}
+mac:
+  target:
+    - dmg
+    - zip
+  artifactName: ${name}-${version}-macos-${arch}.${ext}

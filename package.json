@@ -1,0 +1,51 @@
+{
+  "name": "aiopsterm",
+  "version": "0.1.0",
+  "description": "Self-owned AI operations terminal shell with local mock backends.",
+  "main": "./out/main/index.js",
+  "author": {
+    "name": "aiopsterm",
+    "email": "dev@aiopsterm.local"
+  },
+  "homepage": "https://aiopsterm.local",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "npm run typecheck && electron-vite build",
+    "rebuild:native": "electron-rebuild -f -w node-pty -v 31.7.7 -d https://www.electronjs.org/headers",
+    "build:linux": "npm run build && npm run rebuild:native && electron-builder --linux --config electron-builder.yml",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:e2e": "npm run build && playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^5.1.5",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.15.0",
+    "@xterm/xterm": "^5.5.0",
+    "adm-zip": "^0.5.17",
+    "electron-store": "^10.0.1",
+    "lucide-vue-next": "^0.468.0",
+    "node-pty": "^1.1.0",
+    "pinia": "^2.2.8",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2",
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^20.17.10",
+    "@vue/test-utils": "^2.4.6",
+    "electron": "^31.7.7",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "jsdom": "^25.0.1",
+    "less": "^4.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.1.10"
+  }
+}
