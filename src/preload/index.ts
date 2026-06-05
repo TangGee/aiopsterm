@@ -78,6 +78,7 @@ const api: AiopsPreloadApi = {
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:open-file', options),
   showSaveDialog: (options) => ipcRenderer.invoke('dialog:save-file', options),
   writeLocalFile: (filePath: string, content: string) => ipcRenderer.invoke('files:write-local', filePath, content),
+  stageChatAttachment: (payload) => ipcRenderer.invoke('chat:stage-attachment', payload),
   kbCheckPath: (absPath: string) => ipcRenderer.invoke('kb:check-path', { absPath }),
   kbEnsureRoot: () => ipcRenderer.invoke('kb:ensure-root'),
   kbGetRoot: () => ipcRenderer.invoke('kb:get-root'),

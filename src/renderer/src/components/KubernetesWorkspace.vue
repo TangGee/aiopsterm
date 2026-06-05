@@ -111,7 +111,16 @@
                 <input
                   v-model="workspace.k8sSearchQuery"
                   placeholder="搜索"
+                  @keydown.esc="workspace.clearK8sSearch"
                 />
+                <button
+                  v-if="workspace.k8sSearchQuery"
+                  class="k8s-search-clear"
+                  title="清除搜索"
+                  @click="workspace.clearK8sSearch"
+                >
+                  <X />
+                </button>
                 <Search />
               </label>
               <button
@@ -244,6 +253,32 @@
                 <div class="k8s-form-status">
                   <span>连接状态</span>
                   <K8sStatusTag :status="workspace.k8sSelectedCluster.connection_status" />
+                </div>
+                <div class="k8s-form-actions inline">
+                  <button
+                    v-if="workspace.k8sSelectedCluster.connection_status !== 'connected'"
+                    :disabled="workspace.k8sConnectingClusterIds.includes(workspace.k8sSelectedCluster.id)"
+                    @click="workspace.connectK8sCluster(workspace.k8sSelectedCluster.id)"
+                  >
+                    <LoaderCircle v-if="workspace.k8sConnectingClusterIds.includes(workspace.k8sSelectedCluster.id)" />
+                    <Link v-else />
+                    {{ workspace.k8sSelectedCluster.connection_status === 'connecting' ? '连接中' : '连接' }}
+                  </button>
+                  <button
+                    v-else
+                    @click="workspace.disconnectK8sCluster(workspace.k8sSelectedCluster.id)"
+                  >
+                    <Unplug />
+                    断开
+                  </button>
+                  <button @click="workspace.openK8sTerminal(workspace.k8sSelectedCluster.id)">
+                    <Terminal />
+                    打开终端
+                  </button>
+                  <button @click="workspace.openK8sProxyConfig">
+                    <Settings />
+                    Agent 代理
+                  </button>
                 </div>
                 <div
                   v-if="workspace.k8sSelectedCluster.source_type !== 'jumpserver'"
@@ -424,6 +459,32 @@
           <header>
             <strong>{{ workspace.k8sResourceOutputTitle }}</strong>
             <span v-if="workspace.k8sCopiedCommand">已复制: {{ workspace.k8sCopiedCommand }}</span>
+            <div class="k8s-resource-output-actions">
+              <button
+                title="复制输出"
+                @click="workspace.copyK8sResourceOutput"
+              >
+                <Clipboard />
+              </button>
+              <button
+                title="发送输出命令到终端"
+                @click="workspace.sendK8sCurrentOutputToTerminal"
+              >
+                <Terminal />
+              </button>
+              <button
+                title="发送输出到 AI"
+                @click="workspace.sendK8sCurrentOutputToAi"
+              >
+                <Bot />
+              </button>
+              <button
+                title="清空输出"
+                @click="workspace.clearK8sResourceOutput"
+              >
+                <X />
+              </button>
+            </div>
           </header>
           <pre>{{ workspace.k8sResourceOutput }}</pre>
         </aside>
@@ -432,13 +493,14 @@
 
     <K8sAddClusterModal v-if="workspace.k8sAddModalOpen" />
     <K8sEditClusterModal v-if="workspace.k8sEditModalOpen && editingCluster" />
+    <K8sProxyConfigModal v-if="workspace.k8sProxyConfigOpen" />
     <K8sDeleteConfirmModal v-if="workspace.k8sDeleteConfirmCluster" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
-import { ChevronRight, Clipboard, Cloud, FileSearch, FileText, LoaderCircle, Plus, RefreshCw, ScrollText, Search, Terminal, Trash2, X } from 'lucide-vue-next'
+import { Bot, ChevronRight, Clipboard, Cloud, FileSearch, FileText, Link, LoaderCircle, Plus, RefreshCw, ScrollText, Search, Settings, Terminal, Trash2, Unplug, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { K8sConnectionStatus, K8sResourceKind, MockK8sCluster } from '@/data/mockData'
 
@@ -774,6 +836,103 @@ const K8sEditClusterModal = defineComponent({
             ])
           ])
         : null
+  }
+})
+
+const K8sProxyConfigModal = defineComponent({
+  name: 'K8sProxyConfigModal',
+  setup() {
+    const store = useWorkspaceStore()
+    return () =>
+      h('div', { class: 'file-modal' }, [
+        h('div', { class: 'file-modal-card small k8s-proxy-config-modal' }, [
+          h('header', [
+            h('strong', 'Kubernetes Agent 代理设置'),
+            h(
+              'button',
+              {
+                title: '关闭',
+                onClick: store.closeK8sProxyConfig
+              },
+              [h(X)]
+            )
+          ]),
+          h('div', { class: 'k8s-modal-form' }, [
+            h('label', { class: 'k8s-switch-row' }, [
+              h('span', '启用代理'),
+              h('input', {
+                type: 'checkbox',
+                checked: store.k8sProxyConfig.enabled,
+                onInput: (event: Event) => store.updateK8sProxyConfig({ enabled: (event.target as HTMLInputElement).checked })
+              })
+            ]),
+            h('label', [
+              h('span', '代理类型'),
+              h(
+                'select',
+                {
+                  value: store.k8sProxyConfig.type,
+                  disabled: !store.k8sProxyConfig.enabled,
+                  onChange: (event: Event) => store.updateK8sProxyConfig({ type: (event.target as HTMLSelectElement).value as any })
+                },
+                ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].map((type) => h('option', { value: type }, type))
+              )
+            ]),
+            h('label', [
+              h('span', '代理主机'),
+              h('input', {
+                value: store.k8sProxyConfig.host,
+                disabled: !store.k8sProxyConfig.enabled,
+                onInput: (event: Event) => store.updateK8sProxyConfig({ host: (event.target as HTMLInputElement).value })
+              })
+            ]),
+            h('label', [
+              h('span', '代理端口'),
+              h('input', {
+                type: 'number',
+                min: 1,
+                max: 65535,
+                value: store.k8sProxyConfig.port,
+                disabled: !store.k8sProxyConfig.enabled,
+                onInput: (event: Event) => store.updateK8sProxyConfig({ port: Number((event.target as HTMLInputElement).value) })
+              })
+            ]),
+            h('label', { class: 'k8s-switch-row' }, [
+              h('span', '代理身份'),
+              h('input', {
+                type: 'checkbox',
+                checked: store.k8sProxyConfig.enableProxyIdentity,
+                disabled: !store.k8sProxyConfig.enabled,
+                onInput: (event: Event) => store.updateK8sProxyConfig({ enableProxyIdentity: (event.target as HTMLInputElement).checked })
+              })
+            ]),
+            store.k8sProxyConfig.enabled && store.k8sProxyConfig.enableProxyIdentity
+              ? [
+                  h('label', [
+                    h('span', '用户名'),
+                    h('input', {
+                      value: store.k8sProxyConfig.username,
+                      onInput: (event: Event) => store.updateK8sProxyConfig({ username: (event.target as HTMLInputElement).value })
+                    })
+                  ]),
+                  h('label', [
+                    h('span', '密码'),
+                    h('input', {
+                      type: 'password',
+                      value: store.k8sProxyConfig.password,
+                      onInput: (event: Event) => store.updateK8sProxyConfig({ password: (event.target as HTMLInputElement).value })
+                    })
+                  ])
+                ]
+              : null
+          ]),
+          h('p', { class: 'k8s-proxy-hint' }, '连接集群时会把该代理配置应用到本地 Kubernetes Agent mock 状态。'),
+          h('footer', [
+            h('button', { onClick: store.closeK8sProxyConfig }, '取消'),
+            h('button', { class: 'primary', onClick: store.saveK8sProxyConfig }, '保存')
+          ])
+        ])
+      ])
   }
 })
 

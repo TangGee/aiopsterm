@@ -11,10 +11,269 @@
         <p class="eyebrow">AI Agent</p>
         <h2>{{ agentMode ? 'Agents 工作台' : '智能助手' }}</h2>
       </div>
-      <span class="mock-badge">{{ workspace.config.modelProvider }}</span>
+      <div class="ai-header-actions">
+        <button
+          type="button"
+          class="ai-header-icon-button"
+          title="新建会话"
+          data-testid="ai-new-chat"
+          @click.stop="createNewAiConversation"
+        >
+          <Plus />
+        </button>
+        <div
+          class="ai-history-menu-wrap"
+          @click.stop
+        >
+          <button
+            type="button"
+            class="ai-header-icon-button"
+            title="会话历史"
+            data-testid="ai-history-open"
+            @click.stop="toggleHistoryMenu"
+          >
+            <History />
+          </button>
+          <div
+            v-if="historyMenuOpen"
+            class="ai-history-dropdown"
+            data-testid="ai-history-dropdown"
+          >
+            <div class="ai-history-search-row">
+              <label class="ai-history-search">
+                <Search />
+                <input
+                  ref="historySearchInputRef"
+                  v-model="historySearchTerm"
+                  type="search"
+                  placeholder="搜索历史"
+                  data-testid="ai-history-search-input"
+                  @keydown.esc.prevent="closeHistoryMenu"
+                />
+                <button
+                  v-if="historySearchTerm"
+                  type="button"
+                  title="清空搜索"
+                  @click="clearHistorySearch"
+                >
+                  <X />
+                </button>
+              </label>
+              <button
+                type="button"
+                class="ai-history-favorite-toggle"
+                :class="{ active: historyFavoritesOnly }"
+                title="只看收藏"
+                data-testid="ai-history-favorites-toggle"
+                @click="historyFavoritesOnly = !historyFavoritesOnly"
+              >
+                <Star />
+              </button>
+            </div>
+
+            <div class="ai-history-list">
+              <template v-if="groupedVisibleHistory.length">
+                <section
+                  v-for="group in groupedVisibleHistory"
+                  :key="group.label"
+                  class="ai-history-group"
+                >
+                  <div
+                    class="ai-history-date"
+                    :class="{ favorite: group.label === historyFavoriteLabel }"
+                  >
+                    <Star v-if="group.label === historyFavoriteLabel" />
+                    <span>{{ group.label }}</span>
+                  </div>
+                  <div
+                    v-for="conversation in group.items"
+                    :key="conversation.id"
+                    class="ai-history-item"
+                    :class="{ active: workspace.selectedConversationId === conversation.id, favorite: conversation.favorite }"
+                    role="button"
+                    tabindex="0"
+                    @click="restoreHistoryConversation(conversation.id)"
+                    @keydown.enter.prevent="restoreHistoryConversation(conversation.id)"
+                    @keydown.delete.prevent="deleteHistoryConversation(conversation.id)"
+                    @keydown.backspace.prevent="deleteHistoryConversation(conversation.id)"
+                  >
+                    <div class="ai-history-content">
+                      <input
+                        v-if="editingHistoryId === conversation.id"
+                        v-model="editingHistoryTitle"
+                        class="ai-history-title-input"
+                        data-testid="ai-history-title-input"
+                        @click.stop
+                        @keydown.enter.prevent="saveHistoryTitle(conversation.id)"
+                        @keydown.esc.prevent="cancelHistoryTitleEdit"
+                      />
+                      <span
+                        v-else
+                        class="ai-history-title"
+                      >
+                        {{ conversation.title }}
+                      </span>
+                      <span class="ai-history-meta">
+                        <span>{{ formatHistoryTime(conversation.ts) }}</span>
+                        <span v-if="conversation.ipAddress">{{ conversation.ipAddress }}</span>
+                      </span>
+                    </div>
+                    <div class="ai-history-actions">
+                      <template v-if="editingHistoryId === conversation.id">
+                        <button
+                          type="button"
+                          title="保存"
+                          @click.stop="saveHistoryTitle(conversation.id)"
+                        >
+                          <Check />
+                        </button>
+                        <button
+                          type="button"
+                          title="取消"
+                          @click.stop="cancelHistoryTitleEdit"
+                        >
+                          <X />
+                        </button>
+                      </template>
+                      <template v-else>
+                        <button
+                          type="button"
+                          title="收藏"
+                          :class="{ active: conversation.favorite }"
+                          @click.stop="toggleHistoryFavorite(conversation.id)"
+                        >
+                          <Star />
+                        </button>
+                        <button
+                          type="button"
+                          title="编辑标题"
+                          @click.stop="editHistoryTitle(conversation.id)"
+                        >
+                          <Pencil />
+                        </button>
+                        <button
+                          type="button"
+                          title="删除历史"
+                          @click.stop="deleteHistoryConversation(conversation.id)"
+                        >
+                          <Trash2 />
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </section>
+                <button
+                  v-if="hasMoreHistoryConversations"
+                  type="button"
+                  class="ai-history-load-more"
+                  :disabled="historyLoadingMore"
+                  data-testid="ai-history-load-more"
+                  @click="loadMoreHistoryConversations"
+                >
+                  {{ historyLoadingMore ? '加载中...' : '加载更多' }}
+                </button>
+              </template>
+              <div
+                v-else
+                class="ai-history-empty"
+              >
+                暂无数据
+              </div>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="ai-header-icon-button"
+          title="搜索聊天"
+          data-testid="ai-chat-search-open"
+          @click.stop="openChatSearch"
+        >
+          <Search />
+        </button>
+        <button
+          type="button"
+          class="ai-header-icon-button"
+          title="导出聊天"
+          data-testid="ai-chat-export"
+          @click.stop="exportCurrentChat"
+        >
+          <Download />
+        </button>
+        <span class="mock-badge">{{ workspace.config.modelProvider }}</span>
+      </div>
     </header>
 
-    <div class="chat-scroll">
+    <div
+      ref="chatScrollRef"
+      class="chat-scroll"
+    >
+      <div
+        v-if="chatSearchOpen"
+        class="ai-chat-search-bar"
+        @click.stop
+      >
+        <div class="ai-chat-search-input-wrap">
+          <Search />
+          <input
+            ref="chatSearchInputRef"
+            v-model="chatSearchTerm"
+            type="search"
+            placeholder="搜索聊天"
+            data-testid="ai-chat-search-input"
+            @keydown.enter.exact.prevent="findNextChatMatch"
+            @keydown.shift.enter.prevent="findPreviousChatMatch"
+            @keydown.esc.prevent="closeChatSearch"
+          />
+          <span
+            v-if="chatSearchTerm && chatSearchMatchCount > 0"
+            class="ai-chat-search-count"
+            data-testid="ai-chat-search-count"
+          >
+            {{ chatSearchCurrentIndex }}/{{ chatSearchMatchCount }}
+          </span>
+          <span
+            v-else-if="chatSearchTerm"
+            class="ai-chat-search-count no-results"
+            data-testid="ai-chat-search-count"
+          >
+            无匹配
+          </span>
+          <button
+            v-if="chatSearchTerm"
+            type="button"
+            title="清空"
+            @click="clearChatSearch"
+          >
+            <X />
+          </button>
+        </div>
+        <div class="ai-chat-search-controls">
+          <button
+            type="button"
+            title="上一个"
+            :disabled="chatSearchMatchCount === 0"
+            @click="findPreviousChatMatch"
+          >
+            <ChevronLeft />
+          </button>
+          <button
+            type="button"
+            title="下一个"
+            :disabled="chatSearchMatchCount === 0"
+            @click="findNextChatMatch"
+          >
+            <ChevronRight />
+          </button>
+          <button
+            type="button"
+            title="关闭"
+            @click="closeChatSearch"
+          >
+            <X />
+          </button>
+        </div>
+      </div>
       <article
         v-for="message in workspace.chatMessages"
         :key="message.id"
@@ -54,7 +313,7 @@
           <div
             :ref="setEditEditableRef"
             class="chat-editable message-editable"
-            :class="{ 'is-empty': !editDraft.trim() && !editImageInputParts.length && !editHostContexts.length }"
+            :class="{ 'is-empty': !editDraft.trim() && !editImageInputParts.length && !editFileInputParts.length && !editHostContexts.length }"
             data-placeholder="编辑消息"
             contenteditable="true"
             spellcheck="false"
@@ -65,6 +324,14 @@
             @click="handleEditEditableClick"
           ></div>
           <div class="message-edit-actions">
+            <button
+              type="button"
+              title="上传文件"
+              data-testid="ai-edit-file-upload-button"
+              @click.stop="handleFileUpload"
+            >
+              <Upload />
+            </button>
             <button
               type="button"
               @click.stop="cancelMessageEdit"
@@ -128,35 +395,116 @@
         </p>
         <em v-if="message.state === 'streaming'">streaming</em>
         <div
+          v-if="isCommandSuggestionMessage(message)"
+          class="message-command-actions"
+        >
+          <button
+            type="button"
+            class="secondary"
+            data-testid="ai-message-command-copy"
+            @click.stop="copyMessageToClipboard(message)"
+          >
+            <Copy />
+            <span>复制</span>
+          </button>
+          <button
+            type="button"
+            class="primary"
+            data-testid="ai-message-command-run"
+            @click.stop="runMessageCommand(message)"
+          >
+            <Play />
+            <span>运行</span>
+          </button>
+        </div>
+        <div
+          v-if="message.executedCommand"
+          class="message-executed-command"
+          data-testid="ai-message-executed-command"
+        >
+          <Check />
+          <span>已发送到终端：{{ message.executedCommand }}</span>
+        </div>
+        <div
+          v-if="message.role === 'user' && editingMessageId !== message.id"
+          class="message-actions user-message-actions"
+        >
+          <button
+            type="button"
+            title="复制"
+            data-testid="ai-message-copy"
+            @click.stop="copyMessageToClipboard(message)"
+          >
+            <Copy />
+          </button>
+          <button
+            type="button"
+            title="编辑并重新发送"
+            data-testid="ai-message-edit"
+            @click.stop="startMessageEdit(message)"
+          >
+            <RefreshCw />
+          </button>
+        </div>
+        <div
           v-if="message.role === 'assistant'"
           class="message-actions"
         >
           <button
+            type="button"
+            title="复制"
+            data-testid="ai-message-copy"
+            @click.stop="copyMessageToClipboard(message)"
+          >
+            <Copy />
+          </button>
+          <button
+            type="button"
             :class="{ active: message.favorite }"
             title="收藏"
-            @click="workspace.toggleMessageFavorite(message.id)"
+            @click.stop="toggleMessageFavorite(message.id)"
           >
             <Star />
           </button>
           <button
+            type="button"
             :class="{ active: message.feedback === 'up' }"
             title="有帮助"
-            @click="workspace.setMessageFeedback(message.id, 'up')"
+            @click.stop="setMessageFeedback(message.id, 'up')"
           >
             <ThumbsUp />
           </button>
           <button
+            type="button"
             :class="{ active: message.feedback === 'down' }"
             title="无帮助"
-            @click="workspace.setMessageFeedback(message.id, 'down')"
+            @click.stop="setMessageFeedback(message.id, 'down')"
           >
             <ThumbsDown />
           </button>
           <button
+            type="button"
             title="重试"
-            @click="workspace.retryLastAssistantMessage()"
+            data-testid="ai-message-retry"
+            @click.stop="retryAssistantMessage(message.id)"
           >
             <RefreshCw />
+          </button>
+          <button
+            type="button"
+            title="沉淀到知识"
+            data-testid="ai-message-to-knowledge"
+            @click.stop="summarizeMessageToKnowledge(message.id)"
+          >
+            <BookOpen />
+          </button>
+          <button
+            type="button"
+            title="沉淀到技能"
+            data-testid="ai-message-to-skill"
+            @click.stop="summarizeMessageToSkill(message.id)"
+          >
+            <Sparkles />
           </button>
         </div>
       </article>
@@ -317,6 +665,13 @@
       <span>{{ workspace.config.modelName }}</span>
       <em>{{ workspace.config.modelEndpoint || '本地 mock，无远端调用' }}</em>
     </div>
+    <span
+      v-if="chatExportNotice"
+      class="ai-operation-notice"
+      data-testid="ai-chat-export-notice"
+    >
+      {{ chatExportNotice }}
+    </span>
 
     <form
       class="chat-input"
@@ -670,7 +1025,7 @@
       <div
         ref="editableRef"
         class="chat-editable"
-        :class="{ 'is-empty': !draft.trim() && !workspace.selectedContexts.length && !selectedCommand }"
+        :class="{ 'is-empty': !draft.trim() && !workspace.selectedContexts.length && !imageInputParts.length && !fileInputParts.length && !selectedCommand }"
         data-placeholder="描述你的运维目标"
         data-testid="ai-message-input"
         data-onboarding-id="ai-input-editable"
@@ -686,11 +1041,11 @@
       ></div>
       <button
         type="button"
-        class="file-placeholder-button"
+        class="file-upload-button"
         data-testid="ai-file-upload-button"
-        title="上传文件暂未启用"
+        title="上传文件"
         :disabled="streaming"
-        @click.stop="showFileUploadPlaceholder"
+        @click.stop="handleFileUpload"
       >
         <Upload />
       </button>
@@ -722,10 +1077,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
   Bot,
   Brain,
+  BookOpen,
   Check,
   CheckSquare,
   ChevronDown,
@@ -733,6 +1089,8 @@ import {
   ChevronRight,
   ChevronUp,
   Code2,
+  Copy,
+  Download,
   LoaderCircle,
   FileText,
   FolderGit2,
@@ -742,7 +1100,11 @@ import {
   Mic,
   MinusSquare,
   Minus,
+  Play,
+  Pencil,
+  Plus,
   RefreshCw,
+  Search,
   Send,
   Server,
   Sparkles,
@@ -751,6 +1113,7 @@ import {
   History,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   Upload,
   X,
   Zap
@@ -775,7 +1138,8 @@ import type {
   AiDocChipContentPart,
   AiImageContentPart,
   AiSkillChipContentPart,
-  AiSupportedImageType
+  AiSupportedImageType,
+  ConversationItem
 } from '@/stores/workspace'
 import type { TodoItem } from '@/stores/workspace'
 
@@ -784,11 +1148,16 @@ defineProps<{ agentMode?: boolean }>()
 const workspace = useWorkspaceStore()
 const draft = ref('')
 const imageInputParts = ref<AiImageContentPart[]>([])
+const fileInputParts = ref<AiDocChipContentPart[]>([])
+const chatScrollRef = ref<HTMLElement | null>(null)
 const editableRef = ref<HTMLElement | null>(null)
 const editEditableRef = ref<HTMLElement | null>(null)
+const chatSearchInputRef = ref<HTMLInputElement | null>(null)
+const historySearchInputRef = ref<HTMLInputElement | null>(null)
 const editingMessageId = ref<string | null>(null)
 const editDraft = ref('')
 const editImageInputParts = ref<AiImageContentPart[]>([])
+const editFileInputParts = ref<AiDocChipContentPart[]>([])
 const editHostContexts = ref<AiContextOption[]>([])
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const modelSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -815,9 +1184,53 @@ const modelQuery = ref('')
 const dropActive = ref(false)
 const syncingFromEditable = ref(false)
 const inputPlaceholderNotice = ref('')
+const chatSearchOpen = ref(false)
+const chatSearchTerm = ref('')
+const chatSearchMatchCount = ref(0)
+const chatSearchCurrentIndex = ref(0)
+const historyMenuOpen = ref(false)
+const historySearchTerm = ref('')
+const historyFavoritesOnly = ref(false)
+const historyCurrentPage = ref(1)
+const historyLoadingMore = ref(false)
+const editingHistoryId = ref<string | null>(null)
+const editingHistoryTitle = ref('')
+const chatExportNotice = ref('')
 let inputPlaceholderNoticeTimer: number | undefined
+let chatSearchTimer: number | undefined
+let chatExportNoticeTimer: number | undefined
+const historyPageSize = 20
+const historyFavoriteLabel = '收藏'
 const supportedImageTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const imagePartMediaTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
+const chatAttachmentFilters = [
+  {
+    name: 'Text',
+    extensions: [
+      'txt',
+      'md',
+      'js',
+      'ts',
+      'py',
+      'java',
+      'cpp',
+      'c',
+      'html',
+      'css',
+      'json',
+      'xml',
+      'yaml',
+      'yml',
+      'sql',
+      'sh',
+      'bat',
+      'ps1',
+      'log',
+      'csv',
+      'tsv'
+    ]
+  }
+]
 const maxImageBytes = 10 * 1024 * 1024
 const maxHostContexts = 5
 const todoMaxItems = 20
@@ -827,6 +1240,28 @@ const focusedTodo = computed(() => workspace.todoItems.find((todo) => todo.isFoc
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
 const focusedTodoId = computed(() => focusedTodo.value?.id || null)
 const visibleTodos = computed(() => workspace.todoItems.slice(0, todoMaxItems))
+const filteredHistoryConversations = computed(() => {
+  const keyword = historySearchTerm.value.trim().toLowerCase()
+  return workspace.sortedConversations.filter((conversation) => {
+    const matchesSearch = !keyword || conversation.title.toLowerCase().includes(keyword)
+    const matchesFavorite = !historyFavoritesOnly.value || conversation.favorite
+    return matchesSearch && matchesFavorite
+  })
+})
+const visibleHistoryConversations = computed(() => filteredHistoryConversations.value.slice(0, historyCurrentPage.value * historyPageSize))
+const hasMoreHistoryConversations = computed(() => visibleHistoryConversations.value.length < filteredHistoryConversations.value.length)
+const groupedVisibleHistory = computed(() => {
+  const groups = new Map<string, ConversationItem[]>()
+  visibleHistoryConversations.value.forEach((conversation) => {
+    const label = historyFavoritesOnly.value ? historyFavoriteLabel : historyDateLabel(conversation.ts)
+    if (!groups.has(label)) groups.set(label, [])
+    groups.get(label)!.push(conversation)
+  })
+  return Array.from(groups.entries()).map(([label, items]) => ({
+    label,
+    items: [...items].sort((first, second) => second.ts - first.ts)
+  }))
+})
 
 const isTodoFocused = (todo: TodoItem) => {
   if (focusedTodoId.value) return todo.id === focusedTodoId.value
@@ -842,6 +1277,417 @@ const todoStatusIcon = (todo: TodoItem) => {
 const closeModelMenu = () => {
   modelMenuOpen.value = false
   modelQuery.value = ''
+}
+
+const historyDateLabel = (timestamp: number) => {
+  const date = new Date(timestamp || Date.now())
+  const today = new Date()
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+  const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const diffDays = Math.floor((startOfToday - startOfTarget) / (1000 * 60 * 60 * 24))
+  if (diffDays <= 0) return '今天'
+  if (diffDays === 1) return '昨天'
+  if (diffDays < 7) return `${diffDays}天前`
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
+const formatHistoryTime = (timestamp: number) => {
+  const date = new Date(timestamp || Date.now())
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return historyDateLabel(timestamp)
+}
+
+type ChatSearchMatch = {
+  element: HTMLElement
+}
+
+const chatSearchMarks: HTMLElement[] = []
+const chatSearchMatches: ChatSearchMatch[] = []
+
+const getCurrentConversationTitle = () =>
+  workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
+
+const sanitizeExportFileName = (value: string) => {
+  const safeName = value.replace(/[/\\?%*:|"<>]/g, '-').trim()
+  return `${(safeName || 'aiopsterm-chat').slice(0, 30)}.md`
+}
+
+const escapeMarkdownFence = (value: string) => value.replace(/```/g, '``\\`')
+
+const markdownTextForPart = (part: AiContentPart) => {
+  if (part.type === 'text') return part.text
+  if (part.type === 'image') return `[image: ${part.name || part.mediaType}]`
+  if (part.chipType === 'doc') return `@${part.ref.name || part.ref.relPath || part.ref.absPath}`
+  if (part.chipType === 'chat') return `@${part.ref.title || part.ref.taskId}`
+  if (part.chipType === 'command') return part.ref.label || part.ref.command
+  return `@skill:${part.ref.skillName}`
+}
+
+const plainTextForPart = (part: AiContentPart) => {
+  if (part.type === 'text') return part.text
+  if (part.type === 'image') return `[image: ${part.name || part.mediaType}]`
+  if (part.chipType === 'doc') return `@${part.ref.name || part.ref.relPath || part.ref.absPath}`
+  if (part.chipType === 'chat') return `@${part.ref.title || part.ref.taskId}`
+  if (part.chipType === 'command') return part.ref.label || part.ref.command
+  return `@skill:${part.ref.skillName}`
+}
+
+const messagePlainText = (message: { text: string; contentParts?: AiContentPart[] }) =>
+  message.contentParts?.length ? message.contentParts.map(plainTextForPart).join('') : message.text
+
+const markdownForMessage = (message: { role: string; text: string; contentParts?: AiContentPart[]; hosts?: AiContextOption[] }) => {
+  const role = message.role === 'user' ? 'User' : message.role === 'assistant' ? 'aiopsterm' : 'System'
+  const body = message.contentParts?.length ? message.contentParts.map(markdownTextForPart).join('') : message.text
+  const hosts = message.hosts?.length ? `\n\nHosts: ${message.hosts.map((host) => host.label).join(', ')}` : ''
+  if (message.role === 'system') return `**${role}:**\n\n${body}${hosts}\n`
+  if (message.contentParts?.some((part) => part.type === 'image')) return `**${role}:**\n\n${body}${hosts}\n`
+  return `**${role}:**\n\n${escapeMarkdownFence(body)}${hosts}\n`
+}
+
+const buildChatExportMarkdown = () => {
+  const title = getCurrentConversationTitle()
+  const header = `# ${title}\n\n> Exported on: ${new Date().toLocaleString()} from aiopsterm\n\n---\n\n`
+  return `${header}${workspace.chatMessages.map(markdownForMessage).join('\n---\n\n')}`
+}
+
+const showChatExportNotice = (message: string) => {
+  chatExportNotice.value = message
+  if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
+  chatExportNoticeTimer = window.setTimeout(() => {
+    chatExportNotice.value = ''
+    chatExportNoticeTimer = undefined
+  }, 2400)
+}
+
+const copyTextWithFallback = async (text: string) => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Fall through to textarea fallback for restricted clipboard environments.
+    }
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand?.('copy') ?? false
+  textarea.remove()
+  return copied
+}
+
+const copyMessageToClipboard = async (message: { text: string; contentParts?: AiContentPart[] }) => {
+  const text = messagePlainText(message).trim()
+  if (!text) {
+    showChatExportNotice('消息为空，无法复制。')
+    return
+  }
+  const copied = await copyTextWithFallback(text)
+  showChatExportNotice(copied ? '消息已复制。' : '复制失败。')
+}
+
+const isCommandSuggestionMessage = (message: { role: string; contentParts?: AiContentPart[]; text: string; state?: string }) => {
+  if (message.role !== 'assistant' || message.state === 'streaming') return false
+  return Boolean(message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command') || message.text.trim().startsWith('/'))
+}
+
+const runMessageCommand = (message: { text: string; contentParts?: AiContentPart[]; executedCommand?: string }) => {
+  const command = messagePlainText(message).trim()
+  if (!command) {
+    showChatExportNotice('没有可运行的命令。')
+    return
+  }
+  const decision = workspace.stageActiveTerminalCommand(command)
+  message.executedCommand = command
+  if (decision?.status === 'needs-approval') {
+    showChatExportNotice('命令已送入终端安全确认。')
+    return
+  }
+  if (decision?.status === 'blocked') {
+    showChatExportNotice('命令被安全策略拦截。')
+    return
+  }
+  showChatExportNotice('命令已写入终端输入区。')
+}
+
+const toggleMessageFavorite = (id: string) => {
+  workspace.toggleMessageFavorite(id)
+  const message = workspace.chatMessages.find((item) => item.id === id)
+  showChatExportNotice(message?.favorite ? '已收藏消息。' : '已取消收藏。')
+}
+
+const setMessageFeedback = (id: string, feedback: 'up' | 'down') => {
+  workspace.setMessageFeedback(id, feedback)
+  const message = workspace.chatMessages.find((item) => item.id === id)
+  const current = message?.feedback
+  showChatExportNotice(current ? (current === 'up' ? '已标记有帮助。' : '已标记无帮助。') : '已取消反馈。')
+}
+
+const retryAssistantMessage = (id: string) => {
+  const retried = workspace.retryAssistantMessage(id)
+  showChatExportNotice(retried ? '已重新发送上一条用户消息。' : '没有可重试的用户消息。')
+}
+
+const summarizeMessageToKnowledge = async (id: string) => {
+  const result = await workspace.summarizeMessageToKnowledge(id)
+  showChatExportNotice(result ? `已沉淀到知识：${result.relPath}` : '沉淀到知识失败。')
+}
+
+const summarizeMessageToSkill = async (id: string) => {
+  const result = await workspace.summarizeMessageToSkill(id)
+  showChatExportNotice(result ? `已创建技能：${result.name}` : '沉淀到技能失败。')
+}
+
+const exportCurrentChat = async () => {
+  if (workspace.chatMessages.length === 0) {
+    showChatExportNotice('当前会话为空，无法导出。')
+    return
+  }
+  try {
+    const result = await window.aiops.showSaveDialog({
+      defaultPath: sanitizeExportFileName(getCurrentConversationTitle()),
+      filters: [{ name: 'Markdown Files', extensions: ['md'] }]
+    })
+    if (result?.canceled || !result?.filePath) return
+    await window.aiops.writeLocalFile(result.filePath, buildChatExportMarkdown())
+    showChatExportNotice('聊天已导出。')
+  } catch (error) {
+    showChatExportNotice(`导出失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+const openHistoryMenu = async () => {
+  chatSearchOpen.value = false
+  closeContextPopup()
+  closeCommandPopup()
+  modeMenuOpen.value = false
+  closeModelMenu()
+  historyMenuOpen.value = true
+  await nextTick()
+  historySearchInputRef.value?.focus()
+}
+
+const closeHistoryMenu = () => {
+  historyMenuOpen.value = false
+  editingHistoryId.value = null
+  editingHistoryTitle.value = ''
+}
+
+const toggleHistoryMenu = () => {
+  if (historyMenuOpen.value) {
+    closeHistoryMenu()
+    return
+  }
+  void openHistoryMenu()
+}
+
+const clearHistorySearch = () => {
+  historySearchTerm.value = ''
+  void nextTick(() => historySearchInputRef.value?.focus())
+}
+
+const createNewAiConversation = () => {
+  workspace.createConversation()
+  historySearchTerm.value = ''
+  historyCurrentPage.value = 1
+  closeHistoryMenu()
+  showChatExportNotice('已新建会话。')
+}
+
+const restoreHistoryConversation = (id: string) => {
+  if (editingHistoryId.value) return
+  const restored = workspace.restoreConversation(id)
+  if (restored) {
+    closeHistoryMenu()
+    showChatExportNotice('已恢复历史会话。')
+  }
+}
+
+const editHistoryTitle = async (id: string) => {
+  const conversation = workspace.conversations.find((item) => item.id === id)
+  if (!conversation) return
+  editingHistoryId.value = id
+  editingHistoryTitle.value = conversation.title
+  await nextTick()
+  const input = historySearchInputRef.value?.closest('.ai-history-dropdown')?.querySelector<HTMLInputElement>('.ai-history-title-input')
+  input?.focus()
+  input?.select()
+}
+
+const cancelHistoryTitleEdit = () => {
+  editingHistoryId.value = null
+  editingHistoryTitle.value = ''
+}
+
+const saveHistoryTitle = (id: string) => {
+  if (!editingHistoryId.value) return
+  const saved = workspace.renameConversation(id, editingHistoryTitle.value)
+  cancelHistoryTitleEdit()
+  showChatExportNotice(saved ? '历史标题已更新。' : '历史标题未更新。')
+}
+
+const deleteHistoryConversation = (id: string) => {
+  workspace.deleteConversation(id)
+  if (visibleHistoryConversations.value.length === 0 && historyCurrentPage.value > 1) {
+    historyCurrentPage.value -= 1
+  }
+  showChatExportNotice('历史会话已删除。')
+}
+
+const toggleHistoryFavorite = (id: string) => {
+  workspace.toggleConversationFavorite(id)
+  const conversation = workspace.conversations.find((item) => item.id === id)
+  showChatExportNotice(conversation?.favorite ? '历史会话已收藏。' : '已取消历史收藏。')
+}
+
+const loadMoreHistoryConversations = async () => {
+  if (historyLoadingMore.value || !hasMoreHistoryConversations.value) return
+  historyLoadingMore.value = true
+  try {
+    await new Promise((resolve) => window.setTimeout(resolve, 300))
+    historyCurrentPage.value += 1
+  } finally {
+    historyLoadingMore.value = false
+  }
+}
+
+const clearChatHighlights = () => {
+  chatSearchMarks.splice(0).forEach((mark) => {
+    const parent = mark.parentNode
+    if (!parent) return
+    parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
+    parent.normalize()
+  })
+  chatSearchMatches.splice(0)
+  chatSearchMatchCount.value = 0
+  chatSearchCurrentIndex.value = 0
+}
+
+const isSearchableChatTextNode = (node: Node) => {
+  const parent = node.parentElement
+  if (!parent) return false
+  if (!node.textContent?.trim()) return false
+  if (parent.closest('.ai-chat-search-bar')) return false
+  if (parent.closest('.chat-input')) return false
+  if (parent.closest('.user-message-edit-container')) return false
+  if (parent.closest('button')) return false
+  return Boolean(parent.closest('.message'))
+}
+
+const findChatTextRanges = (root: HTMLElement, term: string) => {
+  const ranges: Range[] = []
+  const lowerTerm = term.toLowerCase()
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      return isSearchableChatTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+    }
+  })
+
+  let node = walker.nextNode() as Text | null
+  while (node) {
+    const text = node.data.toLowerCase()
+    let offset = 0
+    while (true) {
+      const index = text.indexOf(lowerTerm, offset)
+      if (index === -1) break
+      const range = document.createRange()
+      range.setStart(node, index)
+      range.setEnd(node, index + term.length)
+      ranges.push(range)
+      offset = index + 1
+    }
+    node = walker.nextNode() as Text | null
+  }
+  return ranges
+}
+
+const setActiveChatSearchMatch = (index: number) => {
+  chatSearchMatches.forEach((match) => match.element.classList.remove('active'))
+  const match = chatSearchMatches[index]
+  if (!match) return
+  match.element.classList.add('active')
+  if (typeof match.element.scrollIntoView === 'function') {
+    match.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
+const runChatSearch = () => {
+  const root = chatScrollRef.value
+  clearChatHighlights()
+  const term = chatSearchTerm.value.trim()
+  if (!root || !term) return
+
+  const ranges = findChatTextRanges(root, term)
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const mark = document.createElement('mark')
+    mark.className = 'ai-chat-search-highlight'
+    try {
+      ranges[index].surroundContents(mark)
+      chatSearchMarks.unshift(mark)
+    } catch {
+      // Ignore ranges that cannot be wrapped in the rendered DOM.
+    }
+  }
+  chatSearchMarks.forEach((element) => chatSearchMatches.push({ element }))
+  chatSearchMatchCount.value = chatSearchMatches.length
+  if (chatSearchMatches.length > 0) {
+    chatSearchCurrentIndex.value = 1
+    setActiveChatSearchMatch(0)
+  }
+}
+
+const scheduleChatSearch = () => {
+  if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
+  chatSearchTimer = window.setTimeout(() => {
+    runChatSearch()
+    chatSearchTimer = undefined
+  }, 200)
+}
+
+const openChatSearch = async () => {
+  chatSearchOpen.value = true
+  closePopups()
+  await nextTick()
+  chatSearchInputRef.value?.focus()
+  if (chatSearchTerm.value.trim()) runChatSearch()
+}
+
+const closeChatSearch = () => {
+  chatSearchOpen.value = false
+  chatSearchTerm.value = ''
+  if (chatSearchTimer) {
+    window.clearTimeout(chatSearchTimer)
+    chatSearchTimer = undefined
+  }
+  clearChatHighlights()
+}
+
+const clearChatSearch = async () => {
+  chatSearchTerm.value = ''
+  clearChatHighlights()
+  await nextTick()
+  chatSearchInputRef.value?.focus()
+}
+
+const findNextChatMatch = () => {
+  if (chatSearchMatches.length === 0) return
+  const nextIndex = chatSearchCurrentIndex.value >= chatSearchMatches.length ? 0 : chatSearchCurrentIndex.value
+  chatSearchCurrentIndex.value = nextIndex + 1
+  setActiveChatSearchMatch(nextIndex)
+}
+
+const findPreviousChatMatch = () => {
+  if (chatSearchMatches.length === 0) return
+  const previousIndex = chatSearchCurrentIndex.value <= 1 ? chatSearchMatches.length - 1 : chatSearchCurrentIndex.value - 2
+  chatSearchCurrentIndex.value = previousIndex + 1
+  setActiveChatSearchMatch(previousIndex)
 }
 
 type AiCommandOption = {
@@ -863,14 +1709,19 @@ const docsCurrentNodes = computed(() => {
   return currentNode?.type === 'dir' ? currentNode.children || [] : []
 })
 const docsContextOptions = computed<AiContextOption[]>(() =>
-  docsCurrentNodes.value.map((node) => ({
-    id: `${node.type === 'dir' ? 'kb-dir' : 'kb-doc'}:${node.relPath}`,
-    kind: 'docs',
-    label: node.title,
-    detail: node.type === 'dir' ? 'dir' : node.relPath,
-    relPath: node.relPath,
-    contextType: node.type
-  }))
+  docsCurrentNodes.value
+    .map((node) => ({
+      id: `${node.type === 'dir' ? 'kb-dir' : 'kb-doc'}:${node.relPath}`,
+      kind: 'docs' as const,
+      label: node.title,
+      detail: node.type === 'dir' ? 'dir' : node.relPath,
+      relPath: node.relPath,
+      contextType: node.type
+    }))
+    .sort((first, second) => {
+      if (first.contextType !== second.contextType) return first.contextType === 'dir' ? -1 : 1
+      return first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' })
+    })
 )
 const removeFileExtension = (filename: string) => {
   const lastDot = filename.lastIndexOf('.')
@@ -1426,6 +2277,20 @@ const insertContextAtEditCursor = (context: AiContextOption) => {
   return true
 }
 
+const insertFileChipAtMainCursor = (part: AiDocChipContentPart) => {
+  restoreEditableSelection()
+  insertChipIntoEditableCursor(editableRef.value, part, () => {
+    fileInputParts.value = [...fileInputParts.value, part]
+    handleEditableInput()
+  }, '@')
+}
+
+const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
+  restoreEditSelection()
+  const editTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
+  insertChipIntoEditableCursor(editTarget, part, handleEditEditableInput, '@')
+}
+
 const insertImageFilesIntoEdit = async (files: File[]) => {
   for (const file of files) {
     const part = await processImageFile(file)
@@ -1700,13 +2565,18 @@ const renderEditableFromState = () => {
     editable.appendChild(createImageElement(part))
     editable.appendChild(document.createTextNode(' '))
   })
+  fileInputParts.value.forEach((part) => {
+    editable.appendChild(document.createTextNode(' '))
+    editable.appendChild(createChipElement(part, { removablePart: true }))
+    editable.appendChild(document.createTextNode(' '))
+  })
   if (selectedCommandRef.value) {
     editable.appendChild(document.createTextNode(' '))
     const commandChip = createCommandChipElement()
     if (commandChip) editable.appendChild(commandChip)
     editable.appendChild(document.createTextNode(' '))
   }
-  if (active) {
+  if (active && !contextPopupOpen.value && !commandPopupOpen.value && !modelMenuOpen.value) {
     moveEditableCaretToEnd()
   }
   void nextTick(() => {
@@ -1866,6 +2736,7 @@ const renderEditEditableFromParts = (parts: AiContentPart[]) => {
   renderPartsIntoEditable(editable, parts)
   editDraft.value = editableTextFromElement(editable)
   editImageInputParts.value = parts.filter((part): part is AiImageContentPart => part.type === 'image')
+  editFileInputParts.value = parts.filter((part): part is AiDocChipContentPart => part.type === 'chip' && part.chipType === 'doc')
   requestAnimationFrame(() => {
     const range = document.createRange()
     range.selectNodeContents(editable)
@@ -1890,6 +2761,7 @@ const cancelMessageEdit = () => {
   editingMessageId.value = null
   editDraft.value = ''
   editImageInputParts.value = []
+  editFileInputParts.value = []
   editHostContexts.value = []
   editSavedRange.value = null
 }
@@ -1898,6 +2770,9 @@ const handleEditEditableInput = () => {
   editDraft.value = editableTextFromElement(editEditableRef.value)
   editImageInputParts.value = extractContentPartsFromEditable(editEditableRef.value).filter(
     (part): part is AiImageContentPart => part.type === 'image'
+  )
+  editFileInputParts.value = extractContentPartsFromEditable(editEditableRef.value).filter(
+    (part): part is AiDocChipContentPart => part.type === 'chip' && part.chipType === 'doc'
   )
   saveEditSelection()
 }
@@ -2011,6 +2886,9 @@ const syncStorePartsFromEditable = () => {
       .filter(Boolean)
   )
   const commandPresent = Boolean(editable.querySelector('.mention-chip[data-command-chip]'))
+  const domFileParts = Array.from(editable.querySelectorAll<HTMLElement>('.mention-chip[data-chip-type="doc"]:not([data-context-id])'))
+    .map(chipPartFromChipElement)
+    .filter((part): part is AiDocChipContentPart => Boolean(part && part.chipType === 'doc'))
   const domImages = Array.from(editable.querySelectorAll<HTMLElement>('.image-preview-wrapper[data-image-type]'))
     .map((element): AiImageContentPart | null => {
       const mediaType = element.dataset.mediaType
@@ -2028,6 +2906,7 @@ const syncStorePartsFromEditable = () => {
   if (!commandPresent && workspace.selectedCommandId) {
     workspace.selectCommandPreset(null)
   }
+  fileInputParts.value = domFileParts
   imageInputParts.value = domImages
 }
 
@@ -2193,9 +3072,43 @@ const showInputPlaceholderNotice = (message: string) => {
   }, 2400)
 }
 
-const showFileUploadPlaceholder = () => {
+const currentAttachmentTaskId = () => workspace.selectedConversationId || 'local-chat'
+
+const handleFileUpload = async () => {
   if (streaming.value) return
-  showInputPlaceholderNotice('文件上传为本地占位，暂未启用附件暂存。')
+  const taskId = currentAttachmentTaskId().trim()
+  if (!taskId) {
+    showInputPlaceholderNotice('请先创建会话后再上传文件。')
+    return
+  }
+  try {
+    const result = await window.aiops?.showOpenDialog?.({
+      properties: ['openFile'],
+      filters: chatAttachmentFilters
+    })
+    if (!result || result.canceled || !result.filePaths?.length) return
+    const srcAbsPath = result.filePaths[0]
+    const staged = await window.aiops.stageChatAttachment({ taskId, srcAbsPath })
+    const displayName = staged.name || srcAbsPath.split(/[/\\]/).pop() || 'file'
+    const part: AiDocChipContentPart = {
+      type: 'chip',
+      chipType: 'doc',
+      ref: {
+        absPath: staged.refPath,
+        relPath: staged.refPath,
+        name: displayName,
+        type: 'file'
+      }
+    }
+    if (editingMessageId.value) {
+      insertFileChipAtEditCursor(part)
+    } else {
+      insertFileChipAtMainCursor(part)
+    }
+    showInputPlaceholderNotice(`已添加文件：${displayName}`)
+  } catch (error) {
+    showInputPlaceholderNotice(`文件上传失败：${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const showVoicePlaceholder = () => {
@@ -2276,6 +3189,7 @@ const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFoc
   closeCommandPopup({ restoreFocus: options.restoreCommandFocus })
   modeMenuOpen.value = false
   closeModelMenu()
+  closeHistoryMenu()
 }
 
 const handleSend = () => {
@@ -2290,6 +3204,7 @@ const handleSend = () => {
   const contentParts = extractEditableContentParts()
   workspace.sendChat(draft.value, contentParts)
   imageInputParts.value = []
+  fileInputParts.value = []
   setDraft('')
   closePopups()
 }
@@ -2676,7 +3591,19 @@ const handleContextKeydown = (event: KeyboardEvent) => {
 }
 
 const handlePanelKeydown = (event: KeyboardEvent) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+    event.preventDefault()
+    event.stopPropagation()
+    void openChatSearch()
+    return
+  }
   if (event.key !== 'Escape') return
+  if (chatSearchOpen.value) {
+    event.preventDefault()
+    event.stopPropagation()
+    closeChatSearch()
+    return
+  }
   if (contextPopupOpen.value) {
     event.preventDefault()
     event.stopPropagation()
@@ -2724,6 +3651,26 @@ const openContextPopup = (level: 'main' | AiContextKind = 'main') => {
 watch(contextQuery, () => {
   contextKeyboardIndex.value = -1
 })
+
+watch(chatSearchTerm, () => {
+  if (!chatSearchOpen.value) return
+  scheduleChatSearch()
+})
+
+watch([historySearchTerm, historyFavoritesOnly], () => {
+  historyCurrentPage.value = 1
+  editingHistoryId.value = null
+  editingHistoryTitle.value = ''
+})
+
+watch(
+  () => workspace.chatMessages.map((message) => `${message.id}:${message.text}:${message.state || ''}`).join('|'),
+  async () => {
+    if (!chatSearchOpen.value || !chatSearchTerm.value.trim()) return
+    await nextTick()
+    runChatSearch()
+  }
+)
 
 watch(
   () => workspace.onboardingAiRequest.sequence,
@@ -2773,7 +3720,8 @@ watch(
   [
     () => workspace.selectedContexts.map((context) => `${context.id}:${context.label}:${context.data || ''}`).join('|'),
     () => workspace.selectedCommandId,
-    () => `${workspace.selectedCommandRef?.command || ''}:${workspace.selectedCommandRef?.label || ''}:${workspace.selectedCommandRef?.path || ''}`
+    () => `${workspace.selectedCommandRef?.command || ''}:${workspace.selectedCommandRef?.label || ''}:${workspace.selectedCommandRef?.path || ''}`,
+    () => fileInputParts.value.map((part) => `${part.ref.absPath}:${part.ref.name || ''}`).join('|')
   ],
   () => {
     if (syncingFromEditable.value) return
@@ -2781,5 +3729,11 @@ watch(
   },
   { immediate: true }
 )
+
+onBeforeUnmount(() => {
+  if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
+  if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
+  clearChatHighlights()
+})
 
 </script>

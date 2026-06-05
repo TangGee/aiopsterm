@@ -5,7 +5,16 @@
         <input
           v-model="workspace.k8sSearchQuery"
           placeholder="搜索"
+          @keydown.esc="workspace.clearK8sSearch"
         />
+        <button
+          v-if="workspace.k8sSearchQuery"
+          class="k8s-search-clear"
+          title="清除搜索"
+          @click="workspace.clearK8sSearch"
+        >
+          <X />
+        </button>
         <Search />
       </label>
       <button
@@ -147,7 +156,7 @@
 </template>
 
 <script setup lang="ts">
-import { Cloud, Link, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Settings, Trash2, Unplug } from 'lucide-vue-next'
+import { Cloud, Link, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Settings, Trash2, Unplug, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
@@ -161,6 +170,7 @@ const openAddCluster = () => {
 const openConfig = () => {
   workspace.k8sSelectedClusterId = workspace.k8sSelectedClusterId || workspace.filteredK8sClusters[0]?.id || null
   workspace.k8sConfigTab = 'local'
+  workspace.setActiveModule('kubernetes')
 }
 
 const toggleMenu = (clusterId: string) => {

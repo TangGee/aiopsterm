@@ -47,7 +47,12 @@
       <button @click="workspace.closeAllPanels(); menu.visible = false">关闭全部</button>
       <button @click="renameSelected">重命名</button>
       <button @click="cloneSelected">克隆</button>
-      <button @click="forkSelected">Fork SSH Channel</button>
+      <button
+        v-if="canForkSelected"
+        @click="forkSelected"
+      >
+        Fork SSH Channel
+      </button>
       <button @click="workspace.createPanel('right'); menu.visible = false">向右拆分</button>
       <button @click="workspace.createPanel('below'); menu.visible = false">向下拆分</button>
     </div>
@@ -385,6 +390,7 @@ type TerminalSuggestion = {
 
 const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
+const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
 
 const showDashboard = ref(true)
 
@@ -622,14 +628,7 @@ const cloneSelected = () => {
 }
 
 const forkSelected = () => {
-  const source = workspace.panels.find((panel) => panel.id === menu.panelId)
-  if (source?.kind === 'knowledge') {
-    menu.visible = false
-    return
-  }
-  workspace.createPanel(source?.split)
-  workspace.renamePanel(workspace.activePanelId, `${source?.title || 'terminal'} fork`)
-  workspace.appendTerminalOutput(workspace.activePanelId, '[fork] reused SSH channel placeholder\n$ ')
+  workspace.forkSshPanel(menu.panelId)
   menu.visible = false
 }
 

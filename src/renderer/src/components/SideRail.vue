@@ -109,9 +109,8 @@ const openModule = (key: ModuleKey) => {
 }
 
 const login = () => {
-  workspace.loginUser()
+  workspace.openUserLogin()
   userMenuOpen.value = false
-  workspace.setActiveModule('user')
 }
 
 const accountCenter = () => {

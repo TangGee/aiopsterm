@@ -6,6 +6,7 @@
         <input
           v-model="query"
           placeholder="搜索会话"
+          @keydown.esc.prevent="clearSearch"
         />
         <button
           v-if="query"
@@ -20,7 +21,7 @@
       <button
         class="new-chat-btn"
         title="新建会话"
-        @click="workspace.createConversation()"
+        @click="handleNewChat"
       >
         <Plus />
         <span>New Chat</span>
@@ -48,6 +49,8 @@
           :class="{ active: workspace.selectedConversationId === conversation.id }"
           @click="workspace.selectConversation(conversation.id)"
           @keydown.enter="workspace.selectConversation(conversation.id)"
+          @keydown.delete.prevent="handleDeleteConversation(conversation.id)"
+          @keydown.backspace.prevent="handleDeleteConversation(conversation.id)"
         >
           <div class="conversation-content">
             <div class="conversation-title">{{ conversation.title }}</div>
@@ -64,7 +67,7 @@
           <button
             class="delete-btn"
             title="删除会话"
-            @click.stop="workspace.deleteConversation(conversation.id)"
+            @click.stop="handleDeleteConversation(conversation.id)"
           >
             <Trash2 />
           </button>
@@ -99,7 +102,7 @@ const filteredConversations = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   if (!keyword) return workspace.sortedConversations
   return workspace.sortedConversations.filter((conversation) =>
-    `${conversation.title} ${conversation.id}`.toLowerCase().includes(keyword)
+    `${conversation.title} ${conversation.id} ${conversation.summary || ''} ${conversation.ipAddress || ''}`.toLowerCase().includes(keyword)
   )
 })
 
@@ -129,6 +132,19 @@ watch(query, () => {
 
 const clearSearch = () => {
   query.value = ''
+}
+
+const handleNewChat = () => {
+  query.value = ''
+  currentPage.value = 1
+  workspace.createConversation()
+}
+
+const handleDeleteConversation = (id: string) => {
+  workspace.deleteConversation(id)
+  if (visibleConversations.value.length === 0 && currentPage.value > 1) {
+    currentPage.value -= 1
+  }
 }
 
 const loadMoreConversations = async () => {

@@ -36,6 +36,7 @@ import type {
   K8sContextInfo,
   K8sImportContextInfo,
   K8sNamespaceInfo,
+  K8sProxyConfig,
   K8sResourceKind,
   K8sTerminalTab,
   MockK8sResource,
@@ -87,7 +88,7 @@ type PanelDirection = 'right' | 'below'
 type CloseMode = 'current' | 'others' | 'all'
 type FilesUiMode = 'transfer' | 'default'
 type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
-type ModelProviderKey = 'litellm' | 'openai'
+type ModelProviderKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available'
 type OnboardingAiRequest =
   | 'none'
@@ -160,6 +161,21 @@ export type TerminalPanel = {
     relPath: string
     isImage: boolean
   }
+  sshSession?: TerminalSshSession
+}
+
+export type TerminalSshSession = {
+  connectionId: string
+  sourcePanelId?: string
+  forkFromConnectionId?: string
+  host: string
+  port: number
+  username: string
+  assetId?: string
+  assetName: string
+  organizationId?: string
+  authType?: string
+  createdAt: number
 }
 
 export type ChatMessage = {
@@ -171,6 +187,7 @@ export type ChatMessage = {
   state?: 'streaming' | 'done'
   favorite?: boolean
   feedback?: 'up' | 'down'
+  executedCommand?: string
 }
 
 export type AiTextContentPart = {
@@ -257,6 +274,13 @@ export type ModelProviderSettings = {
   apiKey: string
   modelId: string
   apiFormat?: 'chat-completions' | 'responses'
+  awsAccessKey?: string
+  awsSecretKey?: string
+  awsSessionToken?: string
+  awsRegion?: string
+  awsUseCrossRegionInference?: boolean
+  awsEndpointSelected?: boolean
+  awsBedrockEndpoint?: string
 }
 
 type SettingsModelOption = {
@@ -363,6 +387,8 @@ export type BillingSettings = {
   budgetResetAt: string
   ratio: number
 }
+
+export type UserLoginTab = 'account' | 'email' | 'mobile'
 
 export type AboutSettings = {
   version: string
@@ -471,7 +497,7 @@ const defaultConfig: UserConfig = {
       username: '',
       password: ''
     },
-    shellIntegrationTimeout: 3000
+    shellIntegrationTimeout: 4
   },
   modelSettings: {
     addModelSwitch: true,
@@ -486,6 +512,33 @@ const defaultConfig: UserConfig = {
         apiKey: '',
         modelId: 'gpt-5',
         apiFormat: 'responses'
+      },
+      bedrock: {
+        baseUrl: '',
+        apiKey: '',
+        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        awsAccessKey: '',
+        awsSecretKey: '',
+        awsSessionToken: '',
+        awsRegion: 'us-east-1',
+        awsUseCrossRegionInference: false,
+        awsEndpointSelected: false,
+        awsBedrockEndpoint: ''
+      },
+      deepseek: {
+        baseUrl: '',
+        apiKey: '',
+        modelId: 'deepseek-chat'
+      },
+      anthropic: {
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: '',
+        modelId: 'claude-3-5-sonnet-latest'
+      },
+      ollama: {
+        baseUrl: 'http://localhost:11434',
+        apiKey: '',
+        modelId: 'llama3.1'
       }
     },
     options: cloneModelOptionConfig(settingsModelOptions)
@@ -1211,6 +1264,44 @@ const normalizeModelProviderConfig = (source: unknown, fallback: ModelProviderSe
       ? {
           apiFormat: stringFromOptions(incoming.apiFormat, modelApiFormats, fallback.apiFormat || 'chat-completions')
         }
+      : {}),
+    ...(fallback.awsAccessKey !== undefined || incoming.awsAccessKey !== undefined
+      ? {
+          awsAccessKey: typeof incoming.awsAccessKey === 'string' ? incoming.awsAccessKey : fallback.awsAccessKey || ''
+        }
+      : {}),
+    ...(fallback.awsSecretKey !== undefined || incoming.awsSecretKey !== undefined
+      ? {
+          awsSecretKey: typeof incoming.awsSecretKey === 'string' ? incoming.awsSecretKey : fallback.awsSecretKey || ''
+        }
+      : {}),
+    ...(fallback.awsSessionToken !== undefined || incoming.awsSessionToken !== undefined
+      ? {
+          awsSessionToken: typeof incoming.awsSessionToken === 'string' ? incoming.awsSessionToken : fallback.awsSessionToken || ''
+        }
+      : {}),
+    ...(fallback.awsRegion !== undefined || incoming.awsRegion !== undefined
+      ? {
+          awsRegion: typeof incoming.awsRegion === 'string' && incoming.awsRegion.trim() ? incoming.awsRegion.trim() : fallback.awsRegion || 'us-east-1'
+        }
+      : {}),
+    ...(fallback.awsUseCrossRegionInference !== undefined || incoming.awsUseCrossRegionInference !== undefined
+      ? {
+          awsUseCrossRegionInference:
+            typeof incoming.awsUseCrossRegionInference === 'boolean'
+              ? incoming.awsUseCrossRegionInference
+              : Boolean(fallback.awsUseCrossRegionInference)
+        }
+      : {}),
+    ...(fallback.awsEndpointSelected !== undefined || incoming.awsEndpointSelected !== undefined
+      ? {
+          awsEndpointSelected: typeof incoming.awsEndpointSelected === 'boolean' ? incoming.awsEndpointSelected : Boolean(fallback.awsEndpointSelected)
+        }
+      : {}),
+    ...(fallback.awsBedrockEndpoint !== undefined || incoming.awsBedrockEndpoint !== undefined
+      ? {
+          awsBedrockEndpoint: typeof incoming.awsBedrockEndpoint === 'string' ? incoming.awsBedrockEndpoint.trim() : fallback.awsBedrockEndpoint || ''
+        }
       : {})
   }
 }
@@ -1220,7 +1311,11 @@ const normalizeModelSettingsConfig = (source?: unknown) => {
   const incomingProviders = isRecord(incoming.providers) ? incoming.providers : {}
   const providers: ModelSettingsUserConfig['providers'] = {
     litellm: normalizeModelProviderConfig(incomingProviders.litellm, defaultModelSettingsConfig.providers.litellm),
-    openai: normalizeModelProviderConfig(incomingProviders.openai, defaultModelSettingsConfig.providers.openai)
+    openai: normalizeModelProviderConfig(incomingProviders.openai, defaultModelSettingsConfig.providers.openai),
+    bedrock: normalizeModelProviderConfig(incomingProviders.bedrock, defaultModelSettingsConfig.providers.bedrock),
+    deepseek: normalizeModelProviderConfig(incomingProviders.deepseek, defaultModelSettingsConfig.providers.deepseek),
+    anthropic: normalizeModelProviderConfig(incomingProviders.anthropic, defaultModelSettingsConfig.providers.anthropic),
+    ollama: normalizeModelProviderConfig(incomingProviders.ollama, defaultModelSettingsConfig.providers.ollama)
   }
 
   const rawOptions = Array.isArray(incoming.options) ? incoming.options : defaultModelSettingsConfig.options
@@ -1850,6 +1945,33 @@ const defaultModelProviders: Record<ModelProviderKey, ModelProviderSettings> = {
     apiKey: '',
     modelId: 'gpt-5',
     apiFormat: 'responses'
+  },
+  bedrock: {
+    baseUrl: '',
+    apiKey: '',
+    modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+    awsAccessKey: '',
+    awsSecretKey: '',
+    awsSessionToken: '',
+    awsRegion: 'us-east-1',
+    awsUseCrossRegionInference: false,
+    awsEndpointSelected: false,
+    awsBedrockEndpoint: ''
+  },
+  deepseek: {
+    baseUrl: '',
+    apiKey: '',
+    modelId: 'deepseek-chat'
+  },
+  anthropic: {
+    baseUrl: 'https://api.anthropic.com',
+    apiKey: '',
+    modelId: 'claude-3-5-sonnet-latest'
+  },
+  ollama: {
+    baseUrl: 'http://localhost:11434',
+    apiKey: '',
+    modelId: 'llama3.1'
   }
 }
 
@@ -2063,6 +2185,42 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     { id: 'opened-local', kind: 'hosts', label: '127.0.0.1', detail: 'local shell' },
     { id: 'asset-1', kind: 'hosts', label: '10.24.8.12', detail: 'prod-bastion' }
   ])
+
+  const createMockSshConnectionId = (asset: { id?: string; host: string; port?: number; username?: string; asset_type?: string }) =>
+    `${asset.username || 'root'}@${asset.host}:${asset.port || 22}:${asset.asset_type || 'person'}:${createId('ssh')}`
+
+  const registerMockSshSession = (
+    panelId: string,
+    asset: {
+      id?: string
+      name?: string
+      title?: string
+      host: string
+      port?: number
+      username?: string
+      group_name?: string
+      asset_type?: string
+      auth_type?: string
+    }
+  ) => {
+    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    if (!panel) return null
+    const title = asset.name || asset.title || asset.host
+    const session: TerminalSshSession = {
+      connectionId: createMockSshConnectionId(asset),
+      host: asset.host,
+      port: Number(asset.port) || 22,
+      username: asset.username || 'root',
+      assetId: asset.id,
+      assetName: title,
+      organizationId: asset.group_name,
+      authType: asset.auth_type,
+      createdAt: Date.now()
+    }
+    panel.kind = 'terminal'
+    panel.sshSession = session
+    return session
+  }
   const aiSkillContextOptions = computed<AiContextOption[]>(() =>
     settingsSkills.value
       .filter((skill) => skill.enabled)
@@ -2159,6 +2317,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const k8sResourceOutputTitle = ref('资源输出')
   const k8sResourceLoading = ref(false)
   const k8sCopiedCommand = ref('')
+  const k8sProxyConfig = ref<K8sProxyConfig>({
+    enabled: false,
+    type: 'SOCKS5',
+    host: '127.0.0.1',
+    port: 1080,
+    enableProxyIdentity: false,
+    username: '',
+    password: ''
+  })
+  const k8sProxyConfigOpen = ref(false)
   const activeSettingsSection = ref<SettingSectionKey>('general')
   const editorSettings = ref<EditorSettings>({ ...defaultEditorSettings })
   const terminalSettings = ref<TerminalSettings>({ ...defaultTerminalSettings })
@@ -2191,11 +2359,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const addModelSwitch = ref(true)
   const modelProviders = ref<Record<ModelProviderKey, ModelProviderSettings>>({
     litellm: { ...defaultModelProviders.litellm },
-    openai: { ...defaultModelProviders.openai }
+    openai: { ...defaultModelProviders.openai },
+    bedrock: { ...defaultModelProviders.bedrock },
+    deepseek: { ...defaultModelProviders.deepseek },
+    anthropic: { ...defaultModelProviders.anthropic },
+    ollama: { ...defaultModelProviders.ollama }
   })
   const modelCheckState = ref<Record<ModelProviderKey, 'idle' | 'checking' | 'success'>>({
     litellm: 'idle',
-    openai: 'idle'
+    openai: 'idle',
+    bedrock: 'idle',
+    deepseek: 'idle',
+    anthropic: 'idle',
+    ollama: 'idle'
   })
   const aiPreferences = ref<AiPreferenceSettings>({
     ...defaultAiPreferences,
@@ -2354,7 +2530,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const query = extensionSearchQuery.value.trim().toLowerCase()
     const visible = visibleExtensionPlugins.value
     if (!query) return visible
-    return visible.filter((plugin) => plugin.name.toLowerCase().includes(query))
+    return visible.filter((plugin) =>
+      [plugin.name, plugin.description, plugin.pluginId, plugin.source || '', ...(plugin.categories || [])].some((value) => value.toLowerCase().includes(query))
+    )
   })
   const selectedExtension = computed(() => visibleExtensionPlugins.value.find((plugin) => plugin.pluginId === selectedExtensionId.value) || null)
   const selectedExtensionInstallProgress = computed(() =>
@@ -2496,7 +2674,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     addModelSwitch.value = normalizedModelSettings.addModelSwitch
     modelProviders.value = {
       litellm: { ...normalizedModelSettings.providers.litellm },
-      openai: { ...normalizedModelSettings.providers.openai }
+      openai: { ...normalizedModelSettings.providers.openai },
+      bedrock: { ...normalizedModelSettings.providers.bedrock },
+      deepseek: { ...normalizedModelSettings.providers.deepseek },
+      anthropic: { ...normalizedModelSettings.providers.anthropic },
+      ollama: { ...normalizedModelSettings.providers.ollama }
     }
     settingModelOptions.value = normalizedModelSettings.options.map((option) => ({
       name: option.name,
@@ -2739,7 +2921,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     addModelSwitch: addModelSwitch.value,
     providers: {
       litellm: { ...modelProviders.value.litellm },
-      openai: { ...modelProviders.value.openai }
+      openai: { ...modelProviders.value.openai },
+      bedrock: { ...modelProviders.value.bedrock },
+      deepseek: { ...modelProviders.value.deepseek },
+      anthropic: { ...modelProviders.value.anthropic },
+      ollama: { ...modelProviders.value.ollama }
     },
     options: settingModelOptions.value.map((option) => ({
       name: option.name,
@@ -3264,19 +3450,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     modelCheckState.value = { ...modelCheckState.value, [provider]: 'checking' }
     window.setTimeout(() => {
       modelCheckState.value = { ...modelCheckState.value, [provider]: 'success' }
-      setSettingsNotice(`${provider === 'litellm' ? 'LiteLLM' : 'OpenAI Compatible'} Check 成功`)
+      const providerLabel: Record<ModelProviderKey, string> = {
+        litellm: 'LiteLLM',
+        openai: 'OpenAI Compatible',
+        bedrock: 'Amazon Bedrock',
+        deepseek: 'DeepSeek',
+        anthropic: 'Anthropic',
+        ollama: 'Ollama'
+      }
+      setSettingsNotice(`${providerLabel[provider]} Check 成功`)
     }, 300)
   }
 
   const saveModelProvider = (provider: ModelProviderKey) => {
     const configPatch = modelProviders.value[provider]
+    const providerName: Record<ModelProviderKey, UserConfig['modelProvider']> = {
+      litellm: 'litellm',
+      openai: 'openai-compatible',
+      bedrock: 'bedrock',
+      deepseek: 'deepseek',
+      anthropic: 'anthropic',
+      ollama: 'ollama'
+    }
+    const providerLabel: Record<ModelProviderKey, string> = {
+      litellm: 'LiteLLM',
+      openai: 'OpenAI Compatible',
+      bedrock: 'Amazon Bedrock',
+      deepseek: 'DeepSeek',
+      anthropic: 'Anthropic',
+      ollama: 'Ollama'
+    }
     saveConfig({
-      modelProvider: provider === 'litellm' ? 'litellm' : 'openai-compatible',
+      modelProvider: providerName[provider],
       modelEndpoint: configPatch.baseUrl,
       modelName: configPatch.modelId,
       modelSettings: getModelSettingsSnapshot()
     })
-    setSettingsNotice(`${provider === 'litellm' ? 'LiteLLM' : 'OpenAI Compatible'} Save 成功`)
+    setSettingsNotice(`${providerLabel[provider]} Save 成功`)
   }
 
   const updateAiPreferences = (patch: AiPreferencePatch) => {
@@ -3600,34 +3810,298 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userNotice.value = message
   }
 
-  const openAccountCenter = () => {
-    setUserNotice('账号中心为本地占位，未连接远端服务')
+  const userAccountCenterOpen = ref(false)
+  const userContactCodeCountdown = ref<Record<'email' | 'mobile', number>>({
+    email: 0,
+    mobile: 0
+  })
+  const userContactCodeSending = ref<Record<'email' | 'mobile', boolean>>({
+    email: false,
+    mobile: false
+  })
+  const userContactCodeTimers: Partial<Record<'email' | 'mobile', number>> = {}
+  const userLoginTab = ref<UserLoginTab>('account')
+  const userLoginLoading = ref(false)
+  const userLoginCodeCountdown = ref<Record<'email' | 'mobile', number>>({
+    email: 0,
+    mobile: 0
+  })
+  const userLoginCodeSending = ref<Record<'email' | 'mobile', boolean>>({
+    email: false,
+    mobile: false
+  })
+  const userLoginCodeTimers: Partial<Record<'email' | 'mobile', number>> = {}
+
+  const isUserSubscriptionActive = computed(() => {
+    const profile = userProfile.value
+    if (profile.subscription !== 'pro' && profile.subscription !== 'ultra') return false
+    return new Date(profile.subscriptionExpiresAt) > new Date()
+  })
+
+  const canEditUserMobile = computed(() => userProfile.value.authProvider !== 'oauth')
+  const canEditUserEmail = computed(() => userProfile.value.authProvider === 'local')
+  const canResetUserPassword = computed(() => userProfile.value.authProvider === 'local')
+
+  const validateUserProfileDraft = (patch: Partial<Pick<MockUserProfile, 'name' | 'username'>>) => {
+    const username = patch.username?.trim() ?? userProfile.value.username
+    const name = patch.name?.trim() ?? userProfile.value.name
+    if (!username || username.length < 6 || username.length > 20) {
+      return '用户名长度需要在 6 到 20 个字符之间'
+    }
+    if (!/^[A-Za-z0-9_]+$/.test(username)) {
+      return '用户名仅支持字母、数字和下划线'
+    }
+    if (!name || name.length > 20) {
+      return '姓名不能为空且不能超过 20 个字符'
+    }
+    return ''
   }
 
-  const loginUser = () => {
+  const validateUserContactDraft = (kind: 'email' | 'mobile', value: string) => {
+    const trimmed = value.trim()
+    if (kind === 'email') {
+      if (!canEditUserEmail.value) return '当前登录方式不允许修改邮箱'
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return '邮箱格式不正确'
+      return ''
+    }
+    if (!canEditUserMobile.value) return '当前登录方式不允许修改手机号'
+    if (!/^1[3-9]\d{9}$/.test(trimmed)) return '手机号格式不正确'
+    return ''
+  }
+
+  const openAccountCenter = () => {
+    userAccountCenterOpen.value = true
+    setUserNotice('账号中心已打开，本地展示订阅、可信设备和账号状态')
+  }
+
+  const closeAccountCenter = () => {
+    userAccountCenterOpen.value = false
+  }
+
+  const openUserLogin = () => {
+    activeModule.value = 'user'
+    userProfile.value.skippedLogin = true
+    billingSettings.value.skippedLogin = true
+    userLoginTab.value = 'account'
+    setUserNotice('已打开本地登录页')
+  }
+
+  const setUserLoginTab = (tab: UserLoginTab) => {
+    userLoginTab.value = tab
+  }
+
+  const applyLocalLoginProfile = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'authProvider' | 'needDeviceVerification'>> = {}) => {
     userProfile.value.skippedLogin = false
+    userProfile.value = {
+      ...userProfile.value,
+      ...patch,
+      skippedLogin: false,
+      needDeviceVerification: patch.needDeviceVerification ?? false
+    }
     billingSettings.value.skippedLogin = false
+    billingSettings.value.email = userProfile.value.email || billingSettings.value.email
+    userLoginLoading.value = false
+  }
+
+  const loginUser = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'authProvider'>> = {}) => {
+    applyLocalLoginProfile(patch)
     setUserNotice('已切换为本地登录状态')
   }
 
   const logoutUser = () => {
     userProfile.value.skippedLogin = true
     billingSettings.value.skippedLogin = true
+    userAccountCenterOpen.value = false
     setUserNotice('已退出，本地 mock 登录态已清除')
   }
 
-  const updateUserProfile = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials'>>) => {
-    userProfile.value = { ...userProfile.value, ...patch }
+  const skipUserLogin = () => {
+    applyLocalLoginProfile({
+      name: 'Guest',
+      username: 'guest',
+      email: 'guest@example.local',
+      mobile: '',
+      authProvider: 'local'
+    })
+    billingSettings.value.skippedLogin = true
+    setUserNotice('已跳过登录，使用本地访客状态')
+    return true
+  }
+
+  const sendUserLoginCode = (kind: 'email' | 'mobile', value: string) => {
+    const trimmed = value.trim()
+    if (kind === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setUserNotice('邮箱格式不正确')
+      return false
+    }
+    if (kind === 'mobile' && !/^1[3-9]\d{9}$/.test(trimmed)) {
+      setUserNotice('手机号格式不正确')
+      return false
+    }
+    if (userLoginCodeCountdown.value[kind] > 0 || userLoginCodeSending.value[kind]) return false
+    userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: true }
+    window.setTimeout(() => {
+      userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: false }
+      userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, [kind]: 300 }
+      if (userLoginCodeTimers[kind]) window.clearInterval(userLoginCodeTimers[kind])
+      userLoginCodeTimers[kind] = window.setInterval(() => {
+        const next = Math.max(0, userLoginCodeCountdown.value[kind] - 1)
+        userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, [kind]: next }
+        if (next === 0 && userLoginCodeTimers[kind]) {
+          window.clearInterval(userLoginCodeTimers[kind])
+          delete userLoginCodeTimers[kind]
+        }
+      }, 1000)
+      setUserNotice(`${kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`)
+    }, 120)
+    return true
+  }
+
+  const loginWithAccount = (username: string, password: string) => {
+    const nextUsername = username.trim()
+    if (!nextUsername || !password) {
+      setUserNotice('请输入用户名和密码')
+      return false
+    }
+    userLoginLoading.value = true
+    if (nextUsername.toLowerCase().includes('verify')) {
+      userLoginLoading.value = false
+      userProfile.value.needDeviceVerification = true
+      setUserNotice('当前设备需要验证后才能登录')
+      return false
+    }
+    applyLocalLoginProfile({
+      username: nextUsername,
+      name: userProfile.value.name || nextUsername,
+      authProvider: 'local'
+    })
+    setUserNotice('账号登录成功，本地数据库初始化完成')
+    return true
+  }
+
+  const loginWithEmail = (email: string, code: string) => {
+    const nextEmail = email.trim()
+    if (!nextEmail || !code.trim()) {
+      setUserNotice('请输入邮箱和验证码')
+      return false
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      setUserNotice('邮箱格式不正确')
+      return false
+    }
+    userLoginLoading.value = true
+    applyLocalLoginProfile({
+      email: nextEmail,
+      username: nextEmail.split('@')[0] || userProfile.value.username,
+      authProvider: 'local'
+    })
+    userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, email: 0 }
+    if (userLoginCodeTimers.email) {
+      window.clearInterval(userLoginCodeTimers.email)
+      delete userLoginCodeTimers.email
+    }
+    setUserNotice('邮箱登录成功，本地数据库初始化完成')
+    return true
+  }
+
+  const loginWithMobile = (mobile: string, code: string) => {
+    const nextMobile = mobile.trim()
+    if (!nextMobile || !code.trim()) {
+      setUserNotice('请输入手机号和验证码')
+      return false
+    }
+    if (!/^1[3-9]\d{9}$/.test(nextMobile)) {
+      setUserNotice('手机号格式不正确')
+      return false
+    }
+    userLoginLoading.value = true
+    applyLocalLoginProfile({
+      mobile: nextMobile,
+      authProvider: 'local'
+    })
+    userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, mobile: 0 }
+    if (userLoginCodeTimers.mobile) {
+      window.clearInterval(userLoginCodeTimers.mobile)
+      delete userLoginCodeTimers.mobile
+    }
+    setUserNotice('手机号登录成功，本地数据库初始化完成')
+    return true
+  }
+
+  const updateUserProfile = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl'>>) => {
+    const validation = validateUserProfileDraft(patch)
+    if (validation) {
+      setUserNotice(validation)
+      return false
+    }
+    const nextAvatarInitials = patch.avatarInitials?.trim().toUpperCase().slice(0, 3)
+    userProfile.value = {
+      ...userProfile.value,
+      ...patch,
+      name: patch.name?.trim() ?? userProfile.value.name,
+      username: patch.username?.trim() ?? userProfile.value.username,
+      avatarInitials: nextAvatarInitials || userProfile.value.avatarInitials
+    }
     setUserNotice('个人信息已保存')
+    return true
   }
 
-  const resetUserPassword = () => {
+  const resetUserPassword = (password = '') => {
+    if (!canResetUserPassword.value) {
+      setUserNotice('当前登录方式不允许修改密码')
+      return false
+    }
+    if (password && password.length < 6) {
+      setUserNotice('密码长度至少 6 位')
+      return false
+    }
     setUserNotice('密码重置为本地占位，未调用远端接口')
+    return true
   }
 
-  const bindUserContact = (kind: 'email' | 'mobile', value: string) => {
-    userProfile.value = { ...userProfile.value, [kind]: value }
+  const sendUserContactCode = (kind: 'email' | 'mobile', value: string) => {
+    const validation = validateUserContactDraft(kind, value)
+    if (validation) {
+      setUserNotice(validation)
+      return false
+    }
+    if (userContactCodeCountdown.value[kind] > 0 || userContactCodeSending.value[kind]) return false
+    userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: true }
+    window.setTimeout(() => {
+      userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: false }
+      userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [kind]: 300 }
+      if (userContactCodeTimers[kind]) window.clearInterval(userContactCodeTimers[kind])
+      userContactCodeTimers[kind] = window.setInterval(() => {
+        const next = Math.max(0, userContactCodeCountdown.value[kind] - 1)
+        userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [kind]: next }
+        if (next === 0 && userContactCodeTimers[kind]) {
+          window.clearInterval(userContactCodeTimers[kind])
+          delete userContactCodeTimers[kind]
+        }
+      }, 1000)
+      setUserNotice(`${kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
+    }, 120)
+    return true
+  }
+
+  const bindUserContact = (kind: 'email' | 'mobile', value: string, code = '') => {
+    const validation = validateUserContactDraft(kind, value)
+    if (validation) {
+      setUserNotice(validation)
+      return false
+    }
+    if (!code.trim()) {
+      setUserNotice(`请输入${kind === 'email' ? '邮箱' : '手机'}验证码`)
+      return false
+    }
+    userProfile.value = { ...userProfile.value, [kind]: value.trim() }
+    userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [kind]: 0 }
+    if (userContactCodeTimers[kind]) {
+      window.clearInterval(userContactCodeTimers[kind])
+      delete userContactCodeTimers[kind]
+    }
     setUserNotice(`${kind === 'email' ? '邮箱' : '手机号'}已绑定`)
+    return true
   }
 
   const checkAboutUpdate = () => {
@@ -4998,6 +5472,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       lastUpdated: '刚刚',
       size: 524288,
       readme: '本地拖拽安装的插件包已加入插件列表。',
+      categories: ['Local', 'Tools'],
       functions: [{ title: '本地插件', desc: '从 .external-reference 包安装，等待接入真实插件运行时。' }]
     })
     selectedExtensionId.value = pluginId
@@ -5013,6 +5488,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const createAliasCommand = () => {
     if (aliasCommands.value.some((item) => item.id === 'new')) return
+    aliasSearchQuery.value = ''
     if (aliasEditSnapshot.value && aliasEditSnapshot.value.id !== 'new') {
       aliasCommands.value = aliasCommands.value.map((item) =>
         item.id === aliasEditSnapshot.value?.id ? { ...aliasEditSnapshot.value, edit: false } : { ...item, edit: false }
@@ -5114,6 +5590,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setK8sNotice('Kubernetes 配置已刷新')
   }
 
+  const clearK8sSearch = () => {
+    k8sSearchQuery.value = ''
+    setK8sActionMenu(null)
+  }
+
   const setK8sActionMenu = (clusterId: string | null) => {
     k8sClusterActionMenuId.value = clusterId
   }
@@ -5134,6 +5615,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sSelectedClusterId.value = id
   }
 
+  const openK8sProxyConfig = () => {
+    k8sProxyConfigOpen.value = true
+  }
+
+  const closeK8sProxyConfig = () => {
+    k8sProxyConfigOpen.value = false
+  }
+
+  const updateK8sProxyConfig = (patch: Partial<K8sProxyConfig>) => {
+    k8sProxyConfig.value = {
+      ...k8sProxyConfig.value,
+      ...patch,
+      port: patch.port === undefined ? k8sProxyConfig.value.port : Math.max(1, Math.min(65535, Number(patch.port) || 1))
+    }
+    if (!k8sProxyConfig.value.enableProxyIdentity) {
+      k8sProxyConfig.value.username = ''
+      k8sProxyConfig.value.password = ''
+    }
+  }
+
+  const saveK8sProxyConfig = () => {
+    if (k8sProxyConfig.value.enabled && (!k8sProxyConfig.value.host.trim() || !k8sProxyConfig.value.port)) {
+      setK8sNotice('请补全 Kubernetes Agent 代理主机和端口')
+      return false
+    }
+    k8sProxyConfigOpen.value = false
+    setK8sNotice(k8sProxyConfig.value.enabled ? 'Kubernetes Agent 代理配置已应用' : 'Kubernetes Agent 代理已关闭')
+    return true
+  }
+
   const connectK8sCluster = (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return
@@ -5152,7 +5663,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       latest.is_active = 1
       k8sActiveClusterId.value = id
       setK8sConnecting(id, false)
-      setK8sNotice(`${latest.name} 连接成功`)
+      setK8sNotice(
+        k8sProxyConfig.value.enabled
+          ? `${latest.name} 连接成功，K8s Agent 代理 ${k8sProxyConfig.value.type} ${k8sProxyConfig.value.host}:${k8sProxyConfig.value.port} 已应用`
+          : `${latest.name} 连接成功`
+      )
     }, 280)
   }
 
@@ -5225,6 +5740,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return `kubectl get ${type} ${resource.name}${namespaceArg} -o wide`
   }
 
+  const currentK8sOutputCommand = () => k8sResourceOutput.value.split('\n').find((line) => line.trim().startsWith('kubectl '))?.trim() || ''
+
   const setK8sResourceKind = (kind: K8sResourceKind) => {
     k8sResourceKind.value = kind
     if (kind === 'nodes') k8sResourceNamespace.value = 'all'
@@ -5294,6 +5811,54 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setK8sNotice('kubectl 命令已复制')
     return command
+  }
+
+  const copyK8sResourceOutput = () => {
+    const output = k8sResourceOutput.value.trim()
+    if (!output) return ''
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(output).catch(() => undefined)
+    }
+    setK8sNotice('Kubernetes 输出已复制')
+    return output
+  }
+
+  const clearK8sResourceOutput = () => {
+    k8sCopiedCommand.value = ''
+    k8sResourceOutputTitle.value = '资源输出'
+    k8sResourceOutput.value = '选择 Kubernetes 资源后，可在这里查看 Describe、Logs 或 kubectl 执行结果。'
+    setK8sNotice('Kubernetes 输出已清空')
+  }
+
+  const sendK8sCurrentOutputToTerminal = () => {
+    const cluster = k8sResourceCluster.value
+    const command = currentK8sOutputCommand()
+    if (!cluster || !command) {
+      setK8sNotice('当前没有可发送到终端的 kubectl 命令')
+      return ''
+    }
+    openK8sTerminal(cluster.id)
+    sendK8sTerminalCommand(command)
+    setK8sNotice(`已发送到 ${cluster.name} 终端`)
+    return command
+  }
+
+  const sendK8sCurrentOutputToAi = () => {
+    const cluster = k8sResourceCluster.value
+    const output = k8sResourceOutput.value.trim()
+    if (!cluster || !output) {
+      setK8sNotice('当前没有可发送到 AI 的 Kubernetes 输出')
+      return false
+    }
+    const host: AiContextOption = {
+      id: `k8s-${cluster.id}`,
+      kind: 'hosts',
+      label: cluster.name,
+      detail: `${cluster.context_name} / ${cluster.default_namespace}`
+    }
+    sendChat(`请分析这个 Kubernetes 输出并给出下一步排查建议：\n\nTerminal output:\n\`\`\`\n${output}\n\`\`\``, undefined, [host])
+    setK8sNotice('Kubernetes 输出已发送到 AI')
+    return true
   }
 
   const sendK8sResourceCommand = (resourceId: string, action: 'get' | 'describe' | 'logs' = 'get') => {
@@ -5488,6 +6053,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.split = undefined
     panel.sessionId = undefined
     panel.knowledge = undefined
+    panel.sshSession = undefined
     setTerminalOutput(panel, 'aiopsterm dashboard\n$ ')
   }
 
@@ -5538,6 +6104,61 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (panel && title.trim()) {
       panel.title = title.trim()
     }
+  }
+
+  const canForkSshPanel = (panelId: string) => {
+    const panel = panels.value.find((item) => item.id === panelId)
+    return Boolean(panel?.kind === 'terminal' && panel.sshSession?.connectionId)
+  }
+
+  const forkSshPanel = (panelId: string) => {
+    const source = panels.value.find((item) => item.id === panelId)
+    if (!source?.sshSession?.connectionId) return null
+    const sourceSession = source.sshSession
+    const forkSession: TerminalSshSession = {
+      ...sourceSession,
+      connectionId: createMockSshConnectionId({
+        id: sourceSession.assetId,
+        host: sourceSession.host,
+        port: sourceSession.port,
+        username: sourceSession.username,
+        asset_type: sourceSession.authType || 'person'
+      }),
+      sourcePanelId: source.id,
+      forkFromConnectionId: sourceSession.connectionId,
+      createdAt: Date.now()
+    }
+    const forkPanel: TerminalPanel = {
+      id: createId('panel'),
+      title: `${source.title} fork`,
+      cwd: source.cwd,
+      kind: 'terminal',
+      output: '',
+      outputSegments: [],
+      status: 'running',
+      split: source.split,
+      sshSession: forkSession
+    }
+    const message = [
+      `[fork ssh] source=${source.title}`,
+      `[fork ssh] reused ${sourceSession.username}@${sourceSession.host}:${sourceSession.port}`,
+      `[fork ssh] sourceConnectionId=${sourceSession.connectionId}`,
+      `[fork ssh] newConnectionId=${forkSession.connectionId}`,
+      '$ '
+    ].join('\n')
+    setTerminalOutput(forkPanel, `${message}\n`)
+    panels.value.push(forkPanel)
+    activePanelId.value = forkPanel.id
+    selectedContexts.value = [
+      ...selectedContexts.value.filter((item) => item.id !== (sourceSession.assetId || sourceSession.connectionId)),
+      {
+        id: sourceSession.assetId || sourceSession.connectionId,
+        kind: 'hosts',
+        label: sourceSession.host,
+        detail: `${sourceSession.assetName} fork`
+      }
+    ]
+    return forkPanel
   }
 
   const knowledgePanelId = (relPath: string) => `kb:${relPath}`
@@ -5744,10 +6365,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return prompt.execution
   }
 
+  const resolveActiveWritableTerminalPanel = () =>
+    activePanel.value.kind === 'knowledge' ? panels.value.find((item) => item.kind !== 'knowledge') : activePanel.value
+
+  const stageActiveTerminalCommand = (command: string) => {
+    const panel = resolveActiveWritableTerminalPanel()
+    const text = command.trim()
+    if (!panel || !text) return null
+    return executeTerminalCommand(panel.id, text, { source: 'agent' })
+  }
+
   const appendActiveTerminalInput = (command: string) => {
-    const panel = activePanel.value.kind === 'knowledge' ? panels.value.find((item) => item.kind !== 'knowledge') : activePanel.value
-    if (!panel) return
-    executeTerminalCommand(panel.id, command, { writeToShell: false })
+    const panel = resolveActiveWritableTerminalPanel()
+    if (!panel) return null
+    return executeTerminalCommand(panel.id, command, { writeToShell: false, source: 'agent' })
   }
 
   const buildPlainTextFromAiParts = (parts: AiContentPart[]) =>
@@ -5836,7 +6467,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createConversation = () => {
-    const conversation = {
+    const conversation: ConversationItem = {
       id: createId('conv'),
       title: '新会话',
       summary: '等待输入运维目标',
@@ -5846,6 +6477,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     conversations.value.unshift(conversation)
     selectedConversationId.value = conversation.id
     chatMessages.value = [{ id: createId('msg'), role: 'assistant', text: '请输入本次运维目标。', state: 'done' }]
+    return conversation
   }
 
   const deleteConversation = (id: string) => {
@@ -5857,6 +6489,58 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const selectConversation = (id: string) => {
     selectedConversationId.value = id
+  }
+
+  const renameConversation = (id: string, title: string) => {
+    const nextTitle = title.trim()
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation || !nextTitle) return false
+    conversation.title = nextTitle
+    conversation.updatedAt = '刚刚'
+    conversation.ts = Math.max(Date.now(), ...conversations.value.map((item) => item.ts)) + 1
+    return true
+  }
+
+  const toggleConversationFavorite = (id: string) => {
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation) return false
+    conversation.favorite = !conversation.favorite
+    return true
+  }
+
+  const restoreConversation = (id: string) => {
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation) return false
+    selectedConversationId.value = id
+    chatMessages.value = [
+      {
+        id: createId('msg'),
+        role: 'system',
+        text: `已恢复会话：${conversation.title}`
+      },
+      {
+        id: createId('msg'),
+        role: 'user',
+        text: conversation.summary || conversation.title,
+        hosts: conversation.ipAddress
+          ? [
+              {
+                id: `history-host-${conversation.id}`,
+                kind: 'hosts',
+                label: conversation.ipAddress,
+                detail: conversation.title
+              }
+            ]
+          : undefined
+      },
+      {
+        id: createId('msg'),
+        role: 'assistant',
+        text: `这是 ${conversation.title} 的本地历史摘要。继续输入后会基于当前上下文生成新的运维计划。`,
+        state: 'done'
+      }
+    ]
+    return true
   }
 
   const toggleContext = (context: AiContextOption) => {
@@ -5894,11 +6578,157 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const retryLastAssistantMessage = () => {
-    const lastUserMessage = [...chatMessages.value].reverse().find((message) => message.role === 'user')
+  const retryAssistantMessage = (messageId?: string) => {
+    const assistantIndex = messageId
+      ? chatMessages.value.findIndex((message) => message.id === messageId && message.role === 'assistant')
+      : -1
+    const history = assistantIndex >= 0 ? chatMessages.value.slice(0, assistantIndex) : chatMessages.value
+    const lastUserMessage = [...history].reverse().find((message) => message.role === 'user')
     if (lastUserMessage) {
       sendChat(lastUserMessage.text, lastUserMessage.contentParts, lastUserMessage.hosts)
+      return true
     }
+    return false
+  }
+
+  const retryLastAssistantMessage = () => {
+    return retryAssistantMessage()
+  }
+
+  const messagePlainText = (message: ChatMessage) =>
+    message.contentParts?.length ? buildPlainTextFromAiParts(message.contentParts).trim() : message.text.trim()
+
+  const messageSummaryContent = (message: ChatMessage) => {
+    const body = messagePlainText(message)
+    const hosts = message.hosts?.length ? `\n\nHosts: ${message.hosts.map((host) => host.label).join(', ')}` : ''
+    return `# AI Message Summary\n\nRole: ${message.role}\nMessage ID: ${message.id}\n\n${body}${hosts}\n`
+  }
+
+  const knowledgeFileNameForMessage = (message: ChatMessage) => {
+    const safeId = message.id.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'message'
+    return `ai-message-${safeId}.md`
+  }
+
+  const uniqueKnowledgeFileName = (parentRelDir: string, fileName: string) => {
+    const dotIndex = fileName.lastIndexOf('.')
+    const base = dotIndex >= 0 ? fileName.slice(0, dotIndex) : fileName
+    const ext = dotIndex >= 0 ? fileName.slice(dotIndex) : ''
+    let candidate = fileName
+    let index = 1
+    while (findKnowledgeNode(createKbRelPath(parentRelDir, candidate))) {
+      candidate = `${base}-${index}${ext}`
+      index += 1
+    }
+    return candidate
+  }
+
+  const ensureLocalKnowledgeDir = async (title: string) => {
+    const relPath = title
+    const existing = findKnowledgeNode(relPath)
+    if (existing?.type === 'dir') return existing
+    if (window.aiops?.kbMkdir) {
+      await window.aiops.kbMkdir('', title)
+      await refreshKnowledgeTree()
+      const created = findKnowledgeNode(relPath)
+      if (created?.type === 'dir') return created
+    }
+    const node: KnowledgeNode = {
+      id: createId('kb'),
+      key: relPath,
+      relPath,
+      title,
+      type: 'dir',
+      children: []
+    }
+    insertKnowledgeNode('', node)
+    persistKnowledgeBase()
+    return node
+  }
+
+  const summarizeMessageToKnowledge = async (messageId: string) => {
+    const message = chatMessages.value.find((item) => item.id === messageId)
+    if (!message) return null
+    const content = messageSummaryContent(message)
+    await ensureLocalKnowledgeDir('summary')
+    const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
+    const fallbackRelPath = createKbRelPath('summary', fileName)
+    let relPath = fallbackRelPath
+
+    if (window.aiops?.kbCreateFile) {
+      const result = await window.aiops.kbCreateFile('summary', fileName, content)
+      relPath = result?.relPath || fallbackRelPath
+      if (window.aiops.kbWriteFile) {
+        await window.aiops.kbWriteFile(relPath, content)
+      }
+      await refreshKnowledgeTree()
+    } else {
+      insertKnowledgeNode('summary', {
+        id: createId('kb'),
+        key: relPath,
+        relPath,
+        title: fileName,
+        type: 'file',
+        size: content.length
+      })
+      kbUsedBytes.value += content.length
+      persistKnowledgeBase()
+    }
+
+    kbSelectedKeys.value = [relPath]
+    openKnowledgeFile(relPath)
+    return { relPath, content }
+  }
+
+  const alphaSuffix = (index: number) => {
+    let value = index
+    let suffix = ''
+    do {
+      suffix = String.fromCharCode(97 + (value % 26)) + suffix
+      value = Math.floor(value / 26) - 1
+    } while (value >= 0)
+    return suffix
+  }
+
+  const skillNameForMessage = (message: ChatMessage) => {
+    const words = messagePlainText(message)
+      .toLowerCase()
+      .match(/[a-z]+/g)
+      ?.filter((word) => word.length > 2)
+      .slice(0, 3)
+    const rawBase = words?.length ? `${words.join('-')}-skill` : 'ai-message-skill'
+    let candidate = rawBase.replace(/[^a-z-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '') || 'ai-message-skill'
+    let index = 0
+    while (settingsSkills.value.some((skill) => skill.name === candidate)) {
+      candidate = `${rawBase}-${alphaSuffix(index)}`
+      index += 1
+    }
+    return candidate
+  }
+
+  const summarizeMessageToSkill = async (messageId: string) => {
+    const message = chatMessages.value.find((item) => item.id === messageId)
+    if (!message) return null
+    const name = skillNameForMessage(message)
+    const plainText = messagePlainText(message)
+    const skill = {
+      name,
+      description: `Summarized from AI message ${message.id}`,
+      content: `Use this runbook when a similar operations context appears.\n\nSource message:\n${plainText}`,
+      enabled: true,
+      editable: true
+    }
+    settingsSkills.value.unshift(skill)
+    persistSkills()
+    try {
+      const created = await window.aiops?.createSkill?.({ name: skill.name, description: skill.description }, skill.content)
+      if (created) {
+        const existing = settingsSkills.value.find((item) => item.name === created.name)
+        if (existing) Object.assign(existing, created)
+      }
+    } catch {
+      setSettingsNotice(`${name} 已保存到本地，技能桥接创建失败`)
+    }
+    return skill
   }
 
   return {
@@ -6011,6 +6841,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceOutputTitle,
     k8sResourceLoading,
     k8sCopiedCommand,
+    k8sProxyConfig,
+    k8sProxyConfigOpen,
     activeSettingsSection,
     editorSettings,
     terminalSettings,
@@ -6050,6 +6882,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aboutSettings,
     userProfile,
     userNotice,
+    userAccountCenterOpen,
+    userContactCodeCountdown,
+    userContactCodeSending,
+    userLoginTab,
+    userLoginLoading,
+    userLoginCodeCountdown,
+    userLoginCodeSending,
+    isUserSubscriptionActive,
+    canEditUserMobile,
+    canEditUserEmail,
+    canResetUserPassword,
     mcpServers,
     expandedMcpServerNames,
     activeMcpServerTab,
@@ -6138,10 +6981,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateBillingSettings,
     setUserNotice,
     openAccountCenter,
+    closeAccountCenter,
+    openUserLogin,
+    setUserLoginTab,
     loginUser,
     logoutUser,
+    skipUserLogin,
+    sendUserLoginCode,
+    loginWithAccount,
+    loginWithEmail,
+    loginWithMobile,
     updateUserProfile,
     resetUserPassword,
+    sendUserContactCode,
     bindUserContact,
     checkAboutUpdate,
     checkTopUpdate,
@@ -6227,8 +7079,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     deleteAliasCommand,
     switchK8sContext,
     reloadK8sConfig,
+    clearK8sSearch,
     selectK8sCluster,
     setK8sActionMenu,
+    openK8sProxyConfig,
+    closeK8sProxyConfig,
+    updateK8sProxyConfig,
+    saveK8sProxyConfig,
     connectK8sCluster,
     disconnectK8sCluster,
     openK8sTerminal,
@@ -6241,6 +7098,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     describeK8sResource,
     showK8sPodLogs,
     copyK8sResourceCommand,
+    copyK8sResourceOutput,
+    clearK8sResourceOutput,
+    sendK8sCurrentOutputToTerminal,
+    sendK8sCurrentOutputToAi,
     sendK8sResourceCommand,
     testK8sClusterConnection,
     selectK8sImportContext,
@@ -6255,6 +7116,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     toggleLeft,
     toggleRight,
     createPanel,
+    registerMockSshSession,
+    canForkSshPanel,
+    forkSshPanel,
     closePanel,
     closeOthers,
     closeAllPanels,
@@ -6268,18 +7132,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     executeGlobalTerminalCommand,
     approveTerminalSecurityPrompt,
     cancelTerminalSecurityPrompt,
+    stageActiveTerminalCommand,
     appendActiveTerminalInput,
     sendChat,
     resendUserMessageFromParts,
     createConversation,
     deleteConversation,
     selectConversation,
+    renameConversation,
+    toggleConversationFavorite,
+    restoreConversation,
     toggleContext,
     removeContext,
     applyCommandPreset,
     selectCommandPreset,
     setMessageFeedback,
     toggleMessageFavorite,
-    retryLastAssistantMessage
+    retryAssistantMessage,
+    retryLastAssistantMessage,
+    summarizeMessageToKnowledge,
+    summarizeMessageToSkill
   }
 })

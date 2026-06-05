@@ -492,13 +492,17 @@ export type MockUserProfile = {
   name: string
   username: string
   avatarInitials: string
+  avatarImageUrl: string
   registrationType: 'enterprise' | 'personal'
+  authProvider: 'local' | 'sso' | 'oauth'
   subscription: 'free' | 'pro' | 'ultra'
   subscriptionExpiresAt: string
   email: string
   mobile: string
   localIp: string
   macAddress: string
+  isOfficeDevice: boolean
+  needDeviceVerification: boolean
   skippedLogin: boolean
 }
 
@@ -507,13 +511,17 @@ export const mockUserProfile: MockUserProfile = {
   name: 'Local Operator',
   username: 'local_ops',
   avatarInitials: 'AI',
+  avatarImageUrl: '',
   registrationType: 'personal',
+  authProvider: 'local',
   subscription: 'pro',
   subscriptionExpiresAt: '2026-12-31',
   email: 'operator@example.local',
   mobile: '13800000000',
   localIp: '127.0.0.1',
   macAddress: 'aa:bb:cc:dd:ee:ff',
+  isOfficeDevice: true,
+  needDeviceVerification: false,
   skippedLogin: false
 }
 
@@ -772,6 +780,7 @@ export type ExtensionPlugin = {
   lastUpdated?: string
   size?: number
   readme?: string
+  categories?: string[]
   functions?: ExtensionFunction[]
 }
 
@@ -827,6 +836,16 @@ export type K8sBastionGroup = {
   uuid: string
   label: string
   ip: string
+}
+
+export type K8sProxyConfig = {
+  enabled: boolean
+  type: 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
+  host: string
+  port: number
+  enableProxyIdentity: boolean
+  username: string
+  password: string
 }
 
 export type K8sTerminalTab = {
@@ -1131,6 +1150,7 @@ export const mockExtensionPlugins: ExtensionPlugin[] = [
     installedVersion: '',
     latestVersion: '',
     source: 'preinstalled',
+    categories: ['SSH', 'Tools'],
     functions: [
       { title: '资产同步', desc: '从堡垒机同步组织、主机和账号信息。' },
       { title: '资产直连', desc: '在终端中选择同步资产后直接建立 SSH 会话。' },
@@ -1150,7 +1170,8 @@ export const mockExtensionPlugins: ExtensionPlugin[] = [
     hasUpdate: false,
     installedVersion: '',
     latestVersion: '',
-    source: 'preinstalled'
+    source: 'preinstalled',
+    categories: ['Tools']
   },
   {
     pluginId: 'ops-runbook',
@@ -1169,6 +1190,7 @@ export const mockExtensionPlugins: ExtensionPlugin[] = [
     lastUpdated: '2026-06-01',
     size: 1843200,
     readme: 'Ops Runbook 提供常用巡检、发布前检查和故障复盘模板，可在终端工作区中作为辅助流程打开。',
+    categories: ['Tools', 'Runbook'],
     functions: [
       { title: '巡检模板', desc: '生成磁盘、负载、服务状态的检查清单。' },
       { title: '发布守卫', desc: '把发布前后验证步骤整理为可复用流程。' }
@@ -1191,6 +1213,7 @@ export const mockExtensionPlugins: ExtensionPlugin[] = [
     lastUpdated: '2026-05-30',
     size: 702464,
     readme: '从本地 .external-reference 包安装的工具插件，当前不在插件商店内。',
+    categories: ['Tools', 'Local'],
     functions: [{ title: '本地工具', desc: '提供路径检查、环境变量快照和日志定位入口。' }]
   },
   {
@@ -1210,6 +1233,7 @@ export const mockExtensionPlugins: ExtensionPlugin[] = [
     lastUpdated: '2026-05-28',
     size: 2310144,
     readme: 'Cloud Assets 用于同步云主机、标签和连接入口，安装后可在资产管理中启用。',
+    categories: ['Cloud', 'Assets'],
     functions: [
       { title: '云资产同步', desc: '按账号和地域拉取云主机列表。' },
       { title: '标签映射', desc: '把云标签映射到本地资产分组。' }
@@ -1233,6 +1257,7 @@ export const mockExtensionPlugins: ExtensionPlugin[] = [
     lastUpdated: '2026-05-20',
     size: 4194304,
     readme: '私有插件展示订阅入口；未订阅时不可直接安装。',
+    categories: ['Private', 'Automation'],
     functions: [{ title: '订阅能力', desc: '开通后启用私有自动化任务模板。' }]
   }
 ]
@@ -1525,9 +1550,24 @@ export const mockK8sResources: MockK8sResource[] = [
 ]
 
 export type MockDatabaseEngineCode = 'mysql' | 'postgresql' | 'sqlite' | 'oracle'
+export type MockDatabaseEngineOptionCode =
+  | MockDatabaseEngineCode
+  | 'h2'
+  | 'sqlserver'
+  | 'mariadb'
+  | 'clickhouse'
+  | 'dm'
+  | 'presto'
+  | 'db2'
+  | 'oceanbase'
+  | 'hive'
+  | 'kingbase'
+  | 'mongodb'
+  | 'timeplus'
 
 export type MockDatabaseEngine = {
-  code: MockDatabaseEngineCode
+  code: MockDatabaseEngineOptionCode
+  connectionCode?: MockDatabaseEngineCode
   name: string
   enabled: boolean
   accent: string
@@ -1547,11 +1587,15 @@ export type MockDatabaseTable = {
   primaryKey: string[]
   rows: Array<Record<string, string | number | boolean | null>>
   ddl: string
+  ddlError?: { code: 'permission' | 'other'; message: string }
 }
 
 export type MockDatabaseSchema = {
   name: string
   tables: MockDatabaseTable[]
+  views?: MockDatabaseTable[]
+  functions?: string[]
+  procedures?: string[]
 }
 
 export type MockDatabaseCatalog = {
@@ -1586,14 +1630,22 @@ export type MockDatabaseGroup = {
 }
 
 export const mockDatabaseEngines: MockDatabaseEngine[] = [
-  { code: 'mysql', name: 'MySQL', enabled: true, accent: '#00758f' },
-  { code: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
-  { code: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
-  { code: 'oracle', name: 'Oracle', enabled: true, accent: '#c74634' },
-  { code: 'mysql', name: 'MariaDB', enabled: false, accent: '#c0765c' },
-  { code: 'postgresql', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
-  { code: 'sqlite', name: 'MongoDB', enabled: false, accent: '#4db33d' },
-  { code: 'oracle', name: 'SQL Server', enabled: false, accent: '#a91d22' }
+  { code: 'mysql', connectionCode: 'mysql', name: 'MySQL', enabled: true, accent: '#00758f' },
+  { code: 'h2', name: 'H2', enabled: false, accent: '#7c3aed' },
+  { code: 'oracle', connectionCode: 'oracle', name: 'Oracle', enabled: true, accent: '#c74634' },
+  { code: 'postgresql', connectionCode: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
+  { code: 'sqlserver', name: 'SQLServer', enabled: false, accent: '#a91d22' },
+  { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
+  { code: 'mariadb', name: 'MariaDB', enabled: false, accent: '#c0765c' },
+  { code: 'clickhouse', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
+  { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
+  { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
+  { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
+  { code: 'oceanbase', name: 'OceanBase', enabled: false, accent: '#0ea5e9' },
+  { code: 'hive', name: 'Hive', enabled: false, accent: '#f59e0b' },
+  { code: 'kingbase', name: 'KingBase', enabled: false, accent: '#dc2626' },
+  { code: 'mongodb', name: 'MongoDB', enabled: false, accent: '#4db33d' },
+  { code: 'timeplus', name: 'Timeplus', enabled: false, accent: '#14b8a6' }
 ]
 
 export const mockDatabaseGroups: MockDatabaseGroup[] = [
@@ -1626,11 +1678,25 @@ const serviceHealthColumns: MockDatabaseColumn[] = [
   { name: 'healthy', type: 'tinyint', nullable: false }
 ]
 
+const metricEventsColumns: MockDatabaseColumn[] = [
+  { name: 'service', type: 'varchar(80)', nullable: false },
+  { name: 'event_type', type: 'varchar(32)', nullable: false },
+  { name: 'severity', type: 'varchar(16)', nullable: false },
+  { name: 'created_at', type: 'datetime', nullable: false }
+]
+
 const cacheColumns: MockDatabaseColumn[] = [
   { name: 'key', type: 'text', nullable: false, key: 'PK' },
   { name: 'value', type: 'text', nullable: true },
   { name: 'ttl_seconds', type: 'integer', nullable: true },
   { name: 'updated_at', type: 'text', nullable: false }
+]
+
+const oracleAuditColumns: MockDatabaseColumn[] = [
+  { name: 'event_id', type: 'NUMBER', nullable: false },
+  { name: 'actor', type: 'VARCHAR2(64)', nullable: false },
+  { name: 'action', type: 'VARCHAR2(64)', nullable: false },
+  { name: 'created_at', type: 'TIMESTAMP', nullable: false }
 ]
 
 export const mockDatabaseConnections: MockDatabaseConnection[] = [
@@ -1670,7 +1736,23 @@ export const mockDatabaseConnections: MockDatabaseConnection[] = [
                 ddl:
                   'CREATE TABLE public.orders (\n  id BIGINT PRIMARY KEY,\n  service VARCHAR(80) NOT NULL,\n  status VARCHAR(32) NOT NULL,\n  owner VARCHAR(64),\n  updated_at TIMESTAMP NOT NULL\n);'
               }
-            ]
+            ],
+            views: [
+              {
+                id: 'view-public-open-orders',
+                name: 'open_orders_v',
+                columns: ordersColumns,
+                primaryKey: ['id'],
+                rows: [
+                  { id: 1001, service: 'payment-api', status: 'investigating', owner: 'alice', updated_at: '2026-06-03 10:12:00' }
+                ],
+                ddlError: { code: 'permission', message: 'DDL requires elevated catalog permission.' },
+                ddl:
+                  'CREATE VIEW public.open_orders_v AS\nSELECT id, service, status, owner, updated_at\nFROM public.orders\nWHERE status <> \'closed\';'
+              }
+            ],
+            functions: ['notify_order_owner(order_id bigint)', 'calculate_order_age(order_id bigint)'],
+            procedures: ['archive_closed_orders(cutoff timestamp)']
           },
           {
             name: 'ops',
@@ -1687,7 +1769,20 @@ export const mockDatabaseConnections: MockDatabaseConnection[] = [
                 ddl:
                   'CREATE TABLE ops.ops_incidents (\n  id BIGINT PRIMARY KEY,\n  service VARCHAR(80) NOT NULL,\n  severity VARCHAR(16) NOT NULL,\n  status VARCHAR(32) NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);'
               }
-            ]
+            ],
+            views: [
+              {
+                id: 'view-ops-active-incidents',
+                name: 'active_incidents_v',
+                columns: incidentsColumns,
+                primaryKey: ['id'],
+                rows: [{ id: 9001, service: 'checkout', severity: 'P1', status: 'open', updated_at: '2026-06-03 11:18:00' }],
+                ddl:
+                  'CREATE VIEW ops.active_incidents_v AS\nSELECT id, service, severity, status, updated_at\nFROM ops.ops_incidents\nWHERE status <> \'closed\';'
+              }
+            ],
+            functions: ['incident_priority(severity text)'],
+            procedures: ['rotate_incident_partitions()']
           }
         ]
       }
@@ -1735,6 +1830,57 @@ export const mockDatabaseConnections: MockDatabaseConnection[] = [
             ],
             ddl:
               'CREATE TABLE `ops_incidents` (\n  `id` BIGINT NOT NULL,\n  `service` VARCHAR(80) NOT NULL,\n  `severity` VARCHAR(16) NOT NULL,\n  `status` VARCHAR(32) NOT NULL,\n  `updated_at` DATETIME NOT NULL,\n  PRIMARY KEY (`id`)\n);'
+          },
+          {
+            id: 'tbl-metric-events',
+            name: 'metric_events',
+            columns: metricEventsColumns,
+            primaryKey: [],
+            rows: [
+              { service: 'api-gateway', event_type: 'deploy', severity: 'info', created_at: '2026-06-03 10:42:00' },
+              { service: 'queue', event_type: 'lag', severity: 'warning', created_at: '2026-06-03 10:58:00' }
+            ],
+            ddl:
+              'CREATE TABLE `metric_events` (\n  `service` VARCHAR(80) NOT NULL,\n  `event_type` VARCHAR(32) NOT NULL,\n  `severity` VARCHAR(16) NOT NULL,\n  `created_at` DATETIME NOT NULL\n);'
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'conn-oracle-audit',
+    name: 'audit-oracle',
+    dbType: 'oracle',
+    env: 'TEST',
+    groupId: 'group-default',
+    host: '10.32.6.28',
+    port: 1521,
+    authentication: 'UserAndPassword',
+    user: 'audit',
+    hasPassword: true,
+    database: 'ORCLPDB1',
+    url: '10.32.6.28:1521/ORCLPDB1',
+    status: 'connected',
+    catalogs: [
+      {
+        name: 'ORCLPDB1',
+        schemas: [
+          {
+            name: 'OPS',
+            tables: [
+              {
+                id: 'tbl-oracle-audit-log',
+                name: 'AUDIT_LOG',
+                columns: oracleAuditColumns,
+                primaryKey: [],
+                rows: [
+                  { event_id: 501, actor: 'deploy-bot', action: 'RELEASE_START', created_at: '2026-06-03 08:10:00' },
+                  { event_id: 502, actor: 'ops-user', action: 'MANUAL_APPROVE', created_at: '2026-06-03 08:16:00' }
+                ],
+                ddl:
+                  'CREATE TABLE OPS.AUDIT_LOG (\n  event_id NUMBER NOT NULL,\n  actor VARCHAR2(64) NOT NULL,\n  action VARCHAR2(64) NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);'
+              }
+            ]
           }
         ]
       }
@@ -1780,7 +1926,7 @@ export const mockDatabaseConnections: MockDatabaseConnection[] = [
 export const mockDatabases = mockDatabaseConnections.map((connection) => ({
   id: connection.id,
   name: connection.database,
-  type: mockDatabaseEngines.find((engine) => engine.code === connection.dbType)?.name ?? connection.dbType,
+  type: mockDatabaseEngines.find((engine) => engine.connectionCode === connection.dbType)?.name ?? connection.dbType,
   host: connection.host,
   tables: connection.catalogs.reduce((total, catalog) => {
     const direct = catalog.tables?.length ?? 0

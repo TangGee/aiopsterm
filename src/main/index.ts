@@ -239,7 +239,7 @@ const defaultConfig: UserConfig = {
       username: '',
       password: ''
     },
-    shellIntegrationTimeout: 3000
+    shellIntegrationTimeout: 4
   },
   modelSettings: {
     addModelSwitch: true,
@@ -254,6 +254,33 @@ const defaultConfig: UserConfig = {
         apiKey: '',
         modelId: 'gpt-5',
         apiFormat: 'responses'
+      },
+      bedrock: {
+        baseUrl: '',
+        apiKey: '',
+        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        awsAccessKey: '',
+        awsSecretKey: '',
+        awsSessionToken: '',
+        awsRegion: 'us-east-1',
+        awsUseCrossRegionInference: false,
+        awsEndpointSelected: false,
+        awsBedrockEndpoint: ''
+      },
+      deepseek: {
+        baseUrl: '',
+        apiKey: '',
+        modelId: 'deepseek-chat'
+      },
+      anthropic: {
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: '',
+        modelId: 'claude-3-5-sonnet-latest'
+      },
+      ollama: {
+        baseUrl: 'http://localhost:11434',
+        apiKey: '',
+        modelId: 'llama3.1'
       }
     },
     options: [
@@ -646,15 +673,27 @@ const normalizeSecurityConfig = (source?: unknown): SecurityUserConfig => {
   }
 }
 
+const mergeModelProvider = (
+  provider: ModelSettingsUserConfig['providers'][keyof ModelSettingsUserConfig['providers']] | undefined,
+  fallback: ModelSettingsUserConfig['providers'][keyof ModelSettingsUserConfig['providers']]
+) => ({
+  ...fallback,
+  ...(provider || {})
+})
+
 const cloneModelSettings = (settings?: ModelSettingsUserConfig): ModelSettingsUserConfig | undefined =>
   settings
     ? {
         addModelSwitch: settings.addModelSwitch,
         providers: {
-          litellm: { ...settings.providers.litellm },
-          openai: { ...settings.providers.openai }
+          litellm: mergeModelProvider(settings.providers?.litellm, defaultConfig.modelSettings!.providers.litellm),
+          openai: mergeModelProvider(settings.providers?.openai, defaultConfig.modelSettings!.providers.openai),
+          bedrock: mergeModelProvider(settings.providers?.bedrock, defaultConfig.modelSettings!.providers.bedrock),
+          deepseek: mergeModelProvider(settings.providers?.deepseek, defaultConfig.modelSettings!.providers.deepseek),
+          anthropic: mergeModelProvider(settings.providers?.anthropic, defaultConfig.modelSettings!.providers.anthropic),
+          ollama: mergeModelProvider(settings.providers?.ollama, defaultConfig.modelSettings!.providers.ollama)
         },
-        options: settings.options.map((option) => ({ ...option }))
+        options: (settings.options || defaultConfig.modelSettings!.options).map((option) => ({ ...option }))
       }
     : undefined
 
@@ -780,6 +819,7 @@ const getSkillsInitMarkerPath = () => join(getSkillsUserPath(), '.aiopsterm-skil
 const getSkillFilePath = (skillDirName: string) => join(getSkillsUserPath(), skillDirName, 'SKILL.md')
 const getKnowledgeBasePath = () => join(app.getPath('userData'), 'knowledgebase')
 const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-knowledge-initialized')
+const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
 
 const blockedKnowledgeImportExtensions = new Set([
   '.exe',
@@ -819,8 +859,39 @@ const blockedKnowledgeImportExtensions = new Set([
 
 const knowledgeImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 const maxKnowledgeImportBytes = 10 * 1024 * 1024
+const maxChatAttachmentBytes = 10 * 1024 * 1024
+const allowedChatAttachmentExtensions = new Set([
+  '.txt',
+  '.md',
+  '.js',
+  '.ts',
+  '.py',
+  '.java',
+  '.cpp',
+  '.c',
+  '.html',
+  '.css',
+  '.json',
+  '.xml',
+  '.yaml',
+  '.yml',
+  '.sql',
+  '.sh',
+  '.bat',
+  '.ps1',
+  '.log',
+  '.csv',
+  '.tsv'
+])
 
 const normalizeKnowledgeRelPath = (relPath: string) => relPath.replace(/\\/g, '/').replace(/^\/+/, '')
+
+const normalizeChatAttachmentTaskId = (taskId: string) => taskId.trim().replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 96)
+
+const sanitizeChatAttachmentName = (name: string) => {
+  const cleaned = basename(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim()
+  return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : `attachment-${Date.now()}.txt`
+}
 
 const isSafeKnowledgeBasename = (name: string) => {
   if (!name || name === '.' || name === '..') return false
@@ -1654,6 +1725,17 @@ const registerIpc = () => {
     return { success: true, filePath: result.filePath }
   })
   ipcMain.handle('dialog:open-file', async (event, options) => {
+    if (
+      process.env.NODE_ENV === 'test' &&
+      Array.isArray(options?.properties) &&
+      options.properties.includes('openFile') &&
+      Array.isArray(options?.filters) &&
+      options.filters.some((filter: { name?: string }) => filter?.name === 'Text')
+    ) {
+      const attachmentPath = join(app.getPath('userData'), 'e2e-chat-attachment.md')
+      await writeFile(attachmentPath, '# E2E chat attachment\n\nGenerated by the aiopsterm test harness.\n', 'utf-8')
+      return { canceled: false, filePaths: [attachmentPath] }
+    }
     if (process.env.NODE_ENV === 'test' && Array.isArray(options?.properties) && options.properties.includes('openDirectory')) {
       const importPath = join(app.getPath('userData'), 'e2e-imported-note.md')
       await writeFile(importPath, '# E2E imported note\n\nGenerated by the aiopsterm test harness.\n', 'utf-8')
@@ -1673,6 +1755,32 @@ const registerIpc = () => {
     if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, typeof content === 'string' ? content : String(content), 'utf-8')
+  })
+  ipcMain.handle('chat:stage-attachment', async (_event, payload: { taskId: string; srcAbsPath: string }) => {
+    const taskId = normalizeChatAttachmentTaskId(typeof payload?.taskId === 'string' ? payload.taskId : '')
+    const srcAbsPath = typeof payload?.srcAbsPath === 'string' ? payload.srcAbsPath : ''
+    if (!taskId) throw new Error('taskId is required')
+    if (!srcAbsPath || !isAbsolute(srcAbsPath)) throw new Error('srcAbsPath must be absolute')
+
+    const metadata = await stat(srcAbsPath)
+    if (!metadata.isFile()) throw new Error('Attachment source must be a file')
+    if (metadata.size > maxChatAttachmentBytes) throw new Error('Attachment file too large')
+
+    const ext = extname(srcAbsPath).toLowerCase()
+    if (!allowedChatAttachmentExtensions.has(ext)) throw new Error('Attachment file type not allowed')
+
+    const taskDir = join(getChatAttachmentsPath(), taskId)
+    await mkdir(taskDir, { recursive: true })
+    const finalName = await ensureUniqueKnowledgeName(taskDir, sanitizeChatAttachmentName(basename(srcAbsPath)))
+    const stagedPath = join(taskDir, finalName)
+    await cp(srcAbsPath, stagedPath)
+    return {
+      mode: 'local',
+      refPath: `aiopsterm://chat-attachment/${encodeURIComponent(taskId)}/${encodeURIComponent(finalName)}`,
+      name: finalName,
+      size: metadata.size,
+      stagedPath
+    }
   })
   ipcMain.handle('kb:check-path', async (_event, payload: { absPath: string }) => {
     const absPath = typeof payload?.absPath === 'string' ? payload.absPath : ''

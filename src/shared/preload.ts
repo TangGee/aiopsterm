@@ -154,6 +154,13 @@ export type ModelProviderUserConfig = {
   apiKey: string
   modelId: string
   apiFormat?: 'chat-completions' | 'responses'
+  awsAccessKey?: string
+  awsSecretKey?: string
+  awsSessionToken?: string
+  awsRegion?: string
+  awsUseCrossRegionInference?: boolean
+  awsEndpointSelected?: boolean
+  awsBedrockEndpoint?: string
 }
 
 export type ModelOptionUserConfig = {
@@ -169,6 +176,10 @@ export type ModelSettingsUserConfig = {
   providers: {
     litellm: ModelProviderUserConfig
     openai: ModelProviderUserConfig
+    bedrock: ModelProviderUserConfig
+    deepseek: ModelProviderUserConfig
+    anthropic: ModelProviderUserConfig
+    ollama: ModelProviderUserConfig
   }
   options: ModelOptionUserConfig[]
 }
@@ -344,6 +355,14 @@ export type SaveDialogResult = {
   filePath?: string
 }
 
+export type ChatAttachmentStageResult = {
+  mode: 'local'
+  refPath: string
+  name: string
+  size: number
+  stagedPath: string
+}
+
 export type SkillImportErrorCode = 'INVALID_ZIP' | 'NO_SKILL_MD' | 'INVALID_METADATA' | 'DIR_EXISTS' | 'EXTRACT_FAILED' | 'UNKNOWN'
 
 export type SkillImportResult = {
@@ -365,7 +384,7 @@ export type UserConfig = {
   defaultMode: 'terminal' | 'agents'
   leftPanelOpen: boolean
   rightPanelOpen: boolean
-  modelProvider: 'mock' | 'litellm' | 'openai-compatible' | 'ollama' | 'bedrock'
+  modelProvider: 'mock' | 'litellm' | 'openai-compatible' | 'ollama' | 'bedrock' | 'deepseek' | 'anthropic'
   modelEndpoint: string
   modelName: string
   watermark: 'open' | 'close'
@@ -453,6 +472,7 @@ export type AiopsPreloadApi = {
   showOpenDialog: (options: OpenDialogOptions) => Promise<OpenDialogResult | undefined>
   showSaveDialog: (options: SaveDialogOptions) => Promise<SaveDialogResult | undefined>
   writeLocalFile: (filePath: string, content: string) => Promise<void>
+  stageChatAttachment: (payload: { taskId: string; srcAbsPath: string }) => Promise<ChatAttachmentStageResult>
   kbCheckPath: (absPath: string) => Promise<{ exists: boolean; isDirectory: boolean; isFile: boolean }>
   kbEnsureRoot: () => Promise<{ success: boolean }>
   kbGetRoot: () => Promise<{ root: string }>

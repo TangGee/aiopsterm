@@ -637,11 +637,25 @@
             @dragenter.prevent="keyDragOver = true"
             @dragleave.prevent="keyDragOver = false"
             @drop.prevent="handleKeyDrop"
-            @click="keyImportNotice = '请选择 .pem、.key、.pub、.ppk 等密钥文件。'"
+            @click="openKeyImportDialog"
           >
+            <input
+              ref="keyImportInput"
+              class="key-hidden-file-input"
+              type="file"
+              accept=".pem,.key,.txt,.pub,.asc,.crt,.cer,.der,.p12,.pfx,.ssh,.ppk,.gpg,.any"
+              @click.stop
+              @change="handleKeyFileChange"
+            />
             <Upload />
             <span>拖拽或点击导入密钥文件</span>
           </div>
+          <small
+            v-if="keyFormError"
+            class="key-form-error"
+          >
+            {{ keyFormError }}
+          </small>
           <small v-if="keyImportNotice">{{ keyImportNotice }}</small>
           <button
             class="asset-submit-button"
@@ -898,6 +912,8 @@ const keyContextMenuId = ref<string | null>(null)
 const keyContextPosition = reactive({ x: 0, y: 0 })
 const keyDragOver = ref(false)
 const keyImportNotice = ref('')
+const keyFormError = ref('')
+const keyImportInput = ref<HTMLInputElement | null>(null)
 const keyForm = reactive({
   id: '',
   name: '',
@@ -1186,6 +1202,7 @@ const connectAsset = (assetId: string | null) => {
   workspace.createPanel()
   workspace.renamePanel(workspace.activePanelId, asset.name || asset.title)
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
+  workspace.registerMockSshSession(workspace.activePanelId, asset)
   workspace.appendTerminalInput(workspace.activePanelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
   workspace.appendTerminalOutput(workspace.activePanelId, `[mock ssh] ${asset.name || asset.title}\n$ `)
   workspace.selectedContexts = [
@@ -1599,6 +1616,8 @@ const confirmImportAssets = (overwrite: boolean) => {
 
 const openNewKeyPanel = () => {
   keyEditMode.value = false
+  keyFormError.value = ''
+  keyImportNotice.value = ''
   Object.assign(keyForm, { id: '', name: '', privateKey: '', publicKey: '', passphrase: '' })
   keyEditorOpen.value = true
 }
@@ -1608,23 +1627,70 @@ const editKey = (keyId: string | null) => {
   const key = keychains.value.find((item) => item.id === keyId)
   if (!key) return
   keyEditMode.value = true
+  keyFormError.value = ''
+  keyImportNotice.value = ''
   Object.assign(keyForm, { id: key.id, name: key.name, privateKey: key.privateKey, publicKey: key.publicKey, passphrase: key.passphrase })
   keyEditorOpen.value = true
   keyContextMenuId.value = null
 }
 
+const detectKeyType = (privateKey = '', publicKey = ''): 'rsa' | 'ed25519' | 'ecdsa' => {
+  const publicAlgorithm = publicKey.trim().split(/\s+/)[0]?.toLowerCase()
+  if (publicAlgorithm === 'ssh-ed25519') return 'ed25519'
+  if (publicAlgorithm === 'ssh-rsa') return 'rsa'
+  if (publicAlgorithm?.startsWith('ecdsa-')) return 'ecdsa'
+
+  if (privateKey.includes('BEGIN RSA PRIVATE KEY')) return 'rsa'
+  if (privateKey.includes('BEGIN EC PRIVATE KEY')) return 'ecdsa'
+  if (privateKey.includes('ssh-ed25519')) return 'ed25519'
+  if (privateKey.includes('ssh-rsa')) return 'rsa'
+  if (privateKey.includes('ecdsa-sha2')) return 'ecdsa'
+
+  if (privateKey.includes('BEGIN OPENSSH PRIVATE KEY') && typeof globalThis.atob === 'function') {
+    try {
+      const body = privateKey.replace(/-----(BEGIN|END)[\s\S]+?KEY-----/g, '').replace(/\s+/g, '')
+      const decoded = globalThis.atob(body)
+      if (decoded.includes('ssh-ed25519')) return 'ed25519'
+      if (decoded.includes('ssh-rsa')) return 'rsa'
+      if (decoded.includes('ecdsa-sha2')) return 'ecdsa'
+    } catch {
+      // Invalid or redacted OpenSSH keys fall back to RSA, matching External reference's visible default.
+    }
+  }
+
+  return 'rsa'
+}
+
+const validateKeyForm = () => {
+  const name = keyForm.name.trim()
+  if (!name) return '请输入名称。'
+  if (!keyForm.privateKey.trim()) return '请输入私钥。'
+  if (keyForm.name.includes(' ')) return '名称不能包含空格。'
+  if (keyForm.publicKey.includes(' ')) return '公钥不能包含空格。'
+  if (keyForm.passphrase.includes(' ')) return 'Passphrase 不能包含空格。'
+  const duplicate = keychains.value.find((key) => key.name === name && key.id !== keyForm.id)
+  if (duplicate) return `密钥 ${name} 已存在。`
+  return ''
+}
+
 const submitKeyForm = () => {
-  const name = keyForm.name.trim() || 'new-key'
+  const error = validateKeyForm()
+  if (error) {
+    keyFormError.value = error
+    return
+  }
+  const name = keyForm.name.trim()
   const row: KeychainItem = {
     id: keyForm.id || `key-local-${Date.now()}`,
     name,
-    type: keyForm.publicKey.includes('ed25519') ? 'ed25519' : 'rsa',
-    privateKey: keyForm.privateKey || '-----BEGIN OPENSSH PRIVATE KEY-----',
-    publicKey: keyForm.publicKey,
+    type: detectKeyType(keyForm.privateKey, keyForm.publicKey),
+    privateKey: keyForm.privateKey.trim(),
+    publicKey: keyForm.publicKey.trim(),
     passphrase: keyForm.passphrase
   }
   keychains.value = keyEditMode.value && keyForm.id ? keychains.value.map((key) => (key.id === keyForm.id ? row : key)) : [...keychains.value, row]
   selectedKeyId.value = row.id
+  keyFormError.value = ''
   keyImportNotice.value = `${keyEditMode.value ? '已保存' : '已创建'} ${row.name}。`
   keyEditorOpen.value = false
 }
@@ -1655,11 +1721,53 @@ const openKeyContextMenu = (event: MouseEvent, keyId: string) => {
   keyContextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
 }
 
-const handleKeyDrop = () => {
+const applyImportedKeyFile = (fileName: string, content: string) => {
+  const text = content.trim()
+  if (!text) {
+    keyImportNotice.value = '密钥文件为空。'
+    return
+  }
+  keyForm.privateKey = text
+  keyFormError.value = ''
+  const type = detectKeyType(keyForm.privateKey, keyForm.publicKey).toUpperCase()
+  keyImportNotice.value = `已导入 ${fileName}，识别为 ${type}。`
+}
+
+const openKeyImportDialog = () => {
+  keyImportNotice.value = '请选择 .pem、.key、.pub、.ppk 等密钥文件。'
+  if (keyImportInput.value) {
+    keyImportInput.value.value = ''
+    keyImportInput.value.click()
+  }
+}
+
+const handleKeyFileChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const content = await readFileAsText(file)
+    applyImportedKeyFile(file.name, content)
+  } catch {
+    keyImportNotice.value = '密钥文件读取失败。'
+  } finally {
+    input.value = ''
+  }
+}
+
+const handleKeyDrop = async (event: DragEvent) => {
   keyDragOver.value = false
-  keyImportNotice.value = '已读取密钥文件名，文件内容读取为本地占位。'
-  if (!keyForm.name) keyForm.name = 'imported-key'
-  if (!keyForm.privateKey) keyForm.privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----'
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) {
+    keyImportNotice.value = '没有检测到可导入的密钥文件。'
+    return
+  }
+  try {
+    const content = await readFileAsText(file)
+    applyImportedKeyFile(file.name, content)
+  } catch {
+    keyImportNotice.value = '密钥文件读取失败。'
+  }
 }
 
 const closeConfirm = () => {

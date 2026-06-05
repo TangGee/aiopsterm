@@ -14,19 +14,170 @@
     <main class="user-info-body">
       <section
         v-if="workspace.userProfile.skippedLogin"
-        class="user-login-card"
+        class="user-login-card auth-login-card"
       >
-        <div class="user-avatar large muted">
-          <User />
+        <div class="user-login-heading">
+          <div class="user-avatar large muted">
+            <User />
+          </div>
+          <div>
+            <h3>请先登录</h3>
+            <p>登录后可查看个人信息、账号中心、订阅和可信设备状态。</p>
+          </div>
         </div>
-        <h3>请先登录</h3>
-        <p>登录后可查看个人信息、账号中心、订阅和可信设备状态。</p>
-        <button
-          class="settings-button primary"
-          @click="workspace.loginUser"
+
+        <div
+          class="user-login-tabs"
+          role="tablist"
         >
-          登录
-        </button>
+          <button
+            :class="{ active: workspace.userLoginTab === 'email' }"
+            @click="workspace.setUserLoginTab('email')"
+          >
+            邮箱登录
+          </button>
+          <button
+            :class="{ active: workspace.userLoginTab === 'mobile' }"
+            @click="workspace.setUserLoginTab('mobile')"
+          >
+            手机号登录
+          </button>
+          <button
+            :class="{ active: workspace.userLoginTab === 'account' }"
+            @click="workspace.setUserLoginTab('account')"
+          >
+            账号登录
+          </button>
+        </div>
+
+        <div
+          v-if="workspace.userLoginTab === 'account'"
+          class="user-login-form"
+        >
+          <label>
+            <span>用户名</span>
+            <input
+              v-model="loginDraft.username"
+              placeholder="请输入用户名"
+            />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              v-model="loginDraft.password"
+              type="password"
+              placeholder="请输入密码"
+            />
+          </label>
+          <button
+            class="settings-button primary"
+            :disabled="workspace.userLoginLoading"
+            @click="loginWithAccount"
+          >
+            {{ workspace.userLoginLoading ? '登录中' : '登录' }}
+          </button>
+        </div>
+
+        <div
+          v-else-if="workspace.userLoginTab === 'email'"
+          class="user-login-form"
+        >
+          <label>
+            <span>邮箱</span>
+            <input
+              v-model="loginDraft.email"
+              type="email"
+              placeholder="请输入邮箱"
+            />
+          </label>
+          <label>
+            <span>验证码</span>
+            <div class="user-code-row">
+              <input
+                v-model="loginDraft.emailCode"
+                placeholder="请输入验证码"
+              />
+              <button
+                class="settings-button"
+                :disabled="!canSendLoginEmailCode || workspace.userLoginCodeCountdown.email > 0 || workspace.userLoginCodeSending.email"
+                @click="sendLoginCode('email')"
+              >
+                {{
+                  workspace.userLoginCodeSending.email
+                    ? '发送中'
+                    : workspace.userLoginCodeCountdown.email > 0
+                      ? `${workspace.userLoginCodeCountdown.email}s`
+                      : '获取验证码'
+                }}
+              </button>
+            </div>
+          </label>
+          <button
+            class="settings-button primary"
+            :disabled="workspace.userLoginLoading"
+            @click="loginWithEmail"
+          >
+            {{ workspace.userLoginLoading ? '登录中' : '登录' }}
+          </button>
+        </div>
+
+        <div
+          v-else
+          class="user-login-form"
+        >
+          <label>
+            <span>手机号</span>
+            <div class="user-mobile-input">
+              <em>+86</em>
+              <input
+                v-model="loginDraft.mobile"
+                type="tel"
+                placeholder="请输入手机号"
+              />
+            </div>
+          </label>
+          <label>
+            <span>验证码</span>
+            <div class="user-code-row">
+              <input
+                v-model="loginDraft.mobileCode"
+                placeholder="请输入验证码"
+              />
+              <button
+                class="settings-button"
+                :disabled="!canSendLoginMobileCode || workspace.userLoginCodeCountdown.mobile > 0 || workspace.userLoginCodeSending.mobile"
+                @click="sendLoginCode('mobile')"
+              >
+                {{
+                  workspace.userLoginCodeSending.mobile
+                    ? '发送中'
+                    : workspace.userLoginCodeCountdown.mobile > 0
+                      ? `${workspace.userLoginCodeCountdown.mobile}s`
+                      : '获取验证码'
+                }}
+              </button>
+            </div>
+          </label>
+          <button
+            class="settings-button primary"
+            :disabled="workspace.userLoginLoading"
+            @click="loginWithMobile"
+          >
+            {{ workspace.userLoginLoading ? '登录中' : '登录' }}
+          </button>
+        </div>
+
+        <p
+          v-if="workspace.userProfile.needDeviceVerification"
+          class="user-login-warning"
+        >
+          当前设备需要验证后才能登录
+        </p>
+
+        <div class="user-skip-login">
+          暂不登录
+          <button @click="skipLogin">跳过登录</button>
+        </div>
       </section>
 
       <section
@@ -38,7 +189,12 @@
           title="头像设置"
           @click="openAvatarModal"
         >
-          <span>{{ workspace.userProfile.avatarInitials }}</span>
+          <img
+            v-if="workspace.userProfile.avatarImageUrl"
+            :src="workspace.userProfile.avatarImageUrl"
+            alt=""
+          />
+          <span v-else>{{ workspace.userProfile.avatarInitials }}</span>
           <div class="user-avatar-overlay">
             <Camera />
           </div>
@@ -55,8 +211,17 @@
           <span
             class="subscription-tag"
             :class="{ free: !isSubscriptionActive }"
+            :title="`到期时间：${workspace.userProfile.subscriptionExpiresAt}`"
           >
             {{ isSubscriptionActive ? titleCase(workspace.userProfile.subscription) : 'free' }}
+          </span>
+        </div>
+
+        <div class="user-status-strip">
+          <span>{{ workspace.userProfile.authProvider === 'local' ? '本地账号' : workspace.userProfile.authProvider.toUpperCase() }}</span>
+          <span>{{ workspace.userProfile.isOfficeDevice ? '办公设备' : '非办公设备' }}</span>
+          <span :class="{ warn: workspace.userProfile.needDeviceVerification }">
+            {{ workspace.userProfile.needDeviceVerification ? '需要设备验证' : '设备已验证' }}
           </span>
         </div>
 
@@ -122,6 +287,7 @@
               <button
                 class="settings-button icon-only"
                 title="重置密码"
+                :disabled="!workspace.canResetUserPassword"
                 @click="openPasswordModal"
               >
                 <Pencil />
@@ -136,6 +302,7 @@
               <button
                 class="settings-button icon-only"
                 :title="workspace.userProfile.mobile ? '修改手机号' : '绑定手机号'"
+                :disabled="!workspace.canEditUserMobile"
                 @click="openContactModal('mobile')"
               >
                 <Pencil />
@@ -150,6 +317,7 @@
               <button
                 class="settings-button icon-only"
                 :title="workspace.userProfile.email ? '修改邮箱' : '绑定邮箱'"
+                :disabled="!workspace.canEditUserEmail"
                 @click="openContactModal('email')"
               >
                 <Pencil />
@@ -225,6 +393,12 @@
           />
         </label>
         <p
+          v-if="confirmPasswordDraft && passwordDraft !== confirmPasswordDraft"
+          class="user-modal-error"
+        >
+          两次输入的密码不一致
+        </p>
+        <p
           v-if="passwordDraft"
           class="password-strength"
           :class="passwordStrengthClass"
@@ -279,9 +453,16 @@
             />
             <button
               class="settings-button"
+              :disabled="!canSendContactCode || workspace.userContactCodeCountdown[contactKind] > 0 || workspace.userContactCodeSending[contactKind]"
               @click="sendContactCode"
             >
-              发送验证码
+              {{
+                workspace.userContactCodeSending[contactKind]
+                  ? '发送中'
+                  : workspace.userContactCodeCountdown[contactKind] > 0
+                    ? `${workspace.userContactCodeCountdown[contactKind]}s`
+                    : '发送验证码'
+              }}
             </button>
           </div>
         </label>
@@ -318,7 +499,15 @@
           </button>
         </header>
         <div class="avatar-preview-box">
-          <span>{{ avatarDraft || workspace.userProfile.avatarInitials }}</span>
+          <img
+            v-if="avatarPreview"
+            :src="avatarPreview"
+            :style="{ transform: `scale(${avatarZoom}) translate(${avatarOffset.x / avatarZoom}px, ${avatarOffset.y / avatarZoom}px)` }"
+            alt=""
+            draggable="false"
+            @mousedown="startAvatarDrag"
+          />
+          <span v-else>{{ avatarDraft || workspace.userProfile.avatarInitials }}</span>
         </div>
         <label>
           <span>头像缩写</span>
@@ -339,6 +528,28 @@
           />
           <span>+</span>
         </div>
+        <div class="avatar-actions-row">
+          <button
+            class="settings-button"
+            @click="chooseAvatarImage"
+          >
+            本地上传
+          </button>
+          <button
+            v-if="avatarPreview"
+            class="settings-button"
+            @click="clearAvatarImage"
+          >
+            使用缩写
+          </button>
+          <input
+            ref="avatarInput"
+            class="visually-hidden-input"
+            type="file"
+            accept="image/*"
+            @change="handleAvatarFile"
+          />
+        </div>
         <footer>
           <button
             class="settings-button"
@@ -355,11 +566,76 @@
         </footer>
       </section>
     </div>
+
+    <div
+      v-if="workspace.userAccountCenterOpen"
+      class="user-modal-backdrop"
+    >
+      <section class="user-modal-card user-account-modal">
+        <header>
+          <h3>账号中心</h3>
+          <button
+            title="关闭"
+            @click="workspace.closeAccountCenter"
+          >
+            <X />
+          </button>
+        </header>
+        <div class="account-center-grid">
+          <section>
+            <small>账号</small>
+            <strong>{{ workspace.userProfile.email || workspace.userProfile.username }}</strong>
+            <span>{{ workspace.userProfile.authProvider === 'local' ? '本地密码登录' : '第三方登录' }}</span>
+          </section>
+          <section>
+            <small>订阅</small>
+            <strong>{{ isSubscriptionActive ? titleCase(workspace.userProfile.subscription) : 'Free' }}</strong>
+            <span>{{ workspace.userProfile.subscriptionExpiresAt }} 到期</span>
+          </section>
+          <section>
+            <small>可信设备</small>
+            <strong>{{ workspace.trustedDevices.length }}</strong>
+            <span>{{ currentDeviceLabel }}</span>
+          </section>
+          <section>
+            <small>计费用量</small>
+            <strong>{{ Math.round(workspace.billingSettings.ratio * 100) }}%</strong>
+            <span>{{ workspace.billingSettings.budgetResetAt }} 重置</span>
+          </section>
+        </div>
+        <div class="account-device-list">
+          <article
+            v-for="device in workspace.trustedDevices"
+            :key="device.id"
+          >
+            <div>
+              <strong>{{ device.deviceName }}</strong>
+              <span>{{ device.lastLoginIp }} · {{ device.location }}</span>
+            </div>
+            <em :class="{ current: device.current }">{{ device.current ? '当前设备' : '可信设备' }}</em>
+          </article>
+        </div>
+        <footer>
+          <button
+            class="settings-button"
+            @click="workspace.setActiveModule('settings'); workspace.setActiveSettingsSection('billing'); workspace.closeAccountCenter()"
+          >
+            订阅设置
+          </button>
+          <button
+            class="settings-button"
+            @click="workspace.setActiveModule('settings'); workspace.setActiveSettingsSection('trustedDevices'); workspace.closeAccountCenter()"
+          >
+            可信设备
+          </button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onUnmounted, reactive, ref } from 'vue'
 import { Camera, Check, Gauge, LogOut, Pencil, User, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -374,7 +650,19 @@ const confirmPasswordDraft = ref('')
 const contactDraft = ref('')
 const contactCodeDraft = ref('')
 const avatarDraft = ref('')
+const avatarPreview = ref('')
 const avatarZoom = ref(1)
+const avatarInput = ref<HTMLInputElement | null>(null)
+const avatarOffset = reactive({ x: 0, y: 0 })
+const avatarDrag = reactive({ active: false, startX: 0, startY: 0 })
+const loginDraft = reactive({
+  username: workspace.userProfile.username || 'local_ops',
+  password: '',
+  email: workspace.userProfile.email || '',
+  emailCode: '',
+  mobile: workspace.userProfile.mobile || '',
+  mobileCode: ''
+})
 const profileDraft = reactive({
   name: workspace.userProfile.name,
   username: workspace.userProfile.username
@@ -398,8 +686,32 @@ const passwordScore = computed(() => {
 const passwordStrengthText = computed(() => (passwordScore.value <= 1 ? '密码强度弱' : passwordScore.value === 2 ? '密码强度中' : '密码强度强'))
 const passwordStrengthClass = computed(() => (passwordScore.value <= 1 ? 'weak' : passwordScore.value === 2 ? 'medium' : 'strong'))
 const canSavePassword = computed(() => passwordDraft.value.length >= 6 && passwordDraft.value === confirmPasswordDraft.value)
+const canSendContactCode = computed(() => (contactKind.value === 'email' ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactDraft.value.trim()) : /^1[3-9]\d{9}$/.test(contactDraft.value.trim())))
+const canSendLoginEmailCode = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginDraft.email.trim()))
+const canSendLoginMobileCode = computed(() => /^1[3-9]\d{9}$/.test(loginDraft.mobile.trim()))
+const currentDeviceLabel = computed(() => workspace.trustedDevices.find((device) => device.current)?.deviceName || '未识别当前设备')
 
 const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
+
+const sendLoginCode = (kind: 'email' | 'mobile') => {
+  workspace.sendUserLoginCode(kind, kind === 'email' ? loginDraft.email : loginDraft.mobile)
+}
+
+const loginWithAccount = () => {
+  workspace.loginWithAccount(loginDraft.username, loginDraft.password)
+}
+
+const loginWithEmail = () => {
+  workspace.loginWithEmail(loginDraft.email, loginDraft.emailCode)
+}
+
+const loginWithMobile = () => {
+  workspace.loginWithMobile(loginDraft.mobile, loginDraft.mobileCode)
+}
+
+const skipLogin = () => {
+  workspace.skipUserLogin()
+}
 
 const startEditing = () => {
   profileDraft.name = workspace.userProfile.name
@@ -414,11 +726,11 @@ const cancelEditing = () => {
 }
 
 const saveProfile = () => {
-  workspace.updateUserProfile({
+  const saved = workspace.updateUserProfile({
     name: profileDraft.name,
     username: profileDraft.username
   })
-  editing.value = false
+  if (saved) editing.value = false
 }
 
 const openPasswordModal = () => {
@@ -428,8 +740,8 @@ const openPasswordModal = () => {
 }
 
 const savePassword = () => {
-  workspace.resetUserPassword()
-  passwordModalOpen.value = false
+  const saved = workspace.resetUserPassword(passwordDraft.value)
+  if (saved) passwordModalOpen.value = false
 }
 
 const openContactModal = (kind: 'email' | 'mobile') => {
@@ -440,22 +752,79 @@ const openContactModal = (kind: 'email' | 'mobile') => {
 }
 
 const sendContactCode = () => {
-  workspace.setUserNotice(`${contactKind.value === 'email' ? '邮箱' : '手机'}验证码已发送`)
+  workspace.sendUserContactCode(contactKind.value, contactDraft.value)
 }
 
 const saveContact = () => {
-  workspace.bindUserContact(contactKind.value, contactDraft.value)
-  contactModalOpen.value = false
+  const saved = workspace.bindUserContact(contactKind.value, contactDraft.value, contactCodeDraft.value)
+  if (saved) contactModalOpen.value = false
 }
 
 const openAvatarModal = () => {
   avatarDraft.value = workspace.userProfile.avatarInitials
+  avatarPreview.value = workspace.userProfile.avatarImageUrl
   avatarZoom.value = 1
+  avatarOffset.x = 0
+  avatarOffset.y = 0
   avatarModalOpen.value = true
 }
 
-const saveAvatar = () => {
-  workspace.updateUserProfile({ avatarInitials: (avatarDraft.value || 'AI').toUpperCase().slice(0, 3) })
-  avatarModalOpen.value = false
+const chooseAvatarImage = () => {
+  avatarInput.value?.click()
 }
+
+const clearAvatarImage = () => {
+  avatarPreview.value = ''
+  avatarZoom.value = 1
+  avatarOffset.x = 0
+  avatarOffset.y = 0
+}
+
+const handleAvatarFile = (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    workspace.setUserNotice('请选择图片文件')
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    avatarPreview.value = String(reader.result || '')
+    avatarOffset.x = 0
+    avatarOffset.y = 0
+  }
+  reader.readAsDataURL(file)
+}
+
+const onAvatarDragMove = (event: MouseEvent) => {
+  if (!avatarDrag.active) return
+  avatarOffset.x = event.clientX - avatarDrag.startX
+  avatarOffset.y = event.clientY - avatarDrag.startY
+}
+
+const stopAvatarDrag = () => {
+  avatarDrag.active = false
+}
+
+const startAvatarDrag = (event: MouseEvent) => {
+  if (!avatarPreview.value) return
+  avatarDrag.active = true
+  avatarDrag.startX = event.clientX - avatarOffset.x
+  avatarDrag.startY = event.clientY - avatarOffset.y
+  window.addEventListener('mousemove', onAvatarDragMove)
+  window.addEventListener('mouseup', stopAvatarDrag, { once: true })
+}
+
+const saveAvatar = () => {
+  const saved = workspace.updateUserProfile({
+    avatarInitials: (avatarDraft.value || 'AI').toUpperCase().slice(0, 3),
+    avatarImageUrl: avatarPreview.value
+  })
+  if (saved) avatarModalOpen.value = false
+}
+
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onAvatarDragMove)
+  window.removeEventListener('mouseup', stopAvatarDrag)
+})
 </script>

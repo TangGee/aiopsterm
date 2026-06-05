@@ -21,6 +21,7 @@
               <Plus />
               添加命令
             </button>
+            <span class="alias-config-hint">Enter 保存编辑，取消会恢复原值。</span>
           </header>
 
           <table class="alias-config-table">
@@ -93,6 +94,12 @@
               </tr>
             </tbody>
           </table>
+          <div
+            v-if="workspace.extensionNotice"
+            class="alias-config-notice"
+          >
+            {{ workspace.extensionNotice }}
+          </div>
         </div>
       </div>
 
@@ -145,9 +152,10 @@
           <PluginSidebar
             identifier="jumpserver-support"
             version="N/A"
+            last-updated="N/A"
             source="Preinstalled"
             size="N/A"
-            :tags="['SSH', 'Tools']"
+            :tags="workspace.selectedExtension.categories || ['SSH', 'Tools']"
           />
         </div>
       </div>
@@ -234,9 +242,10 @@
           <PluginSidebar
             :identifier="workspace.selectedExtension.pluginId"
             :version="workspace.selectedExtension.installedVersion || workspace.selectedExtension.latestVersion || '0.0.0'"
+            :last-updated="workspace.selectedExtension.lastUpdated || 'N/A'"
             :source="sourceText(workspace.selectedExtension)"
             :size="formatSize(workspace.selectedExtension.size)"
-            :tags="[workspace.selectedExtension.source || 'store', workspace.selectedExtension.installed ? 'installed' : 'available']"
+            :tags="workspace.selectedExtension.categories || [workspace.selectedExtension.source || 'store', workspace.selectedExtension.installed ? 'installed' : 'available']"
           />
         </div>
       </div>
@@ -396,6 +405,7 @@ const PluginSidebar = defineComponent({
   props: {
     identifier: { type: String, required: true },
     version: { type: String, required: true },
+    lastUpdated: { type: String, required: true },
     source: { type: String, required: true },
     size: { type: String, required: true },
     tags: { type: Array as PropType<string[]>, required: true }
@@ -411,7 +421,7 @@ const PluginSidebar = defineComponent({
             h('dt', '插件版本'),
             h('dd', props.version),
             h('dt', '最后更新'),
-            h('dd', 'N/A'),
+            h('dd', props.lastUpdated),
             h('dt', '插件来源'),
             h('dd', props.source),
             h('dt', '插件大小'),

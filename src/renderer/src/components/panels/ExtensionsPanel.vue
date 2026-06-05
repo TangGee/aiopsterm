@@ -48,6 +48,18 @@
             >
               {{ !item.isPlugin ? '系统' : 'System' }}
             </em>
+            <em
+              v-else-if="item.isPrivate"
+              class="extension_tag private"
+            >
+              Private
+            </em>
+            <em
+              v-else-if="item.installed"
+              class="extension_tag installed"
+            >
+              Installed
+            </em>
           </span>
           <small
             class="extension_item_desc"
@@ -55,6 +67,15 @@
           >
             {{ item.description || '暂无描述' }}
           </small>
+          <span
+            v-if="item.isPlugin"
+            class="extension_item_meta"
+          >
+            <span>{{ sourceText(item) }}</span>
+            <span v-if="item.installedVersion">{{ item.installedVersion }}</span>
+            <span v-else-if="item.latestVersion">{{ item.latestVersion }}</span>
+            <span v-if="item.hasUpdate">Update available</span>
+          </span>
           <span
             v-if="pluginProgress(item.pluginId)"
             class="extension_install_status"
@@ -124,7 +145,7 @@
 import { computed, type Component } from 'vue'
 import { Cloud, CloudDownload, Crown, FileText, Layers, LoaderCircle, PackageOpen, Pencil, RefreshCw, Search, ShieldCheck, WandSparkles } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { ExtensionIconKey, ExtensionInstallStage } from '@/data/mockData'
+import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPlugin } from '@/data/mockData'
 
 const workspace = useWorkspaceStore()
 
@@ -156,6 +177,12 @@ const stageText = (stage: ExtensionInstallStage) => {
 const pluginProgress = (pluginId: string) => workspace.extensionInstallProgressMap[pluginId] || null
 
 const isPluginBusy = (pluginId: string) => Boolean(workspace.extensionInstallLoadingMap[pluginId] || workspace.extensionUpdateLoadingMap[pluginId])
+
+const sourceText = (plugin: ExtensionPlugin) => {
+  if (plugin.source === 'preinstalled') return 'Preinstalled'
+  if (plugin.source === 'local') return 'Local'
+  return 'Store'
+}
 
 const handleDragLeave = (event: DragEvent) => {
   if (event.currentTarget === event.target) {

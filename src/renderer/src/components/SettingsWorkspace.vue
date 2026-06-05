@@ -193,6 +193,36 @@ const cursorStyles = [
   { value: 'bar' as const, label: '竖线光标' },
   { value: 'underline' as const, label: '下划线光标' }
 ]
+type SettingsModelProviderKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
+const modelProviderCards: Array<{ provider: SettingsModelProviderKey; title: string }> = [
+  { provider: 'litellm', title: 'LiteLLM' },
+  { provider: 'openai', title: 'OpenAI Compatible & Responses' },
+  { provider: 'bedrock', title: 'Amazon Bedrock' },
+  { provider: 'deepseek', title: 'DeepSeek' },
+  { provider: 'anthropic', title: 'Anthropic' },
+  { provider: 'ollama', title: 'Ollama' }
+]
+const awsRegionOptions = [
+  'us-east-1',
+  'us-east-2',
+  'us-west-2',
+  'ap-south-1',
+  'ap-northeast-1',
+  'ap-northeast-2',
+  'ap-northeast-3',
+  'ap-southeast-1',
+  'ap-southeast-2',
+  'ca-central-1',
+  'eu-central-1',
+  'eu-central-2',
+  'eu-west-1',
+  'eu-west-2',
+  'eu-west-3',
+  'eu-north-1',
+  'sa-east-1',
+  'us-gov-east-1',
+  'us-gov-west-1'
+]
 const customBackgroundCss =
   'radial-gradient(circle at 25% 25%, #ffffff 0 1px, transparent 2px), radial-gradient(circle at 76% 60%, #b9d8ff 0 1px, transparent 2px), linear-gradient(145deg, #020617, #111827 55%, #1e293b)'
 
@@ -664,7 +694,7 @@ const ModelSettings = defineComponent({
               model.locked ? h(LockKeyhole) : null,
               h('span', model.name.replace(/-Thinking$/, '')),
               model.name.endsWith('-Thinking') ? h(Brain, { class: 'thinking-icon' }) : null,
-              model.checked && !model.locked
+              model.checked && model.type === 'custom' && !model.locked
                 ? h(
                     'button',
                     {
@@ -692,7 +722,7 @@ const ModelSettings = defineComponent({
           ])
         ]),
         workspace.addModelSwitch
-          ? h('div', [h('h3', 'API 配置'), h(ProviderCard, { provider: 'litellm', title: 'LiteLLM' }), h(ProviderCard, { provider: 'openai', title: 'OpenAI Compatible & Responses' })])
+          ? h('div', [h('h3', 'API 配置'), ...modelProviderCards.map((item) => h(ProviderCard, { key: item.provider, provider: item.provider, title: item.title }))])
           : null
       ])
   }
@@ -829,13 +859,35 @@ const AiPreferenceSettings = defineComponent({
                     onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { enableProxyIdentity: (event.target as HTMLInputElement).checked } })
                   }),
                   '启用代理身份'
-                ])
+                ]),
+                workspace.aiPreferences.proxy.enableProxyIdentity
+                  ? h('div', { class: 'proxy-grid credentials' }, [
+                      h('label', [
+                        h('span', 'Username'),
+                        h('input', {
+                          class: 'settings-input',
+                          value: workspace.aiPreferences.proxy.username,
+                          onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { username: (event.target as HTMLInputElement).value } })
+                        })
+                      ]),
+                      h('label', [
+                        h('span', 'Password'),
+                        h('input', {
+                          class: 'settings-input',
+                          type: 'password',
+                          value: workspace.aiPreferences.proxy.password,
+                          onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { password: (event.target as HTMLInputElement).value } })
+                        })
+                      ])
+                    ])
+                  : null
               ])
             : null
         ]),
         h('h3', '终端'),
         h('div', { class: 'settings-section-card' }, [
-          numberRow('Shell Integration Timeout', workspace.aiPreferences.shellIntegrationTimeout, 100, undefined, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true)
+          numberRow('Shell Integration Timeout', workspace.aiPreferences.shellIntegrationTimeout, 1, 300, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true),
+          h('p', { class: 'setting-description-no-padding' }, 'Shell integration command detection timeout in seconds.')
         ])
       ])
   }
@@ -963,9 +1015,14 @@ const McpSettingsPage = defineComponent({
               workspace.mcpServers.map((server) => {
                 const expanded = workspace.expandedMcpServerNames.includes(server.name)
                 const tab = workspace.activeMcpServerTab[server.name] || 'tools'
+                const statusLabel = server.disabled ? 'disabled' : server.status
                 return h('div', { class: ['settings-section-card mcp-server-card', { disabled: server.disabled }] }, [
                   h('div', { class: 'mcp-server-header' }, [
-                    h('button', { class: 'mcp-server-title', onClick: () => workspace.toggleMcpServerExpanded(server.name) }, [h('strong', server.name), h('span', server.status)]),
+                    h('button', { class: 'mcp-server-title', onClick: () => workspace.toggleMcpServerExpanded(server.name) }, [
+                      h('span', { class: ['mcp-expand-caret', { expanded }] }, '›'),
+                      h('strong', server.name),
+                      h('em', { class: ['mcp-status-badge', statusLabel] }, statusLabel)
+                    ]),
                     h('div', { class: 'mcp-actions' }, [
                       h('button', { class: 'settings-button', onClick: () => workspace.openMcpConfigEditor() }, '编辑'),
                       h('button', { class: 'settings-button danger', onClick: () => workspace.deleteMcpServer(server.name) }, '删除'),
@@ -986,27 +1043,42 @@ const McpSettingsPage = defineComponent({
                           ? h(
                               'div',
                               { class: 'mcp-tool-list' },
-                              server.tools.map((tool) =>
-                                h('div', { class: ['mcp-tool-item', { disabled: !tool.enabled }] }, [
-                                  h('div', { class: 'mcp-tool-header' }, [
-                                    h('button', { onClick: () => workspace.toggleMcpTool(server.name, tool.name) }, tool.name),
-                                    h('span', tool.enabled ? 'success' : 'default')
-                                  ]),
-                                  h('small', tool.description),
-                                  tool.parameters.length
-                                    ? h('div', { class: 'mcp-parameters' }, [
-                                        h('strong', `PARAMETERS (${tool.parameters.length})`),
-                                        ...tool.parameters.map((parameter) => h('p', [parameter.name, parameter.required ? h('b', '*') : null, h('small', ` ${parameter.description}`)]))
-                                      ])
-                                    : null
-                                ])
-                              )
+                              server.tools.length
+                                ? server.tools.map((tool) =>
+                                    h('div', { class: ['mcp-tool-item', { disabled: !tool.enabled }] }, [
+                                      h('div', { class: 'mcp-tool-header' }, [
+                                        h('span', { class: 'mcp-tool-icon' }, 'tool'),
+                                        h('button', { onClick: () => workspace.toggleMcpTool(server.name, tool.name) }, tool.name),
+                                        h('em', { class: ['mcp-tool-state', tool.enabled ? 'success' : 'default'] }, tool.enabled ? 'success' : 'default')
+                                      ]),
+                                      tool.description ? h('small', tool.description) : null,
+                                      tool.parameters.length
+                                        ? h('div', { class: 'mcp-parameters' }, [
+                                            h('strong', `PARAMETERS (${tool.parameters.length})`),
+                                            ...tool.parameters.map((parameter) =>
+                                              h('p', [
+                                                h('span', parameter.name),
+                                                parameter.required ? h('b', '*') : null,
+                                                h('small', parameter.description || 'No description')
+                                              ])
+                                            )
+                                          ])
+                                        : null
+                                    ])
+                                  )
+                                : [h('div', { class: 'settings-empty-state' }, 'No Tools')]
                             )
                           : h(
                               'div',
                               { class: 'mcp-tool-list' },
                               server.resources.length
-                                ? server.resources.map((resource) => h('div', { class: 'mcp-tool-item' }, [h('strong', resource.name), h('small', resource.description), h('code', resource.uri)]))
+                                ? server.resources.map((resource) =>
+                                    h('div', { class: 'mcp-resource-item' }, [
+                                      h('div', { class: 'mcp-resource-header' }, [h('span', { class: 'mcp-tool-icon' }, 'resource'), h('strong', resource.name)]),
+                                      resource.description ? h('small', resource.description) : null,
+                                      h('code', resource.uri)
+                                    ])
+                                  )
                                 : [h('div', { class: 'settings-empty-state' }, 'No Resources')]
                             )
                       ])
@@ -1313,7 +1385,7 @@ const ProviderCard = defineComponent({
   name: 'ProviderCard',
   props: {
     provider: {
-      type: String as () => 'litellm' | 'openai',
+      type: String as () => SettingsModelProviderKey,
       required: true
     },
     title: {
@@ -1324,49 +1396,111 @@ const ProviderCard = defineComponent({
   setup(props) {
     const providerState = computed(() => workspace.modelProviders[props.provider])
     const checkLabel = computed(() => (workspace.modelCheckState[props.provider] === 'checking' ? 'Checking' : 'Check'))
+    const openAiUrlPreview = computed(() => {
+      if (props.provider !== 'openai') return ''
+      const url = providerState.value.baseUrl.trim()
+      if (!url) return ''
+      let baseUrl = url
+      if (url.endsWith('#')) {
+        baseUrl = url.slice(0, -1)
+      } else {
+        let hasV1 = false
+        try {
+          hasV1 = new URL(url).pathname.split('/').filter(Boolean).includes('v1')
+        } catch {
+          hasV1 = false
+        }
+        if (!hasV1) {
+          baseUrl = `${url}${url.endsWith('/') ? '' : '/'}v1`
+        }
+      }
+      const apiPath = providerState.value.apiFormat === 'responses' ? 'responses' : 'chat/completions'
+      return `${baseUrl}${baseUrl.endsWith('/') ? '' : '/'}${apiPath}`
+    })
+    const update = (patch: Partial<typeof providerState.value>) => workspace.updateModelProviderConfig(props.provider, patch)
+    const field = (label: string, key: keyof typeof providerState.value, options: { type?: string; placeholder?: string; wide?: boolean } = {}) =>
+      h('label', { class: ['provider-field', { wide: options.wide }] }, [
+        h('span', label),
+        h('input', {
+          class: 'settings-input',
+          type: options.type || 'text',
+          value: providerState.value[key] as string,
+          placeholder: options.placeholder,
+          onChange: (event: Event) => update({ [key]: (event.target as HTMLInputElement).value })
+        })
+      ])
+    const checkbox = (label: string, key: keyof typeof providerState.value) =>
+      h('label', { class: 'settings-check-line provider-check-line' }, [
+        h('input', {
+          type: 'checkbox',
+          checked: Boolean(providerState.value[key]),
+          onChange: (event: Event) => update({ [key]: (event.target as HTMLInputElement).checked })
+        }),
+        label
+      ])
     return () =>
       h('div', { class: 'settings-section-card provider-card' }, [
         h('header', [h('h4', props.title)]),
-        h('label', { class: 'provider-field' }, [
-          h('span', props.provider === 'litellm' ? 'Base URL' : 'OpenAI Base URL'),
-          h('input', {
-            class: 'settings-input',
-            value: providerState.value.baseUrl,
-            placeholder: props.provider === 'litellm' ? 'http://localhost:4000' : 'https://api.openai.com',
-            onChange: (event: Event) => workspace.updateModelProviderConfig(props.provider, { baseUrl: (event.target as HTMLInputElement).value })
-          })
-        ]),
+        props.provider === 'litellm' ? field('LiteLLM Base URL', 'baseUrl', { placeholder: 'http://localhost:4000', wide: true }) : null,
         props.provider === 'openai'
-          ? h('label', { class: 'provider-field' }, [
-              h('span', 'API Format'),
-              h(
-                'select',
-                {
-                  class: 'settings-select',
-                  value: providerState.value.apiFormat,
-                  onChange: (event: Event) =>
-                    workspace.updateModelProviderConfig(props.provider, { apiFormat: (event.target as HTMLSelectElement).value as 'chat-completions' | 'responses' })
-                },
-                [h('option', { value: 'chat-completions' }, 'Chat Completions'), h('option', { value: 'responses' }, 'Responses')]
-              )
-            ])
+          ? [
+              field('OpenAI Base URL', 'baseUrl', { placeholder: 'https://api.openai.com/v1', wide: true }),
+              h('small', { class: 'provider-help' }, '末尾追加 # 可跳过自动 /v1 拼接。'),
+              openAiUrlPreview.value ? h('small', { class: 'provider-help url-preview' }, `Preview: ${openAiUrlPreview.value}`) : null,
+              h('label', { class: 'provider-field' }, [
+                h('span', 'API Format'),
+                h(
+                  'select',
+                  {
+                    class: 'settings-select',
+                    value: providerState.value.apiFormat,
+                    onChange: (event: Event) =>
+                      update({ apiFormat: (event.target as HTMLSelectElement).value as 'chat-completions' | 'responses' })
+                  },
+                  [h('option', { value: 'chat-completions' }, 'Chat Completions'), h('option', { value: 'responses' }, 'Responses')]
+                )
+              ])
+            ]
           : null,
-        h('label', { class: 'provider-field' }, [
-          h('span', 'API Key'),
-          h('input', {
-            class: 'settings-input',
-            type: 'password',
-            value: providerState.value.apiKey,
-            onChange: (event: Event) => workspace.updateModelProviderConfig(props.provider, { apiKey: (event.target as HTMLInputElement).value })
-          })
-        ]),
+        props.provider === 'bedrock'
+          ? [
+              h('div', { class: 'provider-grid two' }, [
+                field('AWS Access Key', 'awsAccessKey', { placeholder: 'AKIA...' }),
+                field('AWS Secret Key', 'awsSecretKey', { type: 'password' }),
+                field('AWS Session Token', 'awsSessionToken'),
+                h('label', { class: 'provider-field' }, [
+                  h('span', 'AWS Region'),
+                  h(
+                    'select',
+                    {
+                      class: 'settings-select',
+                      value: providerState.value.awsRegion,
+                      onChange: (event: Event) => update({ awsRegion: (event.target as HTMLSelectElement).value })
+                    },
+                    awsRegionOptions.map((region) => h('option', { value: region }, region))
+                  )
+                ])
+              ]),
+              checkbox('AWS VPC Endpoint', 'awsEndpointSelected'),
+              providerState.value.awsEndpointSelected
+                ? field('Bedrock Endpoint', 'awsBedrockEndpoint', { placeholder: 'https://bedrock-runtime...', wide: true })
+                : null,
+              checkbox('Cross Region Inference', 'awsUseCrossRegionInference')
+            ]
+          : null,
+        props.provider === 'deepseek' ? field('DeepSeek API Key', 'apiKey', { type: 'password' }) : null,
+        props.provider === 'anthropic'
+          ? [field('Anthropic Base URL', 'baseUrl', { placeholder: 'https://api.anthropic.com', wide: true }), field('Anthropic API Key', 'apiKey', { type: 'password' })]
+          : null,
+        props.provider === 'ollama' ? field('Ollama Base URL', 'baseUrl', { placeholder: 'http://localhost:11434', wide: true }) : null,
+        props.provider === 'litellm' || props.provider === 'openai' ? field('API Key', 'apiKey', { type: 'password' }) : null,
         h('label', { class: 'provider-field' }, [
           h('span', 'Model'),
           h('div', { class: 'model-input-container' }, [
             h('input', {
               class: 'settings-input',
               value: providerState.value.modelId,
-              onChange: (event: Event) => workspace.updateModelProviderConfig(props.provider, { modelId: (event.target as HTMLInputElement).value })
+              onChange: (event: Event) => update({ modelId: (event.target as HTMLInputElement).value })
             }),
             h(
               'button',

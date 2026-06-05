@@ -116,6 +116,16 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { initialFileSessions } from '@/data/mockData'
 import type { KeywordHighlightUserConfig } from '@shared/preload'
 
+const waitForDatabaseSqlResult = async () => {
+  await new Promise((resolve) => window.setTimeout(resolve, 0))
+  await flushPromises()
+}
+
+const waitForDatabaseDbAiDone = async () => {
+  await new Promise((resolve) => window.setTimeout(resolve, 380))
+  await flushPromises()
+}
+
 describe('AppShell', () => {
   it('renders primary product surfaces', () => {
     const wrapper = mount(AppShell, {
@@ -232,9 +242,61 @@ describe('AppShell', () => {
     await keys.find('[data-testid="key-new-button"]').trigger('click')
     expect(keys.text()).toContain('新建密钥')
     await keys.find('.key-form-panel input').setValue('unit-key')
-    await keys.find('.key-form-panel textarea').setValue('ssh-ed25519 AAAA unit')
+    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    expect(keys.text()).toContain('请输入私钥')
+    await keys.find('.key-form-panel textarea').setValue('-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----')
     await keys.find('.key-form-panel .asset-submit-button').trigger('click')
     expect(keys.text()).toContain('unit-key')
+    expect(keys.findAll('.keychain-card').find((button) => button.text().includes('unit-key'))!.text()).toContain('类型ed25519')
+
+    await keys.find('[data-testid="key-new-button"]').trigger('click')
+    await keys.find('.key-form-panel input').setValue('prod-ed25519')
+    await keys.find('.key-form-panel textarea').setValue('-----BEGIN RSA PRIVATE KEY-----')
+    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    expect(keys.text()).toContain('密钥 prod-ed25519 已存在')
+
+    const originalKeyFileReader = window.FileReader
+    const originalGlobalKeyFileReader = globalThis.FileReader
+    let keyReaderPayload = '-----BEGIN RSA PRIVATE KEY-----\nunit import\n-----END RSA PRIVATE KEY-----'
+    class MockKeyImportFileReader {
+      result = keyReaderPayload
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      readAsText() {
+        this.onload?.()
+      }
+    }
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockKeyImportFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockKeyImportFileReader })
+
+    await keys.find('[data-testid="key-new-button"]').trigger('click')
+    await keys.find('.key-form-panel input').setValue('import-unit')
+    const keyInput = keys.find('input.key-hidden-file-input')
+    Object.defineProperty(keyInput.element, 'files', {
+      configurable: true,
+      value: [new File([keyReaderPayload], 'unit-rsa.pem', { type: 'text/plain' })]
+    })
+    await keyInput.trigger('change')
+    await flushPromises()
+    expect(keys.text()).toContain('已导入 unit-rsa.pem，识别为 RSA')
+    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    expect(keys.findAll('.keychain-card').find((button) => button.text().includes('import-unit'))!.text()).toContain('类型rsa')
+
+    await keys.find('[data-testid="key-new-button"]').trigger('click')
+    await keys.find('.key-form-panel input').setValue('drop-unit')
+    keyReaderPayload = '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----'
+    await keys.find('.key-drop-area').trigger('drop', {
+      dataTransfer: {
+        files: [new File([keyReaderPayload], 'drop-ed25519.key', { type: 'text/plain' })]
+      }
+    })
+    await flushPromises()
+    expect(keys.text()).toContain('已导入 drop-ed25519.key，识别为 ED25519')
+    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    expect(keys.findAll('.keychain-card').find((button) => button.text().includes('drop-unit'))!.text()).toContain('类型ed25519')
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalKeyFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalKeyFileReader })
+
     await keys.findAll('.keychain-card').find((button) => button.text().includes('unit-key'))!.trigger('contextmenu', {
       clientX: 310,
       clientY: 210
@@ -453,6 +515,43 @@ describe('AppShell', () => {
       expect(wrapper.text()).toContain('prod-bastion')
       expect(wrapper.text()).not.toContain('10.24.8.12')
 
+      await wrapper.find('.workspace-button[title="主机"]').trigger('click')
+      expect(wrapper.find('.workspace-host-modal').text()).toContain('新建主机')
+      await wrapper.find('.workspace-host-form').trigger('submit')
+      expect(wrapper.text()).toContain('请填写主机名、地址和用户名')
+      await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('workspace-unit')
+      await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.44.0.9')
+      await wrapper.findAll('.workspace-host-form input').at(2)!.setValue('ops')
+      await wrapper.findAll('.workspace-host-form input').at(3)!.setValue('Workspace')
+      await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('2201')
+      await wrapper.find('.workspace-host-form textarea').setValue('工作区新增主机')
+      await wrapper.find('.workspace-host-form').trigger('submit')
+      expect(wrapper.find('.workspace-host-modal').exists()).toBe(false)
+      expect(wrapper.text()).toContain('workspace-unit')
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit'))!.trigger('contextmenu', {
+        clientX: 300,
+        clientY: 200
+      })
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('克隆')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
+      expect(wrapper.find('.workspace-host-modal').text()).toContain('编辑主机')
+      await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('workspace-unit-edited')
+      await wrapper.find('.workspace-host-form').trigger('submit')
+      expect(wrapper.text()).toContain('workspace-unit-edited')
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('contextmenu')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('克隆'))!.trigger('click')
+      expect((wrapper.findAll('.workspace-host-form input').at(0)!.element as HTMLInputElement).value).toBe('workspace-unit-edited_Clone')
+      await wrapper.find('.workspace-host-form').trigger('submit')
+      expect(wrapper.text()).toContain('workspace-unit-edited_Clone')
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited_Clone'))!.trigger('contextmenu')
+      await wrapper.find('.workspace-node-menu .delete').trigger('click')
+      expect(wrapper.find('.files-folder-confirm').text()).toContain('删除主机')
+      await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
+      expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('workspace-unit-edited_Clone'))).toBe(false)
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
+      expect(store.activePanel.title).toBe('workspace-unit-edited')
+      expect(store.activePanel.output).toContain('[mock ssh] workspace-unit-edited')
+
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu', {
@@ -597,13 +696,53 @@ describe('AppShell', () => {
 
       await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
       expect(wrapper.text()).toContain('jumpserver-org')
+      await wrapper.find('.workspace-button[title="新建"]').trigger('click')
+      expect(wrapper.find('.workspace-add-menu').text()).toContain('自定义文件夹')
+      await wrapper.find('.workspace-add-menu').findAll('button').find((button) => button.text().includes('自定义文件夹'))!.trigger('click')
+      expect(wrapper.find('.workspace-folder-modal').text()).toContain('创建文件夹')
+      await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      expect(wrapper.text()).toContain('请输入文件夹名称')
+      await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('值班窗口')
+      await wrapper.find('.workspace-folder-modal .files-folder-form textarea').setValue('工作区值班资产')
+      await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      expect(wrapper.text()).toContain('值班窗口')
+      await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('值班窗口'))!.trigger('contextmenu')
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('编辑文件夹')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑文件夹'))!.trigger('click')
+      await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('值班归档')
+      await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      expect(wrapper.text()).toContain('值班归档')
       await wrapper.find('.workspace-row-action.refresh').trigger('click')
       expect(wrapper.text()).toContain('正在刷新堡垒机资源')
 
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').exists()).toBe(true)
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑备注'))!.trigger('click')
-      expect(wrapper.text()).not.toContain('(生产入口)')
+      expect((wrapper.find('.workspace-comment-edit input').element as HTMLInputElement).value).toBe('生产入口')
+      await wrapper.find('.workspace-comment-edit input').setValue('工作区备注')
+      await wrapper.find('.workspace-comment-edit input').trigger('keydown', { key: 'Enter' })
+      expect(wrapper.text()).toContain('(工作区备注)')
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('从文件夹移除')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
+      expect(wrapper.text()).toContain('已从 核心业务 移除 prod-bastion')
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('移动到文件夹')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
+      expect(wrapper.find('.workspace-folder-modal').text()).toContain('值班归档')
+      await wrapper.findAll('.files-folder-option').find((button) => button.text().includes('值班归档'))!.trigger('click')
+      expect(wrapper.text()).toContain('已移动 prod-bastion 到 值班归档')
+      await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('值班归档'))!.trigger('contextmenu')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
+      expect(wrapper.find('.files-folder-confirm').text()).toContain('其中 1 个主机将移出该文件夹')
+      await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
+      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('值班归档'))).toBe(false)
+      expect(wrapper.text()).toContain('prod-bastion')
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('jumpserver-org'))!.trigger('contextmenu')
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('管理资产')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('管理资产'))!.trigger('click')
+      expect(wrapper.find('.workspace-management-modal').text()).toContain('管理资产 · jumpserver-org')
+      await wrapper.find('.workspace-management-modal header button').trigger('click')
 
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('dblclick')
       expect(store.activePanel.title).toBe('prod-bastion')
@@ -616,55 +755,137 @@ describe('AppShell', () => {
   })
 
   it('matches External reference-style user menu and user info card interactions', async () => {
+    vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
     const rail = mount(SideRail, {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    const originalFileReader = window.FileReader
+    const originalGlobalFileReader = globalThis.FileReader
+    class MockAvatarFileReader {
+      result = 'data:image/png;base64,avatar'
+      onload: null | (() => void) = null
+      readAsDataURL() {
+        this.onload?.()
+      }
+    }
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockAvatarFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockAvatarFileReader })
 
-    await rail.find('.user-rail-trigger').trigger('click')
-    expect(rail.find('.user-menu-popover').exists()).toBe(true)
-    expect(rail.text()).toContain('账号中心')
-    expect(rail.text()).toContain('个人信息')
-    expect(rail.text()).toContain('退出登录')
+    try {
+      await rail.find('.user-rail-trigger').trigger('click')
+      expect(rail.find('.user-menu-popover').exists()).toBe(true)
+      expect(rail.text()).toContain('账号中心')
+      expect(rail.text()).toContain('个人信息')
+      expect(rail.text()).toContain('退出登录')
 
-    await rail.findAll('.user-menu-popover button').find((button) => button.text().includes('个人信息'))!.trigger('click')
-    expect(store.activeModule).toBe('user')
+      await rail.findAll('.user-menu-popover button').find((button) => button.text().includes('个人信息'))!.trigger('click')
+      expect(store.activeModule).toBe('user')
 
-    const panel = mount(UserPanel, {
-      global: { plugins: [pinia] }
-    })
-    expect(panel.text()).toContain('个人信息')
-    expect(panel.text()).toContain('VIP用户')
-    expect(panel.text()).toContain('Local Operator')
+      const panel = mount(UserPanel, {
+        global: { plugins: [pinia] }
+      })
+      expect(panel.text()).toContain('个人信息')
+      expect(panel.text()).toContain('VIP用户')
+      expect(panel.text()).toContain('Local Operator')
+      expect(panel.text()).toContain('本地账号')
+      expect(panel.text()).toContain('设备已验证')
 
-    await panel.find('button[title="编辑"]').trigger('click')
-    await panel.findAll('.user-info-form input').at(0)!.setValue('Ops Lead')
-    await panel.find('button[title="保存"]').trigger('click')
-    expect(store.userProfile.name).toBe('Ops Lead')
+      await panel.find('.user-info-footer .settings-button').trigger('click')
+      await panel.vm.$nextTick()
+      expect(store.userAccountCenterOpen).toBe(true)
+      expect(panel.find('.user-account-modal').text()).toContain('可信设备')
+      expect(panel.find('.user-account-modal').text()).toContain('Linux Workstation')
+      await panel.findAll('.user-account-modal footer button').at(1)!.trigger('click')
+      expect(store.activeModule).toBe('settings')
+      expect(store.activeSettingsSection).toBe('trustedDevices')
+      expect(store.userAccountCenterOpen).toBe(false)
 
-    await panel.find('button[title="修改邮箱"]').trigger('click')
-    await panel.find('.user-modal-card input').setValue('ops@example.local')
-    await panel.findAll('.user-modal-card input').at(1)!.setValue('123456')
-    await panel.find('.user-modal-card footer .primary').trigger('click')
-    expect(store.userProfile.email).toBe('ops@example.local')
+      await panel.find('button[title="编辑"]').trigger('click')
+      await panel.findAll('.user-info-form input').at(1)!.setValue('bad-name!')
+      await panel.find('button[title="保存"]').trigger('click')
+      expect(store.userNotice).toBe('用户名仅支持字母、数字和下划线')
+      await panel.findAll('.user-info-form input').at(0)!.setValue('Ops Lead')
+      await panel.findAll('.user-info-form input').at(1)!.setValue('ops_lead')
+      await panel.find('button[title="保存"]').trigger('click')
+      expect(store.userProfile.name).toBe('Ops Lead')
 
-    await panel.find('button[title="重置密码"]').trigger('click')
-    await panel.find('.user-modal-card input[type="password"]').setValue('Aa123456!')
-    await panel.findAll('.user-modal-card input[type="password"]').at(1)!.setValue('Aa123456!')
-    await panel.find('.user-modal-card footer .primary').trigger('click')
-    expect(store.userNotice).toContain('密码重置')
+      await panel.find('button[title="修改邮箱"]').trigger('click')
+      await panel.find('.user-modal-card input').setValue('ops@example.local')
+      await panel.find('.user-code-row button').trigger('click')
+      await vi.advanceTimersByTimeAsync(120)
+      await panel.vm.$nextTick()
+      expect(panel.find('.user-code-row button').text()).toContain('300s')
+      await panel.findAll('.user-modal-card input').at(1)!.setValue('123456')
+      await panel.find('.user-modal-card footer .primary').trigger('click')
+      expect(store.userProfile.email).toBe('ops@example.local')
 
-    await panel.find('.user-avatar.large').trigger('click')
-    await panel.find('.avatar-settings-modal input').setValue('OP')
-    await panel.find('.avatar-settings-modal footer .primary').trigger('click')
-    expect(store.userProfile.avatarInitials).toBe('OP')
+      await panel.find('button[title="重置密码"]').trigger('click')
+      await panel.find('.user-modal-card input[type="password"]').setValue('Aa123456!')
+      await panel.findAll('.user-modal-card input[type="password"]').at(1)!.setValue('Aa123456!')
+      await panel.find('.user-modal-card footer .primary').trigger('click')
+      expect(store.userNotice).toContain('密码重置')
 
-    await panel.find('.user-info-footer .danger').trigger('click')
-    expect(store.userProfile.skippedLogin).toBe(true)
-    await panel.vm.$nextTick()
-    expect(panel.text()).toContain('请先登录')
+      await panel.find('.user-avatar.large').trigger('click')
+      await panel.find('.avatar-settings-modal input').setValue('OP')
+      const avatarFileInput = panel.find('.avatar-settings-modal input[type="file"]')
+      Object.defineProperty(avatarFileInput.element, 'files', {
+        configurable: true,
+        value: [new File(['avatar'], 'avatar.png', { type: 'image/png' })]
+      })
+      await avatarFileInput.trigger('change')
+      await panel.vm.$nextTick()
+      expect(panel.find('.avatar-preview-box img').exists()).toBe(true)
+      await panel.find('.avatar-settings-modal footer .primary').trigger('click')
+      expect(store.userProfile.avatarInitials).toBe('OP')
+      expect(store.userProfile.avatarImageUrl).toBe('data:image/png;base64,avatar')
+
+      await panel.find('.user-info-footer .danger').trigger('click')
+      expect(store.userProfile.skippedLogin).toBe(true)
+      await panel.vm.$nextTick()
+      expect(panel.text()).toContain('请先登录')
+      expect(panel.find('.user-login-tabs').text()).toContain('邮箱登录')
+      expect(panel.find('.user-login-tabs').text()).toContain('手机号登录')
+      expect(panel.find('.user-login-tabs').text()).toContain('账号登录')
+
+      await panel.findAll('.user-login-tabs button').find((button) => button.text().includes('账号登录'))!.trigger('click')
+      await panel.findAll('.user-login-form input').at(0)!.setValue('verify-device')
+      await panel.findAll('.user-login-form input').at(1)!.setValue('secret')
+      await panel.find('.user-login-form .primary').trigger('click')
+      await panel.vm.$nextTick()
+      expect(store.userNotice).toBe('当前设备需要验证后才能登录')
+      expect(panel.text()).toContain('当前设备需要验证后才能登录')
+      await panel.findAll('.user-login-form input').at(0)!.setValue('ops_return')
+      await panel.findAll('.user-login-form input').at(1)!.setValue('secret')
+      await panel.find('.user-login-form .primary').trigger('click')
+      await panel.vm.$nextTick()
+      expect(store.userProfile.skippedLogin).toBe(false)
+      expect(store.userProfile.username).toBe('ops_return')
+
+      await panel.find('.user-info-footer .danger').trigger('click')
+      await panel.vm.$nextTick()
+      await panel.findAll('.user-login-tabs button').find((button) => button.text().includes('邮箱登录'))!.trigger('click')
+      await panel.findAll('.user-login-form input').at(0)!.setValue('login@example.local')
+      await panel.find('.user-code-row button').trigger('click')
+      await vi.advanceTimersByTimeAsync(120)
+      await panel.vm.$nextTick()
+      expect(panel.find('.user-code-row button').text()).toContain('300s')
+      await panel.findAll('.user-login-form input').at(1)!.setValue('246810')
+      await panel.find('.user-login-form .primary').trigger('click')
+      expect(store.userProfile.email).toBe('login@example.local')
+
+      await panel.find('.user-info-footer .danger').trigger('click')
+      await panel.vm.$nextTick()
+      await panel.find('.user-skip-login button').trigger('click')
+      expect(store.userProfile.username).toBe('guest')
+      expect(store.billingSettings.skippedLogin).toBe(true)
+    } finally {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+      vi.useRealTimers()
+    }
   })
 
   it('filters, selects, deletes, and creates agent conversations', async () => {
@@ -754,13 +975,32 @@ describe('AppShell', () => {
       expect(wrapper.text()).not.toContain('生产巡检')
       expect(wrapper.text()).not.toContain('检查 Pod 事件和镜像拉取')
 
+      await wrapper.find('.agents-search input').setValue('索引建议')
+      expect(wrapper.text()).toContain('数据库慢查询')
+      expect(wrapper.text()).not.toContain('K8s 发布失败')
+
+      await wrapper.find('.agents-search input').setValue('prod-cluster')
+      expect(wrapper.text()).toContain('K8s 发布失败')
+      expect(wrapper.text()).not.toContain('数据库慢查询')
+
+      await wrapper.find('.agents-search input').trigger('keydown', { key: 'Escape' })
+      expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
+
+      await wrapper.find('.agents-search input').setValue('conv-2')
       await wrapper.find('.conversation-item').trigger('click')
       expect(store.selectedConversationId).toBe('conv-2')
 
-      await wrapper.find('.delete-btn').trigger('click')
+      await wrapper.find('.conversation-item').trigger('keydown', { key: 'Delete' })
       expect(store.conversations.some((conversation) => conversation.id === 'conv-2')).toBe(false)
 
+      await wrapper.find('.agents-search input').setValue('conv-3')
+      await wrapper.find('.conversation-item').trigger('click')
+      expect(store.selectedConversationId).toBe('conv-3')
+      await wrapper.find('.delete-btn').trigger('click')
+      expect(store.conversations.some((conversation) => conversation.id === 'conv-3')).toBe(false)
+
       await wrapper.find('.new-chat-btn').trigger('click')
+      expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
       expect(store.selectedConversationId).toMatch(/^conv-/)
       expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
     } finally {
@@ -777,6 +1017,164 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    vi.mocked(window.aiops.showSaveDialog).mockClear()
+    vi.mocked(window.aiops.writeLocalFile).mockClear()
+    vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/ai-chat-export.md' })
+    store.chatMessages = [
+      { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
+      { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划', contentParts: [{ type: 'text', text: '检查生产数据库 rollback 计划' }] },
+      { id: 'search-assistant', role: 'assistant', text: 'rollback 计划：先确认连接，再生成只读 SQL。', state: 'done' }
+    ]
+    store.conversations = Array.from({ length: 23 }, (_, index) => ({
+      id: `history-${index + 1}`,
+      title: index === 0 ? '生产巡检' : index === 1 ? '发布回滚会话' : `历史会话 ${index + 1}`,
+      summary: index === 1 ? '包含 nginx 发布上下文' : `历史摘要 ${index + 1}`,
+      updatedAt: index === 0 ? '刚刚' : '今天',
+      ts: new Date('2026-06-04T10:30:00+08:00').getTime() - index * 1000,
+      ipAddress: index === 1 ? '10.24.8.12' : undefined,
+      favorite: index === 0 || index === 2
+    }))
+    store.selectedConversationId = 'history-1'
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(true)
+    expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-history-search-input"]').element)
+    expect(wrapper.findAll('.ai-history-item')).toHaveLength(20)
+    expect(wrapper.find('[data-testid="ai-history-load-more"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('nginx')
+    expect(wrapper.findAll('.ai-history-item')).toHaveLength(0)
+    expect(wrapper.find('.ai-history-empty').text()).toContain('暂无数据')
+    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('发布回滚会话')
+    expect(wrapper.findAll('.ai-history-item')).toHaveLength(1)
+    expect(wrapper.find('.ai-history-item').text()).toContain('发布回滚会话')
+    await wrapper.find('.ai-history-search button[title="清空搜索"]').trigger('click')
+    expect((wrapper.find('[data-testid="ai-history-search-input"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.find('[data-testid="ai-history-favorites-toggle"]').trigger('click')
+    expect(wrapper.find('.ai-history-date').text()).toContain('收藏')
+    expect(wrapper.findAll('.ai-history-item')).toHaveLength(2)
+    await wrapper.find('[data-testid="ai-history-favorites-toggle"]').trigger('click')
+
+    const firstHistoryItem = wrapper.findAll('.ai-history-item').find((item) => item.text().includes('生产巡检'))!
+    await firstHistoryItem.find('button[title="编辑标题"]').trigger('click')
+    await wrapper.find('[data-testid="ai-history-title-input"]').setValue('生产巡检复盘')
+    await wrapper.find('[data-testid="ai-history-title-input"]').trigger('keydown', { key: 'Enter' })
+    expect(store.conversations.find((conversation) => conversation.id === 'history-1')?.title).toBe('生产巡检复盘')
+    if (!wrapper.find('[data-testid="ai-history-dropdown"]').exists()) {
+      await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
+      await wrapper.vm.$nextTick()
+    }
+
+    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('发布回滚会话')
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('发布回滚会话'))!.find('button[title="收藏"]').trigger('click')
+    expect(store.conversations.find((conversation) => conversation.id === 'history-2')?.favorite).toBe(true)
+    await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('发布回滚会话'))!.trigger('click')
+    expect(store.selectedConversationId).toBe('history-2')
+    expect(store.chatMessages[0].text).toContain('已恢复会话')
+    expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('历史会话 3')
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('历史会话 3'))!.find('button[title="删除历史"]').trigger('click')
+    expect(store.conversations.some((conversation) => conversation.id === 'history-3')).toBe(false)
+    await wrapper.find('[data-testid="ai-new-chat"]').trigger('click')
+    expect(store.selectedConversationId).toMatch(/^conv-/)
+    expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+    expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
+    store.selectedConversationId = 'history-1'
+    store.chatMessages = [
+      { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
+      { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划', contentParts: [{ type: 'text', text: '检查生产数据库 rollback 计划' }] },
+      { id: 'search-assistant', role: 'assistant', text: 'rollback 计划：先确认连接，再生成只读 SQL。', state: 'done' }
+    ]
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.ai-panel').trigger('keydown', { key: 'f', ctrlKey: true })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(true)
+    expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-chat-search-input"]').element)
+    await wrapper.find('[data-testid="ai-chat-search-input"]').setValue('rollback')
+    await new Promise((resolve) => window.setTimeout(resolve, 210))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-chat-search-count"]').text()).toBe('1/2')
+    expect(wrapper.findAll('.ai-chat-search-highlight')).toHaveLength(2)
+    expect(wrapper.findAll('.ai-chat-search-highlight.active')).toHaveLength(1)
+    await wrapper.find('.ai-chat-search-controls button[title="下一个"]').trigger('click')
+    expect(wrapper.find('[data-testid="ai-chat-search-count"]').text()).toBe('2/2')
+    await wrapper.find('[data-testid="ai-chat-search-input"]').trigger('keydown', { key: 'Enter', shiftKey: true })
+    expect(wrapper.find('[data-testid="ai-chat-search-count"]').text()).toBe('1/2')
+    await wrapper.find('[data-testid="ai-chat-search-input"]').setValue('missing-term')
+    await new Promise((resolve) => window.setTimeout(resolve, 210))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-chat-search-count"]').text()).toBe('无匹配')
+    await wrapper.find('[data-testid="ai-chat-search-input"]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(false)
+    expect(wrapper.find('.ai-chat-search-highlight').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({
+      defaultPath: '生产巡检复盘.md',
+      filters: [{ name: 'Markdown Files', extensions: ['md'] }]
+    })
+    const exportCall = vi.mocked(window.aiops.writeLocalFile).mock.calls.at(-1)
+    expect(exportCall?.[0]).toBe('/tmp/ai-chat-export.md')
+    expect(String(exportCall?.[1])).toContain('from aiopsterm')
+    expect(String(exportCall?.[1])).toContain('**User:**')
+    expect(String(exportCall?.[1])).toContain('rollback 计划')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('聊天已导出')
+
+    const assistantMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('rollback 计划'))
+    expect(assistantMessage).toBeTruthy()
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await assistantMessage!.find('[data-testid="ai-message-copy"]').trigger('click')
+    await flushPromises()
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('rollback 计划：先确认连接，再生成只读 SQL。')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('消息已复制')
+
+    await assistantMessage!.find('button[title="收藏"]').trigger('click')
+    expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.favorite).toBe(true)
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('已收藏消息')
+    await assistantMessage!.find('button[title="有帮助"]').trigger('click')
+    expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.feedback).toBe('up')
+    await assistantMessage!.find('button[title="无帮助"]').trigger('click')
+    expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.feedback).toBe('down')
+
+    await assistantMessage!.find('[data-testid="ai-message-to-knowledge"]').trigger('click')
+    await flushPromises()
+    expect(store.activePanel.kind).toBe('knowledge')
+    expect(store.activePanel.knowledge?.relPath).toMatch(/^summary\/ai-message-search-assistant\.md$/)
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('已沉淀到知识')
+    await assistantMessage!.find('[data-testid="ai-message-to-skill"]').trigger('click')
+    await flushPromises()
+    expect(store.settingsSkills[0].name).toMatch(/rollback.+skill|ai-message-skill/)
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('已创建技能')
+
+    store.activePanelId = 'panel-main'
+    await assistantMessage!.find('[data-testid="ai-message-retry"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(store.chatMessages.at(-2)?.text).toContain('检查生产数据库 rollback 计划')
+
+    store.chatMessages.push({
+      id: 'command-assistant',
+      role: 'assistant',
+      text: 'uptime',
+      contentParts: [{ type: 'chip', chipType: 'command', ref: { command: 'uptime', label: 'uptime' } }],
+      state: 'done'
+    })
+    await wrapper.vm.$nextTick()
+    const commandMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('uptime'))
+    expect(commandMessage).toBeTruthy()
+    await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
+    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    expect(store.activePanel.output).toContain('[mock] uptime')
+    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime')
+    expect(commandMessage!.find('[data-testid="ai-message-executed-command"]').text()).toContain('uptime')
 
     const findContextButton = (label: string) =>
       wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes(label))
@@ -1225,11 +1623,25 @@ describe('AppShell', () => {
     expect(voiceButton.attributes('disabled')).toBeUndefined()
     const fileUploadButton = wrapper.find('[data-testid="ai-file-upload-button"]')
     expect(fileUploadButton.exists()).toBe(true)
-    expect(fileUploadButton.attributes('title')).toBe('上传文件暂未启用')
+    expect(fileUploadButton.attributes('title')).toBe('上传文件')
     expect(fileUploadButton.attributes('disabled')).toBeUndefined()
+    vi.mocked(window.aiops.showOpenDialog).mockClear()
+    vi.mocked(window.aiops.stageChatAttachment).mockClear()
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/ai-attachment.log'] })
     await fileUploadButton.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传为本地占位')
+    await flushPromises()
+    expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Text',
+          extensions: expect.arrayContaining(['txt', 'md', 'js', 'ts', 'py', 'log', 'csv', 'tsv'])
+        }
+      ]
+    })
+    expect(window.aiops.stageChatAttachment).toHaveBeenCalledWith({ taskId: store.selectedConversationId, srcAbsPath: '/tmp/ai-attachment.log' })
+    expect(wrapper.find('.chat-editable .mention-chip-doc').text()).toContain('ai-attachment.log')
+    expect(wrapper.find('.input-placeholder-notice').text()).toContain('已添加文件：ai-attachment.log')
     await voiceButton.trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音输入为本地占位')
@@ -1286,7 +1698,7 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
     await wrapper.vm.$nextTick()
     const noticeAfterDisabledFileClick = wrapper.find('.input-placeholder-notice')
-    expect(noticeAfterDisabledFileClick.exists() ? noticeAfterDisabledFileClick.text() : '').not.toContain('文件上传为本地占位')
+    expect(noticeAfterDisabledFileClick.exists() ? noticeAfterDisabledFileClick.text() : '').not.toContain('已添加文件')
     await wrapper.find('.chat-input button[type="submit"]').trigger('submit')
     await wrapper.vm.$nextTick()
     expect(store.chatMessages.some((message) => message.state === 'streaming')).toBe(false)
@@ -1335,6 +1747,7 @@ describe('AppShell', () => {
     await editInput.trigger('input')
     editSelection?.removeAllRanges()
     editSelection?.addRange(slashRange)
+    await editInput.trigger('keyup')
     await editInput.trigger('keydown', { key: '/' })
     await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.vm.$nextTick()
@@ -1421,12 +1834,20 @@ describe('AppShell', () => {
     expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(true)
     Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
     Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/edit-attachment.sql'] })
+    await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.stageChatAttachment).toHaveBeenLastCalledWith({ taskId: store.selectedConversationId, srcAbsPath: '/tmp/edit-attachment.sql' })
+    expect(wrapper.find('.user-message-edit-container .mention-chip-doc').text()).toContain('edit-attachment.sql')
+
     await wrapper.find('.message-edit-actions .primary').trigger('click')
     await wrapper.vm.$nextTick()
     expect(store.chatMessages.find((message) => message.id === originalUserMessageId)).toBeUndefined()
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'text' && part.text.includes('编辑后的回滚窗口'))).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'skill')).toBe(true)
+    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc' && part.ref.name === 'edit-attachment.sql')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image' && part.name === 'edit.png')).toBe(true)
     expect(store.chatMessages.at(-2)?.hosts?.map((context) => context.id)).toEqual(['asset-1', 'opened-mysql'])
     expect(wrapper.find('.user-message-edit-container').exists()).toBe(false)
@@ -1972,11 +2393,13 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('权限已更新为 744')
     expect(wrapper.text()).toContain('-744')
 
+    vi.mocked(window.aiops.showSaveDialog).mockClear()
+    vi.mocked(window.aiops.showSaveDialog).mockReset()
     vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/downloads/release-note-v2.md' })
     await renamedRow.find('.file-row-actions button[title="下载"]').trigger('click')
     await flushPromises()
     expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({ defaultPath: 'release-note-v2.md' })
-    expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-picked/release-note-v2.md' && task.target === '/tmp/downloads/release-note-v2.md')).toEqual(
+    expect(store.fileTransferTasks.find((task) => task.name === 'release-note-v2.md' && task.target === '/tmp/downloads/release-note-v2.md')).toEqual(
       expect.objectContaining({
         type: 'download',
         name: 'release-note-v2.md',
@@ -2383,6 +2806,10 @@ describe('AppShell', () => {
     expect(panel.text()).toContain('支持资产同步与资产直连')
     expect(panel.text()).toContain('Alias')
     expect(panel.text()).toContain('系统')
+    expect(panel.text()).toContain('Installed')
+    expect(panel.text()).toContain('Store')
+    expect(panel.text()).toContain('Update available')
+    expect(panel.text()).toContain('Private')
     expect(panel.find('button[title="安装"]').exists()).toBe(true)
     expect(panel.find('button[title="订阅"]').exists()).toBe(true)
     expect(panel.find('button[title="更新"]').exists()).toBe(true)
@@ -2438,6 +2865,18 @@ describe('AppShell', () => {
     expect(filteredCommandInputs).toEqual(['git status'])
     await workspace.find('.alias-search-input input').setValue('')
 
+    await workspace.find('.alias-search-input input').setValue('no-hit')
+    await workspace.find('.alias-config-toolbar button').trigger('click')
+    expect(store.aliasSearchQuery).toBe('')
+    expect(workspace.findAll('.alias-config-table tbody tr')[0].find('input').element).toBeTruthy()
+    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="保存"]').trigger('click')
+    expect(store.extensionNotice).toContain('不能为空')
+    await workspace.findAll('.alias-config-table tbody tr')[0].find('input').setValue('ll')
+    await workspace.findAll('.alias-config-table tbody tr')[0].find('textarea').setValue('ls')
+    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="保存"]').trigger('click')
+    expect(store.extensionNotice).toContain('已存在')
+    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="取消"]').trigger('click')
+
     await workspace.find('.alias-config-toolbar button').trigger('click')
     const newRow = workspace.findAll('.alias-config-table tbody tr')[0]
     await newRow.find('input').setValue('ports')
@@ -2468,6 +2907,9 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Ops Runbook')
     expect(workspace.text()).toContain('插件功能')
     expect(workspace.text()).toContain('插件标识')
+    expect(workspace.text()).toContain('最后更新')
+    expect(workspace.text()).toContain('插件分类')
+    expect(workspace.text()).toContain('Runbook')
     expect(workspace.text()).toContain('卸载')
     expect(workspace.text()).toContain('更新')
 
@@ -2504,7 +2946,9 @@ describe('AppShell', () => {
       await panel.find('.k8s-search input').setValue('staging')
       expect(panel.text()).toContain('staging-cluster')
       expect(panel.text()).not.toContain('prod-cluster')
-      await panel.find('.k8s-search input').setValue('')
+      await panel.find('.k8s-search-clear').trigger('click')
+      expect(store.k8sSearchQuery).toBe('')
+      await panel.find('.k8s-search input').setValue('staging')
 
       const stagingRow = panel.findAll('.k8s-cluster-item').find((row) => row.text().includes('staging-cluster'))!
       await stagingRow.find('button[title="更多"]').trigger('click')
@@ -2517,6 +2961,7 @@ describe('AppShell', () => {
       await stagingRow.find('button[title="更多"]').trigger('click')
       await stagingRow.find('.k8s-cluster-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
       expect(store.k8sEditModalOpen).toBe(true)
+      store.clearK8sSearch()
 
       const workspace = mount(KubernetesWorkspace, {
         global: { plugins: [pinia] }
@@ -2535,6 +2980,21 @@ describe('AppShell', () => {
     await workspace.find('.k8s-detail-form label input').setValue('prod-renamed')
     await workspace.find('.k8s-form-actions .primary').trigger('click')
     expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')?.name).toBe('prod-renamed')
+    await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('Agent 代理'))!.trigger('click')
+    expect(store.k8sProxyConfigOpen).toBe(true)
+    await workspace.find('.k8s-proxy-config-modal .k8s-switch-row input').setValue(true)
+    await workspace.find('.k8s-proxy-config-modal select').setValue('HTTPS')
+    const proxyInputs = workspace.findAll('.k8s-proxy-config-modal input')
+    await proxyInputs[1].setValue('proxy.k8s.local')
+    await proxyInputs[2].setValue('9443')
+    await workspace.find('.k8s-proxy-config-modal footer .primary').trigger('click')
+    expect(store.k8sProxyConfig).toMatchObject({ enabled: true, type: 'HTTPS', host: 'proxy.k8s.local', port: 9443 })
+    await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('连接'))!.trigger('click')
+    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')?.connection_status).toBe('connecting')
+    await vi.advanceTimersByTimeAsync(280)
+    expect(store.k8sClusterNotice).toContain('proxy.k8s.local:9443')
+    await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('打开终端'))!.trigger('click')
+    expect(store.k8sActiveTerminal?.clusterId).toBe('k8s-1')
 
     await workspace.find('.k8s-command-line input').setValue('kubectl get pods -A')
     await workspace.find('.k8s-command-line').trigger('submit')
@@ -2561,6 +3021,15 @@ describe('AppShell', () => {
     expect(store.k8sResourceOutput).toContain('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     await billingRow.find('button[title="Logs"]').trigger('click')
     expect(store.k8sResourceOutput).toContain('kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
+    await workspace.find('.k8s-resource-output-actions button[title="复制输出"]').trigger('click')
+    expect(store.k8sClusterNotice).toBe('Kubernetes 输出已复制')
+    await workspace.find('.k8s-resource-output-actions button[title="发送输出命令到终端"]').trigger('click')
+    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
+    await workspace.find('.k8s-resource-output-actions button[title="发送输出到 AI"]').trigger('click')
+    expect(store.chatMessages.at(-2)?.text).toContain('Kubernetes 输出')
+    await workspace.find('.k8s-resource-output-actions button[title="清空输出"]').trigger('click')
+    expect(store.k8sResourceOutputTitle).toBe('资源输出')
+    await billingRow.find('button[title="Describe"]').trigger('click')
     await billingRow.find('button[title="发送到终端"]').trigger('click')
     expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     await workspace.find('.k8s-resource-search input').setValue('')
@@ -2602,6 +3071,23 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('orders-postgres')
     expect(wrapper.find('.db-workspace-tab').text()).toContain('Overview')
     expect(wrapper.text()).toContain('New Connection')
+    expect(wrapper.find('.db-overview-hero').text()).toContain('Create connection')
+    expect(wrapper.find('.db-overview-hero').text()).toContain('Explore schemas')
+    expect(wrapper.find('.db-overview-hero').text()).toContain('Query console')
+    expect(wrapper.find('.db-engine-grid').text()).toContain('MySQL')
+    expect(wrapper.find('.db-engine-grid').text()).toContain('H2')
+    expect(wrapper.find('.db-engine-grid').text()).toContain('SQLServer')
+    expect(wrapper.find('.db-engine-grid').text()).toContain('Timeplus')
+    expect(wrapper.findAll('.db-engine-grid button')).toHaveLength(16)
+    expect(wrapper.findAll('.db-engine-grid button').filter((button) => button.classes().includes('disabled'))).toHaveLength(12)
+    await wrapper.findAll('.db-overview-tips button').find((button) => button.text().includes('Explore schemas'))!.trigger('click')
+    expect(document.activeElement).toBe(wrapper.find('.db-search input').element)
+    await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('SQLServer'))!.trigger('click')
+    expect(wrapper.text()).toContain('SQLServer connection is coming soon')
+    await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('PostgreSQL'))!.trigger('click')
+    expect(wrapper.find('.db-connection-modal').text()).toContain('PostgreSQL')
+    expect(wrapper.find('.db-connection-modal').text()).toContain('SSL Mode')
+    await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
 
     await wrapper.find('.db-search input').setValue('metrics')
     expect(wrapper.text()).toContain('metrics-mysql')
@@ -2610,6 +3096,11 @@ describe('AppShell', () => {
 
     await wrapper.find('button[title="Add"]').trigger('click')
     expect(wrapper.find('.db-add-menu').exists()).toBe(true)
+    expect(wrapper.find('.db-add-menu').text()).toContain('H2')
+    expect(wrapper.find('.db-add-menu').text()).toContain('SQLServer')
+    expect(wrapper.find('.db-add-menu').text()).toContain('Timeplus')
+    expect(wrapper.find('.db-add-menu').findAll('button')).toHaveLength(17)
+    expect(wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('H2'))!.attributes('disabled')).toBeDefined()
     await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('PostgreSQL'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
     const pgModalInputs = wrapper.findAll('.db-connection-modal input')
@@ -2622,9 +3113,14 @@ describe('AppShell', () => {
     const pgModalSelects = wrapper.findAll('.db-connection-modal select')
     await pgModalSelects.at(3)!.setValue('verify-full')
     expect((pgModalInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://127.0.0.1:5432')
+    await pgModalInputs.at(6)!.setValue('jdbc:postgresql://manual-host:15432/manualdb')
+    await pgModalInputs.at(1)!.setValue('10.10.10.20')
+    expect((wrapper.findAll('.db-connection-modal input').at(6)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://manual-host:15432/manualdb')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('PostgreSQL 16 mock')
     await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
     expect(wrapper.text()).toContain('e2e-postgres')
 
     const postgresRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-postgres'))!
@@ -2636,6 +3132,7 @@ describe('AppShell', () => {
     expect(editInputs.at(4)!.attributes('placeholder')).toContain('Leave empty')
     await editInputs.at(0)!.setValue('orders-pg-edited')
     await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
     expect(wrapper.text()).toContain('orders-pg-edited')
 
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm/unit-cache.sqlite3'] })
@@ -2650,36 +3147,222 @@ describe('AppShell', () => {
     expect((sqliteInputs.at(3)!.element as HTMLInputElement).value).toBe('sqlite:///tmp/aiopsterm/unit-cache.sqlite3')
     await sqliteInputs.at(0)!.setValue('unit-sqlite')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('SQLite mock')
     await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
     expect(wrapper.text()).toContain('unit-sqlite')
 
+    await wrapper.find('button[title="Add"]').trigger('click')
+    await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('SQLite'))!.trigger('click')
+    const invalidSqliteInputs = wrapper.findAll('.db-connection-modal input')
+    await invalidSqliteInputs.at(0)!.setValue('fail-sqlite')
+    await invalidSqliteInputs.at(1)!.setValue('/tmp/aiopsterm/not-a-db.txt')
+    await wrapper.find('.db-connection-modal footer button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-modal-feedback').text()).toContain('SQLite file should end')
+    expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
+    await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
+
+    await wrapper.find('button[title="Add"]').trigger('click')
+    await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('Oracle'))!.trigger('click')
+    const oracleInputs = wrapper.findAll('.db-connection-modal input')
+    await oracleInputs.at(0)!.setValue('hr-oracle-url')
+    await oracleInputs.at(1)!.setValue('')
+    await oracleInputs.at(2)!.setValue('')
+    await oracleInputs.at(3)!.setValue('hr')
+    await oracleInputs.at(4)!.setValue('secret')
+    await oracleInputs.at(5)!.setValue('ORCLPDB1')
+    await oracleInputs.at(6)!.setValue('jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1')
+    await wrapper.find('.db-connection-modal footer button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Oracle mock')
+    await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('hr-oracle-url')
+
+    const defaultGroupRow = wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes('Default Group'))!
+    await defaultGroupRow.trigger('contextmenu')
+    expect(wrapper.find('.db-context-menu').text()).toContain('New Connection')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('New Connection'))!.trigger('mouseenter')
+    expect(wrapper.find('.db-popup-submenu').text()).toContain('MySQL')
+    expect(wrapper.find('.db-popup-submenu').text()).toContain('SQLServer')
+    expect(wrapper.find('.db-popup-submenu').text()).toContain('Timeplus')
+    expect(wrapper.find('.db-popup-submenu').findAll('button')).toHaveLength(16)
+    expect(wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('SQLServer'))!.attributes('disabled')).toBeDefined()
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('MySQL'))!.trigger('click')
+    expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
+    const groupModalSelects = wrapper.findAll('.db-connection-modal select')
+    expect((groupModalSelects.at(1)!.element as HTMLSelectElement).value).toBe('group-default')
+    await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
+
+    await defaultGroupRow.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('New Group'))!.trigger('click')
+    expect(wrapper.find('.db-tree-edit').exists()).toBe(true)
+    await wrapper.find('.db-tree-edit').setValue('Child DB Group')
+    await wrapper.find('.db-tree-edit').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.text()).toContain('Child DB Group')
+    await wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes('Child DB Group'))!.trigger('contextmenu')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
+    expect(wrapper.find('.db-popup-submenu').text()).toContain('Root Group')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Root Group'))!.trigger('click')
+    expect(wrapper.text()).toContain('Group moved to root')
+
+    const metricsConnectionRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!
+    await metricsConnectionRow.trigger('contextmenu')
+    const metricsMenuButtons = wrapper.find('.db-context-menu').findAll('button')
+    expect(metricsMenuButtons.find((button) => button.text().includes('Open Connection'))).toBeTruthy()
+    expect(metricsMenuButtons.find((button) => button.text().includes('Query Console'))!.attributes('disabled')).toBeDefined()
+    expect(metricsMenuButtons.find((button) => button.text().includes('Create Database'))!.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Production'))!.trigger('click')
+    expect(wrapper.findAll('.db-tree > ul > li').find((group) => group.text().includes('Production'))!.text()).toContain('metrics-mysql')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Root Group'))!.trigger('click')
+    expect(wrapper.findAll('.db-tree > ul > li').find((group) => group.text().includes('Default Group'))!.text()).toContain('metrics-mysql')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Refresh'))!.trigger('click')
+    expect(wrapper.text()).toContain('Connection schema refreshed')
+
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Open Connection'))!.trigger('click')
+    expect(wrapper.text()).toContain('Connection opened')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
+    expect(wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Create Database'))!.attributes('disabled')).toBeUndefined()
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Create Database'))!.trigger('click')
+    expect(wrapper.find('.db-create-modal').exists()).toBe(true)
+    const createDbNameInput = wrapper.find('.db-create-modal input')
+    await createDbNameInput.setValue('bad-name')
+    expect(createDbNameInput.classes()).toContain('error')
+    expect(wrapper.find('.db-create-modal footer button[type="submit"]').attributes('disabled')).toBeDefined()
+    await createDbNameInput.setValue('ops_metrics')
+    expect((wrapper.find('.db-create-modal textarea').element as HTMLTextAreaElement).value).toBe('CREATE DATABASE `ops_metrics`;')
+    await wrapper.find('.db-create-modal textarea').setValue('CREATE DATABASE `manual_metrics`;')
+    await createDbNameInput.setValue('ignored_metrics')
+    expect((wrapper.find('.db-create-modal textarea').element as HTMLTextAreaElement).value).toBe('CREATE DATABASE `manual_metrics`;')
+    await wrapper.find('.db-create-modal').trigger('submit')
+    expect(wrapper.text()).toContain('Database created in local mock state')
+    expect(wrapper.text()).toContain('manual_metrics')
+
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-pg-edited'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Create Database'))!.trigger('click')
+    await wrapper.find('.db-create-modal input').setValue('reporting')
+    expect((wrapper.find('.db-create-modal textarea').element as HTMLTextAreaElement).value).toBe('CREATE DATABASE "reporting";')
+    await wrapper.find('.db-create-modal').trigger('submit')
+    expect(wrapper.text()).toContain('reporting')
+
+    await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('click')
     await wrapper.find('button[title="New SQL"]').trigger('click')
-    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('SQL'))).toBe(true)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('Query 1'))).toBe(true)
+    expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-metrics-mysql')
+    const sqlToolbarSelectsForMetrics = wrapper.findAll('.db-sql-toolbar select')
+    expect(sqlToolbarSelectsForMetrics).toHaveLength(2)
+    expect(sqlToolbarSelectsForMetrics.at(0)!.classes()).toContain('db-picker--connection')
+    expect(sqlToolbarSelectsForMetrics.at(0)!.text()).not.toContain('[idle]')
+    expect(sqlToolbarSelectsForMetrics.at(0)!.text()).not.toContain('[failed]')
+    expect(wrapper.findAll('.db-sql-toolbar option').find((option) => option.text().includes('unit-sqlite'))!.text()).not.toContain('[idle]')
+    expect((sqlToolbarSelectsForMetrics.at(1)!.element as HTMLSelectElement).value).toBe('metrics')
+    expect(sqlToolbarSelectsForMetrics.at(1)!.classes()).toContain('db-picker--database')
+    expect(sqlToolbarSelectsForMetrics.at(1)!.text()).toContain('manual_metrics')
+    await sqlToolbarSelectsForMetrics.at(1)!.setValue('manual_metrics')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('manual_metrics')
+    await wrapper.findAll('.db-sql-toolbar select').at(1)!.setValue('metrics')
+    const unitSqliteOptionValue = wrapper.findAll('.db-sql-toolbar option').find((option) => option.text().includes('unit-sqlite'))!.attributes('value')!
+    await sqlToolbarSelectsForMetrics.at(0)!.setValue(unitSqliteOptionValue)
+    expect(wrapper.text()).toContain('Connection auto-connected for SQL context')
+    expect(wrapper.findAll('.db-sql-toolbar select')).toHaveLength(2)
+    expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('unit-cache.sqlite3')
+    await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-pg-edited'))!.trigger('click')
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('Query 2'))).toBe(true)
+    expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-prod-pg')
+    const sqlToolbarSelectsForPg = wrapper.findAll('.db-sql-toolbar select')
+    expect(sqlToolbarSelectsForPg).toHaveLength(3)
+    expect((sqlToolbarSelectsForPg.at(1)!.element as HTMLSelectElement).value).toBe('orders')
+    expect((sqlToolbarSelectsForPg.at(2)!.element as HTMLSelectElement).value).toBe('public')
+    expect(sqlToolbarSelectsForPg.at(2)!.classes()).toContain('db-picker--schema')
+    expect(sqlToolbarSelectsForPg.at(1)!.text()).toContain('reporting')
+    await sqlToolbarSelectsForPg.at(1)!.setValue('reporting')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
+    await wrapper.findAll('.db-sql-toolbar select').at(1)!.setValue('orders')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
+    await sqlToolbarSelectsForPg.at(2)!.setValue('')
+    expect(wrapper.find('button[title="Run all"]').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('.db-sql-toolbar select').at(2)!.setValue('ops')
+    expect(wrapper.find('button[title="Run all"]').attributes('disabled')).toBeUndefined()
+    await wrapper.findAll('.db-sql-toolbar select').at(1)!.setValue('orders')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
     const workbenchEditor = wrapper.find('.db-sql-editor')
+    expect(wrapper.find('.db-sql-toolbar-run').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-toolbar-run-current').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-toolbar-explain').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-editor-shell').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('1')
+    expect(wrapper.find('.db-sql-editor-footer').text()).toContain('Ln 1, Col 1')
     expect(wrapper.find('button[title="Save As"]').exists()).toBe(true)
     expect(wrapper.find('button[title="Save As"]').attributes('disabled')).toBeDefined()
     await workbenchEditor.setValue('select id, service from public.orders where status = \'open\' order by updated_at desc limit 5; select * from public.orders where service = \'billing\';')
+    expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('1')
     await wrapper.find('button[title="Format"]').trigger('click')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('SELECT\n  id')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('\nFROM\n  public.orders')
+    expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('2')
     await workbenchEditor.setValue('select id from public.orders;\nselect * from public.audit_events;')
     const formatEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const formatSelectionEnd = 'select id from public.orders'.length
     formatEditorElement.setSelectionRange(0, formatSelectionEnd)
+    await workbenchEditor.trigger('select')
+    expect(wrapper.find('.db-sql-editor-footer').text()).toContain(`${formatSelectionEnd} selected`)
     await wrapper.find('button[title="Format"]').trigger('click')
     await flushPromises()
     const selectionFormattedSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(selectionFormattedSql).toContain('SELECT\n  id')
     expect(selectionFormattedSql).toContain('select * from public.audit_events;')
     await wrapper.find('button[title="Run all"]').trigger('click')
+    expect(wrapper.find('.db-result-running').text()).toContain('Running query')
+    expect(wrapper.find('.db-status-bar').text()).toContain('Running')
+    expect(wrapper.find('.db-result-tabs').text()).toContain('#1-1')
+    await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-tabs').text()).toContain('#1-1')
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
+    expect(wrapper.find('.db-status-bar').text()).toContain('Execution OK')
     expect(wrapper.text()).toContain('【Rows】')
+    expect(wrapper.find('.db-result-tabs').attributes('role')).toBe('tablist')
+    const overviewResultTab = wrapper.find('.db-result-tabs [role="tab"]')
+    expect(overviewResultTab.text()).toContain('Overview')
+    expect(overviewResultTab.attributes('aria-selected')).toBe('false')
+    const firstResultAriaTab = wrapper.findAll('.db-result-tabs [role="tab"]').find((tab) => tab.text().includes('#1-1'))!
+    expect(firstResultAriaTab.attributes('aria-selected')).toBe('true')
+    expect(firstResultAriaTab.attributes('title')).toContain('#1-1')
+    expect(firstResultAriaTab.find('.db-result-tab-close').attributes('aria-label')).toBe('Close result tab')
     const serviceHeader = wrapper.findAll('.db-result-table th').find((header) => header.text().includes('service'))!
-    await serviceHeader.find('button[title="Filter"]').trigger('click')
+    const serviceFilterButton = serviceHeader.find('button[title="Filter"]')
+    vi.spyOn(serviceFilterButton.element, 'getBoundingClientRect').mockReturnValue({
+      x: 960,
+      y: 720,
+      left: 960,
+      top: 720,
+      right: 982,
+      bottom: 742,
+      width: 22,
+      height: 22,
+      toJSON: () => ({})
+    } as DOMRect)
+    await serviceFilterButton.trigger('click')
+    await flushPromises()
     expect(wrapper.find('.db-filter-popover').text()).toContain('payment-api')
-    expect(wrapper.find('.db-filter-mode-row').exists()).toBe(true)
+    expect(wrapper.find('.db-filter-popover').attributes('style')).toContain('left:')
+    expect(Number.parseFloat(wrapper.find('.db-filter-popover').attributes('style')!.match(/left:\s*([\d.]+)px/)![1])).toBeLessThanOrEqual(window.innerWidth - 260 - 8)
+    expect(document.activeElement).toBe(wrapper.find('.db-filter-search input').element)
+    expect(wrapper.find('.db-filter-mode-row').exists()).toBe(false)
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('.db-filter-popover').exists()).toBe(false)
+    await serviceFilterButton.trigger('click')
+    await flushPromises()
     await wrapper.find('.db-filter-search input').setValue('orders')
     expect(wrapper.find('.db-filter-popover').text()).toContain('orders-worker')
     expect(wrapper.find('.db-filter-popover').text()).not.toContain('payment-api')
@@ -2687,33 +3370,44 @@ describe('AppShell', () => {
     await wrapper.find('.db-filter-footer .primary').trigger('click')
     expect(wrapper.find('.db-result-table').text()).toContain('orders-worker')
     expect(wrapper.find('.db-result-table').text()).not.toContain('payment-api')
-    expect(wrapper.find('.db-status-bar').text()).toContain('1 row')
+    expect(wrapper.find('.db-status-bar').text()).toContain('4 row')
     await serviceHeader.find('button[title="Filter"]').trigger('click')
     await wrapper.find('.db-filter-row.all button').trigger('click')
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
     await serviceHeader.find('button[title="Filter"]').trigger('click')
-    await wrapper.find('.db-filter-mode-row select').setValue('like')
-    await wrapper.find('.db-filter-mode-row input').setValue('payment')
+    await wrapper.find('.db-filter-search input').setValue('payment')
+    await wrapper.find('.db-filter-popover input[type="checkbox"]').setValue(true)
     await wrapper.find('.db-filter-footer .primary').trigger('click')
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
     expect(wrapper.find('.db-result-table').text()).not.toContain('orders-worker')
-    expect(wrapper.find('.db-filter-chip').text()).toContain('LIKE payment')
+    expect(wrapper.find('.db-filter-chip').text()).toContain('EQ payment-api')
+    const sqlResultWithFilter = wrapper.findAll('.db-result-tabs [role="tab"]').find((tab) => tab.text().includes('#1-1'))!
     await serviceHeader.find('button[title="Filter"]').trigger('click')
     await wrapper.find('.db-filter-row.all button').trigger('click')
     expect(wrapper.find('.db-result-table').text()).toContain('orders-worker')
-    const firstResultTab = wrapper.findAll('.db-result-tabs button').find((button) => button.text().includes('#1-1'))!
-    await wrapper.find('.db-result-tabs button').trigger('click')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('Execution History')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('1 executions')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('#1-1')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('Rows')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('Affected rows')
+    expect(wrapper.find('.db-filter-chip').exists()).toBe(false)
+    await serviceHeader.find('button[title="Filter"]').trigger('click')
+    await wrapper.find('.db-filter-search input').setValue('payment')
+    await wrapper.find('.db-filter-popover input[type="checkbox"]').setValue(true)
+    await wrapper.find('.db-filter-footer .primary').trigger('click')
+    expect(wrapper.find('.db-filter-chip').text()).toContain('EQ payment-api')
+    const firstResultTab = sqlResultWithFilter
+    await wrapper.find('.db-result-tabs [role="tab"]').trigger('click')
+    expect(wrapper.find('.db-result-tabs [role="tab"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('.db-sql-overview th').map((header) => header.text())).toEqual(['SQL', 'Message', 'Time'])
+    expect(wrapper.find('.db-sql-overview').text()).toContain('Execution OK')
     expect(wrapper.find('.db-sql-overview').text()).toContain('ms')
     await wrapper.find('.db-sql-overview tbody tr').trigger('click')
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
-    await firstResultTab.find('svg').trigger('click')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('Result tab closed')
-    expect(wrapper.find('.db-sql-overview-open').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-filter-chip').text()).toContain('EQ payment-api')
+    expect(wrapper.find('.db-result-table').text()).not.toContain('orders-worker')
+    await wrapper.find('.db-result-tabs [role="tab"]').trigger('keydown', { key: ' ' })
+    expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
+    await firstResultTab.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
+    await firstResultTab.find('.db-result-tab-close').trigger('click')
+    expect(wrapper.find('.db-sql-overview tbody tr').classes()).toContain('closed')
+    expect(wrapper.find('.db-sql-overview-open').exists()).toBe(false)
     await wrapper.find('.db-sql-overview tbody tr').trigger('click')
     expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
     await workbenchEditor.setValue('select * from public.orders; select * from public.audit_events;')
@@ -2721,15 +3415,19 @@ describe('AppShell', () => {
     const secondStatementOffset = editorElement.value.indexOf('select * from public.audit_events')
     editorElement.setSelectionRange(secondStatementOffset, secondStatementOffset)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
+    expect(wrapper.find('.db-result-running').text()).toContain('select * from public.audit_events')
+    await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-sql-overview').exists()).toBe(false)
     expect(wrapper.find('.db-result-table').text()).toContain('mock query ok')
     expect(wrapper.find('.db-result-tabs').text()).toContain('#2-1')
     editorElement.setSelectionRange(0, 'select * from public.orders'.length)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
+    await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
     editorElement.setSelectionRange(secondStatementOffset, secondStatementOffset)
     await wrapper.find('button[title="Explain"]').trigger('click')
-    await wrapper.find('.db-result-tabs button').trigger('click')
+    await waitForDatabaseSqlResult()
+    await wrapper.find('.db-result-tabs [role="tab"]').trigger('click')
     expect(wrapper.find('.db-sql-overview').text()).toContain('EXPLAIN select * from public.audit_events')
 
     await workbenchEditor.setValue('select id from "public"."orders" where status = \'open\';\nselect * from public.audit_events;')
@@ -2738,6 +3436,12 @@ describe('AppShell', () => {
     convertEditorElement.setSelectionRange(0, selectedConvertSql.length)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    await new Promise((resolve) => window.setTimeout(resolve, 90))
+    await flushPromises()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Done')
     expect(wrapper.findAll('.db-ai-section header').map((header) => header.text())).toEqual(['Reasoning', 'Response'])
     expect(wrapper.find('.db-ai-section').text()).toContain('Read the active database context')
     expect(wrapper.find('.db-ai-dialect-row').text()).toContain('Target Dialect')
@@ -2753,6 +3457,12 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('"public"."orders"')
     expect(wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.attributes('disabled')).toBeUndefined()
+    const readOnlyEditorBefore = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
+    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.trigger('click')
+    expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toBe(readOnlyEditorBefore)
+    expect(wrapper.find('.db-result-running').text()).toContain('LIMIT 100')
+    await waitForDatabaseSqlResult()
+    expect(wrapper.find('.db-result-tabs').text()).toContain('#')
     await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Replace Selection'))!.trigger('click')
     await flushPromises()
     const replacedConvertSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
@@ -2779,6 +3489,80 @@ describe('AppShell', () => {
     expect(insertReplacedSql).toContain('before select id from "public"."orders"')
     expect(insertReplacedSql).toContain('LIMIT 100; after')
     expect(insertReplacedSql).not.toContain('selected')
+    await workbenchEditor.setValue('select id from public.orders where')
+    const completeEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
+    completeEditorElement.setSelectionRange(completeEditorElement.value.length, completeEditorElement.value.length)
+    await wrapper.find('button[title="AI Complete SQL"]').trigger('click')
+    expect(wrapper.find('.db-ai-drawer').text()).toContain('Complete SQL')
+    expect(wrapper.find('.db-ai-context').text()).toContain('cursor prefix')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain("where status = 'open'")
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('LIMIT 100')
+    await workbenchEditor.setValue('select 1;\nselect * from public.audit_events;\n-- after cursor')
+    const prefixEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
+    const prefixOffset = prefixEditorElement.value.indexOf('select * from public.audit_events') + 'select * from public.audit_events'.length
+    prefixEditorElement.setSelectionRange(prefixOffset, prefixOffset)
+    await wrapper.find('button[title="AI Complete SQL"]').trigger('click')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select 1;')
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select * from public.audit_events')
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).not.toContain('after cursor')
+    await wrapper.find('button[title="AI Optimize SQL"]').trigger('click')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-request-list').exists()).toBe(true)
+    expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.text()).join(' ')).toContain('Convert SQL')
+    expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.text()).join(' ')).toContain('Optimize SQL')
+    await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Convert SQL'))!.trigger('click')
+    expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
+    expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('postgresql')
+    await wrapper.find('.db-ai-dialect-row select').setValue('mssql')
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('[public].[orders]')
+    await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Optimize SQL'))!.trigger('click')
+    expect(wrapper.find('.db-ai-drawer').text()).toContain('Optimize SQL')
+    await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Convert SQL'))!.trigger('click')
+    expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('mssql')
+    await wrapper.find('button[title="AI Explain SQL"]').trigger('click')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Cancelled')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Cancelled')
+
+    const publicSchemaRows = wrapper.findAll('.db-tree-row.schema').filter((row) => row.text().includes('public'))
+    expect(publicSchemaRows.length).toBeGreaterThan(0)
+    const publicSchemaRow = publicSchemaRows[0]
+    expect(wrapper.findAll('.db-tree-row.folder').map((row) => row.text()).join(' ')).toContain('tables')
+    expect(wrapper.findAll('.db-tree-row.folder').map((row) => row.text()).join(' ')).toContain('views')
+    expect(wrapper.findAll('.db-tree-row.folder').map((row) => row.text()).join(' ')).toContain('functions')
+    expect(wrapper.findAll('.db-tree-row.folder').map((row) => row.text()).join(' ')).toContain('procedures')
+    const viewsFolder = wrapper.findAll('.db-tree-row.folder').find((row) => row.text().includes('views'))!
+    await viewsFolder.find('button').trigger('click')
+    const openOrdersView = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('open_orders_v'))!
+    expect(openOrdersView.exists()).toBe(true)
+    await openOrdersView.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Query Console'))!.trigger('click')
+    expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toBe('SELECT *\nFROM "public"."open_orders_v"\nLIMIT 100;')
+    await openOrdersView.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('View DDL'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-ddl-modal').text()).toContain('DDL permission denied')
+    expect(wrapper.find('.db-ddl-toolbar').findAll('button').find((button) => button.text().includes('Copy'))!.attributes('disabled')).toBeDefined()
+    await wrapper.find('.db-ddl-modal header button').trigger('click')
+    await openOrdersView.trigger('contextmenu')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Copy Table'))!.trigger('mouseenter')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Copy Table DDL'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('DDL permission denied')
+    const functionsFolder = wrapper.findAll('.db-tree-row.folder').find((row) => row.text().includes('functions'))!
+    await functionsFolder.find('button').trigger('click')
+    const routineRow = wrapper.findAll('.db-tree-row.column').find((row) => row.text().includes('notify_order_owner'))!
+    await routineRow.trigger('click')
+    expect(routineRow.classes()).toContain('selected')
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-prod-pg')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('orders')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
+    await publicSchemaRow.trigger('click')
 
     const ordersTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('orders'))!
     await ordersTable.find('button').trigger('click')
@@ -2788,21 +3572,59 @@ describe('AppShell', () => {
     expect(ownerColumn.classes()).toContain('selected')
 
     await ordersTable.trigger('contextmenu')
-    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Copy SELECT'))!.trigger('click')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Copy Table'))!.trigger('mouseenter')
+    expect(wrapper.find('.db-popup-submenu').text()).toContain('Copy Table SELECT')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Copy Table SELECT'))!.trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('SELECT * FROM "public"."orders"')
     expect(wrapper.text()).toContain('SELECT copied')
 
     await ordersTable.trigger('contextmenu')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Copy Table'))!.trigger('mouseenter')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Copy Table DDL'))!.trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE public.orders'))
+    expect(wrapper.text()).toContain('DDL copied')
+
+    await ordersTable.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Query Console'))!.trigger('click')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toBe('SELECT *\nFROM "public"."orders"\nLIMIT 100;')
+    expect(wrapper.findAll('.db-workspace-tab').find((tab) => tab.classes().includes('active'))!.text()).toContain('Query')
 
     await ordersTable.trigger('dblclick')
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(true)
     expect(wrapper.find('.db-where-bar').text()).toContain('orders')
-    await wrapper.find('.db-where-bar input').setValue('status = investigating')
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: ?')
+    expect(wrapper.find('.db-toolbar-total-unknown').text()).toBe('?')
+    await wrapper.find('.db-toolbar-total').trigger('click')
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 4')
+    await wrapper.find('.db-toolbar select').setValue('10')
+    expect(wrapper.find('.db-result-table tbody tr').exists()).toBe(true)
+    expect(wrapper.find('.db-toolbar-total-unknown').exists()).toBe(false)
+    expect(wrapper.find('.db-toolbar-btn-last').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-toolbar-btn-add-row').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.db-toolbar-btn-delete-row').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-toolbar-btn-delete-row').attributes('title')).toContain('Select a row')
+    expect(wrapper.find('.db-toolbar-btn-undo').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-toolbar-btn-undo').attributes('title')).toContain('Nothing to undo')
+    expect(wrapper.find('.db-toolbar-btn-save').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-toolbar-btn-save').attributes('title')).toContain('No changes to save')
+    expect(wrapper.find('.db-toolbar button[title="Chart"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-toolbar button[title="Comment"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-toolbar .db-toolbar-export').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-where-bar input[aria-label="ORDER BY expression"]').exists()).toBe(false)
+    expect(wrapper.find('.db-where-bar button[title="Apply order"]').exists()).toBe(false)
+    expect(wrapper.findAll('.db-where-bar input')).toHaveLength(1)
+    const whereInput = wrapper.find('.db-where-bar input')
+    await whereInput.setValue('status = investigating')
+    expect(whereInput.classes()).toContain('pending')
+    expect(wrapper.find('.db-where-bar button[title="Apply filter"]').classes()).toContain('pending')
     await wrapper.find('.db-where-bar button').trigger('click')
+    expect(wrapper.find('.db-where-bar input').classes()).not.toContain('pending')
     expect(wrapper.find('.db-result-table').text()).toContain('investigating')
     expect(wrapper.find('.db-result-table').text()).not.toContain('mitigated')
+    expect(wrapper.find('.db-status-bar').text()).toContain('1 row')
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 4')
+    await wrapper.find('.db-toolbar-total').trigger('click')
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 1')
     const ownerHeader = wrapper.findAll('.db-result-table th').find((header) => header.text().includes('owner'))!
     await ownerHeader.find('button[title="Filter"]').trigger('click')
     expect(wrapper.find('.db-filter-popover').text()).toContain('alice')
@@ -2813,15 +3635,23 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-result-table').text()).not.toContain('bob')
 
     const dataRow = wrapper.find('.db-result-table tbody tr')
+    await dataRow.trigger('click')
+    expect(wrapper.find('.db-toolbar-btn-delete-row').attributes('disabled')).toBeUndefined()
     const ownerCell = dataRow.findAll('td').at(4)!
     await ownerCell.trigger('dblclick')
     const dataEditInput = wrapper.find('.db-result-table td input')
+    expect(document.activeElement).toBe(dataEditInput.element)
+    expect((dataEditInput.element as HTMLInputElement).selectionStart).toBe(0)
     await dataEditInput.setValue('alice-edited')
     await dataEditInput.trigger('keydown', { key: 'Enter' })
     expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
     expect(wrapper.find('.db-result-table tbody tr').findAll('td').at(4)!.classes()).toContain('updated')
     expect(wrapper.find('.db-result-table').text()).toContain('alice-edited')
+    expect(wrapper.find('.db-toolbar-btn-save').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.db-toolbar-btn-save').attributes('title')).toContain('Save changes')
+    expect(wrapper.find('.db-toolbar-btn-undo').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-edit-summary').text()).toContain('1 Updated')
+    expect(wrapper.find('.db-edit-summary').text()).toContain('1 SQL')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('UPDATE "public"."orders"')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('"owner" = \'alice-edited\'')
     await wrapper.find('.db-toolbar button[title="Undo"]').trigger('click')
@@ -2852,6 +3682,8 @@ describe('AppShell', () => {
     await wrapper.find('.db-result-table tbody tr').trigger('click')
     await wrapper.find('.db-toolbar button[title="Delete row"]').trigger('click')
     expect(wrapper.find('.db-result-table tbody tr.deleted').exists()).toBe(true)
+    await wrapper.find('.db-result-table tbody tr.deleted').findAll('td').at(4)!.trigger('dblclick')
+    expect(wrapper.find('.db-result-table td input').exists()).toBe(false)
     expect(wrapper.text()).toContain('Row marked for deletion')
     expect(wrapper.find('.db-edit-summary').text()).toContain('1 Deleted')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('DELETE FROM "public"."orders"')
@@ -2864,15 +3696,106 @@ describe('AppShell', () => {
     await wrapper.find('.db-result-table tbody tr').trigger('click')
     await wrapper.find('.db-toolbar button[title="Delete row"]').trigger('click')
     await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.db-result-table tbody tr.deleted').exists()).toBe(false)
     expect(wrapper.find('.db-edit-summary').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Changes saved to local mock state')
+    expect(wrapper.text()).toContain('Changes saved to local mock state (1 statement)')
+    const resetOwnerHeader = wrapper.findAll('.db-result-table th').find((header) => header.text().includes('owner'))!
+    await resetOwnerHeader.find('button[title="Filter"]').trigger('click')
+    await wrapper.find('.db-filter-row.all button').trigger('click')
+    await wrapper.find('.db-where-bar input').setValue('')
+    await wrapper.find('.db-where-bar button').trigger('click')
+    await wrapper.find('.db-toolbar-total').trigger('click')
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 3')
 
+    let metricEventsTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('metric_events'))
+    if (!metricEventsTable) {
+      const metricsConnection = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!
+      if (!wrapper.findAll('.db-tree-row.database').some((row) => row.text().includes('metrics'))) {
+        await metricsConnection.find('button').trigger('click')
+      }
+      const metricsCatalog = wrapper.findAll('.db-tree-row.database').find((row) => row.text().includes('metrics'))
+      if (metricsCatalog) await metricsCatalog.find('button').trigger('click')
+      metricEventsTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('metric_events'))
+    }
+    expect(metricEventsTable).toBeTruthy()
+    const metricEventsRow = metricEventsTable!
+    await metricEventsRow.trigger('dblclick')
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('metric_events'))).toBe(true)
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: ?')
+    await wrapper.find('.db-result-table tbody tr').trigger('click')
+    const metricSeverityCell = wrapper.find('.db-result-table tbody tr').findAll('td').at(3)!
+    await metricSeverityCell.trigger('dblclick')
+    const metricEditInput = wrapper.find('.db-result-table td input')
+    await metricEditInput.setValue('critical')
+    await metricEditInput.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.db-edit-summary').text()).toContain('No primary key detected')
+    expect(wrapper.find('.db-edit-summary pre').text()).toContain('UPDATE `metrics`.`metric_events`')
+    expect(wrapper.find('.db-edit-summary pre').text()).toContain('LIMIT 1')
+    await wrapper.find('.db-toolbar button[title="Add row"]').trigger('click')
+    const metricNewRow = wrapper.find('.db-result-table tbody tr.new')
+    await metricNewRow.findAll('td').at(1)!.trigger('dblclick')
+    await wrapper.find('.db-result-table tbody tr.new input').setValue('search')
+    await wrapper.find('.db-result-table tbody tr.new input').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.db-edit-summary').text()).toContain('2 SQL')
+    expect(wrapper.find('.db-edit-summary pre').text()).toContain('INSERT INTO `metrics`.`metric_events`')
+    await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Changes saved to local mock state (2 statements)')
+    expect(wrapper.find('.db-edit-summary').exists()).toBe(false)
+
+    await wrapper.find('.db-search input').setValue('audit-oracle')
+    const oracleConnectionRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('audit-oracle'))!
+    await oracleConnectionRow.find('button').trigger('click')
+    const oracleCatalogRow = wrapper.findAll('.db-tree-row.database').find((row) => row.text().includes('ORCLPDB1'))!
+    await oracleCatalogRow.find('button').trigger('click')
+    const oracleSchemaRow = wrapper.findAll('.db-tree-row.schema').find((row) => row.text().includes('OPS'))!
+    await oracleSchemaRow.find('button').trigger('click')
+    const oracleTablesFolder = wrapper
+      .findAll('.db-tree-row.folder')
+      .filter((row) => row.text().includes('tables') && row.find('button').exists())
+      .at(0)!
+    await oracleTablesFolder.find('button').trigger('click')
+    const oracleTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('AUDIT_LOG'))!
+    await oracleTable.trigger('dblclick')
+    await wrapper.find('.db-result-table tbody tr').trigger('click')
+    const oracleActionCell = wrapper.find('.db-result-table tbody tr').findAll('td').at(3)!
+    await oracleActionCell.trigger('dblclick')
+    const oracleEditInput = wrapper.find('.db-result-table td input')
+    await oracleEditInput.setValue('RELEASE_BLOCKED')
+    await oracleEditInput.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.db-edit-summary').text()).toContain('Oracle table editing requires a primary key')
+    await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+    expect(wrapper.find('.db-edit-summary').exists()).toBe(true)
+    expect(wrapper.find('.db-edit-summary').text()).toContain('Oracle table editing requires a primary key')
+    expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
+
+    await wrapper.find('.db-search input').setValue('')
     await ordersTable.trigger('contextmenu')
     expect(wrapper.find('.db-context-menu').exists()).toBe(true)
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('View DDL'))!.trigger('click')
+    await flushPromises()
     expect((wrapper.find('.db-ddl-modal textarea').element as HTMLTextAreaElement).value).toContain('CREATE TABLE')
+    await wrapper.find('.db-ddl-toolbar').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE public.orders'))
+    expect(wrapper.find('.db-ddl-toolbar').findAll('button').some((button) => button.text().includes('Open SQL Tab'))).toBe(false)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('DDL: orders'))).toBe(false)
     await wrapper.find('.db-ddl-modal header button').trigger('click')
+
+    const ordersDataTab = wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('orders'))!
+    await ordersDataTab.trigger('click')
+    await wrapper.find('.db-toolbar-total').trigger('click')
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 3')
+
+    await ordersTable.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Truncate'))!.trigger('click')
+    expect(wrapper.find('.db-danger-confirm').text()).toContain('TRUNCATE TABLE')
+    await wrapper.find('.db-danger-confirm input').setValue('orders')
+    await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    expect(wrapper.text()).toContain('Table truncated in local mock state')
+    await ordersDataTab.trigger('click')
+    expect(wrapper.find('.db-result-table tbody tr').exists()).toBe(false)
+    expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 0')
 
     await ordersTable.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Drop'))!.trigger('click')
@@ -2880,10 +3803,32 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-danger-confirm footer .danger').attributes('disabled')).toBeDefined()
     await wrapper.find('.db-danger-confirm input').setValue('orders')
     await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-drawer').text()).toContain('DROP TABLE public.orders')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Generated SQL')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable'))
+    const originalExecCommand = document.execCommand
+    const execCommandSpy = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommandSpy
+    })
     await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
+    await flushPromises()
+    expect(execCommandSpy).toHaveBeenCalledWith('copy')
+    if (originalExecCommand) {
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: originalExecCommand
+      })
+    } else {
+      Reflect.deleteProperty(document, 'execCommand')
+    }
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('DROP TABLE public.orders;')
+    expect(wrapper.findAll('.db-ai-request-list button').some((button) => button.text().includes('Drop Table'))).toBe(true)
+    expect(wrapper.findAll('.db-tree-row.table').some((row) => row.text().trim() === 'orders')).toBe(false)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(false)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('DDL: orders'))).toBe(false)
     expect(
       wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Insert Into Editor'))!.attributes('disabled')
     ).toBeDefined()
@@ -2893,13 +3838,290 @@ describe('AppShell', () => {
     const sqlEditor = wrapper.find('.db-sql-editor')
     await sqlEditor.setValue('syntax_error')
     await wrapper.find('button[title="Run all"]').trigger('click')
+    expect(wrapper.find('.db-result-running').text()).toContain('syntax_error')
+    await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-error').text()).toContain('Mock SQL parser rejected')
+    const dbAiRequestCountBeforeDiagnose = wrapper.findAll('.db-ai-request-list button').length
     await wrapper.find('.db-result-error button').trigger('click')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('SELECT')
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Replace Selection'))!.trigger('click')
+    expect(wrapper.find('.db-result-diagnose-btn').classes()).toContain('loading')
+    expect(wrapper.find('.db-result-diagnose-spinner').exists()).toBe(true)
+    expect(wrapper.findAll('.db-ai-request-list button')).toHaveLength(dbAiRequestCountBeforeDiagnose)
+    await new Promise((resolve) => window.setTimeout(resolve, 190))
+    await flushPromises()
+    expect(wrapper.find('.db-result-diagnose-success').text()).toContain('Diagnosed and replaced editor SQL')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('SELECT')
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.trigger('click')
+    expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('LIMIT 100')
+    await wrapper.find('button[title="Run all"]').trigger('click')
+    expect(wrapper.find('.db-result-running').exists()).toBe(true)
+    await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-tabs').text()).toContain('#')
+
+    const removableConnection = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!
+    await removableConnection.trigger('contextmenu')
+    expect(wrapper.find('.db-context-menu').text()).toContain('Close Connection')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Query Console'))!.trigger('click')
+    expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe(
+      wrapper.findAll('.db-sql-toolbar option').find((option) => option.text().includes('unit-sqlite'))!.attributes('value')
+    )
+    const unitSqliteQueryTitle = wrapper.findAll('.db-workspace-tab').find((tab) => tab.classes().includes('active'))!.text()
+    expect(unitSqliteQueryTitle).toContain('Query')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Remove'))!.trigger('click')
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('unit-sqlite'))).toBe(false)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text() === unitSqliteQueryTitle)).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('supports Monaco-like SQL editor indentation, run shortcut, and find/replace controls', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    const editor = wrapper.find('.db-sql-editor')
+    await editor.setValue('select 1;')
+    const editorElement = editor.element as HTMLTextAreaElement
+
+    editorElement.setSelectionRange(0, 0)
+    await editor.trigger('keydown', { key: 'Tab' })
+    await flushPromises()
+    expect(editorElement.value).toBe('  select 1;')
+    expect(editorElement.selectionStart).toBe(2)
+    expect(wrapper.find('.db-sql-editor-footer').text()).toContain('Ln 1, Col 3')
+
+    await editor.trigger('keydown', { key: 'Tab', shiftKey: true })
+    await flushPromises()
+    expect(editorElement.value).toBe('select 1;')
+    expect(editorElement.selectionStart).toBe(0)
+
+    await editor.setValue('select 1;\nselect 2;\nselect 3;')
+    editorElement.setSelectionRange(0, 'select 1;\nselect 2;\n'.length)
+    await editor.trigger('keydown', { key: 'Tab' })
+    await flushPromises()
+    expect(editorElement.value).toBe('  select 1;\n  select 2;\nselect 3;')
+    expect(editorElement.selectionStart).toBe(2)
+    expect(editorElement.selectionEnd).toBe('  select 1;\n  select 2;\n'.length)
+
+    editorElement.setSelectionRange(0, '  select 1;\n  select 2;\n'.length)
+    await editor.trigger('keydown', { key: 'Tab', shiftKey: true })
+    await flushPromises()
+    expect(editorElement.value).toBe('select 1;\nselect 2;\nselect 3;')
+
+    await editor.setValue('select status from public.orders where status = \'open\';')
+    const firstStatus = editorElement.value.indexOf('status')
+    editorElement.setSelectionRange(firstStatus, firstStatus + 'status'.length)
+    await editor.trigger('keydown', { key: 'f', ctrlKey: true })
+    await flushPromises()
+    expect(wrapper.find('.db-sql-find-panel').exists()).toBe(true)
+    expect((wrapper.find('.db-sql-find-panel input[aria-label="Find in SQL"]').element as HTMLInputElement).value).toBe('status')
+    expect(wrapper.find('.db-sql-find-count').text()).toBe('1/2')
+
+    await wrapper.find('.db-sql-find-panel input[aria-label="Find in SQL"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(editorElement.selectionStart).toBe(editorElement.value.lastIndexOf('status'))
+    expect(wrapper.find('.db-sql-find-count').text()).toBe('2/2')
+
+    await wrapper.find('.db-sql-find-panel button[title="Toggle replace"]').trigger('click')
+    await wrapper.find('.db-sql-find-panel input[aria-label="Replace in SQL"]').setValue('state')
+    await wrapper.find('.db-sql-find-panel button[title="Replace current"]').trigger('click')
+    await flushPromises()
+    expect(editorElement.value).toBe('select status from public.orders where state = \'open\';')
+    await wrapper.find('.db-sql-find-panel button[title="Replace all"]').trigger('click')
+    await flushPromises()
+    expect(editorElement.value).toBe('select state from public.orders where state = \'open\';')
+    expect(wrapper.text()).toContain('Replaced 1 match')
+
+    await wrapper.find('.db-sql-find-panel input[aria-label="Find in SQL"]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('.db-sql-find-panel').exists()).toBe(false)
+
+    await editor.setValue('select * from public.orders;')
+    await editor.trigger('keydown', { key: 'Enter', ctrlKey: true })
+    expect(wrapper.find('.db-result-running').text()).toContain('select * from public.orders')
+    await waitForDatabaseSqlResult()
+    expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
+
+    wrapper.unmount()
+  })
+
+  it('keeps SQL history inert when a running result tab is closed before completion', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
+    await wrapper.find('button[title="Run all"]').trigger('click')
+    expect(wrapper.find('.db-result-running').text()).toContain('Running query')
+
+    const runningResultTab = wrapper.findAll('.db-result-tabs [role="tab"]').find((tab) => tab.text().includes('#1-1'))!
+    await runningResultTab.find('.db-result-tab-close').trigger('click')
+    expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-overview').text()).not.toContain('#1-1')
+
+    await waitForDatabaseSqlResult()
+    expect(wrapper.find('.db-sql-overview').text()).toContain('select * from public.orders')
+    expect(wrapper.find('.db-sql-overview tbody tr').classes()).toContain('closed')
+    expect(wrapper.find('.db-sql-overview-open').exists()).toBe(false)
+    await wrapper.find('.db-sql-overview tbody tr').trigger('click')
+    expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
+    expect(wrapper.find('.db-result-table').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('opens the Database DB AI pane with active context, streaming chat, resize, and persisted state', async () => {
+    localStorage.removeItem('aiopsterm.database.dbAiPane')
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
+    await wrapper.find('button[title="Toggle DB AI Pane"]').trigger('click')
+    expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
+    expect(wrapper.find('.database-workspace').attributes('style')).toContain('--db-ai-pane-width: 360px')
+    expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('orders-postgres')
+    expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('orders')
+    expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('public')
+
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema and generate a SELECT')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+    await new Promise((resolve) => window.setTimeout(resolve, 115))
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.classes()).toContain('cancelled')
+    await new Promise((resolve) => window.setTimeout(resolve, 380))
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Cancelled')
+
+    await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Query'))!.trigger('click')
+    await wrapper.find('.db-sql-toolbar .db-picker--connection').setValue('conn-metrics-mysql')
+    await wrapper.find('.db-ai-pane-context-head button').trigger('click')
+    expect((wrapper.find('.db-ai-pane-connection').element as HTMLSelectElement).value).toBe('conn-metrics-mysql')
+    expect((wrapper.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('metrics')
+    await wrapper.find('.db-ai-pane-connection').setValue('conn-local-cache')
+    expect((wrapper.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('cache.db')
+    expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('local-cache is not connected')
+    await wrapper.find('.db-ai-pane-connect-row button').trigger('click')
+    expect(wrapper.find('.db-ai-pane-context-card').text()).not.toContain('is not connected')
+
+    const resizer = wrapper.find('.db-ai-pane-resizer')
+    await resizer.trigger('pointerdown', { clientX: 600 })
+    expect(wrapper.find('.database-workspace').classes()).toContain('db-ai-pane-resizing')
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 420 }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.database-workspace').attributes('style')).toContain('--db-ai-pane-width: 540px')
+    expect(resizer.attributes('aria-valuenow')).toBe('540')
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.database-workspace').classes()).not.toContain('db-ai-pane-resizing')
+    await resizer.trigger('dblclick')
+    expect(wrapper.find('.database-workspace').attributes('style')).toContain('--db-ai-pane-width: 360px')
+
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('persist this draft')
+    await wrapper.vm.$nextTick()
+    wrapper.unmount()
+
+    const remounted = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await remounted.vm.$nextTick()
+    expect(remounted.find('.db-ai-pane').exists()).toBe(true)
+    expect((remounted.find('.db-ai-pane-connection').element as HTMLSelectElement).value).toBe('conn-local-cache')
+    expect((remounted.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('cache.db')
+    expect((remounted.find('.db-ai-pane-composer textarea').element as HTMLTextAreaElement).value).toBe('persist this draft')
+    expect(remounted.findAll('.db-ai-pane-message').some((message) => message.text().includes('Cancelled'))).toBe(true)
+
+    remounted.unmount()
+    localStorage.removeItem('aiopsterm.database.dbAiPane')
+  })
+
+  it('keeps the SQL editor shell gutter, active line, and scroll state in sync', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    const editor = wrapper.find('.db-sql-editor')
+    await editor.setValue('select 1;\nselect 2;\nselect 3;')
+    await flushPromises()
+
+    expect(wrapper.find('.db-sql-editor-shell').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('3')
+
+    const editorElement = editor.element as HTMLTextAreaElement
+    const secondLineOffset = editorElement.value.indexOf('2')
+    editorElement.setSelectionRange(secondLineOffset, secondLineOffset + 1)
+    await editor.trigger('select')
+
+    expect(wrapper.find('.db-sql-editor-footer').text()).toContain('Ln 2, Col 8')
+    expect(wrapper.find('.db-sql-editor-footer').text()).toContain('1 selected')
+    expect(wrapper.findAll('.db-sql-editor-gutter span').at(1)!.classes()).toContain('active')
+    expect(wrapper.find('.db-sql-editor-active-line').attributes('style')).toContain('translateY(20px)')
+
+    editorElement.scrollTop = 20
+    await editor.trigger('scroll')
+    expect(wrapper.find('.db-sql-editor-active-line').attributes('style')).toContain('translateY(0px)')
+
+    wrapper.unmount()
+  })
+
+  it('resizes the SQL editor/result panes with a External reference-style horizontal splitter', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    const panes = wrapper.find('.db-sql-panes')
+    const splitter = wrapper.find('.db-sql-splitter')
+    expect(splitter.exists()).toBe(true)
+    expect(panes.attributes('style')).toContain('--db-sql-editor-percent: 45%')
+    expect(splitter.attributes('aria-valuenow')).toBe('45')
+
+    const panesElement = panes.element as HTMLElement
+    vi.spyOn(panesElement, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 100,
+      left: 0,
+      right: 800,
+      bottom: 600,
+      width: 800,
+      height: 500,
+      toJSON: () => ({})
+    } as DOMRect)
+
+    await splitter.trigger('pointerdown', { clientY: 325 })
+    expect(panes.classes()).toContain('resizing')
+    expect(panes.attributes('style')).toContain('--db-sql-editor-percent: 45%')
+
+    window.dispatchEvent(new MouseEvent('pointermove', { clientY: 40 }))
+    await wrapper.vm.$nextTick()
+    expect(panes.attributes('style')).toContain('--db-sql-editor-percent: 20%')
+    expect(splitter.attributes('aria-valuenow')).toBe('20')
+
+    window.dispatchEvent(new MouseEvent('pointermove', { clientY: 610 }))
+    await wrapper.vm.$nextTick()
+    expect(panes.attributes('style')).toContain('--db-sql-editor-percent: 80%')
+    expect(splitter.attributes('aria-valuenow')).toBe('80')
+
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await wrapper.vm.$nextTick()
+    expect(panes.classes()).not.toContain('resizing')
+
+    await splitter.trigger('dblclick')
+    expect(panes.attributes('style')).toContain('--db-sql-editor-percent: 45%')
+    expect(splitter.attributes('aria-valuenow')).toBe('45')
 
     wrapper.unmount()
   })
@@ -3061,6 +4283,10 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('模型名称')
     expect(workspace.text()).toContain('LiteLLM')
     expect(workspace.text()).toContain('OpenAI Compatible & Responses')
+    expect(workspace.text()).toContain('Amazon Bedrock')
+    expect(workspace.text()).toContain('DeepSeek')
+    expect(workspace.text()).toContain('Anthropic')
+    expect(workspace.text()).toContain('Ollama')
     const providerInputs = workspace.findAll('.provider-card .settings-input')
     await providerInputs[0].setValue('http://litellm.internal')
     await workspace.findAll('.provider-card').at(0)!.findAll('button').find((button) => button.text() === 'Save')!.trigger('click')
@@ -3077,11 +4303,27 @@ describe('AppShell', () => {
         })
       })
     )
+    const bedrockCard = workspace.findAll('.provider-card').find((card) => card.text().includes('Amazon Bedrock'))!
+    expect(bedrockCard.text()).toContain('AWS Access Key')
+    expect(bedrockCard.text()).toContain('Cross Region Inference')
+    await bedrockCard.findAll('.settings-input')[0].setValue('AKIA-LOCAL')
+    await bedrockCard.findAll('.settings-select')[0].setValue('eu-west-1')
+    await bedrockCard.findAll('.settings-check-line input')[0].setValue(true)
+    expect(store.modelProviders.bedrock.awsAccessKey).toBe('AKIA-LOCAL')
+    expect(store.modelProviders.bedrock.awsRegion).toBe('eu-west-1')
+    expect(store.modelProviders.bedrock.awsEndpointSelected).toBe(true)
+    await workspace.vm.$nextTick()
+    expect(bedrockCard.text()).toContain('Bedrock Endpoint')
+
+    const openAiCard = workspace.findAll('.provider-card').find((card) => card.text().includes('OpenAI Compatible & Responses'))!
+    expect(openAiCard.text()).toContain('Preview:')
+    expect(openAiCard.text()).toContain('/responses')
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('AI 偏好设置'))!.trigger('click')
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('启用 Extended Thinking')
     expect(workspace.text()).toContain('OpenAI Reasoning Effort')
+    expect(workspace.find('.settings-number.wide').attributes('max')).toBe('300')
     await workspace.find('.settings-budget input[type="range"]').setValue('5000')
     expect(store.aiPreferences.thinkingBudgetTokens).toBe(5000)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(

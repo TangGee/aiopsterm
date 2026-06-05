@@ -20,7 +20,7 @@ const defaultAiPreferences = {
     username: '',
     password: ''
   },
-  shellIntegrationTimeout: 3000
+  shellIntegrationTimeout: 4
 }
 
 const defaultEditorSettings = {
@@ -78,6 +78,33 @@ const defaultModelSettings = {
       apiKey: '',
       modelId: 'gpt-5',
       apiFormat: 'responses' as const
+    },
+    bedrock: {
+      baseUrl: '',
+      apiKey: '',
+      modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+      awsAccessKey: '',
+      awsSecretKey: '',
+      awsSessionToken: '',
+      awsRegion: 'us-east-1',
+      awsUseCrossRegionInference: false,
+      awsEndpointSelected: false,
+      awsBedrockEndpoint: ''
+    },
+    deepseek: {
+      baseUrl: '',
+      apiKey: '',
+      modelId: 'deepseek-chat'
+    },
+    anthropic: {
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: '',
+      modelId: 'claude-3-5-sonnet-latest'
+    },
+    ollama: {
+      baseUrl: 'http://localhost:11434',
+      apiKey: '',
+      modelId: 'llama3.1'
     }
   },
   options: [
@@ -1495,6 +1522,10 @@ describe('workspace store', () => {
       modelId: 'gpt-5',
       apiFormat: 'responses'
     })
+    expect(store.modelProviders.bedrock).toEqual(defaultModelSettings.providers.bedrock)
+    expect(store.modelProviders.deepseek).toEqual(defaultModelSettings.providers.deepseek)
+    expect(store.modelProviders.anthropic).toEqual(defaultModelSettings.providers.anthropic)
+    expect(store.modelProviders.ollama).toEqual(defaultModelSettings.providers.ollama)
     expect(store.settingModelOptions).toEqual([
       { name: 'custom-a', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }
     ])
@@ -1513,7 +1544,11 @@ describe('workspace store', () => {
               apiKey: 'open-secret',
               modelId: 'gpt-5',
               apiFormat: 'responses'
-            }
+            },
+            bedrock: defaultModelSettings.providers.bedrock,
+            deepseek: defaultModelSettings.providers.deepseek,
+            anthropic: defaultModelSettings.providers.anthropic,
+            ollama: defaultModelSettings.providers.ollama
           },
           options: [{ name: 'custom-a', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }]
         }
@@ -2359,7 +2394,7 @@ describe('workspace store', () => {
         username: 'ops',
         password: 'secret'
       },
-      shellIntegrationTimeout: 3000
+      shellIntegrationTimeout: 4
     })
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2367,7 +2402,7 @@ describe('workspace store', () => {
           thinkingBudgetTokens: 6553,
           autoApproval: true,
           reasoningEffort: 'medium',
-          shellIntegrationTimeout: 3000,
+          shellIntegrationTimeout: 4,
           proxy: expect.objectContaining({
             type: 'HTTP',
             port: 7890
@@ -2518,6 +2553,29 @@ describe('workspace store', () => {
     await vi.runAllTimersAsync()
   })
 
+  it('manages External reference-style AI history conversation actions', () => {
+    const store = useWorkspaceStore()
+
+    expect(store.renameConversation('conv-2', 'K8s 发布复盘')).toBe(true)
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.title).toBe('K8s 发布复盘')
+    expect(store.renameConversation('conv-2', '   ')).toBe(false)
+
+    expect(store.toggleConversationFavorite('conv-2')).toBe(true)
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.favorite).toBe(true)
+    expect(store.toggleConversationFavorite('missing')).toBe(false)
+
+    expect(store.restoreConversation('conv-2')).toBe(true)
+    expect(store.selectedConversationId).toBe('conv-2')
+    expect(store.chatMessages[0].text).toContain('已恢复会话')
+    expect(store.chatMessages.at(-1)?.text).toContain('K8s 发布复盘')
+    expect(store.chatMessages.find((message) => message.role === 'user')?.hosts?.[0].label).toBe('prod-cluster')
+
+    const created = store.createConversation()
+    expect(created.title).toBe('新会话')
+    expect(store.selectedConversationId).toBe(created.id)
+    expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+  })
+
   it('manages External reference-style context chips, command presets, message actions, and todos', async () => {
     const store = useWorkspaceStore()
 
@@ -2537,12 +2595,33 @@ describe('workspace store', () => {
     store.setMessageFeedback(assistant!.id, 'up')
     expect(assistant!.favorite).toBe(true)
     expect(assistant!.feedback).toBe('up')
+    store.setMessageFeedback(assistant!.id, 'up')
+    expect(assistant!.feedback).toBeUndefined()
+
+    store.sendChat('重新执行发布检查')
+    await vi.runAllTimersAsync()
+    const retryTarget = store.chatMessages.at(-1)!
+    expect(retryTarget.role).toBe('assistant')
+    expect(store.retryAssistantMessage(retryTarget.id)).toBe(true)
+    expect(store.chatMessages.at(-2)?.text).toContain('重新执行发布检查')
+
+    const knowledgeSummary = await store.summarizeMessageToKnowledge(retryTarget.id)
+    expect(knowledgeSummary?.relPath).toMatch(/^summary\/ai-message-.+\.md$/)
+    expect(store.findKnowledgeNode(knowledgeSummary!.relPath)).toEqual(expect.objectContaining({ type: 'file' }))
+    expect(store.activePanel.kind).toBe('knowledge')
+
+    const skillSummary = await store.summarizeMessageToSkill(retryTarget.id)
+    expect(skillSummary?.name).toMatch(/skill$/)
+    expect(store.settingsSkills[0].name).toBe(skillSummary?.name)
+
+    store.activePanelId = 'panel-main'
+    const terminalDecision = store.stageActiveTerminalCommand('echo ai-message')
+    expect(terminalDecision?.status).toBe('allow')
+    expect(store.activePanel.output).toContain('[mock] echo ai-message')
 
     expect(store.todoProgress.total).toBe(3)
     expect(store.todoProgress.completed).toBe(1)
     expect(store.todoProgress.percent).toBe(33)
-
-    await vi.runAllTimersAsync()
   })
 
   it('manages External reference-style quick command scripts and macro snippets', () => {
@@ -2926,16 +3005,43 @@ describe('workspace store', () => {
     store.switchK8sContext('staging/devops')
     expect(store.k8sContexts.find((context) => context.name === 'staging/devops')?.isActive).toBe(true)
 
+    store.k8sSearchQuery = 'prod'
+    store.setK8sActionMenu('k8s-1')
+    store.clearK8sSearch()
+    expect(store.k8sSearchQuery).toBe('')
+    expect(store.k8sClusterActionMenuId).toBeNull()
+
+    store.openK8sProxyConfig()
+    expect(store.k8sProxyConfigOpen).toBe(true)
+    store.updateK8sProxyConfig({ enabled: true, type: 'HTTPS', host: 'proxy.internal', port: 8443, enableProxyIdentity: true, username: 'ops', password: 'secret' })
+    expect(store.k8sProxyConfig).toMatchObject({ enabled: true, type: 'HTTPS', host: 'proxy.internal', port: 8443, username: 'ops' })
+    expect(store.saveK8sProxyConfig()).toBe(true)
+    expect(store.k8sProxyConfigOpen).toBe(false)
+
     store.connectK8sCluster('k8s-2')
     expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connecting')
     await vi.advanceTimersByTimeAsync(280)
     expect(store.k8sActiveClusterId).toBe('k8s-2')
     expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connected')
+    expect(store.k8sClusterNotice).toContain('proxy.internal:8443')
 
     store.openK8sTerminal('k8s-2')
     expect(store.k8sActiveTerminal?.clusterId).toBe('k8s-2')
     store.sendK8sTerminalCommand('kubectl get ns')
     expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl get ns')
+
+    store.k8sActiveClusterId = 'k8s-1'
+    store.describeK8sResource('k8s-pod-worker-1')
+    expect(store.copyK8sResourceOutput()).toContain('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+    const sentOutputCommand = store.sendK8sCurrentOutputToTerminal()
+    expect(sentOutputCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+    expect(store.sendK8sCurrentOutputToAi()).toBe(true)
+    expect(store.chatMessages.at(-2)?.text).toContain('Kubernetes 输出')
+    expect(store.chatMessages.at(-2)?.hosts?.[0].label).toBe('prod-cluster')
+    store.clearK8sResourceOutput()
+    expect(store.k8sResourceOutputTitle).toBe('资源输出')
+    expect(store.k8sCopiedCommand).toBe('')
 
     const added = store.addK8sCluster({
       name: 'qa-cluster',
@@ -3155,6 +3261,44 @@ describe('workspace store', () => {
             openai: expect.objectContaining({ modelId: 'ops-model' })
           })
         })
+      })
+    )
+
+    vi.mocked(window.aiops.saveConfig).mockClear()
+    store.updateModelProviderConfig('bedrock', {
+      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      awsAccessKey: 'AKIA-LOCAL',
+      awsSecretKey: 'secret',
+      awsSessionToken: 'token',
+      awsRegion: 'eu-west-1',
+      awsEndpointSelected: true,
+      awsBedrockEndpoint: 'https://bedrock-runtime.eu-west-1.amazonaws.com',
+      awsUseCrossRegionInference: true
+    })
+    expect(store.modelProviders.bedrock.awsRegion).toBe('eu-west-1')
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelSettings: expect.objectContaining({
+          providers: expect.objectContaining({
+            bedrock: expect.objectContaining({
+              modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+              awsAccessKey: 'AKIA-LOCAL',
+              awsRegion: 'eu-west-1',
+              awsEndpointSelected: true,
+              awsBedrockEndpoint: 'https://bedrock-runtime.eu-west-1.amazonaws.com',
+              awsUseCrossRegionInference: true
+            })
+          })
+        })
+      })
+    )
+    store.saveModelProvider('bedrock')
+    expect(store.config.modelProvider).toBe('bedrock')
+    expect(store.config.modelName).toBe('anthropic.claude-3-haiku-20240307-v1:0')
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelProvider: 'bedrock',
+        modelName: 'anthropic.claude-3-haiku-20240307-v1:0'
       })
     )
 
@@ -3689,6 +3833,70 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.trustedDeviceModal.open).toBe(true)
     store.confirmTrustedDeviceRevoke()
     expect(store.trustedDevices.some((device) => device.id === 2)).toBe(false)
+
+    store.openAccountCenter()
+    expect(store.userAccountCenterOpen).toBe(true)
+    store.closeAccountCenter()
+    expect(store.userAccountCenterOpen).toBe(false)
+
+    store.openUserLogin()
+    expect(store.activeModule).toBe('user')
+    expect(store.userProfile.skippedLogin).toBe(true)
+    expect(store.userLoginTab).toBe('account')
+    store.setUserLoginTab('email')
+    expect(store.userLoginTab).toBe('email')
+    expect(store.loginWithAccount('', '')).toBe(false)
+    expect(store.userNotice).toBe('请输入用户名和密码')
+    expect(store.loginWithAccount('verify-device', 'secret')).toBe(false)
+    expect(store.userProfile.needDeviceVerification).toBe(true)
+    expect(store.userNotice).toBe('当前设备需要验证后才能登录')
+    expect(store.loginWithAccount('ops_login', 'secret')).toBe(true)
+    expect(store.userProfile.skippedLogin).toBe(false)
+    expect(store.userProfile.username).toBe('ops_login')
+    store.logoutUser()
+    expect(store.sendUserLoginCode('email', 'bad')).toBe(false)
+    expect(store.userNotice).toBe('邮箱格式不正确')
+    expect(store.sendUserLoginCode('email', 'login@example.local')).toBe(true)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(store.userLoginCodeCountdown.email).toBe(300)
+    expect(store.loginWithEmail('login@example.local', '246810')).toBe(true)
+    expect(store.userProfile.email).toBe('login@example.local')
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+    store.logoutUser()
+    expect(store.sendUserLoginCode('mobile', '13800000001')).toBe(true)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(store.userLoginCodeCountdown.mobile).toBe(300)
+    expect(store.loginWithMobile('13800000001', '135790')).toBe(true)
+    expect(store.userProfile.mobile).toBe('13800000001')
+    store.logoutUser()
+    expect(store.skipUserLogin()).toBe(true)
+    expect(store.userProfile.username).toBe('guest')
+    expect(store.billingSettings.skippedLogin).toBe(true)
+
+    expect(store.updateUserProfile({ username: 'bad-name!' })).toBe(false)
+    expect(store.userNotice).toBe('用户名仅支持字母、数字和下划线')
+    expect(store.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead' })).toBe(true)
+    expect(store.userProfile.name).toBe('Ops Lead')
+
+    expect(store.sendUserContactCode('email', 'broken-email')).toBe(false)
+    expect(store.userNotice).toBe('邮箱格式不正确')
+    expect(store.sendUserContactCode('email', 'ops@example.local')).toBe(true)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(store.userContactCodeCountdown.email).toBe(300)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userContactCodeCountdown.email).toBe(299)
+    expect(store.bindUserContact('email', 'ops@example.local', '')).toBe(false)
+    expect(store.userNotice).toBe('请输入邮箱验证码')
+    expect(store.bindUserContact('email', 'ops@example.local', '123456')).toBe(true)
+    expect(store.userProfile.email).toBe('ops@example.local')
+    expect(store.userContactCodeCountdown.email).toBe(0)
+
+    store.userProfile.authProvider = 'sso'
+    expect(store.canResetUserPassword).toBe(false)
+    expect(store.resetUserPassword('Aa123456!')).toBe(false)
+    expect(store.userNotice).toBe('当前登录方式不允许修改密码')
+    store.userProfile.authProvider = 'local'
+    expect(store.resetUserPassword('Aa123456!')).toBe(true)
 
     vi.mocked(window.aiops.saveConfig).mockClear()
     store.updatePrivacySettings({ telemetry: 'disabled', secretRedaction: 'enabled' })

@@ -664,6 +664,16 @@ Object.defineProperty(window, 'aiops', {
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/tmp/imported-note.md'] })),
     showSaveDialog: vi.fn(async (options?: { defaultPath?: string }) => ({ canceled: false, filePath: `/tmp/${options?.defaultPath || 'downloaded-file'}` })),
     writeLocalFile: vi.fn(async () => undefined),
+    stageChatAttachment: vi.fn(async ({ taskId, srcAbsPath }: { taskId: string; srcAbsPath: string }) => {
+      const name = srcAbsPath.split(/[/\\]/).pop() || 'attachment.txt'
+      return {
+        mode: 'local' as const,
+        refPath: `aiopsterm://chat-attachment/${encodeURIComponent(taskId)}/${encodeURIComponent(name)}`,
+        name,
+        size: 128,
+        stagedPath: `/tmp/aiopsterm/chat-attachments/${taskId}/${name}`
+      }
+    }),
     kbCheckPath: vi.fn(async (absPath: string) => ({ exists: true, isDirectory: absPath.endsWith('/folder'), isFile: !absPath.endsWith('/folder') })),
     kbEnsureRoot: vi.fn(async () => ({ success: true })),
     kbGetRoot: vi.fn(async () => ({ root: '/tmp/aiopsterm/knowledgebase' })),
