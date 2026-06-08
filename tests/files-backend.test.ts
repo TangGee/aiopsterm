@@ -3,6 +3,168 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const ssh2Mock = vi.hoisted(() => {
+  type MockNode = {
+    type: 'file' | 'directory' | 'link'
+    content?: Buffer
+    mode: number
+    mtime: number
+  }
+
+  const nodes = new Map<string, MockNode>()
+  const connectConfigs: Array<Record<string, unknown>> = []
+  const calls: Array<Record<string, unknown>> = []
+
+  const normalize = (path: string) => {
+    const normalized = String(path || '/')
+      .trim()
+      .replace(/\/+/g, '/')
+    return normalized || '/'
+  }
+
+  const dirname = (path: string) => {
+    const normalized = normalize(path)
+    const index = normalized.lastIndexOf('/')
+    return index <= 0 ? '/' : normalized.slice(0, index)
+  }
+
+  const basename = (path: string) => normalize(path).split('/').filter(Boolean).at(-1) || path
+
+  const ensureDirectory = (path: string) => {
+    const normalized = normalize(path)
+    if (!nodes.has(normalized)) nodes.set(normalized, { type: 'directory', mode: 0o040755, mtime: 1_717_200_000 })
+  }
+
+  const putFile = (path: string, content: string, mode = 0o100644) => {
+    const normalized = normalize(path)
+    ensureDirectory(dirname(normalized))
+    nodes.set(normalized, { type: 'file', content: Buffer.from(content, 'utf-8'), mode, mtime: 1_717_200_100 })
+  }
+
+  const missingError = (path: string) => Object.assign(new Error(`No such file ${path}`), { code: 2 })
+
+  const attrsFor = (node: MockNode) => ({
+    mode: node.mode,
+    size: node.content?.length || 0,
+    mtime: node.mtime,
+    isDirectory: () => node.type === 'directory',
+    isFile: () => node.type === 'file',
+    isSymbolicLink: () => node.type === 'link'
+  })
+
+  const sftp = {
+    readdir(path: string, callback: (error: Error | null, entries?: Array<Record<string, unknown>>) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'readdir', path: normalized })
+      const node = nodes.get(normalized)
+      if (!node) {
+        callback(missingError(normalized))
+        return
+      }
+      if (node.type !== 'directory') {
+        callback(Object.assign(new Error(`${normalized} is not a directory`), { code: 'ENOTDIR' }))
+        return
+      }
+      const rows = [...nodes.entries()]
+        .filter(([entryPath]) => entryPath !== normalized && dirname(entryPath) === normalized)
+        .map(([entryPath, entryNode]) => ({
+          filename: basename(entryPath),
+          attrs: attrsFor(entryNode)
+        }))
+      callback(null, rows)
+    },
+    stat(path: string, callback: (error: Error | null, stats?: Record<string, unknown>) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'stat', path: normalized })
+      const node = nodes.get(normalized)
+      if (!node) {
+        callback(missingError(normalized))
+        return
+      }
+      callback(null, attrsFor(node))
+    },
+    readFile(path: string, callback: (error: Error | null, content?: Buffer) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'readFile', path: normalized })
+      const node = nodes.get(normalized)
+      if (!node) {
+        callback(missingError(normalized))
+        return
+      }
+      if (node.type !== 'file') {
+        callback(Object.assign(new Error(`${normalized} is not a file`), { code: 'EISDIR' }))
+        return
+      }
+      callback(null, Buffer.from(node.content || Buffer.alloc(0)))
+    },
+    writeFile(path: string, content: Buffer, callback: (error?: Error | null) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'writeFile', path: normalized, content: Buffer.from(content).toString('utf-8') })
+      if (!nodes.has(dirname(normalized))) {
+        callback(missingError(dirname(normalized)))
+        return
+      }
+      nodes.set(normalized, { type: 'file', content: Buffer.from(content), mode: 0o100644, mtime: 1_717_200_200 })
+      callback(null)
+    },
+    mkdir(path: string, callback: (error?: Error | null) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'mkdir', path: normalized })
+      const parent = dirname(normalized)
+      if (normalized !== '/' && !nodes.has(parent)) {
+        callback(missingError(parent))
+        return
+      }
+      if (!nodes.has(normalized)) nodes.set(normalized, { type: 'directory', mode: 0o040755, mtime: 1_717_200_200 })
+      callback(null)
+    }
+  }
+
+  class Client {
+    private handlers = new Map<string, (...args: unknown[]) => void>()
+
+    once(event: string, handler: (...args: unknown[]) => void) {
+      this.handlers.set(event, handler)
+      return this
+    }
+
+    connect(config: Record<string, unknown>) {
+      connectConfigs.push(config)
+      queueMicrotask(() => this.handlers.get('ready')?.())
+    }
+
+    sftp(callback: (error: Error | null, wrapper?: typeof sftp) => void) {
+      calls.push({ method: 'sftp' })
+      callback(null, sftp)
+    }
+
+    end() {
+      calls.push({ method: 'end' })
+    }
+  }
+
+  const reset = () => {
+    nodes.clear()
+    connectConfigs.length = 0
+    calls.length = 0
+    ensureDirectory('/')
+    ensureDirectory('/srv')
+    ensureDirectory('/srv/logs')
+    putFile('/srv/note.txt', 'remote note from sftp\n')
+    putFile('/srv/logs/app.log', 'hello log\n', 0o100600)
+  }
+
+  reset()
+
+  return {
+    Client,
+    reset,
+    connectConfigs,
+    calls,
+    nodes
+  }
+})
+
 vi.mock('electron', () => ({
   app: {
     getPath: () => '/tmp/aiopsterm-files-test'
@@ -33,6 +195,10 @@ vi.mock('better-sqlite3', () => {
   throw new Error('force electron-store files backend in tests')
 })
 
+vi.mock('../src/main/backend/ssh2Runtime', () => ({
+  loadSsh2: () => ({ Client: ssh2Mock.Client })
+}))
+
 let readFileContent: (filePath: string, options?: Record<string, unknown>) => Promise<any>
 let writeFileContent: (filePath: string, content: string, options?: Record<string, unknown>) => Promise<any>
 let listFiles: (directory: string, options?: Record<string, unknown>) => Promise<any[]>
@@ -50,6 +216,7 @@ let deleteFileSession: (id: string) => Promise<any>
 let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
 let deleteFileSessionFolder: (uuid: string) => Promise<any>
 let resetFileSessionCatalog: () => void
+let saveAsset: (asset: any) => any
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/files'
@@ -71,13 +238,37 @@ beforeAll(async () => {
   saveFileSessionFolder = backend.saveFileSessionFolder
   deleteFileSessionFolder = backend.deleteFileSessionFolder
   resetFileSessionCatalog = backend.__resetFileSessionCatalogForTests
+  const assetsModulePath = '../src/main/backend/assets'
+  saveAsset = (await import(assetsModulePath)).saveAsset
 })
 
 beforeEach(() => {
   resetFileSessionCatalog?.()
+  ssh2Mock.reset()
 })
 
 describe('files backend content boundary', () => {
+  const saveSftpAsset = () => {
+    const saved = saveAsset({
+      id: 'asset-sftp-files-test',
+      name: 'sftp-files-test',
+      title: 'sftp-files-test',
+      host: 'sftp.example.test',
+      ip: 'sftp.example.test',
+      group: '测试',
+      group_name: '测试',
+      status: 'online',
+      username: 'ops',
+      port: 7992,
+      asset_type: 'person',
+      auth_type: 'password',
+      tags: ['sftp'],
+      password: 'backend-secret'
+    })
+    expect(saved.ok).toBe(true)
+    return saved.data.id
+  }
+
   it('loads and mutates file session catalog behind the main-process boundary', async () => {
     const initial = await listFileSessionCatalog()
     expect(initial.ok).toBe(true)
@@ -317,6 +508,94 @@ describe('files backend content boundary', () => {
       action: 'edit',
       content: expect.stringContaining('Staging release')
     })
+  })
+
+  it('keeps credentialless development assets on the seed backend even when an SSH agent socket exists', async () => {
+    const originalAgent = process.env.SSH_AUTH_SOCK
+    const originalFilesAgent = process.env.AIOPSTERM_FILES_SFTP_AGENT
+    process.env.SSH_AUTH_SOCK = '/tmp/aiopsterm-test-agent.sock'
+    delete process.env.AIOPSTERM_FILES_SFTP_AGENT
+    try {
+      const rows = await listFiles('/home/deploy', { kind: 'remote', sessionId: 'asset-1', host: 'prod-bastion' })
+
+      expect(rows.map((entry) => entry.name)).toContain('release-note.md')
+      expect(ssh2Mock.connectConfigs).toEqual([])
+    } finally {
+      if (originalAgent === undefined) delete process.env.SSH_AUTH_SOCK
+      else process.env.SSH_AUTH_SOCK = originalAgent
+      if (originalFilesAgent === undefined) delete process.env.AIOPSTERM_FILES_SFTP_AGENT
+      else process.env.AIOPSTERM_FILES_SFTP_AGENT = originalFilesAgent
+    }
+  })
+
+  it('lists, reads, and writes remote files through asset-backed SFTP credentials', async () => {
+    const sessionId = saveSftpAsset()
+
+    const rows = await listFiles('/srv', { kind: 'remote', sessionId, host: 'client-host-ignored' })
+    expect(rows).toEqual([
+      expect.objectContaining({ name: '..', path: '/', type: 'directory' }),
+      expect.objectContaining({ name: 'logs', path: '/srv/logs', type: 'directory', mode: 'd755' }),
+      expect.objectContaining({ name: 'note.txt', path: '/srv/note.txt', type: 'file', size: 22, mode: '-644' })
+    ])
+
+    const read = await readFileContent('/srv/note.txt', { kind: 'remote', sessionId })
+    expect(read).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        action: 'edit',
+        content: 'remote note from sftp\n',
+        size: 22
+      })
+    })
+
+    const written = await writeFileContent('/srv/releases/new.txt', 'created on sftp\n', { kind: 'remote', sessionId, host: 'ui-host' })
+    expect(written.ok).toBe(true)
+    expect(written.data).toEqual(
+      expect.objectContaining({
+        size: 16,
+        task: expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          type: 'r2r',
+          name: 'save new.txt',
+          source: '/srv/releases/new.txt',
+          target: '/srv/releases/new.txt',
+          fromHost: 'ui-host',
+          toHost: 'ui-host',
+          speed: '已保存',
+          status: 'success'
+        })
+      })
+    )
+    expect(ssh2Mock.nodes.get('/srv/releases/new.txt')?.content?.toString('utf-8')).toBe('created on sftp\n')
+    expect(ssh2Mock.connectConfigs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          host: 'sftp.example.test',
+          port: 7992,
+          username: 'ops',
+          password: 'backend-secret'
+        })
+      ])
+    )
+    expect(ssh2Mock.connectConfigs.some((config) => config.host === 'client-host-ignored')).toBe(false)
+    expect(ssh2Mock.calls).toEqual(
+      expect.arrayContaining([
+        { method: 'readdir', path: '/srv' },
+        { method: 'readFile', path: '/srv/note.txt' },
+        { method: 'mkdir', path: '/srv/releases' },
+        { method: 'writeFile', path: '/srv/releases/new.txt', content: 'created on sftp\n' }
+      ])
+    )
+  })
+
+  it('returns backend errors instead of seed fallback when asset-backed SFTP fails', async () => {
+    const sessionId = saveSftpAsset()
+
+    await expect(listFiles('/missing', { kind: 'remote', sessionId })).rejects.toThrow('No such file /missing')
+
+    const read = await readFileContent('/srv/unknown.txt', { kind: 'remote', sessionId })
+    expect(read).toMatchObject({ ok: true, data: { action: 'create', content: '' } })
+    expect(ssh2Mock.calls).toEqual(expect.arrayContaining([{ method: 'stat', path: '/srv/unknown.txt' }]))
   })
 
   it('returns create mode for missing remote files and persists writes', async () => {

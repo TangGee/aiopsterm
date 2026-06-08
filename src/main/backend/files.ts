@@ -28,9 +28,21 @@ import type {
   FileTransferTaskRecordResult,
   FileWriteContentResult
 } from '@shared/preload'
-import { getAsset } from './assets'
+import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'
+import { getAsset, getAssetSecret, getKeychainSecret } from './assets'
+import { loadSsh2 } from './ssh2Runtime'
 
 type BackendFileEntry = FileListEntry & { mode: string }
+type RemoteSftpTarget = {
+  assetId: string
+  host: string
+  username: string
+  port: number
+  password?: string
+  privateKey?: string
+  passphrase?: string
+  agent?: string
+}
 
 const seedTime = new Date('2026-06-04T05:10:00.000Z').getTime()
 
@@ -60,6 +72,266 @@ const entry = (name: string, path: string, type: FileListEntry['type'], size = 0
 const modeString = (type: FileListEntry['type'], mode: number) => {
   const prefix = type === 'directory' ? 'd' : type === 'link' ? 'l' : '-'
   return `${prefix}${(mode & 0o777).toString(8).padStart(3, '0')}`
+}
+
+const textSecret = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const usablePrivateKey = (value: unknown) => {
+  const privateKey = textSecret(value)
+  if (!privateKey.includes('PRIVATE KEY')) return ''
+  const body = privateKey
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.includes('BEGIN') && !line.includes('END'))
+    .join('')
+  return body.length >= 32 ? privateKey : ''
+}
+
+const assetIdCandidates = (sessionId?: string) => {
+  const id = textSecret(sessionId)
+  return [...new Set([id, id.replace(/^folder_/, '')].filter(Boolean))]
+}
+
+const resolveRemoteSftpTarget = (options: FileListOptions): RemoteSftpTarget | null => {
+  if (options.kind !== 'remote') return null
+  const asset = assetIdCandidates(options.sessionId)
+    .map((id) => getAsset(id))
+    .find((item) => item && !item.isLocalShell)
+  if (!asset) return null
+
+  const secret = getAssetSecret(asset.id)
+  const keychainSecret = asset.keychainId ? getKeychainSecret(asset.keychainId) : {}
+  const password = textSecret(secret.password)
+  const privateKey = usablePrivateKey(secret.privateKey) || usablePrivateKey(keychainSecret.privateKey)
+  const passphrase = textSecret(secret.passphrase) || textSecret(keychainSecret.passphrase)
+  const agent =
+    !password && !privateKey && process.env.AIOPSTERM_FILES_SFTP_AGENT === '1' ? textSecret(process.env.SSH_AUTH_SOCK) : ''
+  const host = textSecret(asset.host || asset.ip || options.host)
+  const username = textSecret(asset.username)
+  const port = Number(asset.port || 22)
+  if (!host || !username || !Number.isInteger(port) || port < 1 || port > 65535) return null
+  if (!password && !privateKey && !agent) return null
+  return {
+    assetId: asset.id,
+    host,
+    username,
+    port,
+    ...(password ? { password } : {}),
+    ...(privateKey ? { privateKey } : {}),
+    ...(passphrase ? { passphrase } : {}),
+    ...(agent ? { agent } : {})
+  }
+}
+
+const sftpErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || 'SFTP operation failed'))
+
+const isNotFoundError = (error: unknown) => {
+  const code = (error as { code?: unknown } | undefined)?.code
+  const message = sftpErrorMessage(error).toLowerCase()
+  return code === 'ENOENT' || code === 2 || message.includes('no such file') || message.includes('not found')
+}
+
+const fileError = (error: unknown, errorCode: string) => {
+  const code = (error as { code?: unknown } | undefined)?.code
+  if (isNotFoundError(error)) return { ok: false as const, errorCode: 'not_found', errorMessage: 'File entry not found' }
+  if (code === 'EACCES' || code === 'EPERM' || sftpErrorMessage(error).toLowerCase().includes('permission')) {
+    return { ok: false as const, errorCode: 'permission', errorMessage: 'Permission denied' }
+  }
+  return { ok: false as const, errorCode, errorMessage: sftpErrorMessage(error) }
+}
+
+const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFTPWrapper) => Promise<T>): Promise<T> => {
+  const ssh2 = loadSsh2()
+  if (!ssh2) throw new Error('ssh2 runtime is not available')
+
+  const client = new ssh2.Client()
+  const connectConfig: ConnectConfig = {
+    host: target.host,
+    port: target.port,
+    username: target.username,
+    readyTimeout: 15000,
+    keepaliveInterval: 10000
+  }
+  if (target.password) connectConfig.password = target.password
+  if (target.privateKey) connectConfig.privateKey = target.privateKey
+  if (target.passphrase) connectConfig.passphrase = target.passphrase
+  if (target.agent) connectConfig.agent = target.agent
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const settle = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      fn()
+    }
+    const closeClient = () => {
+      try {
+        client.end()
+      } catch {}
+    }
+    client
+      .once('ready', () => {
+        client.sftp((error, sftp) => {
+          if (error || !sftp) {
+            settle(() => reject(error || new Error('SFTP session is unavailable')))
+            closeClient()
+            return
+          }
+          operation(sftp)
+            .then((result) => settle(() => resolve(result)))
+            .catch((operationError) => settle(() => reject(operationError)))
+            .finally(closeClient)
+        })
+      })
+      .once('error', (error) => settle(() => reject(error)))
+      .once('close', () => {
+        if (!settled) settle(() => reject(new Error('SFTP connection closed before it became ready')))
+      })
+    client.connect(connectConfig)
+  })
+}
+
+const sftpStat = (sftp: SFTPWrapper, path: string) =>
+  new Promise<SftpStats>((resolve, reject) => {
+    sftp.stat(path, (error, stats) => (error ? reject(error) : resolve(stats)))
+  })
+
+const sftpReadFile = (sftp: SFTPWrapper, path: string) =>
+  new Promise<Buffer>((resolve, reject) => {
+    sftp.readFile(path, (error, content) => (error ? reject(error) : resolve(Buffer.isBuffer(content) ? content : Buffer.from(String(content)))))
+  })
+
+const sftpWriteFile = (sftp: SFTPWrapper, path: string, content: Buffer) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.writeFile(path, content, (error) => (error ? reject(error) : resolve()))
+  })
+
+const sftpMkdir = (sftp: SFTPWrapper, path: string) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.mkdir(path, (error) => (error ? reject(error) : resolve()))
+  })
+
+const sftpReaddir = (sftp: SFTPWrapper, path: string) =>
+  new Promise<SftpFileEntry[]>((resolve, reject) => {
+    sftp.readdir(path, (error, entries) => (error ? reject(error) : resolve(entries || [])))
+  })
+
+const sftpEntryType = (attrs: Partial<SftpStats>): FileListEntry['type'] => {
+  if (typeof attrs.isDirectory === 'function' && attrs.isDirectory()) return 'directory'
+  if (typeof attrs.isSymbolicLink === 'function' && attrs.isSymbolicLink()) return 'link'
+  if (typeof attrs.isFile === 'function' && attrs.isFile()) return 'file'
+  const mode = Number(attrs.mode || 0) & 0o170000
+  if (mode === 0o040000) return 'directory'
+  if (mode === 0o120000) return 'link'
+  return 'file'
+}
+
+const sftpEntryToFileListEntry = (parentPath: string, item: SftpFileEntry): FileListEntry => {
+  const type = sftpEntryType(item.attrs as Partial<SftpStats>)
+  const path = normalizeRemotePath(`${parentPath}/${item.filename}`)
+  const mode = Number(item.attrs?.mode || 0)
+  return {
+    name: item.filename,
+    path,
+    type,
+    size: Number(item.attrs?.size || 0),
+    modifiedAt: Number(item.attrs?.mtime || 0) ? Number(item.attrs.mtime) * 1000 : Date.now(),
+    ...(mode ? { mode: modeString(type, mode) } : {})
+  }
+}
+
+const ensureRemoteParentDirs = async (sftp: SFTPWrapper, remoteDir: string) => {
+  const normalized = normalizeRemotePath(remoteDir)
+  if (normalized === '/') return
+  const parts = normalized.split('/').filter(Boolean)
+  let cursor = ''
+  for (const part of parts) {
+    cursor = normalizeRemotePath(`${cursor}/${part}`)
+    try {
+      const stats = await sftpStat(sftp, cursor)
+      if (sftpEntryType(stats) !== 'directory') throw new Error(`${cursor} is not a directory`)
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error
+      try {
+        await sftpMkdir(sftp, cursor)
+      } catch (mkdirError) {
+        try {
+          const stats = await sftpStat(sftp, cursor)
+          if (sftpEntryType(stats) === 'directory') continue
+        } catch {}
+        throw mkdirError
+      }
+    }
+  }
+}
+
+const listRemoteFilesViaSftp = async (directory: string, options: FileListOptions): Promise<FileListEntry[] | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const path = normalizeRemotePath(directory)
+  return withRemoteSftp(target, async (sftp) => {
+    const rows = (await sftpReaddir(sftp, path))
+      .filter((item) => item.filename !== '.' && item.filename !== '..')
+      .slice(0, 500)
+      .map((item) => sftpEntryToFileListEntry(path, item))
+    const parent = path === '/' ? [] : [entry('..', dirname(path), 'directory', 0, 'drwxr-xr-x', seedTime)]
+    return [...parent, ...sortEntries(rows)]
+  })
+}
+
+const readRemoteFileViaSftp = async (filePath: string, options: FileContentOptions): Promise<FileReadContentResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const path = normalizeRemotePath(filePath)
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      let stats: SftpStats
+      try {
+        stats = await sftpStat(sftp, path)
+      } catch (error) {
+        if (isNotFoundError(error)) return { ok: true, data: { content: '', action: 'create', size: 0, mtimeMs: Date.now() } }
+        throw error
+      }
+      if (sftpEntryType(stats) !== 'file') return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
+      ensureTextSize(Number(stats.size || 0))
+      const content = await sftpReadFile(sftp, path)
+      ensureTextSize(content.length)
+      return {
+        ok: true,
+        data: {
+          content: content.toString('utf-8'),
+          action: 'edit',
+          size: content.length,
+          mtimeMs: Number(stats.mtime || 0) ? Number(stats.mtime) * 1000 : Date.now()
+        }
+      }
+    })
+  } catch (error) {
+    return fileError(error, 'read_failed')
+  }
+}
+
+const writeRemoteFileViaSftp = async (filePath: string, content: Buffer, options: FileContentOptions): Promise<FileWriteContentResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const path = normalizeRemotePath(filePath)
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      await ensureRemoteParentDirs(sftp, dirname(path))
+      await sftpWriteFile(sftp, path, content)
+      const stats = await sftpStat(sftp, path)
+      return {
+        ok: true,
+        data: {
+          size: Number(stats.size || content.length),
+          mtimeMs: Number(stats.mtime || 0) ? Number(stats.mtime) * 1000 : Date.now(),
+          task: writeContentTask(path, options)
+        }
+      }
+    })
+  } catch (error) {
+    return fileError(error, 'write_failed')
+  }
 }
 
 const remoteSeedTree: Record<string, BackendFileEntry[]> = {
@@ -506,6 +778,9 @@ export const listFiles = async (directory: string, options: FileListOptions = {}
   }
 
   const path = normalizeRemotePath(directory)
+  const sftpRows = await listRemoteFilesViaSftp(path, options)
+  if (sftpRows) return sftpRows
+
   const rows = (remoteSeedTree[path] || []).map((item) => ({ ...item }))
   const parent = path === '/' ? [] : [entry('..', dirname(path), 'directory', 0, 'drwxr-xr-x', seedTime)]
   return [...parent, ...sortEntries(rows)]
@@ -625,6 +900,9 @@ export const readFileContent = async (filePath: string, options: FileContentOpti
   }
 
   const path = normalizeRemotePath(filePath)
+  const sftpRead = await readRemoteFileViaSftp(path, options)
+  if (sftpRead) return sftpRead
+
   const entry = findRemoteEntry(path)
   if (entry && entry.type !== 'file') return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
   if (!entry && !(path in remoteFileContents)) return { ok: true, data: { content: '', action: 'create', size: 0, mtimeMs: Date.now() } }
@@ -652,6 +930,9 @@ export const writeFileContent = async (filePath: string, content: string, option
       return { ok: false, errorCode: 'write_failed', errorMessage: (error as Error).message }
     }
   }
+
+  const sftpWrite = await writeRemoteFileViaSftp(path, Buffer.from(text, 'utf-8'), options)
+  if (sftpWrite) return sftpWrite
 
   const modifiedAt = Date.now()
   remoteFileContents[path] = { content: text, mtimeMs: modifiedAt }
