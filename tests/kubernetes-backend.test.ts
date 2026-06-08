@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   __resetKubernetesCatalogForTests,
+  addKubernetesCluster,
   cleanupKubernetesAgent,
   closeKubernetesTerminal,
   createKubernetesTerminal,
@@ -9,14 +10,48 @@ import {
   resizeKubernetesTerminal,
   testKubernetesClusterConnection
 } from '@shared/kubernetes'
-import { mkdtemp, writeFile } from 'fs/promises'
+import { chmod, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
 describe('kubernetes backend boundary', () => {
+  const tempDirs: string[] = []
+  const originalKubectlPath = process.env.AIOPSTERM_KUBECTL_PATH
+
   beforeEach(() => {
     __resetKubernetesCatalogForTests()
   })
+
+  afterEach(async () => {
+    if (originalKubectlPath === undefined) delete process.env.AIOPSTERM_KUBECTL_PATH
+    else process.env.AIOPSTERM_KUBECTL_PATH = originalKubectlPath
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+  })
+
+  const createFakeKubectl = async (scriptBody: string) => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-fake-kubectl-'))
+    tempDirs.push(dir)
+    const filePath = join(dir, 'kubectl')
+    await writeFile(filePath, ['#!/bin/sh', 'set -eu', scriptBody].join('\n'), 'utf-8')
+    await chmod(filePath, 0o755)
+    process.env.AIOPSTERM_KUBECTL_PATH = filePath
+    return filePath
+  }
+
+  const qaKubeconfigContent = [
+    'apiVersion: v1',
+    'kind: Config',
+    'current-context: qa/dev',
+    'clusters:',
+    '- name: qa-cluster',
+    '  cluster:',
+    '    server: https://qa.k8s.local:6443',
+    'contexts:',
+    '- name: qa/dev',
+    '  context:',
+    '    cluster: qa-cluster',
+    '    namespace: qa'
+  ].join('\n')
 
   it('creates backend-owned terminal session records before renderer output handling', async () => {
     const created = await createKubernetesTerminal({
@@ -86,6 +121,95 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.durationMs).toBeGreaterThan(0)
   })
 
+  it('executes kubectl through the backend for explicit kubeconfig clusters', async () => {
+    await createFakeKubectl(
+      [
+        'echo "fake kubectl invoked"',
+        'echo "KUBECONFIG_EXISTS=$([ -f "$KUBECONFIG" ] && echo yes || echo no)"',
+        'echo "KUBECONFIG_CONTEXT=$(grep -m1 current-context "$KUBECONFIG" | sed "s/.*: //")"',
+        'echo "ARGS=$*"'
+      ].join('\n')
+    )
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    expect(added.ok).toBe(true)
+
+    const result = await executeKubernetesCommand({
+      command: 'kubectl get pods',
+      clusterId: added.data!.cluster!.id,
+      namespace: 'qa',
+      source: 'terminal'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        command: 'kubectl get pods',
+        success: true,
+        error: '',
+        contextName: 'qa/dev',
+        namespace: 'qa',
+        source: 'terminal'
+      })
+    )
+    expect(result.data?.output).toContain('fake kubectl invoked')
+    expect(result.data?.output).toContain('KUBECONFIG_EXISTS=yes')
+    expect(result.data?.output).toContain('KUBECONFIG_CONTEXT=qa/dev')
+    expect(result.data?.output).toContain('ARGS=get pods --context=qa/dev --namespace=qa')
+    expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods')
+    expect(result.data?.terminalOutput).toContain('fake kubectl invoked')
+  })
+
+  it('returns backend-owned failure metadata for nonzero kubectl exits', async () => {
+    await createFakeKubectl(
+      [
+        'echo "stdout before failure"',
+        'echo "fake kubectl failed" >&2',
+        'exit 23'
+      ].join('\n')
+    )
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    expect(added.ok).toBe(true)
+
+    const result = await executeKubernetesCommand({
+      command: 'kubectl get pods',
+      clusterId: added.data!.cluster!.id,
+      namespace: 'qa',
+      source: 'agent'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        command: 'kubectl get pods',
+        success: false,
+        error: 'fake kubectl failed',
+        contextName: 'qa/dev',
+        namespace: 'qa',
+        source: 'agent'
+      })
+    )
+    expect(result.data?.output).toContain('stdout before failure')
+    expect(result.data?.output).toContain('fake kubectl failed')
+    expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods')
+    expect(result.data?.terminalOutput).toContain('fake kubectl failed')
+  })
+
   it('tests add-cluster context validity through backend boundary', async () => {
     await expect(testKubernetesClusterConnection({ contextName: 'prod/admin' })).resolves.toMatchObject({
       ok: true,
@@ -98,19 +222,6 @@ describe('kubernetes backend boundary', () => {
       }
     })
 
-    const qaKubeconfigContent = [
-      'apiVersion: v1',
-      'kind: Config',
-      'clusters:',
-      '- name: qa-cluster',
-      '  cluster:',
-      '    server: https://qa.k8s.local:6443',
-      'contexts:',
-      '- name: qa/dev',
-      '  context:',
-      '    cluster: qa-cluster',
-      '    namespace: qa'
-    ].join('\n')
     const fromContent = await testKubernetesClusterConnection({
       contextName: 'qa/dev',
       serverUrl: 'https://qa.k8s.local:6443',

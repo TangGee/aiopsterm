@@ -1,5 +1,8 @@
+import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
-import { readFile } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { homedir, tmpdir } from 'os'
+import { join } from 'path'
 import type {
   AiopsMutationResult,
   KubernetesBastionGroup,
@@ -116,6 +119,8 @@ const defaultClusters: KubernetesClusterRecord[] = [
     bastion_asset_id_last: 1014
   }
 ]
+
+const developmentSeedClusterIds = new Set(defaultClusters.map((cluster) => cluster.id))
 
 const defaultNamespaces: KubernetesNamespaceInfo[] = [
   { id: 'k8s-ns-prod-default', clusterId: 'k8s-1', name: 'default', status: 'Active', age: '92d' },
@@ -827,6 +832,203 @@ const namespaceFromCommand = (command: string, fallback: string) => {
   return namespaceMatch?.[1] || fallback
 }
 
+const stripAnsi = (value: string) =>
+  value
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001b[@-Z\\-_]/g, '')
+
+const resolveKubectlCommand = () => process.env.AIOPSTERM_KUBECTL_PATH?.trim() || 'kubectl'
+
+const expandHomePath = (value: string) => {
+  if (value === '~') return homedir()
+  if (value.startsWith('~/') || value.startsWith('~\\')) return join(homedir(), value.slice(2))
+  return value
+}
+
+const hasArgument = (args: string[], names: string[]) =>
+  args.some((arg, index) => names.includes(arg) || names.some((name) => arg.startsWith(`${name}=`)) || (names.includes(args[index - 1]) && !arg.startsWith('-')))
+
+const hasNamespaceArgument = (args: string[]) => hasArgument(args, ['-n', '--namespace'])
+
+const hasContextArgument = (args: string[]) => hasArgument(args, ['--context'])
+
+const hasAllNamespacesArgument = (args: string[]) => args.includes('-A') || args.includes('--all-namespaces')
+
+const isClusterScopedCommand = (args: string[]) => {
+  const command = args[0]?.toLowerCase() || ''
+  if (!command || ['version', 'config', 'cluster-info', 'api-resources', 'api-versions'].includes(command)) return true
+  if (!['get', 'describe', 'delete'].includes(command)) return false
+  const kind = args.find((arg, index) => index > 0 && !arg.startsWith('-'))?.toLowerCase() || ''
+  return ['namespace', 'namespaces', 'ns', 'node', 'nodes', 'no', 'persistentvolume', 'persistentvolumes', 'pv', 'clusterrole', 'clusterroles'].includes(kind)
+}
+
+const tokenizeKubectlCommand = (command: string) => {
+  const args: string[] = []
+  let current = ''
+  let quote: '"' | "'" | '' = ''
+  let escaped = false
+
+  const pushCurrent = () => {
+    if (!current) return
+    args.push(current)
+    current = ''
+  }
+
+  for (const char of command.trim()) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = ''
+      else current += char
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (/\s/.test(char)) {
+      pushCurrent()
+      continue
+    }
+    current += char
+  }
+
+  if (escaped) current += '\\'
+  if (quote) {
+    return {
+      ok: false as const,
+      args: [],
+      error: `Unclosed ${quote === '"' ? 'double' : 'single'} quote in kubectl command.`
+    }
+  }
+  pushCurrent()
+  return { ok: true as const, args, error: '' }
+}
+
+const buildKubectlArgs = (command: string, cluster: KubernetesClusterRecord, namespace: string) => {
+  const parsed = tokenizeKubectlCommand(command)
+  if (!parsed.ok) return parsed
+  const args = [...parsed.args]
+  if (/^kubectl(?:\.exe)?$/i.test(args[0] || '')) args.shift()
+  if (!hasContextArgument(args)) args.push(`--context=${cluster.context_name}`)
+  if (namespace && namespace !== 'all' && !hasNamespaceArgument(args) && !hasAllNamespacesArgument(args) && !isClusterScopedCommand(args)) {
+    args.push(`--namespace=${namespace}`)
+  }
+  return { ok: true as const, args, error: '' }
+}
+
+const canRunLocalKubectl = (cluster: KubernetesClusterRecord) =>
+  !developmentSeedClusterIds.has(cluster.id) &&
+  cluster.source_type === 'local' &&
+  cluster.auth_type === 'kubeconfig' &&
+  Boolean(cluster.kubeconfig_content?.trim() || cluster.kubeconfig_path?.trim())
+
+const nonRunnableKubernetesReason = (cluster: KubernetesClusterRecord) => {
+  if (developmentSeedClusterIds.has(cluster.id)) return ''
+  if (cluster.source_type === 'jumpserver' || cluster.auth_type === 'jumpserver') {
+    return 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+  }
+  if (!cluster.kubeconfig_content?.trim() && !cluster.kubeconfig_path?.trim()) {
+    return 'Kubeconfig path or content is required before executing kubectl.'
+  }
+  return ''
+}
+
+const createKubectlEnvironment = async (cluster: KubernetesClusterRecord) => {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  let tempDir = ''
+  if (cluster.kubeconfig_content?.trim()) {
+    tempDir = await mkdtemp(join(tmpdir(), 'aiopsterm-kubeconfig-'))
+    const kubeconfigPath = join(tempDir, 'config')
+    await writeFile(kubeconfigPath, cluster.kubeconfig_content, { encoding: 'utf-8', mode: 0o600 })
+    env.KUBECONFIG = kubeconfigPath
+  } else if (cluster.kubeconfig_path?.trim()) {
+    env.KUBECONFIG = expandHomePath(cluster.kubeconfig_path.trim())
+  }
+  const cleanup = async () => {
+    if (tempDir) await rm(tempDir, { recursive: true, force: true })
+  }
+  return { env, cleanup }
+}
+
+const runLocalKubectl = async (
+  cluster: KubernetesClusterRecord,
+  command: string,
+  namespace: string,
+  timeoutMs = 30_000
+): Promise<{ success: boolean; output: string; error: string; exitCode?: number | null }> => {
+  const argsResult = buildKubectlArgs(command, cluster, namespace)
+  if (!argsResult.ok) return { success: false, output: '', error: argsResult.error, exitCode: null }
+
+  const { env, cleanup } = await createKubectlEnvironment(cluster)
+  try {
+    return await new Promise((resolve) => {
+      const child = spawn(resolveKubectlCommand(), argsResult.args, {
+        env,
+        cwd: homedir(),
+        windowsHide: true
+      })
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+      let timeoutId: ReturnType<typeof setTimeout>
+      const finish = (result: { success: boolean; output: string; error: string; exitCode?: number | null }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeoutId)
+        resolve(result)
+      }
+      timeoutId = setTimeout(() => {
+        child.kill()
+        const output = stripAnsi([stdout, stderr].filter(Boolean).join('\n')).trimEnd()
+        finish({
+          success: false,
+          output,
+          error: `kubectl command timed out after ${timeoutMs}ms.`,
+          exitCode: -1
+        })
+      }, timeoutMs)
+
+      child.stdout?.on('data', (data) => {
+        stdout += String(data)
+      })
+      child.stderr?.on('data', (data) => {
+        stderr += String(data)
+      })
+      child.on('error', (error) => {
+        finish({
+          success: false,
+          output: '',
+          error: error instanceof Error ? error.message : String(error),
+          exitCode: null
+        })
+      })
+      child.on('close', (code, signal) => {
+        const cleanStdout = stripAnsi(stdout).trimEnd()
+        const cleanStderr = stripAnsi(stderr).trimEnd()
+        const output = [cleanStdout, cleanStderr].filter(Boolean).join('\n')
+        const success = code === 0
+        finish({
+          success,
+          output,
+          error: success ? '' : cleanStderr || (signal ? `Command exited from signal ${signal}.` : `Command exited with code ${code}.`),
+          exitCode: code
+        })
+      })
+    })
+  } finally {
+    await cleanup()
+  }
+}
+
 const renderList = (command: string, clusterId: string, namespace: string) => {
   const getKind = command.match(/^kubectl\s+get\s+([^\s]+)/)
   const kind = getKind ? kindFromToken(getKind[1]) : null
@@ -976,6 +1178,41 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
       }
     }
     return { ok: false, errorCode: 'K8S_CLUSTER_REQUIRED', errorMessage: 'Kubernetes cluster is required.' }
+  }
+
+  const cluster = clusters.find((item) => item.id === input.clusterId)
+  if (!cluster) {
+    if (input.source === 'agent') {
+      return {
+        ok: true,
+        data: createKubernetesCommandRun(input, command, '', false, startedAt, 'Kubernetes cluster not found.')
+      }
+    }
+    return { ok: false, errorCode: 'K8S_CLUSTER_NOT_FOUND', errorMessage: 'Kubernetes cluster not found.' }
+  }
+
+  if (canRunLocalKubectl(cluster)) {
+    const namespace = input.namespace || cluster.default_namespace || input.defaultNamespace || 'default'
+    const result = await runLocalKubectl(cluster, command, namespace)
+    const output = result.output || result.error
+    return {
+      ok: true,
+      data: {
+        ...createKubernetesCommandRun(input, command, output, result.success, startedAt, result.error),
+        terminalOutput: renderTerminalCommandOutput(command, output, result.error)
+      }
+    }
+  }
+
+  const nonRunnableReason = nonRunnableKubernetesReason(cluster)
+  if (nonRunnableReason) {
+    return {
+      ok: true,
+      data: {
+        ...createKubernetesCommandRun(input, command, nonRunnableReason, false, startedAt, nonRunnableReason),
+        terminalOutput: renderTerminalCommandOutput(command, nonRunnableReason, nonRunnableReason)
+      }
+    }
   }
 
   const output = renderCommand({ ...input, command })
