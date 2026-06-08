@@ -4863,6 +4863,34 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.aboutSettings.version).toBe('0.1.1')
   })
 
+  it('does not fabricate user login or logout state when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshUserAccount()
+    const profileBefore = { ...store.userProfile }
+    const billingBefore = { ...store.billingSettings }
+    const originalOpenLogin = window.aiops.openUserLogin
+    const originalLogout = window.aiops.logoutUserAccount
+
+    try {
+      ;(window.aiops as any).openUserLogin = undefined
+      await expect(store.openUserLogin()).resolves.toBe(false)
+      expect(store.activeModule).toBe('user')
+      expect(store.userLoginTab).toBe('account')
+      expect(store.userNotice).toBe('登录服务不可用')
+      expect(store.userProfile).toEqual(profileBefore)
+      expect(store.billingSettings).toEqual(billingBefore)
+
+      ;(window.aiops as any).logoutUserAccount = undefined
+      await expect(store.logoutUser()).resolves.toBe(false)
+      expect(store.userNotice).toBe('登出服务不可用')
+      expect(store.userProfile).toEqual(profileBefore)
+      expect(store.billingSettings).toEqual(billingBefore)
+    } finally {
+      ;(window.aiops as any).openUserLogin = originalOpenLogin
+      ;(window.aiops as any).logoutUserAccount = originalLogout
+    }
+  })
+
   it('does not fabricate Skill writes when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshSkillsFromBridge()

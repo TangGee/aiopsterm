@@ -4757,10 +4757,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userLoginTab.value = 'account'
     resetUserCodeState('login')
     if (!window.aiops?.openUserLogin) {
-      userProfile.value = { ...userProfile.value, skippedLogin: true }
-      billingSettings.value.skippedLogin = true
-      setUserNotice('已打开本地登录页')
-      return true
+      setUserNotice('登录服务不可用')
+      return false
     }
     return applyUserMutationResult(await window.aiops.openUserLogin())
   }
@@ -4779,15 +4777,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resetUserCodeState('login')
     resetUserCodeState('contact')
     if (!window.aiops?.logoutUserAccount) {
-      userProfile.value = {
-        ...userProfile.value,
-        skippedLogin: true,
-        localDatabaseReady: false,
-        needDeviceVerification: false
-      }
-      billingSettings.value.skippedLogin = true
-      setUserNotice('已退出登录')
-      return true
+      setUserNotice('登出服务不可用')
+      return false
     }
     return applyUserMutationResult(await window.aiops.logoutUserAccount())
   }
