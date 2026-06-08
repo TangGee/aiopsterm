@@ -1021,6 +1021,31 @@ export type ChatAttachmentStageResult = {
   stagedPath: string
 }
 
+export type ChatImageAttachmentMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+export type ChatImageAttachmentPrepareInput = {
+  mediaType?: string
+  data?: string
+  name?: string
+  size?: number
+}
+
+export type ChatImageAttachmentValidateInput = Omit<ChatImageAttachmentPrepareInput, 'data'>
+
+export type ChatImageAttachmentValidateResult = AiopsMutationResult<{
+  mediaType: ChatImageAttachmentMediaType
+  name?: string
+  size: number
+}>
+
+export type ChatImageAttachmentPrepareResult = AiopsMutationResult<{
+  type: 'image'
+  mediaType: ChatImageAttachmentMediaType
+  data: string
+  name?: string
+  size: number
+}>
+
 export type AppUpdateCheckResult = {
   available: boolean
   channel: 'local' | 'manual' | 'auto'
@@ -1945,6 +1970,8 @@ export type AiopsPreloadApi = {
   readLocalFile: (filePath: string) => Promise<LocalFileReadResult>
   writeLocalFile: (filePath: string, content: string) => Promise<void>
   stageChatAttachment: (payload: { taskId: string; srcAbsPath: string }) => Promise<ChatAttachmentStageResult>
+  validateChatImageAttachment: (input: ChatImageAttachmentValidateInput) => Promise<ChatImageAttachmentValidateResult>
+  prepareChatImageAttachment: (input: ChatImageAttachmentPrepareInput) => Promise<ChatImageAttachmentPrepareResult>
   kbCheckPath: (absPath: string) => Promise<{ exists: boolean; isDirectory: boolean; isFile: boolean }>
   kbEnsureRoot: () => Promise<{ success: boolean }>
   kbGetRoot: () => Promise<{ root: string }>

@@ -40,6 +40,7 @@ import {
   saveChatMessageMetadata,
   updateChatConversation
 } from './backend/chatHistory'
+import { prepareChatImageAttachment, validateChatImageAttachment } from './backend/chatImageAttachment'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -226,6 +227,8 @@ import type {
   TerminalCommandGenerationInput,
   TerminalCommandSuggestionContext,
   TerminalCreateOptions,
+  ChatImageAttachmentPrepareInput,
+  ChatImageAttachmentValidateInput,
   UserConfig,
   VoiceTranscriptionInput,
   UserRuleConfig,
@@ -2661,6 +2664,8 @@ const registerIpc = () => {
       stagedPath
     }
   })
+  ipcMain.handle('chat:validate-image-attachment', (_event, input?: ChatImageAttachmentValidateInput) => validateChatImageAttachment(input || {}))
+  ipcMain.handle('chat:prepare-image-attachment', (_event, input?: ChatImageAttachmentPrepareInput) => prepareChatImageAttachment(input || {}))
   ipcMain.handle('kb:check-path', async (_event, payload: { absPath: string }) => {
     const absPath = typeof payload?.absPath === 'string' ? payload.absPath : ''
     try {

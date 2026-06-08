@@ -2032,6 +2032,61 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('prepares AI image attachments through the preload boundary without writing system chat messages', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.chatMessages = [{ id: 'existing-system', role: 'system', text: '已有后端消息。' }]
+
+    const originalFileReader = window.FileReader
+    const originalGlobalFileReader = globalThis.FileReader
+    const readAsDataUrl = vi.fn(function (this: { onload: null | (() => void) }) {
+      this.onload?.()
+    })
+    class MockImageFileReader {
+      result = 'data:text/plain;base64,VEVYVA=='
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      readAsDataURL = readAsDataUrl
+    }
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockImageFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockImageFileReader })
+
+    try {
+      vi.mocked(window.aiops.validateChatImageAttachment).mockClear()
+      vi.mocked(window.aiops.prepareChatImageAttachment).mockClear()
+      const invalidImageFile = new File(['TEXT'], 'note.txt', { type: 'text/plain' })
+      Object.defineProperty(wrapper.find('.chat-input input[type="file"]').element, 'files', {
+        configurable: true,
+        value: [invalidImageFile]
+      })
+      await wrapper.find('.chat-input input[type="file"]').trigger('change')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      expect(window.aiops.validateChatImageAttachment).toHaveBeenCalledWith({
+        mediaType: 'text/plain',
+        name: 'note.txt',
+        size: invalidImageFile.size
+      })
+      expect(window.aiops.prepareChatImageAttachment).not.toHaveBeenCalled()
+      expect(readAsDataUrl).not.toHaveBeenCalled()
+      expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(false)
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：不支持的图片类型')
+      expect(store.chatMessages).toEqual([{ id: 'existing-system', role: 'system', text: '已有后端消息。' }])
+      expect(store.chatMessages.some((message) => message.id.startsWith('image-upload'))).toBe(false)
+    } finally {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+      wrapper.unmount()
+    }
+  })
+
   it('opens and resets the AI command popup with External reference-style keyboard focus behavior', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -2351,6 +2406,8 @@ describe('AppShell', () => {
     await markdownDocAgain!.trigger('click')
     await mainInput.element.appendChild(document.createTextNode('检查回滚窗口'))
     await mainInput.trigger('input')
+    vi.mocked(window.aiops.validateChatImageAttachment).mockClear()
+    vi.mocked(window.aiops.prepareChatImageAttachment).mockClear()
     const imageFile = new File([new Uint8Array([137, 80, 78, 71])], 'input.png', { type: 'image/png' })
     Object.defineProperty(wrapper.find('.chat-input input[type="file"]').element, 'files', {
       configurable: true,
@@ -2360,6 +2417,17 @@ describe('AppShell', () => {
     await flushPromises()
     await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.vm.$nextTick()
+    expect(window.aiops.validateChatImageAttachment).toHaveBeenCalledWith({
+      mediaType: 'image/png',
+      name: 'input.png',
+      size: imageFile.size
+    })
+    expect(window.aiops.prepareChatImageAttachment).toHaveBeenCalledWith({
+      mediaType: 'image/png',
+      data: expect.any(String),
+      name: 'input.png',
+      size: imageFile.size
+    })
     expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-context-usage-ring"]').attributes('title')).toContain('context used')
     const sendSlashTextNode = document.createTextNode('/')

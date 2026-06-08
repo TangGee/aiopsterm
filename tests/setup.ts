@@ -19,6 +19,7 @@ import type {
   McpServerUserConfig,
   SshAgentKeychainOption
 } from '@shared/preload'
+import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
 import { createHash } from 'crypto'
 import { vi } from 'vitest'
 
@@ -4109,6 +4110,8 @@ Object.defineProperty(window, 'aiops', {
         stagedPath: `/tmp/aiopsterm/chat-attachments/${taskId}/${name}`
       }
     }),
+    validateChatImageAttachment: vi.fn(async (input: Parameters<typeof validateChatImageAttachment>[0]) => validateChatImageAttachment(input)),
+    prepareChatImageAttachment: vi.fn(async (input: Parameters<typeof prepareChatImageAttachment>[0]) => prepareChatImageAttachment(input)),
     kbCheckPath: vi.fn(async (absPath: string) => ({ exists: true, isDirectory: absPath.endsWith('/folder'), isFile: !absPath.endsWith('/folder') })),
     kbEnsureRoot: vi.fn(async () => ({ success: true })),
     kbGetRoot: vi.fn(async () => ({ root: '/tmp/aiopsterm/knowledgebase' })),

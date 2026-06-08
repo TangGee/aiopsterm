@@ -1243,7 +1243,6 @@ const preferredVoiceMimeTypes = [
   'audio/aac',
   'audio/wav'
 ]
-const supportedImageTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const imagePartMediaTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
 const chatAttachmentFilters = [
   {
@@ -1273,7 +1272,6 @@ const chatAttachmentFilters = [
     ]
   }
 ]
-const maxImageBytes = 10 * 1024 * 1024
 const maxHostContexts = 5
 const todoMaxItems = 20
 const todoShowSubtasks = true
@@ -3174,24 +3172,38 @@ const fileToBase64 = (file: File) =>
   })
 
 const processImageFile = async (file: File): Promise<AiImageContentPart | null> => {
-  if (!supportedImageTypes.includes(file.type as AiSupportedImageType)) {
-    workspace.chatMessages.push({
-      id: `image-upload-${Date.now()}`,
-      role: 'system',
-      text: `不支持的图片类型：${file.type || file.name}`
+  try {
+    const validation = await window.aiops.validateChatImageAttachment({
+      mediaType: file.type,
+      name: file.name,
+      size: file.size
     })
+    if (!validation.ok || !validation.data) {
+      showInputPlaceholderNotice(`图片上传失败：${validation.errorMessage || validation.errorCode || '图片校验失败'}`)
+      return null
+    }
+
+    const data = await fileToBase64(file)
+    const result = await window.aiops.prepareChatImageAttachment({
+      mediaType: validation.data.mediaType,
+      data,
+      name: validation.data.name,
+      size: validation.data.size
+    })
+    if (!result.ok || !result.data) {
+      showInputPlaceholderNotice(`图片上传失败：${result.errorMessage || result.errorCode || '图片处理失败'}`)
+      return null
+    }
+    return {
+      type: 'image',
+      mediaType: result.data.mediaType,
+      data: result.data.data,
+      name: result.data.name
+    }
+  } catch (error) {
+    showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
     return null
   }
-  if (file.size > maxImageBytes) {
-    workspace.chatMessages.push({
-      id: `image-upload-${Date.now()}`,
-      role: 'system',
-      text: `图片超过 10 MiB：${file.name}`
-    })
-    return null
-  }
-  const data = await fileToBase64(file)
-  return { type: 'image', mediaType: file.type as AiSupportedImageType, data, name: file.name }
 }
 
 const insertImageFiles = async (files: File[]) => {
