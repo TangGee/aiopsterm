@@ -36,6 +36,7 @@ const defaultEditorSettings = {
 const defaultSshProxyConfigs: any[] = []
 
 const defaultSshAgentKeys: any[] = []
+const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
 
 const defaultKeywordHighlight = {
   'keyword-highlight': {
@@ -930,19 +931,19 @@ describe('workspace store', () => {
       sshProxyConfigs: defaultSshProxyConfigs,
       sshAgentKeys: [
         {
-          id: ' key-prod-ed25519 ',
+          id: ' key-1 ',
           fingerprint: ' SHA256:prod ',
           comment: ' prod-ed25519 ',
           keyType: ' ed25519 ',
-          keyChainId: ' key-prod-ed25519 ',
+          keyChainId: ' key-1 ',
           extra: true
         } as any,
         {
-          id: 'key-prod-ed25519',
+          id: 'key-1',
           fingerprint: 'SHA256:duplicate',
           comment: 'duplicate',
           keyType: 'RSA',
-          keyChainId: 'key-prod-ed25519'
+          keyChainId: 'key-1'
         },
         {
           id: '',
@@ -996,26 +997,53 @@ describe('workspace store', () => {
 
     expect(store.sshAgentKeys).toEqual([
       {
-        id: 'key-prod-ed25519',
+        id: 'key-1',
         fingerprint: 'SHA256:prod',
         comment: 'prod-ed25519',
         keyType: 'ED25519',
-        keyChainId: 'key-prod-ed25519'
+        keyChainId: 'key-1'
+      }
+    ])
+    expect(window.aiops.listSshAgentKeychainOptions).toHaveBeenCalled()
+    expect(store.sshAgentKeyChainOptions).toEqual([
+      {
+        key: 'key-1',
+        label: 'prod-ed25519',
+        fingerprint: prodKeychainSshAgentFingerprint,
+        keyType: 'ED25519'
+      },
+      {
+        key: 'key-2',
+        label: 'staging-rsa',
+        fingerprint: 'SHA256:/+3Ox/lagG69520s5FqjN11505yiwGiXccCtpZYvucc',
+        keyType: 'RSA'
       }
     ])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         sshAgentKeys: [
           {
-            id: 'key-prod-ed25519',
+            id: 'key-1',
             fingerprint: 'SHA256:prod',
             comment: 'prod-ed25519',
             keyType: 'ED25519',
-            keyChainId: 'key-prod-ed25519'
+            keyChainId: 'key-1'
           }
         ]
       })
     )
+  })
+
+  it('does not fall back to renderer SSH Agent keychain fixtures when the bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    const originalListSshAgentKeychainOptions = window.aiops.listSshAgentKeychainOptions
+    try {
+      ;(window.aiops as any).listSshAgentKeychainOptions = undefined
+      expect(await store.refreshSshAgentKeychainOptions()).toBe(false)
+      expect(store.sshAgentKeyChainOptions).toEqual([])
+    } finally {
+      ;(window.aiops as any).listSshAgentKeychainOptions = originalListSshAgentKeychainOptions
+    }
   })
 
   it('hydrates and migrates External reference-style user rules and legacy custom instructions', async () => {
@@ -4117,28 +4145,30 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.saveConfig).mockClear()
     store.updateTerminalSettings({ sshAgentsStatus: true })
     expect(store.terminalSettings.sshAgentsStatus).toBe(true)
+    expect(await store.refreshSshAgentKeychainOptions()).toBe(true)
+    expect(window.aiops.listSshAgentKeychainOptions).toHaveBeenCalled()
     store.openSshAgentConfig()
     expect(store.sshAgentConfigModalOpen).toBe(true)
-    store.setSshAgentSelectedKey('key-prod-ed25519')
+    store.setSshAgentSelectedKey('key-1')
     expect(store.addSshAgentKey()).toBe(true)
     expect(store.sshAgentKeys).toEqual([
       {
-        id: 'key-prod-ed25519',
-        fingerprint: 'SHA256:6qY8zR2aQ0prodEd25519',
+        id: 'key-1',
+        fingerprint: prodKeychainSshAgentFingerprint,
         comment: 'prod-ed25519',
         keyType: 'ED25519',
-        keyChainId: 'key-prod-ed25519'
+        keyChainId: 'key-1'
       }
     ])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         sshAgentKeys: [
           {
-            id: 'key-prod-ed25519',
-            fingerprint: 'SHA256:6qY8zR2aQ0prodEd25519',
+            id: 'key-1',
+            fingerprint: prodKeychainSshAgentFingerprint,
             comment: 'prod-ed25519',
             keyType: 'ED25519',
-            keyChainId: 'key-prod-ed25519'
+            keyChainId: 'key-1'
           }
         ]
       })
@@ -4146,7 +4176,7 @@ describe('workspace store', () => {
     expect(store.addSshAgentKey()).toBe(false)
     expect(store.settingsNotice).toContain('请选择密钥')
     vi.mocked(window.aiops.saveConfig).mockClear()
-    expect(store.removeSshAgentKey('key-prod-ed25519')).toBe(true)
+    expect(store.removeSshAgentKey('key-1')).toBe(true)
     expect(store.sshAgentKeys).toEqual([])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({

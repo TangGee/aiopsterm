@@ -78,6 +78,7 @@ import type {
   ShortcutUserConfig,
   SkillUserConfig,
   SshAgentKeyConfig,
+  SshAgentKeychainOption,
   SshProxyConfig,
   SshProxyType,
   TerminalCommandGenerationContext,
@@ -382,13 +383,6 @@ const defaultAiModelCatalog: AiModelCatalog = {
 }
 
 type SshProxyForm = SshProxyConfig
-
-type SshAgentKeyChainOption = {
-  key: string
-  label: string
-  fingerprint: string
-  keyType: string
-}
 
 export type KeywordHighlightSettings = KeywordHighlightUserConfig
 export type SecuritySettings = SecurityUserConfig
@@ -896,27 +890,6 @@ const defaultMcpConfigFile = (): McpConfigFile => ({
     ])
   )
 })
-const defaultSshAgentKeyChainOptions: SshAgentKeyChainOption[] = [
-  {
-    key: 'key-prod-ed25519',
-    label: 'prod-ed25519',
-    fingerprint: 'SHA256:6qY8zR2aQ0prodEd25519',
-    keyType: 'ED25519'
-  },
-  {
-    key: 'key-staging-rsa',
-    label: 'staging-rsa',
-    fingerprint: 'SHA256:9uP1mR4bL7stagingRSA',
-    keyType: 'RSA'
-  },
-  {
-    key: 'key-bastion-ecdsa',
-    label: 'bastion-ecdsa',
-    fingerprint: 'SHA256:3wK5nE8cT2bastionECDSA',
-    keyType: 'ECDSA'
-  }
-]
-
 const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi'] as const
 const terminalCursorStyles = ['block', 'bar', 'underline'] as const
 const middleMouseEventActions: TerminalMouseEventAction[] = ['none', 'paste', 'contextMenu', 'closeTab']
@@ -1208,6 +1181,25 @@ const normalizeSshAgentKeys = (source?: unknown) => {
     normalized,
     changed
   }
+}
+
+const normalizeSshAgentKeychainOptions = (source?: unknown): SshAgentKeychainOption[] => {
+  const rawOptions = Array.isArray(source) ? source : []
+  const seenKeys = new Set<string>()
+  const normalized: SshAgentKeychainOption[] = []
+
+  rawOptions.forEach((item) => {
+    if (!isRecord(item)) return
+    const key = typeof item.key === 'string' ? item.key.trim() : ''
+    const label = typeof item.label === 'string' ? item.label.trim() : ''
+    const fingerprint = typeof item.fingerprint === 'string' ? item.fingerprint.trim() : ''
+    const keyType = typeof item.keyType === 'string' ? item.keyType.trim().toUpperCase() : ''
+    if (!key || !label || !fingerprint || !keyType || seenKeys.has(key)) return
+    seenKeys.add(key)
+    normalized.push({ key, label, fingerprint, keyType })
+  })
+
+  return normalized
 }
 
 const booleanFromExtensionStatus = (value: unknown, fallback: boolean) => {
@@ -2689,7 +2681,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const sshAgentKeys = ref<SshAgentKeyConfig[]>([])
   const sshAgentConfigModalOpen = ref(false)
   const sshAgentSelectedKey = ref('')
-  const sshAgentKeyChainOptions = ref<SshAgentKeyChainOption[]>(defaultSshAgentKeyChainOptions.map((option) => ({ ...option })))
+  const sshAgentKeyChainOptions = ref<SshAgentKeychainOption[]>([])
   const aiModelOptions = ref<AiModelOption[]>([])
   const lockedAiModelOptions = ref<AiModelOption[]>([])
   const settingModelOptions = ref<SettingsModelOption[]>([])
@@ -3166,6 +3158,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const onboardingActiveSteps = computed(() => (onboardingActiveTour.value ? onboardingTourSteps[onboardingActiveTour.value] : []))
   const onboardingActiveStep = computed(() => onboardingActiveSteps.value[onboardingActiveStepIndex.value] || null)
 
+  const refreshSshAgentKeychainOptions = async () => {
+    if (!window.aiops?.listSshAgentKeychainOptions) {
+      sshAgentKeyChainOptions.value = []
+      return false
+    }
+    try {
+      const options = await window.aiops.listSshAgentKeychainOptions()
+      sshAgentKeyChainOptions.value = normalizeSshAgentKeychainOptions(options)
+      return true
+    } catch {
+      sshAgentKeyChainOptions.value = []
+      setSettingsNotice('SSH Agent 密钥列表加载失败')
+      return false
+    }
+  }
+
   const hydrateConfig = async () => {
     if (!window.aiops) return
     const savedConfig = await window.aiops.getConfig()
@@ -3200,6 +3208,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sshProxyConfigs.value = normalizedSshProxyConfigs.map((config) => ({ ...config }))
     const { normalized: normalizedSshAgentKeys, changed: sshAgentKeysChanged } = normalizeSshAgentKeys(savedConfig.sshAgentKeys)
     sshAgentKeys.value = normalizedSshAgentKeys.map((key) => ({ ...key }))
+    await refreshSshAgentKeychainOptions()
     const { normalized: normalizedExtensionSettings, changed: extensionSettingsChanged } = normalizeExtensionSettingsConfig(savedConfig.extensionSettings)
     extensionSettings.value = normalizedExtensionSettings
     const { normalized: normalizedKeywordHighlight, changed: keywordHighlightChanged } = normalizeKeywordHighlightConfig(savedConfig.keywordHighlight)
@@ -4181,6 +4190,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const openSshAgentConfig = () => {
     sshAgentConfigModalOpen.value = true
+    void refreshSshAgentKeychainOptions()
   }
 
   const closeSshAgentConfig = () => {
@@ -8835,6 +8845,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateSshProxyForm,
     saveSshProxyForm,
     removeSshProxyConfig,
+    refreshSshAgentKeychainOptions,
     openSshAgentConfig,
     closeSshAgentConfig,
     setSshAgentSelectedKey,

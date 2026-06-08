@@ -16,8 +16,10 @@ import type {
   DatabaseTableInfo,
   AiTodoItem,
   AiTodoSnapshotResult,
-  McpServerUserConfig
+  McpServerUserConfig,
+  SshAgentKeychainOption
 } from '@shared/preload'
+import { createHash } from 'crypto'
 import { vi } from 'vitest'
 
 type TestAppUpdateProgressEvent = {
@@ -2806,6 +2808,16 @@ const sanitizeKeychain = (keychain: TestKeychainRecord): TestKeychainRecord => (
   passphrase: undefined,
   hasPrivateKey: Boolean(keychain.privateKey || keychain.hasPrivateKey)
 })
+const keychainFingerprintMock = (keychain: TestKeychainRecord) => {
+  const source = keychain.publicKey || keychain.name || keychain.id
+  return `SHA256:${createHash('sha256').update(source).digest('base64').replace(/=+$/, '')}`
+}
+const keychainToSshAgentOptionMock = (keychain: TestKeychainRecord): SshAgentKeychainOption => ({
+  key: keychain.id,
+  label: keychain.name,
+  fingerprint: keychainFingerprintMock(keychain),
+  keyType: keychain.type.toUpperCase()
+})
 const hasOwn = (source: object, key: string) => Object.prototype.hasOwnProperty.call(source, key)
 
 let assetStoreMock = defaultAssets.map(cloneAsset)
@@ -4080,6 +4092,9 @@ Object.defineProperty(window, 'aiops', {
       return { ok: true, data: { uuid } }
     }),
     listKeychains: vi.fn(async () => keychainStoreMock.map(sanitizeKeychain)),
+    listSshAgentKeychainOptions: vi.fn(async () =>
+      keychainStoreMock.filter((keychain) => keychain.hasPrivateKey || keychain.privateKey).map(keychainToSshAgentOptionMock)
+    ),
     getKeychain: vi.fn(async (id: string) => keychainStoreMock.find((keychain) => keychain.id === id) || null),
     saveKeychain: vi.fn(async (input: TestKeychainInput) => {
       const index = keychainStoreMock.findIndex((keychain) => keychain.id === input.id)

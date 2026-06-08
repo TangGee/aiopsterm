@@ -119,6 +119,25 @@ describe('assets backend boundary', () => {
     expect(ignoredClientUuid.data?.uuid).not.toBe('custom-folder-client-draft')
   })
 
+  it('derives SSH Agent keychain options from backend-owned keychains', async () => {
+    const backend = await loadBackend()
+    const options = backend.listSshAgentKeychainOptions()
+
+    expect(options).toContainEqual({
+      key: 'key-1',
+      label: 'prod-ed25519',
+      fingerprint: 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE',
+      keyType: 'ED25519'
+    })
+    expect(options).toContainEqual({
+      key: 'key-2',
+      label: 'staging-rsa',
+      fingerprint: 'SHA256:/+3Ox/lagG69520s5FqjN11505yiwGiXccCtpZYvucc',
+      keyType: 'RSA'
+    })
+    expect(options.every((option: Record<string, unknown>) => !('privateKey' in option) && !('passphrase' in option))).toBe(true)
+  })
+
   it('refreshes organization assets and returns a backend-owned snapshot', async () => {
     const backend = await loadBackend()
     const refreshed = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })

@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import Store from 'electron-store'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { join } from 'path'
 import type {
   AiopsAssetInput,
@@ -13,7 +13,8 @@ import type {
   AiopsKeychainType,
   AiopsMutationResult,
   AiopsOrganizationAssetRefreshInput,
-  AiopsOrganizationAssetRefreshResult
+  AiopsOrganizationAssetRefreshResult,
+  SshAgentKeychainOption
 } from '@shared/preload'
 
 type AssetSecret = {
@@ -324,6 +325,18 @@ const assertUniqueKeychainName = (keychains: AiopsKeychainRecord[], keychain: Ai
     throw new Error(`Keychain already exists: ${keychain.name}`)
   }
 }
+
+const keychainFingerprint = (keychain: AiopsKeychainRecord) => {
+  const source = keychain.publicKey || keychain.name || keychain.id
+  return `SHA256:${createHash('sha256').update(source).digest('base64').replace(/=+$/, '')}`
+}
+
+const keychainToSshAgentOption = (keychain: AiopsKeychainRecord): SshAgentKeychainOption => ({
+  key: keychain.id,
+  label: keychain.name,
+  fingerprint: keychainFingerprint(keychain),
+  keyType: keychain.type.toUpperCase()
+})
 
 class FallbackAssetStore {
   private store = new Store<AssetStoreShape>({
@@ -733,6 +746,8 @@ export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshIn
     }
   })
 export const listKeychains = (): AiopsKeychainRecord[] => getStore().listKeychains()
+export const listSshAgentKeychainOptions = (): SshAgentKeychainOption[] =>
+  listKeychains().filter((keychain) => keychain.hasPrivateKey).map(keychainToSshAgentOption)
 export const getKeychain = (id: string): AiopsKeychainRecord | null => getStore().getKeychain(id)
 export const saveKeychain = (input: AiopsKeychainInput): AiopsMutationResult<AiopsKeychainRecord> => asResult(() => getStore().saveKeychain(input))
 export const deleteKeychain = (id: string): AiopsMutationResult<{ id: string }> =>

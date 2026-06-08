@@ -194,6 +194,8 @@ import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { FileSessionInfo, KeywordHighlightUserConfig } from '@shared/preload'
 
+const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
+
 const waitForDatabaseSqlResult = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 0))
   await flushPromises()
@@ -5728,22 +5730,24 @@ describe('AppShell', () => {
     const agentRow = workspace.findAll('.settings-form-row').find((row) => row.text().includes('SSH Agent 设置'))!
     vi.mocked(window.aiops.saveConfig).mockClear()
     await agentRow.find('button').trigger('click')
+    await flushPromises()
     expect(workspace.find('.agent-config-modal').exists()).toBe(true)
     expect(workspace.text()).toContain('暂无密钥添加')
-    await workspace.find('.agent-config-modal .settings-select').setValue('key-prod-ed25519')
+    expect(window.aiops.listSshAgentKeychainOptions).toHaveBeenCalled()
+    await workspace.find('.agent-config-modal .settings-select').setValue('key-1')
     await workspace.find('.agent-key-form .settings-button.primary').trigger('click')
-    expect(store.sshAgentKeys.some((key) => key.id === 'key-prod-ed25519')).toBe(true)
+    expect(store.sshAgentKeys.some((key) => key.id === 'key-1')).toBe(true)
     expect(workspace.text()).toContain('prod-ed25519')
     expect(workspace.text()).toContain('ED25519')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         sshAgentKeys: [
           {
-            id: 'key-prod-ed25519',
-            fingerprint: 'SHA256:6qY8zR2aQ0prodEd25519',
+            id: 'key-1',
+            fingerprint: prodKeychainSshAgentFingerprint,
             comment: 'prod-ed25519',
             keyType: 'ED25519',
-            keyChainId: 'key-prod-ed25519'
+            keyChainId: 'key-1'
           }
         ]
       })

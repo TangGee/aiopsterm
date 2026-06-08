@@ -156,6 +156,7 @@ const api: AiopsPreloadApi = {
   saveAssetFolder: (folder) => ipcRenderer.invoke('assets:folder:save', folder),
   deleteAssetFolder: (uuid: string) => ipcRenderer.invoke('assets:folder:delete', uuid),
   listKeychains: () => ipcRenderer.invoke('assets:keychains:list'),
+  listSshAgentKeychainOptions: () => ipcRenderer.invoke('assets:keychains:ssh-agent-options'),
   getKeychain: (id: string) => ipcRenderer.invoke('assets:keychains:get', id),
   saveKeychain: (keychain) => ipcRenderer.invoke('assets:keychains:save', keychain),
   deleteKeychain: (id: string) => ipcRenderer.invoke('assets:keychains:delete', id),

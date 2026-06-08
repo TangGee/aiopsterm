@@ -18,6 +18,7 @@ import {
   getKeychainSecret,
   listAssets,
   listKeychains,
+  listSshAgentKeychainOptions,
   refreshOrganizationAssets,
   saveAsset,
   saveAssetFolder,
@@ -2498,6 +2499,7 @@ const registerIpc = () => {
   ipcMain.handle('assets:folder:save', (_event, folder: AiopsCustomFolderSaveInput) => saveAssetFolder(folder))
   ipcMain.handle('assets:folder:delete', (_event, uuid: string) => deleteAssetFolder(uuid))
   ipcMain.handle('assets:keychains:list', () => listKeychains())
+  ipcMain.handle('assets:keychains:ssh-agent-options', () => listSshAgentKeychainOptions())
   ipcMain.handle('assets:keychains:get', (_event, id: string) => getKeychain(id))
   ipcMain.handle('assets:keychains:save', (_event, keychain: AiopsKeychainInput) => saveKeychain(keychain))
   ipcMain.handle('assets:keychains:delete', (_event, id: string) => deleteKeychain(id))

@@ -450,6 +450,13 @@ export type SshAgentKeyConfig = {
   keyChainId: string
 }
 
+export type SshAgentKeychainOption = {
+  key: string
+  label: string
+  fingerprint: string
+  keyType: string
+}
+
 export type TerminalUserConfig = {
   terminalType: string
   fontFamily: string
@@ -1911,6 +1918,7 @@ export type AiopsPreloadApi = {
   saveAssetFolder: (folder: AiopsCustomFolderSaveInput) => Promise<AiopsMutationResult<AiopsCustomFolderRecord>>
   deleteAssetFolder: (uuid: string) => Promise<AiopsMutationResult<{ uuid: string }>>
   listKeychains: () => Promise<AiopsKeychainRecord[]>
+  listSshAgentKeychainOptions: () => Promise<SshAgentKeychainOption[]>
   getKeychain: (id: string) => Promise<AiopsKeychainRecord | null>
   saveKeychain: (keychain: AiopsKeychainInput) => Promise<AiopsMutationResult<AiopsKeychainRecord>>
   deleteKeychain: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
