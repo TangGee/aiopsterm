@@ -1193,6 +1193,72 @@ export const mutateFileEntry = async (mutation: FileEntryMutation, options: File
   return task ? { ...result, data: { ...result.data, task } } : result
 }
 
+const downloadRemoteFileViaSftp = async (remotePath: string, localPath: string, options: FileListOptions): Promise<FileTransferOperationResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const source = normalizeRemotePath(remotePath)
+  const destination = String(localPath || '').trim()
+  const mtimeMs = Date.now()
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      const stats = await sftpStat(sftp, source)
+      if (sftpEntryType(stats) !== 'file') return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
+      const content = await sftpReadFile(sftp, source)
+      await mkdir(getLocalDirname(destination), { recursive: true })
+      await writeFile(destination, content)
+      const task = createFileTransferTaskRecord({
+        type: 'download',
+        name: basename(source),
+        source,
+        target: destination,
+        progress: 100,
+        speed: '完成',
+        status: 'success',
+        fromHost: transferFromHost(options),
+        ...(options.toHost ? { toHost: options.toHost } : {})
+      })
+      return { ok: true, data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task } }
+    })
+  } catch (error) {
+    return fileError(error, 'transfer_failed')
+  }
+}
+
+const uploadRemoteFileViaSftp = async (
+  localPath: string,
+  remoteDirectory: string,
+  name: string,
+  options: FileListOptions
+): Promise<FileTransferOperationResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const source = String(localPath || '').trim()
+  const destination = normalizeRemotePath(`${remoteDirectory}/${name}`)
+  const mtimeMs = Date.now()
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      const content = await readFile(source)
+      await ensureRemoteParentDirs(sftp, dirname(destination))
+      await sftpWriteFile(sftp, destination, content)
+      const task = createFileTransferTaskRecord({
+        type: 'upload',
+        name,
+        source,
+        target: destination,
+        progress: 100,
+        speed: '完成',
+        status: 'success',
+        ...(options.fromHost ? { fromHost: options.fromHost } : {}),
+        toHost: transferToHost(options),
+        stage: 'pending'
+      })
+      return { ok: true, data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task } }
+    })
+  } catch (error) {
+    return fileError(error, 'transfer_failed')
+  }
+}
+
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {
   const mtimeMs = Date.now()
   try {
@@ -1222,6 +1288,8 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
       const source = normalizeRemotePath(operation.remotePath)
       const target = String(operation.localPath || '').trim()
       if (!source || !target) return { ok: false, errorCode: 'invalid_path', errorMessage: 'File path is required' }
+      const sftpResult = await downloadRemoteFileViaSftp(source, target, { ...options, kind: 'remote' })
+      if (sftpResult) return sftpResult
       const readResult = await readFileContent(source, { ...options, kind: 'remote' })
       if (!readResult.ok) return { ok: false, errorCode: readResult.errorCode, errorMessage: readResult.errorMessage }
       await mkdir(getLocalDirname(target), { recursive: true })
@@ -1271,6 +1339,8 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
       return { ok: true, data: { status: 'success', source: localPath, target, bytes: 0, files: 1, mtimeMs, itemKind: 'directory', task } }
     }
     if (!metadata.isFile()) return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
+    const sftpResult = await uploadRemoteFileViaSftp(localPath, remoteDirectory, name, { ...options, kind: 'remote' })
+    if (sftpResult) return sftpResult
     const content = await readFile(localPath, 'utf-8')
     await writeFileContent(target, content, { ...options, kind: 'remote' })
     const task = createFileTransferTaskRecord({

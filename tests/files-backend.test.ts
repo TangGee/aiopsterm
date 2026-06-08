@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -760,6 +760,80 @@ describe('files backend content boundary', () => {
         { method: 'writeFile', path: '/srv/archive/app-copy.log', content: 'hello log\n' }
       ])
     )
+  })
+
+  it('uploads and downloads asset-backed remote transfer entries through binary-safe SFTP operations', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-binary-transfer-'))
+    const localUpload = join(dir, 'binary.bin')
+    const localDownload = join(dir, 'downloaded.bin')
+    const uploadBytes = Buffer.from([0, 1, 2, 3, 127, 128, 255])
+    const downloadBytes = Buffer.from([255, 128, 0, 65, 10])
+    try {
+      await writeFile(localUpload, uploadBytes)
+      ssh2Mock.nodes.set('/srv/archive/remote.bin', { type: 'file', content: downloadBytes, mode: 0o100600, mtime: 1_717_200_400 })
+
+      const uploaded = await transferFileEntry(
+        { kind: 'upload-file', localPath: localUpload, remoteDirectory: '/srv/archive' },
+        { kind: 'remote', sessionId, fromHost: '127.0.0.1', toHost: 'sftp.example.test' }
+      )
+      expect(uploaded.ok).toBe(true)
+      expect(uploaded.data).toEqual(
+        expect.objectContaining({
+          status: 'success',
+          source: localUpload,
+          target: '/srv/archive/binary.bin',
+          bytes: uploadBytes.length,
+          files: 1,
+          itemKind: 'file',
+          task: expect.objectContaining({
+            type: 'upload',
+            name: 'binary.bin',
+            source: localUpload,
+            target: '/srv/archive/binary.bin',
+            fromHost: '127.0.0.1',
+            toHost: 'sftp.example.test',
+            stage: 'pending',
+            status: 'success'
+          })
+        })
+      )
+      expect(ssh2Mock.nodes.get('/srv/archive/binary.bin')?.content).toEqual(uploadBytes)
+
+      const downloaded = await transferFileEntry(
+        { kind: 'download-file', remotePath: '/srv/archive/remote.bin', localPath: localDownload },
+        { kind: 'remote', sessionId, fromHost: 'sftp.example.test', toHost: '127.0.0.1' }
+      )
+      expect(downloaded.ok).toBe(true)
+      expect(downloaded.data).toEqual(
+        expect.objectContaining({
+          status: 'success',
+          source: '/srv/archive/remote.bin',
+          target: localDownload,
+          bytes: downloadBytes.length,
+          files: 1,
+          itemKind: 'file',
+          task: expect.objectContaining({
+            type: 'download',
+            name: 'remote.bin',
+            source: '/srv/archive/remote.bin',
+            target: localDownload,
+            fromHost: 'sftp.example.test',
+            toHost: '127.0.0.1',
+            status: 'success'
+          })
+        })
+      )
+      expect(await readFile(localDownload)).toEqual(downloadBytes)
+      expect(ssh2Mock.calls).toEqual(
+        expect.arrayContaining([
+          { method: 'writeFile', path: '/srv/archive/binary.bin', content: uploadBytes.toString('utf-8') },
+          { method: 'readFile', path: '/srv/archive/remote.bin' }
+        ])
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('returns create mode for missing remote files and persists writes', async () => {
