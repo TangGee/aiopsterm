@@ -3866,6 +3866,75 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('release-note-v2.md')
   })
 
+  it('does not silently ignore Files open/upload/download dialog bridge failures', async () => {
+    const originalAiops = {
+      showOpenDialog: window.aiops.showOpenDialog,
+      showSaveDialog: window.aiops.showSaveDialog
+    }
+
+    try {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const localSession = await loadTestFileSession('local')
+      const localBrowser = mount(FileBrowser, {
+        props: {
+          session: localSession,
+          uiMode: 'default'
+        },
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+      ;(window.aiops as any).showOpenDialog = undefined
+      await localBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '打开文件夹')!.trigger('click')
+      await flushPromises()
+      expect(localBrowser.text()).toContain('打开文件夹对话框服务不可用')
+      expect((localBrowser.find('.file-path-input').element as HTMLInputElement).value).toBe('/')
+      localBrowser.unmount()
+
+      ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
+      const remoteSession = await loadTestFileSession('folder_asset-2')
+      const remoteBrowser = mount(FileBrowser, {
+        props: {
+          session: remoteSession,
+          uiMode: 'default'
+        },
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+
+      vi.mocked(window.aiops.transferFileEntry).mockClear()
+      ;(window.aiops as any).showOpenDialog = undefined
+      await remoteBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传文件')!.trigger('click')
+      await flushPromises()
+      expect(remoteBrowser.text()).toContain('上传文件选择对话框服务不可用')
+      expect(window.aiops.transferFileEntry).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
+      vi.mocked(window.aiops.showOpenDialog!).mockRejectedValueOnce(new Error('dialog crashed'))
+      await remoteBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传目录')!.trigger('click')
+      await flushPromises()
+      expect(remoteBrowser.text()).toContain('上传目录选择对话框失败')
+      expect(window.aiops.transferFileEntry).not.toHaveBeenCalled()
+
+      const remoteFileRow = remoteBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+      ;(window.aiops as any).showSaveDialog = undefined
+      await remoteFileRow.find('.file-row-actions button[title="下载"]').trigger('click')
+      await flushPromises()
+      expect(remoteBrowser.text()).toContain('下载保存对话框服务不可用')
+      expect(window.aiops.transferFileEntry).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).showSaveDialog = originalAiops.showSaveDialog
+      vi.mocked(window.aiops.showSaveDialog!).mockRejectedValueOnce(new Error('save dialog crashed'))
+      await remoteFileRow.find('.file-row-actions button[title="下载"]').trigger('click')
+      await flushPromises()
+      expect(remoteBrowser.text()).toContain('下载保存对话框失败')
+      expect(window.aiops.transferFileEntry).not.toHaveBeenCalled()
+      remoteBrowser.unmount()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('matches External reference-style quick command groups, edit panel, search, menus, and recording', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

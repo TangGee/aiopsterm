@@ -619,6 +619,48 @@ const mutateEntry = async (mutation: FileEntryMutation) => {
   return result.data
 }
 
+type AiopsBridge = NonNullable<typeof window.aiops>
+type OpenDialogBridge = NonNullable<AiopsBridge['showOpenDialog']>
+type SaveDialogBridge = NonNullable<AiopsBridge['showSaveDialog']>
+
+const pickLocalPath = async (
+  options: Parameters<OpenDialogBridge>[0],
+  unavailableMessage: string,
+  failureMessage: string
+) => {
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    fileNotice.value = unavailableMessage
+    return ''
+  }
+  try {
+    const result = await showOpenDialog(options)
+    return result?.canceled ? '' : result?.filePaths?.[0] || ''
+  } catch {
+    fileNotice.value = failureMessage
+    return ''
+  }
+}
+
+const pickSavePath = async (
+  options: Parameters<SaveDialogBridge>[0],
+  unavailableMessage: string,
+  failureMessage: string
+) => {
+  const showSaveDialog = window.aiops?.showSaveDialog
+  if (typeof showSaveDialog !== 'function') {
+    fileNotice.value = unavailableMessage
+    return ''
+  }
+  try {
+    const result = await showSaveDialog(options)
+    return result?.canceled ? '' : result?.filePath || ''
+  } catch {
+    fileNotice.value = failureMessage
+    return ''
+  }
+}
+
 const clearTargetSubDirs = () => {
   Object.keys(targetSubDirs).forEach((key) => {
     delete targetSubDirs[Number(key)]
@@ -656,11 +698,14 @@ const goBack = async () => {
 }
 
 const openLocalFolder = async () => {
-  const result = await window.aiops?.showOpenDialog?.({
-    properties: ['openDirectory'],
-    defaultPath: currentPath.value
-  })
-  const pickedPath = result?.canceled ? '' : result?.filePaths?.[0]
+  const pickedPath = await pickLocalPath(
+    {
+      properties: ['openDirectory'],
+      defaultPath: currentPath.value
+    },
+    '打开文件夹对话框服务不可用',
+    '打开文件夹对话框失败'
+  )
   if (!pickedPath) return
   currentPath.value = normalizePath(pickedPath)
   pathInput.value = currentPath.value
@@ -673,11 +718,14 @@ const queueUpload = async (kind: 'file' | 'directory') => {
     await openLocalFolder()
     return
   }
-  const result = await window.aiops?.showOpenDialog?.({
-    properties: [kind === 'file' ? 'openFile' : 'openDirectory'],
-    defaultPath: currentPath.value
-  })
-  const localPath = result?.canceled ? '' : result?.filePaths?.[0]
+  const localPath = await pickLocalPath(
+    {
+      properties: [kind === 'file' ? 'openFile' : 'openDirectory'],
+      defaultPath: currentPath.value
+    },
+    kind === 'file' ? '上传文件选择对话框服务不可用' : '上传目录选择对话框服务不可用',
+    kind === 'file' ? '上传文件选择对话框失败' : '上传目录选择对话框失败'
+  )
   if (!localPath) return
   const name = getLocalPathName(localPath, kind === 'file' ? 'upload-file.txt' : 'upload-directory')
   loading.value = true
@@ -964,10 +1012,13 @@ const toggleMore = (path: string) => {
 }
 
 const downloadEntry = async (entry: FileBrowserEntry) => {
-  const result = await window.aiops?.showSaveDialog?.({
-    defaultPath: entry.name
-  })
-  const localPath = result?.canceled ? '' : result?.filePath
+  const localPath = await pickSavePath(
+    {
+      defaultPath: entry.name
+    },
+    '下载保存对话框服务不可用',
+    '下载保存对话框失败'
+  )
   if (!localPath) return
   loading.value = true
   try {
