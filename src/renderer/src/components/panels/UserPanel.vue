@@ -628,7 +628,17 @@
               <strong>{{ device.deviceName }}</strong>
               <span>{{ device.lastLoginIp }} · {{ device.location }}</span>
             </div>
-            <em :class="{ current: device.current }">{{ device.current ? '当前设备' : '可信设备' }}</em>
+            <div class="account-device-actions">
+              <em :class="{ current: device.current }">{{ device.current ? '当前设备' : '可信设备' }}</em>
+              <button
+                class="settings-button icon-only danger"
+                :disabled="device.current"
+                :title="device.current ? '当前设备不能移除' : '移除可信设备'"
+                @click="workspace.openTrustedDeviceRevoke(device.id)"
+              >
+                <Trash2 />
+              </button>
+            </div>
           </article>
         </div>
         <footer>
@@ -647,12 +657,44 @@
         </footer>
       </section>
     </div>
+
+    <div
+      v-if="workspace.trustedDeviceModal.open"
+      class="user-modal-backdrop"
+    >
+      <section class="user-modal-card small user-trusted-device-confirm">
+        <header>
+          <h3>移除可信设备</h3>
+          <button
+            title="关闭"
+            @click="workspace.trustedDeviceModal.open = false"
+          >
+            <X />
+          </button>
+        </header>
+        <p>确认移除该可信设备？</p>
+        <footer>
+          <button
+            class="settings-button"
+            @click="workspace.trustedDeviceModal.open = false"
+          >
+            取消
+          </button>
+          <button
+            class="settings-button primary"
+            @click="workspace.confirmTrustedDeviceRevoke"
+          >
+            完成
+          </button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue'
-import { Camera, Check, Gauge, LogOut, Pencil, User, X } from 'lucide-vue-next'
+import { Camera, Check, Gauge, LogOut, Pencil, Trash2, User, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()

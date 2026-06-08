@@ -571,6 +571,13 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.user-info-footer button').filter({ hasText: '账号中心' }).click()
     await expect(page.locator('.user-account-modal')).toContainText('可信设备')
     await expect(page.locator('.user-account-modal')).toContainText('Linux Workstation')
+    await expect(page.locator('.user-account-modal')).toContainText('MacBook')
+    await expect(page.locator('.account-device-actions button[title="当前设备不能移除"]')).toBeDisabled()
+    await page.locator('.account-device-actions button[title="移除可信设备"]').click()
+    await expect(page.locator('.user-trusted-device-confirm')).toContainText('确认移除该可信设备')
+    await page.locator('.user-trusted-device-confirm footer .primary').click()
+    await expect(page.locator('.user-info-notice')).toContainText('可信设备已移除')
+    await expect(page.locator('.user-account-modal')).not.toContainText('MacBook')
     await page.locator('.user-account-modal header').getByTitle('关闭').click()
 
     await page.locator('button[title="编辑"]').click()

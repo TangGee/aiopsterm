@@ -5640,11 +5640,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const result = await window.aiops?.revokeTrustedDevice?.(id)
     if (!result?.ok || !result.data) {
       setSettingsNotice(result?.errorMessage || '可信设备移除失败')
+      setUserNotice(result?.errorMessage || '可信设备移除失败')
       return false
     }
     trustedDevices.value = result.data.trustedDevices.map((device) => ({ ...device }))
     trustedDeviceModal.value = { open: false, id: null }
     setSettingsNotice(result.data.message)
+    setUserNotice(result.data.message)
     return true
   }
 

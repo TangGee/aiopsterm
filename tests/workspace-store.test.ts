@@ -4776,8 +4776,11 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
 
     store.openTrustedDeviceRevoke(2)
     expect(store.trustedDeviceModal.open).toBe(true)
+    vi.mocked(window.aiops.revokeTrustedDevice).mockClear()
     await store.confirmTrustedDeviceRevoke()
+    expect(window.aiops.revokeTrustedDevice).toHaveBeenCalledWith(2)
     expect(store.trustedDevices.some((device) => device.id === 2)).toBe(false)
+    expect(store.userNotice).toBe('可信设备已移除')
 
     store.openAccountCenter()
     expect(store.userAccountCenterOpen).toBe(true)
@@ -4925,8 +4928,10 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     await store.refreshUserAccount()
     const profileBefore = { ...store.userProfile }
     const billingBefore = { ...store.billingSettings }
+    const trustedDevicesBefore = store.trustedDevices.map((device) => ({ ...device }))
     const originalOpenLogin = window.aiops.openUserLogin
     const originalLogout = window.aiops.logoutUserAccount
+    const originalRevokeTrustedDevice = window.aiops.revokeTrustedDevice
 
     try {
       ;(window.aiops as any).openUserLogin = undefined
@@ -4942,9 +4947,16 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.userNotice).toBe('登出服务不可用')
       expect(store.userProfile).toEqual(profileBefore)
       expect(store.billingSettings).toEqual(billingBefore)
+
+      store.openTrustedDeviceRevoke(2)
+      ;(window.aiops as any).revokeTrustedDevice = undefined
+      await expect(store.confirmTrustedDeviceRevoke()).resolves.toBe(false)
+      expect(store.userNotice).toBe('可信设备移除失败')
+      expect(store.trustedDevices).toEqual(trustedDevicesBefore)
     } finally {
       ;(window.aiops as any).openUserLogin = originalOpenLogin
       ;(window.aiops as any).logoutUserAccount = originalLogout
+      ;(window.aiops as any).revokeTrustedDevice = originalRevokeTrustedDevice
     }
   })
 
