@@ -3885,6 +3885,40 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
     expect(store.kbImportJobs.length).toBe(1)
+    expect(window.aiops.kbCheckPath).toHaveBeenCalledWith('/tmp/imported-note.md')
+    expect(window.aiops.kbImportFile).toHaveBeenCalledWith('/tmp/imported-note.md', '')
+
+    vi.mocked(window.aiops.kbCheckPath).mockClear()
+    vi.mocked(window.aiops.kbImportFolder).mockClear()
+    const droppedFolder = new File(['folder'], 'folder') as File & { path?: string }
+    Object.defineProperty(droppedFolder, 'path', { configurable: true, value: '/tmp/imported/folder' })
+    await wrapper.find('.kb-sidebar-root').trigger('drop', {
+      dataTransfer: {
+        files: [droppedFolder]
+      }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.kbCheckPath).toHaveBeenCalledWith('/tmp/imported/folder')
+    expect(window.aiops.kbImportFolder).toHaveBeenCalledWith('/tmp/imported/folder', '')
+
+    const originalKbCheckPath = window.aiops.kbCheckPath
+    vi.mocked(window.aiops.kbImportFile).mockClear()
+    vi.mocked(window.aiops.kbImportFolder).mockClear()
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/bridge-missing.md'] })
+    ;(window.aiops as any).kbCheckPath = undefined
+    try {
+      await wrapper.find('.kb-add-button').trigger('click')
+      await wrapper.find('.kb-add-menu').findAll('button').find((button) => button.text().includes('上传文件'))!.trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(store.topNotice).toBe('知识库导入需要路径检查服务')
+      expect(store.kbImportJobs.some((job) => job.destRelPath.includes('bridge-missing.md'))).toBe(false)
+      expect(window.aiops.kbImportFile).not.toHaveBeenCalled()
+      expect(window.aiops.kbImportFolder).not.toHaveBeenCalled()
+    } finally {
+      ;(window.aiops as any).kbCheckPath = originalKbCheckPath
+    }
   })
 
   it('opens External reference-style knowledge files in the main workspace editor and adds them to AI context', async () => {

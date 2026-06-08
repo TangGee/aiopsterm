@@ -464,6 +464,34 @@ const addToChat = async () => {
   nodeMenu.visible = false
 }
 
+const importKnowledgePath = async (filePath: string, targetDir: string, fallbackName: string) => {
+  if (!window.aiops?.kbCheckPath) {
+    workspace.setTopNotice('知识库导入需要路径检查服务')
+    return
+  }
+  let info: { exists: boolean; isDirectory: boolean; isFile: boolean }
+  try {
+    info = await window.aiops.kbCheckPath(filePath)
+  } catch {
+    workspace.setTopNotice('知识库导入路径检查失败')
+    return
+  }
+  if (!info.exists) {
+    workspace.setTopNotice('知识库导入路径不存在')
+    return
+  }
+  const fileName = filePath.split(/[\\/]/).pop() || fallbackName
+  if (info.isDirectory) {
+    await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'folder')
+    return
+  }
+  if (info.isFile) {
+    await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'file')
+    return
+  }
+  workspace.setTopNotice('知识库导入路径类型不支持')
+}
+
 const uploadFile = async () => {
   addMenuOpen.value = false
   if (!window.aiops?.showOpenDialog) {
@@ -476,13 +504,7 @@ const uploadFile = async () => {
   if (result?.canceled || !result?.filePaths.length) return
   const targetDir = selectedTargetDir()
   for (const filePath of result.filePaths) {
-    const info = window.aiops.kbCheckPath ? await window.aiops.kbCheckPath(filePath) : { isDirectory: false, isFile: true }
-    const fileName = filePath.split(/[\\/]/).pop() || 'imported-note.md'
-    if (info.isDirectory) {
-      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'folder')
-    } else if (info.isFile) {
-      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'file')
-    }
+    await importKnowledgePath(filePath, targetDir, 'imported-note.md')
   }
 }
 
@@ -495,13 +517,7 @@ const handleDropImport = async (event: DragEvent) => {
   }
   const targetDir = selectedTargetDir()
   for (const filePath of localPaths) {
-    const info = window.aiops?.kbCheckPath ? await window.aiops.kbCheckPath(filePath) : { isDirectory: false, isFile: true }
-    const fileName = filePath.split(/[\\/]/).pop() || 'dropped-file.md'
-    if (info.isDirectory) {
-      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'folder')
-    } else if (info.isFile) {
-      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'file')
-    }
+    await importKnowledgePath(filePath, targetDir, 'dropped-file.md')
   }
 }
 
