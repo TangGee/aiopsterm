@@ -21,6 +21,7 @@ import type {
   AiChatHistoryMessage,
   AiChatMessageInput,
   AiChatResponseInput,
+  AiTodoItem,
   AiModelCatalog,
   AiModelCatalogOption,
   AiopsPreloadApi,
@@ -334,18 +335,7 @@ type K8sKubeconfigImportResult = {
   error?: string
 }
 
-export type TodoItem = {
-  id: string
-  content: string
-  description?: string
-  status: 'pending' | 'in_progress' | 'completed'
-  isFocused?: boolean
-  subtasks?: Array<{
-    id: string
-    content: string
-    description?: string
-  }>
-}
+export type TodoItem = AiTodoItem
 
 export type ConversationItem = {
   id: string
@@ -2779,21 +2769,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (settingsNotice.value === text) settingsNotice.value = ''
     }, 2400)
   }
-  const todoItems = ref<TodoItem[]>([
-    { id: 'todo-1', content: '收集上下文', description: '读取终端输出、资产和知识库引用', status: 'completed' },
-    {
-      id: 'todo-2',
-      content: '生成命令建议',
-      description: '只生成需要确认的只读命令',
-      status: 'in_progress',
-      isFocused: true,
-      subtasks: [
-        { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
-        { id: 'todo-2-2', content: '生成回滚步骤' }
-      ]
-    },
-    { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
-  ])
+  const todoItems = ref<TodoItem[]>([])
   const chatMessages = ref<ChatMessage[]>([])
   const terminalSecurityPrompt = ref<TerminalSecurityPrompt>(null)
   const terminalCommandGenerationRecords = ref<TerminalCommandGenerationRecord[]>([])
@@ -2928,6 +2904,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (options.hydrateSelection !== false && selectedContexts.value.length === 0) {
       selectedContexts.value = aiContextCatalog.value.selectedDefaults.map((context) => ({ ...context }))
     }
+    return true
+  }
+
+  const refreshAiTodoSnapshot = async () => {
+    if (!window.aiops?.listAiTodoSnapshot) {
+      todoItems.value = []
+      return false
+    }
+    const result = await window.aiops.listAiTodoSnapshot()
+    if (!result?.ok || !result.data) {
+      todoItems.value = []
+      return false
+    }
+    todoItems.value = result.data.todos.map((todo) => ({
+      ...todo,
+      subtasks: todo.subtasks?.map((subtask) => ({ ...subtask }))
+    }))
     return true
   }
 
@@ -3428,6 +3421,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await refreshFileTransferTasks()
     await refreshKubernetesCatalog()
     await loadChatConversationsFromBackend({ restoreIfEmpty: true })
+    await refreshAiTodoSnapshot()
     await refreshAiContextCatalog({ hydrateSelection: true })
   }
 
@@ -8820,6 +8814,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiContextCatalog,
     hydrateConfig,
     loadChatConversationsFromBackend,
+    refreshAiTodoSnapshot,
     refreshAiContextCatalog,
     saveConfig,
     setSettingsNotice,

@@ -202,6 +202,7 @@ describe('workspace store', () => {
     ;(globalThis as any).__resetKubernetesCatalogMock?.()
     ;(globalThis as any).__resetFileSessionCatalogMock?.()
     ;(globalThis as any).__resetChatHistoryStoreMock?.()
+    ;(globalThis as any).__resetAiTodoSnapshotMock?.()
     ;(globalThis as any).__resetExtensionPluginStoreMock?.()
     ;(globalThis as any).__resetUserAccountStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
@@ -3144,6 +3145,14 @@ describe('workspace store', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-ai-message', 'echo ai-message\n')
     expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'echo ai-message\n', scope: 'input' })
 
+    expect(store.todoProgress.total).toBe(0)
+    await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
+    expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
+    expect(store.todoItems.map((todo) => todo.content)).toEqual(['收集上下文', '生成命令建议', '等待确认'])
+    expect(store.todoItems.find((todo) => todo.id === 'todo-2')?.subtasks?.[0]).toMatchObject({
+      content: '检查风险级别',
+      description: '危险命令需要二次确认'
+    })
     expect(store.todoProgress.total).toBe(3)
     expect(store.todoProgress.completed).toBe(1)
     expect(store.todoProgress.percent).toBe(33)
@@ -3304,6 +3313,47 @@ describe('workspace store', () => {
     store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
     await store.refreshAiContextCatalog()
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
+  })
+
+  it('loads AI todos from the backend bridge instead of renderer mock defaults', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.todoItems).toEqual([])
+    expect(store.todoProgress).toEqual({ total: 0, completed: 0, inProgress: 0, pending: 0, percent: 0 })
+
+    await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
+
+    expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
+    expect(store.todoItems.map((todo) => todo.content)).toEqual(['收集上下文', '生成命令建议', '等待确认'])
+    expect(store.todoItems.find((todo) => todo.isFocused)).toMatchObject({
+      id: 'todo-2',
+      status: 'in_progress',
+      description: '只生成需要确认的只读命令'
+    })
+    expect(store.todoProgress).toEqual({ total: 3, completed: 1, inProgress: 1, pending: 1, percent: 33 })
+  })
+
+  it('does not fabricate AI todos when the backend bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    const originalListAiTodoSnapshot = window.aiops.listAiTodoSnapshot
+
+    try {
+      ;(window.aiops as any).listAiTodoSnapshot = undefined
+      await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
+      expect(store.todoItems).toEqual([])
+      expect(store.todoProgress).toEqual({ total: 0, completed: 0, inProgress: 0, pending: 0, percent: 0 })
+
+      ;(window.aiops as any).listAiTodoSnapshot = vi.fn(async () => ({
+        ok: false,
+        errorCode: 'AI_TODO_SNAPSHOT_ERROR',
+        errorMessage: 'Todo backend unavailable.'
+      }))
+      await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
+      expect(store.todoItems).toEqual([])
+      expect(store.todoProgress).toEqual({ total: 0, completed: 0, inProgress: 0, pending: 0, percent: 0 })
+    } finally {
+      ;(window.aiops as any).listAiTodoSnapshot = originalListAiTodoSnapshot
+    }
   })
 
   it('persists External reference-style knowledge base create, rename, paste, delete, and import completion state', async () => {

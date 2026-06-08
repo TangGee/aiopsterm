@@ -25,6 +25,7 @@ import {
 } from './backend/assets'
 import { createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
 import { listAiContextCatalog } from './backend/aiContext'
+import { listAiTodoSnapshot } from './backend/aiTodos'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
@@ -2242,6 +2243,7 @@ const registerIpc = () => {
   ipcMain.handle('chat-history:delete', (_event, id: string) => deleteChatConversation(id))
   ipcMain.handle('chat-history:restore', (_event, id: string) => restoreChatConversation(id))
   ipcMain.handle('chat-history:message-metadata', (_event, input: AiChatMessageMetadataInput) => saveChatMessageMetadata(input))
+  ipcMain.handle('ai:todo-snapshot', () => listAiTodoSnapshot())
   ipcMain.handle('ai:context-catalog', () => listAiContextCatalog())
   ipcMain.handle('user:get-account', () => getUserAccount())
   ipcMain.handle('user:open-login', () => openUserLogin())

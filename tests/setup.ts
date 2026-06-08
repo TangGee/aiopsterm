@@ -14,6 +14,8 @@ import type {
   DatabaseAiPaneMessageRecord,
   DatabaseWorkspaceCatalog,
   DatabaseTableInfo,
+  AiTodoItem,
+  AiTodoSnapshotResult,
   McpServerUserConfig
 } from '@shared/preload'
 import { vi } from 'vitest'
@@ -2573,6 +2575,55 @@ const setChatHistoryStoreMock = (conversations: TestChatConversationRecord[], me
   }
 }
 
+const defaultAiTodoItems: AiTodoItem[] = [
+  { id: 'todo-1', content: '收集上下文', description: '读取终端输出、资产和知识库引用', status: 'completed' },
+  {
+    id: 'todo-2',
+    content: '生成命令建议',
+    description: '只生成需要确认的只读命令',
+    status: 'in_progress',
+    isFocused: true,
+    subtasks: [
+      { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+      { id: 'todo-2-2', content: '生成回滚步骤' }
+    ]
+  },
+  { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
+]
+
+const cloneAiTodoItem = (todo: AiTodoItem): AiTodoItem => ({
+  ...todo,
+  subtasks: todo.subtasks?.map((subtask) => ({ ...subtask }))
+})
+
+let aiTodoItemsMock = defaultAiTodoItems.map(cloneAiTodoItem)
+
+const aiTodoSnapshotResultMock = (): AiTodoSnapshotResult => {
+  const todos = aiTodoItemsMock.map(cloneAiTodoItem)
+  const focusedTodo = todos.find((todo) => todo.isFocused) || todos.find((todo) => todo.status === 'in_progress') || null
+  return {
+    ok: true,
+    data: {
+      todos,
+      focusedTodoId: focusedTodo?.id || null,
+      totalTodos: todos.length,
+      completedTodos: todos.filter((todo) => todo.status === 'completed').length,
+      source: 'backend',
+      updatedAt: '刚刚'
+    }
+  }
+}
+
+const resetAiTodoSnapshotMock = () => {
+  aiTodoItemsMock = defaultAiTodoItems.map(cloneAiTodoItem)
+  vi.mocked(window.aiops.listAiTodoSnapshot).mockImplementation(async () => aiTodoSnapshotResultMock())
+}
+
+const setAiTodoSnapshotMock = (todos: AiTodoItem[]) => {
+  aiTodoItemsMock = todos.map(cloneAiTodoItem)
+  vi.mocked(window.aiops.listAiTodoSnapshot).mockImplementation(async () => aiTodoSnapshotResultMock())
+}
+
 const defaultAssetFolders: TestAssetFolder[] = [
   { uuid: 'custom-folder-a', name: '核心业务', description: '常用堡垒机业务资产' },
   { uuid: 'custom-folder-b', name: '临时排障', description: '短期排障入口' }
@@ -3141,6 +3192,8 @@ Object.assign(globalThis, {
   },
   __resetChatHistoryStoreMock: resetChatHistoryStoreMock,
   __setChatHistoryStoreMock: setChatHistoryStoreMock,
+  __resetAiTodoSnapshotMock: resetAiTodoSnapshotMock,
+  __setAiTodoSnapshotMock: setAiTodoSnapshotMock,
   __resetAssetStoreMock: resetAssetStoreMock,
   __resetKubernetesCatalogMock: resetKubernetesCatalogMock,
   __resetFileSessionCatalogMock: resetFileSessionCatalogMock,
@@ -3237,6 +3290,7 @@ Object.defineProperty(window, 'aiops', {
       }
     }),
     listChatConversations: vi.fn(async () => chatHistoryListResultMock()),
+    listAiTodoSnapshot: vi.fn(async () => aiTodoSnapshotResultMock()),
     listAiContextCatalog: vi.fn(async () => aiContextCatalogResultMock()),
     createChatConversation: vi.fn(async () => {
       const conversation: TestChatConversationRecord = {

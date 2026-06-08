@@ -283,6 +283,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetExtensionPluginStoreMock?.()
     ;(globalThis as any).__resetFileEntriesMock?.()
     ;(globalThis as any).__resetChatHistoryStoreMock?.()
+    ;(globalThis as any).__resetAiTodoSnapshotMock?.()
     ;(globalThis as any).__resetUserAccountStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
   })
@@ -2485,6 +2486,9 @@ describe('AppShell', () => {
     expect(wrapper.find('.message.user').text()).toContain('编辑后的回滚窗口')
     expect(wrapper.find('.message.user .message-image-part img').exists()).toBe(true)
 
+    await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
     expect(wrapper.find('[data-testid="todo-progress-ratio"]').text()).toBe('1/3')
     expect(wrapper.find('.focus-chain-badge').text()).toContain('Focus Chain')
     expect(wrapper.find('.focus-chain-highlight').text()).toContain('当前焦点')

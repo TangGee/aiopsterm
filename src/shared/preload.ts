@@ -397,6 +397,34 @@ export type AiChatMessageMetadataResult = AiopsMutationResult<{
   messages: AiChatHistoryMessage[]
 }>
 
+export type AiTodoStatus = 'pending' | 'in_progress' | 'completed'
+
+export type AiTodoSubtask = {
+  id: string
+  content: string
+  description?: string
+}
+
+export type AiTodoItem = {
+  id: string
+  content: string
+  description?: string
+  status: AiTodoStatus
+  isFocused?: boolean
+  subtasks?: AiTodoSubtask[]
+}
+
+export type AiTodoSnapshot = {
+  todos: AiTodoItem[]
+  focusedTodoId: string | null
+  totalTodos: number
+  completedTodos: number
+  source: 'backend'
+  updatedAt: string
+}
+
+export type AiTodoSnapshotResult = AiopsMutationResult<AiTodoSnapshot>
+
 export type TerminalCursorStyle = 'block' | 'bar' | 'underline'
 
 export type TerminalMouseEventAction = 'none' | 'paste' | 'contextMenu' | 'closeTab'
@@ -1789,6 +1817,7 @@ export type AiopsPreloadApi = {
   deleteChatConversation: (id: string) => Promise<AiChatConversationDeleteResult>
   restoreChatConversation: (id: string) => Promise<AiChatConversationRestoreResult>
   saveChatMessageMetadata: (input: AiChatMessageMetadataInput) => Promise<AiChatMessageMetadataResult>
+  listAiTodoSnapshot: () => Promise<AiTodoSnapshotResult>
   listAiContextCatalog: () => Promise<AiContextCatalogResult>
   getUserAccount: () => Promise<AiopsUserAccountResult>
   openUserLogin: () => Promise<AiopsUserMutationResult>

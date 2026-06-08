@@ -30,6 +30,7 @@ const api: AiopsPreloadApi = {
   deleteChatConversation: (id: string) => ipcRenderer.invoke('chat-history:delete', id),
   restoreChatConversation: (id: string) => ipcRenderer.invoke('chat-history:restore', id),
   saveChatMessageMetadata: (input) => ipcRenderer.invoke('chat-history:message-metadata', input),
+  listAiTodoSnapshot: () => ipcRenderer.invoke('ai:todo-snapshot'),
   listAiContextCatalog: () => ipcRenderer.invoke('ai:context-catalog'),
   getUserAccount: () => ipcRenderer.invoke('user:get-account'),
   openUserLogin: () => ipcRenderer.invoke('user:open-login'),
