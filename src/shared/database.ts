@@ -896,6 +896,108 @@ const updateDatabaseAiDrawerRequest = (
   return updated
 }
 
+const databaseAiPaneContextSummary = (input: DatabaseAiPaneResponseInput) =>
+  trim(input.context.contextSummary) ||
+  [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
+
+const databaseAiPaneErrorResponse = (
+  input: DatabaseAiPaneResponseInput,
+  startedAt: number,
+  errorCode: string,
+  errorMessage: string
+): DatabaseAiPaneResponseResult => {
+  const requestId = trim(input.requestId) || `dbai-pane-request-${randomUUID()}`
+  const contextSummary = databaseAiPaneContextSummary(input)
+  const existing = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  let assistantMessage: DatabaseAiPaneMessageRecord
+  if (existing && existing.status !== 'cancelled') {
+    assistantMessage =
+      updateDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: existing.id }, { status: 'error', content: errorMessage }) ?? existing
+  } else {
+    assistantMessage =
+      existing ??
+      storeDatabaseAiPaneMessage(
+        databaseAiPaneMessageRecord(
+          {
+            requestId,
+            role: 'assistant',
+            status: 'error',
+            content: errorMessage,
+            contextSummary,
+            createdAt: startedAt
+          },
+          input.assistantMessageId || `dbai-pane-message-${randomUUID()}`
+        )
+      )
+  }
+
+  return {
+    ok: false,
+    errorCode,
+    errorMessage,
+    data: {
+      requestId,
+      assistantMessage,
+      text: assistantMessage.content,
+      provider: 'aiopsterm-local',
+      durationMs: Math.max(1, Date.now() - startedAt)
+    }
+  }
+}
+
+const databaseAiDrawerErrorResponse = (
+  input: DatabaseAiDrawerResponseInput,
+  startedAt: number,
+  errorCode: string,
+  errorMessage: string
+): DatabaseAiDrawerResponseResult => {
+  const requestId = trim(input.requestId)
+  const existing = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  const targetDialect = drawerTargetDialect(input)
+  const text = `Reasoning\n- ${errorMessage}`
+  let request: DatabaseAiDrawerRequestRecord
+  if (existing && existing.status !== 'cancelled') {
+    request = updateDatabaseAiDrawerRequest({ requestId: existing.id }, { status: 'error', text, targetDialect }) ?? existing
+  } else {
+    request =
+      existing ??
+      storeDatabaseAiDrawerRequest({
+        id: requestId || `dbai-drawer-request-${randomUUID()}`,
+        action: input.action,
+        label: databaseAiDrawerActionName(input.action),
+        status: 'error',
+        contextSummary: trim(input.context.contextSummary),
+        sourceSql: input.sourceSql,
+        text,
+        targetDialect,
+        backendContext: {
+          connectionId: trim(input.context.connectionId),
+          dbType: input.context.dbType || '',
+          databaseName: trim(input.context.databaseName),
+          schemaName: trim(input.context.schemaName) || undefined,
+          tableName: trim(input.context.tableName) || undefined,
+          contextSummary: trim(input.context.contextSummary) || undefined
+        },
+        createdAt: startedAt,
+        updatedAt: Date.now()
+      })
+  }
+
+  return {
+    ok: false,
+    errorCode,
+    errorMessage,
+    data: {
+      request,
+      text: request.text,
+      reasoning: request.text,
+      sql: '',
+      provider: 'aiopsterm-local',
+      durationMs: Math.max(1, Date.now() - startedAt)
+    }
+  }
+}
+
 const databaseAiDrawerActionName = (action: DatabaseAiDrawerAction) => {
   switch (action) {
     case 'explain':
@@ -1665,18 +1767,16 @@ export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput
 export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneResponseInput): Promise<DatabaseAiPaneResponseResult> {
   const startedAt = Date.now()
   const prompt = trim(input.prompt)
-  if (!prompt) return { ok: false, errorCode: 'DB_AI_PROMPT_REQUIRED', errorMessage: 'Prompt is required.' }
+  if (!prompt) return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROMPT_REQUIRED', 'Prompt is required.')
   if (!trim(input.context.connectionId)) {
-    return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
+    return databaseAiPaneErrorResponse(input, startedAt, 'DB_CONNECTION_REQUIRED', 'Database connection is required.')
   }
   if (!trim(input.context.databaseName)) {
-    return { ok: false, errorCode: 'DB_DATABASE_REQUIRED', errorMessage: 'Database name is required.' }
+    return databaseAiPaneErrorResponse(input, startedAt, 'DB_DATABASE_REQUIRED', 'Database name is required.')
   }
 
   const promptLower = prompt.toLowerCase()
-  const contextLine =
-    trim(input.context.contextSummary) ||
-    [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
+  const contextLine = databaseAiPaneContextSummary(input)
   const recentTurns = (input.messages || []).filter((message) => message.role === 'user').slice(-4).length
   const selectSql = sampleSelectForContext(input)
   const lines = [`Context: ${contextLine}`, '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。', `Recent user turns: ${recentTurns}`]
@@ -1821,13 +1921,13 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
   const action = input.action
   const validActions: DatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
   if (!validActions.includes(action)) {
-    return { ok: false, errorCode: 'DB_AI_ACTION_INVALID', errorMessage: 'DB AI action is not supported.' }
+    return databaseAiDrawerErrorResponse(input, startedAt, 'DB_AI_ACTION_INVALID', 'DB AI action is not supported.')
   }
   if (action !== 'nl2sql' && action !== 'complete' && action !== 'diagnose' && !trim(input.sourceSql)) {
-    return { ok: false, errorCode: 'DB_AI_SQL_REQUIRED', errorMessage: 'SQL is required.' }
+    return databaseAiDrawerErrorResponse(input, startedAt, 'DB_AI_SQL_REQUIRED', 'SQL is required.')
   }
   if (!trim(input.context.connectionId)) {
-    return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
+    return databaseAiDrawerErrorResponse(input, startedAt, 'DB_CONNECTION_REQUIRED', 'Database connection is required.')
   }
 
   const dialect = drawerTargetDialect(input)

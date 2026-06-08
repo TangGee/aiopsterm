@@ -1634,7 +1634,7 @@ export type DatabaseAiPaneMessageRecord = {
   id: string
   requestId: string
   role: 'user' | 'assistant'
-  status: 'queued' | 'streaming' | 'done' | 'cancelled'
+  status: 'queued' | 'streaming' | 'done' | 'error' | 'cancelled'
   content: string
   contextSummary: string
   createdAt: number

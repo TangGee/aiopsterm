@@ -432,6 +432,52 @@ describe('database backend boundary', () => {
     expect(lateResponse.data?.text).not.toContain('当前响应由 aiopsterm DB AI 本地后端生成')
   })
 
+  it('returns backend-owned DB AI pane error message records', async () => {
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    expect(created.ok).toBe(true)
+    const requestId = created.data!.requestId
+    const assistantMessageId = created.data!.assistantMessage.id
+    expect(startDatabaseAiPaneResponse({ requestId, assistantMessageId }).data?.assistantMessage).toMatchObject({
+      id: assistantMessageId,
+      status: 'streaming'
+    })
+
+    const failed = await generateDatabaseAiPaneResponse({
+      requestId,
+      assistantMessageId,
+      prompt: '',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    expect(failed.ok).toBe(false)
+    expect(failed.errorCode).toBe('DB_AI_PROMPT_REQUIRED')
+    expect(failed.data).toMatchObject({
+      requestId,
+      provider: 'aiopsterm-local',
+      assistantMessage: {
+        id: assistantMessageId,
+        requestId,
+        status: 'error',
+        content: 'Prompt is required.'
+      },
+      text: 'Prompt is required.'
+    })
+  })
+
   it('generates DB AI drawer SQL behind the database backend boundary', async () => {
     const created = await createDatabaseAiDrawerRequest({
       action: 'convert',
@@ -517,6 +563,45 @@ describe('database backend boundary', () => {
     expect(lateResponse.data?.request).toMatchObject({ id: requestId, status: 'cancelled' })
     expect(lateResponse.data?.text).toBe('')
     expect(lateResponse.data?.sql).toBe('')
+  })
+
+  it('returns backend-owned DB AI drawer error request records', async () => {
+    const created = await createDatabaseAiDrawerRequest({
+      action: 'convert',
+      sourceSql: 'select id from "public"."orders"',
+      targetDialect: 'mssql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    expect(created.ok).toBe(true)
+    const requestId = created.data!.id
+    expect(startDatabaseAiDrawerResponse({ requestId }).data).toMatchObject({ id: requestId, status: 'streaming' })
+
+    const failed = await generateDatabaseAiDrawerResponse({
+      requestId,
+      action: created.data!.action,
+      sourceSql: '',
+      targetDialect: created.data!.targetDialect,
+      context: created.data!.backendContext
+    })
+
+    expect(failed.ok).toBe(false)
+    expect(failed.errorCode).toBe('DB_AI_SQL_REQUIRED')
+    expect(failed.data).toMatchObject({
+      request: {
+        id: requestId,
+        status: 'error',
+        text: expect.stringContaining('SQL is required.')
+      },
+      reasoning: expect.stringContaining('SQL is required.'),
+      sql: '',
+      provider: 'aiopsterm-local'
+    })
   })
 
   it('completes drawer SQL from the supplied cursor prefix', async () => {

@@ -2306,7 +2306,7 @@ type DbAiPaneContext = {
   schemaName: string
   dbType: DatabaseEngineCode | ''
 }
-type DbAiPaneMessageStatus = 'queued' | 'streaming' | 'done' | 'cancelled'
+type DbAiPaneMessageStatus = DatabaseAiPaneMessageRecord['status']
 type DbAiPaneMessage = DatabaseAiPaneMessageRecord
 type DbAiPaneQuickPrompt = 'explainActive' | 'schemaSummary' | 'selectSample'
 
@@ -3177,8 +3177,7 @@ const dbAiTargetDialect = computed<DbAiTargetDialect>({
     const request = activeDbAiRequest.value
     if (!request) return
     patchDbAiRequest(request.id, {
-      targetDialect: value,
-      updatedAt: Date.now()
+      targetDialect: value
     })
     if (request.action === 'convert' && request.status !== 'cancelled') {
       void requestDbAiDrawerResponse(request.id)
@@ -3191,7 +3190,7 @@ const dbAiSourceSql = computed(() => activeDbAiRequest.value?.sourceSql ?? '')
 const dbAiText = computed(() => activeDbAiRequest.value?.text ?? '')
 const dbAiStatus = computed<DbAiStatus | 'idle'>(() => activeDbAiRequest.value?.status ?? 'idle')
 const dbAiContextSummary = computed(() => activeDbAiRequest.value?.contextSummary ?? '')
-const dbAiSql = computed(() => extractSql(dbAiText.value))
+const dbAiSql = computed(() => (dbAiStatus.value === 'done' ? extractSql(dbAiText.value) : ''))
 const dbAiIsConvertAction = computed(() => dbAiAction.value === 'convert')
 const dbAiReasoningText = computed(() => {
   const fenceIndex = dbAiText.value.search(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql)?\s*\n/i)
@@ -4102,11 +4101,7 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
     })
     finishDbAiPaneMessage(messageId, result)
   } catch (error) {
-    finishDbAiPaneMessage(messageId, {
-      ok: false,
-      errorCode: 'DB_AI_PANE_ERROR',
-      errorMessage: errorToMessage(error)
-    })
+    showNotice(errorToMessage(error))
   }
 }
 
@@ -4119,15 +4114,12 @@ function applyDbAiPaneAssistantMessage(assistantMessage: DbAiPaneMessage) {
 }
 
 function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponseResult) {
+  if (!result.ok && !result.data?.assistantMessage) showNotice(result.errorMessage || 'DB AI pane response failed')
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled') return message
     if (result.ok && result.data?.assistantMessage) return result.data.assistantMessage
-    return {
-      ...message,
-      status: 'done',
-      content: result.ok && result.data?.text ? result.data.text : result.errorMessage || 'DB AI pane response failed.',
-      updatedAt: Date.now()
-    }
+    if (!result.ok && result.data?.assistantMessage) return result.data.assistantMessage
+    return message
   })
   scrollDbAiPaneMessagesToBottom()
 }
@@ -4156,6 +4148,7 @@ function dbAiPaneStatusLabel(status: DbAiPaneMessageStatus) {
   if (status === 'queued') return 'Queued'
   if (status === 'streaming') return 'Streaming'
   if (status === 'cancelled') return 'Cancelled'
+  if (status === 'error') return 'Error'
   return 'Done'
 }
 
@@ -4221,15 +4214,19 @@ function loadDbAiPaneState() {
     dbAiPaneDraft.value = typeof parsed.draft === 'string' ? parsed.draft : ''
     if (Array.isArray(parsed.messages)) {
       dbAiPaneMessages.value = parsed.messages
-        .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
+        .filter((message) => {
+          if (!message || (message.role !== 'user' && message.role !== 'assistant')) return false
+          if (!['queued', 'streaming', 'done', 'error', 'cancelled'].includes(String(message.status))) return false
+          return Number.isFinite(Number(message.createdAt)) && Number.isFinite(Number(message.updatedAt))
+        })
         .slice(-24)
         .map((message) => ({
           ...message,
-          status: message.status === 'queued' || message.status === 'streaming' ? 'cancelled' : message.status,
+          status: message.status === 'queued' || message.status === 'streaming' ? 'cancelled' : message.status === 'error' ? 'error' : message.status,
           content: String(message.content ?? ''),
           contextSummary: String(message.contextSummary ?? ''),
-          createdAt: Number(message.createdAt) || Date.now(),
-          updatedAt: Number(message.updatedAt) || Date.now()
+          createdAt: Number(message.createdAt),
+          updatedAt: Number(message.updatedAt)
         }))
     }
   } catch {
@@ -6573,22 +6570,14 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
   const request = dbAiRequests.value[reqId]
   if (!request || request.status === 'cancelled') return
   if (expectedDialect && request.targetDialect !== expectedDialect) return
-  if (result.ok) {
-    if (result.data?.request) {
-      dbAiRequests.value = {
-        ...dbAiRequests.value,
-        [reqId]: result.data.request
-      }
-    } else {
-      patchDbAiRequest(reqId, { status: 'done', text: result.data?.text ?? '', updatedAt: Date.now() })
+  if (result.data?.request) {
+    dbAiRequests.value = {
+      ...dbAiRequests.value,
+      [reqId]: result.data.request
     }
     return
   }
-  patchDbAiRequest(reqId, {
-    status: 'error',
-    text: `Reasoning\n- ${result.errorMessage || 'DB AI drawer backend failed.'}`,
-    updatedAt: Date.now()
-  })
+  showNotice(result.errorMessage || 'DB AI drawer backend failed.')
 }
 
 function setActiveDbAiRequest(reqId: string) {

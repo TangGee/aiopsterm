@@ -1196,6 +1196,48 @@ const updateDatabaseAiDrawerRequestMock = (requestId: string, patch: Partial<Pic
   return updated
 }
 
+const databaseAiPaneContextSummaryMock = (input: { context: { contextSummary?: string; connectionId?: string; databaseName?: string; schemaName?: string; dbType?: string } }) =>
+  input.context.contextSummary ||
+  [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
+
+const databaseAiPaneErrorResponseMock = (input: {
+  requestId?: string
+  assistantMessageId?: string
+  context: { contextSummary?: string; connectionId?: string; databaseName?: string; schemaName?: string; dbType?: string }
+}, errorCode: string, errorMessage: string) => {
+  const requestId = input.requestId || `dbai-pane-response-test-${databaseAiPaneRequestSequenceMock++}`
+  const existing = findDatabaseAiPaneAssistantMessageMock({ requestId, assistantMessageId: input.assistantMessageId })
+  const assistantMessage =
+    existing && existing.status !== 'cancelled'
+      ? updateDatabaseAiPaneAssistantMessageMock({ requestId, assistantMessageId: existing.id }, { status: 'error', content: errorMessage })!
+      : existing ||
+        storeDatabaseAiPaneMessageMock(
+          databaseAiPaneMessageRecordMock(
+            {
+              requestId,
+              role: 'assistant',
+              status: 'error',
+              content: errorMessage,
+              contextSummary: databaseAiPaneContextSummaryMock(input),
+              createdAt: Date.now()
+            },
+            input.assistantMessageId || `${requestId}-assistant`
+          )
+        )
+  return {
+    ok: false,
+    errorCode,
+    errorMessage,
+    data: {
+      requestId,
+      assistantMessage,
+      text: assistantMessage.content,
+      provider: 'aiopsterm-local' as const,
+      durationMs: 1
+    }
+  }
+}
+
 const databaseAiDrawerActionNameMock = (action: TestDatabaseAiDrawerAction) => {
   switch (action) {
     case 'explain':
@@ -1216,6 +1258,60 @@ const databaseAiDrawerActionNameMock = (action: TestDatabaseAiDrawerAction) => {
       return 'Drop Table'
     default:
       return action
+  }
+}
+
+const databaseAiDrawerErrorResponseMock = (
+  input: {
+    requestId?: string
+    action: TestDatabaseAiDrawerAction
+    sourceSql: string
+    targetDialect?: TestDatabaseAiTargetDialect
+    context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
+  },
+  errorCode: string,
+  errorMessage: string
+) => {
+  const existing = input.requestId ? findDatabaseAiDrawerRequestMock(input.requestId) : null
+  const targetDialect = input.targetDialect || existing?.targetDialect || input.context.dbType || 'postgresql'
+  const text = `Reasoning\n- ${errorMessage}`
+  const request =
+    existing && existing.status !== 'cancelled'
+      ? updateDatabaseAiDrawerRequestMock(existing.id, { status: 'error', text, targetDialect })!
+      : existing ||
+        storeDatabaseAiDrawerRequestMock({
+          id: input.requestId || `dbai-drawer-response-test-${databaseAiDrawerRequestSequenceMock++}`,
+          action: input.action,
+          label: databaseAiDrawerActionNameMock(input.action),
+          status: 'error',
+          contextSummary: input.context.contextSummary || '',
+          sourceSql: input.sourceSql,
+          text,
+          targetDialect,
+          backendContext: {
+            connectionId: input.context.connectionId || '',
+            dbType: input.context.dbType === 'mssql' ? '' : input.context.dbType,
+            databaseName: input.context.databaseName || '',
+            schemaName: input.context.schemaName,
+            tableName: input.context.tableName,
+            contextSummary: input.context.contextSummary
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        })
+
+  return {
+    ok: false,
+    errorCode,
+    errorMessage,
+    data: {
+      request,
+      text: request.text,
+      reasoning: request.text,
+      sql: '',
+      provider: 'aiopsterm-local' as const,
+      durationMs: 1
+    }
   }
 }
 
@@ -5049,10 +5145,20 @@ Object.defineProperty(window, 'aiops', {
       (input: { requestId?: string; assistantMessageId?: string; prompt: string; context: { contextSummary?: string; connectionId: string; databaseName: string; schemaName?: string; dbType?: string } }) =>
         new Promise((resolve) => {
           window.setTimeout(() => {
+            if (!databaseTrimMock(input.prompt)) {
+              resolve(databaseAiPaneErrorResponseMock(input, 'DB_AI_PROMPT_REQUIRED', 'Prompt is required.'))
+              return
+            }
+            if (!databaseTrimMock(input.context.connectionId)) {
+              resolve(databaseAiPaneErrorResponseMock(input, 'DB_CONNECTION_REQUIRED', 'Database connection is required.'))
+              return
+            }
+            if (!databaseTrimMock(input.context.databaseName)) {
+              resolve(databaseAiPaneErrorResponseMock(input, 'DB_DATABASE_REQUIRED', 'Database name is required.'))
+              return
+            }
             const requestId = input.requestId || `dbai-pane-response-test-${databaseAiPaneRequestSequenceMock++}`
-            const contextSummary =
-              input.context.contextSummary ||
-              [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
+            const contextSummary = databaseAiPaneContextSummaryMock(input)
             const text = [
               `Context: ${contextSummary}`,
               '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。',
@@ -5155,11 +5261,24 @@ Object.defineProperty(window, 'aiops', {
         action: TestDatabaseAiDrawerAction
         sourceSql: string
         targetDialect?: TestDatabaseAiTargetDialect
-        context: { contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
+        context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
         errorMessage?: string
       }) =>
         new Promise((resolve) => {
           window.setTimeout(() => {
+            const validActions: TestDatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
+            if (!validActions.includes(input.action)) {
+              resolve(databaseAiDrawerErrorResponseMock(input, 'DB_AI_ACTION_INVALID', 'DB AI action is not supported.'))
+              return
+            }
+            if (input.action !== 'nl2sql' && input.action !== 'complete' && input.action !== 'diagnose' && !databaseTrimMock(input.sourceSql)) {
+              resolve(databaseAiDrawerErrorResponseMock(input, 'DB_AI_SQL_REQUIRED', 'SQL is required.'))
+              return
+            }
+            if (!databaseTrimMock(input.context.connectionId)) {
+              resolve(databaseAiDrawerErrorResponseMock(input, 'DB_CONNECTION_REQUIRED', 'Database connection is required.'))
+              return
+            }
             const existing = input.requestId ? findDatabaseAiDrawerRequestMock(input.requestId) : null
             if (existing?.status === 'cancelled') {
               resolve({

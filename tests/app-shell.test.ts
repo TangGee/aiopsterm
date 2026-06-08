@@ -5663,6 +5663,57 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('renders backend-owned DB AI drawer error records without generated SQL actions', async () => {
+    const selectedSql = 'select id from "public"."orders"'
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'DB_AI_PROVIDER_ERROR',
+      errorMessage: 'Provider unavailable.',
+      data: {
+        request: {
+          id: 'dbai-drawer-request-test-1',
+          action: 'convert',
+          label: 'Convert SQL',
+          status: 'error',
+          contextSummary: 'orders-postgres · postgresql · orders · current statement',
+          sourceSql: selectedSql,
+          text: 'Reasoning\n- Provider unavailable from backend record.',
+          targetDialect: 'postgresql',
+          backendContext: {
+            connectionId: 'conn-prod-pg',
+            dbType: 'postgresql',
+            databaseName: 'orders',
+            schemaName: 'public',
+            contextSummary: 'orders-postgres · postgresql · orders · current statement'
+          },
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_000_100
+        },
+        text: 'Reasoning\n- Provider unavailable from backend record.',
+        reasoning: 'Reasoning\n- Provider unavailable from backend record.',
+        sql: '',
+        provider: 'aiopsterm-local',
+        durationMs: 1
+      }
+    })
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    await wrapper.find('.db-sql-editor').setValue(`${selectedSql};`)
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await waitForDatabaseDbAiDone()
+
+    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+    expect(wrapper.find('.db-ai-section').text()).toContain('Provider unavailable from backend record.')
+    expect(wrapper.find('.db-ai-sql-actions').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('keeps SQL history inert when a running result tab is closed before completion', async () => {
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
@@ -5801,6 +5852,50 @@ describe('AppShell', () => {
     expect(remounted.findAll('.db-ai-pane-message').some((message) => message.text().includes('Cancelled'))).toBe(true)
 
     remounted.unmount()
+    localStorage.removeItem('aiopsterm.database.dbAiPane')
+  })
+
+  it('renders backend-owned DB AI pane error message records', async () => {
+    localStorage.removeItem('aiopsterm.database.dbAiPane')
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'DB_AI_PROVIDER_ERROR',
+      errorMessage: 'Provider unavailable.',
+      data: {
+        requestId: 'dbai-pane-request-test-1',
+        assistantMessage: {
+          id: 'dbai-pane-request-test-1-assistant',
+          requestId: 'dbai-pane-request-test-1',
+          role: 'assistant',
+          status: 'error',
+          content: 'Pane provider unavailable from backend record.',
+          contextSummary: 'orders-postgres · postgresql · orders · public',
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_000_100
+        },
+        text: 'Pane provider unavailable from backend record.',
+        provider: 'aiopsterm-local',
+        durationMs: 1
+      }
+    })
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    await wrapper.find('button[title="Toggle DB AI Pane"]').trigger('click')
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await flushPromises()
+
+    const assistantMessage = wrapper.findAll('.db-ai-pane-message').at(1)!
+    expect(assistantMessage.classes()).toContain('error')
+    expect(assistantMessage.text()).toContain('Error')
+    expect(assistantMessage.text()).toContain('Pane provider unavailable from backend record.')
+
+    wrapper.unmount()
     localStorage.removeItem('aiopsterm.database.dbAiPane')
   })
 
