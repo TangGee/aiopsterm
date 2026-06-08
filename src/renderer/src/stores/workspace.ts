@@ -5573,11 +5573,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const rule = settingsRules.value.find((item) => item.id === id)
     if (!rule) return false
     if (!rule.content.trim()) {
-      settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
+      if (rule.isDraft) {
+        settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
+        return false
+      }
+      return deleteSettingsRule(id)
+    }
+    const saveSettingsRuleBridge = window.aiops?.saveSettingsRule
+    if (typeof saveSettingsRuleBridge !== 'function') {
+      setSettingsNotice('规则保存服务不可用')
       return false
     }
     try {
-      const result = await window.aiops?.saveSettingsRule?.({
+      const result = await saveSettingsRuleBridge({
         ...(rule.isDraft ? {} : { id }),
         content: rule.content,
         enabled: rule.enabled
@@ -5615,8 +5623,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const rule = settingsRules.value.find((item) => item.id === id)
     if (!rule) return false
     const nextEnabled = !rule.enabled
+    const saveSettingsRuleBridge = window.aiops?.saveSettingsRule
+    if (typeof saveSettingsRuleBridge !== 'function') {
+      setSettingsNotice('规则更新服务不可用')
+      return false
+    }
     try {
-      const result = await window.aiops?.saveSettingsRule?.({
+      const result = await saveSettingsRuleBridge({
         id,
         content: rule.content,
         enabled: nextEnabled
@@ -5637,12 +5650,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const deleteSettingsRule = async (id: string) => {
     const existing = settingsRules.value.find((item) => item.id === id)
     if (!existing) return false
-    if (!existing.content.trim()) {
+    if (!existing.content.trim() && existing.isDraft) {
       settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
       return true
     }
+    const deleteSettingsRuleBridge = window.aiops?.deleteSettingsRule
+    if (typeof deleteSettingsRuleBridge !== 'function') {
+      setSettingsNotice('规则删除服务不可用')
+      return false
+    }
     try {
-      const result = await window.aiops?.deleteSettingsRule?.(id)
+      const result = await deleteSettingsRuleBridge(id)
       if (!result?.ok || !result.data) {
         setSettingsNotice(result?.errorMessage || '规则删除失败')
         return false
@@ -5680,8 +5698,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('快捷键已被占用')
       return false
     }
+    const saveSettingsShortcutBridge = window.aiops?.saveSettingsShortcut
+    if (typeof saveSettingsShortcutBridge !== 'function') {
+      setSettingsNotice('快捷键保存服务不可用')
+      return false
+    }
     try {
-      const result = await window.aiops?.saveSettingsShortcut?.({
+      const result = await saveSettingsShortcutBridge({
         id: actionId,
         shortcut: nextShortcut
       })
@@ -5706,8 +5729,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const resetAllShortcuts = async () => {
+    const resetSettingsShortcutsBridge = window.aiops?.resetSettingsShortcuts
+    if (typeof resetSettingsShortcutsBridge !== 'function') {
+      setSettingsNotice('快捷键重置服务不可用')
+      return false
+    }
     try {
-      const result = await window.aiops?.resetSettingsShortcuts?.()
+      const result = await resetSettingsShortcutsBridge()
       if (!result?.ok || !result.data) {
         setSettingsNotice(result?.errorMessage || '快捷键重置失败')
         return false
@@ -5779,17 +5807,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const confirmTrustedDeviceRevoke = async () => {
     const id = trustedDeviceModal.value.id
     if (id === null) return false
-    const result = await window.aiops?.revokeTrustedDevice?.(id)
-    if (!result?.ok || !result.data) {
-      setSettingsNotice(result?.errorMessage || '可信设备移除失败')
-      setUserNotice(result?.errorMessage || '可信设备移除失败')
+    const revokeTrustedDeviceBridge = window.aiops?.revokeTrustedDevice
+    if (typeof revokeTrustedDeviceBridge !== 'function') {
+      setSettingsNotice('可信设备移除服务不可用')
+      setUserNotice('可信设备移除服务不可用')
       return false
     }
-    trustedDevices.value = result.data.trustedDevices.map((device) => ({ ...device }))
-    trustedDeviceModal.value = { open: false, id: null }
-    setSettingsNotice(result.data.message)
-    setUserNotice(result.data.message)
-    return true
+    try {
+      const result = await revokeTrustedDeviceBridge(id)
+      if (!result?.ok || !result.data) {
+        setSettingsNotice(result?.errorMessage || '可信设备移除失败')
+        setUserNotice(result?.errorMessage || '可信设备移除失败')
+        return false
+      }
+      trustedDevices.value = result.data.trustedDevices.map((device) => ({ ...device }))
+      trustedDeviceModal.value = { open: false, id: null }
+      setSettingsNotice(result.data.message)
+      setUserNotice(result.data.message)
+      return true
+    } catch {
+      setSettingsNotice('可信设备移除失败')
+      setUserNotice('可信设备移除失败')
+      return false
+    }
   }
 
   const toggleMode = () => {

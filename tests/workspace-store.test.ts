@@ -5526,12 +5526,129 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       store.openTrustedDeviceRevoke(2)
       ;(window.aiops as any).revokeTrustedDevice = undefined
       await expect(store.confirmTrustedDeviceRevoke()).resolves.toBe(false)
+      expect(store.userNotice).toBe('可信设备移除服务不可用')
+      expect(store.trustedDevices).toEqual(trustedDevicesBefore)
+
+      ;(window.aiops as any).revokeTrustedDevice = originalRevokeTrustedDevice
+      vi.mocked(window.aiops.revokeTrustedDevice).mockRejectedValueOnce(new Error('trusted device offline'))
+      await expect(store.confirmTrustedDeviceRevoke()).resolves.toBe(false)
       expect(store.userNotice).toBe('可信设备移除失败')
       expect(store.trustedDevices).toEqual(trustedDevicesBefore)
     } finally {
       ;(window.aiops as any).openUserLogin = originalOpenLogin
       ;(window.aiops as any).logoutUserAccount = originalLogout
       ;(window.aiops as any).revokeTrustedDevice = originalRevokeTrustedDevice
+    }
+  })
+
+  it('does not fabricate Settings rules, shortcuts, or trusted-device writes when bridges are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+
+    const originalAiops = {
+      saveSettingsRule: window.aiops.saveSettingsRule,
+      deleteSettingsRule: window.aiops.deleteSettingsRule,
+      saveSettingsShortcut: window.aiops.saveSettingsShortcut,
+      resetSettingsShortcuts: window.aiops.resetSettingsShortcuts,
+      revokeTrustedDevice: window.aiops.revokeTrustedDevice
+    }
+
+    try {
+      const originalPersistedRules = JSON.stringify(store.config.rules)
+      const originalShortcuts = JSON.stringify(store.settingsShortcuts)
+
+      store.editSettingsRule('rule-1')
+      store.updateSettingsRuleDraft('rule-1', 'local fake saved rule')
+      ;(window.aiops as any).saveSettingsRule = undefined
+      await expect(store.saveSettingsRule('rule-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('规则保存服务不可用')
+      expect(JSON.stringify(store.config.rules)).toBe(originalPersistedRules)
+
+      await store.hydrateConfig()
+      ;(window.aiops as any).saveSettingsRule = originalAiops.saveSettingsRule
+      vi.mocked(window.aiops.saveSettingsRule!).mockRejectedValueOnce(new Error('rules offline'))
+      store.editSettingsRule('rule-1')
+      store.updateSettingsRuleDraft('rule-1', 'backend rejected rule')
+      await expect(store.saveSettingsRule('rule-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('规则保存失败')
+      expect(JSON.stringify(store.config.rules)).toBe(originalPersistedRules)
+
+      await store.hydrateConfig()
+      ;(window.aiops as any).saveSettingsRule = undefined
+      await expect(store.toggleSettingsRule('rule-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('规则更新服务不可用')
+      expect(store.settingsRules.find((rule) => rule.id === 'rule-1')?.enabled).toBe(true)
+
+      await store.hydrateConfig()
+      ;(window.aiops as any).saveSettingsRule = originalAiops.saveSettingsRule
+      ;(window.aiops as any).deleteSettingsRule = undefined
+      store.editSettingsRule('rule-1')
+      store.updateSettingsRuleDraft('rule-1', '')
+      await expect(store.saveSettingsRule('rule-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('规则删除服务不可用')
+      expect(store.config.rules?.some((rule) => rule.id === 'rule-1')).toBe(true)
+
+      await store.hydrateConfig()
+      await expect(store.deleteSettingsRule('rule-2')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('规则删除服务不可用')
+      expect(store.settingsRules.some((rule) => rule.id === 'rule-2')).toBe(true)
+
+      ;(window.aiops as any).deleteSettingsRule = originalAiops.deleteSettingsRule
+      vi.mocked(window.aiops.deleteSettingsRule!).mockRejectedValueOnce(new Error('delete rule offline'))
+      await expect(store.deleteSettingsRule('rule-2')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('规则删除失败')
+      expect(store.settingsRules.some((rule) => rule.id === 'rule-2')).toBe(true)
+
+      ;(window.aiops as any).saveSettingsShortcut = undefined
+      store.startShortcutRecording('newTerminal')
+      store.updateShortcutRecording('Ctrl+Shift+N')
+      await expect(store.saveShortcutRecording()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('快捷键保存服务不可用')
+      expect(JSON.stringify(store.settingsShortcuts)).toBe(originalShortcuts)
+      store.cancelShortcutRecording()
+
+      ;(window.aiops as any).saveSettingsShortcut = originalAiops.saveSettingsShortcut
+      vi.mocked(window.aiops.saveSettingsShortcut!).mockRejectedValueOnce(new Error('shortcut offline'))
+      store.startShortcutRecording('newTerminal')
+      store.updateShortcutRecording('Ctrl+Shift+N')
+      await expect(store.saveShortcutRecording()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('快捷键保存失败')
+      expect(JSON.stringify(store.settingsShortcuts)).toBe(originalShortcuts)
+      store.cancelShortcutRecording()
+
+      store.startShortcutRecording('newTerminal')
+      store.updateShortcutRecording('Ctrl+Shift+N')
+      await expect(store.saveShortcutRecording()).resolves.toBe(true)
+      const changedShortcuts = JSON.stringify(store.settingsShortcuts)
+
+      ;(window.aiops as any).resetSettingsShortcuts = undefined
+      await expect(store.resetAllShortcuts()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('快捷键重置服务不可用')
+      expect(JSON.stringify(store.settingsShortcuts)).toBe(changedShortcuts)
+
+      ;(window.aiops as any).resetSettingsShortcuts = originalAiops.resetSettingsShortcuts
+      vi.mocked(window.aiops.resetSettingsShortcuts!).mockRejectedValueOnce(new Error('shortcut reset offline'))
+      await expect(store.resetAllShortcuts()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('快捷键重置失败')
+      expect(JSON.stringify(store.settingsShortcuts)).toBe(changedShortcuts)
+
+      await store.refreshUserAccount()
+      const trustedDevicesBefore = store.trustedDevices.map((device) => ({ ...device }))
+      store.openTrustedDeviceRevoke(2)
+      ;(window.aiops as any).revokeTrustedDevice = undefined
+      await expect(store.confirmTrustedDeviceRevoke()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('可信设备移除服务不可用')
+      expect(store.userNotice).toBe('可信设备移除服务不可用')
+      expect(store.trustedDevices).toEqual(trustedDevicesBefore)
+
+      ;(window.aiops as any).revokeTrustedDevice = originalAiops.revokeTrustedDevice
+      vi.mocked(window.aiops.revokeTrustedDevice!).mockRejectedValueOnce(new Error('trusted device offline'))
+      await expect(store.confirmTrustedDeviceRevoke()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('可信设备移除失败')
+      expect(store.trustedDevices).toEqual(trustedDevicesBefore)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+      store.cancelShortcutRecording()
     }
   })
 
