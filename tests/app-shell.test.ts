@@ -2575,6 +2575,33 @@ describe('AppShell', () => {
     expect(store.activePanel.sshSession?.forkFromConnectionId).toBe('ssh-source-fork-unit')
     expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit' && context.detail === 'fork-source fork')).toBe(true)
 
+    vi.mocked(window.aiops.killTerminal).mockClear()
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('断开连接'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('test-session-asset-fork-unit')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.status).toBe('closed')
+    expect(store.activePanel.output).not.toContain('[connection disconnected]')
+    expect(store.topNotice).toBe('终端已断开连接')
+
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('重新连接'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'ssh',
+        assetId: 'asset-fork-unit',
+        title: 'local shell fork',
+        ssh: expect.objectContaining({ host: '10.8.0.6', port: 2222, username: 'ops', forkFromConnectionId: 'ssh-source-fork-unit' })
+      })
+    )
+    expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.output).not.toContain('[connection reconnected]')
+    expect(store.topNotice).toBe('终端已重新连接')
+
     wrapper.unmount()
   })
 
@@ -2790,6 +2817,26 @@ describe('AppShell', () => {
     expect(store.activePanel.sessionId).toBe('test-session-local')
     expect(store.activePanel.status).toBe('running')
     expect(store.activePanel.output).not.toContain('[aiopsterm] shell started')
+
+    vi.mocked(window.aiops.killTerminal).mockClear()
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('断开连接'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('test-session-local')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.status).toBe('closed')
+    expect(store.activePanel.output).not.toContain('[connection disconnected]')
+    expect(store.topNotice).toBe('终端已断开连接')
+
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('重新连接'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
+    expect(store.activePanel.sessionId).toBe('test-session-local')
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.output).not.toContain('[connection reconnected]')
+    expect(store.topNotice).toBe('终端已重新连接')
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
     await wrapper.find('.command-line input').setValue('whoami')

@@ -1,12 +1,14 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 let createSshTerminalConnectionInfo: (terminalId: string, target: any, options?: any, createdAt?: number) => any
+let createTerminalKillResult: (id: string, exists: boolean) => any
 let createTerminalWriteResult: (id: string, data: string, exists: boolean) => any
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/terminal'
   const backend = await import(modulePath)
   createSshTerminalConnectionInfo = backend.createSshTerminalConnectionInfo
+  createTerminalKillResult = backend.createTerminalKillResult
   createTerminalWriteResult = backend.createTerminalWriteResult
 })
 
@@ -85,6 +87,21 @@ describe('terminal backend boundary', () => {
     })
 
     expect(createTerminalWriteResult('missing-session', 'uptime\n', false)).toEqual({
+      ok: false,
+      errorCode: 'TERMINAL_SESSION_NOT_FOUND',
+      errorMessage: 'Terminal session is not available.'
+    })
+  })
+
+  it('reports terminal kill success and missing-session failures without renderer output fabrication', () => {
+    expect(createTerminalKillResult('terminal-kill-unit', true)).toEqual({
+      ok: true,
+      data: {
+        id: 'terminal-kill-unit'
+      }
+    })
+
+    expect(createTerminalKillResult('missing-session', false)).toEqual({
       ok: false,
       errorCode: 'TERMINAL_SESSION_NOT_FOUND',
       errorMessage: 'Terminal session is not available.'

@@ -708,19 +708,31 @@ const cloneSelected = () => {
   menu.visible = false
 }
 
+const terminalViewSize = (panelId: string) => {
+  const view = terminalViews.get(panelId)
+  view?.fit.fit()
+  return {
+    cols: view?.terminal.cols,
+    rows: view?.terminal.rows
+  }
+}
+
 const startSshTerminalForPanel = async (panel: TerminalPanel) => {
   const ssh = panel.sshSession
-  if (!ssh || !window.aiops?.createTerminal) return
+  if (!ssh) return false
+  if (!window.aiops?.createTerminal) {
+    workspace.setTopNotice('SSH 终端启动服务不可用')
+    return false
+  }
   await nextTick()
-  const view = terminalViews.get(panel.id)
-  view?.fit.fit()
+  const size = terminalViewSize(panel.id)
   try {
     const session = await window.aiops.createTerminal({
       kind: 'ssh',
       assetId: ssh.assetId,
       title: panel.title,
-      cols: view?.terminal.cols,
-      rows: view?.terminal.rows,
+      cols: size.cols,
+      rows: size.rows,
       ssh: {
         host: ssh.host,
         port: ssh.port,
@@ -728,7 +740,7 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
         ...(ssh.forkFromConnectionId ? { forkFromConnectionId: ssh.forkFromConnectionId } : {})
       }
     })
-    workspace.applySshTerminalSession(panel.id, session, {
+    const connected = Boolean(workspace.applySshTerminalSession(panel.id, session, {
       id: ssh.assetId,
       name: ssh.assetName,
       title: ssh.assetName,
@@ -738,9 +750,12 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
       group_name: ssh.organizationId,
       asset_type: ssh.assetType,
       auth_type: ssh.authType
-    })
+    }))
+    if (!connected) workspace.setTopNotice('SSH 终端启动失败')
+    return connected
   } catch (error) {
-    workspace.appendTerminalOutput(panel.id, `[aiopsterm] SSH launch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+    workspace.setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')
+    return false
   }
 }
 
@@ -1190,11 +1205,63 @@ const toggleGlobalInput = () => {
   aiButtonPanelId.value = ''
 }
 
-const togglePanelConnection = (panelId: string) => {
+const reconnectTerminalPanel = async (panel: TerminalPanel) => {
+  if (!window.aiops?.createTerminal) {
+    workspace.setTopNotice('终端启动服务不可用')
+    return false
+  }
+  if (panel.sshSession) {
+    return startSshTerminalForPanel(panel)
+  }
+  await nextTick()
+  const size = terminalViewSize(panel.id)
+  try {
+    const session = await window.aiops.createTerminal({
+      kind: 'local',
+      cols: size.cols,
+      rows: size.rows
+    })
+    const connected = Boolean(workspace.applyLocalTerminalSession(panel.id, session))
+    if (!connected) workspace.setTopNotice('本地终端启动失败')
+    return connected
+  } catch (error) {
+    workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+    return false
+  }
+}
+
+const disconnectTerminalPanel = async (panel: TerminalPanel) => {
+  if (!panel.sessionId) {
+    workspace.setTopNotice('终端会话不可用，请先打开本地 shell 或连接 SSH')
+    return false
+  }
+  if (!window.aiops?.killTerminal) {
+    workspace.setTopNotice('终端断开服务不可用')
+    return false
+  }
+  const sessionId = panel.sessionId
+  const result = await window.aiops.killTerminal(sessionId)
+  if (!result?.ok) {
+    workspace.setTopNotice(result?.errorMessage || '终端断开失败')
+    return false
+  }
+  if (panel.sessionId === sessionId) {
+    panel.sessionId = undefined
+    panel.status = 'closed'
+  }
+  return true
+}
+
+const togglePanelConnection = async (panelId: string) => {
   const panel = panelById(panelId)
   if (!panel || panel.kind === 'knowledge') return
-  panel.status = panel.status === 'closed' ? 'ready' : 'closed'
-  workspace.appendTerminalOutput(panel.id, panel.status === 'closed' ? '\n[connection disconnected]\n' : '\n[connection reconnected]\n$ ')
+  if (panel.status === 'closed') {
+    const connected = await reconnectTerminalPanel(panel)
+    if (connected) workspace.setTopNotice('终端已重新连接')
+  } else {
+    const disconnected = await disconnectTerminalPanel(panel)
+    if (disconnected) workspace.setTopNotice('终端已断开连接')
+  }
   syncTerminalView(panel)
   termMenu.visible = false
 }
@@ -1246,13 +1313,12 @@ const startRealShell = async () => {
   }
   const panel = workspace.activePanel
   if (panel.kind === 'knowledge') return
-  const view = terminalViews.get(panel.id)
-  view?.fit.fit()
+  const size = terminalViewSize(panel.id)
   try {
     const session = await window.aiops.createTerminal({
       kind: 'local',
-      cols: view?.terminal.cols,
-      rows: view?.terminal.rows
+      cols: size.cols,
+      rows: size.rows
     })
     if (!workspace.applyLocalTerminalSession(panel.id, session)) {
       workspace.setTopNotice('本地终端启动失败')

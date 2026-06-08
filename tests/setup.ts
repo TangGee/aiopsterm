@@ -4168,7 +4168,10 @@ Object.defineProperty(window, 'aiops', {
       }
     })),
     resizeTerminal: vi.fn(async () => undefined),
-    killTerminal: vi.fn(async () => undefined),
+    killTerminal: vi.fn(async (id: string) => ({
+      ok: true,
+      data: { id }
+    })),
     getTerminalCommandSuggestions: vi.fn(async (query: string, context?: { mode?: 'base' | 'ai' }) => {
       const trimmed = query.trim()
       const normalized = trimmed.toLowerCase()

@@ -47,6 +47,10 @@ export type TerminalWriteResult = AiopsMutationResult<{
   bytes: number
 }>
 
+export type TerminalKillResult = AiopsMutationResult<{
+  id: string
+}>
+
 export type TerminalDataEvent = {
   id: string
   data: string
@@ -1892,7 +1896,7 @@ export type AiopsPreloadApi = {
   createTerminal: (options?: TerminalCreateOptions) => Promise<TerminalSessionInfo>
   writeTerminal: (id: string, data: string) => Promise<TerminalWriteResult>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
-  killTerminal: (id: string) => Promise<void>
+  killTerminal: (id: string) => Promise<TerminalKillResult>
   getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => Promise<TerminalCommandSuggestion[]>
   generateTerminalCommand: (input: TerminalCommandGenerationInput) => Promise<TerminalCommandGenerationResult>
   listAiModels: () => Promise<AiModelCatalog>

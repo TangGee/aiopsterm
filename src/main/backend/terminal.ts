@@ -1,4 +1,4 @@
-import type { AiopsAssetRecord, TerminalCreateOptions, TerminalSshConnectionInfo, TerminalWriteResult } from '@shared/preload'
+import type { AiopsAssetRecord, TerminalCreateOptions, TerminalKillResult, TerminalSshConnectionInfo, TerminalWriteResult } from '@shared/preload'
 
 export type SshTerminalConnectionTarget = {
   asset?: Pick<AiopsAssetRecord, 'id' | 'name' | 'title' | 'asset_type' | 'organizationId' | 'group_name' | 'auth_type'> | null
@@ -55,6 +55,23 @@ export const createTerminalWriteResult = (id: string, data: string, exists: bool
     data: {
       id: sessionId,
       bytes: Buffer.byteLength(String(data || ''), 'utf8')
+    }
+  }
+}
+
+export const createTerminalKillResult = (id: string, exists: boolean): TerminalKillResult => {
+  const sessionId = cleanOptional(id) || ''
+  if (!sessionId || !exists) {
+    return {
+      ok: false,
+      errorCode: 'TERMINAL_SESSION_NOT_FOUND',
+      errorMessage: 'Terminal session is not available.'
+    }
+  }
+  return {
+    ok: true,
+    data: {
+      id: sessionId
     }
   }
 }

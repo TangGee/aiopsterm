@@ -116,7 +116,7 @@ import {
   saveSettingsShortcut
 } from './backend/settingsPreferences'
 import { generateTerminalCommand, getTerminalCommandSuggestions } from './backend/terminalSuggestions'
-import { createSshTerminalConnectionInfo, createTerminalWriteResult } from './backend/terminal'
+import { createSshTerminalConnectionInfo, createTerminalKillResult, createTerminalWriteResult } from './backend/terminal'
 import {
   bindUserContact,
   getUserAccount,
@@ -2961,13 +2961,14 @@ const registerIpc = () => {
 
   ipcMain.handle('terminal:kill', (_event, id: string) => {
     const session = sessions.get(id)
-    if (!session) return
+    if (!session) return createTerminalKillResult(id, false)
     if (session.kind === 'ssh') {
       ;(session.process as SshShellSession).kill()
     } else {
       session.process.kill()
     }
     sessions.delete(id)
+    return createTerminalKillResult(id, true)
   })
 
   ipcMain.handle('terminal:suggestions', (_event, query: string, context?: TerminalCommandSuggestionContext) =>
