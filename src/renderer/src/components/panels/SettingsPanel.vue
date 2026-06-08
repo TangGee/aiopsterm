@@ -32,7 +32,7 @@
 
 <script setup lang="ts">
 import { ExternalLink } from 'lucide-vue-next'
-import { settingsNavItems } from '@/data/mockData'
+import { settingsNavItems } from '@/config/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()

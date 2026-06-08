@@ -46,7 +46,17 @@
             ref="searchInputRef"
             v-model="keyword"
             placeholder="Search"
+            @keydown.esc.prevent="clearDatabaseSearch"
           />
+          <button
+            v-if="keyword"
+            class="db-search-clear"
+            type="button"
+            title="Clear search"
+            @click="clearDatabaseSearch"
+          >
+            <X />
+          </button>
         </div>
 
         <nav class="db-tree">
@@ -462,11 +472,11 @@
               <strong>New Connection</strong>
               <p>Choose a database engine to start a connection profile.</p>
             </div>
-            <em title="Database engines">{{ mockDatabaseEngines.length }}</em>
+            <em title="Database engines">{{ databaseEngines.length }}</em>
           </header>
           <div class="db-engine-grid">
             <button
-              v-for="engine in mockDatabaseEngines"
+              v-for="engine in databaseEngines"
               :key="`${engine.name}-${engine.code}`"
               type="button"
               :class="{ disabled: !engine.enabled }"
@@ -676,17 +686,12 @@
                 :style="{ transform: `translateY(${sqlEditorActiveLineTop}px)` }"
                 aria-hidden="true"
               />
-              <textarea
+              <DatabaseSqlEditor
                 ref="sqlEditorRef"
                 v-model="activeTab.sql"
-                class="db-sql-editor"
-                spellcheck="false"
-                @input="syncSqlEditorState"
-                @scroll="syncSqlEditorScroll"
-                @click="syncSqlEditorState"
-                @keyup="syncSqlEditorState"
-                @select="syncSqlEditorState"
-                @keydown="handleSqlEditorKeydown"
+                @metrics="syncSqlEditorState"
+                @run="runSqlFromShortcut"
+                @open-find="openSqlFind"
               />
             </div>
             <div
@@ -970,7 +975,6 @@
           :has-selection="!!activeDataTab.selectedRowKey"
           :can-undo="activeDataTab.undoStack.length > 0"
           :is-dirty="isDataTabDirty(activeDataTab)"
-          :is-saving="activeDataTab.saving"
           :edit-disabled-reason="dataEditDisabledReason(activeDataTab)"
           @goto-page="(page) => updateDataPage(page)"
           @goto-last-page="gotoLastDataPage"
@@ -1225,6 +1229,8 @@
             :key="message.id"
             class="db-ai-pane-message"
             :class="[message.role, message.status]"
+            :data-message-id="message.id"
+            :data-request-id="message.requestId"
           >
             <header>
               <strong>{{ message.role === 'user' ? 'You' : 'DB AI' }}</strong>
@@ -1308,6 +1314,7 @@
     <aside
       v-if="dbAiOpen"
       class="db-ai-drawer"
+      :data-request-id="dbAiActiveReqId || undefined"
     >
       <header>
         <div>
@@ -1330,6 +1337,7 @@
           v-for="request in dbAiRequestList"
           :key="request.id"
           type="button"
+          :data-request-id="request.id"
           :class="{ active: request.id === dbAiActiveReqId }"
           @click="setActiveDbAiRequest(request.id)"
         >
@@ -1460,7 +1468,7 @@
       </button>
       <div class="db-popup-subtitle">New Connection</div>
       <button
-        v-for="engine in mockDatabaseEngines"
+        v-for="engine in databaseEngines"
         :key="engine.name"
         type="button"
         :class="{ disabled: !engine.enabled }"
@@ -1497,7 +1505,7 @@
             class="db-popup-menu db-popup-submenu"
           >
             <button
-              v-for="engine in mockDatabaseEngines"
+              v-for="engine in databaseEngines"
               :key="`ctx-${engine.name}`"
               type="button"
               :class="{ disabled: !engine.enabled }"
@@ -1575,7 +1583,7 @@
         <button
           type="button"
           @mouseenter="closeContextSubmenuSoon"
-          @click="deleteGroup(contextMenu.groupId)"
+          @click="requestDeleteGroup(contextMenu.groupId)"
         >
           Delete Group
         </button>
@@ -1668,7 +1676,7 @@
         <button
           type="button"
           @mouseenter="closeContextSubmenuSoon"
-          @click="removeConnection(contextMenu.connectionId)"
+          @click="requestRemoveConnection(contextMenu.connectionId)"
         >
           Remove
         </button>
@@ -2091,6 +2099,42 @@
     </div>
 
     <div
+      v-if="operationConfirm.open"
+      class="db-modal-overlay"
+      @click.self="cancelOperationConfirm"
+    >
+      <section class="db-operation-confirm">
+        <header>
+          <h2>{{ operationConfirm.title }}</h2>
+          <button
+            type="button"
+            title="Close"
+            @click="cancelOperationConfirm"
+          >
+            <X />
+          </button>
+        </header>
+        <p>{{ operationConfirm.message }}</p>
+        <code v-if="operationConfirm.detail">{{ operationConfirm.detail }}</code>
+        <footer>
+          <button
+            type="button"
+            @click="cancelOperationConfirm"
+          >
+            Cancel
+          </button>
+          <button
+            class="danger"
+            type="button"
+            @click="confirmOperation"
+          >
+            {{ operationConfirm.confirmLabel }}
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div
       v-if="notice"
       class="db-toast"
     >
@@ -2133,17 +2177,39 @@ import {
   X,
   Zap
 } from 'lucide-vue-next'
-import {
-  mockDatabaseConnections,
-  mockDatabaseEngines,
-  mockDatabaseGroups,
-  type MockDatabaseCatalog,
-  type MockDatabaseColumn,
-  type MockDatabaseConnection,
-  type MockDatabaseEngineCode,
-  type MockDatabaseGroup,
-  type MockDatabaseTable
-} from '@/data/mockData'
+import { editorLineHeightPx } from '@/services/editorRuntime'
+import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
+import { useWorkspaceStore } from '@/stores/workspace'
+import type {
+  DatabaseAiDrawerResponseInput,
+  DatabaseAiDrawerResponseResult,
+  DatabaseAiDrawerRequestRecord,
+  DatabaseAiPaneMessageRecord,
+  DatabaseAiPaneResponseResult,
+  DatabaseCatalogInfo,
+  DatabaseColumnInfo,
+  DatabaseConnectionDeleteResult,
+  DatabaseConnectionInfo,
+  DatabaseConnectionMoveInput,
+  DatabaseConnectionMutationResult,
+  DatabaseCreateDatabaseResult,
+  DatabaseConnectionSaveInput,
+  DatabaseConnectionSaveResult,
+  DatabaseConnectionTestInput,
+  DatabaseConnectionTestResult,
+  DatabaseEngineCode,
+  DatabaseEngineInfo,
+  DatabaseGroupCreateInput,
+  DatabaseGroupInfo,
+  DatabaseGroupDeleteResult,
+  DatabaseGroupMutationResult,
+  DatabaseGroupUpdateInput,
+  DatabaseSqlExecuteResult,
+  DatabaseTableDdlResult,
+  DatabaseTableInfo,
+  DatabaseTableQueryResult,
+  DatabaseWorkspaceCatalog
+} from '@shared/preload'
 
 type DbFilter =
   | { column: string; operator: 'like' | 'eq' | 'neq'; value: string }
@@ -2180,14 +2246,29 @@ type DataMutationBuildResult =
   | { ok: true; statements: DataMutationStatement[]; warning: string }
   | { ok: false; statements: DataMutationStatement[]; warning: string; error: string }
 type DbAiAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-type DbAiTargetDialect = MockDatabaseEngineCode | 'mssql'
+type DbAiTargetDialect = DatabaseEngineCode | 'mssql'
+type DbAiBackendContext = DatabaseAiDrawerResponseInput['context']
 type TextRange = { start: number; end: number }
-type SqlIndentEdit = { sql: string; selectionStart: number; selectionEnd: number }
+type DatabaseSqlEditorApi = {
+  getText(): string
+  getSelectedText(): string
+  getTextUntilCursor(): string
+  getCurrentStatement(): string
+  getCurrentStatementRange(): TextRange
+  getCursorOffset(): number
+  getSelectionRange(): TextRange
+  setSelectionRange(start: number, end?: number): void
+  replaceAll(next: string): void
+  replaceSelection(next: string): void
+  replaceRange(next: string, range: TextRange): void
+  insertAtCursor(next: string): void
+  focus(): void
+}
 type TableReloadOptions = { withTotal?: boolean; preserveDirty?: boolean; notice?: string }
 type ContextSubmenu = 'groupConnection' | 'groupMove' | 'connectionMove' | 'tableCopy' | null
 type SchemaObjectKind = 'tables' | 'views' | 'functions' | 'procedures'
-type SchemaObjectFolder = { kind: SchemaObjectKind; count: number; tables: MockDatabaseTable[]; routines: string[] }
-type TableDdlResult = { ok: true; ddl: string } | { ok: false; errorCode: 'permission' | 'other'; errorMessage: string }
+type SchemaObjectFolder = { kind: SchemaObjectKind; count: number; tables: DatabaseTableInfo[]; routines: string[] }
+type TableDdlResult = { ok: true; ddl: string } | { ok: false; errorCode: string; errorMessage: string }
 
 const DB_FILTER_NULL = '__AIOPSTERM_DB_NULL__'
 const DB_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -2196,6 +2277,7 @@ const DB_AI_PANE_STORAGE_KEY = 'aiopsterm.database.dbAiPane'
 const DB_AI_PANE_DEFAULT_WIDTH = 360
 const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
+const workspaceStore = useWorkspaceStore()
 
 type SqlResult = {
   id: string
@@ -2217,36 +2299,17 @@ type SqlResultViewState = {
   sort: DbSort
 }
 
-type DbAiRequest = {
-  id: string
-  action: DbAiAction
-  label: string
-  status: DbAiStatus
-  contextSummary: string
-  sourceSql: string
-  text: string
-  targetDialect: DbAiTargetDialect
-  createdAt: number
-  updatedAt: number
-}
-type DbAiScheduledTimer = { id: number; kind: 'stream' | 'done' }
+type DbAiRequest = DatabaseAiDrawerRequestRecord
+type DbAiScheduledTimer = { id: number; kind: 'streaming' }
 type DbAiPaneContext = {
   connectionId: string
   catalogName: string
   schemaName: string
-  dbType: MockDatabaseEngineCode | ''
+  dbType: DatabaseEngineCode | ''
 }
 type DbAiPaneMessageStatus = 'queued' | 'streaming' | 'done' | 'cancelled'
-type DbAiPaneMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  status: DbAiPaneMessageStatus
-  content: string
-  contextSummary: string
-  createdAt: number
-  updatedAt: number
-}
-type DbAiPaneTimer = { id: number; messageId: string; kind: 'stream' | 'done' }
+type DbAiPaneMessage = DatabaseAiPaneMessageRecord
+type DbAiPaneTimer = { id: number; messageId: string; kind: 'streaming' }
 type DbAiPaneQuickPrompt = 'explainActive' | 'schemaSummary' | 'selectSample'
 
 type SqlHistory = {
@@ -2331,8 +2394,9 @@ type ContextMenu =
     }
 
 type ContextMenuPayload = Omit<Extract<ContextMenu, { type: 'group' }>, 'x' | 'y'> | Omit<Extract<ContextMenu, { type: 'connection' }>, 'x' | 'y'> | Omit<Extract<ContextMenu, { type: 'table' }>, 'x' | 'y'>
-type VisibleGroupNode = MockDatabaseGroup & { depth: number }
+type VisibleGroupNode = DatabaseGroupInfo & { depth: number }
 type SqlConsoleContext = { connectionId: string; catalogName: string; schemaName: string }
+type DatabaseOperationConfirmAction = 'deleteGroup' | 'removeConnection'
 
 const DataGridToolbar = defineComponent({
   props: {
@@ -2343,7 +2407,6 @@ const DataGridToolbar = defineComponent({
     hasSelection: { type: Boolean, default: false },
     canUndo: { type: Boolean, default: false },
     isDirty: { type: Boolean, default: false },
-    isSaving: { type: Boolean, default: false },
     editDisabledReason: { type: String, default: '' },
     hideRefresh: { type: Boolean, default: false }
   },
@@ -2360,14 +2423,12 @@ const DataGridToolbar = defineComponent({
     const addRowTitle = computed(() => (props.canEdit ? 'Add row' : props.editDisabledReason || 'Editing is disabled for this result'))
     const deleteRowTitle = computed(() => {
       if (!props.canEdit) return props.editDisabledReason || 'Editing is disabled for this result'
-      if (props.isSaving) return 'Saving changes'
       if (!props.hasSelection) return 'Select a row before deleting'
       return 'Delete row'
     })
-    const undoTitle = computed(() => (props.isSaving ? 'Saving changes' : props.canUndo ? 'Undo' : 'Nothing to undo'))
+    const undoTitle = computed(() => (props.canUndo ? 'Undo' : 'Nothing to undo'))
     const saveTitle = computed(() => {
       if (!props.canEdit) return props.editDisabledReason || 'Editing is disabled for this result'
-      if (props.isSaving) return 'Saving changes'
       if (!props.isDirty) return 'No changes to save'
       return 'Save changes'
     })
@@ -2380,12 +2441,9 @@ const DataGridToolbar = defineComponent({
             value: props.page,
             type: 'number',
             min: '1',
-            ...(pageCount.value === null ? {} : { max: String(pageCount.value) }),
-            title: pageCount.value === null ? `Page ${props.page}` : `Page ${props.page} of ${pageCount.value}`,
             onInput: (event: Event) => gotoPage(Number((event.target as HTMLInputElement).value) || 1)
           }),
-          h('span', { class: 'db-toolbar-page-count' }, `/ ${pageCount.value ?? '?'}`),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-next', disabled: atLastPage.value, title: 'Next page', onClick: () => gotoPage(props.page + 1) }, '⏵'),
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-next', title: 'Next page', onClick: () => gotoPage(props.page + 1) }, '⏵'),
           h(
             'button',
             { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-last', disabled: pageCount.value === null || atLastPage.value, title: 'Last page', onClick: () => emit('gotoLastPage') },
@@ -2400,12 +2458,10 @@ const DataGridToolbar = defineComponent({
             pageSizes.map((size) => h('option', { value: size }, String(size)))
           ),
           h(
-            'button',
+            'span',
             {
-              type: 'button',
               class: 'db-toolbar-total',
-              title: props.hideRefresh ? 'Total rows in current result' : 'Refresh total',
-              disabled: props.hideRefresh,
+              title: 'Refresh total',
               onClick: () => emit('refreshTotal')
             },
             ['Total: ', props.total === null || props.total === undefined ? h('span', { class: 'db-toolbar-total-unknown' }, '?') : String(props.total)]
@@ -2413,10 +2469,10 @@ const DataGridToolbar = defineComponent({
         ]),
         h('div', { class: 'db-toolbar-group' }, [
           !props.hideRefresh && h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-refresh', title: 'Refresh', onClick: () => emit('refresh') }, '↻'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-add-row', disabled: !props.canEdit || props.isSaving, title: addRowTitle.value, onClick: () => emit('add-row') }, '+'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-delete-row', disabled: !props.canEdit || props.isSaving || !props.hasSelection, title: deleteRowTitle.value, onClick: () => emit('delete-row') }, '-'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-undo', disabled: props.isSaving || !props.canUndo, title: undoTitle.value, onClick: () => emit('undo') }, '↶'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-save', disabled: !props.canEdit || props.isSaving || !props.isDirty, title: saveTitle.value, onClick: () => emit('save') }, props.isSaving ? '...' : '💾'),
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-add-row', disabled: !props.canEdit, title: addRowTitle.value, onClick: () => emit('add-row') }, '+'),
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-delete-row', disabled: !props.canEdit || !props.hasSelection, title: deleteRowTitle.value, onClick: () => emit('delete-row') }, '-'),
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-undo', disabled: !props.canUndo, title: undoTitle.value, onClick: () => emit('undo') }, '↶'),
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-save', disabled: !props.canEdit || !props.isDirty, title: saveTitle.value, onClick: () => emit('save') }, '💾'),
           h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-chart', disabled: true, title: 'Chart' }, '📊'),
           h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-comment', disabled: true, title: 'Comment' }, '💬')
         ]),
@@ -2837,18 +2893,19 @@ const ResultGrid = defineComponent({
   }
 })
 
-const groups = ref<MockDatabaseGroup[]>(mockDatabaseGroups.map((group) => ({ ...group })))
-const groupParentById = reactive<Record<string, string | null>>(Object.fromEntries(mockDatabaseGroups.map((group) => [group.id, null])))
-const connections = ref<MockDatabaseConnection[]>(structuredClone(mockDatabaseConnections))
+const databaseEngines = ref<DatabaseEngineInfo[]>([])
+const groups = ref<DatabaseGroupInfo[]>([])
+const groupParentById = reactive<Record<string, string | null>>({})
+const connections = ref<DatabaseConnectionInfo[]>([])
 const keyword = ref('')
 const sidebarCollapsed = ref(false)
-const expandedGroups = ref<string[]>(['group-default', 'group-prod', 'group-local'])
-const expandedConnections = ref<string[]>(['conn-prod-pg'])
-const expandedCatalogs = ref<string[]>(['conn-prod-pg:orders'])
-const expandedSchemas = ref<string[]>(['conn-prod-pg:orders:public', 'conn-prod-pg:orders:ops'])
-const expandedSchemaObjectFolders = ref<string[]>(['conn-prod-pg:orders:public:tables', 'conn-prod-pg:orders:ops:tables'])
+const expandedGroups = ref<string[]>([])
+const expandedConnections = ref<string[]>([])
+const expandedCatalogs = ref<string[]>([])
+const expandedSchemas = ref<string[]>([])
+const expandedSchemaObjectFolders = ref<string[]>([])
 const expandedTables = ref<string[]>([])
-const selectedNodeId = ref<string | null>('conn-prod-pg')
+const selectedNodeId = ref<string | null>(null)
 const overflowOpen = ref(false)
 const addMenuOpen = ref(false)
 const addButtonRef = ref<HTMLButtonElement | null>(null)
@@ -2878,14 +2935,12 @@ const tabs = ref<WorkspaceTab[]>([
 ])
 const activeTabId = ref('tab-overview')
 const resultSeq = ref(1)
-const sqlEditorRef = ref<HTMLTextAreaElement | null>(null)
+const sqlEditorRef = ref<DatabaseSqlEditorApi | null>(null)
 const sqlFindInputRef = ref<HTMLInputElement | null>(null)
 const sqlReplaceInputRef = ref<HTMLInputElement | null>(null)
 const SQL_PANE_DEFAULT_PERCENT = 45
 const SQL_PANE_MIN_PERCENT = 20
 const SQL_PANE_MAX_PERCENT = 80
-const SQL_EDITOR_LINE_HEIGHT = 20
-const SQL_EDITOR_INDENT = '  '
 const sqlPaneEditorPercent = ref(SQL_PANE_DEFAULT_PERCENT)
 const sqlPaneResizing = ref(false)
 const sqlEditorScrollTop = ref(0)
@@ -2912,26 +2967,26 @@ const connectionSaving = ref(false)
 const postgresSslModeOptions = ['disable', 'require', 'verify-ca', 'verify-full'] as const
 const connectionDraft = reactive({
   id: '',
-  dbType: 'mysql' as MockDatabaseEngineCode,
+  dbType: 'mysql' as DatabaseEngineCode,
   name: '',
-  env: 'Development' as MockDatabaseConnection['env'],
+  env: 'Development' as DatabaseConnectionInfo['env'],
   groupId: 'group-default',
   host: '127.0.0.1',
   port: 3306 as number | null,
-  authentication: 'UserAndPassword' as MockDatabaseConnection['authentication'],
+  authentication: 'UserAndPassword' as DatabaseConnectionInfo['authentication'],
   user: 'root',
   password: '',
   database: '',
-  filePath: '/tmp/aiopsterm/demo.db',
+  filePath: '',
   readonly: false,
-  sslMode: '' as NonNullable<MockDatabaseConnection['sslMode']>,
+  sslMode: '' as NonNullable<DatabaseConnectionInfo['sslMode']>,
   url: ''
 })
 
 const createDatabaseModal = reactive({
   open: false,
   connectionId: '',
-  dbType: 'mysql' as Extract<MockDatabaseEngineCode, 'mysql' | 'postgresql'>,
+  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'postgresql'>,
   name: '',
   sql: '',
   userEditedSql: false,
@@ -2978,7 +3033,6 @@ const sqlDiagnose = reactive({
   success: false,
   resultId: ''
 })
-let sqlDiagnoseTimer: number | null = null
 let sqlDiagnoseSuccessTimer: number | null = null
 let sqlPaneResizeElement: HTMLElement | null = null
 const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }> = [
@@ -2999,6 +3053,15 @@ const dangerConfirm = reactive({
   sql: '',
   confirmText: ''
 })
+const operationConfirm = reactive({
+  open: false,
+  action: '' as DatabaseOperationConfirmAction | '',
+  targetId: '',
+  title: '',
+  message: '',
+  detail: '',
+  confirmLabel: 'Delete'
+})
 
 const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId.value))
 const activeSqlTab = computed(() => (activeTab.value?.kind === 'sql' ? activeTab.value : null))
@@ -3010,10 +3073,7 @@ const emptySqlResultViewState: SqlResultViewState = Object.freeze({ page: 1, pag
 const activeSqlCanRun = computed(() => {
   const tab = activeSqlTab.value
   if (!tab) return false
-  const connection = findConnection(tab.connectionId)
-  if (!connection || !tab.catalogName) return false
-  if (sqlConnectionRequiresSchema(connection)) return !!tab.schemaName
-  return true
+  return isSqlConsoleContextReady(tab)
 })
 
 const currentSqlCatalogs = computed(() => {
@@ -3067,8 +3127,12 @@ const activeSqlResultViewState = computed(() => {
 
 const activeSqlHasText = computed(() => Boolean(activeSqlTab.value?.sql.trim()))
 const canToggleDbAiPane = computed(() => connections.value.length > 0)
+const sqlEditorLineHeight = computed(() => editorLineHeightPx(workspaceStore.editorSettings))
 const databaseWorkspaceStyle = computed(() => ({
-  '--db-ai-pane-width': dbAiPaneOpen.value ? `${dbAiPaneWidth.value}px` : '0px'
+  '--db-ai-pane-width': dbAiPaneOpen.value ? `${dbAiPaneWidth.value}px` : '0px',
+  '--db-sql-editor-line-height': `${sqlEditorLineHeight.value}px`,
+  '--db-sql-editor-font-size': `${workspaceStore.editorSettings.fontSize}px`,
+  '--db-sql-editor-tab-size': `${workspaceStore.editorSettings.tabSize}`
 }))
 const sqlPaneStyle = computed(() => ({
   '--db-sql-editor-percent': `${sqlPaneEditorPercent.value}%`,
@@ -3078,7 +3142,7 @@ const sqlPaneStyle = computed(() => ({
 }))
 const activeSqlEditorLineCount = computed(() => Math.max(1, (activeSqlTab.value?.sql.match(/\n/g)?.length ?? 0) + 1))
 const activeSqlEditorLines = computed(() => Array.from({ length: activeSqlEditorLineCount.value }, (_, index) => index + 1))
-const sqlEditorActiveLineTop = computed(() => Math.max(0, (sqlEditorActiveLine.value - 1) * SQL_EDITOR_LINE_HEIGHT - sqlEditorScrollTop.value))
+const sqlEditorActiveLineTop = computed(() => Math.max(0, (sqlEditorActiveLine.value - 1) * sqlEditorLineHeight.value - sqlEditorScrollTop.value))
 const sqlFindMatches = computed<TextRange[]>(() => findSqlTextMatches(activeSqlTab.value?.sql ?? '', sqlFindQuery.value, sqlFindCaseSensitive.value))
 const sqlFindSummary = computed(() => {
   if (!sqlFindQuery.value) return 'Find'
@@ -3116,17 +3180,13 @@ const dbAiTargetDialect = computed<DbAiTargetDialect>({
   set(value) {
     const request = activeDbAiRequest.value
     if (!request) return
-    clearDbAiTimers(request.id)
-    const generatedSql = request.action === 'convert' ? buildDbAiGeneratedSql('convert', request.sourceSql, value) : extractSql(request.text)
     patchDbAiRequest(request.id, {
       targetDialect: value,
-      status: request.action === 'convert' && request.status !== 'cancelled' ? 'done' : request.status,
-      text:
-        request.action === 'convert'
-          ? composeDbAiResponseText(buildDbAiReasoning('convert', request.sourceSql, generatedSql, value), generatedSql)
-          : request.text,
       updatedAt: Date.now()
     })
+    if (request.action === 'convert' && request.status !== 'cancelled') {
+      void requestDbAiDrawerResponse(request.id)
+    }
   }
 })
 const dbAiActionLabel = computed(() => activeDbAiRequest.value?.label ?? 'DB AI')
@@ -3258,11 +3318,11 @@ function clearConnectionFeedback() {
   connectionFeedbackKind.value = 'info'
 }
 
-function sqlConnectionRequiresSchema(connection: MockDatabaseConnection) {
+function sqlConnectionRequiresSchema(connection: DatabaseConnectionInfo) {
   return connection.dbType === 'postgresql' || connection.dbType === 'oracle'
 }
 
-function defaultSchemaForSqlConnection(connection: MockDatabaseConnection | undefined, catalog: MockDatabaseCatalog | undefined) {
+function defaultSchemaForSqlConnection(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined) {
   if (!connection || !catalog || !sqlConnectionRequiresSchema(connection)) return ''
   if (!catalog.schemas?.length) return ''
   return catalog.schemas.find((schema) => schema.name === 'public')?.name ?? catalog.schemas[0]?.name ?? ''
@@ -3328,7 +3388,7 @@ function repairTabsForConnection(connectionId: string) {
   })
 }
 
-function applySqlTabConnectionContext(tab: Extract<WorkspaceTab, { kind: 'sql' }>, connection: MockDatabaseConnection) {
+function applySqlTabConnectionContext(tab: Extract<WorkspaceTab, { kind: 'sql' }>, connection: DatabaseConnectionInfo) {
   const catalog = connection.catalogs[0]
   tab.connectionId = connection.id
   tab.catalogName = catalog?.name ?? ''
@@ -3337,11 +3397,11 @@ function applySqlTabConnectionContext(tab: Extract<WorkspaceTab, { kind: 'sql' }
   tab.tableName = undefined
 }
 
-function updateSqlTabConnection(event: Event) {
+async function updateSqlTabConnection(event: Event) {
   const tab = activeSqlTab.value
   if (!tab) return
   const connectionId = (event.target as HTMLSelectElement).value
-  const connection = findConnection(connectionId)
+  let connection = findConnection(connectionId)
   if (!connection) {
     tab.connectionId = ''
     tab.catalogName = ''
@@ -3349,7 +3409,10 @@ function updateSqlTabConnection(event: Event) {
     return
   }
   if (connection.status !== 'connected' && connection.status !== 'testing') {
-    connection.status = 'connected'
+    const result = await connectDatabaseConnectionViaBackend(connection.id)
+    if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.')) return
+    connection = findConnection(connectionId)
+    if (!connection) return
     expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
     showNotice('Connection auto-connected for SQL context')
   }
@@ -3376,7 +3439,7 @@ function updateSqlTabSchema(event: Event) {
   tab.tableName = undefined
 }
 
-function renderCreateDatabaseTemplate(name: string, dbType: Extract<MockDatabaseEngineCode, 'mysql' | 'postgresql'>) {
+function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'postgresql'>) {
   const trimmed = name.trim()
   return trimmed ? `CREATE DATABASE ${quoteIdentForDialect(trimmed, dbType)};` : ''
 }
@@ -3434,9 +3497,9 @@ function connectionsByGroup(groupId: string) {
   return list.filter((connection) => connectionText(connection).includes(needle))
 }
 
-function flattenVisibleGroups(sourceGroups: MockDatabaseGroup[]): VisibleGroupNode[] {
+function flattenVisibleGroups(sourceGroups: DatabaseGroupInfo[]): VisibleGroupNode[] {
   const sourceIds = new Set(sourceGroups.map((group) => group.id))
-  const byParent = new Map<string | null, MockDatabaseGroup[]>()
+  const byParent = new Map<string | null, DatabaseGroupInfo[]>()
   sourceGroups.forEach((group) => {
     const parentId = groupParentById[group.id] ?? null
     const visibleParent = parentId && sourceIds.has(parentId) ? parentId : null
@@ -3483,7 +3546,7 @@ function collectDescendantGroupIds(groupId: string) {
   return out
 }
 
-function connectionText(connection: MockDatabaseConnection) {
+function connectionText(connection: DatabaseConnectionInfo) {
   return [connection.name, connection.dbType, connection.host, connection.database, ...connection.catalogs.map((catalog) => catalog.name)].join(' ').toLowerCase()
 }
 
@@ -3561,7 +3624,7 @@ function schemaRoutineNodeId(connectionId: string, catalogName: string, schemaNa
   return `${schemaObjectFolderKey(connectionId, catalogName, schemaName, kind)}:${routine}`
 }
 
-function schemaObjectFolders(schema: { tables: MockDatabaseTable[]; views?: MockDatabaseTable[]; functions?: string[]; procedures?: string[] }): SchemaObjectFolder[] {
+function schemaObjectFolders(schema: { tables: DatabaseTableInfo[]; views?: DatabaseTableInfo[]; functions?: string[]; procedures?: string[] }): SchemaObjectFolder[] {
   return [
     { kind: 'tables', count: schema.tables.length, tables: schema.tables, routines: [] },
     { kind: 'views', count: schema.views?.length ?? 0, tables: schema.views ?? [], routines: [] },
@@ -3570,12 +3633,109 @@ function schemaObjectFolders(schema: { tables: MockDatabaseTable[]; views?: Mock
   ]
 }
 
-function selectColumnNode(table: MockDatabaseTable, column: MockDatabaseColumn) {
+function selectColumnNode(table: DatabaseTableInfo, column: DatabaseColumnInfo) {
   selectedNodeId.value = columnNodeId(table.id, column.name)
 }
 
 function findConnection(id: string) {
   return connections.value.find((connection) => connection.id === id)
+}
+
+function replaceRecord<T>(target: Record<string, T>, next: Record<string, T>) {
+  Object.keys(target).forEach((key) => {
+    delete target[key]
+  })
+  Object.assign(target, next)
+}
+
+function cloneDatabaseCatalog<T>(value: T): T {
+  return structuredClone(value)
+}
+
+function tableNodeExists(tableId: string) {
+  return connections.value.some((connection) =>
+    connection.catalogs.some((catalog) => {
+      if (catalog.tables?.some((table) => table.id === tableId || table.columns.some((column) => columnNodeId(table.id, column.name) === tableId))) {
+        return true
+      }
+      return (catalog.schemas ?? []).some((schema) => {
+        if ([schemaObjectFolderKey(connection.id, catalog.name, schema.name, 'tables'), schemaObjectFolderKey(connection.id, catalog.name, schema.name, 'views'), schemaObjectFolderKey(connection.id, catalog.name, schema.name, 'functions'), schemaObjectFolderKey(connection.id, catalog.name, schema.name, 'procedures')].includes(tableId)) {
+          return true
+        }
+        if ([`${connection.id}:${catalog.name}`, `${connection.id}:${catalog.name}:${schema.name}`].includes(tableId)) return true
+        const tableHit = [...schema.tables, ...(schema.views ?? [])].some((table) => table.id === tableId || table.columns.some((column) => columnNodeId(table.id, column.name) === tableId))
+        if (tableHit) return true
+        return (['functions', 'procedures'] as const).some((kind) =>
+          (schema[kind] ?? []).some((routine) => tableId === schemaRoutineNodeId(connection.id, catalog.name, schema.name, kind, routine))
+        )
+      })
+    })
+  )
+}
+
+function databaseNodeExists(id: string | null) {
+  if (!id) return false
+  if (groups.value.some((group) => group.id === id)) return true
+  if (connections.value.some((connection) => connection.id === id)) return true
+  return tableNodeExists(id)
+}
+
+function applyDatabaseCatalog(catalog: DatabaseWorkspaceCatalog) {
+  databaseEngines.value = cloneDatabaseCatalog(catalog.engines)
+  groups.value = cloneDatabaseCatalog(catalog.groups)
+  replaceRecord(groupParentById, cloneDatabaseCatalog(catalog.groupParents))
+  connections.value = cloneDatabaseCatalog(catalog.connections)
+  expandedGroups.value = catalog.defaults.expandedGroupIds.slice()
+  expandedConnections.value = catalog.defaults.expandedConnectionIds.slice()
+  expandedCatalogs.value = catalog.defaults.expandedCatalogIds.slice()
+  expandedSchemas.value = catalog.defaults.expandedSchemaIds.slice()
+  expandedSchemaObjectFolders.value = catalog.defaults.expandedSchemaObjectFolderIds.slice()
+  selectedNodeId.value = databaseNodeExists(catalog.defaults.selectedNodeId)
+    ? catalog.defaults.selectedNodeId
+    : connections.value[0]?.id ?? groups.value[0]?.id ?? null
+  tabs.value.forEach((tab) => {
+    if (tab.kind === 'sql') repairSqlTabContext(tab)
+    if (tab.kind === 'data') {
+      const table = findTable(tab.connectionId, tab.catalogName, tab.tableId, tab.schemaName)
+      if (!table) {
+        tab.error = 'Table no longer exists in the backend catalog'
+        tab.rows = []
+        tab.rowCount = 0
+        tab.total = 0
+        tab.dirtyState = makeDirtyState([], tab.primaryKey)
+        tab.undoStack = []
+      }
+    }
+  })
+  if (dbAiPaneOpen.value || dbAiPaneContext.connectionId) {
+    if (dbAiPaneContext.connectionId && findConnection(dbAiPaneContext.connectionId)) {
+      applyDbAiPaneContext(dbAiPaneContext, dbAiPaneContextTouched)
+    } else {
+      ensureDbAiPaneContextInitialized(true)
+    }
+  }
+}
+
+async function loadDatabaseCatalog() {
+  try {
+    const result = await window.aiops.listDatabaseCatalog()
+    if (!result.ok || !result.data) {
+      showNotice(result.errorMessage || 'Database catalog backend is unavailable')
+      return
+    }
+    applyDatabaseCatalog(result.data)
+  } catch (error) {
+    showNotice(errorToMessage(error))
+  }
+}
+
+function applyDatabaseCatalogMutationResult(result: { ok: boolean; data?: DatabaseWorkspaceCatalog; errorMessage?: string }, fallbackError: string) {
+  if (!result.ok || !result.data) {
+    showNotice(result.errorMessage || fallbackError)
+    return false
+  }
+  applyDatabaseCatalog(result.data)
+  return true
 }
 
 function findTable(connectionId: string, catalogName: string, tableId: string, schemaName?: string) {
@@ -3588,7 +3748,7 @@ function findTable(connectionId: string, catalogName: string, tableId: string, s
   return catalog.tables?.find((table) => table.id === tableId) ?? null
 }
 
-function tableByName(connection: MockDatabaseConnection | undefined, catalogName: string, schemaName: string | undefined, tableName: string) {
+function tableByName(connection: DatabaseConnectionInfo | undefined, catalogName: string, schemaName: string | undefined, tableName: string) {
   const catalog = connection?.catalogs.find((item) => item.name === catalogName)
   if (!catalog) return null
   const normalized = tableName.replace(/[`";]/g, '').split('.').pop()?.trim().toLowerCase()
@@ -3617,13 +3777,12 @@ function getOrCreateSqlResultViewState(resultId: string): SqlResultViewState {
   return state
 }
 
-function openTable(connectionId: string, catalogName: string, table: MockDatabaseTable, schemaName?: string) {
+async function openTable(connectionId: string, catalogName: string, table: DatabaseTableInfo, schemaName?: string) {
   const existing = tabs.value.find((tab) => tab.kind === 'data' && tab.tableId === table.id && tab.connectionId === connectionId) as WorkspaceTab | undefined
   if (existing) {
     activeTabId.value = existing.id
     return
   }
-  const sourceRows = table.rows.map((row) => ({ ...row }))
   const tab: WorkspaceTab = {
     id: `tab-data-${table.id}-${Date.now()}`,
     kind: 'data',
@@ -3634,7 +3793,7 @@ function openTable(connectionId: string, catalogName: string, table: MockDatabas
     tableId: table.id,
     tableName: table.name,
     columns: table.columns.map((column) => column.name),
-    sourceRows,
+    sourceRows: [],
     rows: [],
     primaryKey: table.primaryKey,
     whereRaw: '',
@@ -3659,7 +3818,9 @@ function openTable(connectionId: string, catalogName: string, table: MockDatabas
   }
   tabs.value.push(tab)
   activeTabId.value = tab.id
-  reloadDataTab(tab, { preserveDirty: false })
+  await nextTick()
+  const reactiveTab = tabs.value.find((item) => item.id === tab.id && item.kind === 'data') as Extract<WorkspaceTab, { kind: 'data' }> | undefined
+  if (reactiveTab) await reloadDataTab(reactiveTab, { preserveDirty: false })
 }
 
 function closeTab(tabId: string) {
@@ -3699,17 +3860,34 @@ function resolveSqlConsoleContext(explicitConnectionId?: string): SqlConsoleCont
         active.kind === 'sql'
           ? active.schemaName || pickDefaultSchemaName(catalog)
           : active.schemaName || pickDefaultSchemaName(catalog)
-      return { connectionId: connection.id, catalogName: catalog?.name ?? catalogName, schemaName: schemaName ?? '' }
+      const context = { connectionId: connection.id, catalogName: catalog?.name ?? catalogName, schemaName: schemaName ?? '' }
+      if (isSqlConsoleContextReady(context)) return context
     }
   }
 
   const selected = resolveSelectedSqlContext()
-  if (selected) return selected
-  const first = connections.value[0]
-  return first ? defaultSqlContextForConnection(first) : { connectionId: '', catalogName: '', schemaName: '' }
+  if (selected && isSqlConsoleContextReady(selected)) return selected
+  return firstReadySqlConsoleContext() ?? selected ?? (connections.value[0] ? defaultSqlContextForConnection(connections.value[0]) : { connectionId: '', catalogName: '', schemaName: '' })
 }
 
-function defaultSqlContextForConnection(connection: MockDatabaseConnection): SqlConsoleContext {
+function isSqlConsoleContextReady(context: SqlConsoleContext | { connectionId: string; catalogName: string; schemaName: string }) {
+  const connection = findConnection(context.connectionId)
+  if (!connection || !context.catalogName) return false
+  const catalog = connection.catalogs.find((item) => item.name === context.catalogName)
+  if (!catalog) return false
+  if (sqlConnectionRequiresSchema(connection)) return !!context.schemaName && !!catalog.schemas?.some((schema) => schema.name === context.schemaName)
+  return true
+}
+
+function firstReadySqlConsoleContext(): SqlConsoleContext | null {
+  for (const connection of connections.value) {
+    const context = defaultSqlContextForConnection(connection)
+    if (isSqlConsoleContextReady(context)) return context
+  }
+  return null
+}
+
+function defaultSqlContextForConnection(connection: DatabaseConnectionInfo): SqlConsoleContext {
   const catalog = connection.catalogs[0]
   return {
     connectionId: connection.id,
@@ -3718,7 +3896,7 @@ function defaultSqlContextForConnection(connection: MockDatabaseConnection): Sql
   }
 }
 
-function pickDefaultSchemaName(catalog: MockDatabaseCatalog | undefined) {
+function pickDefaultSchemaName(catalog: DatabaseCatalogInfo | undefined) {
   if (!catalog?.schemas?.length) return ''
   return catalog.schemas.find((schema) => schema.name === 'public')?.name ?? catalog.schemas[0]?.name ?? ''
 }
@@ -3835,10 +4013,11 @@ function updateDbAiPaneSchema(event: Event) {
   dbAiPaneContextTouched = true
 }
 
-function connectDbAiPaneConnection() {
+async function connectDbAiPaneConnection() {
   const connection = dbAiPaneConnection.value
   if (!connection) return
-  connection.status = 'connected'
+  const result = await connectDatabaseConnectionViaBackend(connection.id)
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.')) return
   expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
   showNotice('DB AI context connection opened')
 }
@@ -3866,7 +4045,7 @@ function sendDbAiPaneQuickPrompt(kind: DbAiPaneQuickPrompt) {
   sendDbAiPaneMessage('Generate a read-only SELECT query for the most useful table in the current context.')
 }
 
-function sendDbAiPaneMessage(promptOverride = '') {
+async function sendDbAiPaneMessage(promptOverride = '') {
   const prompt = (promptOverride || dbAiPaneDraft.value).trim()
   if (!prompt || dbAiPaneIsStreaming.value) return
   ensureDbAiPaneContextInitialized(false)
@@ -3874,66 +4053,88 @@ function sendDbAiPaneMessage(promptOverride = '') {
     showNotice('Database context is required before using DB AI pane')
     return
   }
-  if (dbAiPaneConnectionNeedsConnect.value) connectDbAiPaneConnection()
-  const now = Date.now()
+  if (dbAiPaneConnectionNeedsConnect.value) {
+    await connectDbAiPaneConnection()
+    if (dbAiPaneConnectionNeedsConnect.value) return
+  }
   const contextSummary = dbAiPaneContextSummary.value
-  const userMessage: DbAiPaneMessage = {
-    id: `dbai-pane-user-${now}-${Math.random().toString(36).slice(2, 7)}`,
-    role: 'user',
-    status: 'done',
-    content: prompt,
-    contextSummary,
-    createdAt: now,
-    updatedAt: now
+  const requestInput = {
+    prompt,
+    context: {
+      connectionId: dbAiPaneContext.connectionId,
+      dbType: dbAiPaneContext.dbType || undefined,
+      databaseName: dbAiPaneContext.catalogName,
+      schemaName: dbAiPaneContext.schemaName,
+      contextSummary
+    },
+    activeSql: activeSqlTab.value?.sql ?? '',
+    messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
   }
-  const assistantMessage: DbAiPaneMessage = {
-    id: `dbai-pane-assistant-${now}-${Math.random().toString(36).slice(2, 7)}`,
-    role: 'assistant',
-    status: 'queued',
-    content: '',
-    contextSummary,
-    createdAt: now + 1,
-    updatedAt: now + 1
+  const created = await window.aiops.createDatabaseAiPaneRequest(requestInput)
+  if (!created.ok || !created.data) {
+    showNotice(created.errorMessage || 'DB AI pane request failed')
+    return
   }
+  const { userMessage, assistantMessage } = created.data
   dbAiPaneMessages.value = [...dbAiPaneMessages.value, userMessage, assistantMessage]
   if (!promptOverride) dbAiPaneDraft.value = ''
-  startMockDbAiPaneStream(assistantMessage.id, prompt, { ...dbAiPaneContext })
+  void requestDbAiPaneResponse(assistantMessage.id, prompt, { ...dbAiPaneContext }, contextSummary, created.data.requestId)
   scrollDbAiPaneMessagesToBottom()
 }
 
-function startMockDbAiPaneStream(messageId: string, prompt: string, context: DbAiPaneContext) {
+async function requestDbAiPaneResponse(messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) {
   clearDbAiPaneTimers(messageId)
-  const response = buildDbAiPaneResponse(prompt, context)
-  const chunks = chunkDbAiPaneText(response)
-  const timers: DbAiPaneTimer[] = []
-  chunks.forEach((chunk, index) => {
-    const timerId = window.setTimeout(() => appendDbAiPaneStreamChunk(messageId, chunk), 80 + index * 65)
-    timers.push({ id: timerId, messageId, kind: 'stream' })
-  })
-  const doneTimer = window.setTimeout(() => finishDbAiPaneMessage(messageId), 80 + chunks.length * 65)
-  timers.push({ id: doneTimer, messageId, kind: 'done' })
-  dbAiPaneTimers.set(messageId, timers)
+  const timerId = window.setTimeout(() => markDbAiPaneMessageStreaming(messageId), 80)
+  dbAiPaneTimers.set(messageId, [{ id: timerId, messageId, kind: 'streaming' }])
+  try {
+    const result = await window.aiops.generateDatabaseAiPaneResponse({
+      requestId,
+      assistantMessageId: messageId,
+      prompt,
+      context: {
+        connectionId: context.connectionId,
+        dbType: context.dbType || undefined,
+        databaseName: context.catalogName,
+        schemaName: context.schemaName,
+        contextSummary
+      },
+      activeSql: activeSqlTab.value?.sql ?? '',
+      messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
+    })
+    finishDbAiPaneMessage(messageId, result)
+  } catch (error) {
+    finishDbAiPaneMessage(messageId, {
+      ok: false,
+      errorCode: 'DB_AI_PANE_ERROR',
+      errorMessage: errorToMessage(error)
+    })
+  }
 }
 
-function appendDbAiPaneStreamChunk(messageId: string, chunk: string) {
+function markDbAiPaneMessageStreaming(messageId: string) {
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled' || message.status === 'done') return message
     return {
       ...message,
       status: 'streaming',
-      content: `${message.content}${chunk}`,
       updatedAt: Date.now()
     }
   })
   scrollDbAiPaneMessagesToBottom()
 }
 
-function finishDbAiPaneMessage(messageId: string) {
+function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponseResult) {
+  clearDbAiPaneTimers(messageId)
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled') return message
-    return { ...message, status: 'done', updatedAt: Date.now() }
+    if (result.ok && result.data?.assistantMessage) return result.data.assistantMessage
+    return {
+      ...message,
+      status: 'done',
+      content: result.ok && result.data?.text ? result.data.text : result.errorMessage || 'DB AI pane response failed.',
+      updatedAt: Date.now()
+    }
   })
-  dbAiPaneTimers.delete(messageId)
   scrollDbAiPaneMessagesToBottom()
 }
 
@@ -3961,85 +4162,6 @@ function resetDbAiPaneConversation() {
   dbAiPaneMessages.value = []
   dbAiPaneDraft.value = ''
   showNotice('DB AI pane conversation reset')
-}
-
-function buildDbAiPaneResponse(prompt: string, context: DbAiPaneContext) {
-  const connection = findConnection(context.connectionId)
-  const catalog = connection?.catalogs.find((item) => item.name === context.catalogName)
-  const table = firstTableForDbAiPaneContext(context)
-  const promptLower = prompt.toLowerCase()
-  const contextLine = [connection?.name, connection?.dbType, context.catalogName, context.schemaName].filter(Boolean).join(' · ')
-  if (promptLower.includes('explain') && activeSqlTab.value?.sql.trim()) {
-    return [
-      `Context: ${contextLine}`,
-      'I read the active SQL editor and current database context.',
-      'Execution notes:',
-      '- Keep the query read-only before running it from the workbench.',
-      '- Verify WHERE clauses before widening result sets.',
-      '- Check indexes on join/filter columns if latency grows.',
-      '',
-      'Suggested next SQL:',
-      '```sql',
-      buildDbAiPaneSelectSql(context),
-      '```'
-    ].join('\n')
-  }
-  if (promptLower.includes('schema') || promptLower.includes('table')) {
-    const schemaLines = catalog
-      ? summarizeDbAiPaneCatalog(catalog)
-      : ['No catalog metadata is available in the local mock context.']
-    return [`Context: ${contextLine}`, 'Schema summary:', ...schemaLines, '', 'Recommended starting point:', '```sql', buildDbAiPaneSelectSql(context), '```'].join('\n')
-  }
-  if (promptLower.includes('select') || promptLower.includes('query') || promptLower.includes('sql')) {
-    return [`Context: ${contextLine}`, `Generated a conservative read-only query${table ? ` for ${table.name}` : ''}.`, '', '```sql', buildDbAiPaneSelectSql(context), '```'].join('\n')
-  }
-  return [
-    `Context: ${contextLine}`,
-    'I can help inspect schema metadata, draft read-only SQL, explain editor SQL, and suggest optimization checks in this local workspace.',
-    table ? `A useful table to start from is ${table.name}.` : 'No table is selected, so I will stay at database-level guidance.',
-    '',
-    '```sql',
-    buildDbAiPaneSelectSql(context),
-    '```'
-  ].join('\n')
-}
-
-function summarizeDbAiPaneCatalog(catalog: MockDatabaseCatalog) {
-  if (catalog.schemas?.length) {
-    return catalog.schemas.flatMap((schema) => {
-      const tables = [...schema.tables, ...(schema.views ?? [])]
-      const names = tables.slice(0, 4).map((table) => `${table.name}(${table.columns.length} columns)`)
-      return [`- Schema ${schema.name}: ${names.length ? names.join(', ') : 'no tables loaded'}`]
-    })
-  }
-  const names = (catalog.tables ?? []).slice(0, 5).map((table) => `${table.name}(${table.columns.length} columns)`)
-  return [`- Database ${catalog.name}: ${names.length ? names.join(', ') : 'no tables loaded'}`]
-}
-
-function firstTableForDbAiPaneContext(context: DbAiPaneContext) {
-  const connection = findConnection(context.connectionId)
-  const catalog = connection?.catalogs.find((item) => item.name === context.catalogName)
-  if (!catalog) return null
-  if (context.schemaName) {
-    const schema = catalog.schemas?.find((item) => item.name === context.schemaName)
-    return [...(schema?.tables ?? []), ...(schema?.views ?? [])][0] ?? null
-  }
-  return catalog.tables?.[0] ?? null
-}
-
-function buildDbAiPaneSelectSql(context: DbAiPaneContext) {
-  const connection = findConnection(context.connectionId)
-  const catalog = connection?.catalogs.find((item) => item.name === context.catalogName)
-  const table = firstTableForDbAiPaneContext(context)
-  if (!connection || !catalog || !table) return 'select 1;'
-  const qualified = buildQualifiedTableReference(connection.dbType, catalog.name, context.schemaName, table.name)
-  return connection.dbType === 'oracle' ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;` : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
-}
-
-function chunkDbAiPaneText(text: string) {
-  const chunks: string[] = []
-  for (let index = 0; index < text.length; index += 72) chunks.push(text.slice(index, index + 72))
-  return chunks.length ? chunks : ['']
 }
 
 function dbAiPaneStatusLabel(status: DbAiPaneMessageStatus) {
@@ -4155,7 +4277,7 @@ function persistDbAiPaneState() {
       })
     )
   } catch {
-    // Persistence is opportunistic in local mock mode.
+    // Persistence is opportunistic in local backend mode.
   }
 }
 
@@ -4180,14 +4302,14 @@ function openSqlConsole(connectionId?: string) {
   closeMenus()
 }
 
-function renderDefaultSql(connection: MockDatabaseConnection | undefined, catalog: MockDatabaseCatalog | undefined, schemaName?: string) {
+function renderDefaultSql(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined, schemaName?: string) {
   const table = schemaName ? catalog?.schemas?.find((schema) => schema.name === schemaName)?.tables[0] : catalog?.tables?.[0]
   if (!table) return 'select 1;'
   const qualified = buildQualifiedTableReference(connection?.dbType ?? 'mysql', catalog?.name ?? '', schemaName, table.name)
   return connection?.dbType === 'oracle' ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;` : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
 }
 
-function buildQualifiedTableReference(dbType: MockDatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
+function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
   const quotedTable = quoteSqlIdentifierForDialect(tableName, dbType)
   if ((dbType === 'postgresql' || dbType === 'oracle') && schemaName) {
     return `${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
@@ -4198,16 +4320,9 @@ function buildQualifiedTableReference(dbType: MockDatabaseEngineCode, catalogNam
   return quotedTable
 }
 
-function quoteSqlIdentifierForDialect(value: string, dbType: MockDatabaseEngineCode) {
+function quoteSqlIdentifierForDialect(value: string, dbType: DatabaseEngineCode) {
   if (dbType === 'mysql') return `\`${String(value).replace(/`/g, '``')}\``
   return `"${String(value).replace(/"/g, '""')}"`
-}
-
-function quoteSqlIdentifierForDbAi(value: string, dialect: DbAiTargetDialect) {
-  const raw = String(value).replace(/^[`"\[]|[`"\]]$/g, '')
-  if (dialect === 'mysql') return `\`${raw.replace(/`/g, '``')}\``
-  if (dialect === 'mssql') return `[${raw.replace(/]/g, ']]')}]`
-  return `"${raw.replace(/"/g, '""')}"`
 }
 
 function runSql(mode: 'all' | 'current' | 'explain') {
@@ -4228,11 +4343,8 @@ async function appendSqlExecution(tab: Extract<WorkspaceTab, { kind: 'sql' }>, s
 
   let payload: SqlExecutionPayload
   try {
-    await waitForMockSqlResult()
-    payload = executeMockSqlPayload(tab, sql)
-    if (!payload || typeof payload !== 'object') {
-      payload = createSqlErrorPayload('Mock SQL executor returned an empty response.')
-    }
+    const response = await executeSqlThroughBackend(tab, sql)
+    payload = sqlPayloadFromBackendResult(response)
   } catch (error) {
     payload = createSqlErrorPayload(errorToMessage(error))
   }
@@ -4281,29 +4393,32 @@ function createRunningSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql
   }
 }
 
-function waitForMockSqlResult() {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, 0)
+async function executeSqlThroughBackend(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string): Promise<DatabaseSqlExecuteResult> {
+  const connection = findConnection(tab.connectionId)
+  return window.aiops.executeDatabaseSql({
+    connectionId: tab.connectionId,
+    dbType: connection?.dbType,
+    sql,
+    databaseName: tab.catalogName,
+    schemaName: tab.schemaName
   })
 }
 
-function executeMockSqlPayload(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string): SqlExecutionPayload {
-  const connection = findConnection(tab.connectionId)
-  const tableMatch = sql.match(/from\s+([`"\w.]+)/i)
-  const tableName = tableMatch?.[1] ?? ''
-  const table = tableByName(connection, tab.catalogName, tab.schemaName, tableName)
-  const isError = /drop\s+database|syntax_error/i.test(sql)
-  if (isError) {
-    return createSqlErrorPayload('Mock SQL parser rejected this statement.', 22)
+function sqlPayloadFromBackendResult(result: DatabaseSqlExecuteResult | undefined): SqlExecutionPayload {
+  if (!result || typeof result !== 'object') {
+    return createSqlErrorPayload('Backend SQL executor returned an empty response.')
   }
-  const rows = table?.rows.map((row) => ({ ...row })) ?? [{ result: 1, message: 'mock query ok' }]
-  const columns = table?.columns.map((column) => column.name) ?? Object.keys(rows[0] ?? {})
+  if (!result.ok) {
+    return createSqlErrorPayload(result.errorMessage || 'Backend SQL executor failed.')
+  }
+  const rows = result.data?.rows ?? []
+  const columns = result.data?.columns ?? Object.keys(rows[0] ?? {})
   return {
     status: 'ok',
     columns,
     rows,
-    rowCount: rows.length,
-    durationMs: 24 + Math.floor(Math.random() * 18),
+    rowCount: result.data?.rowCount ?? rows.length,
+    durationMs: result.data?.durationMs ?? 0,
     error: null
   }
 }
@@ -4328,7 +4443,7 @@ function patchSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, resultId: s
 function errorToMessage(error: unknown) {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
-  return 'Mock SQL executor failed.'
+  return 'Backend SQL executor failed.'
 }
 
 function firstStatement(sql: string) {
@@ -4340,8 +4455,7 @@ function firstStatement(sql: string) {
 
 function getSelectedSqlText() {
   const editor = sqlEditorRef.value
-  if (!editor) return ''
-  return editor.value.slice(editor.selectionStart, editor.selectionEnd)
+  return editor?.getSelectedText() ?? ''
 }
 
 function sqlCursorPosition(text: string, offset: number) {
@@ -4352,130 +4466,20 @@ function sqlCursorPosition(text: string, offset: number) {
   return { line, column: clamped - lastBreak }
 }
 
-function syncSqlEditorScroll(event?: Event) {
-  const editor = (event?.target as HTMLTextAreaElement | null) ?? sqlEditorRef.value
-  sqlEditorScrollTop.value = editor?.scrollTop ?? 0
-}
-
-function syncSqlEditorState(event?: Event) {
-  const editor = (event?.target as HTMLTextAreaElement | null) ?? sqlEditorRef.value
-  const text = editor?.value ?? activeSqlTab.value?.sql ?? ''
-  const cursor = editor ? Math.min(editor.selectionStart, editor.selectionEnd) : 0
-  const selectionEnd = editor ? Math.max(editor.selectionStart, editor.selectionEnd) : cursor
-  const position = sqlCursorPosition(text, cursor)
-  sqlEditorActiveLine.value = Math.max(1, Math.min(position.line, activeSqlEditorLineCount.value))
-  sqlEditorActiveColumn.value = Math.max(1, position.column)
-  sqlEditorSelectionSize.value = Math.max(0, selectionEnd - cursor)
-  syncSqlEditorScroll(event)
-}
-
-function handleSqlEditorKeydown(event: KeyboardEvent) {
-  const key = event.key.toLowerCase()
-  if ((event.metaKey || event.ctrlKey) && key === 'enter') {
-    event.preventDefault()
-    runSqlFromShortcut()
+function syncSqlEditorState(metrics?: DatabaseSqlEditorMetrics) {
+  if (!metrics) {
+    const tab = activeSqlTab.value
+    const position = sqlCursorPosition(tab?.sql ?? '', sqlEditorRef.value?.getCursorOffset() ?? 0)
+    sqlEditorActiveLine.value = Math.max(1, Math.min(position.line, activeSqlEditorLineCount.value))
+    sqlEditorActiveColumn.value = Math.max(1, position.column)
+    sqlEditorSelectionSize.value = 0
+    sqlEditorScrollTop.value = 0
     return
   }
-  if ((event.metaKey || event.ctrlKey) && key === 'f') {
-    event.preventDefault()
-    openSqlFind(false)
-    return
-  }
-  if ((event.metaKey || event.ctrlKey) && key === 'h') {
-    event.preventDefault()
-    openSqlFind(true)
-    return
-  }
-  if (event.key === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    event.preventDefault()
-    applySqlEditorIndent(event.shiftKey)
-    return
-  }
-  if (event.key === 'Escape' && sqlFindOpen.value) {
-    event.preventDefault()
-    closeSqlFind(true)
-  }
-}
-
-function applySqlEditorIndent(outdent: boolean) {
-  const tab = activeSqlTab.value
-  const editor = sqlEditorRef.value
-  if (!tab || !editor) return
-  const start = editor.selectionStart
-  const end = editor.selectionEnd
-  const edit = start === end ? indentSqlCursor(tab.sql, start, outdent) : indentSqlSelection(tab.sql, start, end, outdent)
-  setEditorSql(edit.sql, edit.selectionStart, edit.selectionEnd)
-}
-
-function indentSqlCursor(sql: string, cursor: number, outdent: boolean): SqlIndentEdit {
-  if (!outdent) {
-    return {
-      sql: `${sql.slice(0, cursor)}${SQL_EDITOR_INDENT}${sql.slice(cursor)}`,
-      selectionStart: cursor + SQL_EDITOR_INDENT.length,
-      selectionEnd: cursor + SQL_EDITOR_INDENT.length
-    }
-  }
-  const lineStart = sql.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1
-  const lineEnd = sql.indexOf('\n', lineStart)
-  const line = sql.slice(lineStart, lineEnd === -1 ? sql.length : lineEnd)
-  const remove = sqlIndentRemoval(line)
-  if (!remove) return { sql, selectionStart: cursor, selectionEnd: cursor }
-  const removedBeforeCursor = cursor >= lineStart + remove ? remove : Math.max(0, cursor - lineStart)
-  return {
-    sql: `${sql.slice(0, lineStart)}${line.slice(remove)}${sql.slice(lineEnd === -1 ? sql.length : lineEnd)}`,
-    selectionStart: cursor - removedBeforeCursor,
-    selectionEnd: cursor - removedBeforeCursor
-  }
-}
-
-function indentSqlSelection(sql: string, selectionStart: number, selectionEnd: number, outdent: boolean): SqlIndentEdit {
-  const range = sqlLineRangeForSelection(sql, selectionStart, selectionEnd)
-  const block = sql.slice(range.start, range.end)
-  const lines = block.split('\n')
-  if (!outdent) {
-    const nextBlock = lines.map((line) => `${SQL_EDITOR_INDENT}${line}`).join('\n')
-    return {
-      sql: `${sql.slice(0, range.start)}${nextBlock}${sql.slice(range.end)}`,
-      selectionStart: selectionStart + SQL_EDITOR_INDENT.length,
-      selectionEnd: selectionEnd + SQL_EDITOR_INDENT.length * lines.length
-    }
-  }
-
-  const removals: Array<{ position: number; length: number }> = []
-  let offset = range.start
-  const nextLines = lines.map((line) => {
-    const remove = sqlIndentRemoval(line)
-    if (remove) removals.push({ position: offset, length: remove })
-    offset += line.length + 1
-    return line.slice(remove)
-  })
-  const removedBefore = (position: number) =>
-    removals.reduce((total, removal) => {
-      if (position <= removal.position) return total
-      if (position >= removal.position + removal.length) return total + removal.length
-      return total + (position - removal.position)
-    }, 0)
-  return {
-    sql: `${sql.slice(0, range.start)}${nextLines.join('\n')}${sql.slice(range.end)}`,
-    selectionStart: selectionStart - removedBefore(selectionStart),
-    selectionEnd: selectionEnd - removedBefore(selectionEnd)
-  }
-}
-
-function sqlLineRangeForSelection(sql: string, selectionStart: number, selectionEnd: number): TextRange {
-  const start = Math.max(0, Math.min(selectionStart, selectionEnd, sql.length))
-  const end = Math.max(0, Math.min(Math.max(selectionStart, selectionEnd), sql.length))
-  const lineStart = sql.lastIndexOf('\n', Math.max(0, start - 1)) + 1
-  const adjustedEnd = end > start && sql[end - 1] === '\n' ? end - 1 : end
-  const nextBreak = sql.indexOf('\n', adjustedEnd)
-  return { start: lineStart, end: nextBreak === -1 ? sql.length : nextBreak }
-}
-
-function sqlIndentRemoval(line: string) {
-  if (line.startsWith('\t')) return 1
-  if (line.startsWith(SQL_EDITOR_INDENT)) return SQL_EDITOR_INDENT.length
-  if (line.startsWith(' ')) return 1
-  return 0
+  sqlEditorActiveLine.value = Math.max(1, Math.min(metrics.line, activeSqlEditorLineCount.value))
+  sqlEditorActiveColumn.value = Math.max(1, metrics.column)
+  sqlEditorSelectionSize.value = Math.max(0, metrics.selectionSize)
+  sqlEditorScrollTop.value = Math.max(0, metrics.scrollTop)
 }
 
 function openSqlFind(replace: boolean) {
@@ -4542,7 +4546,7 @@ function alignSqlFindIndexToSelection() {
     sqlFindActiveIndex.value = matches.length ? 0 : -1
     return
   }
-  const start = Math.min(editor.selectionStart, editor.selectionEnd)
+  const start = editor.getSelectionRange().start
   const exact = matches.findIndex((match) => match.start === start)
   sqlFindActiveIndex.value = exact
 }
@@ -4572,7 +4576,7 @@ function goToSqlFindMatch(direction: 1 | -1) {
   }
   if (sqlFindActiveIndex.value < 0) {
     const editor = sqlEditorRef.value
-    const cursor = editor ? Math.max(editor.selectionStart, editor.selectionEnd) : 0
+    const cursor = editor?.getSelectionRange().end ?? 0
     const index = direction > 0 ? firstSqlFindMatchAtOrAfter(cursor, matches) : firstSqlFindMatchAtOrAfter(cursor, matches) - 1
     selectSqlFindMatch(index)
     return
@@ -4584,7 +4588,7 @@ function replaceCurrentSqlFindMatch() {
   const matches = sqlFindMatches.value
   if (!matches.length) return
   const editor = sqlEditorRef.value
-  const selectedStart = editor ? Math.min(editor.selectionStart, editor.selectionEnd) : -1
+  const selectedStart = editor?.getSelectionRange().start ?? -1
   const activeIndex = matches.findIndex((match) => match.start === selectedStart)
   const match = matches[activeIndex >= 0 ? activeIndex : Math.max(0, sqlFindActiveIndex.value)]
   const sql = activeSqlTab.value?.sql ?? ''
@@ -4618,14 +4622,13 @@ function setSqlEditorSelection(selectionStart: number, selectionEnd = selectionS
     if (!editor) return
     const start = Math.max(0, Math.min(selectionStart, sql.length))
     const end = Math.max(0, Math.min(selectionEnd, sql.length))
-    editor.focus()
     editor.setSelectionRange(start, end)
     syncSqlEditorState()
   })
 }
 
 function focusSqlEditor(event?: MouseEvent) {
-  if (event?.target instanceof HTMLTextAreaElement) return
+  if (event?.target instanceof HTMLTextAreaElement || event?.target instanceof HTMLInputElement || event?.target instanceof HTMLButtonElement) return
   sqlEditorRef.value?.focus()
   syncSqlEditorState()
 }
@@ -4678,16 +4681,14 @@ function resetSqlPaneSplit() {
 function getSqlCursorOffset() {
   const editor = sqlEditorRef.value
   if (!editor) return activeSqlTab.value?.sql.length ?? 0
-  return editor.selectionStart
+  return editor.getCursorOffset()
 }
 
 function getSqlSelectionRange(): TextRange {
   const editor = sqlEditorRef.value
   const length = activeSqlTab.value?.sql.length ?? 0
   if (!editor) return { start: length, end: length }
-  const start = Math.max(0, Math.min(editor.selectionStart, editor.selectionEnd, length))
-  const end = Math.max(0, Math.min(Math.max(editor.selectionStart, editor.selectionEnd), length))
-  return { start, end }
+  return editor.getSelectionRange()
 }
 
 function currentSqlStatement(sql: string, cursorOffset: number) {
@@ -4791,7 +4792,7 @@ function updateDataPage(page: number) {
   const tab = activeDataTab.value
   if (!tab) return
   tab.page = tab.total === null ? Math.max(1, Math.floor(page)) : clampPage(page, tab.total, tab.pageSize)
-  reloadDataTab(tab)
+  void reloadDataTab(tab)
 }
 
 function updateDataPageSize(size: number) {
@@ -4799,16 +4800,18 @@ function updateDataPageSize(size: number) {
   if (!tab) return
   tab.pageSize = size
   tab.page = 1
-  reloadDataTab(tab)
+  void reloadDataTab(tab)
 }
 
 function gotoLastDataPage() {
   const tab = activeDataTab.value
   if (!tab) return
-  if (tab.total === null) refreshDataTotal()
-  const total = tab.total ?? mockQueryDataRows(tab).total
-  tab.page = Math.max(1, Math.ceil(total / tab.pageSize))
-  reloadDataTab(tab)
+  void (async () => {
+    if (tab.total === null) await refreshDataTotal()
+    const total = tab.total ?? tab.rowCount
+    tab.page = Math.max(1, Math.ceil(total / tab.pageSize))
+    await reloadDataTab(tab)
+  })()
 }
 
 function cycleDataSort(column: string) {
@@ -4816,7 +4819,7 @@ function cycleDataSort(column: string) {
   if (!tab) return
   tab.sort = nextSort(tab.sort, column)
   tab.page = 1
-  reloadDataTab(tab)
+  void reloadDataTab(tab)
 }
 
 function applyDataFilter(column: string, filter: DbFilter | null) {
@@ -4824,7 +4827,7 @@ function applyDataFilter(column: string, filter: DbFilter | null) {
   if (!tab) return
   tab.filters = replaceFilter(tab.filters, column, filter)
   tab.page = 1
-  reloadDataTab(tab)
+  void reloadDataTab(tab)
 }
 
 function applyWhere() {
@@ -4833,7 +4836,7 @@ function applyWhere() {
   tab.whereRaw = tab.whereDraft.trim()
   tab.whereDraft = tab.whereRaw
   tab.page = 1
-  reloadDataTab(tab)
+  void reloadDataTab(tab)
 }
 
 function canEditDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
@@ -4987,16 +4990,35 @@ async function saveDataChanges() {
   tab.saving = true
   tab.saveError = null
   await nextTick()
-  tab.sourceRows = tab.sourceRows
-    .filter((row, index) => !tab.dirtyState.deletedRowKeys.has(buildRowKey(row, tab.primaryKey, index)))
-    .map((row, index) => {
-      const key = buildRowKey(row, tab.primaryKey, index)
-      return { ...row, ...(tab.dirtyState.updatedCells.get(key) ?? {}) }
-    })
-  tab.sourceRows.push(...tab.dirtyState.newRows.map((row) => ({ ...row.values })))
-  reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false })
+  const backendResult = await mutateDataTabThroughBackend(tab)
+  if (!backendResult.ok) {
+    tab.saveError = backendResult.errorMessage || 'Backend table mutation failed.'
+    tab.saving = false
+    showNotice(tab.saveError)
+    return
+  }
+  await reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false })
   tab.saving = false
-  showNotice(`Changes saved to local mock state (${mutation.statements.length} statement${mutation.statements.length > 1 ? 's' : ''})`)
+  showNotice(`Changes saved through backend table store (${mutation.statements.length} statement${mutation.statements.length > 1 ? 's' : ''})`)
+}
+
+function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
+  return window.aiops.mutateDatabaseTable({
+    connectionId: tab.connectionId,
+    databaseName: tab.catalogName,
+    schemaName: tab.schemaName,
+    tableName: tab.tableName,
+    mutations: [
+      ...Array.from(tab.dirtyState.deletedRowKeys).map((rowKey) => ({ kind: 'delete' as const, rowKey, primaryKey: tab.primaryKey.slice() })),
+      ...Array.from(tab.dirtyState.updatedCells.entries()).map(([rowKey, patch]) => ({
+        kind: 'update' as const,
+        rowKey,
+        primaryKey: tab.primaryKey.slice(),
+        patch: { ...patch }
+      })),
+      ...tab.dirtyState.newRows.map((row) => ({ kind: 'insert' as const, values: { ...row.values } }))
+    ]
+  })
 }
 
 function discardDataChanges() {
@@ -5019,55 +5041,73 @@ function copyDataMutationPreview() {
 function refreshDataTab() {
   const tab = activeDataTab.value
   if (!tab) return
-  reloadDataTab(tab, { notice: 'Table data refreshed' })
+  void reloadDataTab(tab, { notice: 'Table data refreshed' })
 }
 
-function refreshDataTotal() {
+async function refreshDataTotal() {
   const tab = activeDataTab.value
   if (!tab) return
-  const result = mockQueryDataRows(tab)
-  tab.total = result.total
-  tab.durationMs = 10 + Math.floor(Math.random() * 12)
-  showNotice('Table total refreshed')
+  await reloadDataTab(tab, { withTotal: true, preserveDirty: true, notice: 'Table total refreshed' })
 }
 
-function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, options: TableReloadOptions = {}) {
+async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, options: TableReloadOptions = {}) {
   const preserveDirty = options.preserveDirty ?? true
   tab.loading = true
   tab.error = null
-  const result = mockQueryDataRows(tab)
-  const maxPage = Math.max(1, Math.ceil(result.total / tab.pageSize))
-  if (tab.page > maxPage) {
-    tab.page = maxPage
-    const clamped = mockQueryDataRows(tab)
-    result.rows = clamped.rows
+  try {
+    const result = await queryDataTabThroughBackend(tab, options.withTotal ?? false)
+    if (!result.ok) {
+      tab.error = result.errorMessage || 'Backend table query failed.'
+      return
+    }
+    const total = result.data?.total
+    if (typeof total === 'number') {
+      const maxPage = Math.max(1, Math.ceil(total / tab.pageSize))
+      if (tab.page > maxPage) {
+        tab.page = maxPage
+        return reloadDataTab(tab, options)
+      }
+      tab.total = total
+    }
+    const rows = result.data?.rows ?? []
+    tab.rows = rows
+    tab.sourceRows = rows.map((row) => ({ ...row }))
+    tab.rowCount = result.data?.rowCount ?? rows.length
+    tab.durationMs = result.data?.durationMs ?? 0
+    tab.knownColumns = result.data?.knownColumns ?? tab.columns.slice()
+    tab.columns = result.data?.columns?.length ? result.data.columns : tab.columns
+    if (!preserveDirty) {
+      tab.dirtyState = makeDirtyState(tab.rows, tab.primaryKey)
+      tab.undoStack = []
+      tab.selectedRowKey = null
+      tab.saveError = null
+    } else {
+      tab.dirtyState = { ...tab.dirtyState, originalRows: makeOriginalRows(tab.rows, tab.primaryKey) }
+    }
+    if (options.notice) showNotice(options.notice)
+  } catch (error) {
+    tab.error = errorToMessage(error)
+  } finally {
+    tab.loading = false
   }
-  tab.rows = result.rows
-  tab.rowCount = result.rows.length
-  tab.durationMs = 16 + Math.floor(Math.random() * 20)
-  tab.knownColumns = tab.columns.slice()
-  if (options.withTotal) tab.total = result.total
-  if (!preserveDirty) {
-    tab.dirtyState = makeDirtyState(tab.rows, tab.primaryKey)
-    tab.undoStack = []
-    tab.selectedRowKey = null
-    tab.saveError = null
-  } else {
-    tab.dirtyState = { ...tab.dirtyState, originalRows: makeOriginalRows(tab.rows, tab.primaryKey) }
-  }
-  tab.loading = false
-  if (options.notice) showNotice(options.notice)
 }
 
-function mockQueryDataRows(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  const whereFilters = parseWhereRaw(tab.whereRaw)
-  const filteredRows = applyFilters(applyFilters(tab.sourceRows, whereFilters), tab.filters)
-  const rows = tab.sort ? applySort(filteredRows, tab.sort) : applyOrderBySort(filteredRows, parseOrderByRaw(tab.orderByRaw, tab.columns))
-  const start = (tab.page - 1) * tab.pageSize
-  return {
-    rows: rows.slice(start, start + tab.pageSize).map((row) => ({ ...row })),
-    total: rows.length
-  }
+function queryDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>, withTotal: boolean): Promise<DatabaseTableQueryResult> {
+  const connection = findConnection(tab.connectionId)
+  return window.aiops.queryDatabaseTable({
+    connectionId: tab.connectionId,
+    dbType: connection?.dbType,
+    databaseName: tab.catalogName,
+    schemaName: tab.schemaName,
+    tableName: tab.tableName,
+    filters: tab.filters.map((filter) => ({ ...filter })),
+    sort: tab.sort ? { ...tab.sort } : null,
+    whereRaw: tab.whereRaw || null,
+    orderByRaw: tab.orderByRaw || null,
+    page: tab.page,
+    pageSize: tab.pageSize,
+    withTotal
+  })
 }
 
 function parseWhereRaw(whereRaw: string): DbFilter[] {
@@ -5281,7 +5321,7 @@ function decodePrimaryKeyRowKey(rowKey: string, primaryKey: string[]) {
   }
 }
 
-function compareSqlValue(column: string, value: unknown, dialect: MockDatabaseEngineCode) {
+function compareSqlValue(column: string, value: unknown, dialect: DatabaseEngineCode) {
   const quoted = quoteSqlIdentifier(column, dialect)
   return value === null || value === undefined ? `${quoted} IS NULL` : `${quoted} = ${formatSqlLiteral(value)}`
 }
@@ -5292,7 +5332,7 @@ function dataTableReference(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
   return parts.filter(Boolean).map((part) => quoteSqlIdentifier(String(part), dialect)).join('.')
 }
 
-function quoteSqlIdentifier(value: string, dialect: MockDatabaseEngineCode = 'postgresql') {
+function quoteSqlIdentifier(value: string, dialect: DatabaseEngineCode = 'postgresql') {
   const clean = DB_IDENT_RE.test(value) ? value : quoteIdentifier(value)
   if (dialect === 'mysql') return `\`${String(clean).replace(/`/g, '``')}\``
   return `"${String(clean).replace(/"/g, '""')}"`
@@ -5312,7 +5352,7 @@ function formatDataMutationStatementPreview(statement: DataMutationStatement) {
   return `${sql};`
 }
 
-function placeholder(index: number, dialect: MockDatabaseEngineCode) {
+function placeholder(index: number, dialect: DatabaseEngineCode) {
   if (dialect === 'postgresql') return `$${index}`
   if (dialect === 'oracle') return `:${index}`
   return '?'
@@ -5538,22 +5578,33 @@ function formatSqlText(sql: string) {
   return formatted.endsWith(';') ? formatted : `${formatted};`
 }
 
-function toggleConnectionStatus(id: string) {
+async function toggleConnectionStatus(id: string) {
   const connection = findConnection(id)
   if (!connection) return
   if (connection.status === 'connected') {
-    connection.status = 'idle'
+    const result = await disconnectDatabaseConnectionViaBackend(id)
+    if (!applyDatabaseCatalogMutationResult(result, 'Database disconnect failed.')) return
     expandedConnections.value = expandedConnections.value.filter((item) => item !== id)
     return
   }
-  connection.status = 'connected'
-  refreshConnectionChildren(id, { forceExpand: true, notice: '' })
+  const result = await connectDatabaseConnectionViaBackend(id)
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.')) return
+  expandedConnections.value = Array.from(new Set([...expandedConnections.value, id]))
 }
 
-function refreshConnected() {
-  connections.value
-    .filter((connection) => connection.status === 'connected')
-    .forEach((connection) => refreshConnectionChildren(connection.id, { preserveExpanded: true, notice: '' }))
+async function refreshConnected() {
+  const connected = connections.value.filter((connection) => connection.status === 'connected')
+  for (const connection of connected) {
+    const result = await refreshDatabaseConnectionViaBackend(connection.id)
+    if (result.ok && result.data) {
+      const wasExpanded = expandedConnections.value.includes(connection.id)
+      applyDatabaseCatalog(result.data)
+      if (wasExpanded) expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
+    } else {
+      showNotice(result.errorMessage || 'Database connection refresh failed.')
+      return
+    }
+  }
   showNotice('Connected database schemas refreshed')
 }
 
@@ -5577,7 +5628,12 @@ function focusDatabaseSearch() {
   nextTick(() => searchInputRef.value?.focus())
 }
 
-function openOverviewEngine(engine: (typeof mockDatabaseEngines)[number]) {
+function clearDatabaseSearch() {
+  keyword.value = ''
+  nextTick(() => searchInputRef.value?.focus())
+}
+
+function openOverviewEngine(engine: DatabaseEngineInfo) {
   if (!engine.enabled || !engine.connectionCode) {
     showNotice(`${engine.name} connection is coming soon`)
     return
@@ -5585,7 +5641,7 @@ function openOverviewEngine(engine: (typeof mockDatabaseEngines)[number]) {
   openConnectionModalFromEngine(engine)
 }
 
-function openConnectionModalFromEngine(engine: (typeof mockDatabaseEngines)[number], groupId?: string) {
+function openConnectionModalFromEngine(engine: DatabaseEngineInfo, groupId?: string) {
   if (!engine.enabled || !engine.connectionCode) {
     showNotice(`${engine.name} connection is coming soon`)
     return
@@ -5593,13 +5649,12 @@ function openConnectionModalFromEngine(engine: (typeof mockDatabaseEngines)[numb
   openConnectionModal(engine.connectionCode, groupId)
 }
 
-function addGroup(parentGroupId: string | null = null) {
-  const id = `group-${Date.now()}`
-  groups.value.push({ id, name: 'New Group' })
-  groupParentById[id] = parentGroupId
-  expandedGroups.value.push(id)
-  if (parentGroupId) expandedGroups.value = Array.from(new Set([...expandedGroups.value, parentGroupId]))
-  editingGroupId.value = id
+async function addGroup(parentGroupId: string | null = null) {
+  const result = await createDatabaseGroupViaBackend({ name: 'New Group', parentId: parentGroupId })
+  if (!applyDatabaseCatalogMutationResult(result, 'Database group create failed.') || !result.data) return
+  expandedGroups.value = Array.from(new Set([...expandedGroups.value, result.data.group.id, ...(parentGroupId ? [parentGroupId] : [])]))
+  selectedNodeId.value = result.data.group.id
+  editingGroupId.value = result.data.group.id
   editingGroupName.value = 'New Group'
   closeMenus()
 }
@@ -5612,13 +5667,16 @@ function startGroupRename(groupId: string) {
   closeMenus()
 }
 
-function commitGroupRename() {
+async function commitGroupRename() {
   const id = editingGroupId.value
   if (!id) return
-  const group = groups.value.find((item) => item.id === id)
-  if (group && editingGroupName.value.trim()) group.name = editingGroupName.value.trim()
+  const name = editingGroupName.value.trim()
   editingGroupId.value = null
   editingGroupName.value = ''
+  if (name) {
+    const result = await renameDatabaseGroupViaBackend({ id, name })
+    applyDatabaseCatalogMutationResult(result, 'Database group rename failed.')
+  }
 }
 
 function cancelGroupRename() {
@@ -5626,32 +5684,40 @@ function cancelGroupRename() {
   editingGroupName.value = ''
 }
 
-function deleteGroup(groupId: string) {
+function requestDeleteGroup(groupId: string) {
   if (groupId === DEFAULT_GROUP_ID) {
     showNotice('Default Group cannot be deleted')
     closeMenus()
     return
   }
-  const childGroups = groups.value.filter((group) => (groupParentById[group.id] ?? null) === groupId)
-  childGroups.forEach((group) => {
-    groupParentById[group.id] = null
-  })
-  delete groupParentById[groupId]
-  groups.value = groups.value.filter((group) => group.id !== groupId)
-  connections.value.forEach((connection) => {
-    if (connection.groupId === groupId) connection.groupId = DEFAULT_GROUP_ID
-  })
+  const group = groups.value.find((item) => item.id === groupId)
+  if (!group) return
+  operationConfirm.open = true
+  operationConfirm.action = 'deleteGroup'
+  operationConfirm.targetId = groupId
+  operationConfirm.title = 'Delete Group'
+  operationConfirm.message = `Delete group "${group.name}"? Child groups move to root and connections move to Default Group in the database workspace catalog.`
+  operationConfirm.detail = group.name
+  operationConfirm.confirmLabel = 'Delete'
   closeMenus()
 }
 
-function moveGroupTo(groupId: string, parentId: string | null) {
+async function deleteGroup(groupId: string) {
+  const result = await deleteDatabaseGroupViaBackend(groupId)
+  if (!applyDatabaseCatalogMutationResult(result, 'Database group delete failed.')) return
+  selectedNodeId.value = groups.value.find((group) => group.id === DEFAULT_GROUP_ID)?.id ?? groups.value[0]?.id ?? null
+  closeMenus()
+}
+
+async function moveGroupTo(groupId: string, parentId: string | null) {
   if (groupId === DEFAULT_GROUP_ID) {
     showNotice('Default Group cannot be moved')
     closeMenus()
     return
   }
   if (parentId === groupId || (parentId && collectDescendantGroupIds(groupId).has(parentId))) return
-  groupParentById[groupId] = parentId
+  const result = await moveDatabaseGroupViaBackend({ id: groupId, parentId })
+  if (!applyDatabaseCatalogMutationResult(result, 'Database group move failed.')) return
   if (parentId) expandedGroups.value = Array.from(new Set([...expandedGroups.value, parentId]))
   showNotice(parentId ? `Group moved to ${groupPathLabel(parentId)}` : 'Group moved to root')
   closeMenus()
@@ -5665,26 +5731,33 @@ function openContextMenu(event: MouseEvent, payload: ContextMenuPayload) {
   contextMenu.value = { ...payload, x: event.clientX, y: event.clientY } as ContextMenu
 }
 
-function connectFromMenu(connectionId: string) {
-  toggleConnectionStatus(connectionId)
+async function connectFromMenu(connectionId: string) {
+  const connectionBefore = findConnection(connectionId)
+  if (!connectionBefore) return
+  const result =
+    connectionBefore.status === 'connected' ? await disconnectDatabaseConnectionViaBackend(connectionId) : await connectDatabaseConnectionViaBackend(connectionId)
+  if (!applyDatabaseCatalogMutationResult(result, connectionBefore.status === 'connected' ? 'Database disconnect failed.' : 'Database connection failed.')) return
   const connection = findConnection(connectionId)
   if (connection?.status === 'connected') {
     expandedConnections.value = Array.from(new Set([...expandedConnections.value, connectionId]))
+  } else {
+    expandedConnections.value = expandedConnections.value.filter((item) => item !== connectionId)
   }
   showNotice(connection?.status === 'connected' ? 'Connection opened' : 'Connection closed')
   closeMenus()
 }
 
-function moveConnectionToGroup(connectionId: string, groupId: string) {
+async function moveConnectionToGroup(connectionId: string, groupId: string) {
   const connection = findConnection(connectionId)
   if (!connection || connection.groupId === groupId) return
-  connection.groupId = groupId
+  const result = await moveDatabaseConnectionViaBackend({ connectionId, groupId })
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection move failed.')) return
   expandedGroups.value = Array.from(new Set([...expandedGroups.value, groupId]))
   showNotice(groupId === DEFAULT_GROUP_ID ? 'Connection moved to root group' : `Connection moved to ${groupPathLabel(groupId)}`)
   closeMenus()
 }
 
-function refreshConnectionChildren(connectionId: string, options: { preserveExpanded?: boolean; forceExpand?: boolean; notice?: string } = {}) {
+function applyConnectionRefreshUi(connectionId: string, options: { preserveExpanded?: boolean; forceExpand?: boolean; notice?: string } = {}) {
   const connection = findConnection(connectionId)
   if (!connection) return
   const wasExpanded = expandedConnections.value.includes(connectionId)
@@ -5715,10 +5788,13 @@ function refreshConnectionChildren(connectionId: string, options: { preserveExpa
   if (options.notice !== '') showNotice(options.notice ?? 'Connection schema refreshed')
 }
 
-function refreshConnectionFromMenu(connectionId: string) {
+async function refreshConnectionFromMenu(connectionId: string) {
   const connection = findConnection(connectionId)
   if (!connection) return
-  refreshConnectionChildren(connectionId, { preserveExpanded: true })
+  const wasExpanded = expandedConnections.value.includes(connectionId)
+  const result = await refreshDatabaseConnectionViaBackend(connectionId)
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection refresh failed.')) return
+  applyConnectionRefreshUi(connectionId, { preserveExpanded: wasExpanded, notice: 'Connection schema refreshed' })
   closeMenus()
 }
 
@@ -5738,7 +5814,7 @@ function editConnection(connectionId: string) {
     user: connection.user,
     password: '',
     database: connection.database,
-    filePath: connection.filePath ?? '/tmp/aiopsterm/demo.db',
+    filePath: connection.filePath ?? '',
     readonly: !!connection.readonly,
     sslMode: connection.sslMode ?? '',
     url: connection.url ?? ''
@@ -5754,16 +5830,35 @@ function editConnection(connectionId: string) {
   closeMenus()
 }
 
-function removeConnection(connectionId: string) {
-  connections.value = connections.value.filter((connection) => connection.id !== connectionId)
+function requestRemoveConnection(connectionId: string) {
+  const connection = findConnection(connectionId)
+  if (!connection) return
+  const relatedTabCount = tabs.value.filter((tab) => tab.kind !== 'overview' && tab.connectionId === connectionId).length
+  operationConfirm.open = true
+  operationConfirm.action = 'removeConnection'
+  operationConfirm.targetId = connectionId
+  operationConfirm.title = 'Remove Connection'
+  operationConfirm.message = `Remove connection "${connection.name}"?${relatedTabCount ? ` ${relatedTabCount} related workspace tab${relatedTabCount > 1 ? 's' : ''} will close.` : ''}`
+  operationConfirm.detail = connection.name
+  operationConfirm.confirmLabel = 'Remove'
+  closeMenus()
+}
+
+async function removeConnection(connectionId: string) {
+  const removedTabIds = new Set(tabs.value.filter((tab) => tab.kind !== 'overview' && tab.connectionId === connectionId).map((tab) => tab.id))
+  const result = await removeDatabaseConnectionViaBackend(connectionId)
+  if (!result.ok || !result.data) {
+    showNotice(result.errorMessage || 'Database connection remove failed.')
+    return
+  }
+  applyDatabaseCatalog(result.data)
   expandedConnections.value = expandedConnections.value.filter((id) => id !== connectionId)
   expandedCatalogs.value = expandedCatalogs.value.filter((id) => !id.startsWith(`${connectionId}:`))
   expandedSchemas.value = expandedSchemas.value.filter((id) => !id.startsWith(`${connectionId}:`))
   expandedSchemaObjectFolders.value = expandedSchemaObjectFolders.value.filter((id) => !id.startsWith(`${connectionId}:`))
-  const removedTabIds = new Set(tabs.value.filter((tab) => tab.kind !== 'overview' && tab.connectionId === connectionId).map((tab) => tab.id))
-  tabs.value = tabs.value.filter((tab) => tab.kind === 'overview' || tab.connectionId !== connectionId)
+  tabs.value = tabs.value.filter((tab) => !removedTabIds.has(tab.id))
   if (removedTabIds.has(activeTabId.value)) activeTabId.value = tabs.value[0]?.id ?? 'tab-overview'
-  showNotice('Connection removed')
+  showNotice(result.data.message || 'Connection removed')
   closeMenus()
 }
 
@@ -5821,7 +5916,7 @@ async function openDdlModalFromContext() {
     ddlModal.ddl = result.ddl
     return
   }
-  ddlModal.errorCode = result.errorCode
+  ddlModal.errorCode = result.errorCode === 'permission' ? 'permission' : 'other'
   ddlModal.error = formatDdlError(result)
   showNotice(ddlModal.error)
 }
@@ -5839,11 +5934,21 @@ function fetchTableDdl(ctx: {
   }
   const table = findTable(ctx.connectionId, ctx.catalogName, ctx.tableId, ctx.schemaName)
   if (!table) return Promise.resolve({ ok: false, errorCode: 'other', errorMessage: 'table not found' })
-  if (table.ddlError) {
-    return Promise.resolve({ ok: false, errorCode: table.ddlError.code, errorMessage: table.ddlError.message })
-  }
-  if (!table.ddl.trim()) return Promise.resolve({ ok: false, errorCode: 'other', errorMessage: 'DDL is empty' })
-  return Promise.resolve({ ok: true, ddl: table.ddl })
+  return window.aiops
+    .getDatabaseTableDdl({
+      connectionId: ctx.connectionId,
+      dbType: connection.dbType,
+      databaseName: ctx.catalogName,
+      schemaName: ctx.schemaName,
+      tableName: ctx.tableName
+    })
+    .then(normalizeTableDdlResult)
+    .catch((error) => ({ ok: false, errorCode: 'other', errorMessage: errorToMessage(error) }))
+}
+
+function normalizeTableDdlResult(result: DatabaseTableDdlResult): TableDdlResult {
+  if (result.ok) return { ok: true, ddl: result.data?.ddl ?? '' }
+  return { ok: false, errorCode: result.errorCode || 'other', errorMessage: result.errorMessage || 'DDL fetch failed.' }
 }
 
 function formatDdlError(result: Extract<TableDdlResult, { ok: false }>) {
@@ -5906,21 +6011,39 @@ function cancelDangerousTableAction() {
   dangerConfirm.confirmText = ''
 }
 
-function confirmDangerousTableAction() {
+async function confirmDangerousTableAction() {
   if (!dangerConfirm.open || dangerConfirm.confirmText !== dangerConfirm.tableName) return
   const connection = findConnection(dangerConfirm.connectionId)
   const context = [connection?.name, dangerConfirm.catalogName, dangerConfirm.schemaName, dangerConfirm.tableName].filter(Boolean).join(' · ')
-  openDbAi(dangerConfirm.action, dangerConfirm.sql, context)
-  if (dangerConfirm.action === 'truncate') applyLocalTableTruncate()
-  else applyLocalTableDrop()
-  dangerConfirm.open = false
-  dangerConfirm.confirmText = ''
+  openDbAi(dangerConfirm.action, dangerConfirm.sql, context, {
+    connectionId: dangerConfirm.connectionId,
+    dbType: connection?.dbType ?? '',
+    databaseName: dangerConfirm.catalogName,
+    schemaName: dangerConfirm.schemaName || undefined,
+    tableName: dangerConfirm.tableName,
+    contextSummary: context
+  })
+  const ok = dangerConfirm.action === 'truncate' ? await applyBackendTableTruncate() : await applyBackendTableDrop()
+  if (ok) {
+    dangerConfirm.open = false
+    dangerConfirm.confirmText = ''
+  }
 }
 
-function applyLocalTableTruncate() {
+async function applyBackendTableTruncate() {
   const table = findTable(dangerConfirm.connectionId, dangerConfirm.catalogName, dangerConfirm.tableId, dangerConfirm.schemaName || undefined)
-  if (!table) return
-  table.rows = []
+  if (!table) return false
+  const result = await window.aiops.mutateDatabaseTable({
+    connectionId: dangerConfirm.connectionId,
+    databaseName: dangerConfirm.catalogName,
+    schemaName: dangerConfirm.schemaName || undefined,
+    tableName: dangerConfirm.tableName,
+    mutations: [{ kind: 'truncate' }]
+  })
+  if (!result.ok) {
+    showNotice(result.errorMessage || 'Backend table truncate failed')
+    return false
+  }
   tabs.value.forEach((tab) => {
     if (
       tab.kind === 'data' &&
@@ -5932,51 +6055,96 @@ function applyLocalTableTruncate() {
         tableName: dangerConfirm.tableName
       })
     ) {
-      tab.sourceRows = []
-      reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false, notice: 'Table truncated in local mock state' })
+      void reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false, notice: 'Table truncated through backend table store' })
     }
   })
-  showNotice('Table truncated in local mock state')
+  showNotice('Table truncated through backend table store')
+  return true
 }
 
-function applyLocalTableDrop() {
-  const connection = findConnection(dangerConfirm.connectionId)
-  const catalog = connection?.catalogs.find((item) => item.name === dangerConfirm.catalogName)
-  if (!catalog) return
-  if (dangerConfirm.schemaName) {
-    const schema = catalog.schemas?.find((item) => item.name === dangerConfirm.schemaName)
-    if (schema) {
-      schema.tables = schema.tables.filter((table) => table.id !== dangerConfirm.tableId)
-      if (schema.views) schema.views = schema.views.filter((table) => table.id !== dangerConfirm.tableId)
-    }
-  } else if (catalog.tables) {
-    catalog.tables = catalog.tables.filter((table) => table.id !== dangerConfirm.tableId)
+async function applyBackendTableDrop() {
+  const table = findTable(dangerConfirm.connectionId, dangerConfirm.catalogName, dangerConfirm.tableId, dangerConfirm.schemaName || undefined)
+  if (!table) return false
+  const droppedContext = {
+    connectionId: dangerConfirm.connectionId,
+    catalogName: dangerConfirm.catalogName,
+    schemaName: dangerConfirm.schemaName,
+    tableId: dangerConfirm.tableId,
+    tableName: dangerConfirm.tableName
   }
-
   const removedTabIds = new Set(
     tabs.value
-      .filter(
-        (tab) =>
-          tab.kind !== 'overview' &&
-          tableContextMatches(tab, {
-            connectionId: dangerConfirm.connectionId,
-            catalogName: dangerConfirm.catalogName,
-            schemaName: dangerConfirm.schemaName,
-            tableId: dangerConfirm.tableId,
-            tableName: dangerConfirm.tableName
-          })
-      )
+      .filter((tab) => tab.kind !== 'overview' && tableContextMatches(tab, droppedContext))
       .map((tab) => tab.id)
   )
+  const closeDdlModal =
+    ddlModal.open &&
+    ddlModal.connectionId === droppedContext.connectionId &&
+    ddlModal.catalogName === droppedContext.catalogName &&
+    (ddlModal.schemaName || '') === (droppedContext.schemaName || '') &&
+    (ddlModal.tableId === droppedContext.tableId || ddlModal.tableName === droppedContext.tableName)
+  const result = await window.aiops.mutateDatabaseTable({
+    connectionId: dangerConfirm.connectionId,
+    databaseName: dangerConfirm.catalogName,
+    schemaName: dangerConfirm.schemaName || undefined,
+    tableName: dangerConfirm.tableName,
+    mutations: [{ kind: 'drop' }]
+  })
+  if (!result.ok) {
+    showNotice(result.errorMessage || 'Backend table drop failed')
+    return false
+  }
+  if (!result.data?.catalog) {
+    showNotice('Backend table drop did not return refreshed catalog')
+    return false
+  }
+  applyDatabaseCatalog(result.data.catalog)
+  cleanupDroppedTableUi(droppedContext, removedTabIds, closeDdlModal)
+  showNotice('Table dropped through backend table store')
+  return true
+}
+
+function cleanupDroppedTableUi(
+  droppedContext: { connectionId: string; catalogName: string; schemaName?: string; tableId: string; tableName: string },
+  removedTabIds: Set<string>,
+  closeDdlModal: boolean
+) {
   tabs.value = tabs.value.filter((tab) => !removedTabIds.has(tab.id))
   if (removedTabIds.has(activeTabId.value)) activeTabId.value = tabs.value[0]?.id ?? 'tab-overview'
-  expandedTables.value = expandedTables.value.filter((id) => id !== dangerConfirm.tableId)
-  if (selectedNodeId.value === dangerConfirm.tableId || selectedNodeId.value?.startsWith(`${dangerConfirm.tableId}:column:`)) {
-    selectedNodeId.value = dangerConfirm.schemaName
-      ? `${dangerConfirm.connectionId}:${dangerConfirm.catalogName}:${dangerConfirm.schemaName}`
-      : `${dangerConfirm.connectionId}:${dangerConfirm.catalogName}`
+  expandedTables.value = expandedTables.value.filter((id) => id !== droppedContext.tableId)
+  if (closeDdlModal) ddlModal.open = false
+  const parentNodeId = droppedContext.schemaName
+    ? `${droppedContext.connectionId}:${droppedContext.catalogName}:${droppedContext.schemaName}`
+    : `${droppedContext.connectionId}:${droppedContext.catalogName}`
+  if (
+    databaseNodeExists(parentNodeId) &&
+    (selectedNodeId.value === droppedContext.tableId || selectedNodeId.value?.startsWith(`${droppedContext.tableId}:column:`))
+  ) {
+    selectedNodeId.value = parentNodeId
   }
-  showNotice('Table dropped in local mock state')
+}
+
+function cancelOperationConfirm() {
+  operationConfirm.open = false
+  operationConfirm.action = ''
+  operationConfirm.targetId = ''
+  operationConfirm.title = ''
+  operationConfirm.message = ''
+  operationConfirm.detail = ''
+  operationConfirm.confirmLabel = 'Delete'
+}
+
+async function confirmOperation() {
+  const action = operationConfirm.action
+  const targetId = operationConfirm.targetId
+  cancelOperationConfirm()
+  if (action === 'deleteGroup') {
+    await deleteGroup(targetId)
+    return
+  }
+  if (action === 'removeConnection') {
+    await removeConnection(targetId)
+  }
 }
 
 function copyContextName() {
@@ -5986,7 +6154,7 @@ function copyContextName() {
   closeMenus()
 }
 
-function openConnectionModal(dbType: MockDatabaseEngineCode, groupId = groups.value[0]?.id ?? 'group-default') {
+function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[0]?.id ?? 'group-default') {
   connectionModalMode.value = 'create'
   const defaultPort = dbType === 'postgresql' ? 5432 : dbType === 'oracle' ? 1521 : dbType === 'sqlite' ? null : 3306
   Object.assign(connectionDraft, {
@@ -6001,7 +6169,7 @@ function openConnectionModal(dbType: MockDatabaseEngineCode, groupId = groups.va
     user: dbType === 'sqlite' ? '' : 'root',
     password: '',
     database: '',
-    filePath: '/tmp/aiopsterm/demo.db',
+    filePath: '',
     readonly: dbType === 'sqlite',
     sslMode: '',
     url: ''
@@ -6072,36 +6240,45 @@ async function testConnectionDraft() {
   }
   connectionTesting.value = true
   connectionFeedbackKind.value = 'info'
-  connectionFeedback.value = 'Testing connection in local mock mode...'
+  connectionFeedback.value = 'Testing connection through local backend...'
   await nextTick()
-  const result = mockTestConnectionDraft()
+  const result = await testConnectionDraftViaBackend()
   connectionTesting.value = false
   if (!result.ok) {
     connectionFeedbackKind.value = 'error'
-    connectionFeedback.value = result.message
+    connectionFeedback.value = databaseConnectionResultMessage(result)
     return
   }
   connectionFeedbackKind.value = 'info'
-  connectionFeedback.value = `Connection successful in local mock mode. (${result.message})`
+  connectionFeedback.value = `Connection successful. (${databaseConnectionResultMessage(result)})`
 }
 
-function mockTestConnectionDraft(): { ok: boolean; message: string } {
-  if (connectionDraft.dbType === 'sqlite' && !/\.(db|sqlite|sqlite3)$/i.test(connectionDraft.filePath.trim())) {
-    return { ok: false, message: 'SQLite file should end with .db, .sqlite, or .sqlite3 in local mock mode.' }
+function databaseConnectionTestInput(): DatabaseConnectionTestInput {
+  return {
+    dbType: connectionDraft.dbType,
+    name: connectionDraft.name,
+    host: connectionDraft.host,
+    port: connectionDraft.port,
+    user: connectionDraft.user,
+    password: connectionDraft.password,
+    database: connectionDraft.database,
+    filePath: connectionDraft.filePath,
+    readonly: connectionDraft.readonly,
+    sslMode: connectionDraft.sslMode,
+    url: connectionDraft.url || connectionUrl.value
   }
-  if (connectionDraft.dbType === 'oracle' && connectionDraft.url.trim() && !/(jdbc:oracle|:\/\/|:)/i.test(connectionDraft.url.trim())) {
-    return { ok: false, message: 'Oracle connect string is not valid enough for local mock validation.' }
+}
+
+function databaseConnectionResultMessage(result: DatabaseConnectionTestResult) {
+  if (!result.ok) return result.errorMessage || 'Database connection test failed.'
+  return result.data?.serverVersion || 'ok'
+}
+
+async function testConnectionDraftViaBackend(): Promise<DatabaseConnectionTestResult> {
+  if (!window.aiops?.testDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection test API is unavailable.' }
   }
-  if (connectionDraft.name.toLowerCase().includes('fail')) return { ok: false, message: 'Local mock connection failed for this draft.' }
-  const version =
-    connectionDraft.dbType === 'postgresql'
-      ? 'PostgreSQL 16 mock'
-      : connectionDraft.dbType === 'mysql'
-        ? 'MySQL 8 mock'
-        : connectionDraft.dbType === 'oracle'
-          ? 'Oracle mock'
-          : 'SQLite mock'
-  return { ok: true, message: version }
+  return window.aiops.testDatabaseConnection(databaseConnectionTestInput())
 }
 
 async function saveConnectionDraft() {
@@ -6113,58 +6290,110 @@ async function saveConnectionDraft() {
   }
   connectionSaving.value = true
   connectionFeedbackKind.value = 'info'
-  connectionFeedback.value = 'Saving connection locally...'
+  connectionFeedback.value = 'Saving connection through local backend...'
   await nextTick()
-  const testResult = mockTestConnectionDraft()
+  const testResult = await testConnectionDraftViaBackend()
   if (!testResult.ok) {
     connectionSaving.value = false
     connectionFeedbackKind.value = 'error'
-    connectionFeedback.value = testResult.message
+    connectionFeedback.value = databaseConnectionResultMessage(testResult)
     return
   }
-  const existing = connectionDraft.id ? findConnection(connectionDraft.id) : null
-  const normalized = normalizeConnectionDraft()
-  if (existing) {
-    Object.assign(existing, normalized, {
-      hasPassword: connectionDraft.password ? true : existing.hasPassword
-    })
-  } else {
-    const id = `conn-${Date.now()}`
-    connections.value.push({
-      id,
-      ...normalized,
-      hasPassword: !!connectionDraft.password,
-      status: 'idle',
-      catalogs: [{ name: normalized.database || 'sample', tables: [] }]
-    })
-    expandedConnections.value.push(id)
-  }
+  const saveResult = await saveConnectionDraftViaBackend()
   connectionSaving.value = false
+  if (!saveResult.ok || !saveResult.data) {
+    connectionFeedbackKind.value = 'error'
+    connectionFeedback.value = saveResult.errorMessage || 'Database connection save failed.'
+    return
+  }
+  applyDatabaseCatalog(saveResult.data)
+  selectedNodeId.value = saveResult.data.connection.id
+  expandedConnections.value = Array.from(new Set([...expandedConnections.value, saveResult.data.connection.id]))
   closeConnectionModal()
-  showNotice('Connection saved')
+  showNotice(saveResult.data.message || 'Connection saved')
 }
 
-function normalizeConnectionDraft(): Omit<MockDatabaseConnection, 'id' | 'status' | 'catalogs'> {
-  const isSqlite = connectionDraft.dbType === 'sqlite'
-  const hasOracleConnectString = connectionDraft.dbType === 'oracle' && !!connectionDraft.url.trim()
-  const sqliteFilePath = connectionDraft.filePath.trim()
-  const sqliteName = sqliteFilePath.split('/').pop() || 'main'
-  const normalizedUrl = isSqlite ? `sqlite://${sqliteFilePath}` : connectionUrl.value.trim()
+function databaseConnectionSaveInput(): DatabaseConnectionSaveInput {
   return {
-    name: connectionDraft.name.trim(),
-    dbType: connectionDraft.dbType,
-    env: connectionDraft.env,
-    groupId: connectionDraft.groupId,
-    host: isSqlite ? 'local' : hasOracleConnectString ? 'connect-string' : connectionDraft.host.trim(),
-    port: isSqlite || hasOracleConnectString ? null : connectionDraft.port,
-    authentication: connectionDraft.authentication,
-    user: isSqlite ? '' : connectionDraft.user.trim(),
-    database: isSqlite ? sqliteName : connectionDraft.database.trim(),
-    filePath: isSqlite ? sqliteFilePath : undefined,
-    readonly: isSqlite ? connectionDraft.readonly : undefined,
-    sslMode: connectionDraft.dbType === 'postgresql' ? connectionDraft.sslMode : '',
-    url: normalizedUrl
+    mode: connectionModalMode.value,
+    id: connectionDraft.id || undefined,
+    connection: {
+      ...databaseConnectionTestInput(),
+      env: connectionDraft.env,
+      groupId: connectionDraft.groupId,
+      authentication: connectionDraft.authentication
+    }
   }
+}
+
+async function saveConnectionDraftViaBackend(): Promise<DatabaseConnectionSaveResult> {
+  if (!window.aiops?.saveDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection save API is unavailable.' }
+  }
+  return window.aiops.saveDatabaseConnection(databaseConnectionSaveInput())
+}
+
+async function createDatabaseGroupViaBackend(input: DatabaseGroupCreateInput): Promise<DatabaseGroupMutationResult> {
+  if (!window.aiops?.createDatabaseGroup) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group create API is unavailable.' }
+  }
+  return window.aiops.createDatabaseGroup(input)
+}
+
+async function renameDatabaseGroupViaBackend(input: DatabaseGroupUpdateInput): Promise<DatabaseGroupMutationResult> {
+  if (!window.aiops?.renameDatabaseGroup) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group rename API is unavailable.' }
+  }
+  return window.aiops.renameDatabaseGroup(input)
+}
+
+async function moveDatabaseGroupViaBackend(input: DatabaseGroupUpdateInput): Promise<DatabaseGroupMutationResult> {
+  if (!window.aiops?.moveDatabaseGroup) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group move API is unavailable.' }
+  }
+  return window.aiops.moveDatabaseGroup(input)
+}
+
+async function deleteDatabaseGroupViaBackend(id: string): Promise<DatabaseGroupDeleteResult> {
+  if (!window.aiops?.deleteDatabaseGroup) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group delete API is unavailable.' }
+  }
+  return window.aiops.deleteDatabaseGroup(id)
+}
+
+async function moveDatabaseConnectionViaBackend(input: DatabaseConnectionMoveInput): Promise<DatabaseConnectionMutationResult> {
+  if (!window.aiops?.moveDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection move API is unavailable.' }
+  }
+  return window.aiops.moveDatabaseConnection(input)
+}
+
+async function removeDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionDeleteResult> {
+  if (!window.aiops?.removeDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection remove API is unavailable.' }
+  }
+  return window.aiops.removeDatabaseConnection(connectionId)
+}
+
+async function connectDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  if (!window.aiops?.connectDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection API is unavailable.' }
+  }
+  return window.aiops.connectDatabaseConnection(connectionId)
+}
+
+async function disconnectDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  if (!window.aiops?.disconnectDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database disconnect API is unavailable.' }
+  }
+  return window.aiops.disconnectDatabaseConnection(connectionId)
+}
+
+async function refreshDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  if (!window.aiops?.refreshDatabaseConnection) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database refresh API is unavailable.' }
+  }
+  return window.aiops.refreshDatabaseConnection(connectionId)
 }
 
 function openCreateDatabaseModal(connectionId: string) {
@@ -6195,7 +6424,7 @@ function closeCreateDatabaseModal() {
   createDatabaseModal.feedbackKind = 'info'
 }
 
-function createDatabase() {
+async function createDatabase() {
   const connection = findConnection(createDatabaseModal.connectionId)
   if (!connection) return
   if (!createDatabaseCanSubmit.value) {
@@ -6210,18 +6439,24 @@ function createDatabase() {
     return
   }
   createDatabaseModal.submitting = true
-  const catalog: MockDatabaseCatalog =
-    connection.dbType === 'postgresql'
-      ? { name, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }
-      : { name, tables: [] }
-  connection.catalogs.push(catalog)
-  expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
-  expandedCatalogs.value = Array.from(new Set([...expandedCatalogs.value, `${connection.id}:${name}`]))
-  if (connection.dbType === 'postgresql') expandedSchemas.value = Array.from(new Set([...expandedSchemas.value, `${connection.id}:${name}:public`]))
-  selectedNodeId.value = `${connection.id}:${name}`
-  repairTabsForConnection(connection.id)
+  const result = await createDatabaseViaBackend(createDatabaseModal.connectionId, createDatabaseModal.sql, name)
+  createDatabaseModal.submitting = false
+  if (!result.ok || !result.data) {
+    createDatabaseModal.feedbackKind = 'error'
+    createDatabaseModal.feedback = result.errorMessage || 'Create database failed.'
+    return
+  }
+  applyDatabaseCatalog(result.data)
+  selectedNodeId.value = `${result.data.connection.id}:${result.data.catalog.name}`
   closeCreateDatabaseModal()
-  showNotice('Database created in local mock state')
+  showNotice(result.data.message || 'Database created in workspace catalog')
+}
+
+async function createDatabaseViaBackend(connectionId: string, sql: string, requestedName: string): Promise<DatabaseCreateDatabaseResult> {
+  if (!window.aiops?.createDatabaseCatalog) {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database create API is unavailable.' }
+  }
+  return window.aiops.createDatabaseCatalog({ connectionId, sql, requestedName })
 }
 
 function parseCreateDatabaseName(sql: string) {
@@ -6270,27 +6505,49 @@ function buildDbAiContextParts(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
   return [connection?.name, connection?.dbType, tab.catalogName, tab.schemaName].filter(Boolean)
 }
 
-function openDbAi(action: DbAiAction, sql: string, context = '') {
-  const id = `dbai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  const activeDialect = activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined
-  const targetDialect: DbAiTargetDialect = action === 'convert' ? (activeDialect ?? 'postgresql') : activeDialect ?? 'postgresql'
-  const now = Date.now()
-  const request: DbAiRequest = {
-    id,
-    action,
-    label: dbAiActionName(action),
-    status: 'queued',
-    contextSummary: context,
-    sourceSql: sql,
-    text: '',
-    targetDialect,
-    createdAt: now,
-    updatedAt: now
+function buildDbAiBackendContext(contextSummary = '', override: DbAiBackendContext = {}): DbAiBackendContext {
+  const tab = activeSqlTab.value
+  const connection = override.connectionId ? findConnection(override.connectionId) : tab ? findConnection(tab.connectionId) : undefined
+  return {
+    connectionId: override.connectionId ?? tab?.connectionId ?? '',
+    dbType: override.dbType ?? connection?.dbType ?? '',
+    databaseName: override.databaseName ?? tab?.catalogName ?? '',
+    schemaName: override.schemaName !== undefined ? override.schemaName : tab?.schemaName || undefined,
+    tableName: override.tableName !== undefined ? override.tableName : tab?.tableName || undefined,
+    contextSummary: override.contextSummary ?? contextSummary
   }
-  dbAiRequests.value = { ...dbAiRequests.value, [id]: request }
-  dbAiActiveReqId.value = id
+}
+
+function dbAiBackendContextForIpc(context: DbAiBackendContext): DatabaseAiDrawerResponseInput['context'] {
+  return {
+    connectionId: String(context.connectionId || ''),
+    dbType: context.dbType || '',
+    databaseName: String(context.databaseName || ''),
+    schemaName: context.schemaName ? String(context.schemaName) : undefined,
+    tableName: context.tableName ? String(context.tableName) : undefined,
+    contextSummary: context.contextSummary ? String(context.contextSummary) : undefined
+  }
+}
+
+async function openDbAi(action: DbAiAction, sql: string, context = '', backendContextOverride: DbAiBackendContext = {}) {
+  const backendContext = buildDbAiBackendContext(context, backendContextOverride)
+  const activeDialect = backendContext.dbType || (activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined)
+  const targetDialect: DbAiTargetDialect = action === 'convert' ? (activeDialect ?? 'postgresql') : activeDialect ?? 'postgresql'
+  const result = await window.aiops.createDatabaseAiDrawerRequest({
+    action,
+    sourceSql: sql,
+    targetDialect,
+    context: dbAiBackendContextForIpc({ ...backendContext, contextSummary: backendContext.contextSummary || context })
+  })
+  if (!result.ok || !result.data) {
+    showNotice(result.errorMessage || 'DB AI request failed')
+    return
+  }
+  const request = result.data
+  dbAiRequests.value = { ...dbAiRequests.value, [request.id]: request }
+  dbAiActiveReqId.value = request.id
   dbAiOpen.value = true
-  startMockDbAiStream(id)
+  void requestDbAiDrawerResponse(request.id)
   closeMenus()
 }
 
@@ -6303,42 +6560,60 @@ function patchDbAiRequest(reqId: string, patch: Partial<DbAiRequest>) {
   }
 }
 
-function startMockDbAiStream(reqId: string) {
+async function requestDbAiDrawerResponse(reqId: string) {
   clearDbAiTimers(reqId)
   const request = dbAiRequests.value[reqId]
   if (!request) return
-  const generatedSql = buildDbAiGeneratedSql(request.action, request.sourceSql, request.targetDialect)
-  const reasoning = buildDbAiReasoning(request.action, request.sourceSql, generatedSql, request.targetDialect)
-  const chunks = [`${reasoning}\n\n`, '```sql\n', generatedSql, '\n```']
-  const timers: DbAiScheduledTimer[] = []
-  chunks.forEach((chunk, index) => {
-    const timerId = window.setTimeout(() => {
-      appendDbAiStreamChunk(reqId, chunk)
-    }, 70 + index * 70)
-    timers.push({ id: timerId, kind: 'stream' })
-  })
-  const doneTimer = window.setTimeout(() => {
-    finishDbAiRequest(reqId)
-  }, 70 + chunks.length * 70)
-  timers.push({ id: doneTimer, kind: 'done' })
-  dbAiTimers.set(reqId, timers)
+  patchDbAiRequest(reqId, { status: 'queued', text: '', updatedAt: Date.now() })
+  const expectedDialect = request.targetDialect
+  const streamingTimer = window.setTimeout(() => {
+    markDbAiRequestStreaming(reqId)
+  }, 80)
+  dbAiTimers.set(reqId, [{ id: streamingTimer, kind: 'streaming' }])
+  try {
+    const result = await window.aiops.generateDatabaseAiDrawerResponse({
+      action: request.action,
+      sourceSql: request.sourceSql,
+      targetDialect: expectedDialect,
+      context: dbAiBackendContextForIpc(request.backendContext)
+    })
+    finishDbAiRequest(reqId, result, expectedDialect)
+  } catch (error) {
+    finishDbAiRequest(
+      reqId,
+      {
+        ok: false,
+        errorCode: 'DB_AI_DRAWER_BACKEND_ERROR',
+        errorMessage: errorToMessage(error)
+      },
+      expectedDialect
+    )
+  }
 }
 
-function appendDbAiStreamChunk(reqId: string, chunk: string) {
+function markDbAiRequestStreaming(reqId: string) {
   const request = dbAiRequests.value[reqId]
-  if (!request || request.status === 'cancelled' || request.status === 'done' || request.status === 'error') return
+  if (!request || request.status !== 'queued') return
   patchDbAiRequest(reqId, {
     status: 'streaming',
-    text: `${request.text}${chunk}`,
     updatedAt: Date.now()
   })
 }
 
-function finishDbAiRequest(reqId: string) {
+function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult, expectedDialect?: DbAiTargetDialect) {
+  clearDbAiTimers(reqId)
   const request = dbAiRequests.value[reqId]
   if (!request || request.status === 'cancelled') return
-  patchDbAiRequest(reqId, { status: 'done', updatedAt: Date.now() })
-  dbAiTimers.delete(reqId)
+  if (expectedDialect && request.targetDialect !== expectedDialect) return
+  if (result.ok) {
+    patchDbAiRequest(reqId, { status: 'done', text: result.data?.text ?? '', updatedAt: Date.now() })
+    return
+  }
+  patchDbAiRequest(reqId, {
+    status: 'error',
+    text: `Reasoning\n- ${result.errorMessage || 'DB AI drawer backend failed.'}`,
+    updatedAt: Date.now()
+  })
 }
 
 function clearDbAiTimers(reqId: string) {
@@ -6396,17 +6671,13 @@ function runDbAiReadonly() {
 }
 
 function clearSqlDiagnoseTimers() {
-  if (sqlDiagnoseTimer) {
-    window.clearTimeout(sqlDiagnoseTimer)
-    sqlDiagnoseTimer = null
-  }
   if (sqlDiagnoseSuccessTimer) {
     window.clearTimeout(sqlDiagnoseSuccessTimer)
     sqlDiagnoseSuccessTimer = null
   }
 }
 
-function diagnoseSqlError(result: SqlResult) {
+async function diagnoseSqlError(result: SqlResult) {
   const tab = activeSqlTab.value
   if (!tab || result.status !== 'error') return
   if (!activeSqlCanRun.value) {
@@ -6421,9 +6692,33 @@ function diagnoseSqlError(result: SqlResult) {
   sqlDiagnose.success = false
   sqlDiagnose.error = ''
   sqlDiagnose.resultId = result.id
-  sqlDiagnoseTimer = window.setTimeout(() => {
+
+  try {
+    const connection = findConnection(tab.connectionId)
+    const response = await window.aiops.generateDatabaseAiDrawerResponse({
+      action: 'diagnose',
+      sourceSql: result.sql,
+      targetDialect: connection?.dbType ?? 'postgresql',
+      context: dbAiBackendContextForIpc(
+        buildDbAiBackendContext('', {
+          connectionId: tab.connectionId,
+          dbType: connection?.dbType ?? '',
+          databaseName: tab.catalogName,
+          schemaName: tab.schemaName || undefined,
+          tableName: tab.tableName || undefined,
+          contextSummary: buildDbAiContextParts(tab).join(' · ')
+        })
+      ),
+      errorMessage: result.error ?? ''
+    })
     if (sqlDiagnose.resultId !== result.id) return
-    const diagnosedSql = buildDiagnosedSql(result.sql)
+    if (!response.ok || !response.data?.sql) {
+      sqlDiagnose.running = false
+      sqlDiagnose.success = false
+      sqlDiagnose.error = response.errorMessage || 'DB AI diagnosis failed.'
+      return
+    }
+    const diagnosedSql = response.data.sql
     setEditorSql(diagnosedSql, diagnosedSql.length)
     sqlDiagnose.running = false
     sqlDiagnose.success = true
@@ -6433,8 +6728,12 @@ function diagnoseSqlError(result: SqlResult) {
       if (sqlDiagnose.resultId === result.id) sqlDiagnose.success = false
       sqlDiagnoseSuccessTimer = null
     }, 3000)
-    sqlDiagnoseTimer = null
-  }, 180)
+  } catch (error) {
+    if (sqlDiagnose.resultId !== result.id) return
+    sqlDiagnose.running = false
+    sqlDiagnose.success = false
+    sqlDiagnose.error = errorToMessage(error)
+  }
 }
 
 function cancelDbAiRequest() {
@@ -6463,56 +6762,6 @@ function formatDbAiRequestTime(time: number) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
 }
 
-function dbAiActionName(action: DbAiAction) {
-  switch (action) {
-    case 'explain':
-      return 'Explain SQL'
-    case 'nl2sql':
-      return 'Natural Language to SQL'
-    case 'optimize':
-      return 'Optimize SQL'
-    case 'convert':
-      return 'Convert SQL'
-    case 'complete':
-      return 'Complete SQL'
-    case 'diagnose':
-      return 'Diagnose SQL'
-    case 'truncate':
-      return 'Truncate Table'
-    case 'drop':
-      return 'Drop Table'
-    default:
-      return action
-  }
-}
-
-function composeDbAiResponseText(reasoning: string, generatedSql: string) {
-  return `${reasoning}\n\n\`\`\`sql\n${generatedSql}\n\`\`\``
-}
-
-function buildDbAiReasoning(action: DbAiAction, sourceSql: string, generatedSql: string, targetDialect = dbAiTargetDialect.value) {
-  const lines = ['Reasoning', '- Read the active database context and selected editor range.']
-  if (action === 'convert') {
-    lines.push(`- Converted the SQL text to ${dbAiDialectLabel(targetDialect)} syntax.`)
-    lines.push(isDbAiExecutableDialect(action, targetDialect) ? '- Target dialect matches the active connection, so read-only execution can be enabled.' : '- Target dialect is text-only for this connection.')
-  } else if (action === 'diagnose') {
-    lines.push('- Built a conservative read-only statement that can verify the referenced table.')
-  } else if (action === 'drop' || action === 'truncate') {
-    lines.push('- Preserved the destructive SQL as generated text only; execution remains blocked by the read-only guard.')
-  } else if (action === 'nl2sql') {
-    lines.push('- Mapped the request to the first visible table in the current database context.')
-  } else if (action === 'complete') {
-    lines.push('- Completed the current statement with a bounded read-only predicate.')
-  } else if (action === 'optimize') {
-    lines.push('- Kept the query read-only and added a safer bounded projection for review.')
-  } else {
-    lines.push('- Kept the source SQL available for editor actions and review.')
-  }
-  lines.push(`- Generated SQL is ${isReadOnlySql(generatedSql) ? 'read-only' : 'not read-only'} before any execution action.`)
-  if (sourceSql.trim() && sourceSql !== generatedSql) lines.push('- The original editor SQL remains unchanged until Copy, Replace, Insert, or Run ReadOnly is chosen.')
-  return lines.join('\n')
-}
-
 function isDbAiExecutableDialect(action: DbAiAction, target: DbAiTargetDialect) {
   if (action !== 'convert') return true
   if (target === 'mssql') return false
@@ -6521,114 +6770,8 @@ function isDbAiExecutableDialect(action: DbAiAction, target: DbAiTargetDialect) 
   return connection?.dbType === target
 }
 
-function buildDbAiGeneratedSql(action: DbAiAction, sql: string, targetDialect = dbAiTargetDialect.value) {
-  switch (action) {
-    case 'convert':
-      return convertSqlToDialect(sql, targetDialect)
-    case 'diagnose':
-      return buildDiagnosedSql(sql)
-    case 'nl2sql':
-      return buildNl2Sql()
-    case 'complete':
-      return completeSql(sql)
-    case 'optimize':
-      return optimizeSql(sql)
-    case 'drop':
-    case 'truncate':
-    case 'explain':
-    default:
-      return ensureSqlTerminated(sql.trim() || 'SELECT 1')
-  }
-}
-
-function buildNl2Sql() {
-  const tableRef = buildDbAiTableReference(dbAiActiveDialect())
-  if (dbAiActiveDialect() === 'oracle') {
-    return `SELECT id, service, status, owner, updated_at\nFROM ${tableRef}\nWHERE status = 'open'\nORDER BY updated_at DESC\nFETCH FIRST 20 ROWS ONLY;`
-  }
-  return `SELECT id, service, status, owner, updated_at\nFROM ${tableRef}\nWHERE status = 'open'\nORDER BY updated_at DESC\nLIMIT 20;`
-}
-
-function completeSql(sql: string) {
-  const dialect = dbAiActiveDialect()
-  const base = stripSqlTerminator(sql.trim() || `SELECT *\nFROM ${buildDbAiTableReference(dialect)}`)
-  let completed = base
-  if (/\bwhere\s*$/i.test(completed)) {
-    completed = `${completed} status = 'open'`
-  } else if (!/\bwhere\b/i.test(completed) && /^\s*(select|with)\b/i.test(completed)) {
-    completed = `${completed}\nWHERE status = 'open'`
-  }
-  return addDialectLimit(completed, dialect, 100)
-}
-
-function optimizeSql(sql: string) {
-  const dialect = dbAiActiveDialect()
-  const base = stripSqlTerminator(sql.trim() || `SELECT id, service, status, owner, updated_at\nFROM ${buildDbAiTableReference(dialect)}`)
-  const compact = base.replace(/\bselect\s+\*/i, 'SELECT id, service, status, owner, updated_at')
-  return addDialectLimit(compact, dialect, 100)
-}
-
-function convertSqlToDialect(sql: string, dialect: DbAiTargetDialect) {
-  const normalized = stripSqlTerminator(sql.trim() || 'SELECT 1')
-  const quoted = normalized
-    .replace(/"([^"]+)"/g, (_match, value: string) => quoteSqlIdentifierForDbAi(value, dialect))
-    .replace(/`([^`]+)`/g, (_match, value: string) => quoteSqlIdentifierForDbAi(value, dialect))
-    .replace(/\[([^\]]+)\]/g, (_match, value: string) => quoteSqlIdentifierForDbAi(value, dialect))
-  return addDialectLimit(quoted, dialect, extractSqlLimit(normalized) ?? 100)
-}
-
-function addDialectLimit(sql: string, dialect: DbAiTargetDialect, fallbackLimit: number) {
-  const limit = extractSqlLimit(sql) ?? fallbackLimit
-  let withoutLimit = stripSqlTerminator(sql)
-    .replace(/\s+limit\s+\d+\s*$/i, '')
-    .replace(/\s+fetch\s+first\s+\d+\s+rows\s+only\s*$/i, '')
-  const topMatch = withoutLimit.match(/^\s*select\s+top\s*\(\s*(\d+)\s*\)\s+/i)
-  if (topMatch) withoutLimit = withoutLimit.replace(/^\s*select\s+top\s*\(\s*\d+\s*\)\s+/i, 'SELECT ')
-  if (dialect === 'oracle') return ensureSqlTerminated(`${withoutLimit}\nFETCH FIRST ${Number(topMatch?.[1] ?? limit)} ROWS ONLY`)
-  if (dialect === 'mssql') return ensureSqlTerminated(withoutLimit.replace(/^\s*select\s+/i, `SELECT TOP (${Number(topMatch?.[1] ?? limit)}) `))
-  return ensureSqlTerminated(`${withoutLimit}\nLIMIT ${Number(topMatch?.[1] ?? limit)}`)
-}
-
-function extractSqlLimit(sql: string) {
-  const limitMatch = sql.match(/\blimit\s+(\d+)\b/i)
-  if (limitMatch) return Number(limitMatch[1])
-  const fetchMatch = sql.match(/\bfetch\s+first\s+(\d+)\s+rows\s+only\b/i)
-  if (fetchMatch) return Number(fetchMatch[1])
-  const topMatch = sql.match(/\btop\s*\(\s*(\d+)\s*\)/i)
-  if (topMatch) return Number(topMatch[1])
-  return null
-}
-
-function dbAiActiveDialect(): MockDatabaseEngineCode {
-  const tab = activeSqlTab.value
-  return (tab ? findConnection(tab.connectionId)?.dbType : undefined) ?? 'postgresql'
-}
-
-function buildDbAiTableReference(dialect: MockDatabaseEngineCode | DbAiTargetDialect) {
-  const tab = activeSqlTab.value
-  const connection = tab ? findConnection(tab.connectionId) : undefined
-  const catalog = connection?.catalogs.find((item) => item.name === tab?.catalogName) ?? connection?.catalogs[0]
-  const schema = tab?.schemaName ? catalog?.schemas?.find((item) => item.name === tab.schemaName) : catalog?.schemas?.[0]
-  const table = schema?.tables[0] ?? catalog?.tables?.[0]
-  const tableName = table?.name ?? 'orders'
-  const schemaName = schema?.name || tab?.schemaName
-  if ((dialect === 'postgresql' || dialect === 'oracle' || dialect === 'mssql') && schemaName) {
-    return `${quoteSqlIdentifierForDbAi(schemaName, dialect)}.${quoteSqlIdentifierForDbAi(tableName, dialect)}`
-  }
-  return quoteSqlIdentifierForDbAi(tableName, dialect)
-}
-
 function dbAiDialectLabel(dialect: DbAiTargetDialect) {
   return dbAiDialectOptions.find((option) => option.value === dialect)?.label ?? dialect
-}
-
-function stripSqlTerminator(sql: string) {
-  return sql.trim().replace(/;+$/, '').trim()
-}
-
-function ensureSqlTerminated(sql: string) {
-  const trimmed = sql.trim()
-  return trimmed.endsWith(';') ? trimmed : `${trimmed};`
 }
 
 function isReadOnlySql(sql: string) {
@@ -6670,30 +6813,24 @@ function setEditorSql(nextSql: string, selectionStart: number, selectionEnd = se
   })
 }
 
-function buildDiagnosedSql(sql: string) {
-  const tableMatch = sql.match(/from\s+([`"\w.]+)/i)
-  const tableName = tableMatch?.[1]?.replace(/[`"]/g, '') || 'public.orders'
-  return `SELECT *\nFROM ${tableName}\nLIMIT 100;`
-}
-
 function extractSql(text: string) {
   const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql)?\s*\n([\s\S]*?)```/i)
   return match?.[1].trim() ?? text
 }
 
-function engineAccent(code: MockDatabaseEngineCode) {
-  return mockDatabaseEngines.find((engine) => engine.connectionCode === code)?.accent ?? '#8a94a6'
+function engineAccent(code: DatabaseEngineCode) {
+  return databaseEngines.value.find((engine) => engine.connectionCode === code)?.accent ?? '#8a94a6'
 }
 
-function engineName(code: MockDatabaseEngineCode) {
-  return mockDatabaseEngines.find((engine) => engine.connectionCode === code)?.name ?? code
+function engineName(code: DatabaseEngineCode) {
+  return databaseEngines.value.find((engine) => engine.connectionCode === code)?.name ?? code
 }
 
 function quoteIdentifier(value: string) {
   return value.replace(/[^A-Za-z0-9_]/g, '_')
 }
 
-function quoteIdentForDialect(value: string, dbType: MockDatabaseEngineCode) {
+function quoteIdentForDialect(value: string, dbType: DatabaseEngineCode) {
   if (dbType === 'mysql') return `\`${String(value).replace(/`/g, '``')}\``
   return `"${String(value).replace(/"/g, '""')}"`
 }
@@ -6745,7 +6882,7 @@ function handleWindowClick() {
 }
 
 onMounted(() => {
-  loadDbAiPaneState()
+  void loadDatabaseCatalog().finally(() => loadDbAiPaneState())
   window.addEventListener('click', handleWindowClick)
 })
 

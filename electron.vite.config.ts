@@ -12,7 +12,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),
-        external: ['node-pty']
+        external: ['node-pty', 'better-sqlite3', 'ssh2']
       }
     }
   },

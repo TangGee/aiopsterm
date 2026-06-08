@@ -109,7 +109,7 @@
 import { computed, ref } from 'vue'
 import { ArrowDown, ArrowUp, ChevronsLeftRight, ChevronDown, ChevronRight, Minus, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileTransferTask } from '@/data/mockData'
+import type { FileTransferTask } from '@shared/preload'
 
 const store = useWorkspaceStore()
 const collapsed = ref(false)

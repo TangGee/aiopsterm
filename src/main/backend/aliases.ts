@@ -1,0 +1,257 @@
+import { app } from 'electron'
+import Store from 'electron-store'
+import { randomUUID } from 'crypto'
+import { join } from 'path'
+import type {
+  AiopsMutationResult,
+  AliasCommandConfig,
+  AliasCommandDeleteInput,
+  AliasCommandDeleteResult,
+  AliasCommandListResult,
+  AliasCommandMutationResult,
+  AliasCommandSaveInput
+} from '@shared/preload'
+
+type AliasStoreShape = {
+  aliases: AliasCommandConfig[]
+}
+
+type SqliteDatabase = {
+  exec(sql: string): void
+  prepare(sql: string): {
+    all(...args: unknown[]): unknown[]
+    get(...args: unknown[]): unknown
+    run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
+  }
+}
+
+const defaultAliases: AliasCommandConfig[] = [
+  { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 },
+  { id: 'alias-gst', alias: 'gst', command: 'git status', createdAt: 1717286400000 },
+  { id: 'alias-kctx', alias: 'kctx', command: 'kubectl config current-context', createdAt: 1717372800000 }
+]
+
+const cloneAlias = (command: AliasCommandConfig): AliasCommandConfig => ({ ...command })
+
+const cloneAliases = (commands: AliasCommandConfig[]) => commands.map(cloneAlias)
+
+const normalizeText = (value: unknown) => String(value || '').trim()
+
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
+const normalizeAliases = (source?: unknown): AliasCommandConfig[] => {
+  const rawAliases = Array.isArray(source) ? source : defaultAliases
+  const aliases: AliasCommandConfig[] = []
+  const seenIds = new Set<string>()
+  const seenAliases = new Set<string>()
+
+  rawAliases.forEach((item, index) => {
+    if (!isRecord(item)) return
+    const alias = normalizeText(item.alias)
+    const command = normalizeText(item.command)
+    if (!alias || !command || seenAliases.has(alias)) return
+    let id = normalizeText(item.id) && normalizeText(item.id) !== 'new' ? normalizeText(item.id) : `alias-${index + 1}`
+    while (seenIds.has(id)) id = `${id}-${index + 1}`
+    seenIds.add(id)
+    seenAliases.add(alias)
+    aliases.push({
+      id,
+      alias,
+      command,
+      createdAt: typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) ? item.createdAt : Date.now()
+    })
+  })
+
+  return aliases.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+
+class FallbackAliasStore {
+  private store: Store<AliasStoreShape> | null = null
+  private memory = cloneAliases(defaultAliases)
+
+  constructor() {
+    try {
+      this.store = new Store<AliasStoreShape>({
+        name: 'aiopsterm-aliases',
+        defaults: {
+          aliases: defaultAliases
+        }
+      })
+    } catch {
+      this.store = null
+    }
+  }
+
+  list(): AliasCommandConfig[] {
+    const aliases = normalizeAliases(this.store ? this.store.get('aliases') : this.memory)
+    if (this.store) this.store.set('aliases', aliases)
+    else this.memory = cloneAliases(aliases)
+    return cloneAliases(aliases)
+  }
+
+  save(commands: AliasCommandConfig[]) {
+    const aliases = normalizeAliases(commands)
+    if (this.store) this.store.set('aliases', aliases)
+    else this.memory = cloneAliases(aliases)
+    return cloneAliases(aliases)
+  }
+}
+
+class SqliteAliasStore {
+  constructor(private db: SqliteDatabase) {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS aliases (
+        id TEXT PRIMARY KEY,
+        alias TEXT NOT NULL UNIQUE,
+        command TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_aliases_created_at ON aliases(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_aliases_alias ON aliases(alias);
+    `)
+    this.seed()
+  }
+
+  private seed() {
+    const count = this.db.prepare('SELECT COUNT(*) as count FROM aliases').get() as { count: number }
+    if (count?.count) return
+    for (const item of defaultAliases) {
+      this.db
+        .prepare('INSERT INTO aliases (id, alias, command, created_at) VALUES (?, ?, ?, ?)')
+        .run(item.id, item.alias, item.command, item.createdAt || Date.now())
+    }
+  }
+
+  list(): AliasCommandConfig[] {
+    return this.db
+      .prepare('SELECT id, alias, command, created_at FROM aliases ORDER BY created_at DESC')
+      .all()
+      .map((row) => {
+        const item = row as { id: string; alias: string; command: string; created_at: number }
+        return {
+          id: item.id,
+          alias: item.alias,
+          command: item.command,
+          createdAt: item.created_at
+        }
+      })
+  }
+
+  save(commands: AliasCommandConfig[]) {
+    this.db.exec('DELETE FROM aliases;')
+    for (const item of normalizeAliases(commands)) {
+      this.db
+        .prepare('INSERT INTO aliases (id, alias, command, created_at) VALUES (?, ?, ?, ?)')
+        .run(item.id, item.alias, item.command, item.createdAt || Date.now())
+    }
+    return this.list()
+  }
+}
+
+let aliasStore: FallbackAliasStore | SqliteAliasStore | null = null
+
+const createStore = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
+    return new SqliteAliasStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+  } catch {
+    return new FallbackAliasStore()
+  }
+}
+
+const getStore = () => {
+  if (!aliasStore) aliasStore = createStore()
+  return aliasStore
+}
+
+const asResult = <T>(fn: () => T, fallbackCode = 'ALIAS_BACKEND_ERROR'): AiopsMutationResult<T> => {
+  try {
+    return { ok: true, data: fn() }
+  } catch (error) {
+    const code = isRecord(error) && typeof error.code === 'string' ? error.code : fallbackCode
+    return {
+      ok: false,
+      errorCode: code,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+const listAllAliases = () => getStore().list()
+
+const saveAllAliases = (commands: AliasCommandConfig[]) => getStore().save(commands)
+
+const findAlias = (commands: AliasCommandConfig[], input: AliasCommandDeleteInput | Pick<AliasCommandSaveInput, 'id' | 'previousAlias'>) => {
+  const id = normalizeText(input.id)
+  const alias = normalizeText('alias' in input ? input.alias : 'previousAlias' in input ? input.previousAlias : '')
+  return commands.find((item) => (id && item.id === id) || (alias && item.alias === alias)) || null
+}
+
+export const listAliasCommands = (query = ''): AliasCommandListResult =>
+  asResult(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    const aliases = listAllAliases()
+    if (!normalizedQuery) return aliases
+    return aliases.filter((item) => item.alias.toLowerCase().includes(normalizedQuery) || item.command.toLowerCase().includes(normalizedQuery))
+  })
+
+export const saveAliasCommand = (input: AliasCommandSaveInput): AliasCommandMutationResult => {
+  const alias = normalizeText(input.alias)
+  const command = normalizeText(input.command)
+  if (!alias || !command) {
+    return {
+      ok: false,
+      errorCode: 'ALIAS_REQUIRED',
+      errorMessage: 'Alias and command are required.'
+    }
+  }
+
+  return asResult(() => {
+    const aliases = listAllAliases()
+    const isUpdate = Boolean(normalizeText(input.id) || normalizeText(input.previousAlias))
+    const existing = isUpdate ? findAlias(aliases, input) : null
+    const id = existing?.id || normalizeText(input.id) || `alias-${randomUUID()}`
+    const duplicate = aliases.find((item) => item.alias === alias && item.id !== id)
+    if (duplicate) {
+      throw Object.assign(new Error('Alias already exists.'), { code: 'ALIAS_DUPLICATE' })
+    }
+
+    const nextCommand: AliasCommandConfig = {
+      id,
+      alias,
+      command,
+      createdAt: existing?.createdAt || (typeof input.createdAt === 'number' && Number.isFinite(input.createdAt) ? input.createdAt : Date.now())
+    }
+    const nextAliases = aliases.filter((item) => item.id !== id && item.alias !== input.previousAlias)
+    nextAliases.push(nextCommand)
+    const commands = saveAllAliases(nextAliases)
+    return {
+      command: cloneAlias(nextCommand),
+      commands
+    }
+  }, 'ALIAS_BACKEND_ERROR')
+}
+
+export const deleteAliasCommand = (input: AliasCommandDeleteInput): AliasCommandDeleteResult => {
+  const id = normalizeText(input.id)
+  const alias = normalizeText(input.alias)
+  if (!id && !alias) {
+    return {
+      ok: false,
+      errorCode: 'ALIAS_DELETE_TARGET_REQUIRED',
+      errorMessage: 'Alias delete target is required.'
+    }
+  }
+
+  return asResult(() => {
+    const aliases = listAllAliases()
+    const deleted = aliases.find((item) => (id && item.id === id) || (alias && item.alias === alias))
+    if (!deleted) throw Object.assign(new Error('Alias not found.'), { code: 'ALIAS_NOT_FOUND' })
+    const commands = saveAllAliases(aliases.filter((item) => item.id !== deleted.id))
+    return {
+      deleted: cloneAlias(deleted),
+      commands
+    }
+  }, 'ALIAS_BACKEND_ERROR')
+}

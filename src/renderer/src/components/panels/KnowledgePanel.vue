@@ -55,6 +55,32 @@
       @contextmenu.prevent="openBlankMenu"
     >
       <div class="kb-tree-scroll">
+        <div
+          v-if="workspace.kbContentSearchVisible"
+          class="kb-search-results"
+        >
+          <div class="kb-search-results-header">
+            <span>内容搜索</span>
+            <small v-if="workspace.kbSearchLoading">索引中...</small>
+            <small v-else>{{ workspace.kbContentSearchResults.length }} results</small>
+          </div>
+          <button
+            v-for="result in workspace.kbContentSearchResults"
+            :key="`${result.path}:${result.startLine}`"
+            class="kb-search-result"
+            @click.stop="openSearchResult(result)"
+          >
+            <strong>{{ result.path }}</strong>
+            <span>Lines {{ result.startLine }}-{{ result.endLine }} · {{ result.matchCount }} matches</span>
+            <small>{{ result.snippet }}</small>
+          </button>
+          <div
+            v-if="!workspace.kbSearchLoading && !workspace.kbContentSearchResults.length"
+            class="kb-search-empty"
+          >
+            {{ workspace.kbSearchError || '没有内容搜索结果' }}
+          </div>
+        </div>
         <KnowledgeTreeNode
           v-for="node in workspace.filteredKnowledgeTree"
           :key="node.relPath"
@@ -209,10 +235,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, nextTick, reactive, ref, watch, type VNode } from 'vue'
+import { computed, defineComponent, h, nextTick, onMounted, reactive, ref, watch, type VNode } from 'vue'
 import { ChevronDown, ChevronRight, Cloud, File, FilePlus, Folder, FolderPlus, Plus, RefreshCw, Search, UploadCloud, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { KnowledgeNode } from '@/data/mockData'
+import type { KnowledgeBaseSearchResult, KnowledgeNode } from '@shared/preload'
 
 const props = defineProps<{ query?: string }>()
 const workspace = useWorkspaceStore()
@@ -225,10 +251,22 @@ const blankMenu = reactive({ visible: false, x: 0, y: 0 })
 
 const modifierKey = computed(() => (navigator.platform.toUpperCase().includes('MAC') ? '⌘' : 'Ctrl+'))
 
+onMounted(() => {
+  void workspace.refreshKnowledgeTree({ persist: false })
+})
+
 watch(
   () => props.query,
   (query) => {
     if (query !== undefined) workspace.kbSearchQuery = query
+  },
+  { immediate: true }
+)
+
+watch(
+  () => workspace.kbSearchQuery,
+  () => {
+    void workspace.searchKnowledgeContent()
   },
   { immediate: true }
 )
@@ -333,6 +371,13 @@ const selectNode = (relPath: string, multi: boolean) => {
   }
 }
 
+const openSearchResult = (result: KnowledgeBaseSearchResult) => {
+  workspace.openKnowledgeFile(result.path, {
+    startLine: result.startLine,
+    endLine: result.endLine
+  })
+}
+
 const toggleExpanded = (relPath: string) => {
   workspace.kbExpandedKeys = workspace.kbExpandedKeys.includes(relPath)
     ? workspace.kbExpandedKeys.filter((key) => key !== relPath)
@@ -421,28 +466,43 @@ const addToChat = async () => {
 
 const uploadFile = async () => {
   addMenuOpen.value = false
-  if (window.aiops?.showOpenDialog) {
-    const result = await window.aiops.showOpenDialog({
-      properties: ['openFile', 'openDirectory', 'multiSelections']
-    })
-    if (result?.canceled || !result?.filePaths.length) return
-    const targetDir = selectedTargetDir()
-    for (const filePath of result.filePaths) {
-      const info = window.aiops.kbCheckPath ? await window.aiops.kbCheckPath(filePath) : { isDirectory: false, isFile: true }
-      const fileName = filePath.split(/[\\/]/).pop() || 'imported-note.md'
-      if (info.isDirectory) {
-        await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'folder')
-      } else if (info.isFile) {
-        await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'file')
-      }
-    }
+  if (!window.aiops?.showOpenDialog) {
+    workspace.setTopNotice('知识库导入需要文件选择服务')
     return
   }
-  await workspace.addKnowledgeImportJob(`${selectedTargetDir() || 'uploads'}/imported-note.md`)
+  const result = await window.aiops.showOpenDialog({
+    properties: ['openFile', 'openDirectory', 'multiSelections']
+  })
+  if (result?.canceled || !result?.filePaths.length) return
+  const targetDir = selectedTargetDir()
+  for (const filePath of result.filePaths) {
+    const info = window.aiops.kbCheckPath ? await window.aiops.kbCheckPath(filePath) : { isDirectory: false, isFile: true }
+    const fileName = filePath.split(/[\\/]/).pop() || 'imported-note.md'
+    if (info.isDirectory) {
+      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'folder')
+    } else if (info.isFile) {
+      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'file')
+    }
+  }
 }
 
-const handleDropImport = async () => {
-  await workspace.addKnowledgeImportJob(`${selectedTargetDir() || 'uploads'}/dropped-file.md`)
+const handleDropImport = async (event: DragEvent) => {
+  const files = Array.from(event.dataTransfer?.files || [])
+  const localPaths = files.map((file) => String((file as File & { path?: string }).path || '').trim()).filter(Boolean)
+  if (!localPaths.length) {
+    workspace.setTopNotice('知识库拖拽导入需要真实本地路径')
+    return
+  }
+  const targetDir = selectedTargetDir()
+  for (const filePath of localPaths) {
+    const info = window.aiops?.kbCheckPath ? await window.aiops.kbCheckPath(filePath) : { isDirectory: false, isFile: true }
+    const fileName = filePath.split(/[\\/]/).pop() || 'dropped-file.md'
+    if (info.isDirectory) {
+      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'folder')
+    } else if (info.isFile) {
+      await workspace.addKnowledgeImportJob(`${targetDir}/${fileName}`.replace(/^\/+/, ''), filePath, 'file')
+    }
+  }
 }
 
 const refreshTree = async () => {

@@ -285,9 +285,9 @@
             <div class="user-inline-value">
               <strong>****************</strong>
               <button
+                v-if="!editing && workspace.canResetUserPassword"
                 class="settings-button icon-only"
                 title="重置密码"
-                :disabled="!workspace.canResetUserPassword"
                 @click="openPasswordModal"
               >
                 <Pencil />
@@ -300,9 +300,9 @@
             <div class="user-inline-value">
               <strong>{{ workspace.userProfile.mobile || '-' }}</strong>
               <button
+                v-if="!editing && workspace.canEditUserMobile"
                 class="settings-button icon-only"
                 :title="workspace.userProfile.mobile ? '修改手机号' : '绑定手机号'"
-                :disabled="!workspace.canEditUserMobile"
                 @click="openContactModal('mobile')"
               >
                 <Pencil />
@@ -315,9 +315,9 @@
             <div class="user-inline-value">
               <strong>{{ workspace.userProfile.email || '-' }}</strong>
               <button
+                v-if="!editing && workspace.canEditUserEmail"
                 class="settings-button icon-only"
                 :title="workspace.userProfile.email ? '修改邮箱' : '绑定邮箱'"
-                :disabled="!workspace.canEditUserEmail"
                 @click="openContactModal('email')"
               >
                 <Pencil />
@@ -371,7 +371,7 @@
           <h3>重置密码</h3>
           <button
             title="关闭"
-            @click="passwordModalOpen = false"
+            @click="cancelPasswordModal"
           >
             <X />
           </button>
@@ -408,7 +408,7 @@
         <footer>
           <button
             class="settings-button"
-            @click="passwordModalOpen = false"
+            @click="cancelPasswordModal"
           >
             取消
           </button>
@@ -432,7 +432,7 @@
           <h3>{{ contactKind === 'email' ? '修改邮箱' : '修改手机号' }}</h3>
           <button
             title="关闭"
-            @click="contactModalOpen = false"
+            @click="cancelContactModal"
           >
             <X />
           </button>
@@ -469,7 +469,7 @@
         <footer>
           <button
             class="settings-button"
-            @click="contactModalOpen = false"
+            @click="cancelContactModal"
           >
             取消
           </button>
@@ -493,12 +493,16 @@
           <h3>头像设置</h3>
           <button
             title="关闭"
-            @click="avatarModalOpen = false"
+            @click="cancelAvatarModal"
           >
             <X />
           </button>
         </header>
-        <div class="avatar-preview-box">
+        <div
+          class="avatar-preview-box"
+          :class="{ empty: !avatarPreview }"
+          @click="!avatarPreview ? chooseAvatarImage() : undefined"
+        >
           <img
             v-if="avatarPreview"
             :src="avatarPreview"
@@ -507,17 +511,18 @@
             draggable="false"
             @mousedown="startAvatarDrag"
           />
-          <span v-else>{{ avatarDraft || workspace.userProfile.avatarInitials }}</span>
+          <div
+            v-else
+            class="avatar-preview-placeholder"
+          >
+            <Camera />
+            <p>点击上传头像</p>
+          </div>
         </div>
-        <label>
-          <span>头像缩写</span>
-          <input
-            v-model="avatarDraft"
-            maxlength="3"
-            placeholder="例如 AI"
-          />
-        </label>
-        <div class="avatar-zoom-control">
+        <div
+          v-if="avatarPreview"
+          class="avatar-zoom-control"
+        >
           <span>-</span>
           <input
             v-model="avatarZoom"
@@ -553,12 +558,13 @@
         <footer>
           <button
             class="settings-button"
-            @click="avatarModalOpen = false"
+            @click="cancelAvatarModal"
           >
             取消
           </button>
           <button
             class="settings-button primary"
+            :disabled="!avatarPreview"
             @click="saveAvatar"
           >
             保存
@@ -585,7 +591,7 @@
           <section>
             <small>账号</small>
             <strong>{{ workspace.userProfile.email || workspace.userProfile.username }}</strong>
-            <span>{{ workspace.userProfile.authProvider === 'local' ? '本地密码登录' : '第三方登录' }}</span>
+            <span>{{ accountAuthLabel }}</span>
           </section>
           <section>
             <small>订阅</small>
@@ -601,6 +607,16 @@
             <small>计费用量</small>
             <strong>{{ Math.round(workspace.billingSettings.ratio * 100) }}%</strong>
             <span>{{ workspace.billingSettings.budgetResetAt }} 重置</span>
+          </section>
+          <section>
+            <small>登录时间</small>
+            <strong>{{ workspace.userProfile.lastLoginAt || '-' }}</strong>
+            <span>{{ workspace.userProfile.localDatabaseReady ? '本地数据库已初始化' : '本地数据库未初始化' }}</span>
+          </section>
+          <section>
+            <small>密码</small>
+            <strong>{{ workspace.userProfile.passwordUpdatedAt || '-' }}</strong>
+            <span>{{ workspace.canResetUserPassword ? '允许重置' : '当前账号不可重置' }}</span>
           </section>
         </div>
         <div class="account-device-list">
@@ -649,7 +665,6 @@ const passwordDraft = ref('')
 const confirmPasswordDraft = ref('')
 const contactDraft = ref('')
 const contactCodeDraft = ref('')
-const avatarDraft = ref('')
 const avatarPreview = ref('')
 const avatarZoom = ref(1)
 const avatarInput = ref<HTMLInputElement | null>(null)
@@ -690,6 +705,13 @@ const canSendContactCode = computed(() => (contactKind.value === 'email' ? /^[^\
 const canSendLoginEmailCode = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginDraft.email.trim()))
 const canSendLoginMobileCode = computed(() => /^1[3-9]\d{9}$/.test(loginDraft.mobile.trim()))
 const currentDeviceLabel = computed(() => workspace.trustedDevices.find((device) => device.current)?.deviceName || '未识别当前设备')
+const accountAuthLabel = computed(() => {
+  if (workspace.userProfile.lastLoginMethod === 'email') return '邮箱验证码登录'
+  if (workspace.userProfile.lastLoginMethod === 'mobile') return '手机号验证码登录'
+  if (workspace.userProfile.lastLoginMethod === 'skip') return '访客登录'
+  if (workspace.userProfile.authProvider === 'local') return '本地密码登录'
+  return '第三方登录'
+})
 
 const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
 
@@ -697,20 +719,20 @@ const sendLoginCode = (kind: 'email' | 'mobile') => {
   workspace.sendUserLoginCode(kind, kind === 'email' ? loginDraft.email : loginDraft.mobile)
 }
 
-const loginWithAccount = () => {
-  workspace.loginWithAccount(loginDraft.username, loginDraft.password)
+const loginWithAccount = async () => {
+  await workspace.loginWithAccount(loginDraft.username, loginDraft.password)
 }
 
-const loginWithEmail = () => {
-  workspace.loginWithEmail(loginDraft.email, loginDraft.emailCode)
+const loginWithEmail = async () => {
+  await workspace.loginWithEmail(loginDraft.email, loginDraft.emailCode)
 }
 
-const loginWithMobile = () => {
-  workspace.loginWithMobile(loginDraft.mobile, loginDraft.mobileCode)
+const loginWithMobile = async () => {
+  await workspace.loginWithMobile(loginDraft.mobile, loginDraft.mobileCode)
 }
 
-const skipLogin = () => {
-  workspace.skipUserLogin()
+const skipLogin = async () => {
+  await workspace.skipUserLogin()
 }
 
 const startEditing = () => {
@@ -725,8 +747,8 @@ const cancelEditing = () => {
   editing.value = false
 }
 
-const saveProfile = () => {
-  const saved = workspace.updateUserProfile({
+const saveProfile = async () => {
+  const saved = await workspace.updateUserProfile({
     name: profileDraft.name,
     username: profileDraft.username
   })
@@ -734,38 +756,54 @@ const saveProfile = () => {
 }
 
 const openPasswordModal = () => {
+  if (!workspace.canResetUserPassword) {
+    workspace.setUserNotice('SSO 用户不能修改密码')
+    return
+  }
   passwordDraft.value = ''
   confirmPasswordDraft.value = ''
   passwordModalOpen.value = true
 }
 
-const savePassword = () => {
-  const saved = workspace.resetUserPassword(passwordDraft.value)
-  if (saved) passwordModalOpen.value = false
+const cancelPasswordModal = () => {
+  passwordModalOpen.value = false
+  passwordDraft.value = ''
+  confirmPasswordDraft.value = ''
+}
+
+const savePassword = async () => {
+  const saved = await workspace.resetUserPassword(passwordDraft.value)
+  if (saved) cancelPasswordModal()
 }
 
 const openContactModal = (kind: 'email' | 'mobile') => {
+  if ((kind === 'email' && !workspace.canEditUserEmail) || (kind === 'mobile' && !workspace.canEditUserMobile)) {
+    workspace.setUserNotice(kind === 'email' ? '当前登录方式不允许修改邮箱' : '当前登录方式不允许修改手机号')
+    return
+  }
   contactKind.value = kind
   contactDraft.value = workspace.userProfile[kind] || ''
   contactCodeDraft.value = ''
   contactModalOpen.value = true
 }
 
+const cancelContactModal = () => {
+  contactModalOpen.value = false
+  contactDraft.value = workspace.userProfile[contactKind.value] || ''
+  contactCodeDraft.value = ''
+}
+
 const sendContactCode = () => {
   workspace.sendUserContactCode(contactKind.value, contactDraft.value)
 }
 
-const saveContact = () => {
-  const saved = workspace.bindUserContact(contactKind.value, contactDraft.value, contactCodeDraft.value)
-  if (saved) contactModalOpen.value = false
+const saveContact = async () => {
+  const saved = await workspace.bindUserContact(contactKind.value, contactDraft.value, contactCodeDraft.value)
+  if (saved) cancelContactModal()
 }
 
 const openAvatarModal = () => {
-  avatarDraft.value = workspace.userProfile.avatarInitials
-  avatarPreview.value = workspace.userProfile.avatarImageUrl
-  avatarZoom.value = 1
-  avatarOffset.x = 0
-  avatarOffset.y = 0
+  resetAvatarPreview()
   avatarModalOpen.value = true
 }
 
@@ -774,10 +812,22 @@ const chooseAvatarImage = () => {
 }
 
 const clearAvatarImage = () => {
+  resetAvatarPreview()
+  if (avatarInput.value) avatarInput.value.value = ''
+}
+
+const resetAvatarPreview = () => {
   avatarPreview.value = ''
   avatarZoom.value = 1
   avatarOffset.x = 0
   avatarOffset.y = 0
+  avatarDrag.active = false
+}
+
+const cancelAvatarModal = () => {
+  avatarModalOpen.value = false
+  resetAvatarPreview()
+  if (avatarInput.value) avatarInput.value.value = ''
 }
 
 const handleAvatarFile = (event: Event) => {
@@ -793,7 +843,11 @@ const handleAvatarFile = (event: Event) => {
     avatarOffset.x = 0
     avatarOffset.y = 0
   }
+  reader.onerror = () => {
+    workspace.setUserNotice('图片读取失败')
+  }
   reader.readAsDataURL(file)
+  if (avatarInput.value) avatarInput.value.value = ''
 }
 
 const onAvatarDragMove = (event: MouseEvent) => {
@@ -815,12 +869,15 @@ const startAvatarDrag = (event: MouseEvent) => {
   window.addEventListener('mouseup', stopAvatarDrag, { once: true })
 }
 
-const saveAvatar = () => {
-  const saved = workspace.updateUserProfile({
-    avatarInitials: (avatarDraft.value || 'AI').toUpperCase().slice(0, 3),
+const saveAvatar = async () => {
+  if (!avatarPreview.value) {
+    workspace.setUserNotice('请先上传头像图片')
+    return
+  }
+  const saved = await workspace.updateUserProfile({
     avatarImageUrl: avatarPreview.value
   })
-  if (saved) avatarModalOpen.value = false
+  if (saved) cancelAvatarModal()
 }
 
 onUnmounted(() => {

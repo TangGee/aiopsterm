@@ -50,7 +50,7 @@
           connected: cluster.connection_status === 'connected',
           connecting: cluster.connection_status === 'connecting'
         }"
-        @click="workspace.openK8sTerminal(cluster.id)"
+        @click="void workspace.openK8sTerminal(cluster.id)"
       >
         <span class="k8s-cluster-icon">
           <Cloud />
@@ -156,10 +156,15 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { Cloud, Link, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Settings, Trash2, Unplug, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
+
+onMounted(() => {
+  void workspace.refreshKubernetesCatalog()
+})
 
 const openAddCluster = () => {
   workspace.k8sAddMode = 'import'

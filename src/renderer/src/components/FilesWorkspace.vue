@@ -108,13 +108,15 @@
           </button>
         </div>
       </header>
-      <textarea
-        v-model="editor.content"
-        spellcheck="false"
-        @input="markEditorDirty(editor)"
-      ></textarea>
+      <FilesMonacoEditor
+        :model-value="editor.content"
+        :language="editor.language"
+        :readonly="editor.loading"
+        @update:model-value="updateFileEditorContent(editor, $event)"
+        @save="saveFileEditor(editor.key, false)"
+      />
       <footer>
-        <span>{{ editor.sessionLabel }} · {{ editor.language }} · {{ editor.dirty ? '未保存' : editor.saved ? '已保存' : '已打开' }}</span>
+        <span>{{ editor.sessionLabel }} · {{ editor.language }} · {{ editor.error || (editor.loading ? '加载中' : editor.dirty ? '未保存' : editor.saved ? '已保存' : '已打开') }}</span>
       </footer>
       <button
         v-if="!editor.fullscreen"
@@ -224,9 +226,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Check, ChevronDown, ChevronRight, Maximize2, Minimize2, Save, X } from 'lucide-vue-next'
 import FileBrowser from '@/components/files/FileBrowser.vue'
+import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import TransferSide from '@/components/files/TransferSide.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import type { FileContentOptions } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const expandedDefault = ref(['local'])
@@ -243,6 +247,7 @@ type FileEditorState = {
   loading: boolean
   dirty: boolean
   saved: boolean
+  error: string
   visible: boolean
   fullscreen: boolean
   x: number
@@ -353,14 +358,17 @@ const getFileLanguage = (filePath: string) => {
 
 const getFileName = (filePath: string) => filePath.split('/').filter(Boolean).at(-1) || 'untitled'
 
-const getMockFileContent = (payload: { filePath: string; sessionLabel: string; host: string }) => {
-  const name = getFileName(payload.filePath)
-  if (/\.md$/i.test(name)) return `# ${name}\n\nOpened from ${payload.sessionLabel} (${payload.host}).\n`
-  if (/\.log$/i.test(name)) return `2026-06-04 13:30:00 ${name} opened from ${payload.host}\n`
-  return `# ${payload.filePath}\n# ${payload.sessionLabel} ${payload.host}\n`
+const fileContentOptions = (payload: { sessionId: string; host: string }): FileContentOptions => {
+  const session = workspace.fileSessions.find((item) => item.id === payload.sessionId)
+  return {
+    sessionId: payload.sessionId,
+    kind: session?.kind ?? (payload.sessionId === 'local' ? 'local' : 'remote'),
+    host: payload.host,
+    rootPath: session?.rootPath
+  }
 }
 
-const openFileEditor = (payload: { filePath: string; sessionId: string; sessionLabel: string; host: string }) => {
+const openFileEditor = async (payload: { filePath: string; sessionId: string; sessionLabel: string; host: string }) => {
   const key = `${payload.sessionId}:${payload.filePath}`
   const existing = fileEditors.value.find((editor) => editor.key === key)
   if (existing) {
@@ -368,28 +376,44 @@ const openFileEditor = (payload: { filePath: string; sessionId: string; sessionL
     activeEditorKey.value = key
     return
   }
-  const content = getMockFileContent(payload)
-  fileEditors.value.push({
+  const editor: FileEditorState = {
     key,
     filePath: payload.filePath,
     sessionId: payload.sessionId,
     sessionLabel: payload.sessionLabel,
     host: payload.host,
-    content,
-    originContent: content,
+    content: '',
+    originContent: '',
     action: 'edit',
     language: getFileLanguage(payload.filePath),
-    loading: false,
+    loading: true,
     dirty: false,
     saved: false,
+    error: '',
     visible: true,
     fullscreen: false,
     x: Math.max(24, Math.round(window.innerWidth / 2 - 450)),
     y: Math.max(24, Math.round(window.innerHeight / 2 - 310)),
     width: Math.min(900, Math.max(620, window.innerWidth - 96)),
     height: Math.min(620, Math.max(420, window.innerHeight - 96))
-  })
+  }
+  fileEditors.value.push(editor)
   activeEditorKey.value = key
+  try {
+    const result = await window.aiops.readFileContent(payload.filePath, fileContentOptions(payload))
+    if (!result.ok) {
+      editor.error = result.errorMessage || '读取文件失败'
+      return
+    }
+    const content = result.data?.content ?? ''
+    editor.content = content
+    editor.originContent = content
+    editor.action = result.data?.action ?? 'edit'
+  } catch (error) {
+    editor.error = error instanceof Error ? error.message : '读取文件失败'
+  } finally {
+    editor.loading = false
+  }
 }
 
 const editorGeometry = (editor: FileEditorState) => ({
@@ -409,7 +433,7 @@ const clampEditor = (editor: FileEditorState) => {
 
 const startEditorDrag = (event: MouseEvent, editor: FileEditorState) => {
   const target = event.target as HTMLElement
-  if (editor.fullscreen || target.closest('button') || target.closest('textarea')) return
+  if (editor.fullscreen || target.closest('button') || target.closest('textarea') || target.closest('.files-monaco-editor')) return
   activeEditorKey.value = editor.key
   editorPointer.mode = 'drag'
   editorPointer.key = editor.key
@@ -465,15 +489,33 @@ const markEditorDirty = (editor: FileEditorState) => {
   if (editor.dirty) editor.saved = false
 }
 
-const saveFileEditor = (key: string, needClose: boolean) => {
+const updateFileEditorContent = (editor: FileEditorState, value: string) => {
+  editor.content = value
+  markEditorDirty(editor)
+}
+
+const saveFileEditor = async (key: string, needClose: boolean) => {
   const editor = fileEditors.value.find((item) => item.key === key)
-  if (!editor) return
+  if (!editor || editor.loading) return
   editor.loading = true
-  editor.originContent = editor.content
-  editor.dirty = false
-  editor.saved = true
-  editor.loading = false
-  workspace.pushFileTransferTask({
+  editor.error = ''
+  try {
+    const result = await window.aiops.writeFileContent(editor.filePath, editor.content, fileContentOptions(editor))
+    if (!result.ok) {
+      editor.error = result.errorMessage || '保存文件失败'
+      return
+    }
+    editor.originContent = editor.content
+    editor.action = 'edit'
+    editor.dirty = false
+    editor.saved = true
+  } catch (error) {
+    editor.error = error instanceof Error ? error.message : '保存文件失败'
+    return
+  } finally {
+    editor.loading = false
+  }
+  await workspace.recordFileTransferTask({
     type: 'r2r',
     name: `save ${getFileName(editor.filePath)}`,
     source: editor.filePath,
@@ -511,6 +553,7 @@ const requestCloseFileEditor = (key: string) => {
 }
 
 onMounted(() => {
+  void workspace.refreshFileSessionCatalog()
   window.addEventListener('mousemove', handleEditorPointerMove)
   window.addEventListener('mouseup', stopEditorPointer)
   window.addEventListener('keydown', handleEditorKeydown)

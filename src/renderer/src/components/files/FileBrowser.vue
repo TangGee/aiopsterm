@@ -460,10 +460,13 @@ import {
   UploadCloud,
   X
 } from 'lucide-vue-next'
-import { mockRemoteFileTree } from '@/data/mockData'
-import type { FileSessionInfo, MockFileEntry } from '@/data/mockData'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileListEntry } from '@shared/preload'
+import type { FileEntryMutation, FileListEntry, FileListOptions, FileSessionInfo } from '@shared/preload'
+
+type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
+  mode: string
+  modifiedAt: string
+}
 
 const props = defineProps<{
   session: FileSessionInfo
@@ -478,7 +481,7 @@ const emit = defineEmits<{
 const workspace = useWorkspaceStore()
 const pathInput = ref(props.session.rootPath)
 const currentPath = ref(props.session.rootPath)
-const entries = ref<MockFileEntry[]>([])
+const entries = ref<FileBrowserEntry[]>([])
 const showHidden = ref(true)
 const loading = ref(false)
 const error = ref('')
@@ -488,7 +491,7 @@ const dropTargetPath = ref('')
 const editingPath = ref('')
 const renameValue = ref('')
 const moreForPath = ref('')
-const permissionsTarget = ref<MockFileEntry | null>(null)
+const permissionsTarget = ref<FileBrowserEntry | null>(null)
 const recursivePermission = ref(false)
 const fileNotice = ref('')
 const permissions = reactive<Record<'owner' | 'group' | 'public', string[]>>({
@@ -496,14 +499,14 @@ const permissions = reactive<Record<'owner' | 'group' | 'public', string[]>>({
   group: ['读'],
   public: ['读']
 })
-const deleteDialog = reactive<{ visible: boolean; entry: MockFileEntry | null }>({
+const deleteDialog = reactive<{ visible: boolean; entry: FileBrowserEntry | null }>({
   visible: false,
   entry: null
 })
 const moveDialog = reactive<{
   visible: boolean
   type: 'move' | 'copy'
-  entry: MockFileEntry | null
+  entry: FileBrowserEntry | null
   targetPath: string
   editingPath: boolean
   activeMenuIndex: number | null
@@ -516,7 +519,7 @@ const moveDialog = reactive<{
   activeMenuIndex: null
 })
 const conflictDialog = reactive({ visible: false, newName: '' })
-const targetSubDirs = reactive<Record<number, MockFileEntry[]>>({})
+const targetSubDirs = reactive<Record<number, FileBrowserEntry[]>>({})
 const movePathContainer = ref<HTMLElement | null>(null)
 
 const FS_DND_MIME = 'application/x-synchro-fs-item'
@@ -538,7 +541,7 @@ const permissionGroups = [
   { key: 'public' as const, label: '公共组' }
 ]
 const permissionOptions = ['读', '写', '执行']
-const permissionToModePrefix = (type: MockFileEntry['type']) => {
+const permissionToModePrefix = (type: FileBrowserEntry['type']) => {
   if (type === 'directory') return 'd'
   if (type === 'link') return 'l'
   return '-'
@@ -573,39 +576,47 @@ const formatSize = (size: number) => {
   return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
+const getLocalPathName = (path: string, fallback = 'upload') => path.split(/[\\/]/).filter(Boolean).at(-1) || fallback
+
 const formatDate = (time: number) => {
   const date = new Date(time)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-const mapLocalEntry = (entry: FileListEntry): MockFileEntry => ({
+const getListOptions = (overrides: Partial<FileListOptions> = {}): FileListOptions => ({
+  sessionId: props.session.id,
+  kind: props.session.kind,
+  host: props.session.host,
+  rootPath: props.session.rootPath,
+  ...overrides
+})
+
+const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
   name: entry.name,
   path: entry.path,
-  type: entry.type === 'directory' ? 'directory' : 'file',
-  mode: entry.type === 'directory' ? 'drwxr-xr-x' : '-rw-r--r--',
+  type: entry.type,
+  mode: entry.mode || (entry.type === 'directory' ? 'drwxr-xr-x' : entry.type === 'link' ? 'lrwxrwxrwx' : '-rw-r--r--'),
   size: entry.size,
   modifiedAt: formatDate(entry.modifiedAt)
 })
 
-const loadLocalEntries = async () => {
+const loadDirectoryEntries = async (path: string) => {
   if (!window.aiops) return []
-  const list = await window.aiops.listFiles(currentPath.value)
-  const parent = currentPath.value === '/' ? [] : [{ name: '..', path: dirname(currentPath.value), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '' }]
-  return [...parent, ...list.map(mapLocalEntry)]
-}
-
-const loadRemoteEntries = () => {
-  const list = mockRemoteFileTree[currentPath.value] || []
-  return list.map((entry) => ({ ...entry }))
+  const list = await window.aiops.listFiles(path, getListOptions())
+  const rows = list.map(mapFileEntry)
+  if (rows.some((entry) => entry.name === '..') || path === '/') return rows
+  return [{ name: '..', path: dirname(path), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '' }, ...rows]
 }
 
 const listDirectoryEntries = async (path: string) => {
   const normalized = normalizePath(path)
-  if (props.session.kind === 'local' && window.aiops) {
-    const list = await window.aiops.listFiles(normalized)
-    return list.map(mapLocalEntry)
-  }
-  return (mockRemoteFileTree[normalized] || []).map((entry) => ({ ...entry }))
+  return loadDirectoryEntries(normalized)
+}
+
+const mutateEntry = async (mutation: FileEntryMutation) => {
+  const result = await window.aiops.mutateFileEntry(mutation, getListOptions())
+  if (!result.ok) throw new Error(result.errorMessage || '文件操作失败')
+  return result.data
 }
 
 const clearTargetSubDirs = () => {
@@ -618,7 +629,7 @@ const loadEntries = async () => {
   loading.value = true
   error.value = ''
   try {
-    entries.value = props.session.kind === 'local' ? await loadLocalEntries() : loadRemoteEntries()
+    entries.value = await loadDirectoryEntries(currentPath.value)
   } catch (fileError) {
     error.value = fileError instanceof Error ? fileError.message : '读取文件失败'
     entries.value = []
@@ -632,7 +643,7 @@ const commitPath = async () => {
   await loadEntries()
 }
 
-const openDirectory = async (entry: MockFileEntry) => {
+const openDirectory = async (entry: FileBrowserEntry) => {
   currentPath.value = normalizePath(entry.path)
   pathInput.value = currentPath.value
   await loadEntries()
@@ -668,22 +679,22 @@ const queueUpload = async (kind: 'file' | 'directory') => {
   })
   const localPath = result?.canceled ? '' : result?.filePaths?.[0]
   if (!localPath) return
-  const name = localPath.split(/[\\/]/).filter(Boolean).at(-1) || (kind === 'file' ? 'upload-file.txt' : 'upload-directory')
-  workspace.pushFileTransferTask({
-    type: 'upload',
-    name,
-    source: localPath,
-    target: currentPath.value,
-    progress: 8,
-    speed: 'pending',
-    status: 'running',
-    toHost: props.session.host,
-    stage: kind === 'directory' ? 'scanning' : 'pending',
-    isGroup: kind === 'directory',
-    totalFiles: kind === 'directory' ? 3 : undefined,
-    finishedFiles: kind === 'directory' ? 0 : undefined
-  })
-  fileNotice.value = `${name} 已加入上传任务`
+  const name = getLocalPathName(localPath, kind === 'file' ? 'upload-file.txt' : 'upload-directory')
+  loading.value = true
+  try {
+    const transfer = await window.aiops.transferFileEntry(
+      { kind: kind === 'file' ? 'upload-file' : 'upload-directory', localPath, remoteDirectory: currentPath.value },
+      getListOptions()
+    )
+    if (!transfer.ok) throw new Error(transfer.errorMessage || '上传失败')
+    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    await loadEntries()
+    fileNotice.value = `${name} 上传成功`
+  } catch (uploadError) {
+    fileNotice.value = uploadError instanceof Error ? uploadError.message : '上传失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 const setGlobalDragSide = (side: 'left' | 'right' | null) => {
@@ -692,9 +703,9 @@ const setGlobalDragSide = (side: 'left' | 'right' | null) => {
 
 const getGlobalDragSide = () => ((globalThis as any)[GLOBAL_DND_SIDE_KEY] as 'left' | 'right' | null) || null
 
-const isDraggableEntry = (entry: MockFileEntry) => props.uiMode === 'transfer' && !!props.panelSide && entry.name !== '..' && entry.type !== 'link'
+const isDraggableEntry = (entry: FileBrowserEntry) => props.uiMode === 'transfer' && !!props.panelSide && entry.name !== '..' && entry.type !== 'link'
 
-const startFileDrag = (event: DragEvent, entry: MockFileEntry) => {
+const startFileDrag = (event: DragEvent, entry: FileBrowserEntry) => {
   if (!isDraggableEntry(entry) || !event.dataTransfer || !props.panelSide) return
   const payload: FsDragPayload = {
     kind: 'fs-item',
@@ -746,27 +757,69 @@ const getDropTargetDirectory = (event: DragEvent) => {
 
 const getTargetType = () => (props.session.kind === 'local' ? 'local' : 'remote')
 
-const queueCrossTransfer = (payload: FsDragPayload, targetDir: string) => {
-  const sourceIsLocal = workspace.fileSessions.find((session) => session.id === payload.fromUuid)?.kind === 'local'
+const getDroppedLocalPath = (event: DragEvent) => {
+  const files = Array.from(event.dataTransfer?.files || [])
+  const filePath = files.map((file) => String((file as File & { path?: string }).path || '').trim()).find(Boolean)
+  return filePath || ''
+}
+
+const handleOsFileDrop = async (event: DragEvent) => {
+  const localPath = getDroppedLocalPath(event)
+  if (!localPath) {
+    fileNotice.value = '无法读取拖入文件路径'
+    return
+  }
+  if (props.session.kind === 'local') {
+    currentPath.value = normalizePath(dirname(localPath))
+    pathInput.value = currentPath.value
+    await loadEntries()
+    fileNotice.value = `已打开 ${currentPath.value}`
+    return
+  }
+
+  const name = getLocalPathName(localPath)
+  loading.value = true
+  try {
+    const transfer = await window.aiops.transferFileEntry({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
+    if (!transfer.ok) throw new Error(transfer.errorMessage || '上传失败')
+    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    await loadEntries()
+    fileNotice.value = `${name} 上传成功`
+  } catch (uploadError) {
+    fileNotice.value = uploadError instanceof Error ? uploadError.message : '上传失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => {
+  const sourceSession = workspace.fileSessions.find((session) => session.id === payload.fromUuid)
+  const sourceIsLocal = sourceSession?.kind === 'local'
   const targetIsLocal = getTargetType() === 'local'
   const targetPath = payload.isDir ? targetDir : joinPath(targetDir, payload.name)
-  const taskType = !sourceIsLocal && targetIsLocal ? 'download' : sourceIsLocal && !targetIsLocal ? 'upload' : 'r2r'
-  workspace.pushFileTransferTask({
-    type: taskType,
-    name: payload.name,
-    source: payload.srcPath,
-    target: targetPath,
-    progress: 18,
-    speed: 'pending',
-    status: 'running',
-    fromHost: workspace.fileSessions.find((session) => session.id === payload.fromUuid)?.host,
-    toHost: props.session.host,
-    stage: payload.isDir ? 'scanning' : 'pending',
-    isGroup: payload.isDir,
-    totalFiles: payload.isDir ? 3 : undefined,
-    finishedFiles: payload.isDir ? 0 : undefined
-  })
-  fileNotice.value = `${payload.name} 已加入传输任务`
+  loading.value = true
+  try {
+    const operation = sourceIsLocal
+      ? { kind: payload.isDir ? ('upload-directory' as const) : ('upload-file' as const), localPath: payload.srcPath, remoteDirectory: targetDir }
+      : targetIsLocal
+        ? { kind: 'download-file' as const, remotePath: payload.srcPath, localPath: targetPath }
+        : { kind: 'copy-remote' as const, remotePath: payload.srcPath, targetPath }
+    const transfer = await window.aiops.transferFileEntry(
+      operation,
+      getListOptions({
+        fromHost: sourceSession?.host,
+        toHost: props.session.host
+      })
+    )
+    if (!transfer.ok) throw new Error(transfer.errorMessage || '传输失败')
+    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    await loadEntries()
+    fileNotice.value = `${payload.name} 传输成功`
+  } catch (transferError) {
+    fileNotice.value = transferError instanceof Error ? transferError.message : '传输失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 const handleDragOver = (event: DragEvent) => {
@@ -782,6 +835,7 @@ const handleDragOver = (event: DragEvent) => {
   if (!payload || !sourceSide || !props.panelSide) {
     dropForbidden.value = false
     dragActive.value = true
+    if (event.dataTransfer && getDroppedLocalPath(event)) event.dataTransfer.dropEffect = 'copy'
     return
   }
   dropForbidden.value = false
@@ -797,7 +851,7 @@ const clearFileDropState = () => {
   dropTargetPath.value = ''
 }
 
-const handleDrop = (event: DragEvent) => {
+const handleDrop = async (event: DragEvent) => {
   const payload = readFsDragPayload(event)
   const sourceSide = getGlobalDragSide()
   if (payload && props.panelSide) {
@@ -817,30 +871,37 @@ const handleDrop = (event: DragEvent) => {
     workspace.openFileSession(sessionId, props.panelSide)
     return
   }
-  workspace.pushFileTransferTask({
-    type: 'upload',
-    name: 'dropped-item',
-    source: 'drag-source',
-    target: currentPath.value,
-    progress: 12,
-    speed: 'pending',
-    status: 'running'
-  })
+  await handleOsFileDrop(event)
 }
 
-const startRename = (entry: MockFileEntry) => {
+const startRename = (entry: FileBrowserEntry) => {
   editingPath.value = entry.path
   renameValue.value = entry.name
   moreForPath.value = ''
 }
 
-const confirmRename = (entry: MockFileEntry) => {
+const confirmRename = async (entry: FileBrowserEntry) => {
   const name = renameValue.value.trim()
-  if (name) {
-    entry.name = name
-    entry.path = `${dirname(entry.path)}/${name}`.replace(/\/+/g, '/')
+  if (!name) {
+    fileNotice.value = '请输入新文件名'
+    return
   }
-  cancelRename()
+  const newPath = `${dirname(entry.path)}/${name}`.replace(/\/+/g, '/')
+  if (newPath === entry.path) {
+    cancelRename()
+    return
+  }
+  loading.value = true
+  try {
+    await mutateEntry({ kind: 'rename', oldPath: entry.path, newPath })
+    cancelRename()
+    await loadEntries()
+    fileNotice.value = '重命名成功'
+  } catch (renameError) {
+    fileNotice.value = renameError instanceof Error ? renameError.message : '重命名失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 const cancelRename = () => {
@@ -848,7 +909,7 @@ const cancelRename = () => {
   renameValue.value = ''
 }
 
-const openPermissions = (entry: MockFileEntry) => {
+const openPermissions = (entry: FileBrowserEntry) => {
   permissionsTarget.value = entry
   moreForPath.value = ''
   recursivePermission.value = false
@@ -871,48 +932,57 @@ const parsePermissionMode = (mode: string) => {
   permissions.public = applyDigit(digits[2])
 }
 
-const confirmPermissions = () => {
+const confirmPermissions = async () => {
   if (!permissionsTarget.value) return
-  permissionsTarget.value.mode = `${permissionToModePrefix(permissionsTarget.value.type)}${permissionCode.value}`
-  workspace.pushFileTransferTask({
-    type: 'r2r',
-    name: `chmod ${permissionsTarget.value.name}`,
-    source: permissionsTarget.value.path,
-    target: recursivePermission.value ? 'recursive permissions' : 'permissions',
-    progress: 100,
-    speed: '完成',
-    status: 'success',
-    fromHost: props.session.host,
-    toHost: props.session.host
-  })
-  fileNotice.value = `权限已更新为 ${permissionCode.value}`
-  permissionsTarget.value = null
+  const target = permissionsTarget.value
+  loading.value = true
+  try {
+    await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value })
+    await workspace.recordFileTransferTask({
+      type: 'r2r',
+      name: `chmod ${target.name}`,
+      source: target.path,
+      target: recursivePermission.value ? 'recursive permissions' : 'permissions',
+      progress: 100,
+      speed: '完成',
+      status: 'success',
+      fromHost: props.session.host,
+      toHost: props.session.host
+    })
+    await loadEntries()
+    fileNotice.value = `权限已更新为 ${permissionCode.value}`
+    permissionsTarget.value = null
+  } catch (permissionError) {
+    fileNotice.value = permissionError instanceof Error ? permissionError.message : '权限更新失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 const toggleMore = (path: string) => {
   moreForPath.value = moreForPath.value === path ? '' : path
 }
 
-const downloadEntry = async (entry: MockFileEntry) => {
+const downloadEntry = async (entry: FileBrowserEntry) => {
   const result = await window.aiops?.showSaveDialog?.({
     defaultPath: entry.name
   })
   const localPath = result?.canceled ? '' : result?.filePath
   if (!localPath) return
-  workspace.pushFileTransferTask({
-    type: 'download',
-    name: entry.name,
-    source: entry.path,
-    target: localPath,
-    progress: 18,
-    speed: 'pending',
-    status: 'running',
-    fromHost: props.session.host
-  })
-  fileNotice.value = `${entry.name} 已加入下载任务`
+  loading.value = true
+  try {
+    const transfer = await window.aiops.transferFileEntry({ kind: 'download-file', remotePath: entry.path, localPath }, getListOptions())
+    if (!transfer.ok) throw new Error(transfer.errorMessage || '下载失败')
+    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    fileNotice.value = `${entry.name} 下载成功`
+  } catch (downloadError) {
+    fileNotice.value = downloadError instanceof Error ? downloadError.message : '下载失败'
+  } finally {
+    loading.value = false
+  }
 }
 
-const openFile = (entry: MockFileEntry) => {
+const openFile = (entry: FileBrowserEntry) => {
   emit('openFile', {
     filePath: entry.path,
     sessionId: props.session.id,
@@ -921,7 +991,7 @@ const openFile = (entry: MockFileEntry) => {
   })
 }
 
-const openMoveDialog = (entry: MockFileEntry, type: 'move' | 'copy') => {
+const openMoveDialog = (entry: FileBrowserEntry, type: 'move' | 'copy') => {
   moveDialog.visible = true
   moveDialog.type = type
   moveDialog.entry = entry
@@ -1020,23 +1090,35 @@ const confirmMove = async () => {
   queueMoveTarget(targetName)
 }
 
-const queueMoveTarget = (name: string) => {
+const queueMoveTarget = async (name: string, overwrite = false) => {
   if (!moveDialog.entry) return
-  workspace.pushFileTransferTask({
-    type: 'r2r',
-    name,
-    source: moveDialog.entry.path,
-    target: `${moveDialog.targetPath}/${name}`.replace(/\/+/g, '/'),
-    progress: 20,
-    speed: 'pending',
-    status: 'running',
-    fromHost: props.session.host,
-    toHost: props.session.host
-  })
-  closeMoveDialog()
+  const entry = moveDialog.entry
+  const targetPath = `${moveDialog.targetPath}/${name}`.replace(/\/+/g, '/')
+  loading.value = true
+  try {
+    await mutateEntry({ kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite })
+    await workspace.recordFileTransferTask({
+      type: 'r2r',
+      name,
+      source: entry.path,
+      target: targetPath,
+      progress: 100,
+      speed: '完成',
+      status: 'success',
+      fromHost: props.session.host,
+      toHost: props.session.host
+    })
+    if (dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await loadEntries()
+    fileNotice.value = moveDialog.type === 'copy' ? '复制成功' : '移动成功'
+    closeMoveDialog()
+  } catch (moveError) {
+    fileNotice.value = moveError instanceof Error ? moveError.message : moveDialog.type === 'copy' ? '复制失败' : '移动失败'
+  } finally {
+    loading.value = false
+  }
 }
 
-const handleConflictAction = (action: 'cancel' | 'rename' | 'overwrite') => {
+const handleConflictAction = async (action: 'cancel' | 'rename' | 'overwrite') => {
   if (action === 'cancel') {
     conflictDialog.visible = false
     return
@@ -1047,13 +1129,13 @@ const handleConflictAction = (action: 'cancel' | 'rename' | 'overwrite') => {
       fileNotice.value = '请输入新文件名'
       return
     }
-    queueMoveTarget(name)
+    await queueMoveTarget(name)
     return
   }
-  queueMoveTarget(moveDialog.entry?.name || 'file')
+  await queueMoveTarget(moveDialog.entry?.name || 'file', true)
 }
 
-const deleteEntry = (entry: MockFileEntry) => {
+const deleteEntry = (entry: FileBrowserEntry) => {
   deleteDialog.entry = entry
   deleteDialog.visible = true
   moreForPath.value = ''
@@ -1064,26 +1146,34 @@ const closeDeleteDialog = () => {
   deleteDialog.entry = null
 }
 
-const confirmDeleteEntry = () => {
+const confirmDeleteEntry = async () => {
   const entry = deleteDialog.entry
   if (!entry) return
-  entries.value = entries.value.filter((item) => item.path !== entry.path)
-  workspace.pushFileTransferTask({
-    type: 'r2r',
-    name: `delete ${entry.name}`,
-    source: entry.path,
-    target: currentPath.value,
-    progress: 100,
-    speed: '完成',
-    status: 'success',
-    fromHost: props.session.host,
-    toHost: props.session.host
-  })
-  fileNotice.value = '删除成功'
-  closeDeleteDialog()
+  loading.value = true
+  try {
+    await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' })
+    await workspace.recordFileTransferTask({
+      type: 'r2r',
+      name: `delete ${entry.name}`,
+      source: entry.path,
+      target: currentPath.value,
+      progress: 100,
+      speed: '完成',
+      status: 'success',
+      fromHost: props.session.host,
+      toHost: props.session.host
+    })
+    await loadEntries()
+    fileNotice.value = '删除成功'
+    closeDeleteDialog()
+  } catch (deleteError) {
+    fileNotice.value = deleteError instanceof Error ? deleteError.message : '删除失败'
+  } finally {
+    loading.value = false
+  }
 }
 
-const copyPath = async (entry: MockFileEntry) => {
+const copyPath = async (entry: FileBrowserEntry) => {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(entry.path)

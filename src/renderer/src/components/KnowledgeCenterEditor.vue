@@ -103,29 +103,38 @@
 
     <div
       v-else-if="mode === 'preview' && isMarkdown"
+      ref="previewRef"
       class="kb-markdown-preview"
       v-html="markdownHtml"
     ></div>
 
-    <textarea
+    <KnowledgeMonacoEditor
       v-else
       ref="editorRef"
-      v-model="content"
-      class="kb-editor-textarea"
-      spellcheck="false"
-      @input="scheduleSave"
-    ></textarea>
+      :model-value="content"
+      :language="language"
+      @update:model-value="updateContent"
+      @save="saveNow"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { marked } from 'marked'
+import hljs from 'highlight.js'
+import mermaid from 'mermaid'
+import 'highlight.js/styles/atom-one-dark.css'
 import { Eye, Maximize2, Pencil, ZoomIn, ZoomOut } from 'lucide-vue-next'
+import KnowledgeMonacoEditor from '@/components/knowledge/KnowledgeMonacoEditor.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{
   relPath: string
   isImage?: boolean
+  startLine?: number
+  endLine?: number
+  jumpToken?: number
 }>()
 
 const workspace = useWorkspaceStore()
@@ -137,7 +146,8 @@ const dirty = ref(false)
 const error = ref('')
 const mode = ref<'editor' | 'preview'>('editor')
 const markdownHtml = ref('')
-const editorRef = ref<HTMLTextAreaElement | null>(null)
+const editorRef = ref<InstanceType<typeof KnowledgeMonacoEditor> | null>(null)
+const previewRef = ref<HTMLDivElement | null>(null)
 const imageScale = ref(1)
 const imageTranslateX = ref(0)
 const imageTranslateY = ref(0)
@@ -148,15 +158,62 @@ let saveTimer: number | null = null
 let loadToken = 0
 let previewToken = 0
 const imageCache = new Map<string, string>()
+let mermaidInitialized = false
+let lastMermaidTheme: 'dark' | 'default' | null = null
 
 const minImageScale = 0.1
 const maxImageScale = 10
 const zoomStep = 0.25
+const allowedTableAlignments = new Set(['left', 'center', 'right', 'justify'])
+const allowedMarkdownTags = new Set([
+  'a',
+  'blockquote',
+  'br',
+  'code',
+  'del',
+  'div',
+  'em',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'img',
+  'input',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  'span',
+  'strong',
+  'table',
+  'tbody',
+  'td',
+  'th',
+  'thead',
+  'tr',
+  'ul'
+])
+const removedMarkdownTags = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta'])
+const markdownTagAttributes: Record<string, Set<string>> = {
+  a: new Set(['href', 'rel', 'target', 'title']),
+  code: new Set(['class']),
+  div: new Set(['class']),
+  img: new Set(['alt', 'src', 'title']),
+  input: new Set(['checked', 'disabled', 'type']),
+  span: new Set(['class']),
+  td: new Set(['style']),
+  th: new Set(['style'])
+}
+const markdownClassPattern = /^(hljs|hljs-[\w-]+|language-[\w-]+|mermaid|contains-task-list|task-list-item)$/i
 
 const relPath = computed(() => props.relPath)
 const isImage = computed(() => Boolean(props.isImage))
 const isMarkdown = computed(() => /\.(md|markdown)$/i.test(relPath.value))
 const title = computed(() => relPath.value.split('/').pop() || 'KnowledgeCenter')
+const language = computed(() => languageFromPath(relPath.value))
 const statusText = computed(() => {
   if (loading.value) return 'loading'
   if (saving.value) return 'saving'
@@ -167,6 +224,10 @@ const imageStageStyle = computed(() => ({
   transform: `translate(${imageTranslateX.value}px, ${imageTranslateY.value}px) scale(${imageScale.value})`,
   cursor: imageScale.value > 1 ? (imageDragging.value ? 'grabbing' : 'grab') : 'default'
 }))
+const mermaidTheme = computed<'dark' | 'default'>(() => {
+  const root = document.documentElement
+  return root.classList.contains('theme-light') || root.dataset.theme === 'light' ? 'default' : 'dark'
+})
 
 const clearSaveTimer = () => {
   if (saveTimer) {
@@ -181,6 +242,24 @@ const getParentRelDir = (path: string) => {
 }
 
 const createRelPath = (parentRelDir: string, name: string) => [parentRelDir, name].filter(Boolean).join('/')
+
+const languageFromPath = (path: string) => {
+  const lower = path.toLowerCase()
+  if (/\.(md|markdown)$/.test(lower)) return 'markdown'
+  if (/\.(json|jsonc)$/.test(lower)) return 'json'
+  if (/\.(ya?ml)$/.test(lower)) return 'yaml'
+  if (/\.(ts|tsx)$/.test(lower)) return 'typescript'
+  if (/\.(js|jsx|mjs|cjs)$/.test(lower)) return 'javascript'
+  if (/\.py$/.test(lower)) return 'python'
+  if (/\.go$/.test(lower)) return 'go'
+  if (/\.rs$/.test(lower)) return 'rust'
+  if (/\.(sh|bash|zsh)$/.test(lower)) return 'shell'
+  if (/\.sql$/.test(lower)) return 'sql'
+  if (/\.(html|htm)$/.test(lower)) return 'html'
+  if (/\.css$/.test(lower)) return 'css'
+  if (/\.xml$/.test(lower)) return 'xml'
+  return 'plaintext'
+}
 
 const resetZoom = () => {
   imageScale.value = 1
@@ -223,6 +302,12 @@ const stopImageDrag = () => {
   imageDragging.value = false
 }
 
+const jumpToRequestedLineRange = async () => {
+  if (isImage.value || !props.startLine) return
+  await nextTick()
+  editorRef.value?.revealLineRange(props.startLine, props.endLine || props.startLine)
+}
+
 const loadFile = async () => {
   const token = ++loadToken
   clearSaveTimer()
@@ -248,12 +333,16 @@ const loadFile = async () => {
       if (token !== loadToken) return
       content.value = result.content
       if (isMarkdown.value) void renderMarkdownPreview()
+      void jumpToRequestedLineRange()
     }
   } catch (loadError) {
     if (token !== loadToken) return
     error.value = loadError instanceof Error ? loadError.message : String(loadError)
   } finally {
-    if (token === loadToken) loading.value = false
+    if (token === loadToken) {
+      loading.value = false
+      void jumpToRequestedLineRange()
+    }
   }
 }
 
@@ -284,46 +373,55 @@ const scheduleSave = () => {
   }, 800)
 }
 
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-
-const escapeAttribute = (value: string) => escapeHtml(value).replace(/`/g, '&#96;')
-
-const isLocalResource = (src: string) => Boolean(src) && !/^(https?:|data:|blob:|mailto:|#)/i.test(src)
-
-const safeImageSource = (src: string, imageSources: Map<string, string>) => {
-  if (imageSources.has(src)) return imageSources.get(src)!
-  if (/^https?:/i.test(src) || /^data:image\//i.test(src) || /^blob:/i.test(src)) return src
-  return '#'
+const updateContent = (value: string) => {
+  content.value = value
+  scheduleSave()
 }
+
+const normalizeRelPath = (path: string) => {
+  const output: string[] = []
+  for (const part of path.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      output.pop()
+      continue
+    }
+    output.push(part)
+  }
+  return output.join('/')
+}
+
+const isLocalResource = (src: string) => Boolean(src) && !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(src)
 
 const resolveMarkdownResource = (src: string) => {
-  if (src.startsWith('/')) return src.replace(/^\/+/, '')
-  return createRelPath(getParentRelDir(relPath.value), src)
+  const cleanSrc = src.split(/[?#]/, 1)[0] || ''
+  if (cleanSrc.startsWith('/')) return normalizeRelPath(cleanSrc.replace(/^\/+/, ''))
+  return normalizeRelPath(createRelPath(getParentRelDir(relPath.value), cleanSrc))
 }
 
-const collectMarkdownImages = (source: string) => {
-  const refs = new Set<string>()
-  const pattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
-  for (const match of source.matchAll(pattern)) {
-    const src = match[1].trim()
-    if (isLocalResource(src)) refs.add(src)
-  }
-  return refs
+const imageMimeFromPath = (path: string) => {
+  const lower = path.toLowerCase()
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.bmp')) return 'image/bmp'
+  if (lower.endsWith('.svg')) return 'image/svg+xml'
+  return ''
 }
 
 const loadMarkdownImage = async (src: string) => {
   const imageRelPath = resolveMarkdownResource(src)
+  if (!imageRelPath) return null
   if (imageCache.has(imageRelPath)) return imageCache.get(imageRelPath)!
   if (!window.aiops?.kbReadFile) return null
   try {
     const result = await window.aiops.kbReadFile(imageRelPath, 'base64')
-    const dataUrl = `data:${result.mimeType || 'application/octet-stream'};base64,${result.content}`
+    const mimeType =
+      result.mimeType && result.mimeType !== 'application/octet-stream'
+        ? result.mimeType
+        : imageMimeFromPath(imageRelPath) || result.mimeType || 'application/octet-stream'
+    const dataUrl = `data:${mimeType};base64,${result.content}`
     imageCache.set(imageRelPath, dataUrl)
     return dataUrl
   } catch {
@@ -331,143 +429,161 @@ const loadMarkdownImage = async (src: string) => {
   }
 }
 
-const renderInline = (source: string, imageSources: Map<string, string>) => {
-  const placeholders: string[] = []
-  const hold = (html: string) => {
-    placeholders.push(html)
-    return `\u0000${placeholders.length - 1}\u0000`
-  }
-  let text = source
-    .replace(/`([^`]+)`/g, (_match, code: string) => hold(`<code>${escapeHtml(code)}</code>`))
-    .replace(/!\[([^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_match, alt: string, src: string) =>
-      hold(`<img src="${escapeAttribute(safeImageSource(src, imageSources))}" alt="${escapeAttribute(alt)}" />`)
-    )
-    .replace(/\[([^\]]+)]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_match, label: string, href: string) => {
-      const safeHref = /^(https?:|mailto:|#)/i.test(href) ? href : '#'
-      return hold(`<a href="${escapeAttribute(safeHref)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`)
-    })
-  text = escapeHtml(text)
-  text = text
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/__([^_]+)__/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/_([^_]+)_/g, '<em>$1</em>')
-  return text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => placeholders[Number(index)] || '')
+const isSafeMarkdownUrl = (value: string, kind: 'href' | 'src') => {
+  const url = value.trim()
+  if (!url) return false
+  if (kind === 'href') return /^(https?:|mailto:|#)/i.test(url)
+  return /^(https?:|blob:|data:image\/)/i.test(url)
 }
 
-const splitTableRow = (line: string) =>
-  line
-    .replace(/^\||\|$/g, '')
-    .split('|')
-    .map((cell) => cell.trim())
-
-const tableAlignment = (cell: string) => {
-  const trimmed = cell.trim()
-  if (/^:-+:$/.test(trimmed)) return 'center'
-  if (/^-+:$/.test(trimmed)) return 'right'
-  if (/^:-+$/.test(trimmed)) return 'left'
-  return ''
+const sanitizeStyle = (value: string) => {
+  const declarations = value
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const safe = declarations.filter((entry) => {
+    const [property, rawValue] = entry.split(':').map((part) => part.trim().toLowerCase())
+    return property === 'text-align' && Boolean(rawValue) && allowedTableAlignments.has(rawValue)
+  })
+  return safe.join('; ')
 }
 
-const renderMarkdown = (source: string, imageSources: Map<string, string>) => {
-  const lines = source.replace(/\r\n/g, '\n').split('\n')
-  const html: string[] = []
-  let index = 0
-  while (index < lines.length) {
-    const line = lines[index]
-    if (!line.trim()) {
-      index += 1
-      continue
-    }
+const sanitizeClassValue = (value: string) =>
+  value
+    .split(/\s+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => markdownClassPattern.test(entry))
+    .join(' ')
 
-    const fence = line.match(/^```([\w-]+)?\s*$/)
-    if (fence) {
-      const language = fence[1] || ''
-      const codeLines: string[] = []
-      index += 1
-      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
-        codeLines.push(lines[index])
-        index += 1
-      }
-      if (index < lines.length) index += 1
-      html.push(`<pre><code${language ? ` class="language-${escapeAttribute(language)}"` : ''}>${escapeHtml(codeLines.join('\n'))}</code></pre>`)
-      continue
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.+)$/)
-    if (heading) {
-      const level = heading[1].length
-      html.push(`<h${level}>${renderInline(heading[2], imageSources)}</h${level}>`)
-      index += 1
-      continue
-    }
-
-    if (/^\s*[-*+]\s+/.test(line)) {
-      const items: string[] = []
-      while (index < lines.length && /^\s*[-*+]\s+/.test(lines[index])) {
-        items.push(`<li>${renderInline(lines[index].replace(/^\s*[-*+]\s+/, ''), imageSources)}</li>`)
-        index += 1
-      }
-      html.push(`<ul>${items.join('')}</ul>`)
-      continue
-    }
-
-    if (/^\s*\d+[.)]\s+/.test(line)) {
-      const items: string[] = []
-      while (index < lines.length && /^\s*\d+[.)]\s+/.test(lines[index])) {
-        items.push(`<li>${renderInline(lines[index].replace(/^\s*\d+[.)]\s+/, ''), imageSources)}</li>`)
-        index += 1
-      }
-      html.push(`<ol>${items.join('')}</ol>`)
-      continue
-    }
-
-    if (/^>\s?/.test(line)) {
-      const quoteLines: string[] = []
-      while (index < lines.length && /^>\s?/.test(lines[index])) {
-        quoteLines.push(lines[index].replace(/^>\s?/, ''))
-        index += 1
-      }
-      html.push(`<blockquote>${quoteLines.map((item) => renderInline(item, imageSources)).join('<br>')}</blockquote>`)
-      continue
-    }
-
-    if (line.includes('|') && index + 1 < lines.length && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1])) {
-      const headers = splitTableRow(line)
-      const aligns = splitTableRow(lines[index + 1]).map(tableAlignment)
-      const rows: string[][] = []
-      index += 2
-      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
-        rows.push(splitTableRow(lines[index]))
-        index += 1
-      }
-      const headerHtml = headers
-        .map((cell, cellIndex) => `<th${aligns[cellIndex] ? ` style="text-align: ${aligns[cellIndex]}"` : ''}>${renderInline(cell, imageSources)}</th>`)
-        .join('')
-      const rowsHtml = rows
-        .map((row) => `<tr>${row.map((cell, cellIndex) => `<td${aligns[cellIndex] ? ` style="text-align: ${aligns[cellIndex]}"` : ''}>${renderInline(cell, imageSources)}</td>`).join('')}</tr>`)
-        .join('')
-      html.push(`<table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>`)
-      continue
-    }
-
-    const paragraph: string[] = [line]
-    index += 1
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^(#{1,6})\s+/.test(lines[index]) &&
-      !/^```/.test(lines[index]) &&
-      !/^\s*[-*+]\s+/.test(lines[index]) &&
-      !/^\s*\d+[.)]\s+/.test(lines[index]) &&
-      !/^>\s?/.test(lines[index])
-    ) {
-      paragraph.push(lines[index])
-      index += 1
-    }
-    html.push(`<p>${renderInline(paragraph.join(' '), imageSources)}</p>`)
+const sanitizeMarkdownElement = (element: Element) => {
+  const tag = element.tagName.toLowerCase()
+  if (removedMarkdownTags.has(tag)) {
+    element.remove()
+    return
   }
-  return html.join('\n')
+  if (!allowedMarkdownTags.has(tag)) {
+    element.replaceWith(...Array.from(element.childNodes))
+    return
+  }
+
+  const allowedAttrs = markdownTagAttributes[tag] || new Set<string>()
+  for (const attr of Array.from(element.attributes)) {
+    const name = attr.name.toLowerCase()
+    const value = attr.value
+    if (name.startsWith('on') || !allowedAttrs.has(name)) {
+      element.removeAttribute(attr.name)
+      continue
+    }
+    if (name === 'href') {
+      if (isSafeMarkdownUrl(value, 'href')) {
+        element.setAttribute('target', '_blank')
+        element.setAttribute('rel', 'noreferrer')
+      } else {
+        element.removeAttribute(attr.name)
+      }
+    } else if (name === 'src') {
+      if (!isSafeMarkdownUrl(value, 'src')) element.removeAttribute(attr.name)
+    } else if (name === 'style') {
+      const cleanStyle = sanitizeStyle(value)
+      if (cleanStyle) element.setAttribute('style', cleanStyle)
+      else element.removeAttribute(attr.name)
+    } else if (name === 'class') {
+      const cleanClass = sanitizeClassValue(value)
+      if (cleanClass) element.setAttribute('class', cleanClass)
+      else element.removeAttribute(attr.name)
+    } else if (tag === 'input') {
+      if (name === 'type' && value !== 'checkbox') element.removeAttribute(attr.name)
+      if (name === 'checked') element.setAttribute('checked', '')
+      if (name === 'disabled') element.setAttribute('disabled', '')
+    }
+  }
+
+  if (tag === 'a') {
+    const href = element.getAttribute('href')
+    if (href && isSafeMarkdownUrl(href, 'href')) {
+      element.setAttribute('target', '_blank')
+      element.setAttribute('rel', 'noreferrer')
+    }
+  }
+  if (tag === 'input') {
+    element.setAttribute('disabled', '')
+  }
+}
+
+const sanitizeMarkdownHtml = (html: string) => {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  for (const element of Array.from(doc.body.querySelectorAll('*'))) {
+    sanitizeMarkdownElement(element)
+  }
+  return doc.body.innerHTML
+}
+
+const replaceLocalMarkdownImages = async (doc: Document) => {
+  const tasks = Array.from(doc.querySelectorAll('img')).map(async (img) => {
+    const src = img.getAttribute('src') || ''
+    if (!isLocalResource(src)) return
+    const dataUrl = await loadMarkdownImage(src)
+    if (dataUrl) img.setAttribute('src', dataUrl)
+  })
+  await Promise.all(tasks)
+}
+
+const normalizeTableAlignments = (doc: Document) => {
+  for (const cell of Array.from(doc.querySelectorAll('th[align], td[align]'))) {
+    const align = (cell.getAttribute('align') || '').toLowerCase()
+    cell.removeAttribute('align')
+    if (allowedTableAlignments.has(align)) cell.setAttribute('style', `text-align: ${align}`)
+  }
+}
+
+const highlightCodeBlocks = (doc: Document) => {
+  let hasMermaid = false
+  for (const code of Array.from(doc.querySelectorAll<HTMLElement>('pre code'))) {
+    const languageClass = Array.from(code.classList).find((className) => className.startsWith('language-'))
+    const language = languageClass?.replace(/^language-/, '').toLowerCase()
+    const source = code.textContent || ''
+
+    if (language === 'mermaid') {
+      const container = doc.createElement('div')
+      container.className = 'mermaid'
+      container.textContent = source
+      code.parentElement?.replaceWith(container)
+      hasMermaid = true
+      continue
+    }
+
+    const highlighted = language && hljs.getLanguage(language) ? hljs.highlight(source, { language }) : hljs.highlightAuto(source)
+    code.innerHTML = highlighted.value
+    code.classList.add('hljs')
+    if (language) code.classList.add(`language-${language}`)
+  }
+  return hasMermaid
+}
+
+const ensureMermaidInitialized = () => {
+  const theme = mermaidTheme.value
+  if (mermaidInitialized && lastMermaidTheme === theme) return
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme
+  })
+  mermaidInitialized = true
+  lastMermaidTheme = theme
+}
+
+const renderMermaidInPreview = async () => {
+  const container = previewRef.value
+  if (!container) return
+  const nodes = Array.from(container.querySelectorAll<HTMLElement>('.mermaid:not([data-processed])'))
+  if (nodes.length === 0) return
+  ensureMermaidInitialized()
+  try {
+    await mermaid.run({ nodes })
+  } catch (runError) {
+    console.warn('Failed to render knowledge markdown Mermaid diagram', runError)
+  }
 }
 
 const renderMarkdownPreview = async () => {
@@ -476,16 +592,23 @@ const renderMarkdownPreview = async () => {
     markdownHtml.value = ''
     return
   }
-  const imageSources = new Map<string, string>()
-  const refs = collectMarkdownImages(content.value)
-  await Promise.all(
-    [...refs].map(async (src) => {
-      const dataUrl = await loadMarkdownImage(src)
-      if (dataUrl) imageSources.set(src, dataUrl)
-    })
-  )
+
+  const rawHtml = await marked.parse(content.value || '', {
+    async: false,
+    gfm: true,
+    breaks: false
+  })
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(String(rawHtml), 'text/html')
+  await replaceLocalMarkdownImages(doc)
+  normalizeTableAlignments(doc)
+  const hasMermaid = highlightCodeBlocks(doc)
   if (token !== previewToken) return
-  markdownHtml.value = renderMarkdown(content.value, imageSources)
+  markdownHtml.value = sanitizeMarkdownHtml(doc.body.innerHTML)
+  if (hasMermaid) {
+    await nextTick()
+    if (token === previewToken) await renderMermaidInPreview()
+  }
 }
 
 const imageExtensionFromMime = (mimeType: string) => {
@@ -500,19 +623,11 @@ const imageExtensionFromMime = (mimeType: string) => {
 }
 
 const insertAtCursor = (value: string) => {
-  const textarea = editorRef.value
-  if (!textarea) {
-    content.value += value
+  if (editorRef.value) {
+    editorRef.value.insertAtCursor(value)
     return
   }
-  const start = textarea.selectionStart
-  const end = textarea.selectionEnd
-  content.value = `${content.value.slice(0, start)}${value}${content.value.slice(end)}`
-  requestAnimationFrame(() => {
-    textarea.focus()
-    textarea.selectionStart = start + value.length
-    textarea.selectionEnd = start + value.length
-  })
+  content.value += value
 }
 
 const handlePaste = async (event: ClipboardEvent) => {
@@ -543,6 +658,22 @@ const handlePaste = async (event: ClipboardEvent) => {
 }
 
 watch(() => [props.relPath, props.isImage] as const, loadFile)
+
+watch(
+  () => props.jumpToken,
+  () => {
+    if (props.startLine) mode.value = 'editor'
+    void jumpToRequestedLineRange()
+  }
+)
+
+watch(
+    editorRef,
+    () => {
+      void jumpToRequestedLineRange()
+  },
+  { flush: 'post' }
+)
 
 watch([content, isMarkdown, mode], () => {
   if (mode.value === 'preview' && isMarkdown.value) void renderMarkdownPreview()

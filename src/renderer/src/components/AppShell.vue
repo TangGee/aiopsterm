@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
 import ModulePanel from '@/components/ModulePanel.vue'
@@ -57,8 +57,21 @@ import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
+let stopDeepLink: (() => void) | undefined
 
 onMounted(() => {
+  workspace.installShortcutRuntime()
   workspace.hydrateConfig()
+  stopDeepLink = window.aiops?.onDeepLink?.((payload) => {
+    workspace.handleDeepLink(payload)
+  })
+  void window.aiops?.consumeDeepLinks?.().then((payloads) => {
+    payloads.forEach((payload) => workspace.handleDeepLink(payload))
+  })
+})
+
+onUnmounted(() => {
+  stopDeepLink?.()
+  workspace.uninstallShortcutRuntime()
 })
 </script>

@@ -50,10 +50,11 @@
               :class="{ active: tab.id === workspace.k8sActiveTerminalId }"
               @click="workspace.setActiveK8sTerminal(tab.id)"
             >
-              <span>{{ tab.name }}</span>
+              <span class="k8s-tab-name">{{ tab.name }}</span>
+              <small>{{ tab.namespace }} · {{ tab.status }}</small>
               <button
                 title="关闭"
-                @click.stop="workspace.closeK8sTerminalTab(tab.id)"
+              @click.stop="void workspace.closeK8sTerminalTab(tab.id)"
               >
                 <X />
               </button>
@@ -62,9 +63,38 @@
           <button
             class="k8s-workspace-button"
             title="新增终端"
-            @click="workspace.k8sActiveCluster && workspace.openK8sTerminal(workspace.k8sActiveCluster.id)"
+            @click="createTerminalTab"
           >
             <Plus />
+          </button>
+        </div>
+        <div
+          v-if="workspace.k8sActiveTerminal"
+          class="k8s-terminal-meta"
+        >
+          <span>Session: {{ workspace.k8sActiveTerminal.sessionId }}</span>
+          <span>Namespace: {{ workspace.k8sActiveTerminal.namespace }}</span>
+          <span>Size: {{ workspace.k8sActiveTerminal.cols }}x{{ workspace.k8sActiveTerminal.rows }}</span>
+          <span>Status: {{ workspace.k8sActiveTerminal.status }}</span>
+          <button
+            title="同步尺寸"
+            @click="syncActiveTerminalSize"
+          >
+            Resize
+          </button>
+          <button
+            title="采集命令输出到 AI"
+            :disabled="workspace.k8sActiveTerminal.status === 'ended'"
+            @click="sendAiCommand"
+          >
+            AI Command
+          </button>
+          <button
+            title="结束会话"
+            :disabled="workspace.k8sActiveTerminal.status === 'ended'"
+            @click="void workspace.endK8sTerminalSession(workspace.k8sActiveTerminal.id)"
+          >
+            End
           </button>
         </div>
         <div class="k8s-terminal-container">
@@ -84,8 +114,21 @@
           <input
             v-model="command"
             placeholder="输入 kubectl 命令"
+            :disabled="workspace.k8sActiveTerminal?.status === 'ended'"
           />
         </form>
+        <div
+          v-if="workspace.k8sActiveTerminal?.commandHistory.length"
+          class="k8s-terminal-history"
+        >
+          <button
+            v-for="history in workspace.k8sActiveTerminal.commandHistory.slice(0, 4)"
+            :key="history"
+            @click="command = history"
+          >
+            {{ history }}
+          </button>
+        </div>
       </section>
 
       <section class="k8s-cluster-config-container">
@@ -271,7 +314,7 @@
                     <Unplug />
                     断开
                   </button>
-                  <button @click="workspace.openK8sTerminal(workspace.k8sSelectedCluster.id)">
+                  <button @click="void workspace.openK8sTerminal(workspace.k8sSelectedCluster.id)">
                     <Terminal />
                     打开终端
                   </button>
@@ -337,6 +380,60 @@
           刷新
         </button>
       </header>
+
+      <div class="k8s-agent-bar">
+        <div class="k8s-agent-current">
+          <strong>Agent</strong>
+          <span>{{ workspace.k8sAgentCluster?.name || 'No cluster' }}</span>
+          <small>{{ workspace.k8sAgentCurrentCluster.contextName || '-' }}</small>
+          <em :class="workspace.k8sAgentStatus">{{ workspace.k8sAgentStatus }}</em>
+        </div>
+        <select
+          :value="workspace.k8sAgentClusterId || ''"
+          @change="handleK8sAgentClusterChange"
+        >
+          <option value="">No cluster</option>
+          <option
+            v-for="cluster in workspace.k8sClusters"
+            :key="cluster.id"
+            :value="cluster.id"
+          >
+            {{ cluster.name }}
+          </option>
+        </select>
+        <button
+          :disabled="workspace.k8sAgentTesting"
+          @click="workspace.testK8sAgentConnection"
+        >
+          <LoaderCircle v-if="workspace.k8sAgentTesting" />
+          Test
+        </button>
+        <button @click="workspace.refreshK8sAgentNamespaces">Namespaces</button>
+        <form
+          class="k8s-agent-command"
+          @submit.prevent="runAgentCommand"
+        >
+          <input
+            v-model="workspace.k8sAgentCommandDraft"
+            placeholder="kubectl command"
+          />
+          <button type="submit">Run</button>
+        </form>
+        <button @click="workspace.cleanupK8sAgent">Cleanup</button>
+      </div>
+
+      <div
+        v-if="workspace.k8sAgentCommandHistory.length"
+        class="k8s-agent-history"
+      >
+        <button
+          v-for="history in workspace.k8sAgentCommandHistory.slice(0, 5)"
+          :key="history"
+          @click="workspace.k8sAgentCommandDraft = history"
+        >
+          {{ history }}
+        </button>
+      </div>
 
       <div class="k8s-resource-toolbar">
         <label class="k8s-resource-filter">
@@ -499,14 +596,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { Bot, ChevronRight, Clipboard, Cloud, FileSearch, FileText, Link, LoaderCircle, Plus, RefreshCw, ScrollText, Search, Settings, Terminal, Trash2, Unplug, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { K8sConnectionStatus, K8sResourceKind, MockK8sCluster } from '@/data/mockData'
+import type { KubernetesClusterRecord, KubernetesConnectionStatus, KubernetesResourceKind } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const command = ref('')
-const k8sResourceKinds: Array<{ key: K8sResourceKind; label: string }> = [
+const k8sResourceKinds: Array<{ key: KubernetesResourceKind; label: string }> = [
   { key: 'pods', label: 'Pods' },
   { key: 'deployments', label: 'Deployments' },
   { key: 'services', label: 'Services' },
@@ -521,7 +618,7 @@ const detailForm = reactive({
 
 const editingCluster = computed(() => workspace.k8sClusters.find((cluster) => cluster.id === workspace.k8sEditingClusterId) || null)
 
-const syncDetailForm = (cluster: MockK8sCluster | null) => {
+const syncDetailForm = (cluster: KubernetesClusterRecord | null) => {
   if (!cluster) return
   detailForm.name = cluster.name
   detailForm.contextName = cluster.context_name
@@ -535,8 +632,30 @@ watch(
   { immediate: true }
 )
 
+onMounted(() => {
+  void workspace.refreshKubernetesCatalog()
+})
+
 const jumpserverClusters = (bastionUuid: string) =>
   workspace.filteredK8sClusters.filter((cluster) => cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastionUuid)
+
+const createTerminalTab = () => {
+  void workspace.createNewK8sTerminalTab()
+}
+
+const syncActiveTerminalSize = () => {
+  const terminal = workspace.k8sActiveTerminal
+  if (!terminal) return
+  void workspace.resizeK8sTerminal(terminal.id, terminal.cols + 8, terminal.rows + 2)
+}
+
+const sendAiCommand = () => {
+  const terminal = workspace.k8sActiveTerminal
+  if (!terminal) return
+  const text = command.value.trim() || terminal.lastCommand || 'kubectl get pods -A'
+  void workspace.executeK8sTerminalAiCommand(text, terminal.id)
+  command.value = ''
+}
 
 const sendCommand = () => {
   workspace.sendK8sTerminalCommand(command.value)
@@ -547,10 +666,18 @@ const handleK8sNamespaceChange = (event: Event) => {
   workspace.setK8sResourceNamespace((event.target as HTMLSelectElement).value)
 }
 
-const saveDetail = () => {
+const handleK8sAgentClusterChange = (event: Event) => {
+  workspace.setK8sAgentCluster((event.target as HTMLSelectElement).value || null)
+}
+
+const runAgentCommand = () => {
+  workspace.runK8sAgentKubectl()
+}
+
+const saveDetail = async () => {
   const cluster = workspace.k8sSelectedCluster
   if (!cluster) return
-  workspace.updateK8sCluster(cluster.id, {
+  await workspace.updateK8sCluster(cluster.id, {
     name: detailForm.name,
     defaultNamespace: detailForm.defaultNamespace
   })
@@ -578,6 +705,10 @@ const K8sAddClusterModal = defineComponent({
   name: 'K8sAddClusterModal',
   setup() {
     const store = useWorkspaceStore()
+    const importing = ref(false)
+    const testing = ref(false)
+    const saving = ref(false)
+    const formError = ref('')
     const form = reactive({
       kubeconfigPath: '~/.kube/config',
       contextName: store.k8sImportContexts[0]?.name || 'new/context',
@@ -596,17 +727,39 @@ const K8sAddClusterModal = defineComponent({
       form.defaultNamespace = context.namespace || 'default'
     }
 
-    const browseKubeconfig = () => {
-      form.kubeconfigPath = '/home/tlinux/.kube/config'
-      const context = store.k8sImportContexts[0]
-      if (context) applyContext(context.name)
+    const applyImportedContexts = (contexts = store.k8sImportContexts) => {
+      const current = contexts.find((context) => context.name === form.contextName) || contexts[0]
+      if (current) applyContext(current.name)
+    }
+
+    const browseKubeconfig = async () => {
+      formError.value = ''
+      const result = await window.aiops.showOpenDialog({
+        defaultPath: form.kubeconfigPath.includes('/') ? form.kubeconfigPath.slice(0, form.kubeconfigPath.lastIndexOf('/')) : undefined,
+        properties: ['openFile'],
+        filters: [
+          { name: 'All Files', extensions: ['*'] },
+          { name: 'YAML Files', extensions: ['yaml', 'yml'] }
+        ]
+      })
+      if (!result || result.canceled || !result.filePaths.length) return
+      form.kubeconfigPath = result.filePaths[0]
+      importing.value = true
       store.k8sTestResult = null
-      store.k8sClusterNotice = '已选择 kubeconfig 文件'
+      const importResult = await store.importK8sKubeconfigFile(form.kubeconfigPath)
+      importing.value = false
+      if (!importResult.success) {
+        formError.value = importResult.error || 'Kubeconfig 导入失败'
+        return
+      }
+      form.kubeconfigContent = importResult.kubeconfigContent
+      applyImportedContexts(importResult.contexts)
     }
 
     const switchAddMode = (mode: 'import' | 'manual') => {
       store.k8sAddMode = mode
       store.k8sTestResult = null
+      formError.value = ''
       if (mode === 'import') {
         const context = store.k8sImportContexts[0]
         if (context) applyContext(context.name)
@@ -619,15 +772,57 @@ const K8sAddClusterModal = defineComponent({
       form.kubeconfigContent = ''
     }
 
-    const submit = () => {
-      store.addK8sCluster({
-        name: form.name,
-        contextName: form.contextName,
-        serverUrl: form.serverUrl,
-        defaultNamespace: form.defaultNamespace,
-        kubeconfigPath: store.k8sAddMode === 'import' ? form.kubeconfigPath : null,
-        kubeconfigContent: store.k8sAddMode === 'manual' ? form.kubeconfigContent : null
-      })
+    const validateForm = () => {
+      if (store.k8sAddMode === 'import') {
+        if (!form.kubeconfigPath.trim() || !form.contextName.trim()) return '请选择 kubeconfig 文件和 Context'
+        if (!form.name.trim() || !form.serverUrl.trim()) return '请补全集群名称和 Server URL'
+        return ''
+      }
+      if (!form.name.trim() || !form.contextName.trim() || !form.serverUrl.trim()) return '请补全集群名称、Context Name 和 Server URL'
+      return ''
+    }
+
+    const testConnection = async () => {
+      formError.value = ''
+      const error = validateForm()
+      if (error) {
+        formError.value = error
+        store.k8sTestResult = false
+        store.k8sClusterNotice = error
+        return
+      }
+      testing.value = true
+      if (store.k8sAddMode === 'manual' && form.kubeconfigContent.trim()) {
+        const parsed = store.importK8sKubeconfigContent(form.kubeconfigContent)
+        if (parsed.success && parsed.contexts.some((context) => context.name === form.contextName)) {
+          applyImportedContexts(parsed.contexts)
+        }
+      }
+      store.testK8sClusterConnection({ contextName: form.contextName, serverUrl: form.serverUrl })
+      window.setTimeout(() => {
+        testing.value = false
+      }, 120)
+    }
+
+    const submit = async () => {
+      formError.value = validateForm()
+      if (formError.value) {
+        store.k8sClusterNotice = formError.value
+        return
+      }
+      saving.value = true
+      try {
+        await store.addK8sCluster({
+          name: form.name,
+          contextName: form.contextName,
+          serverUrl: form.serverUrl,
+          defaultNamespace: form.defaultNamespace,
+          kubeconfigPath: store.k8sAddMode === 'import' ? form.kubeconfigPath : null,
+          kubeconfigContent: store.k8sAddMode === 'manual' ? form.kubeconfigContent : null
+        })
+      } finally {
+        saving.value = false
+      }
     }
 
     return () =>
@@ -672,9 +867,10 @@ const K8sAddClusterModal = defineComponent({
                     'button',
                     {
                       title: '浏览',
+                      disabled: importing.value,
                       onClick: browseKubeconfig
                     },
-                    [h(FileSearch), h('span', '浏览')]
+                    [importing.value ? h(LoaderCircle) : h(FileSearch), h('span', importing.value ? '导入中' : '浏览')]
                   )
                 ])
               : h('label', [
@@ -737,19 +933,24 @@ const K8sAddClusterModal = defineComponent({
               })
             ])
           ]),
+          formError.value ? h('p', { class: 'k8s-form-error' }, formError.value) : null,
           h('div', { class: 'k8s-test-connection' }, [
             h(
               'button',
               {
-                onClick: () => store.testK8sClusterConnection({ contextName: form.contextName, serverUrl: form.serverUrl })
+                disabled: importing.value || testing.value,
+                onClick: testConnection
               },
-              '测试连接'
+              testing.value ? '测试中' : '测试连接'
             ),
             store.k8sTestResult === null
               ? null
               : h('span', { class: store.k8sTestResult ? 'success' : 'error' }, store.k8sTestResult ? '连接成功' : '连接失败')
           ]),
-          h('footer', [h('button', { onClick: () => (store.k8sAddModalOpen = false) }, '取消'), h('button', { class: 'primary', onClick: submit }, '保存')])
+          h('footer', [
+            h('button', { onClick: () => (store.k8sAddModalOpen = false) }, '取消'),
+            h('button', { class: 'primary', disabled: importing.value || saving.value, onClick: submit }, saving.value ? '保存中' : '保存')
+          ])
         ])
       ])
   }
@@ -771,9 +972,9 @@ const K8sEditClusterModal = defineComponent({
       },
       { immediate: true }
     )
-    const submit = () => {
+    const submit = async () => {
       if (!cluster.value) return
-      store.updateK8sCluster(cluster.value.id, {
+      await store.updateK8sCluster(cluster.value.id, {
         name: form.name,
         defaultNamespace: form.defaultNamespace,
         autoConnect: form.autoConnect
@@ -827,7 +1028,7 @@ const K8sEditClusterModal = defineComponent({
                     }
                   })
                 ]),
-                h('div', { class: 'k8s-form-status' }, [h('span', '连接状态'), h(K8sStatusTag, { status: cluster.value.connection_status as K8sConnectionStatus })])
+                h('div', { class: 'k8s-form-status' }, [h('span', '连接状态'), h(K8sStatusTag, { status: cluster.value.connection_status as KubernetesConnectionStatus })])
               ]),
               h('footer', [
                 h('button', { onClick: () => (store.k8sEditModalOpen = false) }, '取消'),
@@ -926,7 +1127,7 @@ const K8sProxyConfigModal = defineComponent({
                 ]
               : null
           ]),
-          h('p', { class: 'k8s-proxy-hint' }, '连接集群时会把该代理配置应用到本地 Kubernetes Agent mock 状态。'),
+          h('p', { class: 'k8s-proxy-hint' }, '连接集群时会把该代理配置应用到本地 Kubernetes Agent 配置状态。'),
           h('footer', [
             h('button', { onClick: store.closeK8sProxyConfig }, '取消'),
             h('button', { class: 'primary', onClick: store.saveK8sProxyConfig }, '保存')

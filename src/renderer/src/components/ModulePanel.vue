@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Search } from 'lucide-vue-next'
-import { menuItems } from '@/data/mockData'
+import { menuItems } from '@/config/navigation'
 import { useWorkspaceStore } from '@/stores/workspace'
 import WorkspacePanel from '@/components/panels/WorkspacePanel.vue'
 import AssetsPanel from '@/components/panels/AssetsPanel.vue'

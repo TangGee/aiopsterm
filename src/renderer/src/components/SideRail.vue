@@ -89,7 +89,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Gauge, LogIn, LogOut, User } from 'lucide-vue-next'
-import { menuItems, type ModuleKey } from '@/data/mockData'
+import { menuItems, type ModuleKey } from '@/config/navigation'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()

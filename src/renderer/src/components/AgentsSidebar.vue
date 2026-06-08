@@ -47,8 +47,8 @@
           tabindex="0"
           class="conversation-item"
           :class="{ active: workspace.selectedConversationId === conversation.id }"
-          @click="workspace.selectConversation(conversation.id)"
-          @keydown.enter="workspace.selectConversation(conversation.id)"
+          @click="handleSelectConversation(conversation.id)"
+          @keydown.enter="handleSelectConversation(conversation.id)"
           @keydown.delete.prevent="handleDeleteConversation(conversation.id)"
           @keydown.backspace.prevent="handleDeleteConversation(conversation.id)"
         >
@@ -134,14 +134,18 @@ const clearSearch = () => {
   query.value = ''
 }
 
-const handleNewChat = () => {
+const handleNewChat = async () => {
   query.value = ''
   currentPage.value = 1
-  workspace.createConversation()
+  await workspace.createConversation()
 }
 
-const handleDeleteConversation = (id: string) => {
-  workspace.deleteConversation(id)
+const handleSelectConversation = async (id: string) => {
+  await workspace.restoreConversation(id)
+}
+
+const handleDeleteConversation = async (id: string) => {
+  await workspace.deleteConversation(id)
   if (visibleConversations.value.length === 0 && currentPage.value > 1) {
     currentPage.value -= 1
   }

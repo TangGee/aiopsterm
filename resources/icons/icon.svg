@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="aiopsterm app icon">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="0.42" stop-color="#155e75"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="104" y1="144" x2="416" y2="384" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="0.5" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#facc15"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="52" y="52" width="408" height="408" rx="88" fill="none" stroke="#e0f2fe" stroke-opacity="0.18" stroke-width="12"/>
+  <path d="M142 172l78 84-78 84" fill="none" stroke="url(#beam)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M258 338h118" fill="none" stroke="#e5e7eb" stroke-width="36" stroke-linecap="round"/>
+  <circle cx="368" cy="156" r="28" fill="#facc15"/>
+  <circle cx="398" cy="218" r="18" fill="#34d399"/>
+  <path d="M324 140c-38 10-68 40-78 78" fill="none" stroke="#7dd3fc" stroke-width="18" stroke-linecap="round" opacity="0.9"/>
+</svg>

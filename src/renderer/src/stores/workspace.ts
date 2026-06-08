@@ -1,82 +1,87 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
+import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
-import {
-  initialFileSessions,
-  mockAliasCommands,
-  mockExtensionPlugins,
-  mockInitialTransferTasks,
-  mockKnowledgeTree,
-  mockK8sBastions,
-  mockK8sClusters,
-  mockK8sContexts,
-  mockK8sNamespaces,
-  mockK8sResources,
-  mockQuickCommandSnippets,
-  mockSettingsMcpServers,
-  mockSettingsRules,
-  mockSettingsShortcuts,
-  mockSettingsSkills,
-  mockSettingsTrustedDevices,
-  createDefaultOnboardingCompleted,
-  mockUserProfile,
-  onboardingTourSteps,
-  settingsModelOptions,
-  mockSnippetGroups
-} from '@/data/mockData'
+import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
+import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
+import type { AiopstermDeepLinkPayload } from '@shared/deepLink'
+import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
+import type { ModuleKey } from '@/config/navigation'
+import type { OnboardingModuleId } from '@/config/onboarding'
+import type { SettingSectionKey } from '@/config/settings'
 import type {
+  AppUpdateCheckResult,
+  AppUpdateProgressEvent,
+  AiContextCatalog,
   AiContextOption,
-  AliasCommand,
-  ExtensionPlugin,
-  ExtensionInstallStage,
-  FileSessionInfo,
-  FileTransferTask,
-  K8sBastionGroup,
-  K8sContextInfo,
-  K8sImportContextInfo,
-  K8sNamespaceInfo,
-  K8sProxyConfig,
-  K8sResourceKind,
-  K8sTerminalTab,
-  MockK8sResource,
-  MockK8sCluster,
-  ModuleKey,
-  OnboardingModuleId,
-  QuickCommandSnippet,
-  SettingSectionKey,
-  SettingsMcpServer,
-  SettingsRule,
-  SettingsShortcut,
-  SettingsSkill,
-  SettingsTrustedDevice,
-  MockUserProfile,
-  SnippetGroup
-} from '@/data/mockData'
-import type { KnowledgeNode, KnowledgeNodeType } from '@/data/mockData'
-import type {
   AiPreferencesUserConfig,
+  AiChatConversationRecord,
+  AiChatExchangeRequestInput,
+  AiChatHistoryMessage,
+  AiChatMessageInput,
+  AiChatResponseInput,
+  AiModelCatalog,
+  AiModelCatalogOption,
+  AiopsPreloadApi,
   AliasCommandConfig,
+  AliasCommandSaveInput,
+  AiopsTrustedDevice,
+  AiopsUserAccountSnapshot,
+  AiopsUserMutationResult,
+  AiopsUserProfile,
   EditorUserConfig,
+  ExtensionInstallProgress as BackendExtensionInstallProgress,
+  ExtensionInstallStage,
+  ExtensionPluginRuntimeConfig,
   ExtensionUserConfig,
+  FileSessionCatalog,
+  FileSessionFolderRecord,
+  FileSessionFolderSaveInput,
+  FileSessionInfo,
+  FileSessionPatch,
+  FileTransferTask,
+  FileTransferTaskRecordInput,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseEntry,
+  KnowledgeBaseSearchResult,
+  KnowledgeBaseSearchStatus,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseUserConfig,
+  KnowledgeNode,
+  KnowledgeNodeType,
+  KubernetesBastionGroup,
+  KubernetesCatalog,
+  KubernetesClusterRecord,
+  KubernetesConnectionStatus,
+  KubernetesContextInfo,
+  KubernetesImportContextInfo,
+  KubernetesNamespaceInfo,
+  KubernetesResource,
+  KubernetesResourceKind,
+  KubernetesTerminalRecord,
+  KubernetesTerminalStatus,
   McpServerUserConfig,
   McpToolStatesUserConfig,
   McpConfigFile,
+  ModelProviderCheckKey,
   ModelOptionUserConfig,
   ModelSettingsUserConfig,
   PrivacyUserConfig,
+  QuickCommandGroupConfig,
+  QuickCommandSnippetConfig,
   QuickCommandsUserConfig,
   SecurityUserConfig,
+  SettingsPreferencesSnapshot,
   ShortcutUserConfig,
   SkillUserConfig,
   SshAgentKeyConfig,
   SshProxyConfig,
   SshProxyType,
+  TerminalCommandGenerationContext,
+  TerminalCommandGenerationRecord,
+  TerminalSessionInfo,
   TerminalMouseEventAction,
   TerminalUserConfig,
   UserConfig,
@@ -88,8 +93,13 @@ type PanelDirection = 'right' | 'below'
 type CloseMode = 'current' | 'others' | 'all'
 type FilesUiMode = 'transfer' | 'default'
 type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
-type ModelProviderKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
+type SnippetGroup = QuickCommandGroupConfig
+type QuickCommandSnippet = QuickCommandSnippetConfig
+type AliasCommand = AliasCommandConfig & { edit?: boolean }
+type KnowledgeBridgeApi = Pick<AiopsPreloadApi, 'kbEnsureRoot' | 'kbListDir'>
+type ModelProviderKey = ModelProviderCheckKey
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available'
+type AiChatHistoryHost = NonNullable<AiChatHistoryMessage['hosts']>[number]
 type OnboardingAiRequest =
   | 'none'
   | 'open-mode'
@@ -112,9 +122,67 @@ type ExtensionInstallProgress = {
   percent: number
 }
 
+type K8sContextInfo = KubernetesContextInfo
+type K8sCluster = KubernetesClusterRecord
+type K8sBastionGroup = KubernetesBastionGroup
+type K8sImportContextInfo = KubernetesImportContextInfo
+type K8sNamespaceInfo = KubernetesNamespaceInfo
+type K8sResource = KubernetesResource
+type K8sResourceKind = KubernetesResourceKind
+type K8sConnectionStatus = KubernetesConnectionStatus
+type K8sProxyConfig = {
+  enabled: boolean
+  type: 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
+  host: string
+  port: number
+  enableProxyIdentity: boolean
+  username: string
+  password: string
+}
+type K8sTerminalStatus = KubernetesTerminalStatus
+type K8sTerminalTab = {
+  id: string
+  sessionId: string
+  clusterId: string
+  name: string
+  namespace: string
+  isActive: boolean
+  output: string
+  status: K8sTerminalStatus
+  cols: number
+  rows: number
+  createdAt: string
+  updatedAt: string
+  exitCode: number | null
+  commandHistory: string[]
+  lastCommand: string
+  lastCommandOutput: string
+  collectingAiOutput: boolean
+  aiCommandTabId: string | null
+}
+type K8sAgentRunRecord = {
+  id: string
+  command: string
+  status: 'queued' | 'running' | 'success' | 'error' | 'cancelled'
+  output: string
+  error?: string
+  clusterId: string | null
+  contextName: string | null
+  namespace: string
+  startedAt: string
+  durationMs: number
+}
+type ExtensionPlugin = ExtensionPluginRuntimeConfig
+
 type MacroCommandEntry = {
   command: string
   timestamp: number
+}
+
+const getKnowledgeBridge = (): KnowledgeBridgeApi | null => {
+  const api = window.aiops as unknown as Partial<Record<keyof KnowledgeBridgeApi, unknown>> | undefined
+  if (typeof api?.kbEnsureRoot !== 'function' || typeof api?.kbListDir !== 'function') return null
+  return api as KnowledgeBridgeApi
 }
 
 export type TerminalSecurityExecution = {
@@ -138,9 +206,10 @@ export type TerminalSecurityPrompt = {
 } | null
 
 export type TerminalSecurityDecision =
-  | { status: 'allow' }
+  | { status: 'allow'; execution?: TerminalSecurityExecution }
   | { status: 'blocked'; result: CommandSecurityResult }
   | { status: 'needs-approval'; prompt: NonNullable<TerminalSecurityPrompt> }
+  | { status: 'unavailable'; command: string; panelIds: string[]; reason: string }
 
 export type TerminalOutputSegment = {
   text: string
@@ -160,12 +229,15 @@ export type TerminalPanel = {
   knowledge?: {
     relPath: string
     isImage: boolean
+    startLine?: number
+    endLine?: number
+    jumpToken?: number
   }
   sshSession?: TerminalSshSession
 }
 
 export type TerminalSshSession = {
-  connectionId: string
+  connectionId?: string
   sourcePanelId?: string
   forkFromConnectionId?: string
   host: string
@@ -173,9 +245,10 @@ export type TerminalSshSession = {
   username: string
   assetId?: string
   assetName: string
+  assetType?: string
   organizationId?: string
   authType?: string
-  createdAt: number
+  createdAt?: number
 }
 
 export type ChatMessage = {
@@ -188,6 +261,17 @@ export type ChatMessage = {
   favorite?: boolean
   feedback?: 'up' | 'down'
   executedCommand?: string
+  ask?: 'command' | 'mcp_tool_call' | 'followup'
+  say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
+  action?: 'approved' | 'rejected'
+  mcpToolCall?: {
+    serverName: string
+    toolName: string
+    arguments?: Record<string, unknown>
+  }
+  followupOptions?: string[]
+  selectedOption?: string
+  partial?: boolean
 }
 
 export type AiTextContentPart = {
@@ -242,6 +326,14 @@ export type AiImageContentPart = {
 
 export type AiContentPart = AiTextContentPart | AiChipContentPart | AiImageContentPart
 
+type K8sKubeconfigImportResult = {
+  success: boolean
+  contexts: K8sImportContextInfo[]
+  kubeconfigContent: string
+  currentContext: string
+  error?: string
+}
+
 export type TodoItem = {
   id: string
   content: string
@@ -291,6 +383,14 @@ type SettingsModelOption = {
   apiProvider?: string
 }
 
+type AiModelOption = AiModelCatalogOption
+
+const defaultAiModelCatalog: AiModelCatalog = {
+  chatModels: [],
+  lockedChatModels: [],
+  settingsModels: []
+}
+
 type SshProxyForm = SshProxyConfig
 
 type SshAgentKeyChainOption = {
@@ -323,12 +423,17 @@ const cloneShortcutConfig = (shortcuts: SettingsShortcut[]): ShortcutUserConfig[
 
 const cloneRuleConfig = (rules: SettingsRule[]): UserRuleConfig[] =>
   rules
-    .filter((rule) => rule.content.trim())
+    .filter((rule) => !rule.isDraft && rule.content.trim())
     .map((rule) => ({
       id: rule.id,
       content: rule.content.trim(),
       enabled: rule.enabled !== undefined ? rule.enabled : true
     }))
+
+type SettingsShortcut = ShortcutUserConfig
+type SettingsRule = UserRuleConfig & { isEditing?: boolean; isDraft?: boolean }
+type SettingsSkill = SkillUserConfig
+type SettingsMcpServer = McpServerUserConfig
 
 const cloneSkillConfig = (skills: SettingsSkill[]): SkillUserConfig[] =>
   skills
@@ -341,21 +446,6 @@ const cloneSkillConfig = (skills: SettingsSkill[]): SkillUserConfig[] =>
       content: skill.content.trim(),
       ...(skill.path ? { path: skill.path } : {})
     }))
-
-const cloneModelOptionConfig = (options: SettingsModelOption[]): ModelOptionUserConfig[] =>
-  options
-    .filter((option) => option.name.trim())
-    .map((option) => {
-      const name = option.name.trim()
-      const type = option.type || (name.startsWith('custom-') ? 'custom' : 'standard')
-      return {
-        name,
-        locked: Boolean(option.locked),
-        checked: Boolean(option.checked),
-        type,
-        apiProvider: option.apiProvider || (type === 'custom' ? 'openai' : 'default')
-      }
-    })
 
 const cloneMcpServerConfig = (servers: SettingsMcpServer[]): McpServerUserConfig[] =>
   servers.map((server) => ({
@@ -392,10 +482,35 @@ export type UserLoginTab = 'account' | 'email' | 'mobile'
 
 export type AboutSettings = {
   version: string
-  updateStatus: 'idle' | 'checking' | 'latest' | 'available' | 'downloading'
+  updateStatus: 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'downloaded' | 'error'
   newVersion: string
   progress: number
 }
+
+const createEmptyUserProfile = (): AiopsUserProfile => ({
+  uid: 0,
+  name: '',
+  username: '',
+  avatarInitials: 'AI',
+  avatarImageUrl: '',
+  registrationType: 'personal',
+  registrationCode: 9,
+  authProvider: 'local',
+  subscription: 'free',
+  subscriptionExpiresAt: '',
+  email: '',
+  mobile: '',
+  localIp: '',
+  macAddress: '',
+  isOfficeDevice: false,
+  needDeviceVerification: false,
+  skippedLogin: true,
+  localDatabaseReady: false,
+  lastLoginMethod: 'skip',
+  lastLoginAt: '',
+  passwordUpdatedAt: '',
+  avatarUpdatedAt: ''
+})
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
@@ -403,15 +518,16 @@ const defaultConfig: UserConfig = {
   defaultMode: 'terminal',
   leftPanelOpen: true,
   rightPanelOpen: true,
-  modelProvider: 'mock',
+  modelProvider: 'local',
   modelEndpoint: '',
-  modelName: 'mock-ops-agent',
+  modelName: 'aiopsterm-local-agent',
   watermark: 'open',
   background: {
     mode: 'none',
     image: '',
     opacity: 0.15,
-    brightness: 0.45
+    brightness: 0.45,
+    lastCustomImage: ''
   },
   terminal: {
     terminalType: 'xterm-256color',
@@ -541,27 +657,20 @@ const defaultConfig: UserConfig = {
         modelId: 'llama3.1'
       }
     },
-    options: cloneModelOptionConfig(settingsModelOptions)
+    options: []
   },
-  shortcuts: cloneShortcutConfig(mockSettingsShortcuts),
-  rules: cloneRuleConfig(mockSettingsRules),
-  skills: cloneSkillConfig(mockSettingsSkills),
-  mcpServers: cloneMcpServerConfig(mockSettingsMcpServers),
-  mcpToolStates: {
-    'filesystem:read_file': true,
-    'filesystem:list_directory': true,
-    'ops-inventory:lookup_asset': false
-  },
-  quickCommands: {
-    groups: mockSnippetGroups.map((group) => ({ ...group })),
-    snippets: mockQuickCommandSnippets.map((snippet) => ({ ...snippet }))
-  },
+  shortcuts: [],
+  rules: [],
+  skills: [],
+  mcpServers: [],
+  mcpToolStates: {},
+  quickCommands: { groups: [], snippets: [] },
   knowledgeBase: {
-    tree: cloneKnowledgeNodes(mockKnowledgeTree),
-    usedBytes: 342 * 1024,
+    tree: [],
+    usedBytes: 0,
     totalBytes: 1024 * 1024 * 1024
   },
-  aliasCommands: mockAliasCommands.map((alias) => ({ id: alias.id, alias: alias.alias, command: alias.command, createdAt: alias.createdAt })),
+  aliasCommands: [],
   onboarding: {
     version: 2,
     guideTabAutoOpened: false,
@@ -577,6 +686,110 @@ const defaultConfig: UserConfig = {
 const ONBOARDING_VERSION = 2
 const onboardingModuleIds: OnboardingModuleId[] = ['interfaceGuide', 'systemSettings', 'addAndConnectHost', 'aiChat']
 const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
+const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
+const stripYamlScalar = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const withoutComment = trimmed.replace(/\s+#.*$/, '').trim()
+  if ((withoutComment.startsWith('"') && withoutComment.endsWith('"')) || (withoutComment.startsWith("'") && withoutComment.endsWith("'"))) {
+    return withoutComment.slice(1, -1)
+  }
+  return withoutComment
+}
+const yamlValueAfter = (line: string, key: string) => {
+  const match = line.match(new RegExp(`^\\s*${key}\\s*:\\s*(.*)$`))
+  return match ? stripYamlScalar(match[1]) : ''
+}
+const parseKubeconfigContexts = (content: string): K8sKubeconfigImportResult => {
+  const lines = content.split(/\r?\n/)
+  const currentContext = lines.map((line) => yamlValueAfter(line, 'current-context')).find(Boolean) || ''
+  const clusters = new Map<string, string>()
+  const contexts: K8sImportContextInfo[] = []
+  let section: 'clusters' | 'contexts' | '' = ''
+  let clusterName = ''
+  let contextName = ''
+  let contextCluster = ''
+  let contextNamespace = ''
+
+  const flushContext = () => {
+    if (!contextName || !contextCluster) return
+    contexts.push({
+      name: contextName,
+      cluster: contextCluster,
+      server: clusters.get(contextCluster) || '',
+      namespace: contextNamespace || 'default'
+    })
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\t/g, '  ')
+    if (/^\s*clusters\s*:\s*$/.test(line)) {
+      flushContext()
+      section = 'clusters'
+      clusterName = ''
+      contextName = ''
+      contextCluster = ''
+      contextNamespace = ''
+      continue
+    }
+    if (/^\s*contexts\s*:\s*$/.test(line)) {
+      flushContext()
+      section = 'contexts'
+      clusterName = ''
+      contextName = ''
+      contextCluster = ''
+      contextNamespace = ''
+      continue
+    }
+    if (/^\s*(users|preferences|apiVersion|kind)\s*:/.test(line)) {
+      if (section === 'contexts') flushContext()
+      section = ''
+      clusterName = ''
+      contextName = ''
+      contextCluster = ''
+      contextNamespace = ''
+      continue
+    }
+    if (section === 'clusters') {
+      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
+      if (listName) {
+        clusterName = stripYamlScalar(listName[1])
+        if (!clusters.has(clusterName)) clusters.set(clusterName, '')
+        continue
+      }
+      const server = yamlValueAfter(line, 'server')
+      if (clusterName && server) clusters.set(clusterName, server)
+      continue
+    }
+    if (section === 'contexts') {
+      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
+      if (listName) {
+        flushContext()
+        contextName = stripYamlScalar(listName[1])
+        contextCluster = ''
+        contextNamespace = ''
+        continue
+      }
+      const cluster = yamlValueAfter(line, 'cluster')
+      if (contextName && cluster) {
+        contextCluster = cluster
+        continue
+      }
+      const namespace = yamlValueAfter(line, 'namespace')
+      if (contextName && namespace) contextNamespace = namespace
+    }
+  }
+  if (section === 'contexts') flushContext()
+
+  const uniqueContexts = contexts.filter((context, index, list) => list.findIndex((item) => item.name === context.name) === index)
+  return {
+    success: uniqueContexts.length > 0,
+    contexts: uniqueContexts,
+    kubeconfigContent: content,
+    currentContext,
+    error: uniqueContexts.length > 0 ? undefined : '未在 kubeconfig 中发现 contexts'
+  }
+}
 const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
 const MACRO_MAX_COMMAND_COUNT = 50
 const MACRO_DEFAULT_SLEEP_THRESHOLD_MS = 500
@@ -592,6 +805,27 @@ const k8sKindLabels: Record<K8sResourceKind, string> = {
   services: 'Services',
   nodes: 'Nodes'
 }
+const k8sTerminalPrompt = (namespace: string) => `[${namespace || 'default'}]$ `
+const k8sTerminalTabFromRecord = (record: KubernetesTerminalRecord): K8sTerminalTab => ({
+  id: record.id,
+  sessionId: record.sessionId,
+  clusterId: record.clusterId,
+  name: record.name,
+  namespace: record.namespace,
+  isActive: false,
+  output: record.output,
+  status: record.status,
+  cols: record.cols,
+  rows: record.rows,
+  createdAt: record.createdAt,
+  updatedAt: record.updatedAt,
+  exitCode: null,
+  commandHistory: [],
+  lastCommand: '',
+  lastCommandOutput: '',
+  collectingAiOutput: false,
+  aiCommandTabId: null
+})
 const ctrlKeyMap: Record<string, string> = {
   'ctrl+a': '\x01',
   'ctrl+b': '\x02',
@@ -638,34 +872,25 @@ const defaultWorkspacePreferences: WorkspaceUserConfig = {
 }
 
 const defaultQuickCommands: QuickCommandsUserConfig = {
-  groups: mockSnippetGroups.map((group) => ({ ...group })),
-  snippets: mockQuickCommandSnippets.map((snippet) => ({ ...snippet }))
+  groups: [],
+  snippets: []
 }
 
 const defaultKnowledgeBase: KnowledgeBaseUserConfig = {
-  tree: cloneKnowledgeNodes(mockKnowledgeTree),
+  tree: [],
   usedBytes: defaultConfig.knowledgeBase!.usedBytes,
   totalBytes: defaultConfig.knowledgeBase!.totalBytes
 }
 
-const defaultAliasCommands: AliasCommandConfig[] = mockAliasCommands.map((alias) => ({
-  id: alias.id,
-  alias: alias.alias,
-  command: alias.command,
-  createdAt: alias.createdAt
-}))
+const defaultAliasCommands: AliasCommandConfig[] = []
 
-const defaultShortcuts: ShortcutUserConfig[] = cloneShortcutConfig(mockSettingsShortcuts)
+const defaultShortcuts: ShortcutUserConfig[] = []
 const shortcutDefaultsById = new Map(defaultShortcuts.map((shortcut) => [shortcut.id, shortcut]))
 const shortcutModifierTokens = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'cmd', 'command', 'meta'])
-const defaultRules: UserRuleConfig[] = cloneRuleConfig(mockSettingsRules)
-const defaultSkills: SkillUserConfig[] = cloneSkillConfig(mockSettingsSkills)
-const defaultMcpServers: McpServerUserConfig[] = cloneMcpServerConfig(mockSettingsMcpServers)
-const defaultMcpToolStates: McpToolStatesUserConfig = {
-  'filesystem:read_file': true,
-  'filesystem:list_directory': true,
-  'ops-inventory:lookup_asset': false
-}
+const defaultRules: UserRuleConfig[] = []
+const defaultSkills: SkillUserConfig[] = []
+const defaultMcpServers: McpServerUserConfig[] = []
+const defaultMcpToolStates: McpToolStatesUserConfig = {}
 const mcpStatusValues: McpServerUserConfig['status'][] = ['connected', 'connecting', 'disconnected', 'disabled', 'error']
 
 const defaultMcpConfigFile = (): McpConfigFile => ({
@@ -720,6 +945,85 @@ const integerInRange = (value: unknown, fallback: number, min: number) =>
   typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
 
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) => (typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback)
+
+const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUserConfig[] = []) => {
+  const rawOptions = Array.isArray(source) ? source : fallback
+  const seenNames = new Set<string>()
+  const options: ModelOptionUserConfig[] = []
+  let changed = !Array.isArray(source)
+  rawOptions.forEach((item) => {
+    if (!isRecord(item)) {
+      changed = true
+      return
+    }
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    if (!name || seenNames.has(name)) {
+      changed = true
+      return
+    }
+    seenNames.add(name)
+    const locked = Boolean(item.locked)
+    const type = stringFromOptions(item.type, modelOptionTypes, locked ? 'standard' : 'custom')
+    const option: ModelOptionUserConfig = {
+      name,
+      locked,
+      checked: item.checked !== undefined ? Boolean(item.checked) : true,
+      type,
+      apiProvider: typeof item.apiProvider === 'string' && item.apiProvider.trim() ? item.apiProvider.trim() : 'default'
+    }
+    options.push(option)
+    const allowedKeys = new Set(['name', 'locked', 'checked', 'type', 'apiProvider'])
+    if (
+      item.name !== option.name ||
+      item.locked !== option.locked ||
+      item.checked !== option.checked ||
+      item.type !== option.type ||
+      item.apiProvider !== option.apiProvider ||
+      Object.keys(item).some((key) => !allowedKeys.has(key))
+    ) {
+      changed = true
+    }
+  })
+
+  return {
+    normalized: options,
+    changed
+  }
+}
+
+const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
+  if (!isRecord(source)) return null
+  const id = typeof source.id === 'string' ? source.id.trim() : ''
+  const label = typeof source.label === 'string' && source.label.trim() ? source.label.trim() : id
+  if (!id || !label) return null
+  const locked = Boolean(source.locked)
+  return {
+    id,
+    label,
+    detail: typeof source.detail === 'string' ? source.detail.trim() : '',
+    checked: source.checked !== undefined ? Boolean(source.checked) : true,
+    locked,
+    tier: typeof source.tier === 'string' ? source.tier.trim() : undefined,
+    type: stringFromOptions(source.type, modelOptionTypes, locked ? 'standard' : 'standard'),
+    apiProvider: typeof source.apiProvider === 'string' && source.apiProvider.trim() ? source.apiProvider.trim() : 'default'
+  }
+}
+
+const normalizeAiModelCatalog = (source?: Partial<AiModelCatalog> | null): AiModelCatalog => {
+  const incoming = isRecord(source) ? source : {}
+  const chatModels = (Array.isArray(incoming.chatModels) ? incoming.chatModels : defaultAiModelCatalog.chatModels)
+    .map(normalizeAiModelOption)
+    .filter((model): model is AiModelOption => Boolean(model))
+  const lockedChatModels = (Array.isArray(incoming.lockedChatModels) ? incoming.lockedChatModels : defaultAiModelCatalog.lockedChatModels)
+    .map(normalizeAiModelOption)
+    .filter((model): model is AiModelOption => Boolean(model))
+    .map((model) => ({ ...model, locked: true }))
+  const settingsModels = normalizeModelSettingsOptions(
+    Array.isArray(incoming.settingsModels) ? incoming.settingsModels : defaultAiModelCatalog.settingsModels,
+    defaultAiModelCatalog.settingsModels
+  ).normalized
+  return { chatModels, lockedChatModels, settingsModels }
+}
 
 const createMacroSnippetName = () => {
   const now = new Date()
@@ -1318,41 +1622,8 @@ const normalizeModelSettingsConfig = (source?: unknown) => {
     ollama: normalizeModelProviderConfig(incomingProviders.ollama, defaultModelSettingsConfig.providers.ollama)
   }
 
-  const rawOptions = Array.isArray(incoming.options) ? incoming.options : defaultModelSettingsConfig.options
-  const seenNames = new Set<string>()
-  const options: ModelOptionUserConfig[] = []
-  let changed = !isRecord(source) || !isRecord(incoming.providers) || !Array.isArray(incoming.options)
-  rawOptions.forEach((item) => {
-    if (!isRecord(item)) {
-      changed = true
-      return
-    }
-    const name = typeof item.name === 'string' ? item.name.trim() : ''
-    if (!name || seenNames.has(name)) {
-      changed = true
-      return
-    }
-    seenNames.add(name)
-    const option: ModelOptionUserConfig = {
-      name,
-      locked: Boolean(item.locked),
-      checked: item.checked !== undefined ? Boolean(item.checked) : true,
-      type: stringFromOptions(item.type, modelOptionTypes, item.locked ? 'standard' : 'custom'),
-      apiProvider: typeof item.apiProvider === 'string' && item.apiProvider.trim() ? item.apiProvider.trim() : 'default'
-    }
-    options.push(option)
-    const allowedKeys = new Set(['name', 'locked', 'checked', 'type', 'apiProvider'])
-    if (
-      item.name !== option.name ||
-      item.locked !== option.locked ||
-      item.checked !== option.checked ||
-      item.type !== option.type ||
-      item.apiProvider !== option.apiProvider ||
-      Object.keys(item).some((key) => !allowedKeys.has(key))
-    ) {
-      changed = true
-    }
-  })
+  const { normalized: options, changed: optionsChanged } = normalizeModelSettingsOptions(incoming.options, defaultModelSettingsConfig.options)
+  let changed = !isRecord(source) || !isRecord(incoming.providers) || optionsChanged
 
   const normalized: ModelSettingsUserConfig = {
     addModelSwitch: typeof incoming.addModelSwitch === 'boolean' ? incoming.addModelSwitch : defaultModelSettingsConfig.addModelSwitch,
@@ -1542,7 +1813,7 @@ const isValidShortcutForAction = (actionId: string, shortcut: string) => {
 }
 
 const normalizeShortcutsConfig = (source?: unknown) => {
-  const shortcutsById = new Map<string, string>()
+  const shortcutsById = new Map<string, ShortcutUserConfig>()
   let changed = !Array.isArray(source)
 
   if (Array.isArray(source)) {
@@ -1552,19 +1823,25 @@ const normalizeShortcutsConfig = (source?: unknown) => {
         return
       }
       const id = typeof item.id === 'string' ? item.id.trim() : ''
-      const defaultShortcut = shortcutDefaultsById.get(id)
+      const action = typeof item.action === 'string' && item.action.trim() ? item.action.trim() : id
       const shortcut = typeof item.shortcut === 'string' ? item.shortcut.trim() : ''
-      if (!defaultShortcut || !shortcut || shortcutsById.has(id) || !isValidShortcutForAction(id, shortcut)) {
+      if (!id || !action || !shortcut || shortcutsById.has(id) || !isValidShortcutForAction(id, shortcut)) {
         changed = true
         return
       }
-      shortcutsById.set(id, shortcut)
+      const normalizedShortcut: ShortcutUserConfig = {
+        id,
+        action,
+        shortcut,
+        ...(typeof item.suffix === 'string' && item.suffix.trim() ? { suffix: item.suffix.trim() } : {})
+      }
+      shortcutsById.set(id, normalizedShortcut)
       const allowedKeys = new Set(['id', 'action', 'shortcut', 'suffix'])
       if (
         item.id !== id ||
         item.shortcut !== shortcut ||
-        item.action !== defaultShortcut.action ||
-        item.suffix !== defaultShortcut.suffix ||
+        item.action !== action ||
+        item.suffix !== normalizedShortcut.suffix ||
         Object.keys(item).some((key) => !allowedKeys.has(key))
       ) {
         changed = true
@@ -1578,19 +1855,12 @@ const normalizeShortcutsConfig = (source?: unknown) => {
         changed = true
         return
       }
-      shortcutsById.set(id, shortcut)
+      shortcutsById.set(id, { ...defaultShortcut, shortcut })
       if (value !== shortcut) changed = true
     })
   }
 
-  const normalized = defaultShortcuts.map((defaultShortcut) => ({
-    ...defaultShortcut,
-    shortcut: shortcutsById.get(defaultShortcut.id) || defaultShortcut.shortcut
-  }))
-
-  if (shortcutsById.size !== normalized.length) {
-    changed = true
-  }
+  const normalized = Array.from(shortcutsById.values())
 
   return {
     normalized,
@@ -1842,9 +2112,24 @@ const normalizeMcpServersConfig = (source?: unknown, toolStatesSource?: unknown)
   }
 }
 
+const normalizeUserModelProvider = (value: unknown): UserConfig['modelProvider'] => {
+  const provider = String(value || '').trim()
+  if (!provider || provider === 'mock' || provider === 'local') return 'local'
+  if (provider === 'litellm' || provider === 'openai-compatible' || provider === 'ollama' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic') return provider
+  return defaultConfig.modelProvider
+}
+
+const normalizeUserModelName = (value: unknown) => {
+  const modelName = String(value || '').trim()
+  if (!modelName || modelName === 'mock-ops-agent' || modelName === 'ops-local-agent' || modelName === 'aiopsterm-local-agent') return defaultConfig.modelName
+  return modelName
+}
+
 const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
+  modelProvider: normalizeUserModelProvider(patch.modelProvider || base.modelProvider),
+  modelName: normalizeUserModelName(patch.modelName || base.modelName),
   background: {
     ...base.background,
     ...(patch.background || {})
@@ -2039,6 +2324,12 @@ const defaultAboutSettings: AboutSettings = {
   progress: 0
 }
 
+const settingsDocumentationUrl = 'https://aiopsterm.local/docs'
+const settingsFeedbackUrl = 'https://aiopsterm.local/feedback'
+
+const resolveUpdateVersion = (result?: AppUpdateCheckResult | null) =>
+  result?.updateInfo?.version || result?.versionInfo?.version || (result?.isUpdateAvailable || result?.available ? '0.1.1' : '')
+
 type SnippetKeyPayload = Extract<ParsedSnippetCommand, { type: 'KEY' }>['payload']
 
 const parseSnippetScript = (text: string): ParsedSnippetCommand[] => {
@@ -2137,6 +2428,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   })
   const onboardingAutoApprovalEvent = ref(0)
   const config = ref<UserConfig>(defaultConfig)
+  const themeListenerCleanup = ref<(() => void) | null>(null)
   const workspacePreferences = ref<WorkspaceUserConfig>({
     ...defaultWorkspacePreferences,
     expandedGroups: [...defaultWorkspacePreferences.expandedGroups]
@@ -2153,43 +2445,42 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       outputSegments: createTerminalSegments('aiopsterm local shell\n$ ')
     }
   ])
-  const selectedConversationId = ref('conv-1')
-  const now = Date.now()
-  const conversations = ref<ConversationItem[]>([
-    {
-      id: 'conv-1',
-      title: '生产巡检',
-      summary: '分析磁盘、负载和服务状态',
-      updatedAt: '刚刚',
-      ts: now,
-      ipAddress: '10.24.8.12'
-    },
-    {
-      id: 'conv-2',
-      title: 'K8s 发布失败',
-      summary: '检查 Pod 事件和镜像拉取',
-      updatedAt: '今天',
-      ts: now - 1000 * 60 * 45,
-      ipAddress: 'prod-cluster'
-    },
-    {
-      id: 'conv-3',
-      title: '数据库慢查询',
-      summary: '梳理慢日志和索引建议',
-      updatedAt: '昨天',
-      ts: now - 1000 * 60 * 60 * 24,
-      ipAddress: '10.32.6.9'
-    }
-  ])
-  const selectedContexts = ref<AiContextOption[]>([
-    { id: 'opened-local', kind: 'hosts', label: '127.0.0.1', detail: 'local shell' },
-    { id: 'asset-1', kind: 'hosts', label: '10.24.8.12', detail: 'prod-bastion' }
-  ])
 
-  const createMockSshConnectionId = (asset: { id?: string; host: string; port?: number; username?: string; asset_type?: string }) =>
-    `${asset.username || 'root'}@${asset.host}:${asset.port || 22}:${asset.asset_type || 'person'}:${createId('ssh')}`
+  const applyCurrentTheme = () => {
+    applyThemeToDocument(config.value.theme)
+  }
 
-  const registerMockSshSession = (
+  const applyCurrentEditorSettings = () => {
+    applyEditorSettingsToDocument(editorSettings.value)
+  }
+
+  const shortcutHandlers: Record<string, ShortcutActionHandler> = {
+    newTerminal: () => triggerShortcutAction('newTerminal'),
+    toggleAi: () => triggerShortcutAction('toggleAi'),
+    switchToSpecificTab: (payload) => triggerShortcutAction('switchToSpecificTab', payload?.digit),
+    quickCommand: () => triggerShortcutAction('quickCommand')
+  }
+
+  const refreshShortcutRuntime = () => {
+    shortcutRuntime.update(getShortcutsSnapshot(), shortcutHandlers)
+  }
+
+  const setupThemeBridge = () => {
+    if (themeListenerCleanup.value) return
+    themeListenerCleanup.value = addSystemThemeListener(() => {
+      if (config.value.theme === 'auto') applyCurrentTheme()
+    })
+  }
+  const selectedConversationId = ref('')
+  const conversations = ref<ConversationItem[]>([])
+  const aiContextCatalog = ref<AiContextCatalog>({
+    categories: [],
+    openedHosts: [],
+    selectedDefaults: []
+  })
+  const selectedContexts = ref<AiContextOption[]>([])
+
+  const registerSshSession = (
     panelId: string,
     asset: {
       id?: string
@@ -2207,17 +2498,58 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!panel) return null
     const title = asset.name || asset.title || asset.host
     const session: TerminalSshSession = {
-      connectionId: createMockSshConnectionId(asset),
       host: asset.host,
       port: Number(asset.port) || 22,
       username: asset.username || 'root',
       assetId: asset.id,
       assetName: title,
+      assetType: asset.asset_type,
       organizationId: asset.group_name,
-      authType: asset.auth_type,
-      createdAt: Date.now()
+      authType: asset.auth_type
     }
     panel.kind = 'terminal'
+    panel.sshSession = session
+    return session
+  }
+
+  const applySshTerminalSession = (
+    panelId: string,
+    terminalSession?: TerminalSessionInfo | null,
+    asset?: {
+      id?: string
+      name?: string
+      title?: string
+      host?: string
+      port?: number
+      username?: string
+      group_name?: string
+      asset_type?: string
+      auth_type?: string
+    }
+  ) => {
+    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    if (!panel || !terminalSession) return null
+    panel.sessionId = terminalSession.id
+    panel.cwd = terminalSession.cwd || panel.cwd
+    panel.kind = 'terminal'
+    panel.status = 'running'
+    if (terminalSession.kind !== 'ssh' || !terminalSession.connection) return null
+    const connection = terminalSession.connection
+    const previous = panel.sshSession
+    const session: TerminalSshSession = {
+      connectionId: connection.connectionId,
+      sourcePanelId: previous?.sourcePanelId,
+      forkFromConnectionId: connection.forkFromConnectionId || previous?.forkFromConnectionId,
+      host: connection.host || asset?.host || previous?.host || '',
+      port: Number(connection.port || asset?.port || previous?.port || 22),
+      username: connection.username || asset?.username || previous?.username || 'root',
+      assetId: connection.assetId || asset?.id || previous?.assetId,
+      assetName: connection.assetName || asset?.name || asset?.title || previous?.assetName || connection.host || 'ssh',
+      assetType: connection.assetType || asset?.asset_type || previous?.assetType,
+      organizationId: connection.organizationId || asset?.group_name || previous?.organizationId,
+      authType: connection.authType || asset?.auth_type || previous?.authType,
+      createdAt: connection.createdAt
+    }
     panel.sshSession = session
     return session
   }
@@ -2234,12 +2566,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const selectedCommandId = ref<string | null>(null)
   const selectedCommandRef = ref<AiCommandChipRef | null>(null)
   const filesUiMode = ref<FilesUiMode>('transfer')
-  const fileSessions = ref<FileSessionInfo[]>([...initialFileSessions])
+  const fileSessions = ref<FileSessionInfo[]>([])
+  const fileSessionFolders = ref<FileSessionFolderRecord[]>([])
   const selectedLeftFileSessionId = ref<string | null>(null)
   const selectedRightFileSessionId = ref<string | null>('local')
-  const fileTransferTasks = ref<FileTransferTask[]>(mockInitialTransferTasks.map((task) => ({ ...task, children: task.children ? [...task.children] : undefined })))
-  const snippetGroups = ref<SnippetGroup[]>(mockSnippetGroups.map((group) => ({ ...group })))
-  const quickCommands = ref<QuickCommandSnippet[]>(mockQuickCommandSnippets.map((snippet) => ({ ...snippet })))
+  const fileTransferTasks = ref<FileTransferTask[]>([])
+  const snippetGroups = ref<SnippetGroup[]>([])
+  const quickCommands = ref<QuickCommandSnippet[]>([])
   const selectedSnippetGroupUuid = ref<string | null>(null)
   const snippetSearchQuery = ref('')
   const isMacroRecording = ref(false)
@@ -2254,16 +2587,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const macroTargetGroupUuid = ref<string | null>(null)
   const macroLimitReason = ref<'time' | 'count' | null>(null)
   let macroAutoStopTimer: ReturnType<typeof globalThis.setTimeout> | null = null
-  const knowledgeTree = ref<KnowledgeNode[]>(cloneKnowledgeNodes(mockKnowledgeTree))
+  const knowledgeTree = ref<KnowledgeNode[]>([])
   const kbExpandedKeys = ref<string[]>(['commands', 'images'])
   const kbSelectedKeys = ref<string[]>([])
   const kbSearchQuery = ref('')
+  const kbContentSearchResults = ref<KnowledgeBaseSearchResult[]>([])
+  const kbSearchStatus = ref<KnowledgeBaseSearchStatus>({ totalFiles: 0, totalChunks: 0, provider: 'aiopsterm-local', model: 'lexical', updatedAt: 0 })
+  const kbSearchLoading = ref(false)
+  const kbSearchError = ref('')
   const kbClipboard = ref<KbClipboard>(null)
   const kbImportJobs = ref<Array<{ id: string; destRelPath: string; percent: number }>>([])
-  const kbUsedBytes = ref(342 * 1024)
+  const kbUsedBytes = ref(0)
   const kbTotalBytes = ref(1024 * 1024 * 1024)
   const extensionSearchQuery = ref('')
-  const extensionPlugins = ref<ExtensionPlugin[]>(mockExtensionPlugins.map((plugin) => ({ ...plugin, functions: plugin.functions ? [...plugin.functions] : undefined })))
+  const extensionPlugins = ref<ExtensionPlugin[]>([])
   const selectedExtensionId = ref<string>('jumpserverSupport')
   const extensionDetailTab = ref<'details' | 'features'>('details')
   const extensionNotice = ref('')
@@ -2272,38 +2609,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionInstallProgressMap = ref<Record<string, ExtensionInstallProgress>>({})
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
-  const aliasCommands = ref<AliasCommand[]>(mockAliasCommands.map((alias) => ({ ...alias })))
+  const aliasCommands = ref<AliasCommand[]>([])
   const aliasEditSnapshot = ref<AliasCommand | null>(null)
   const aliasSearchQuery = ref('')
-  const k8sContexts = ref<K8sContextInfo[]>(mockK8sContexts.map((context) => ({ ...context })))
-  const k8sClusters = ref<MockK8sCluster[]>(mockK8sClusters.map((cluster) => ({ ...cluster })))
-  const k8sBastions = ref<K8sBastionGroup[]>(mockK8sBastions.map((bastion) => ({ ...bastion })))
-  const k8sNamespaces = ref<K8sNamespaceInfo[]>(mockK8sNamespaces.map((namespace) => ({ ...namespace })))
-  const k8sResources = ref<MockK8sResource[]>(mockK8sResources.map((resource) => ({ ...resource })))
+  const k8sContexts = ref<K8sContextInfo[]>([])
+  const k8sClusters = ref<K8sCluster[]>([])
+  const k8sBastions = ref<K8sBastionGroup[]>([])
+  const k8sNamespaces = ref<K8sNamespaceInfo[]>([])
+  const k8sResources = ref<K8sResource[]>([])
   const k8sConnectingClusterIds = ref<string[]>([])
   const k8sSyncingBastionIds = ref<string[]>([])
   const k8sDeleteConfirmClusterId = ref<string | null>(null)
   const k8sClusterActionMenuId = ref<string | null>(null)
-  const k8sImportContexts = ref<K8sImportContextInfo[]>([
-    { name: 'prod/admin', cluster: 'prod-cluster', server: 'https://prod.k8s.local:6443', namespace: 'default' },
-    { name: 'staging/devops', cluster: 'staging-cluster', server: 'https://staging.k8s.local:6443', namespace: 'staging' }
-  ])
-  const k8sActiveClusterId = ref<string | null>('k8s-1')
+  const k8sImportContexts = ref<K8sImportContextInfo[]>([])
+  const k8sActiveClusterId = ref<string | null>(null)
   const k8sSearchQuery = ref('')
   const k8sConfigTab = ref<'local' | 'jumpserver'>('local')
-  const k8sSelectedClusterId = ref<string | null>('k8s-1')
+  const k8sSelectedClusterId = ref<string | null>(null)
   const k8sClusterNotice = ref('')
-  const k8sTerminalTabs = ref<K8sTerminalTab[]>([
-    {
-      id: 'k8s-tab-k8s-1',
-      clusterId: 'k8s-1',
-      name: 'prod-cluster',
-      namespace: 'default',
-      isActive: true,
-      output: 'kubectl context: prod/admin\n$ '
-    }
-  ])
-  const k8sActiveTerminalId = ref<string | null>('k8s-tab-k8s-1')
+  const k8sTerminalTabs = ref<K8sTerminalTab[]>([])
+  const k8sActiveTerminalId = ref<string | null>(null)
   const k8sAddModalOpen = ref(false)
   const k8sEditModalOpen = ref(false)
   const k8sEditingClusterId = ref<string | null>(null)
@@ -2317,6 +2642,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const k8sResourceOutputTitle = ref('资源输出')
   const k8sResourceLoading = ref(false)
   const k8sCopiedCommand = ref('')
+  const k8sAgentClusterId = ref<string | null>(null)
+  const k8sAgentContextName = ref('')
+  const k8sAgentStatus = ref<'idle' | 'ready' | 'running' | 'error'>('idle')
+  const k8sAgentCommandDraft = ref('kubectl get pods -A')
+  const k8sAgentCommandHistory = ref<string[]>(['kubectl get pods -A', 'kubectl get namespaces', 'kubectl version --request-timeout=10s'])
+  const k8sAgentRuns = ref<K8sAgentRunRecord[]>([])
+  const k8sAgentLastResult = ref<K8sAgentRunRecord | null>(null)
+  const k8sAgentTesting = ref(false)
   const k8sProxyConfig = ref<K8sProxyConfig>({
     enabled: false,
     type: 'SOCKS5',
@@ -2346,16 +2679,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const sshAgentConfigModalOpen = ref(false)
   const sshAgentSelectedKey = ref('')
   const sshAgentKeyChainOptions = ref<SshAgentKeyChainOption[]>(defaultSshAgentKeyChainOptions.map((option) => ({ ...option })))
-  const settingModelOptions = ref<SettingsModelOption[]>(
-    settingsModelOptions.map((model) => {
-      const type = model.name.startsWith('custom-') ? 'custom' : 'standard'
-      return {
-        ...model,
-        type,
-        apiProvider: type === 'custom' ? 'openai' : 'default'
-      }
-    })
-  )
+  const aiModelOptions = ref<AiModelOption[]>([])
+  const lockedAiModelOptions = ref<AiModelOption[]>([])
+  const settingModelOptions = ref<SettingsModelOption[]>([])
   const addModelSwitch = ref(true)
   const modelProviders = ref<Record<ModelProviderKey, ModelProviderSettings>>({
     litellm: { ...defaultModelProviders.litellm },
@@ -2365,13 +2691,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     anthropic: { ...defaultModelProviders.anthropic },
     ollama: { ...defaultModelProviders.ollama }
   })
-  const modelCheckState = ref<Record<ModelProviderKey, 'idle' | 'checking' | 'success'>>({
+  const modelCheckState = ref<Record<ModelProviderKey, 'idle' | 'checking' | 'success' | 'error'>>({
     litellm: 'idle',
     openai: 'idle',
     bedrock: 'idle',
     deepseek: 'idle',
     anthropic: 'idle',
     ollama: 'idle'
+  })
+  const modelCheckRequestSeq = ref<Record<ModelProviderKey, number>>({
+    litellm: 0,
+    openai: 0,
+    bedrock: 0,
+    deepseek: 0,
+    anthropic: 0,
+    ollama: 0
   })
   const aiPreferences = ref<AiPreferenceSettings>({
     ...defaultAiPreferences,
@@ -2398,12 +2732,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const privacySettings = ref<PrivacySettings>({ ...defaultPrivacySettings })
   const billingSettings = ref<BillingSettings>({ ...defaultBillingSettings })
   const aboutSettings = ref<AboutSettings>({ ...defaultAboutSettings })
-  const userProfile = ref<MockUserProfile>({ ...mockUserProfile })
+  const userProfile = ref<AiopsUserProfile>(createEmptyUserProfile())
   const userNotice = ref('')
-  const mcpServers = ref<SettingsMcpServer[]>(mockSettingsMcpServers.map((server) => ({ ...server, tools: server.tools.map((tool) => ({ ...tool, parameters: [...tool.parameters] })), resources: server.resources.map((resource) => ({ ...resource })) })))
-  const expandedMcpServerNames = ref<string[]>(['filesystem'])
+  const mcpServers = ref<SettingsMcpServer[]>([])
+  const expandedMcpServerNames = ref<string[]>([])
   const activeMcpServerTab = ref<Record<string, 'tools' | 'resources'>>({})
-  const settingsSkills = ref<SettingsSkill[]>(mockSettingsSkills.map((skill) => ({ ...skill })))
+  const settingsSkills = ref<SettingsSkill[]>([])
   const skillsUserPath = ref('~/.config/aiopsterm/skills')
   const skillModal = ref<{ mode: 'create' | 'edit' | null; name: string; description: string; content: string }>({
     mode: null,
@@ -2411,12 +2745,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     description: '',
     content: ''
   })
-  const settingsRules = ref<SettingsRule[]>(mockSettingsRules.map((rule) => ({ ...rule })))
-  const settingsShortcuts = ref<SettingsShortcut[]>(mockSettingsShortcuts.map((shortcut) => ({ ...shortcut })))
+  const settingsRules = ref<SettingsRule[]>([])
+  const settingsShortcuts = ref<SettingsShortcut[]>([])
   const shortcutRecording = ref<{ actionId: string | null; tempShortcut: string }>({ actionId: null, tempShortcut: '' })
-  const trustedDevices = ref<SettingsTrustedDevice[]>(mockSettingsTrustedDevices.map((device) => ({ ...device })))
+  const trustedDevices = ref<AiopsTrustedDevice[]>([])
   const trustedDeviceModal = ref<{ open: boolean; id: number | null }>({ open: false, id: null })
   const settingsNotice = ref('')
+  const setSettingsNoticeText = (text: string) => {
+    settingsNotice.value = text
+    if (!text) return
+    window.setTimeout(() => {
+      if (settingsNotice.value === text) settingsNotice.value = ''
+    }, 2400)
+  }
   const todoItems = ref<TodoItem[]>([
     { id: 'todo-1', content: '收集上下文', description: '读取终端输出、资产和知识库引用', status: 'completed' },
     {
@@ -2432,11 +2773,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
   ])
-  const chatMessages = ref<ChatMessage[]>([
-    { id: 'msg-1', role: 'system', text: 'AI 能力当前使用本地 mock，占位保留聊天、上下文、命令建议和 Agent 状态流。' },
-    { id: 'msg-2', role: 'assistant', text: '选择资产或输入目标后，我会生成可审计的执行计划。', state: 'done' }
-  ])
+  const chatMessages = ref<ChatMessage[]>([])
   const terminalSecurityPrompt = ref<TerminalSecurityPrompt>(null)
+  const terminalCommandGenerationRecords = ref<TerminalCommandGenerationRecord[]>([])
   let keywordHighlightSaveTimer: number | null = null
   let removeKeywordHighlightConfigFileListener: (() => void) | null = null
   let keywordHighlightLoadRequest = 0
@@ -2446,8 +2785,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let mcpConfigSaveTimer: number | null = null
   let removeMcpConfigFileListener: (() => void) | null = null
   let mcpConfigLoadRequest = 0
+  let kbSearchRequest = 0
   let removeSkillsUpdateListener: (() => void) | null = null
   let removeKnowledgeProgressListener: (() => void) | null = null
+  let removeExtensionInstallProgressListener: (() => void) | null = null
+  let aiModelCatalogLoadPromise: Promise<AiModelCatalog> | null = null
   let pendingSkillImportOverwritePath = ''
 
   const activePanel = computed(() => panels.value.find((panel) => panel.id === activePanelId.value) || panels.value[0])
@@ -2466,6 +2808,150 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       percent: total === 0 ? 0 : Math.round((completed / total) * 100)
     }
   })
+
+  const cloneConversationRecord = (conversation: AiChatConversationRecord): ConversationItem => ({
+    id: conversation.id,
+    title: conversation.title,
+    summary: conversation.summary,
+    updatedAt: conversation.updatedAt,
+    ts: conversation.ts,
+    ipAddress: conversation.ipAddress,
+    favorite: conversation.favorite
+  })
+
+  const applyChatHistorySnapshot = (snapshot: { conversations: AiChatConversationRecord[]; selectedConversationId: string }) => {
+    conversations.value = snapshot.conversations.map(cloneConversationRecord)
+    selectedConversationId.value = conversations.value.some((conversation) => conversation.id === snapshot.selectedConversationId)
+      ? snapshot.selectedConversationId
+      : conversations.value[0]?.id || ''
+  }
+
+  const historyHostToContext = (host: AiChatHistoryHost): AiContextOption => ({
+    id: host.id,
+    kind: 'hosts',
+    label: host.label,
+    detail: host.detail
+  })
+
+  const chatHistoryMessageToChatMessage = (message: AiChatHistoryMessage): ChatMessage => ({
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    hosts: message.hosts?.map(historyHostToContext),
+    state: message.state,
+    favorite: message.favorite,
+    feedback: message.feedback
+  })
+
+  const chatMessageToHistoryMessage = (message: ChatMessage): AiChatHistoryMessage | null => {
+    const text = message.text.trim()
+    if (!text) return null
+    const hosts = message.hosts
+      ?.filter((host) => host.kind === 'hosts' && host.label.trim())
+      .map((host): AiChatHistoryHost => ({
+        id: host.id,
+        kind: 'hosts',
+        label: host.label,
+        detail: host.detail
+      }))
+    return {
+      id: message.id,
+      role: message.role,
+      text,
+      hosts: hosts?.length ? hosts : undefined,
+      state: message.state,
+      favorite: message.favorite,
+      feedback: message.feedback
+    }
+  }
+
+  const currentChatHistoryMessages = () => chatMessages.value.map(chatMessageToHistoryMessage).filter(Boolean) as AiChatHistoryMessage[]
+
+  const restoreChatMessagesFromBackend = async (id: string) => {
+    if (!window.aiops?.restoreChatConversation) return false
+    const result = await window.aiops.restoreChatConversation(id)
+    if (!result?.ok || !result.data) return false
+    const existing = conversations.value.find((conversation) => conversation.id === result.data!.conversation.id)
+    const nextConversation = cloneConversationRecord(result.data.conversation)
+    conversations.value = existing
+      ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
+      : [nextConversation, ...conversations.value]
+    selectedConversationId.value = nextConversation.id
+    chatMessages.value = result.data.messages.map(chatHistoryMessageToChatMessage)
+    return true
+  }
+
+  const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean } = {}) => {
+    if (!window.aiops?.listChatConversations) return false
+    const result = await window.aiops.listChatConversations()
+    if (!result?.ok || !result.data) return false
+    applyChatHistorySnapshot(result.data)
+    if (options.restoreIfEmpty !== false && chatMessages.value.length === 0 && selectedConversationId.value) {
+      await restoreChatMessagesFromBackend(selectedConversationId.value)
+    }
+    return true
+  }
+
+  const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = {}) => {
+    if (!window.aiops?.listAiContextCatalog) return false
+    const result = await window.aiops.listAiContextCatalog()
+    if (!result?.ok || !result.data) return false
+    aiContextCatalog.value = {
+      categories: result.data.categories.map((category) => ({
+        ...category,
+        options: category.options.map((option) => ({ ...option }))
+      })),
+      openedHosts: result.data.openedHosts.map((host) => ({ ...host })),
+      selectedDefaults: result.data.selectedDefaults.map((context) => ({ ...context }))
+    }
+    if (options.hydrateSelection !== false && selectedContexts.value.length === 0) {
+      selectedContexts.value = aiContextCatalog.value.selectedDefaults.map((context) => ({ ...context }))
+    }
+    return true
+  }
+
+  const updateCurrentConversationSnapshot = async (summary?: string, options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) => {
+    if (!window.aiops?.updateChatConversation) {
+      if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
+      return false
+    }
+    let id = selectedConversationId.value
+    if (!id || !conversations.value.some((conversation) => conversation.id === id)) {
+      if (!window.aiops.createChatConversation) {
+        if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
+        return false
+      }
+      const created = await window.aiops.createChatConversation()
+      if (!created?.ok || !created.data) {
+        if (options.notifyFailure) setTopNotice(created?.errorMessage || '会话历史写入失败')
+        return false
+      }
+      applyChatHistorySnapshot({
+        conversations: created.data.conversations,
+        selectedConversationId: created.data.selectedConversationId
+      })
+      id = created.data.conversation.id
+    }
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation) return false
+    const result = await window.aiops.updateChatConversation({
+      id,
+      title: conversation.title,
+      summary: summary || conversation.summary,
+      favorite: conversation.favorite,
+      messages: currentChatHistoryMessages()
+    })
+    if (!result?.ok || !result.data) {
+      if (options.notifyFailure) setTopNotice(result?.errorMessage || '会话历史写入失败')
+      return false
+    }
+    applyChatHistorySnapshot({
+      conversations: result.data.conversations,
+      selectedConversationId: result.data.selectedConversationId
+    })
+    return true
+  }
+
   const selectedLeftFileSession = computed(() => fileSessions.value.find((session) => session.id === selectedLeftFileSessionId.value) || null)
   const selectedRightFileSession = computed(() => fileSessions.value.find((session) => session.id === selectedRightFileSessionId.value) || null)
   const transferTaskGroups = computed(() => {
@@ -2482,6 +2968,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const sum = fileTransferTasks.value.reduce((acc, task) => acc + task.progress, 0)
     return Math.round(sum / fileTransferTasks.value.length)
   })
+  const terminalCommandModelOptions = computed(() =>
+    settingModelOptions.value.filter((model) => model.checked && !model.locked && !model.name.endsWith('-Thinking')).map((model) => model.name)
+  )
+  const applyAiModelCatalog = (catalog: AiModelCatalog, options: { replaceSettingsOptions?: boolean } = {}) => {
+    aiModelOptions.value = catalog.chatModels.map((model) => ({ ...model }))
+    lockedAiModelOptions.value = catalog.lockedChatModels.map((model) => ({ ...model, locked: true }))
+    if (options.replaceSettingsOptions) {
+      settingModelOptions.value = catalog.settingsModels.map((model) => ({
+        name: model.name,
+        locked: model.locked,
+        checked: model.checked,
+        type: model.type,
+        apiProvider: model.apiProvider
+      }))
+    }
+    return catalog
+  }
+  const refreshAiModelCatalog = async (options: { replaceSettingsOptions?: boolean } = {}) => {
+    if (!window.aiops?.listAiModels) {
+      return applyAiModelCatalog(defaultAiModelCatalog, {
+        replaceSettingsOptions: options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
+      })
+    }
+    aiModelCatalogLoadPromise ||= window.aiops
+      .listAiModels()
+      .then((catalog) => normalizeAiModelCatalog(catalog))
+      .finally(() => {
+        aiModelCatalogLoadPromise = null
+      })
+    try {
+      const catalog = await aiModelCatalogLoadPromise
+      return applyAiModelCatalog(catalog, {
+        replaceSettingsOptions: options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
+      })
+    } catch (error) {
+      setSettingsNoticeText(`模型列表加载失败：${error instanceof Error ? error.message : String(error)}`)
+      return applyAiModelCatalog(defaultAiModelCatalog, {
+        replaceSettingsOptions: options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
+      })
+    }
+  }
   const filteredQuickCommands = computed(() => {
     const query = snippetSearchQuery.value.trim().toLowerCase()
     if (query) {
@@ -2509,6 +3036,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         .filter(Boolean) as KnowledgeNode[]
     return filter(knowledgeTree.value)
   })
+  const kbContentSearchVisible = computed(() => kbSearchQuery.value.trim().length > 1)
   const kbCapacityPercent = computed(() => Math.min(100, Math.round((kbUsedBytes.value / kbTotalBytes.value) * 100)))
   const visibleExtensionPlugins = computed(() =>
     extensionPlugins.value
@@ -2570,6 +3098,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   })
   const k8sActiveTerminal = computed(() => k8sTerminalTabs.value.find((tab) => tab.id === k8sActiveTerminalId.value) || null)
+  const k8sAgentCluster = computed(() => (k8sAgentClusterId.value ? k8sClusters.value.find((cluster) => cluster.id === k8sAgentClusterId.value) || null : null))
+  const k8sAgentCurrentCluster = computed(() => ({
+    clusterId: k8sAgentCluster.value?.id || null,
+    contextName: k8sAgentCluster.value?.context_name || k8sAgentContextName.value || null
+  }))
   const k8sResourceCluster = computed(() => k8sActiveCluster.value || k8sSelectedCluster.value || k8sClusters.value[0] || null)
   const k8sActiveNamespaces = computed(() => {
     const clusterId = k8sResourceCluster.value?.id
@@ -2632,12 +3165,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const missingSecurityConfig = !isRecord(savedConfig.securityConfig)
     const missingPrivacy = !isRecord(savedConfig.privacy)
     const missingAiPreferences = !isRecord(savedConfig.aiPreferences)
+    const savedModelSettings: Record<string, unknown> = isRecord(savedConfig.modelSettings) ? savedConfig.modelSettings : {}
     const missingModelSettings = !isRecord(savedConfig.modelSettings)
+    const missingModelOptions = !Array.isArray(savedModelSettings.options)
+    const modelProviderChanged = normalizeUserModelProvider(savedConfig.modelProvider) !== savedConfig.modelProvider
+    const modelNameChanged = normalizeUserModelName(savedConfig.modelName) !== savedConfig.modelName
     const missingQuickCommands = !isRecord(savedConfig.quickCommands)
     const missingKnowledgeBase = !isRecord(savedConfig.knowledgeBase)
     const missingAliasCommands = !Array.isArray(savedConfig.aliasCommands)
-    const missingShortcuts = !Array.isArray(savedConfig.shortcuts)
-    const missingRules = !Array.isArray(savedConfig.rules)
     const missingSkills = !Array.isArray(savedConfig.skills)
     const missingMcpServers = !Array.isArray(savedConfig.mcpServers)
     config.value = mergeUserConfig(defaultConfig, savedConfig)
@@ -2670,7 +3205,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...normalizedAiPreferences,
       proxy: { ...normalizedAiPreferences.proxy }
     }
-    const { normalized: normalizedModelSettings, changed: modelSettingsChanged } = normalizeModelSettingsConfig(savedConfig.modelSettings)
+    const modelCatalog = await refreshAiModelCatalog({ replaceSettingsOptions: false })
+    const modelSettingsSource =
+      missingModelSettings || missingModelOptions
+        ? {
+            ...savedModelSettings,
+            options: modelCatalog.settingsModels
+          }
+        : savedConfig.modelSettings
+    const { normalized: normalizedModelSettings, changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource)
     addModelSwitch.value = normalizedModelSettings.addModelSwitch
     modelProviders.value = {
       litellm: { ...normalizedModelSettings.providers.litellm },
@@ -2687,31 +3230,78 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       type: option.type,
       apiProvider: option.apiProvider
     }))
-    const { normalized: normalizedQuickCommands, changed: quickCommandsChanged } = normalizeQuickCommandsConfig(savedConfig.quickCommands)
+    const bridgeQuickCommands = window.aiops.getQuickCommands ? await window.aiops.getQuickCommands() : savedConfig.quickCommands
+    const { normalized: normalizedQuickCommands, changed: quickCommandsChanged } = normalizeQuickCommandsConfig(bridgeQuickCommands)
     snippetGroups.value = normalizedQuickCommands.groups.map((group) => ({ ...group }))
     quickCommands.value = normalizedQuickCommands.snippets.map((snippet) => ({ ...snippet }))
-    const { normalized: normalizedKnowledgeBase, changed: knowledgeBaseChanged } = normalizeKnowledgeBaseConfig(savedConfig.knowledgeBase)
+    const {
+      normalized: savedKnowledgeBaseSnapshot,
+      changed: savedKnowledgeBaseChanged
+    } = normalizeKnowledgeBaseConfig(savedConfig.knowledgeBase)
+    let normalizedKnowledgeBase = savedKnowledgeBaseSnapshot
+    let knowledgeBaseChanged = savedKnowledgeBaseChanged
+    const knowledgeBridge = getKnowledgeBridge()
+    if (knowledgeBridge) {
+      try {
+        await knowledgeBridge.kbEnsureRoot()
+        const bridgeKnowledgeTree = await loadKnowledgeTreeFromBridge('')
+        const bridgeKnowledgeBase: KnowledgeBaseUserConfig = {
+          tree: cloneKnowledgeNodes(bridgeKnowledgeTree),
+          usedBytes: knowledgeTreeSize(bridgeKnowledgeTree),
+          totalBytes: savedKnowledgeBaseSnapshot.totalBytes
+        }
+        normalizedKnowledgeBase = bridgeKnowledgeBase
+      } catch {
+        setTopNotice('知识库加载失败')
+      }
+    }
     knowledgeTree.value = cloneKnowledgeNodes(normalizedKnowledgeBase.tree)
     kbUsedBytes.value = normalizedKnowledgeBase.usedBytes
     kbTotalBytes.value = normalizedKnowledgeBase.totalBytes
-    const { normalized: normalizedAliasCommands, changed: aliasCommandsChanged } = normalizeAliasCommandsConfig(savedConfig.aliasCommands)
+    let bridgeAliasCommands = savedConfig.aliasCommands || defaultAliasCommands
+    try {
+      bridgeAliasCommands = await loadAliasCommandsFromBackend(bridgeAliasCommands)
+    } catch {
+      setExtensionNotice('Alias 加载失败')
+    }
+    const { normalized: normalizedAliasCommands, changed: aliasCommandsChanged } = normalizeAliasCommandsConfig(bridgeAliasCommands)
     aliasCommands.value = normalizedAliasCommands.map((alias) => ({ ...alias, edit: false }))
-    const { normalized: normalizedShortcuts, changed: shortcutsChanged } = normalizeShortcutsConfig(savedConfig.shortcuts)
+    let bridgeSettingsPreferences: SettingsPreferencesSnapshot = {
+      shortcuts: normalizeShortcutsConfig(savedConfig.shortcuts).normalized,
+      rules: normalizeRulesConfig(savedConfig.rules, savedConfig.customInstructions).normalized
+    }
+    try {
+      const result = await window.aiops.getSettingsPreferences?.({
+        shortcuts: savedConfig.shortcuts,
+        rules: savedConfig.rules,
+        customInstructions: savedConfig.customInstructions
+      })
+      if (result?.ok && result.data) {
+        bridgeSettingsPreferences = result.data
+      } else if (result && !result.ok) {
+        setSettingsNotice(result.errorMessage || '设置偏好加载失败')
+      }
+    } catch {
+      setSettingsNotice('设置偏好加载失败')
+    }
+    const { normalized: normalizedShortcuts } = normalizeShortcutsConfig(bridgeSettingsPreferences.shortcuts)
     settingsShortcuts.value = normalizedShortcuts.map((shortcut) => ({ ...shortcut }))
-    const { normalized: normalizedRules, changed: rulesChanged } = normalizeRulesConfig(savedConfig.rules, savedConfig.customInstructions)
+    const { normalized: normalizedRules } = normalizeRulesConfig(bridgeSettingsPreferences.rules)
     settingsRules.value = normalizedRules.map((rule) => ({ ...rule, isEditing: false }))
-    const { normalized: normalizedSkills, changed: skillsChanged } = normalizeSkillsConfig(savedConfig.skills)
-    settingsSkills.value = normalizedSkills.map((skill) => ({ ...skill }))
+    const savedSkillsSnapshot = normalizeSkillsConfig(savedConfig.skills)
+    const bridgeSkills = await readSkillsSnapshotFromBridge()
     const {
-      normalized: normalizedMcpServers,
-      toolStates: normalizedMcpToolStates,
-      changed: mcpServersChanged
-    } = normalizeMcpServersConfig(savedConfig.mcpServers, savedConfig.mcpToolStates)
-    mcpServers.value = normalizedMcpServers.map((server) => ({
-      ...server,
-      tools: server.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })),
-      resources: server.resources.map((resource) => ({ ...resource }))
-    }))
+      normalized: normalizedSkills,
+      changed: rawSkillsChanged
+    } = normalizeSkillsConfig(bridgeSkills || savedConfig.skills)
+    const skillsChanged = bridgeSkills ? savedSkillsSnapshot.changed : rawSkillsChanged
+    settingsSkills.value = normalizedSkills.map((skill) => ({ ...skill }))
+    const savedMcpSnapshot = normalizeMcpServersConfig(savedConfig.mcpServers, savedConfig.mcpToolStates)
+    applyMcpServersSnapshot({
+      normalized: savedMcpSnapshot.normalized,
+      toolStates: savedMcpSnapshot.toolStates,
+      changed: savedMcpSnapshot.changed
+    })
     const { normalized, changed } = normalizeOnboardingConfig(config.value.onboarding)
     onboardingCompleted.value = normalized.completedModules
     config.value = mergeUserConfig(config.value, {
@@ -2732,9 +3322,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       shortcuts: normalizedShortcuts,
       rules: normalizedRules,
       skills: normalizedSkills,
-      customInstructions: typeof savedConfig.customInstructions === 'string' && savedConfig.customInstructions.trim() ? '' : savedConfig.customInstructions,
-      mcpServers: normalizedMcpServers,
-      mcpToolStates: normalizedMcpToolStates,
+      customInstructions: '',
+      mcpServers: savedMcpSnapshot.normalized,
+      mcpToolStates: savedMcpSnapshot.toolStates,
       onboarding: normalized
     })
     if (
@@ -2759,6 +3349,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       missingPrivacy ||
       aiPreferencesChanged ||
       missingAiPreferences ||
+      modelProviderChanged ||
+      modelNameChanged ||
       modelSettingsChanged ||
       missingModelSettings ||
       quickCommandsChanged ||
@@ -2767,18 +3359,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       missingKnowledgeBase ||
       aliasCommandsChanged ||
       missingAliasCommands ||
-      shortcutsChanged ||
-      missingShortcuts ||
-      rulesChanged ||
-      missingRules ||
       skillsChanged ||
       missingSkills ||
-      mcpServersChanged ||
+      savedMcpSnapshot.changed ||
       missingMcpServers
     ) {
       config.value = mergeUserConfig(
         config.value,
         await window.aiops.saveConfig({
+          modelProvider: config.value.modelProvider,
+          modelName: config.value.modelName,
           terminal: normalizedTerminal,
           workspacePreferences: normalizedWorkspacePreferences,
           editorSettings: normalizedEditorSettings,
@@ -2793,12 +3383,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           quickCommands: normalizedQuickCommands,
           knowledgeBase: normalizedKnowledgeBase,
           aliasCommands: normalizedAliasCommands,
-          shortcuts: normalizedShortcuts,
-          rules: normalizedRules,
           skills: normalizedSkills,
           customInstructions: '',
-          mcpServers: normalizedMcpServers,
-          mcpToolStates: normalizedMcpToolStates,
+          mcpServers: savedMcpSnapshot.normalized,
+          mcpToolStates: savedMcpSnapshot.toolStates,
           onboarding: normalized
         })
       )
@@ -2806,18 +3394,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     mode.value = config.value.defaultMode
     leftPanelOpen.value = config.value.leftPanelOpen
     rightPanelOpen.value = config.value.rightPanelOpen
-    document.documentElement.dataset.theme = config.value.theme
-    await loadSkillsFromBridge()
+    config.value.theme = normalizeThemeId(config.value.theme)
+    applyCurrentTheme()
+    applyCurrentEditorSettings()
+    refreshShortcutRuntime()
+    setupThemeBridge()
+    await refreshUserAccount()
+    await refreshExtensionPlugins()
     setupKnowledgeBridgeListeners()
     await refreshKnowledgeTree({ persist: false })
+    await refreshFileSessionCatalog()
+    await refreshFileTransferTasks()
+    await refreshKubernetesCatalog()
+    await loadChatConversationsFromBackend({ restoreIfEmpty: true })
+    await refreshAiContextCatalog({ hydrateSelection: true })
   }
 
   const saveConfig = async (patch: Partial<UserConfig>) => {
-    config.value = mergeUserConfig(config.value, patch)
-    document.documentElement.dataset.theme = config.value.theme
+    const normalizedPatch = patch.theme ? { ...patch, theme: normalizeThemeId(patch.theme) } : patch
+    config.value = mergeUserConfig(config.value, normalizedPatch)
+    config.value.theme = normalizeThemeId(config.value.theme)
+    applyCurrentTheme()
+    setupThemeBridge()
     if (window.aiops) {
-      config.value = mergeUserConfig(config.value, await window.aiops.saveConfig(patch))
+      config.value = mergeUserConfig(config.value, await window.aiops.saveConfig(normalizedPatch))
     }
+    config.value.theme = normalizeThemeId(config.value.theme)
+    editorSettings.value = normalizeEditorSettingsConfig(config.value.editorSettings).normalized
+    applyCurrentTheme()
+    applyCurrentEditorSettings()
+    refreshShortcutRuntime()
+    setupThemeBridge()
   }
 
   const getQuickCommandsSnapshot = (): QuickCommandsUserConfig => ({
@@ -2825,8 +3432,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     snippets: quickCommands.value.map((snippet) => ({ ...snippet }))
   })
 
-  const persistQuickCommands = () => {
-    saveConfig({ quickCommands: getQuickCommandsSnapshot() })
+  const applyQuickCommandsSnapshot = (snapshot: QuickCommandsUserConfig) => {
+    const normalized = normalizeQuickCommandsConfig(snapshot).normalized
+    snippetGroups.value = normalized.groups.map((group) => ({ ...group }))
+    quickCommands.value = normalized.snippets.map((snippet) => ({ ...snippet }))
+    config.value = mergeUserConfig(config.value, { quickCommands: normalized })
+    return normalized
+  }
+
+  const refreshQuickCommands = async () => {
+    const snapshot = window.aiops?.getQuickCommands ? await window.aiops.getQuickCommands() : config.value.quickCommands || defaultQuickCommands
+    return applyQuickCommandsSnapshot(snapshot)
+  }
+
+  const persistQuickCommands = async () => {
+    const snapshot = getQuickCommandsSnapshot()
+    if (window.aiops?.saveQuickCommands) {
+      const result = await window.aiops.saveQuickCommands(snapshot)
+      if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '快捷命令保存失败')
+      applyQuickCommandsSnapshot(result.data)
+      await saveConfig({ quickCommands: result.data })
+      return result.data
+    }
+    await saveConfig({ quickCommands: snapshot })
+    return snapshot
   }
 
   const getKnowledgeBaseSnapshot = (): KnowledgeBaseUserConfig => ({
@@ -2840,8 +3469,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loadKnowledgeTreeFromBridge = async (relDir = ''): Promise<KnowledgeNode[]> => {
-    if (!window.aiops?.kbListDir) return cloneKnowledgeNodes(knowledgeTree.value)
-    const entries = await window.aiops.kbListDir(relDir)
+    const knowledgeBridge = getKnowledgeBridge()
+    if (!knowledgeBridge) return cloneKnowledgeNodes(knowledgeTree.value)
+    const entries = await knowledgeBridge.kbListDir(relDir)
     const nodes: KnowledgeNode[] = []
     for (const entry of entries) {
       const node = knowledgeEntryToNode(entry)
@@ -2854,8 +3484,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshKnowledgeTree = async (options: { persist?: boolean } = {}) => {
-    if (!window.aiops?.kbEnsureRoot || !window.aiops?.kbListDir) return
-    await window.aiops.kbEnsureRoot()
+    const knowledgeBridge = getKnowledgeBridge()
+    if (!knowledgeBridge) return
+    await knowledgeBridge.kbEnsureRoot()
     const nextTree = await loadKnowledgeTreeFromBridge('')
     const nextSnapshot: KnowledgeBaseUserConfig = {
       tree: cloneKnowledgeNodes(nextTree),
@@ -2904,6 +3535,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveConfig({ aliasCommands: getAliasCommandsSnapshot() })
   }
 
+  const applyAliasCommandsFromBackend = (commands: AliasCommandConfig[]) => {
+    const { normalized } = normalizeAliasCommandsConfig(commands)
+    aliasCommands.value = normalized.map((alias) => ({ ...alias, edit: false }))
+    config.value = mergeUserConfig(config.value, { aliasCommands: normalized })
+    return normalized
+  }
+
+  const loadAliasCommandsFromBackend = async (fallback: AliasCommandConfig[]) => {
+    if (!window.aiops?.listAliasCommands) return fallback
+    const result = await window.aiops.listAliasCommands()
+    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || 'Alias 加载失败')
+    return result.data
+  }
+
+  const refreshAliasCommands = async () => {
+    try {
+      const commands = await loadAliasCommandsFromBackend(defaultAliasCommands)
+      const normalized = applyAliasCommandsFromBackend(commands)
+      await saveConfig({ aliasCommands: normalized })
+      return true
+    } catch {
+      setExtensionNotice('Alias 加载失败')
+      return false
+    }
+  }
+
+  const syncAliasConfigFromBackend = async (commands: AliasCommandConfig[]) => {
+    applyAliasCommandsFromBackend(commands)
+    await saveConfig({ aliasCommands: getAliasCommandsSnapshot() })
+  }
+
   const getExtensionSettingsSnapshot = (): ExtensionUserConfig => ({ ...extensionSettings.value })
 
   const getPrivacySnapshot = (): PrivacyUserConfig => ({
@@ -2944,15 +3606,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const getRulesSnapshot = (): UserRuleConfig[] => cloneRuleConfig(settingsRules.value)
 
-  const persistRules = () => {
-    saveConfig({ rules: getRulesSnapshot(), customInstructions: '' })
+  const applySettingsPreferencesSnapshot = (snapshot: SettingsPreferencesSnapshot) => {
+    const { normalized: normalizedShortcuts } = normalizeShortcutsConfig(snapshot.shortcuts)
+    const { normalized: normalizedRules } = normalizeRulesConfig(snapshot.rules)
+    settingsShortcuts.value = normalizedShortcuts.map((shortcut) => ({ ...shortcut }))
+    settingsRules.value = normalizedRules.map((rule) => ({ ...rule, isEditing: false }))
+    config.value = mergeUserConfig(config.value, {
+      shortcuts: normalizedShortcuts,
+      rules: normalizedRules,
+      customInstructions: ''
+    })
+    refreshShortcutRuntime()
+    return {
+      shortcuts: normalizedShortcuts,
+      rules: normalizedRules
+    }
   }
 
   const getSkillsSnapshot = (): SkillUserConfig[] => cloneSkillConfig(settingsSkills.value)
-
-  const persistSkills = () => {
-    saveConfig({ skills: getSkillsSnapshot() })
-  }
 
   const applySkillsList = (skills: SkillUserConfig[]) => {
     const { normalized } = normalizeSkillsConfig(skills)
@@ -2967,7 +3638,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
-  const loadSkillsFromBridge = async () => {
+  const readSkillsSnapshotFromBridge = async () => {
     if (!window.aiops?.getSkills) return false
     try {
       installSkillsUpdateListener()
@@ -2976,6 +3647,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         window.aiops.getSkills()
       ])
       skillsUserPath.value = path
+      return skills
+    } catch {
+      setSettingsNotice('Skills 加载失败')
+      return null
+    }
+  }
+
+  const loadSkillsFromBridge = async () => {
+    const skills = await readSkillsSnapshotFromBridge()
+    if (!skills) return false
+    try {
       applySkillsList(skills)
       return true
     } catch {
@@ -2983,6 +3665,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
   }
+
+  const refreshSkillsFromBridge = () => loadSkillsFromBridge()
 
   const reloadSkills = async () => {
     try {
@@ -3020,9 +3704,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { servers, toolStates }
   }
 
-  const persistMcpServers = () => {
+  const readMcpServersSnapshotFromBridge = async (currentServers: McpServerUserConfig[], currentToolStates: McpToolStatesUserConfig) => {
+    if (window.aiops?.getMcpServers) {
+      try {
+        return normalizeMcpServersConfig(await window.aiops.getMcpServers())
+      } catch {
+        setSettingsNotice('MCP 配置加载失败')
+        return null
+      }
+    }
+    if (!window.aiops?.readMcpConfig) return null
+    try {
+      const content = await window.aiops.readMcpConfig()
+      const editorContent = content.trim() ? content : JSON.stringify({ mcpServers: {} }, null, 2)
+      const parsed = normalizeMcpConfigFile(parseMcpEditorContent(editorContent))
+      return normalizeMcpServersConfig(mcpConfigFileToServers(parsed, currentServers), currentToolStates)
+    } catch {
+      setSettingsNotice('MCP 配置加载失败')
+      return null
+    }
+  }
+
+  const applyMcpServersSnapshot = (snapshot: ReturnType<typeof normalizeMcpServersConfig>) => {
+    mcpServers.value = snapshot.normalized.map((server) => ({
+      ...server,
+      tools: server.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })),
+      resources: server.resources.map((resource) => ({ ...resource }))
+    }))
+    const expandedNames = expandedMcpServerNames.value.filter((name) => mcpServers.value.some((server) => server.name === name))
+    expandedMcpServerNames.value = expandedNames.length || !mcpServers.value[0] ? expandedNames : [mcpServers.value[0].name]
+    config.value = mergeUserConfig(config.value, {
+      mcpServers: snapshot.normalized,
+      mcpToolStates: snapshot.toolStates
+    })
+  }
+
+  const refreshMcpServersFromBridge = async () => {
     const { servers, toolStates } = getMcpSnapshot()
-    saveConfig({ mcpServers: servers, mcpToolStates: toolStates })
+    const snapshot = await readMcpServersSnapshotFromBridge(servers, toolStates)
+    if (!snapshot) return false
+    applyMcpServersSnapshot(snapshot)
+    return true
   }
 
   const applyMcpConfigFileContent = (content: string, markSaved = true) => {
@@ -3069,18 +3791,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const setSettingsNotice = (text: string) => {
-    settingsNotice.value = text
-    if (!text) return
-    window.setTimeout(() => {
-      if (settingsNotice.value === text) settingsNotice.value = ''
-    }, 2400)
+    setSettingsNoticeText(text)
   }
 
-  const setActiveSettingsSection = (key: SettingSectionKey) => {
-    if (key === 'docs') {
-      setSettingsNotice('已打开文档入口')
-      return
-    }
+  const closeSettingsInlineEditors = () => {
     if (keywordHighlightEditorOpen.value) {
       closeKeywordHighlightEditor()
     }
@@ -3091,9 +3805,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       closeMcpConfigEditor()
     }
     onboardingGuideOpen.value = false
+  }
+
+  const openSettingsDocumentation = async () => {
+    closeSettingsInlineEditors()
+    activeSettingsSection.value = 'general'
+    try {
+      await window.aiops?.openExternalUrl?.(settingsDocumentationUrl)
+      setSettingsNotice('已打开文档')
+      return true
+    } catch {
+      setSettingsNotice('文档入口打开失败')
+      return false
+    }
+  }
+
+  const setActiveSettingsSection = (key: SettingSectionKey) => {
+    if (key === 'docs') {
+      void openSettingsDocumentation()
+      return
+    }
+    closeSettingsInlineEditors()
     activeSettingsSection.value = key
     if (key === 'skills') {
       void loadSkillsFromBridge()
+    } else if (key === 'mcp') {
+      void refreshMcpServersFromBridge()
     }
   }
 
@@ -3248,7 +3985,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const selectTheme = (theme: string) => {
-    saveConfig({ theme })
+    saveConfig({ theme: normalizeThemeId(theme) })
   }
 
   const selectBackground = (mode: UserConfig['background']['mode'], image = '') => {
@@ -3259,6 +3996,64 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         image
       }
     })
+  }
+
+  const uploadCustomBackground = async () => {
+    try {
+      const result = await window.aiops?.showOpenDialog?.({
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }]
+      })
+      if (!result || result.canceled || !result.filePaths.length) return false
+      const saved = await window.aiops?.saveCustomBackground?.(result.filePaths[0])
+      if (!saved?.url) {
+        setSettingsNotice('自定义背景保存失败')
+        return false
+      }
+      await saveConfig({
+        background: {
+          ...config.value.background,
+          mode: 'custom',
+          image: saved.url,
+          lastCustomImage: saved.url
+        }
+      })
+      setSettingsNotice(`自定义背景已保存：${saved.name}`)
+      return true
+    } catch (error) {
+      setSettingsNotice(`自定义背景保存失败：${error instanceof Error ? error.message : String(error)}`)
+      return false
+    }
+  }
+
+  const selectCustomBackground = () => {
+    const customImage = config.value.background.lastCustomImage || (config.value.background.mode === 'custom' ? config.value.background.image : '')
+    if (!customImage) {
+      setSettingsNotice('请先上传自定义背景')
+      return false
+    }
+    saveConfig({
+      background: {
+        ...config.value.background,
+        mode: 'custom',
+        image: customImage,
+        lastCustomImage: customImage
+      }
+    })
+    return true
+  }
+
+  const clearCustomBackground = () => {
+    const wasSelected = config.value.background.mode === 'custom'
+    saveConfig({
+      background: {
+        ...config.value.background,
+        mode: wasSelected ? 'none' : config.value.background.mode,
+        image: wasSelected ? '' : config.value.background.image,
+        lastCustomImage: ''
+      }
+    })
+    setSettingsNotice('自定义背景已清除')
   }
 
   const updateBackgroundTuning = (patch: Partial<Pick<UserConfig['background'], 'opacity' | 'brightness'>>) => {
@@ -3284,6 +4079,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const updateEditorSettings = (patch: Partial<EditorSettings>) => {
     editorSettings.value = normalizeEditorSettingsConfig({ ...editorSettings.value, ...patch }).normalized
+    applyCurrentEditorSettings()
     saveConfig({ editorSettings: { ...editorSettings.value } })
     setSettingsNotice('编辑器设置已保存')
   }
@@ -3446,20 +4242,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     persistModelSettings()
   }
 
-  const checkModelProvider = (provider: ModelProviderKey) => {
+  const checkModelProvider = async (provider: ModelProviderKey) => {
+    const requestSeq = (modelCheckRequestSeq.value[provider] || 0) + 1
+    modelCheckRequestSeq.value = { ...modelCheckRequestSeq.value, [provider]: requestSeq }
     modelCheckState.value = { ...modelCheckState.value, [provider]: 'checking' }
-    window.setTimeout(() => {
-      modelCheckState.value = { ...modelCheckState.value, [provider]: 'success' }
-      const providerLabel: Record<ModelProviderKey, string> = {
-        litellm: 'LiteLLM',
-        openai: 'OpenAI Compatible',
-        bedrock: 'Amazon Bedrock',
-        deepseek: 'DeepSeek',
-        anthropic: 'Anthropic',
-        ollama: 'Ollama'
+    const config = { ...modelProviders.value[provider] }
+    try {
+      const result = await window.aiops.checkModelProvider({ provider, config })
+      if (modelCheckRequestSeq.value[provider] !== requestSeq) return
+      if (result.ok) {
+        modelCheckState.value = { ...modelCheckState.value, [provider]: 'success' }
+        setSettingsNotice(result.data?.message || `${provider} Check 成功`)
+      } else {
+        modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
+        setSettingsNotice(result.errorMessage || `${provider} Check 失败`)
       }
-      setSettingsNotice(`${providerLabel[provider]} Check 成功`)
-    }, 300)
+    } catch (error) {
+      if (modelCheckRequestSeq.value[provider] !== requestSeq) return
+      modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
+      setSettingsNotice(`模型 Provider 检查失败：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   const saveModelProvider = (provider: ModelProviderKey) => {
@@ -3832,286 +4634,322 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   })
   const userLoginCodeTimers: Partial<Record<'email' | 'mobile', number>> = {}
 
+  const clearUserCodeTimer = (timers: Partial<Record<'email' | 'mobile', number>>, kind: 'email' | 'mobile') => {
+    if (!timers[kind]) return
+    window.clearInterval(timers[kind])
+    delete timers[kind]
+  }
+
+  const resetUserCodeState = (target: 'login' | 'contact', kind?: 'email' | 'mobile') => {
+    const kinds: Array<'email' | 'mobile'> = kind ? [kind] : ['email', 'mobile']
+    kinds.forEach((item) => {
+      if (target === 'login') {
+        userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, [item]: 0 }
+        userLoginCodeSending.value = { ...userLoginCodeSending.value, [item]: false }
+        clearUserCodeTimer(userLoginCodeTimers, item)
+      } else {
+        userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [item]: 0 }
+        userContactCodeSending.value = { ...userContactCodeSending.value, [item]: false }
+        clearUserCodeTimer(userContactCodeTimers, item)
+      }
+    })
+  }
+
   const isUserSubscriptionActive = computed(() => {
     const profile = userProfile.value
     if (profile.subscription !== 'pro' && profile.subscription !== 'ultra') return false
     return new Date(profile.subscriptionExpiresAt) > new Date()
   })
 
-  const canEditUserMobile = computed(() => userProfile.value.authProvider !== 'oauth')
-  const canEditUserEmail = computed(() => userProfile.value.authProvider === 'local')
-  const canResetUserPassword = computed(() => userProfile.value.authProvider === 'local')
+  const canEditUserMobile = computed(() => userProfile.value.registrationCode !== 7)
+  const canEditUserEmail = computed(() => ![2, 3, 4, 6].includes(userProfile.value.registrationCode))
+  const canResetUserPassword = computed(() => userProfile.value.registrationCode !== 1 && userProfile.value.authProvider !== 'sso')
 
-  const validateUserProfileDraft = (patch: Partial<Pick<MockUserProfile, 'name' | 'username'>>) => {
-    const username = patch.username?.trim() ?? userProfile.value.username
-    const name = patch.name?.trim() ?? userProfile.value.name
-    if (!username || username.length < 6 || username.length > 20) {
-      return '用户名长度需要在 6 到 20 个字符之间'
+  const applyUserAccountSnapshot = (snapshot: AiopsUserAccountSnapshot) => {
+    userProfile.value = { ...snapshot.profile }
+    trustedDevices.value = snapshot.trustedDevices.map((device) => ({ ...device }))
+    billingSettings.value = {
+      ...billingSettings.value,
+      skippedLogin: snapshot.profile.skippedLogin || snapshot.profile.lastLoginMethod === 'skip',
+      email: snapshot.profile.email || billingSettings.value.email,
+      subscription: snapshot.profile.subscription,
+      subscriptionExpiresAt: snapshot.profile.subscriptionExpiresAt
     }
-    if (!/^[A-Za-z0-9_]+$/.test(username)) {
-      return '用户名仅支持字母、数字和下划线'
-    }
-    if (!name || name.length > 20) {
-      return '姓名不能为空且不能超过 20 个字符'
-    }
-    return ''
   }
 
-  const validateUserContactDraft = (kind: 'email' | 'mobile', value: string) => {
-    const trimmed = value.trim()
-    if (kind === 'email') {
-      if (!canEditUserEmail.value) return '当前登录方式不允许修改邮箱'
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return '邮箱格式不正确'
-      return ''
+  const applyUserMutationResult = (result: AiopsUserMutationResult | undefined) => {
+    if (result?.data) applyUserAccountSnapshot(result.data)
+    if (!result?.ok) {
+      setUserNotice(result?.errorMessage || '用户操作失败')
+      userLoginLoading.value = false
+      return false
     }
-    if (!canEditUserMobile.value) return '当前登录方式不允许修改手机号'
-    if (!/^1[3-9]\d{9}$/.test(trimmed)) return '手机号格式不正确'
-    return ''
+    setUserNotice(result.data?.message || '用户操作已完成')
+    userLoginLoading.value = false
+    return true
+  }
+
+  const refreshUserAccount = async () => {
+    if (!window.aiops?.getUserAccount) return false
+    try {
+      const result = await window.aiops.getUserAccount()
+      if (!result?.ok || !result.data) {
+        setUserNotice(result?.errorMessage || '用户信息加载失败')
+        return false
+      }
+      applyUserAccountSnapshot(result.data)
+      return true
+    } catch (error) {
+      setUserNotice(error instanceof Error ? error.message : '用户信息加载失败')
+      return false
+    }
+  }
+
+  const startUserCountdown = (
+    target: 'login' | 'contact',
+    kind: 'email' | 'mobile',
+    countdownSeconds: number,
+    message: string,
+    delayMs = 120
+  ) => {
+    const sendingRef = target === 'login' ? userLoginCodeSending : userContactCodeSending
+    const countdownRef = target === 'login' ? userLoginCodeCountdown : userContactCodeCountdown
+    const timers = target === 'login' ? userLoginCodeTimers : userContactCodeTimers
+    window.setTimeout(() => {
+      sendingRef.value = { ...sendingRef.value, [kind]: false }
+      countdownRef.value = { ...countdownRef.value, [kind]: countdownSeconds }
+      clearUserCodeTimer(timers, kind)
+      timers[kind] = window.setInterval(() => {
+        const next = Math.max(0, countdownRef.value[kind] - 1)
+        countdownRef.value = { ...countdownRef.value, [kind]: next }
+        if (next === 0) clearUserCodeTimer(timers, kind)
+      }, 1000)
+      setUserNotice(message)
+    }, delayMs)
   }
 
   const openAccountCenter = () => {
     userAccountCenterOpen.value = true
-    setUserNotice('账号中心已打开，本地展示订阅、可信设备和账号状态')
+    setUserNotice('账号中心已打开')
   }
 
   const closeAccountCenter = () => {
     userAccountCenterOpen.value = false
   }
 
-  const openUserLogin = () => {
+  const openUserLogin = async () => {
     activeModule.value = 'user'
-    userProfile.value.skippedLogin = true
-    billingSettings.value.skippedLogin = true
     userLoginTab.value = 'account'
-    setUserNotice('已打开本地登录页')
+    resetUserCodeState('login')
+    if (!window.aiops?.openUserLogin) {
+      userProfile.value = { ...userProfile.value, skippedLogin: true }
+      billingSettings.value.skippedLogin = true
+      setUserNotice('已打开本地登录页')
+      return true
+    }
+    return applyUserMutationResult(await window.aiops.openUserLogin())
   }
 
   const setUserLoginTab = (tab: UserLoginTab) => {
     userLoginTab.value = tab
   }
 
-  const applyLocalLoginProfile = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'authProvider' | 'needDeviceVerification'>> = {}) => {
-    userProfile.value.skippedLogin = false
-    userProfile.value = {
-      ...userProfile.value,
-      ...patch,
-      skippedLogin: false,
-      needDeviceVerification: patch.needDeviceVerification ?? false
-    }
-    billingSettings.value.skippedLogin = false
-    billingSettings.value.email = userProfile.value.email || billingSettings.value.email
-    userLoginLoading.value = false
+  const loginUser = async () => {
+    const result = await window.aiops?.loginUserAccount?.({ method: 'account', username: userProfile.value.username || 'local_ops', password: 'local' })
+    return applyUserMutationResult(result || { ok: false, errorMessage: '用户登录 API 不可用' })
   }
 
-  const loginUser = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'authProvider'>> = {}) => {
-    applyLocalLoginProfile(patch)
-    setUserNotice('已切换为本地登录状态')
-  }
-
-  const logoutUser = () => {
-    userProfile.value.skippedLogin = true
-    billingSettings.value.skippedLogin = true
+  const logoutUser = async () => {
     userAccountCenterOpen.value = false
-    setUserNotice('已退出，本地 mock 登录态已清除')
+    resetUserCodeState('login')
+    resetUserCodeState('contact')
+    if (!window.aiops?.logoutUserAccount) {
+      userProfile.value = {
+        ...userProfile.value,
+        skippedLogin: true,
+        localDatabaseReady: false,
+        needDeviceVerification: false
+      }
+      billingSettings.value.skippedLogin = true
+      setUserNotice('已退出登录')
+      return true
+    }
+    return applyUserMutationResult(await window.aiops.logoutUserAccount())
   }
 
-  const skipUserLogin = () => {
-    applyLocalLoginProfile({
-      name: 'Guest',
-      username: 'guest',
-      email: 'guest@example.local',
-      mobile: '',
-      authProvider: 'local'
-    })
-    billingSettings.value.skippedLogin = true
-    setUserNotice('已跳过登录，使用本地访客状态')
-    return true
+  const skipUserLogin = async () => {
+    const result = await window.aiops?.skipUserLogin?.()
+    return applyUserMutationResult(result || { ok: false, errorMessage: '跳过登录 API 不可用' })
   }
 
-  const sendUserLoginCode = (kind: 'email' | 'mobile', value: string) => {
-    const trimmed = value.trim()
-    if (kind === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setUserNotice('邮箱格式不正确')
-      return false
-    }
-    if (kind === 'mobile' && !/^1[3-9]\d{9}$/.test(trimmed)) {
-      setUserNotice('手机号格式不正确')
-      return false
-    }
+  const sendUserLoginCode = async (kind: 'email' | 'mobile', value: string) => {
     if (userLoginCodeCountdown.value[kind] > 0 || userLoginCodeSending.value[kind]) return false
     userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: true }
-    window.setTimeout(() => {
+    const result = await window.aiops?.sendUserLoginCode?.({ kind, value })
+    if (!result?.ok || !result.data) {
       userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: false }
-      userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, [kind]: 300 }
-      if (userLoginCodeTimers[kind]) window.clearInterval(userLoginCodeTimers[kind])
-      userLoginCodeTimers[kind] = window.setInterval(() => {
-        const next = Math.max(0, userLoginCodeCountdown.value[kind] - 1)
-        userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, [kind]: next }
-        if (next === 0 && userLoginCodeTimers[kind]) {
-          window.clearInterval(userLoginCodeTimers[kind])
-          delete userLoginCodeTimers[kind]
-        }
-      }, 1000)
-      setUserNotice(`${kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`)
-    }, 120)
+      setUserNotice(result?.errorMessage || '验证码发送失败')
+      return false
+    }
+    startUserCountdown('login', kind, result.data.countdownSeconds, result.data.message)
     return true
   }
 
-  const loginWithAccount = (username: string, password: string) => {
-    const nextUsername = username.trim()
-    if (!nextUsername || !password) {
-      setUserNotice('请输入用户名和密码')
-      return false
-    }
+  const loginWithAccount = async (username: string, password: string) => {
     userLoginLoading.value = true
-    if (nextUsername.toLowerCase().includes('verify')) {
-      userLoginLoading.value = false
-      userProfile.value.needDeviceVerification = true
-      setUserNotice('当前设备需要验证后才能登录')
-      return false
-    }
-    applyLocalLoginProfile({
-      username: nextUsername,
-      name: userProfile.value.name || nextUsername,
-      authProvider: 'local'
-    })
-    setUserNotice('账号登录成功，本地数据库初始化完成')
-    return true
+    const result = await window.aiops?.loginUserAccount?.({ method: 'account', username, password })
+    return applyUserMutationResult(result || { ok: false, errorMessage: '账号登录 API 不可用' })
   }
 
-  const loginWithEmail = (email: string, code: string) => {
-    const nextEmail = email.trim()
-    if (!nextEmail || !code.trim()) {
-      setUserNotice('请输入邮箱和验证码')
-      return false
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
-      setUserNotice('邮箱格式不正确')
-      return false
-    }
+  const loginWithEmail = async (email: string, code: string) => {
     userLoginLoading.value = true
-    applyLocalLoginProfile({
-      email: nextEmail,
-      username: nextEmail.split('@')[0] || userProfile.value.username,
-      authProvider: 'local'
-    })
-    userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, email: 0 }
-    if (userLoginCodeTimers.email) {
-      window.clearInterval(userLoginCodeTimers.email)
-      delete userLoginCodeTimers.email
-    }
-    setUserNotice('邮箱登录成功，本地数据库初始化完成')
-    return true
+    const result = await window.aiops?.loginUserAccount?.({ method: 'email', email, code })
+    const ok = applyUserMutationResult(result || { ok: false, errorMessage: '邮箱登录 API 不可用' })
+    if (ok) resetUserCodeState('login', 'email')
+    return ok
   }
 
-  const loginWithMobile = (mobile: string, code: string) => {
-    const nextMobile = mobile.trim()
-    if (!nextMobile || !code.trim()) {
-      setUserNotice('请输入手机号和验证码')
-      return false
-    }
-    if (!/^1[3-9]\d{9}$/.test(nextMobile)) {
-      setUserNotice('手机号格式不正确')
-      return false
-    }
+  const loginWithMobile = async (mobile: string, code: string) => {
     userLoginLoading.value = true
-    applyLocalLoginProfile({
-      mobile: nextMobile,
-      authProvider: 'local'
-    })
-    userLoginCodeCountdown.value = { ...userLoginCodeCountdown.value, mobile: 0 }
-    if (userLoginCodeTimers.mobile) {
-      window.clearInterval(userLoginCodeTimers.mobile)
-      delete userLoginCodeTimers.mobile
-    }
-    setUserNotice('手机号登录成功，本地数据库初始化完成')
-    return true
+    const result = await window.aiops?.loginUserAccount?.({ method: 'mobile', mobile, code })
+    const ok = applyUserMutationResult(result || { ok: false, errorMessage: '手机号登录 API 不可用' })
+    if (ok) resetUserCodeState('login', 'mobile')
+    return ok
   }
 
-  const updateUserProfile = (patch: Partial<Pick<MockUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl'>>) => {
-    const validation = validateUserProfileDraft(patch)
-    if (validation) {
-      setUserNotice(validation)
-      return false
-    }
-    const nextAvatarInitials = patch.avatarInitials?.trim().toUpperCase().slice(0, 3)
-    userProfile.value = {
-      ...userProfile.value,
-      ...patch,
-      name: patch.name?.trim() ?? userProfile.value.name,
-      username: patch.username?.trim() ?? userProfile.value.username,
-      avatarInitials: nextAvatarInitials || userProfile.value.avatarInitials
-    }
-    setUserNotice('个人信息已保存')
-    return true
+  const updateUserProfile = async (
+    patch: Partial<Pick<AiopsUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl' | 'avatarUpdatedAt'>>
+  ) => {
+    const result = await window.aiops?.updateUserProfile?.(patch)
+    return applyUserMutationResult(result || { ok: false, errorMessage: '用户资料保存 API 不可用' })
   }
 
-  const resetUserPassword = (password = '') => {
-    if (!canResetUserPassword.value) {
-      setUserNotice('当前登录方式不允许修改密码')
-      return false
-    }
-    if (password && password.length < 6) {
-      setUserNotice('密码长度至少 6 位')
-      return false
-    }
-    setUserNotice('密码重置为本地占位，未调用远端接口')
-    return true
+  const resetUserPassword = async (password = '') => {
+    const result = await window.aiops?.resetUserPassword?.({ password })
+    return applyUserMutationResult(result || { ok: false, errorMessage: '密码重置 API 不可用' })
   }
 
-  const sendUserContactCode = (kind: 'email' | 'mobile', value: string) => {
-    const validation = validateUserContactDraft(kind, value)
-    if (validation) {
-      setUserNotice(validation)
-      return false
-    }
+  const sendUserContactCode = async (kind: 'email' | 'mobile', value: string) => {
     if (userContactCodeCountdown.value[kind] > 0 || userContactCodeSending.value[kind]) return false
     userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: true }
-    window.setTimeout(() => {
+    const result = await window.aiops?.sendUserContactCode?.({ kind, value })
+    if (!result?.ok || !result.data) {
       userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: false }
-      userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [kind]: 300 }
-      if (userContactCodeTimers[kind]) window.clearInterval(userContactCodeTimers[kind])
-      userContactCodeTimers[kind] = window.setInterval(() => {
-        const next = Math.max(0, userContactCodeCountdown.value[kind] - 1)
-        userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [kind]: next }
-        if (next === 0 && userContactCodeTimers[kind]) {
-          window.clearInterval(userContactCodeTimers[kind])
-          delete userContactCodeTimers[kind]
+      setUserNotice(result?.errorMessage || '验证码发送失败')
+      return false
+    }
+    startUserCountdown('contact', kind, result.data.countdownSeconds, result.data.message)
+    return true
+  }
+
+  const bindUserContact = async (kind: 'email' | 'mobile', value: string, code = '') => {
+    const result = await window.aiops?.bindUserContact?.({ kind, value, code })
+    const ok = applyUserMutationResult(result || { ok: false, errorMessage: '联系方式绑定 API 不可用' })
+    if (ok) resetUserCodeState('contact', kind)
+    return ok
+  }
+
+  let removeAppUpdateProgressListener: (() => void) | null = null
+
+  const handleAppUpdateProgress = (event: AppUpdateProgressEvent) => {
+    aboutSettings.value = {
+      ...aboutSettings.value,
+      updateStatus: event.status === 'downloaded' ? 'downloaded' : event.status,
+      newVersion: event.version || aboutSettings.value.newVersion,
+      progress: Math.max(0, Math.min(100, Math.round(event.percent)))
+    }
+    if (event.status === 'downloaded') setSettingsNotice('更新已下载，可执行安装')
+    if (event.status === 'error') setSettingsNotice(event.message || '更新下载失败')
+  }
+
+  const installAppUpdateProgressListener = () => {
+    if (removeAppUpdateProgressListener || !window.aiops?.onAppUpdateProgress) return
+    removeAppUpdateProgressListener = window.aiops.onAppUpdateProgress(handleAppUpdateProgress)
+  }
+
+  const startAboutDownload = async () => {
+    installAppUpdateProgressListener()
+    const version = aboutSettings.value.newVersion || aboutSettings.value.version
+    aboutSettings.value.updateStatus = 'downloading'
+    aboutSettings.value.progress = 0
+    setSettingsNotice('正在下载更新')
+    try {
+      const result = await window.aiops?.downloadAppUpdate?.(version)
+      if (!result?.ok || !result.data) {
+        aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
+        setSettingsNotice(result?.errorMessage || '更新下载失败')
+        return
+      }
+      aboutSettings.value = {
+        ...aboutSettings.value,
+        updateStatus: 'downloaded',
+        newVersion: result.data.version,
+        progress: result.data.percent
+      }
+      setSettingsNotice('更新已下载，可执行安装')
+    } catch (error) {
+      aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
+      setSettingsNotice(error instanceof Error ? error.message : '更新下载失败')
+    }
+  }
+
+  const checkAboutUpdate = async () => {
+    if (aboutSettings.value.updateStatus === 'available') {
+      await startAboutDownload()
+      return
+    }
+    if (aboutSettings.value.updateStatus === 'downloaded') {
+      try {
+        const result = await window.aiops?.installAppUpdate?.(aboutSettings.value.newVersion || aboutSettings.value.version)
+        if (!result?.ok || !result.data) {
+          aboutSettings.value.updateStatus = 'error'
+          setSettingsNotice(result?.errorMessage || '更新安装失败')
+          return
         }
-      }, 1000)
-      setUserNotice(`${kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
-    }, 120)
-    return true
-  }
-
-  const bindUserContact = (kind: 'email' | 'mobile', value: string, code = '') => {
-    const validation = validateUserContactDraft(kind, value)
-    if (validation) {
-      setUserNotice(validation)
-      return false
+        aboutSettings.value.updateStatus = 'latest'
+        aboutSettings.value.progress = 100
+        aboutSettings.value.version = result.data.version
+        aboutSettings.value.newVersion = ''
+        setSettingsNotice('更新安装请求已提交')
+      } catch (error) {
+        aboutSettings.value.updateStatus = 'error'
+        setSettingsNotice(error instanceof Error ? error.message : '更新安装失败')
+      }
+      return
     }
-    if (!code.trim()) {
-      setUserNotice(`请输入${kind === 'email' ? '邮箱' : '手机'}验证码`)
-      return false
+    aboutSettings.value = {
+      ...aboutSettings.value,
+      updateStatus: 'checking',
+      progress: 0
     }
-    userProfile.value = { ...userProfile.value, [kind]: value.trim() }
-    userContactCodeCountdown.value = { ...userContactCodeCountdown.value, [kind]: 0 }
-    if (userContactCodeTimers[kind]) {
-      window.clearInterval(userContactCodeTimers[kind])
-      delete userContactCodeTimers[kind]
-    }
-    setUserNotice(`${kind === 'email' ? '邮箱' : '手机号'}已绑定`)
-    return true
-  }
-
-  const checkAboutUpdate = () => {
-    aboutSettings.value.updateStatus = 'checking'
     setSettingsNotice('正在检查更新')
-    window.setTimeout(() => {
-      aboutSettings.value.updateStatus = 'latest'
-      aboutSettings.value.newVersion = aboutSettings.value.version
+    try {
+      const result = await window.aiops?.checkUpdate()
+      const detectedVersion = resolveUpdateVersion(result)
+      if (result?.available || result?.isUpdateAvailable || result?.updateInfo) {
+        aboutSettings.value = {
+          ...aboutSettings.value,
+          updateStatus: 'available',
+          newVersion: detectedVersion || aboutSettings.value.version
+        }
+        setSettingsNotice(`检测到可用更新 ${aboutSettings.value.newVersion}`)
+        return
+      }
+      aboutSettings.value = {
+        ...aboutSettings.value,
+        updateStatus: 'latest',
+        newVersion: detectedVersion || aboutSettings.value.version,
+        progress: 0
+      }
       setSettingsNotice('当前已是最新版本')
-    }, 300)
+    } catch {
+      aboutSettings.value = {
+        ...aboutSettings.value,
+        updateStatus: 'error',
+        progress: 0
+      }
+      setSettingsNotice('更新检查失败')
+    }
   }
 
   const setTopNotice = (message: string) => {
@@ -4128,7 +4966,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = await window.aiops?.checkUpdate()
       topUpdateState.value = result?.available ? 'available' : 'local'
       if (result?.available) {
-        setTopNotice('检测到可用更新')
+        const detectedVersion = resolveUpdateVersion(result)
+        if (detectedVersion) aboutSettings.value.newVersion = detectedVersion
+        setTopNotice(detectedVersion ? `检测到可用更新 ${detectedVersion}` : '检测到可用更新')
       }
     } catch {
       topUpdateState.value = 'local'
@@ -4136,16 +4976,59 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const handleTopUpdateClick = () => {
+  const handleTopUpdateClick = async () => {
     if (topUpdateState.value === 'available') {
-      setTopNotice('更新安装为本地占位，未连接远端更新服务')
+      const version = aboutSettings.value.newVersion || aboutSettings.value.version
+      topUpdateState.value = 'checking'
+      await startAboutDownload()
+      if (aboutSettings.value.updateStatus !== 'downloaded') {
+        topUpdateState.value = 'available'
+        setTopNotice('更新下载失败')
+        return
+      }
+      try {
+        const result = await window.aiops?.installAppUpdate?.(version)
+        if (!result?.ok || !result.data) {
+          topUpdateState.value = 'available'
+          setTopNotice(result?.errorMessage || '更新安装失败')
+          return
+        }
+        aboutSettings.value = {
+          ...aboutSettings.value,
+          updateStatus: 'latest',
+          version: result.data.version,
+          newVersion: '',
+          progress: 100
+        }
+        topUpdateState.value = 'local'
+        setTopNotice('更新安装请求已提交')
+      } catch (error) {
+        topUpdateState.value = 'available'
+        setTopNotice(error instanceof Error ? error.message : '更新安装失败')
+      }
       return
     }
-    checkTopUpdate()
+    await checkTopUpdate()
   }
 
-  const openSettingsExternalAction = (label: string) => {
-    setSettingsNotice(`已打开 ${label}`)
+  const openSettingsExternalAction = async (label: '日志目录' | '反馈页面' | '账户中心' | string) => {
+    try {
+      if (label === '日志目录') {
+        await window.aiops?.openLogDir?.()
+        setSettingsNotice('日志目录已打开')
+        return true
+      }
+      if (label === '反馈页面') {
+        await window.aiops?.openExternalUrl?.(settingsFeedbackUrl)
+        setSettingsNotice('反馈页面已打开')
+        return true
+      }
+      setSettingsNotice(`已打开 ${label}`)
+      return true
+    } catch {
+      setSettingsNotice(`${label} 打开失败`)
+      return false
+    }
   }
 
   const openMcpConfigEditor = async () => {
@@ -4163,6 +5046,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     installMcpConfigFileListener()
     if (!window.aiops) return
     try {
+      const { servers, toolStates } = getMcpSnapshot()
+      const bridgeSnapshot = await readMcpServersSnapshotFromBridge(servers, toolStates)
+      if (bridgeSnapshot) {
+        applyMcpServersSnapshot(bridgeSnapshot)
+      }
       const [path, content] = await Promise.all([window.aiops.getMcpConfigPath(), window.aiops.readMcpConfig()])
       if (requestId !== mcpConfigLoadRequest) return
       mcpConfigPath.value = path
@@ -4220,11 +5108,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const content = format ? JSON.stringify(normalized, null, 2) : mcpConfigEditorContent.value
+    if (!window.aiops?.writeMcpConfig) {
+      mcpConfigEditorError.value = 'Save failed: MCP 配置保存服务不可用'
+      mcpConfigEditorLastSaved.value = false
+      setSettingsNotice('MCP 配置保存服务不可用')
+      return false
+    }
     try {
-      await window.aiops?.writeMcpConfig(content)
+      await window.aiops.writeMcpConfig(content)
       mcpConfigEditorContent.value = JSON.stringify(normalized, null, 2)
-      mcpServers.value = mcpConfigFileToServers(normalized, mcpServers.value)
-      persistMcpServers()
+      const refreshed = await refreshMcpServersFromBridge()
+      if (!refreshed) {
+        mcpServers.value = mcpConfigFileToServers(normalized, mcpServers.value)
+        const { servers, toolStates } = getMcpSnapshot()
+        config.value = mergeUserConfig(config.value, { mcpServers: servers, mcpToolStates: toolStates })
+      }
       mcpConfigEditorError.value = ''
       mcpConfigEditorLastSaved.value = true
       setSettingsNotice('MCP 配置已保存')
@@ -4249,42 +5147,68 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const toggleMcpServerDisabled = async (name: string) => {
     const server = mcpServers.value.find((item) => item.name === name)
-    if (!server) return
-    server.disabled = !server.disabled
-    server.status = server.disabled ? 'disabled' : server.error ? 'error' : 'connected'
-    try {
-      await window.aiops?.toggleMcpServer(name, server.disabled)
-    } catch (error) {
-      server.disabled = !server.disabled
-      server.status = server.disabled ? 'disabled' : server.error ? 'error' : 'connected'
-      setSettingsNotice(`MCP ${name} 状态更新失败`)
-      return
+    if (!server) return false
+    if (!window.aiops?.toggleMcpServer) {
+      setSettingsNotice('MCP 状态服务不可用')
+      return false
     }
-    persistMcpServers()
-    setSettingsNotice(`${server.name} ${server.disabled ? '已禁用' : '已启用'}`)
+    const nextDisabled = !server.disabled
+    try {
+      await window.aiops.toggleMcpServer(name, nextDisabled)
+      const refreshed = await refreshMcpServersFromBridge()
+      if (!refreshed) {
+        setSettingsNotice(`MCP ${name} 状态更新后刷新失败`)
+        return false
+      }
+    } catch {
+      setSettingsNotice(`MCP ${name} 状态更新失败`)
+      return false
+    }
+    setSettingsNotice(`${name} ${nextDisabled ? '已禁用' : '已启用'}`)
+    return true
   }
 
   const deleteMcpServer = async (name: string) => {
-    const previous = mcpServers.value.map((server) => ({ ...server, tools: server.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })), resources: server.resources.map((resource) => ({ ...resource })) }))
-    mcpServers.value = mcpServers.value.filter((item) => item.name !== name)
-    expandedMcpServerNames.value = expandedMcpServerNames.value.filter((item) => item !== name)
-    try {
-      await window.aiops?.deleteMcpServer(name)
-    } catch {
-      mcpServers.value = previous
-      setSettingsNotice(`${name} 删除失败`)
-      return
+    if (!window.aiops?.deleteMcpServer) {
+      setSettingsNotice('MCP 删除服务不可用')
+      return false
     }
-    persistMcpServers()
+    try {
+      await window.aiops.deleteMcpServer(name)
+      const refreshed = await refreshMcpServersFromBridge()
+      if (!refreshed) {
+        setSettingsNotice(`${name} 删除后刷新失败`)
+        return false
+      }
+    } catch {
+      setSettingsNotice(`${name} 删除失败`)
+      return false
+    }
     setSettingsNotice(`${name} 已删除`)
+    return true
   }
 
-  const toggleMcpTool = (serverName: string, toolName: string) => {
+  const toggleMcpTool = async (serverName: string, toolName: string) => {
     const tool = mcpServers.value.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
-    if (!tool) return
-    tool.enabled = !tool.enabled
-    persistMcpServers()
-    setSettingsNotice(`${toolName} ${tool.enabled ? '已启用' : '已禁用'}`)
+    if (!tool) return false
+    if (!window.aiops?.setMcpToolState) {
+      setSettingsNotice('MCP Tool 状态服务不可用')
+      return false
+    }
+    const nextEnabled = !tool.enabled
+    try {
+      await window.aiops.setMcpToolState(serverName, toolName, nextEnabled)
+      const refreshed = await refreshMcpServersFromBridge()
+      if (!refreshed) {
+        setSettingsNotice(`${toolName} 状态更新后刷新失败`)
+        return false
+      }
+    } catch {
+      setSettingsNotice(`${toolName} 状态更新失败`)
+      return false
+    }
+    setSettingsNotice(`${toolName} ${nextEnabled ? '已启用' : '已禁用'}`)
+    return true
   }
 
   const openSkillModal = async (mode: 'create' | 'edit', skillName?: string) => {
@@ -4330,15 +5254,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('只能编辑用户创建的 Skill')
         return false
       }
+      if (!window.aiops?.updateSkill) {
+        setSettingsNotice('Skill 保存服务不可用')
+        return false
+      }
       try {
-        if (window.aiops?.updateSkill) {
-          await window.aiops.updateSkill(name, { name, description }, content)
-          await loadSkillsFromBridge()
-        } else {
-          skill.description = description
-          skill.content = content
-          persistSkills()
-        }
+        await window.aiops.updateSkill(name, { name, description }, content)
+        await loadSkillsFromBridge()
         setSettingsNotice(`${name} 已保存`)
         closeSkillModal()
         return true
@@ -4355,13 +5277,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('Skill 已存在')
       return false
     }
+    if (!window.aiops?.createSkill) {
+      setSettingsNotice('Skill 创建服务不可用')
+      return false
+    }
     try {
-      if (window.aiops?.createSkill) {
-        await window.aiops.createSkill({ name, description }, content)
-        await loadSkillsFromBridge()
-      } else {
-        settingsSkills.value.unshift({ name, description, content, enabled: true, editable: true })
-        persistSkills()
+      const created = await window.aiops.createSkill({ name, description }, content)
+      await loadSkillsFromBridge()
+      if (created) {
+        applySkillsList([created, ...settingsSkills.value.filter((item) => item.name !== created.name)])
       }
       setSettingsNotice(`${name} 已创建`)
       closeSkillModal()
@@ -4375,14 +5299,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const toggleSkillEnabled = async (name: string) => {
     const skill = settingsSkills.value.find((item) => item.name === name)
     if (!skill) return
+    if (!window.aiops?.setSkillEnabled) {
+      setSettingsNotice('Skill 状态服务不可用')
+      return
+    }
     const previous = skill.enabled
     skill.enabled = !skill.enabled
     try {
-      if (window.aiops?.setSkillEnabled) {
-        await window.aiops.setSkillEnabled(name, skill.enabled)
-      } else {
-        persistSkills()
-      }
+      await window.aiops.setSkillEnabled(name, skill.enabled)
       setSettingsNotice(`${name} ${skill.enabled ? '已启用' : '已禁用'}`)
     } catch {
       skill.enabled = previous
@@ -4397,18 +5321,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('只能删除用户创建的 Skill')
       return
     }
-    const previous = settingsSkills.value.map((item) => ({ ...item }))
-    settingsSkills.value = settingsSkills.value.filter((item) => item.name !== name)
+    if (!window.aiops?.deleteSkill) {
+      setSettingsNotice('Skill 删除服务不可用')
+      return
+    }
     try {
-      if (window.aiops?.deleteSkill) {
-        await window.aiops.deleteSkill(name)
-        await loadSkillsFromBridge()
-      } else {
-        persistSkills()
-      }
+      await window.aiops.deleteSkill(name)
+      await loadSkillsFromBridge()
       setSettingsNotice(`${name} 已删除`)
     } catch {
-      settingsSkills.value = previous
       setSettingsNotice(`${name} 删除失败`)
     }
   }
@@ -4475,7 +5396,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const addSettingsRule = () => {
     if (settingsRules.value.some((rule) => rule.isEditing)) return
-    settingsRules.value.unshift({ id: createId('rule'), content: '', enabled: true, isEditing: true })
+    settingsRules.value.unshift({ id: 'rule-draft-new', content: '', enabled: true, isEditing: true, isDraft: true })
   }
 
   const editSettingsRule = (id: string) => {
@@ -4489,19 +5410,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (rule) rule.content = content
   }
 
-  const saveSettingsRule = (id: string) => {
+  const saveSettingsRule = async (id: string) => {
     const rule = settingsRules.value.find((item) => item.id === id)
     if (!rule) return false
     if (!rule.content.trim()) {
       settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-      persistRules()
       return false
     }
-    rule.content = rule.content.trim()
-    rule.isEditing = false
-    persistRules()
-    setSettingsNotice('规则已保存')
-    return true
+    try {
+      const result = await window.aiops?.saveSettingsRule?.({
+        ...(rule.isDraft ? {} : { id }),
+        content: rule.content,
+        enabled: rule.enabled
+      })
+      if (!result?.ok || !result.data) {
+        setSettingsNotice(result?.errorMessage || '规则保存失败')
+        return false
+      }
+      applySettingsPreferencesSnapshot(result.data)
+      setSettingsNotice(result.data.message || '规则已保存')
+      return true
+    } catch {
+      setSettingsNotice('规则保存失败')
+      return false
+    }
   }
 
   const cancelSettingsRuleEdit = (id: string) => {
@@ -4515,33 +5447,66 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (savedRule) {
       rule.content = savedRule.content
       rule.enabled = savedRule.enabled
+      rule.isDraft = false
     }
     rule.isEditing = false
   }
 
-  const toggleSettingsRule = (id: string) => {
+  const toggleSettingsRule = async (id: string) => {
     const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return
-    rule.enabled = !rule.enabled
-    persistRules()
-    setSettingsNotice(`规则${rule.enabled ? '已启用' : '已禁用'}`)
+    if (!rule) return false
+    const nextEnabled = !rule.enabled
+    try {
+      const result = await window.aiops?.saveSettingsRule?.({
+        id,
+        content: rule.content,
+        enabled: nextEnabled
+      })
+      if (!result?.ok || !result.data) {
+        setSettingsNotice(result?.errorMessage || '规则更新失败')
+        return false
+      }
+      applySettingsPreferencesSnapshot(result.data)
+      setSettingsNotice(`规则${nextEnabled ? '已启用' : '已禁用'}`)
+      return true
+    } catch {
+      setSettingsNotice('规则更新失败')
+      return false
+    }
   }
 
-  const deleteSettingsRule = (id: string) => {
-    settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-    persistRules()
-    setSettingsNotice('规则已删除')
+  const deleteSettingsRule = async (id: string) => {
+    const existing = settingsRules.value.find((item) => item.id === id)
+    if (!existing) return false
+    if (!existing.content.trim()) {
+      settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
+      return true
+    }
+    try {
+      const result = await window.aiops?.deleteSettingsRule?.(id)
+      if (!result?.ok || !result.data) {
+        setSettingsNotice(result?.errorMessage || '规则删除失败')
+        return false
+      }
+      applySettingsPreferencesSnapshot(result.data)
+      setSettingsNotice('规则已删除')
+      return true
+    } catch {
+      setSettingsNotice('规则删除失败')
+      return false
+    }
   }
 
   const startShortcutRecording = (actionId: string) => {
     shortcutRecording.value = { actionId, tempShortcut: '' }
+    shortcutRuntime.setRecording(true)
   }
 
   const updateShortcutRecording = (shortcut: string) => {
     shortcutRecording.value.tempShortcut = shortcut
   }
 
-  const saveShortcutRecording = () => {
+  const saveShortcutRecording = async () => {
     const { actionId, tempShortcut } = shortcutRecording.value
     const nextShortcut = tempShortcut.trim()
     if (!actionId || !nextShortcut) return false
@@ -4556,22 +5521,94 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('快捷键已被占用')
       return false
     }
-    shortcut.shortcut = nextShortcut
-    saveConfig({ shortcuts: getShortcutsSnapshot() })
-    shortcutRecording.value = { actionId: null, tempShortcut: '' }
-    setSettingsNotice('快捷键已保存')
-    return true
+    try {
+      const result = await window.aiops?.saveSettingsShortcut?.({
+        id: actionId,
+        shortcut: nextShortcut
+      })
+      if (!result?.ok || !result.data) {
+        setSettingsNotice(result?.errorMessage || '快捷键保存失败')
+        return false
+      }
+      applySettingsPreferencesSnapshot(result.data)
+      shortcutRecording.value = { actionId: null, tempShortcut: '' }
+      shortcutRuntime.setRecording(false)
+      setSettingsNotice(result.data.message || '快捷键已保存')
+      return true
+    } catch {
+      setSettingsNotice('快捷键保存失败')
+      return false
+    }
   }
 
   const cancelShortcutRecording = () => {
     shortcutRecording.value = { actionId: null, tempShortcut: '' }
+    shortcutRuntime.setRecording(false)
   }
 
-  const resetAllShortcuts = () => {
-    settingsShortcuts.value = defaultShortcuts.map((shortcut) => ({ ...shortcut }))
-    saveConfig({ shortcuts: getShortcutsSnapshot() })
-    shortcutRecording.value = { actionId: null, tempShortcut: '' }
-    setSettingsNotice('快捷键已全部重置')
+  const resetAllShortcuts = async () => {
+    try {
+      const result = await window.aiops?.resetSettingsShortcuts?.()
+      if (!result?.ok || !result.data) {
+        setSettingsNotice(result?.errorMessage || '快捷键重置失败')
+        return false
+      }
+      applySettingsPreferencesSnapshot(result.data)
+      shortcutRecording.value = { actionId: null, tempShortcut: '' }
+      shortcutRuntime.setRecording(false)
+      setSettingsNotice(result.data.message || '快捷键已全部重置')
+      return true
+    } catch {
+      setSettingsNotice('快捷键重置失败')
+      return false
+    }
+  }
+
+  const installShortcutRuntime = () => {
+    shortcutRuntime.install(getShortcutsSnapshot(), shortcutHandlers)
+  }
+
+  const uninstallShortcutRuntime = () => {
+    shortcutRuntime.destroy()
+  }
+
+  const switchToTerminalPanelIndex = (digit: number) => {
+    const index = Math.max(1, Math.min(9, Math.floor(digit))) - 1
+    const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
+    const target = terminalPanels[index]
+    if (!target) return false
+    mode.value = 'terminal'
+    activeModule.value = 'workspace'
+    activePanelId.value = target.id
+    return true
+  }
+
+  const triggerShortcutAction = (actionId: string, digit?: number) => {
+    if (actionId === 'newTerminal') {
+      mode.value = 'terminal'
+      activeModule.value = 'workspace'
+      createPanel()
+      setTopNotice('已通过快捷键新建终端')
+      return true
+    }
+    if (actionId === 'toggleAi') {
+      mode.value = 'terminal'
+      if (activeModule.value === 'database' || activeModule.value === 'user') activeModule.value = 'workspace'
+      toggleRight()
+      setTopNotice(`AI 侧栏已${rightPanelOpen.value ? '打开' : '关闭'}`)
+      return true
+    }
+    if (actionId === 'switchToSpecificTab' && digit) {
+      return switchToTerminalPanelIndex(digit)
+    }
+    if (actionId === 'quickCommand') {
+      mode.value = 'terminal'
+      activeModule.value = 'snippets'
+      leftPanelOpen.value = true
+      setTopNotice('已打开快捷命令')
+      return true
+    }
+    return false
   }
 
   const openTrustedDeviceRevoke = (id: number) => {
@@ -4580,12 +5617,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     trustedDeviceModal.value = { open: true, id }
   }
 
-  const confirmTrustedDeviceRevoke = () => {
+  const confirmTrustedDeviceRevoke = async () => {
     const id = trustedDeviceModal.value.id
-    if (id === null) return
-    trustedDevices.value = trustedDevices.value.filter((item) => item.id !== id)
+    if (id === null) return false
+    const result = await window.aiops?.revokeTrustedDevice?.(id)
+    if (!result?.ok || !result.data) {
+      setSettingsNotice(result?.errorMessage || '可信设备移除失败')
+      return false
+    }
+    trustedDevices.value = result.data.trustedDevices.map((device) => ({ ...device }))
     trustedDeviceModal.value = { open: false, id: null }
-    setSettingsNotice('可信设备已移除')
+    setSettingsNotice(result.data.message)
+    return true
   }
 
   const toggleMode = () => {
@@ -4606,8 +5649,151 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const handleDeepLink = (payload: AiopstermDeepLinkPayload) => {
+    if (payload.target === 'agents') {
+      mode.value = 'agents'
+      agentsLeftOpen.value = true
+      setTopNotice('已通过 aiopsterm:// 打开 Agents')
+      return true
+    }
+
+    const targetModule = payload.module || payload.target
+    mode.value = 'terminal'
+    activeModule.value = targetModule
+    if (targetModule === 'settings') {
+      rightPanelOpen.value = false
+      setActiveSettingsSection(payload.settingsSection || 'general')
+    } else if (targetModule === 'database' || targetModule === 'user') {
+      rightPanelOpen.value = false
+      onboardingGuideOpen.value = false
+    } else {
+      leftPanelOpen.value = true
+      rightPanelOpen.value = config.value.rightPanelOpen
+      onboardingGuideOpen.value = false
+    }
+    setTopNotice(`已通过 aiopsterm:// 打开${targetModule === 'workspace' ? '工作区' : targetModule}`)
+    return true
+  }
+
   const setFilesUiMode = (mode: FilesUiMode) => {
     filesUiMode.value = mode
+  }
+
+  const normalizeFileTransferTask = (value: unknown): FileTransferTask | null => {
+    if (!isRecord(value)) return null
+    const type = value.type === 'download' || value.type === 'upload' || value.type === 'r2r' ? value.type : null
+    const name = typeof value.name === 'string' ? value.name.trim() : ''
+    const source = typeof value.source === 'string' ? value.source : ''
+    const target = typeof value.target === 'string' ? value.target : ''
+    const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : ''
+    if (!id || !type || !name || !source || !target) return null
+    const status =
+      value.status === 'running' || value.status === 'success' || value.status === 'failed' || value.status === 'error'
+        ? value.status
+        : 'running'
+    const progress = typeof value.progress === 'number' && Number.isFinite(value.progress) ? Math.min(100, Math.max(0, Math.round(value.progress))) : 0
+    const stage = value.stage === 'scanning' || value.stage === 'pending' ? value.stage : undefined
+    const task: FileTransferTask = {
+      id,
+      type,
+      name,
+      source,
+      target,
+      progress,
+      speed: typeof value.speed === 'string' && value.speed.trim() ? value.speed : status === 'running' ? 'pending' : '',
+      status,
+      ...(stage ? { stage } : {}),
+      ...(value.isGroup === true ? { isGroup: true } : {}),
+      ...(typeof value.fromHost === 'string' && value.fromHost ? { fromHost: value.fromHost } : {}),
+      ...(typeof value.toHost === 'string' && value.toHost ? { toHost: value.toHost } : {}),
+      ...(typeof value.totalFiles === 'number' && Number.isFinite(value.totalFiles) ? { totalFiles: Math.max(0, Math.round(value.totalFiles)) } : {}),
+      ...(typeof value.finishedFiles === 'number' && Number.isFinite(value.finishedFiles)
+        ? { finishedFiles: Math.max(0, Math.round(value.finishedFiles)) }
+        : {})
+    }
+    const children = Array.isArray(value.children) ? value.children.map(normalizeFileTransferTask).filter((child): child is FileTransferTask => !!child) : []
+    if (children.length) task.children = children
+    return task
+  }
+
+  const refreshFileTransferTasks = async () => {
+    if (!window.aiops?.listFileTransferTasks) {
+      fileTransferTasks.value = []
+      return false
+    }
+    try {
+      const tasks = await window.aiops.listFileTransferTasks()
+      fileTransferTasks.value = Array.isArray(tasks) ? tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task) : []
+      return true
+    } catch {
+      setTopNotice('文件传输任务加载失败')
+      return false
+    }
+  }
+
+  const applyFileSessionCatalog = (catalog: FileSessionCatalog) => {
+    fileSessions.value = Array.isArray(catalog.sessions) ? catalog.sessions.map((session) => ({ ...session })) : []
+    fileSessionFolders.value = Array.isArray(catalog.folders) ? catalog.folders.map((folder) => ({ ...folder })) : []
+    if (!fileSessions.value.some((session) => session.id === selectedLeftFileSessionId.value)) {
+      selectedLeftFileSessionId.value = null
+    }
+    if (!fileSessions.value.some((session) => session.id === selectedRightFileSessionId.value)) {
+      selectedRightFileSessionId.value = fileSessions.value.some((session) => session.id === 'local') ? 'local' : fileSessions.value[0]?.id || null
+    }
+    return catalog
+  }
+
+  const refreshFileSessionCatalog = async () => {
+    if (!window.aiops?.listFileSessionCatalog) return null
+    const result = await window.aiops.listFileSessionCatalog()
+    if (!result?.ok || !result.data) {
+      setTopNotice(result?.errorMessage || '文件会话加载失败')
+      return null
+    }
+    return applyFileSessionCatalog(result.data)
+  }
+
+  const applyFileSessionMutationResult = (result?: { ok?: boolean; data?: FileSessionCatalog; errorMessage?: string }) => {
+    if (!result?.ok || !result.data) {
+      if (result?.errorMessage) setTopNotice(result.errorMessage)
+      return null
+    }
+    return applyFileSessionCatalog(result.data)
+  }
+
+  const persistFileSession = async (session: FileSessionInfo) => {
+    if (!window.aiops?.saveFileSession) return null
+    return applyFileSessionMutationResult(await window.aiops.saveFileSession({ ...session }))
+  }
+
+  const updateFileSession = async (id: string, patch: FileSessionPatch) => {
+    const session = fileSessions.value.find((item) => item.id === id)
+    if (!session) return null
+    if (!window.aiops?.updateFileSession) {
+      setTopNotice('文件会话写入服务不可用')
+      return null
+    }
+    const previous = { ...session }
+    Object.assign(session, patch)
+    const result = await window.aiops.updateFileSession(id, patch)
+    const applied = applyFileSessionMutationResult(result)
+    if (!applied) Object.assign(session, previous)
+    return result?.ok ? result.data?.session || null : null
+  }
+
+  const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput) => {
+    const normalized = { ...(folder.uuid ? { uuid: folder.uuid } : {}), name: folder.name.trim(), description: (folder.description || '').trim() }
+    if (!normalized.name || !window.aiops?.saveFileSessionFolder) return null
+    const result = await window.aiops.saveFileSessionFolder(normalized)
+    applyFileSessionMutationResult(result)
+    return result?.ok ? result.data?.folder || null : null
+  }
+
+  const deleteFileSessionFolder = async (uuid: string) => {
+    if (!window.aiops?.deleteFileSessionFolder) return false
+    const result = await window.aiops.deleteFileSessionFolder(uuid)
+    applyFileSessionMutationResult(result)
+    return Boolean(result?.ok)
   }
 
   const scheduleFileTransferTaskRemoval = (id: string, delay = 800) => {
@@ -4630,6 +5816,61 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectFileSession(side, session.id)
   }
 
+  const fileSideForTerminalPanel = () => {
+    if (!selectedLeftFileSessionId.value) return 'left'
+    if (!selectedRightFileSessionId.value) return 'right'
+    return 'left'
+  }
+
+  const ensureFileSessionForTerminalPanel = (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
+    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    if (!panel || panel.kind === 'knowledge') return null
+    const ssh = panel.sshSession
+    const sessionId = ssh?.assetId || (ssh ? `ssh-${ssh.connectionId}` : 'local')
+    let session = fileSessions.value.find((item) => item.id === sessionId)
+
+    if (!session) {
+      session = ssh
+        ? {
+            id: sessionId,
+            label: ssh.assetName || ssh.host,
+            host: ssh.host,
+            group: ssh.organizationId || '终端连接',
+            kind: 'remote',
+            rootPath: ssh.username ? `/home/${ssh.username}` : '/home/deploy',
+            status: panel.status === 'closed' ? 'idle' : 'active',
+            favorite: false,
+            assetType: ssh.assetType === 'organization' ? 'organization' : 'person',
+            comment: `Opened from ${panel.title}`
+          }
+        : {
+            id: 'local',
+            label: 'Local',
+            host: '127.0.0.1',
+            group: '本地连接',
+            kind: 'local',
+            rootPath: panel.cwd || '/',
+            status: 'active',
+            assetType: 'local'
+          }
+      fileSessions.value.push(session)
+      void persistFileSession(session)
+    } else {
+      session.status = panel.status === 'closed' ? 'idle' : 'active'
+      if (!ssh && panel.cwd) session.rootPath = panel.cwd
+      void updateFileSession(session.id, {
+        status: session.status,
+        rootPath: session.rootPath
+      })
+    }
+
+    setFilesUiMode('transfer')
+    openFileSession(session.id, side)
+    setActiveModule('files')
+    appendTerminalSegment(panel, `[file manager] opened ${session.label} on ${side} transfer pane\n$ `, 'output')
+    return session
+  }
+
   const closeFileSession = (side: 'left' | 'right') => {
     selectFileSession(side, null)
   }
@@ -4650,68 +5891,57 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       status: 'active'
     }
     fileSessions.value.push(session)
+    void persistFileSession(session)
     openFileSession(assetId, side)
     return session
   }
 
-  const addRemoteFileSessionFromSftpPayload = (payload: Record<string, unknown>, side: 'left' | 'right' = 'left') => {
-    const assetId = String(payload.uuid || payload.id || payload.host || payload.ip || createId('file-asset'))
-    const known = fileSessions.value.find((item) => item.id === assetId)
+  const addRemoteFileSessionFromSftpPayload = async (payload: Record<string, unknown>, side: 'left' | 'right' = 'left') => {
+    const payloadId = String(payload.uuid || payload.id || payload.assetId || '').trim()
+    const payloadHost = String(payload.host || payload.ip || '').trim()
+    const known = fileSessions.value.find((item) => (payloadId && item.id === payloadId) || (payloadHost && item.host === payloadHost))
     if (known) {
-      openFileSession(assetId, side)
+      openFileSession(known.id, side)
       return known
     }
-    const host = String(payload.host || payload.ip || assetId)
-    const username = String(payload.username || 'deploy')
-    const session: FileSessionInfo = {
-      id: assetId,
-      label: String(payload.title || payload.hostname || host),
-      host,
-      group: '资产',
-      kind: 'remote',
-      rootPath: username ? `/home/${username}` : '/home/deploy',
-      status: 'active',
-      favorite: false,
-      assetType: String(payload.asset_type || '').includes('organization') ? 'organization' : 'person',
-      comment: payload.comment ? String(payload.comment) : undefined
+    if (!window.aiops?.saveFileSessionFromSftpPayload) {
+      setTopNotice('文件会话写入服务不可用')
+      return null
     }
-    fileSessions.value.push(session)
-    openFileSession(assetId, side)
+    const result = await window.aiops.saveFileSessionFromSftpPayload({ ...payload })
+    if (!result?.ok || !result.data?.session) {
+      setTopNotice(result?.errorMessage || '文件会话创建失败')
+      return null
+    }
+    applyFileSessionCatalog(result.data)
+    const session = result.data.session
+    openFileSession(session.id, side)
     return session
   }
 
-  const pushFileTransferTask = (patch: Partial<FileTransferTask> & Pick<FileTransferTask, 'type' | 'name' | 'source' | 'target'>) => {
-    const task: FileTransferTask = {
-      ...patch,
-      id: patch.id || createId('transfer'),
-      progress: patch.progress ?? 0,
-      speed: patch.speed ?? 'pending',
-      status: patch.status ?? 'running'
+  const pushFileTransferTask = (task: FileTransferTask) => {
+    const normalized = normalizeFileTransferTask(task)
+    if (!normalized) return null
+    fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== normalized.id)
+    fileTransferTasks.value.unshift(normalized)
+    if (normalized.status === 'success' || normalized.status === 'failed' || normalized.status === 'error') {
+      scheduleFileTransferTaskRemoval(normalized.id, normalized.status === 'success' ? 2500 : 8000)
     }
-    fileTransferTasks.value.unshift(task)
-    if (task.status === 'running') {
-      const timer = window.setInterval(() => {
-        const current = fileTransferTasks.value.find((item) => item.id === task.id)
-        if (!current) {
-          window.clearInterval(timer)
-          return
-        }
-        current.progress = Math.min(100, current.progress + 12)
-        current.speed = current.progress >= 100 ? '完成' : '620 KB/s'
-        if (current.progress >= 100) {
-          current.status = 'success'
-          window.clearInterval(timer)
-          scheduleFileTransferTaskRemoval(current.id, current.isGroup ? 8000 : 2500)
-        }
-      }, 900)
-    } else if (task.status === 'success' || task.status === 'failed' || task.status === 'error') {
-      scheduleFileTransferTaskRemoval(task.id, task.status === 'success' ? 2500 : 8000)
-    }
-    return task
+    return normalized
   }
 
-  const cancelFileTransferTask = (id: string) => {
-    const taskIds = new Set([id])
+  const recordFileTransferTask = async (input: FileTransferTaskRecordInput) => {
+    if (!window.aiops?.recordFileTransferTask) return null
+    const result = await window.aiops.recordFileTransferTask(input)
+    if (!result?.ok || !result.data?.task) {
+      if (result?.errorMessage) setTopNotice(result.errorMessage)
+      return null
+    }
+    return pushFileTransferTask(result.data.task)
+  }
+
+  const affectedFileTransferTaskIds = (id: string) => {
+    const taskIds = new Set<string>([id])
     fileTransferTasks.value.forEach((item) => {
       if (item.children?.some((child) => child.id === id)) {
         taskIds.add(item.id)
@@ -4721,6 +5951,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         item.children.forEach((child) => taskIds.add(child.id))
       }
     })
+    return taskIds
+  }
+
+  const markFileTransferTasksCancelled = (ids: Iterable<string>) => {
+    const taskIds = new Set(ids)
     const affected = fileTransferTasks.value.filter((item) => taskIds.has(item.id))
     affected.forEach((task) => {
       task.status = 'failed'
@@ -4735,75 +5970,88 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
-  const createSnippetGroup = (groupName: string) => {
+  const cancelFileTransferTask = async (id: string) => {
+    if (!window.aiops?.cancelFileTransferTask) return false
+    const result = await window.aiops.cancelFileTransferTask({ id })
+    if (!result?.ok || !result.data) {
+      setTopNotice(result?.errorMessage || '取消传输任务失败')
+      return false
+    }
+    if (result.data.status !== 'aborted') {
+      setTopNotice('传输任务已结束或不存在')
+      return false
+    }
+    markFileTransferTasksCancelled(result.data.taskIds.length ? result.data.taskIds : affectedFileTransferTaskIds(id))
+    return true
+  }
+
+  const createSnippetGroup = async (groupName: string) => {
     const name = groupName.trim()
     if (!name) return
-    const nextId = Math.max(0, ...snippetGroups.value.map((group) => group.id)) + 1
-    const group = { id: nextId, uuid: createId('snippet-group'), group_name: name }
-    snippetGroups.value.push(group)
-    persistQuickCommands()
-    return group
+    const result = await window.aiops.saveQuickCommandGroup({ group_name: name })
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
+    return result.data.group
   }
 
-  const renameSnippetGroup = (uuid: string, groupName: string) => {
-    const group = snippetGroups.value.find((item) => item.uuid === uuid)
-    if (group && groupName.trim()) {
-      group.group_name = groupName.trim()
-      persistQuickCommands()
-    }
+  const renameSnippetGroup = async (uuid: string, groupName: string) => {
+    const name = groupName.trim()
+    if (!name) return
+    const result = await window.aiops.saveQuickCommandGroup({ uuid, group_name: name })
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
   }
 
-  const deleteSnippetGroup = (uuid: string) => {
-    quickCommands.value = quickCommands.value.filter((command) => command.group_uuid !== uuid)
-    snippetGroups.value = snippetGroups.value.filter((group) => group.uuid !== uuid)
+  const deleteSnippetGroup = async (uuid: string) => {
+    const result = await window.aiops.deleteQuickCommandGroup(uuid)
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
     if (selectedSnippetGroupUuid.value === uuid) selectedSnippetGroupUuid.value = null
-    persistQuickCommands()
   }
 
-  const createQuickCommand = (payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
+  const createQuickCommand = async (payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
     const snippetName = payload.snippet_name.trim()
     if (!snippetName || !payload.snippet_content) return
-    const nextId = Math.max(0, ...quickCommands.value.map((command) => command.id)) + 1
-    const nowText = '刚刚'
-    const command = {
-      id: nextId,
-      uuid: createId('snippet'),
+    const result = await window.aiops.saveQuickCommandSnippet({
       snippet_name: snippetName,
       snippet_content: payload.snippet_content,
-      group_uuid: payload.group_uuid ?? null,
-      create_at: nowText,
-      update_at: nowText
-    }
-    quickCommands.value.push(command)
-    persistQuickCommands()
-    return command
+      group_uuid: payload.group_uuid ?? null
+    })
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
+    return result.data.snippet
   }
 
-  const updateQuickCommand = (id: number, payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
-    const command = quickCommands.value.find((item) => item.id === id)
-    if (!command) return
-    command.snippet_name = payload.snippet_name.trim()
-    command.snippet_content = payload.snippet_content
-    command.group_uuid = payload.group_uuid ?? null
-    command.update_at = '刚刚'
-    persistQuickCommands()
+  const updateQuickCommand = async (id: number, payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
+    const snippetName = payload.snippet_name.trim()
+    if (!snippetName || !payload.snippet_content) return
+    const result = await window.aiops.saveQuickCommandSnippet({
+      id,
+      snippet_name: snippetName,
+      snippet_content: payload.snippet_content,
+      group_uuid: payload.group_uuid ?? null
+    })
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
   }
 
-  const deleteQuickCommand = (id: number) => {
-    quickCommands.value = quickCommands.value.filter((command) => command.id !== id)
-    persistQuickCommands()
+  const deleteQuickCommand = async (id: number) => {
+    const result = await window.aiops.deleteQuickCommandSnippet(id)
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
   }
 
-  const reorderQuickCommand = (sourceId: number, targetId: number) => {
+  const reorderQuickCommand = async (sourceId: number, targetId: number) => {
     const currentList = [...filteredQuickCommands.value]
     const sourceIndex = currentList.findIndex((command) => command.id === sourceId)
     const targetIndex = currentList.findIndex((command) => command.id === targetId)
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return
     const [moved] = currentList.splice(sourceIndex, 1)
     currentList.splice(targetIndex, 0, moved)
-    const otherCommands = quickCommands.value.filter((command) => !currentList.some((item) => item.id === command.id))
-    quickCommands.value = [...otherCommands, ...currentList]
-    persistQuickCommands()
+    const otherCommandIds = quickCommands.value.filter((command) => !currentList.some((item) => item.id === command.id)).map((command) => command.id)
+    const result = await window.aiops.reorderQuickCommands({ orderedIds: [...otherCommandIds, ...currentList.map((command) => command.id)] })
+    if (!result.ok || !result.data) return
+    applyQuickCommandsSnapshot(result.data)
   }
 
   const serializeSnippetScript = (scriptContent: string, autoExecute: boolean) => {
@@ -4879,22 +6127,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function addMacroCommandEntry(command: string, timestamp = Date.now()) {
     if (!isMacroRecording.value) return false
     if (macroCommandBuffer.value.length >= MACRO_MAX_COMMAND_COUNT) {
-      autoStopMacroRecording('count')
+      void autoStopMacroRecording('count')
       return false
     }
     macroCommandBuffer.value.push({ command, timestamp })
     if (macroCommandBuffer.value.length >= MACRO_MAX_COMMAND_COUNT) {
-      autoStopMacroRecording('count')
+      void autoStopMacroRecording('count')
     }
     return true
   }
 
-  const saveMacroSnippet = (content: string) => {
+  const saveMacroSnippet = async (content: string, snippetName = macroDefaultName.value || createMacroSnippetName(), groupUuid = macroTargetGroupUuid.value) => {
     if (!content.trim()) return null
     return createQuickCommand({
-      snippet_name: macroDefaultName.value || createMacroSnippetName(),
+      snippet_name: snippetName,
       snippet_content: content,
-      group_uuid: macroTargetGroupUuid.value
+      group_uuid: groupUuid
     })
   }
 
@@ -4909,14 +6157,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     macroTargetGroupUuid.value = null
   }
 
-  function autoStopMacroRecording(reason: 'time' | 'count') {
+  async function autoStopMacroRecording(reason: 'time' | 'count') {
     if (!isMacroRecording.value) return null
     macroLimitReason.value = reason
     commitMacroCurrentLine()
     const content = buildMacroSnippetContent()
-    const saved = saveMacroSnippet(content)
+    const snippetName = macroDefaultName.value || createMacroSnippetName()
+    const groupUuid = macroTargetGroupUuid.value
     resetMacroRecordingState()
-    return saved
+    return saveMacroSnippet(content, snippetName, groupUuid)
   }
 
   const startMacroRecording = (terminalId?: string | null) => {
@@ -4931,7 +6180,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     macroLimitReason.value = null
     clearMacroAutoStopTimer()
     macroAutoStopTimer = setTimeout(() => {
-      autoStopMacroRecording('time')
+      void autoStopMacroRecording('time')
     }, MACRO_MAX_RECORDING_DURATION_MS)
   }
 
@@ -4953,7 +6202,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!isMacroRecording.value || !data) return
     if (macroTerminalId.value && panelId !== macroTerminalId.value) return
     if (macroRecordingStartTime.value && timestamp - macroRecordingStartTime.value >= MACRO_MAX_RECORDING_DURATION_MS) {
-      autoStopMacroRecording('time')
+      void autoStopMacroRecording('time')
       return
     }
 
@@ -5007,11 +6256,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const stopMacroRecording = () => {
+  const stopMacroRecording = async () => {
     if (!isMacroRecording.value) return
     commitMacroCurrentLine()
     const content = buildMacroSnippetContent()
-    const saved = saveMacroSnippet(content)
+    const saved = await saveMacroSnippet(content)
     resetMacroRecordingState()
     return saved
   }
@@ -5032,33 +6281,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return null
   }
 
-  const removeKnowledgeNode = (relPath: string, nodes = knowledgeTree.value): KnowledgeNode | null => {
-    const index = nodes.findIndex((node) => node.relPath === relPath)
-    if (index >= 0) {
-      const [removed] = nodes.splice(index, 1)
-      return removed
-    }
-    for (const node of nodes) {
-      if (node.children) {
-        const removed = removeKnowledgeNode(relPath, node.children)
-        if (removed) return removed
-      }
-    }
-    return null
-  }
-
-  const insertKnowledgeNode = (parentRelDir: string, node: KnowledgeNode) => {
-    if (!parentRelDir) {
-      knowledgeTree.value.unshift(node)
-      return
-    }
-    const parent = findKnowledgeNode(parentRelDir)
-    if (!parent || parent.type !== 'dir') return
-    parent.children = parent.children || []
-    parent.children.unshift(node)
-    if (!kbExpandedKeys.value.includes(parentRelDir)) kbExpandedKeys.value.push(parentRelDir)
-  }
-
   const selectKnowledgeNode = (relPath: string, multi = false) => {
     if (!multi) {
       kbSelectedKeys.value = [relPath]
@@ -5069,87 +6291,99 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       : [...kbSelectedKeys.value, relPath]
   }
 
+  const refreshKnowledgeSearchStatus = async () => {
+    if (!window.aiops?.kbSearchStatus) return
+    try {
+      kbSearchStatus.value = await window.aiops.kbSearchStatus()
+    } catch {
+      kbSearchStatus.value = { totalFiles: 0, totalChunks: 0, provider: 'aiopsterm-local', model: 'lexical', updatedAt: 0 }
+    }
+  }
+
+  const searchKnowledgeContent = async (query = kbSearchQuery.value) => {
+    const normalizedQuery = query.trim()
+    const request = ++kbSearchRequest
+    if (normalizedQuery.length <= 1 || !window.aiops?.kbSearch) {
+      kbContentSearchResults.value = []
+      kbSearchLoading.value = false
+      kbSearchError.value = ''
+      return []
+    }
+    kbSearchLoading.value = true
+    kbSearchError.value = ''
+    try {
+      const results = await window.aiops.kbSearch(normalizedQuery, { maxResults: 12, minScore: 0.15 })
+      if (request !== kbSearchRequest) return kbContentSearchResults.value
+      kbContentSearchResults.value = results
+      await refreshKnowledgeSearchStatus()
+      return results
+    } catch (searchError) {
+      if (request !== kbSearchRequest) return kbContentSearchResults.value
+      kbContentSearchResults.value = []
+      kbSearchError.value = searchError instanceof Error ? searchError.message : String(searchError)
+      return []
+    } finally {
+      if (request === kbSearchRequest) kbSearchLoading.value = false
+    }
+  }
+
+  const reindexKnowledgeContent = async () => {
+    if (!window.aiops?.kbReindex) return { files: 0, chunks: 0 }
+    const result = await window.aiops.kbReindex()
+    await refreshKnowledgeSearchStatus()
+    if (kbSearchQuery.value.trim().length > 1) void searchKnowledgeContent()
+    return result
+  }
+
   const createKnowledgeNode = async (kind: KnowledgeNodeType, parentRelDir: string, title: string) => {
     const name = title.trim()
     if (!name) return null
-    if (window.aiops?.kbCreateFile && window.aiops?.kbMkdir) {
-      const result =
-        kind === 'dir'
-          ? await window.aiops.kbMkdir(parentRelDir, name)
-          : await window.aiops.kbCreateFile(parentRelDir, name, '')
-      await refreshKnowledgeTree()
-      const created = findKnowledgeNode(result.relPath)
-      kbSelectedKeys.value = [result.relPath]
-      if (kind === 'dir' && !kbExpandedKeys.value.includes(result.relPath)) {
-        kbExpandedKeys.value.push(result.relPath)
-      }
-      return created
+    if (!window.aiops?.kbCreateFile || !window.aiops?.kbMkdir) {
+      setTopNotice('知识库写入服务不可用')
+      return null
     }
-    const relPath = createKbRelPath(parentRelDir, name)
-    const node: KnowledgeNode = {
-      id: createId('kb'),
-      key: relPath,
-      relPath,
-      title: name,
-      type: kind,
-      size: kind === 'file' ? 1024 : undefined,
-      children: kind === 'dir' ? [] : undefined
+    const result =
+      kind === 'dir'
+        ? await window.aiops.kbMkdir(parentRelDir, name)
+        : await window.aiops.kbCreateFile(parentRelDir, name, '')
+    await refreshKnowledgeTree()
+    const created = findKnowledgeNode(result.relPath)
+    kbSelectedKeys.value = [result.relPath]
+    if (kind === 'dir' && !kbExpandedKeys.value.includes(result.relPath)) {
+      kbExpandedKeys.value.push(result.relPath)
     }
-    insertKnowledgeNode(parentRelDir, node)
-    kbSelectedKeys.value = [relPath]
-    kbUsedBytes.value += node.size || 0
-    persistKnowledgeBase()
-    return node
+    return created
   }
 
   const renameKnowledgeNode = async (relPath: string, title: string) => {
     const node = findKnowledgeNode(relPath)
     const name = title.trim()
     if (!node || !name) return
-    if (window.aiops?.kbRename) {
-      const result = await window.aiops.kbRename(relPath, name)
-      kbSelectedKeys.value = [result.relPath]
-      kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, result.relPath) : key))
-      await refreshKnowledgeTree()
-      syncKnowledgePanelsAfterRename(relPath, result.relPath)
+    if (!window.aiops?.kbRename) {
+      setTopNotice('知识库重命名服务不可用')
       return
     }
-    const parent = getKbParent(relPath)
-    const nextRelPath = createKbRelPath(parent, name)
-    const updatePaths = (target: KnowledgeNode, oldPrefix: string, newPrefix: string) => {
-      target.title = target.relPath === oldPrefix ? name : target.title
-      target.relPath = target.relPath.replace(oldPrefix, newPrefix)
-      target.key = target.relPath
-      target.children?.forEach((child) => updatePaths(child, oldPrefix, newPrefix))
-    }
-    updatePaths(node, relPath, nextRelPath)
-    kbSelectedKeys.value = [nextRelPath]
-    kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, nextRelPath) : key))
-    syncKnowledgePanelsAfterRename(relPath, nextRelPath)
-    persistKnowledgeBase()
+    const result = await window.aiops.kbRename(relPath, name)
+    kbSelectedKeys.value = [result.relPath]
+    kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, result.relPath) : key))
+    await refreshKnowledgeTree()
+    syncKnowledgePanelsAfterRename(relPath, result.relPath)
   }
 
   const deleteKnowledgeNodes = async (relPaths: string[]) => {
-    if (window.aiops?.kbDelete) {
-      for (const relPath of relPaths) {
-        const node = findKnowledgeNode(relPath)
-        if (!node) continue
-        await window.aiops.kbDelete(relPath, node.type === 'dir')
-      }
-      kbSelectedKeys.value = kbSelectedKeys.value.filter((key) => !relPaths.includes(key))
-      kbExpandedKeys.value = kbExpandedKeys.value.filter((key) => !relPaths.some((relPath) => key === relPath || key.startsWith(`${relPath}/`)))
-      await refreshKnowledgeTree()
-      closeKnowledgePanelsForRemoved(relPaths)
+    if (!window.aiops?.kbDelete) {
+      setTopNotice('知识库删除服务不可用')
       return
     }
-    relPaths.forEach((relPath) => {
-      const removed = removeKnowledgeNode(relPath)
-      if (removed) kbUsedBytes.value = Math.max(0, kbUsedBytes.value - knowledgeNodeSize(removed))
-    })
+    for (const relPath of relPaths) {
+      const node = findKnowledgeNode(relPath)
+      if (!node) continue
+      await window.aiops.kbDelete(relPath, node.type === 'dir')
+    }
     kbSelectedKeys.value = kbSelectedKeys.value.filter((key) => !relPaths.includes(key))
     kbExpandedKeys.value = kbExpandedKeys.value.filter((key) => !relPaths.some((relPath) => key === relPath || key.startsWith(`${relPath}/`)))
+    await refreshKnowledgeTree()
     closeKnowledgePanelsForRemoved(relPaths)
-    persistKnowledgeBase()
   }
 
   const copyKnowledgeNodes = (relPaths: string[], mode: 'copy' | 'cut') => {
@@ -5161,70 +6395,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!kbClipboard.value) return
     const destination = findKnowledgeNode(targetRelDir)
     const dstRelDir = destination?.type === 'file' ? getKbParent(destination.relPath) : targetRelDir
-    if (window.aiops?.kbCopy && window.aiops?.kbMove) {
-      const sources = [...kbClipboard.value.sources]
-      const mode = kbClipboard.value.mode
-      for (const source of sources) {
-        if (mode === 'copy') {
-          await window.aiops.kbCopy(source, dstRelDir)
-        } else {
-          await window.aiops.kbMove(source, dstRelDir)
-        }
-      }
-      if (mode === 'cut') kbClipboard.value = null
-      await refreshKnowledgeTree()
-      if (mode === 'cut') closeKnowledgePanelsForRemoved(sources)
+    if (!window.aiops?.kbCopy || !window.aiops?.kbMove) {
+      setTopNotice('知识库复制移动服务不可用')
       return
     }
-    kbClipboard.value.sources.forEach((source) => {
-      const node = findKnowledgeNode(source)
-      if (!node) return
-      const copied = cloneKnowledgeNodes([node])[0]
-      const baseName = kbClipboard.value?.mode === 'copy' ? `${copied.title.replace(/(\.[^.]+)?$/, '')}_copy${copied.title.match(/(\.[^.]+)$/)?.[1] || ''}` : copied.title
-      copied.title = baseName
-      const newRelPath = createKbRelPath(dstRelDir, baseName)
-      const oldRelPath = copied.relPath
-      const updatePaths = (target: KnowledgeNode) => {
-        target.relPath = target.relPath.replace(oldRelPath, newRelPath)
-        target.key = target.relPath
-        target.children?.forEach(updatePaths)
+    const sources = [...kbClipboard.value.sources]
+    const mode = kbClipboard.value.mode
+    for (const source of sources) {
+      if (mode === 'copy') {
+        await window.aiops.kbCopy(source, dstRelDir)
+      } else {
+        await window.aiops.kbMove(source, dstRelDir)
       }
-      updatePaths(copied)
-      insertKnowledgeNode(dstRelDir, copied)
-      if (kbClipboard.value?.mode === 'copy') {
-        kbUsedBytes.value += knowledgeNodeSize(copied)
-      }
-      if (kbClipboard.value?.mode === 'cut') removeKnowledgeNode(source)
-    })
-    if (kbClipboard.value.mode === 'cut') kbClipboard.value = null
-    persistKnowledgeBase()
+    }
+    if (mode === 'cut') kbClipboard.value = null
+    await refreshKnowledgeTree()
+    if (mode === 'cut') closeKnowledgePanelsForRemoved(sources)
   }
 
   const addKnowledgeImportJob = async (destRelPath: string, srcAbsPath?: string, sourceType: 'file' | 'folder' = 'file') => {
-    if (srcAbsPath && window.aiops?.kbImportFile && window.aiops?.kbImportFolder) {
-      const dstRelDir = getKbParent(destRelPath)
-      const result = sourceType === 'folder' ? await window.aiops.kbImportFolder(srcAbsPath, dstRelDir) : await window.aiops.kbImportFile(srcAbsPath, dstRelDir)
-      if (!kbImportJobs.value.some((job) => job.id === result.jobId)) {
-        kbImportJobs.value.push({ id: result.jobId, destRelPath: result.relPath, percent: 100 })
-        window.setTimeout(() => {
-          kbImportJobs.value = kbImportJobs.value.filter((job) => job.id !== result.jobId)
-        }, 500)
-      }
-      await refreshKnowledgeTree()
-      return
+    if (!srcAbsPath) {
+      setTopNotice('知识库导入需要真实本地路径')
+      return false
     }
-    const job = { id: createId('kb-import'), destRelPath, percent: 0 }
-    kbImportJobs.value.push(job)
-    const timer = window.setInterval(() => {
-      job.percent = Math.min(100, job.percent + 25)
-      if (job.percent >= 100) {
-        void createKnowledgeNode('file', getKbParent(destRelPath), destRelPath.split('/').pop() || 'import.md')
-        window.clearInterval(timer)
-        window.setTimeout(() => {
-          kbImportJobs.value = kbImportJobs.value.filter((item) => item.id !== job.id)
-        }, 500)
-      }
-    }, 250)
+    if (!window.aiops?.kbImportFile || !window.aiops?.kbImportFolder) {
+      setTopNotice('知识库导入服务不可用')
+      return false
+    }
+    const dstRelDir = getKbParent(destRelPath)
+    const result = sourceType === 'folder' ? await window.aiops.kbImportFolder(srcAbsPath, dstRelDir) : await window.aiops.kbImportFile(srcAbsPath, dstRelDir)
+    if (!kbImportJobs.value.some((job) => job.id === result.jobId)) {
+      kbImportJobs.value.push({ id: result.jobId, destRelPath: result.relPath, percent: 100 })
+      window.setTimeout(() => {
+        kbImportJobs.value = kbImportJobs.value.filter((job) => job.id !== result.jobId)
+      }, 500)
+    }
+    await refreshKnowledgeTree()
+    return true
   }
 
   const addKnowledgeFilesToChat = async (relPaths: string[]) => {
@@ -5319,6 +6526,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionInstallProgressMap.value = next
   }
 
+  const handleExtensionInstallProgress = (event: BackendExtensionInstallProgress) => {
+    if (event.operation === 'update') {
+      setExtensionUpdateLoading(event.pluginId, !['done', 'error', 'cancelled'].includes(event.stage))
+    } else {
+      setExtensionInstallLoading(event.pluginId, !['done', 'error', 'cancelled'].includes(event.stage))
+    }
+    setExtensionInstallProgress(event.pluginId, event.stage, event.percent)
+  }
+
+  const installExtensionInstallProgressListener = () => {
+    if (removeExtensionInstallProgressListener || !window.aiops?.onExtensionInstallProgress) return
+    removeExtensionInstallProgressListener = window.aiops.onExtensionInstallProgress(handleExtensionInstallProgress)
+  }
+
   const clearExtensionInstallProgressLater = (pluginId: string) => {
     window.setTimeout(() => {
       const current = extensionInstallProgressMap.value[pluginId]
@@ -5329,161 +6550,210 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }, 900)
   }
 
-  const runExtensionInstallLifecycle = (
-    pluginId: string,
-    mode: 'install' | 'update',
-    onComplete: () => void,
-    successNotice: string
-  ) => {
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin || !plugin.isPlugin) return
-    if (mode === 'install') setExtensionInstallLoading(pluginId, true)
-    else setExtensionUpdateLoading(pluginId, true)
-    setExtensionInstallProgress(pluginId, 'downloading', 8)
-    setExtensionNotice(mode === 'install' ? `正在安装 ${plugin.name}` : `正在更新 ${plugin.name}`)
-    const steps: Array<{ stage: ExtensionInstallStage; percent: number; delay: number }> = [
-      { stage: 'downloading', percent: 42, delay: 120 },
-      { stage: 'downloading', percent: 84, delay: 240 },
-      { stage: 'verifying', percent: 100, delay: 360 },
-      { stage: 'installing', percent: 100, delay: 480 }
-    ]
-    steps.forEach((step) => {
-      window.setTimeout(() => {
-        if (mode === 'install' && !extensionInstallLoadingMap.value[pluginId]) return
-        if (mode === 'update' && !extensionUpdateLoadingMap.value[pluginId]) return
-        setExtensionInstallProgress(pluginId, step.stage, step.percent)
-      }, step.delay)
-    })
-    window.setTimeout(() => {
-      if (mode === 'install' && !extensionInstallLoadingMap.value[pluginId]) return
-      if (mode === 'update' && !extensionUpdateLoadingMap.value[pluginId]) return
-      onComplete()
-      setExtensionInstallLoading(pluginId, false)
-      setExtensionUpdateLoading(pluginId, false)
-      setExtensionInstallProgress(pluginId, 'done', 100)
-      setExtensionNotice(successNotice)
-      clearExtensionInstallProgressLater(pluginId)
-    }, 620)
+  const cloneExtensionPluginForBackend = (plugin: ExtensionPlugin): ExtensionPluginRuntimeConfig => ({
+    ...plugin,
+    categories: plugin.categories ? [...plugin.categories] : undefined,
+    functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+    guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
+    connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
+  })
+
+  const applyExtensionPluginFromBackend = (plugin: ExtensionPluginRuntimeConfig) => {
+    const nextPlugin: ExtensionPlugin = {
+      ...plugin,
+      iconKey: plugin.iconKey || 'local',
+      categories: plugin.categories ? [...plugin.categories] : undefined,
+      functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+      guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
+      connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
+    }
+    const index = extensionPlugins.value.findIndex((item) => item.pluginId === nextPlugin.pluginId)
+    if (nextPlugin.show === false && nextPlugin.source === 'local' && !nextPlugin.latestVersion) {
+      if (index >= 0) extensionPlugins.value = extensionPlugins.value.filter((item) => item.pluginId !== nextPlugin.pluginId)
+      ensureSelectedExtensionVisible()
+      return
+    }
+    if (index >= 0) {
+      extensionPlugins.value[index] = { ...extensionPlugins.value[index], ...nextPlugin }
+    } else {
+      extensionPlugins.value.push(nextPlugin)
+    }
   }
 
-  const markPluginInstalled = (pluginId: string) => {
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin || !plugin.isPlugin || plugin.installable === false) return
-    plugin.installed = true
-    plugin.hasUpdate = false
-    plugin.installedVersion = plugin.latestVersion || plugin.installedVersion || '1.0.0'
-    plugin.source = plugin.source || 'store'
+  const refreshExtensionPlugins = async () => {
+    if (!window.aiops?.listExtensionPlugins) return false
+    try {
+      const result = await window.aiops.listExtensionPlugins()
+      if (!result?.ok || !Array.isArray(result.data)) {
+        setExtensionNotice(result?.errorMessage || '插件列表加载失败')
+        return false
+      }
+      extensionPlugins.value = result.data.map((plugin) => ({
+        ...plugin,
+        iconKey: plugin.iconKey || 'local',
+        categories: plugin.categories ? [...plugin.categories] : undefined,
+        functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+        guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
+        connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
+      }))
+      ensureSelectedExtensionVisible()
+      return true
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : '插件列表加载失败')
+      ensureSelectedExtensionVisible()
+      return false
+    }
   }
 
-  const installExtensionPlugin = (pluginId: string) => {
+  const installExtensionPlugin = async (pluginId: string) => {
+    installExtensionInstallProgressListener()
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin) return
     if (plugin.installable === false) {
       setExtensionNotice('该插件需要订阅后安装')
       return
     }
-    runExtensionInstallLifecycle(pluginId, 'install', () => markPluginInstalled(pluginId), `${plugin.name} 安装成功`)
+    setExtensionInstallLoading(pluginId, true)
+    setExtensionNotice(`正在安装 ${plugin.name}`)
+    try {
+      const result = await window.aiops?.installExtensionPlugin?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      if (!result?.ok || !result.data) {
+        const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
+        setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
+        setExtensionNotice(cancelled ? `${plugin.name} 安装已取消` : result?.errorMessage || `${plugin.name} 安装失败`)
+        clearExtensionInstallProgressLater(pluginId)
+        return
+      }
+      applyExtensionPluginFromBackend(result.data.plugin)
+      setExtensionInstallProgress(pluginId, 'done', 100)
+      setExtensionNotice(`${result.data.plugin.name} 安装成功`)
+      clearExtensionInstallProgressLater(pluginId)
+    } catch (error) {
+      setExtensionInstallProgress(pluginId, 'error', 0)
+      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 安装失败`)
+      clearExtensionInstallProgressLater(pluginId)
+    } finally {
+      setExtensionInstallLoading(pluginId, false)
+    }
   }
 
-  const updateExtensionPlugin = (pluginId: string) => {
+  const updateExtensionPlugin = async (pluginId: string) => {
+    installExtensionInstallProgressListener()
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || !plugin.installed || !plugin.hasUpdate) return
-    runExtensionInstallLifecycle(
-      pluginId,
-      'update',
-      () => {
-        plugin.installedVersion = plugin.latestVersion || plugin.installedVersion
-        plugin.hasUpdate = false
-      },
-      `${plugin.name} 已更新`
-    )
+    setExtensionUpdateLoading(pluginId, true)
+    setExtensionNotice(`正在更新 ${plugin.name}`)
+    try {
+      const result = await window.aiops?.updateExtensionPlugin?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      if (!result?.ok || !result.data) {
+        const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
+        setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
+        setExtensionNotice(cancelled ? `${plugin.name} 安装已取消` : result?.errorMessage || `${plugin.name} 更新失败`)
+        clearExtensionInstallProgressLater(pluginId)
+        return
+      }
+      applyExtensionPluginFromBackend(result.data.plugin)
+      setExtensionInstallProgress(pluginId, 'done', 100)
+      setExtensionNotice(`${result.data.plugin.name} 已更新`)
+      clearExtensionInstallProgressLater(pluginId)
+    } catch (error) {
+      setExtensionInstallProgress(pluginId, 'error', 0)
+      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 更新失败`)
+      clearExtensionInstallProgressLater(pluginId)
+    } finally {
+      setExtensionUpdateLoading(pluginId, false)
+    }
   }
 
-  const uninstallExtensionPlugin = (pluginId: string) => {
+  const uninstallExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || plugin.required) return
-    if (plugin.source === 'local' && !plugin.latestVersion) {
-      extensionPlugins.value = extensionPlugins.value.filter((item) => item.pluginId !== pluginId)
-      ensureSelectedExtensionVisible()
-    } else {
-      plugin.installed = false
-      plugin.installedVersion = ''
-      plugin.hasUpdate = false
+    try {
+      const result = await window.aiops?.uninstallExtensionPlugin?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      if (!result?.ok || !result.data) {
+        setExtensionNotice(result?.errorMessage || `${plugin.name} 卸载失败`)
+        return
+      }
+      applyExtensionPluginFromBackend(result.data.plugin)
+      setExtensionNotice(`${result.data.plugin.name} 已卸载`)
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 卸载失败`)
     }
-    setExtensionNotice(`${plugin.name} 已卸载`)
   }
 
-  const subscribeExtensionPlugin = (pluginId: string) => {
+  const subscribeExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin) return
-    setExtensionNotice(`${plugin.name} 已打开订阅入口`)
+    if (!plugin || !plugin.isPlugin) return
+    try {
+      const result = await window.aiops?.openExtensionSubscription?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      if (!result?.ok || !result.data) {
+        setExtensionNotice(result?.errorMessage || `${plugin.name} 订阅入口打开失败`)
+        return
+      }
+      setExtensionNotice(`${plugin.name} 已打开订阅入口`)
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 订阅入口打开失败`)
+    }
   }
 
-  const cancelExtensionInstall = (pluginId: string) => {
+  const cancelExtensionInstall = async (pluginId: string) => {
     if (!extensionInstallLoadingMap.value[pluginId] && !extensionUpdateLoadingMap.value[pluginId]) return
-    setExtensionInstallLoading(pluginId, false)
-    setExtensionUpdateLoading(pluginId, false)
-    setExtensionInstallProgress(pluginId, 'cancelled', 0)
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    setExtensionNotice(`${plugin?.name || '插件'} 安装已取消`)
-    clearExtensionInstallProgressLater(pluginId)
-  }
-
-  const createLocalExtensionPlugin = (fileName: string) => {
-    const pluginName = fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim()
-    const baseId = `local-${pluginName.toLowerCase().replace(/\s+/g, '-') || Date.now().toString(36)}`
-    let pluginId = baseId
-    let index = 1
-    while (extensionPlugins.value.some((plugin) => plugin.pluginId === pluginId)) {
-      pluginId = `${baseId}-${index++}`
-    }
-    return {
-      pluginId,
-      pluginName: pluginName || 'Local Plugin'
+    try {
+      const result = await window.aiops?.cancelExtensionInstall?.(pluginId)
+      if (!result?.ok) {
+        setExtensionNotice(result?.errorMessage || `${plugin?.name || '插件'} 取消失败`)
+        return
+      }
+      setExtensionInstallLoading(pluginId, false)
+      setExtensionUpdateLoading(pluginId, false)
+      setExtensionInstallProgress(pluginId, 'cancelled', 0)
+      setExtensionNotice(`${plugin?.name || '插件'} 安装已取消`)
+      clearExtensionInstallProgressLater(pluginId)
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : `${plugin?.name || '插件'} 取消失败`)
     }
   }
 
-  const dropExtensionPackage = (fileName: string) => {
+  const dropExtensionPackage = async (file: string | { name?: string; path?: string; size?: number }) => {
+    installExtensionInstallProgressListener()
     extensionDragActive.value = false
+    const fileName = typeof file === 'string' ? file : file?.name || ''
+    const filePath = typeof file === 'string' ? '' : file?.path || ''
+    const size = typeof file === 'string' ? undefined : file?.size
     if (!fileName.endsWith('.external-reference')) {
       setExtensionNotice('插件包格式错误，请拖入 .external-reference 文件')
       return false
     }
-    const { pluginId, pluginName } = createLocalExtensionPlugin(fileName)
-    extensionInstallingPackageName.value = pluginName
-    setExtensionInstallLoading(pluginId, true)
-    setExtensionInstallProgress(pluginId, 'installing', 100)
-    setExtensionNotice(`正在安装 ${pluginName}`)
-    extensionPlugins.value.push({
-      pluginId,
-      name: pluginName,
-      description: '通过本地 .external-reference 包安装的插件。',
-      iconKey: 'local',
-      tabName: pluginName,
-      show: true,
-      isPlugin: true,
-      installed: true,
-      hasUpdate: false,
-      installedVersion: '1.0.0',
-      latestVersion: '',
-      installable: true,
-      isDraggedOnly: true,
-      source: 'local',
-      lastUpdated: '刚刚',
-      size: 524288,
-      readme: '本地拖拽安装的插件包已加入插件列表。',
-      categories: ['Local', 'Tools'],
-      functions: [{ title: '本地插件', desc: '从 .external-reference 包安装，等待接入真实插件运行时。' }]
-    })
-    selectedExtensionId.value = pluginId
-    window.setTimeout(() => {
-      setExtensionInstallLoading(pluginId, false)
-      setExtensionInstallProgress(pluginId, 'done', 100)
+    const packageName = fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
+    extensionInstallingPackageName.value = packageName
+    setExtensionNotice(`正在安装 ${packageName}`)
+    let pendingPluginId = ''
+    try {
+      const result = await window.aiops?.installExtensionPackage?.({
+        fileName,
+        filePath,
+        size,
+        existingPluginIds: extensionPlugins.value.map((plugin) => plugin.pluginId)
+      })
+      if (!result?.ok || !result.data) {
+        setExtensionNotice(result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED' ? `${packageName} 安装已取消` : result?.errorMessage || `${packageName} 安装失败`)
+        return false
+      }
+      pendingPluginId = result.data.plugin.pluginId
+      applyExtensionPluginFromBackend(result.data.plugin)
+      selectedExtensionId.value = result.data.plugin.pluginId
+      setExtensionInstallProgress(result.data.plugin.pluginId, 'done', 100)
+      setExtensionNotice(`${result.data.plugin.name} 安装成功`)
+      clearExtensionInstallProgressLater(result.data.plugin.pluginId)
+      return true
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : `${packageName} 安装失败`)
+      return false
+    } finally {
+      if (pendingPluginId) setExtensionInstallLoading(pendingPluginId, false)
       extensionInstallingPackageName.value = ''
-      setExtensionNotice(`${pluginName} 安装成功`)
-      clearExtensionInstallProgressLater(pluginId)
-    }, 350)
-    return true
+    }
   }
 
   const createAliasCommand = () => {
@@ -5521,7 +6791,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     Object.assign(target, patch)
   }
 
-  const saveAliasCommand = (id: string) => {
+  const saveAliasCommand = async (id: string) => {
     const target = aliasCommands.value.find((item) => item.id === id)
     if (!target) return { ok: false, reason: 'not-found' as const }
     const alias = target.alias.trim()
@@ -5530,21 +6800,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setExtensionNotice('Alias 和 Command 不能为空')
       return { ok: false, reason: 'missing' as const }
     }
-    if (aliasCommands.value.some((item) => item.id !== id && item.alias.trim() === alias)) {
-      setExtensionNotice('Alias 已存在')
-      return { ok: false, reason: 'duplicate' as const }
+    const payload: AliasCommandSaveInput = {
+      id: target.id === 'new' ? undefined : target.id,
+      previousAlias: target.id === 'new' ? undefined : aliasEditSnapshot.value?.alias || target.alias,
+      alias,
+      command,
+      createdAt: target.createdAt
     }
-    target.alias = alias
-    target.command = command
-    target.edit = false
-    if (target.id === 'new') {
-      target.id = createId('alias')
-      target.createdAt = Date.now()
+    try {
+      const result = await window.aiops?.saveAliasCommand?.(payload)
+      if (!result?.ok || !result.data) {
+        if (result?.errorCode === 'ALIAS_DUPLICATE') {
+          setExtensionNotice('Alias 已存在')
+          return { ok: false, reason: 'duplicate' as const }
+        }
+        setExtensionNotice(result?.errorMessage || 'Alias 保存失败')
+        return { ok: false, reason: 'backend' as const }
+      }
+      await syncAliasConfigFromBackend(result.data.commands)
+      aliasEditSnapshot.value = null
+      setExtensionNotice('Alias 已保存')
+      return { ok: true, reason: 'saved' as const }
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : 'Alias 保存失败')
+      return { ok: false, reason: 'backend' as const }
     }
-    aliasEditSnapshot.value = null
-    setExtensionNotice('Alias 已保存')
-    persistAliasCommands()
-    return { ok: true, reason: 'saved' as const }
   }
 
   const cancelAliasEdit = (id: string) => {
@@ -5564,11 +6844,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aliasEditSnapshot.value = null
   }
 
-  const deleteAliasCommand = (id: string) => {
-    aliasCommands.value = aliasCommands.value.filter((item) => item.id !== id)
-    if (aliasEditSnapshot.value?.id === id) aliasEditSnapshot.value = null
-    setExtensionNotice('Alias 已删除')
-    persistAliasCommands()
+  const deleteAliasCommand = async (id: string) => {
+    const target = aliasCommands.value.find((item) => item.id === id)
+    if (!target) return { ok: false, reason: 'not-found' as const }
+    try {
+      const result = await window.aiops?.deleteAliasCommand?.({ id: target.id, alias: target.alias })
+      if (!result?.ok || !result.data) {
+        setExtensionNotice(result?.errorMessage || 'Alias 删除失败')
+        return { ok: false, reason: 'backend' as const }
+      }
+      await syncAliasConfigFromBackend(result.data.commands)
+      if (aliasEditSnapshot.value?.id === id) aliasEditSnapshot.value = null
+      setExtensionNotice('Alias 已删除')
+      return { ok: true, reason: 'deleted' as const }
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : 'Alias 删除失败')
+      return { ok: false, reason: 'backend' as const }
+    }
   }
 
   const setK8sNotice = (text: string) => {
@@ -5579,15 +6871,77 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }, 2400)
   }
 
-  const switchK8sContext = (name: string) => {
-    k8sContexts.value.forEach((context) => {
-      context.isActive = context.name === name
+  const activateK8sTerminal = (id: string) => {
+    k8sActiveTerminalId.value = id
+    k8sTerminalTabs.value.forEach((tab) => {
+      tab.isActive = tab.id === id
     })
-    setK8sNotice(`已切换到 ${name}`)
   }
 
-  const reloadK8sConfig = () => {
-    setK8sNotice('Kubernetes 配置已刷新')
+  const applyKubernetesCatalog = (catalog: KubernetesCatalog) => {
+    k8sContexts.value = catalog.contexts.map((context) => ({ ...context }))
+    k8sClusters.value = catalog.clusters.map((cluster) => ({ ...cluster }))
+    k8sBastions.value = catalog.bastions.map((bastion) => ({ ...bastion }))
+    k8sNamespaces.value = catalog.namespaces.map((namespace) => ({ ...namespace }))
+    k8sResources.value = catalog.resources.map((resource) => ({ ...resource }))
+    k8sImportContexts.value = catalog.importContexts.map((context) => ({ ...context }))
+    k8sActiveClusterId.value = catalog.activeClusterId
+    if (!k8sSelectedClusterId.value || !k8sClusters.value.some((cluster) => cluster.id === k8sSelectedClusterId.value)) {
+      k8sSelectedClusterId.value = catalog.selectedClusterId
+    }
+    k8sConnectingClusterIds.value = k8sConnectingClusterIds.value.filter((id) => k8sClusters.value.some((cluster) => cluster.id === id))
+    k8sSyncingBastionIds.value = k8sSyncingBastionIds.value.filter((id) => k8sBastions.value.some((bastion) => bastion.uuid === id))
+    k8sTerminalTabs.value = k8sTerminalTabs.value.filter((tab) => k8sClusters.value.some((cluster) => cluster.id === tab.clusterId))
+
+    if (!k8sTerminalTabs.value.length) {
+      k8sActiveTerminalId.value = null
+    } else if (!k8sActiveTerminalId.value || !k8sTerminalTabs.value.some((tab) => tab.id === k8sActiveTerminalId.value)) {
+      activateK8sTerminal(k8sTerminalTabs.value[0].id)
+    }
+
+    const activeCluster = k8sClusters.value.find((cluster) => cluster.id === k8sActiveClusterId.value)
+    if (activeCluster && (!k8sAgentClusterId.value || !k8sClusters.value.some((cluster) => cluster.id === k8sAgentClusterId.value))) {
+      k8sAgentClusterId.value = activeCluster.id
+      k8sAgentContextName.value = activeCluster.context_name
+      k8sAgentStatus.value = 'ready'
+    } else if (!activeCluster && k8sAgentClusterId.value && !k8sClusters.value.some((cluster) => cluster.id === k8sAgentClusterId.value)) {
+      k8sAgentClusterId.value = null
+      k8sAgentContextName.value = ''
+      k8sAgentStatus.value = 'idle'
+    }
+
+    return catalog
+  }
+
+  const refreshKubernetesCatalog = async () => {
+    if (!window.aiops?.listKubernetesCatalog) return null
+    const result = await window.aiops.listKubernetesCatalog()
+    if (!result?.ok || !result.data) {
+      setK8sNotice(result?.errorMessage || 'Kubernetes 配置加载失败')
+      return null
+    }
+    return applyKubernetesCatalog(result.data)
+  }
+
+  const switchK8sContext = async (name: string) => {
+    if (!window.aiops?.switchKubernetesContext) {
+      setK8sNotice('Kubernetes context API 不可用')
+      return false
+    }
+    const result = await window.aiops.switchKubernetesContext(name)
+    if (!result?.ok || !result.data) {
+      setK8sNotice(result?.errorMessage || 'Kubernetes Context 切换失败')
+      return false
+    }
+    applyKubernetesCatalog(result.data)
+    setK8sNotice(`已切换到 ${name}`)
+    return true
+  }
+
+  const reloadK8sConfig = async () => {
+    const catalog = await refreshKubernetesCatalog()
+    setK8sNotice(catalog ? 'Kubernetes 配置已刷新' : 'Kubernetes 配置刷新失败')
+    return Boolean(catalog)
   }
 
   const clearK8sSearch = () => {
@@ -5645,94 +6999,308 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
+  const setK8sAgentCluster = (clusterId: string | null) => {
+    const cluster = clusterId ? k8sClusters.value.find((item) => item.id === clusterId) : null
+    k8sAgentClusterId.value = cluster?.id || null
+    k8sAgentContextName.value = cluster?.context_name || ''
+    k8sAgentStatus.value = cluster ? 'ready' : 'idle'
+    if (cluster) setK8sNotice(`Kubernetes Agent 已切换到 ${cluster.name}`)
+    return Boolean(cluster)
+  }
+
   const connectK8sCluster = (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
-    if (!cluster) return
+    if (!cluster) return false
+    if (!window.aiops?.connectKubernetesCluster) {
+      setK8sNotice('Kubernetes cluster API 不可用')
+      return false
+    }
     setK8sActionMenu(null)
     setK8sConnecting(id, true)
     cluster.connection_status = 'connecting'
     setK8sNotice(`正在连接 ${cluster.name}`)
-    window.setTimeout(() => {
-      const latest = k8sClusters.value.find((item) => item.id === id)
-      if (!latest || !k8sConnectingClusterIds.value.includes(id)) return
-      k8sClusters.value.forEach((item) => {
-        item.is_active = item.id === id ? 1 : 0
-        if (item.id !== id && item.connection_status === 'connected') item.connection_status = 'disconnected'
+    void window.aiops
+      .connectKubernetesCluster(id)
+      .then((result) => {
+        if (!result?.ok || !result.data) {
+          cluster.connection_status = 'error'
+          setK8sNotice(result?.errorMessage || `${cluster.name} 连接失败`)
+          return false
+        }
+        applyKubernetesCatalog(result.data)
+        const latest = result.data.cluster || result.data.clusters.find((item) => item.id === id)
+        if (latest) {
+          k8sAgentClusterId.value = latest.id
+          k8sAgentContextName.value = latest.context_name
+          k8sAgentStatus.value = 'ready'
+        }
+        completeK8sTerminalConnect(id)
+        setK8sNotice(
+          k8sProxyConfig.value.enabled
+            ? `${latest?.name || cluster.name} 连接成功，K8s Agent 代理 ${k8sProxyConfig.value.type} ${k8sProxyConfig.value.host}:${k8sProxyConfig.value.port} 已应用`
+            : `${latest?.name || cluster.name} 连接成功`
+        )
+        return true
       })
-      latest.connection_status = 'connected'
-      latest.is_active = 1
-      k8sActiveClusterId.value = id
-      setK8sConnecting(id, false)
-      setK8sNotice(
-        k8sProxyConfig.value.enabled
-          ? `${latest.name} 连接成功，K8s Agent 代理 ${k8sProxyConfig.value.type} ${k8sProxyConfig.value.host}:${k8sProxyConfig.value.port} 已应用`
-          : `${latest.name} 连接成功`
-      )
-    }, 280)
+      .catch((error) => {
+        cluster.connection_status = 'error'
+        setK8sNotice(error instanceof Error ? error.message : `${cluster.name} 连接失败`)
+      })
+      .finally(() => {
+        setK8sConnecting(id, false)
+      })
+    return true
   }
 
   const disconnectK8sCluster = (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
-    if (!cluster) return
+    if (!cluster) return false
+    if (!window.aiops?.disconnectKubernetesCluster) {
+      setK8sNotice('Kubernetes cluster API 不可用')
+      return false
+    }
     setK8sActionMenu(null)
     setK8sConnecting(id, false)
-    cluster.connection_status = 'disconnected'
-    cluster.is_active = 0
-    if (k8sActiveClusterId.value === id) k8sActiveClusterId.value = null
-    setK8sNotice(`${cluster.name} 已断开`)
+    void window.aiops
+      .disconnectKubernetesCluster(id)
+      .then((result) => {
+        if (!result?.ok || !result.data) {
+          setK8sNotice(result?.errorMessage || `${cluster.name} 断开失败`)
+          return false
+        }
+        applyKubernetesCatalog(result.data)
+        if (k8sAgentClusterId.value === id) {
+          k8sAgentClusterId.value = null
+          k8sAgentContextName.value = ''
+          k8sAgentStatus.value = 'idle'
+        }
+        k8sTerminalTabs.value
+          .filter((tab) => tab.clusterId === id && tab.status !== 'ended')
+          .forEach((tab) => {
+            tab.status = 'ended'
+            tab.exitCode = 0
+            tab.collectingAiOutput = false
+            appendK8sTerminalOutput(tab, `[Terminal session ended]`)
+          })
+        setK8sNotice(`${cluster.name} 已断开`)
+        return true
+      })
+      .catch((error) => {
+        setK8sNotice(error instanceof Error ? error.message : `${cluster.name} 断开失败`)
+      })
+    return true
   }
 
-  const openK8sTerminal = (clusterId: string) => {
+  const appendK8sTerminalOutput = (tab: K8sTerminalTab, text: string) => {
+    tab.output = tab.output.endsWith('\n') || !tab.output ? `${tab.output}${text}` : `${tab.output}\n${text}`
+    tab.updatedAt = '刚刚'
+  }
+
+  const completeK8sTerminalConnect = (clusterId: string) => {
+    k8sTerminalTabs.value
+      .filter((tab) => tab.clusterId === clusterId && tab.status === 'connecting')
+      .forEach((tab) => {
+        tab.status = 'connected'
+        appendK8sTerminalOutput(tab, `[session ${tab.sessionId}] connected (${tab.cols}x${tab.rows})`)
+        appendK8sTerminalOutput(tab, k8sTerminalPrompt(tab.namespace))
+      })
+  }
+
+  const openK8sTerminal = async (clusterId: string, options: { forceNew?: boolean; namespace?: string; cols?: number; rows?: number } = {}) => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
-    if (!cluster) return
-    let tab = k8sTerminalTabs.value.find((item) => item.clusterId === clusterId)
+    if (!cluster) return null
+    let tab = options.forceNew ? undefined : k8sTerminalTabs.value.find((item) => item.clusterId === clusterId && item.status !== 'ended')
     if (!tab) {
-      tab = {
-        id: createId('k8s-tab'),
-        clusterId,
-        name: cluster.name,
-        namespace: cluster.default_namespace || 'default',
-        isActive: false,
-        output: `kubectl context: ${cluster.context_name}\nnamespace: ${cluster.default_namespace || 'default'}\n$ `
+      if (!window.aiops?.createKubernetesTerminal) {
+        setK8sNotice('Kubernetes terminal API 不可用')
+        return null
       }
+      const result = await window.aiops.createKubernetesTerminal({
+        clusterId,
+        namespace: options.namespace,
+        cols: options.cols,
+        rows: options.rows
+      })
+      if (!result?.ok || !result.data) {
+        setK8sNotice(result?.errorMessage || 'Kubernetes 终端创建失败')
+        return null
+      }
+      tab = k8sTerminalTabFromRecord(result.data)
       k8sTerminalTabs.value.push(tab)
     }
-    k8sTerminalTabs.value.forEach((item) => {
-      item.isActive = item.id === tab.id
-    })
-    k8sActiveTerminalId.value = tab.id
+    activateK8sTerminal(tab.id)
     if (cluster.connection_status !== 'connected') connectK8sCluster(clusterId)
+    else if (tab.status === 'connecting') completeK8sTerminalConnect(clusterId)
+    return tab
   }
 
-  const closeK8sTerminalTab = (id: string) => {
+  const createNewK8sTerminalTab = async (clusterId?: string) => {
+    const targetClusterId = clusterId || k8sActiveCluster.value?.id || k8sSelectedCluster.value?.id || k8sClusters.value[0]?.id
+    return targetClusterId ? openK8sTerminal(targetClusterId, { forceNew: true }) : null
+  }
+
+  const closeK8sTerminalTab = async (id: string) => {
     const index = k8sTerminalTabs.value.findIndex((tab) => tab.id === id)
     if (index < 0) return
+    const tab = k8sTerminalTabs.value[index]
+    if (tab.status !== 'ended') {
+      if (!window.aiops?.closeKubernetesTerminal) {
+        setK8sNotice('Kubernetes terminal API 不可用')
+        return
+      }
+      const result = await window.aiops.closeKubernetesTerminal(tab.sessionId, 0)
+      if (!result?.ok) {
+        setK8sNotice(result?.errorMessage || 'Kubernetes 终端关闭失败')
+        return
+      }
+    }
+    k8sTerminalTabs.value[index].status = 'ended'
+    k8sTerminalTabs.value[index].exitCode = 0
     k8sTerminalTabs.value.splice(index, 1)
     if (k8sActiveTerminalId.value === id) {
       const next = k8sTerminalTabs.value[Math.min(index, k8sTerminalTabs.value.length - 1)]
-      k8sActiveTerminalId.value = next?.id || null
-      k8sTerminalTabs.value.forEach((tab) => {
-        tab.isActive = tab.id === k8sActiveTerminalId.value
-      })
+      if (next) activateK8sTerminal(next.id)
+      else k8sActiveTerminalId.value = null
     }
   }
 
   const setActiveK8sTerminal = (id: string) => {
-    k8sActiveTerminalId.value = id
-    k8sTerminalTabs.value.forEach((tab) => {
-      tab.isActive = tab.id === id
-    })
+    if (!k8sTerminalTabs.value.some((tab) => tab.id === id)) return
+    activateK8sTerminal(id)
   }
 
-  const sendK8sTerminalCommand = (command: string) => {
+  const resizeK8sTerminal = async (id: string, cols: number, rows: number) => {
+    const tab = k8sTerminalTabs.value.find((item) => item.id === id || item.sessionId === id)
+    if (!tab) return false
+    if (window.aiops?.resizeKubernetesTerminal) {
+      const result = await window.aiops.resizeKubernetesTerminal(tab.sessionId, cols, rows)
+      if (!result?.ok || !result.data) {
+        setK8sNotice(result?.errorMessage || 'Kubernetes 终端尺寸同步失败')
+        return false
+      }
+      tab.cols = result.data.cols
+      tab.rows = result.data.rows
+      tab.updatedAt = result.data.updatedAt
+      tab.status = result.data.status
+    } else {
+      setK8sNotice('Kubernetes terminal API 不可用')
+      return false
+    }
+    setK8sNotice(`${tab.name} 终端尺寸已同步 ${tab.cols}x${tab.rows}`)
+    return true
+  }
+
+  type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesCommand']>>['data']>
+
+  const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData> => {
+    const cluster = k8sClusters.value.find((item) => item.id === clusterId)
+    if (!window.aiops?.executeKubernetesCommand) {
+      return {
+        runId: `k8s-run-unavailable-${clusterId}`,
+        command,
+        output: '',
+        success: false,
+        error: 'Kubernetes command API is unavailable.',
+        durationMs: 0,
+        startedAt: '刚刚',
+        clusterId,
+        contextName: cluster?.context_name || k8sAgentContextName.value || 'unknown-context',
+        namespace,
+        source
+      }
+    }
+    const result = await window.aiops.executeKubernetesCommand({
+      command,
+      clusterId,
+      clusterName: cluster?.name,
+      contextName: cluster?.context_name,
+      namespace,
+      defaultNamespace: cluster?.default_namespace,
+      source
+    })
+    if (result.ok && result.data) return result.data
+    return {
+      runId: `k8s-run-failed-${clusterId}`,
+      command,
+      output: '',
+      success: false,
+      error: result.errorMessage || 'Kubernetes command failed.',
+      durationMs: 0,
+      startedAt: '刚刚',
+      clusterId,
+      contextName: cluster?.context_name || k8sAgentContextName.value || 'unknown-context',
+      namespace,
+      source
+    }
+  }
+
+  const formatK8sTerminalCommandResult = (command: string, output: string, error = '') => `[aiopsterm kubectl] ${command}${output || error ? `\n${output || error}` : ''}`
+
+  const sendK8sTerminalCommand = async (command: string) => {
     const tab = k8sActiveTerminal.value
-    if (!tab || !command.trim()) return
-    tab.output += `${command}\n[mock kubectl] ${command}\n$ `
+    const text = command.trim()
+    if (!tab || !text || tab.status === 'ended') return ''
+    if (tab.status === 'connecting') tab.status = 'connected'
+    const result = await executeK8sBackendCommand(text, tab.clusterId, tab.namespace, 'terminal')
+    const displayResult = formatK8sTerminalCommandResult(text, result.output, result.error)
+    tab.commandHistory = [text, ...tab.commandHistory.filter((item) => item !== text)].slice(0, 20)
+    tab.lastCommand = text
+    tab.lastCommandOutput = displayResult
+    appendK8sTerminalOutput(tab, text)
+    appendK8sTerminalOutput(tab, displayResult)
+    appendK8sTerminalOutput(tab, k8sTerminalPrompt(tab.namespace))
+    if (tab.collectingAiOutput) {
+      tab.collectingAiOutput = false
+      const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)
+      const host: AiContextOption | undefined = cluster
+        ? {
+            id: `k8s-${cluster.id}`,
+            kind: 'hosts',
+            label: cluster.name,
+            detail: `${cluster.context_name} / ${tab.namespace}`
+          }
+        : undefined
+      void sendChat(`Terminal output:\n\`\`\`\n${displayResult || 'Command executed successfully, no output returned'}\n\`\`\``, undefined, host ? [host] : undefined)
+      setK8sNotice(`${tab.name} 命令输出已发送到 AI`)
+    }
+    return displayResult
+  }
+
+  const executeK8sTerminalAiCommand = async (command: string, tabId?: string) => {
+    const target = tabId ? k8sTerminalTabs.value.find((tab) => tab.id === tabId || tab.sessionId === tabId) : k8sActiveTerminal.value
+    if (!target || target.status === 'ended') return false
+    activateK8sTerminal(target.id)
+    target.collectingAiOutput = true
+    target.aiCommandTabId = tabId || target.id
+    await sendK8sTerminalCommand(command)
+    return true
+  }
+
+  const endK8sTerminalSession = async (id: string, exitCode = 0) => {
+    const tab = k8sTerminalTabs.value.find((item) => item.id === id || item.sessionId === id)
+    if (!tab) return false
+    if (window.aiops?.closeKubernetesTerminal) {
+      const result = await window.aiops.closeKubernetesTerminal(tab.sessionId, exitCode)
+      if (!result?.ok || !result.data) {
+        setK8sNotice(result?.errorMessage || 'Kubernetes 终端会话结束失败')
+        return false
+      }
+      tab.updatedAt = result.data.updatedAt
+    } else {
+      setK8sNotice('Kubernetes terminal API 不可用')
+      return false
+    }
+    tab.status = 'ended'
+    tab.exitCode = exitCode
+    tab.collectingAiOutput = false
+    appendK8sTerminalOutput(tab, `[Terminal session ended]`)
+    setK8sNotice(`${tab.name} 终端会话已结束`)
+    return true
   }
 
   const findK8sResource = (resourceId: string) => k8sResources.value.find((resource) => resource.id === resourceId) || null
 
-  const buildK8sResourceCommand = (resource: MockK8sResource, action: 'get' | 'describe' | 'logs') => {
+  const buildK8sResourceCommand = (resource: K8sResource, action: 'get' | 'describe' | 'logs') => {
     const type = k8sResourceTypeByKind[resource.kind]
     const namespaceArg = resource.kind === 'nodes' ? '' : ` -n ${resource.namespace}`
     if (action === 'logs') return `kubectl logs ${resource.name}${namespaceArg} --tail=120`
@@ -5751,7 +7319,101 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceNamespace.value = namespace
   }
 
-  const refreshK8sResources = () => {
+  const addK8sAgentRun = (result: K8sBackendCommandData, fallbackCluster?: K8sCluster | null) => {
+    const cluster = fallbackCluster ?? k8sAgentCluster.value
+    const record: K8sAgentRunRecord = {
+      id: result.runId,
+      command: result.command,
+      status: result.success ? 'success' : 'error',
+      output: result.output,
+      error: result.error || undefined,
+      clusterId: result.clusterId || cluster?.id || null,
+      contextName: result.contextName || cluster?.context_name || k8sAgentContextName.value || null,
+      namespace: result.namespace,
+      startedAt: result.startedAt,
+      durationMs: result.durationMs
+    }
+    k8sAgentRuns.value = [record, ...k8sAgentRuns.value].slice(0, 12)
+    k8sAgentLastResult.value = record
+    return record
+  }
+
+  const addK8sAgentLocalFailure = (command: string, error: string) =>
+    addK8sAgentRun({
+      runId: 'k8s-run-local-validation',
+      command,
+      output: '',
+      success: false,
+      error,
+      durationMs: 0,
+      startedAt: '刚刚',
+      clusterId: '',
+      contextName: k8sAgentContextName.value || 'unknown-context',
+      namespace: k8sResourceNamespace.value === 'all' ? 'all' : k8sResourceNamespace.value,
+      source: 'agent'
+    })
+
+  const runK8sAgentKubectl = async (command?: string) => {
+    const cluster = k8sAgentCluster.value
+    const text = (command ?? k8sAgentCommandDraft.value).trim()
+    if (!cluster || !text) {
+      const failed = addK8sAgentLocalFailure(text || '<empty>', 'No cluster selected. Please select a cluster first.')
+      k8sAgentStatus.value = 'error'
+      setK8sNotice(failed.error || 'Kubernetes Agent 执行失败')
+      return failed
+    }
+    k8sAgentStatus.value = 'running'
+    const namespace = k8sResourceNamespace.value === 'all' ? cluster.default_namespace || 'default' : k8sResourceNamespace.value
+    const result = await executeK8sBackendCommand(text, cluster.id, namespace, 'agent')
+    const record = addK8sAgentRun(result, cluster)
+    k8sAgentCommandHistory.value = [text, ...k8sAgentCommandHistory.value.filter((item) => item !== text)].slice(0, 12)
+    k8sAgentCommandDraft.value = text
+    k8sAgentStatus.value = result.success ? 'ready' : 'error'
+    k8sResourceOutputTitle.value = `Agent kubectl / ${cluster.name}`
+    k8sResourceOutput.value = `${text}\n\n${result.output}`
+    setK8sNotice(result.success ? 'Kubernetes Agent 命令执行完成' : 'Kubernetes Agent 命令执行失败')
+    return record
+  }
+
+  const testK8sAgentConnection = async () => {
+    const cluster = k8sAgentCluster.value
+    k8sAgentTesting.value = true
+    const record = cluster
+      ? await runK8sAgentKubectl('kubectl version --request-timeout=10s')
+      : addK8sAgentLocalFailure('kubectl version --request-timeout=10s', 'No cluster selected')
+    k8sAgentStatus.value = record.status === 'success' ? 'ready' : 'error'
+    k8sResourceOutputTitle.value = 'Agent Test Connection'
+    k8sResourceOutput.value = `${record.command}\n\n${record.output || record.error || ''}`
+    window.setTimeout(() => {
+      k8sAgentTesting.value = false
+    }, 160)
+    setK8sNotice(record.status === 'success' ? 'Kubernetes Agent 连接测试成功' : 'Kubernetes Agent 连接测试失败')
+    return record
+  }
+
+  const refreshK8sAgentNamespaces = async () => {
+    const cluster = k8sAgentCluster.value
+    if (!cluster) {
+      setK8sNotice('请选择 Kubernetes Agent 集群')
+      return null
+    }
+    const result = await executeK8sBackendCommand('kubectl get namespaces', cluster.id, cluster.default_namespace, 'agent')
+    const record = addK8sAgentRun(result, cluster)
+    k8sResourceOutputTitle.value = `Namespaces / ${cluster.name}`
+    k8sResourceOutput.value = `${record.command}\n\n${result.output || result.error || ''}`
+    setK8sNotice('Kubernetes namespaces 已刷新')
+    return record
+  }
+
+  const cleanupK8sAgent = () => {
+    k8sAgentClusterId.value = null
+    k8sAgentContextName.value = ''
+    k8sAgentStatus.value = 'idle'
+    k8sAgentLastResult.value = null
+    setK8sNotice('Kubernetes Agent 已清理')
+  }
+
+  const refreshK8sResources = async () => {
     const cluster = k8sResourceCluster.value
     if (!cluster) {
       setK8sNotice('请选择 Kubernetes 集群')
@@ -5759,46 +7421,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     k8sResourceLoading.value = true
     k8sResourceOutputTitle.value = `${cluster.name} / ${k8sKindLabels[k8sResourceKind.value]}`
-    k8sResourceOutput.value = `kubectl get ${k8sKindLabels[k8sResourceKind.value].toLowerCase()} ${k8sResourceNamespace.value === 'all' ? '--all-namespaces' : `-n ${k8sResourceNamespace.value}`}\n\n已刷新 ${filteredK8sResources.value.length} 条资源。`
+    const command = `kubectl get ${k8sKindLabels[k8sResourceKind.value].toLowerCase()} ${k8sResourceNamespace.value === 'all' ? '--all-namespaces' : `-n ${k8sResourceNamespace.value}`}`
+    const result = await executeK8sBackendCommand(command, cluster.id, cluster.default_namespace, 'resource')
+    addK8sAgentRun(result, cluster)
+    k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}\n\n已刷新 ${filteredK8sResources.value.length} 条资源。`
     window.setTimeout(() => {
       k8sResourceLoading.value = false
     }, 180)
     setK8sNotice('Kubernetes 资源已刷新')
   }
 
-  const describeK8sResource = (resourceId: string) => {
+  const describeK8sResource = async (resourceId: string) => {
     const resource = findK8sResource(resourceId)
     if (!resource) return
     const command = buildK8sResourceCommand(resource, 'describe')
     k8sResourceOutputTitle.value = `Describe ${resource.name}`
-    k8sResourceOutput.value = [
-      command,
-      '',
-      `Name: ${resource.name}`,
-      `Namespace: ${resource.kind === 'nodes' ? '<cluster>' : resource.namespace}`,
-      `Kind: ${k8sKindLabels[resource.kind]}`,
-      `Status: ${resource.status}`,
-      `Ready: ${resource.ready}`,
-      resource.node ? `Node: ${resource.node}` : '',
-      resource.image ? `Image: ${resource.image}` : '',
-      resource.ports ? `Ports: ${resource.ports}` : '',
-      resource.selector ? `Selector: ${resource.selector}` : '',
-      resource.restarts !== undefined ? `Restarts: ${resource.restarts}` : '',
-      `Age: ${resource.age}`,
-      '',
-      `Events: ${resource.detail}`
-    ]
-      .filter(Boolean)
-      .join('\n')
+    const result = await executeK8sBackendCommand(command, resource.clusterId, resource.namespace, 'resource')
+    k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}`
   }
 
-  const showK8sPodLogs = (resourceId: string) => {
+  const showK8sPodLogs = async (resourceId: string) => {
     const resource = findK8sResource(resourceId)
     if (!resource || resource.kind !== 'pods') return
     const command = buildK8sResourceCommand(resource, 'logs')
-    const errorLine = resource.status === 'CrashLoopBackOff' ? '\n2026-06-04T09:28:11Z error failed to load billing config: missing secret billing-api-token' : ''
     k8sResourceOutputTitle.value = `Logs ${resource.name}`
-    k8sResourceOutput.value = `${command}\n\n2026-06-04T09:27:59Z info starting container ${resource.name}\n2026-06-04T09:28:02Z info namespace=${resource.namespace} node=${resource.node || '-'}${errorLine}\n2026-06-04T09:28:15Z info readiness probe ${resource.status === 'Running' ? 'passed' : 'pending'}`
+    const result = await executeK8sBackendCommand(command, resource.clusterId, resource.namespace, 'resource')
+    k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}`
   }
 
   const copyK8sResourceCommand = (resourceId: string, action: 'get' | 'describe' | 'logs' = 'get') => {
@@ -5830,20 +7478,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setK8sNotice('Kubernetes 输出已清空')
   }
 
-  const sendK8sCurrentOutputToTerminal = () => {
+  const sendK8sCurrentOutputToTerminal = async () => {
     const cluster = k8sResourceCluster.value
     const command = currentK8sOutputCommand()
     if (!cluster || !command) {
       setK8sNotice('当前没有可发送到终端的 kubectl 命令')
       return ''
     }
-    openK8sTerminal(cluster.id)
-    sendK8sTerminalCommand(command)
+    await openK8sTerminal(cluster.id)
+    await sendK8sTerminalCommand(command)
     setK8sNotice(`已发送到 ${cluster.name} 终端`)
     return command
   }
 
-  const sendK8sCurrentOutputToAi = () => {
+  const sendK8sCurrentOutputToAi = async () => {
     const cluster = k8sResourceCluster.value
     const output = k8sResourceOutput.value.trim()
     if (!cluster || !output) {
@@ -5856,24 +7504,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       label: cluster.name,
       detail: `${cluster.context_name} / ${cluster.default_namespace}`
     }
-    sendChat(`请分析这个 Kubernetes 输出并给出下一步排查建议：\n\nTerminal output:\n\`\`\`\n${output}\n\`\`\``, undefined, [host])
+    const sent = await sendChat(`请分析这个 Kubernetes 输出并给出下一步排查建议：\n\nTerminal output:\n\`\`\`\n${output}\n\`\`\``, undefined, [host])
+    if (!sent) return false
     setK8sNotice('Kubernetes 输出已发送到 AI')
     return true
   }
 
-  const sendK8sResourceCommand = (resourceId: string, action: 'get' | 'describe' | 'logs' = 'get') => {
+  const sendK8sResourceCommand = async (resourceId: string, action: 'get' | 'describe' | 'logs' = 'get') => {
     const resource = findK8sResource(resourceId)
     const cluster = resource ? k8sClusters.value.find((item) => item.id === resource.clusterId) : null
     if (!resource || !cluster || (action === 'logs' && resource.kind !== 'pods')) return
-    openK8sTerminal(cluster.id)
-    sendK8sTerminalCommand(buildK8sResourceCommand(resource, action))
+    await openK8sTerminal(cluster.id)
+    await sendK8sTerminalCommand(buildK8sResourceCommand(resource, action))
     setK8sNotice(`已发送到 ${cluster.name} 终端`)
   }
 
   const testK8sClusterConnection = (patch: { contextName?: string; serverUrl?: string }) => {
-    const ok = !!(patch.contextName?.trim() && patch.serverUrl?.trim())
+    const contextName = patch.contextName?.trim() || ''
+    const context = contextName ? selectK8sImportContext(contextName) : null
+    const serverUrl = patch.serverUrl?.trim() || context?.server || ''
+    const ok = !!(contextName && serverUrl && (!context || context.name === contextName))
     k8sTestResult.value = ok
-    setK8sNotice(ok ? '连接测试成功' : '连接测试失败')
+    setK8sNotice(ok ? '连接测试成功' : '连接测试失败，请确认 Context 和 Server URL')
     return ok
   }
 
@@ -5881,7 +7533,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return k8sImportContexts.value.find((context) => context.name === contextName) || null
   }
 
-  const addK8sCluster = (payload: {
+  const importK8sKubeconfigContent = (content: string) => {
+    const result = parseKubeconfigContexts(content)
+    if (result.success) {
+      k8sImportContexts.value = result.contexts
+      setK8sNotice(`已发现 ${result.contexts.length} 个 kubeconfig Context`)
+    } else {
+      setK8sNotice(result.error || 'Kubeconfig 导入失败')
+    }
+    return result
+  }
+
+  const importK8sKubeconfigFile = async (filePath: string) => {
+    if (!filePath.trim()) {
+      const emptyResult: K8sKubeconfigImportResult = {
+        success: false,
+        contexts: [],
+        kubeconfigContent: '',
+        currentContext: '',
+        error: '请选择 kubeconfig 文件'
+      }
+      setK8sNotice(emptyResult.error || '请选择 kubeconfig 文件')
+      return emptyResult
+    }
+    try {
+      const result = await window.aiops.readLocalFile(filePath)
+      const parsed = importK8sKubeconfigContent(result.content)
+      if (parsed.success) setK8sNotice(`已选择 kubeconfig 文件，发现 ${parsed.contexts.length} 个 Context`)
+      return parsed
+    } catch (error) {
+      const failed: K8sKubeconfigImportResult = {
+        success: false,
+        contexts: [],
+        kubeconfigContent: '',
+        currentContext: '',
+        error: error instanceof Error ? error.message : String(error)
+      }
+      setK8sNotice(`Kubeconfig 导入失败：${failed.error}`)
+      return failed
+    }
+  }
+
+  const addK8sCluster = async (payload: {
     name: string
     contextName: string
     serverUrl: string
@@ -5898,58 +7591,50 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('请补全集群名称、Context 和 Server URL')
       return null
     }
-    const cluster: MockK8sCluster = {
-      id: createId('k8s'),
+    if (!window.aiops?.addKubernetesCluster) {
+      setK8sNotice('Kubernetes cluster API 不可用')
+      return null
+    }
+    const result = await window.aiops.addKubernetesCluster({
       name,
-      kubeconfig_path: payload.kubeconfigPath || null,
-      kubeconfig_content: payload.kubeconfigContent || null,
-      context_name: contextName,
-      server_url: serverUrl,
-      auth_type: payload.sourceType === 'jumpserver' ? 'jumpserver' : 'kubeconfig',
-      is_active: 0,
-      connection_status: 'disconnected',
-      auto_connect: 0,
-      default_namespace: payload.defaultNamespace?.trim() || 'default',
-      created_at: '刚刚',
-      updated_at: '刚刚',
-      source_type: payload.sourceType || 'local',
-      bastion_uuid: payload.bastionUuid || null,
-      bastion_asset_address: null,
-      bastion_asset_name: null,
-      bastion_asset_id_last: null
+      contextName,
+      serverUrl,
+      defaultNamespace: payload.defaultNamespace,
+      kubeconfigPath: payload.kubeconfigPath,
+      kubeconfigContent: payload.kubeconfigContent,
+      sourceType: payload.sourceType,
+      bastionUuid: payload.bastionUuid
+    })
+    if (!result?.ok || !result.data?.cluster) {
+      setK8sNotice(result?.errorMessage || 'Kubernetes 集群添加失败')
+      return null
     }
-    k8sClusters.value.unshift(cluster)
-    if (cluster.source_type === 'local') {
-      k8sContexts.value.unshift({
-        name: cluster.context_name,
-        cluster: cluster.name,
-        namespace: cluster.default_namespace,
-        server: cluster.server_url,
-        isActive: false
-      })
-    }
+    applyKubernetesCatalog(result.data)
+    const cluster = result.data.cluster
     k8sSelectedClusterId.value = cluster.id
     k8sAddModalOpen.value = false
     setK8sNotice(`${cluster.name} 已添加`)
     return cluster
   }
 
-  const updateK8sCluster = (id: string, patch: { name?: string; defaultNamespace?: string; autoConnect?: boolean }) => {
+  const updateK8sCluster = async (id: string, patch: { name?: string; defaultNamespace?: string; autoConnect?: boolean }) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
-    if (!cluster) return
-    if (patch.name?.trim()) cluster.name = patch.name.trim()
-    if (patch.defaultNamespace?.trim()) cluster.default_namespace = patch.defaultNamespace.trim()
-    if (patch.autoConnect !== undefined) cluster.auto_connect = patch.autoConnect ? 1 : 0
-    cluster.updated_at = '刚刚'
-    const context = k8sContexts.value.find((item) => item.name === cluster.context_name)
-    if (context) {
-      context.cluster = cluster.name
-      context.namespace = cluster.default_namespace
-      context.server = cluster.server_url
+    if (!cluster) return null
+    if (!window.aiops?.updateKubernetesCluster) {
+      setK8sNotice('Kubernetes cluster API 不可用')
+      return null
     }
+    const result = await window.aiops.updateKubernetesCluster(id, patch)
+    if (!result?.ok || !result.data?.cluster) {
+      setK8sNotice(result?.errorMessage || `${cluster.name} 更新失败`)
+      return null
+    }
+    applyKubernetesCatalog(result.data)
+    const updated = result.data.cluster
     k8sEditModalOpen.value = false
     k8sEditingClusterId.value = null
-    setK8sNotice(`${cluster.name} 已更新`)
+    setK8sNotice(`${updated.name} 已更新`)
+    return updated
   }
 
   const requestDeleteK8sCluster = (id: string) => {
@@ -5961,51 +7646,69 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sDeleteConfirmClusterId.value = null
   }
 
-  const confirmDeleteK8sCluster = () => {
+  const confirmDeleteK8sCluster = async () => {
     if (!k8sDeleteConfirmClusterId.value) return
-    deleteK8sCluster(k8sDeleteConfirmClusterId.value)
+    await deleteK8sCluster(k8sDeleteConfirmClusterId.value)
     k8sDeleteConfirmClusterId.value = null
   }
 
-  const deleteK8sCluster = (id: string) => {
+  const deleteK8sCluster = async (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
-    k8sClusters.value = k8sClusters.value.filter((item) => item.id !== id)
+    if (!window.aiops?.deleteKubernetesCluster) {
+      setK8sNotice('Kubernetes cluster API 不可用')
+      return false
+    }
+    const result = await window.aiops.deleteKubernetesCluster(id)
+    if (!result?.ok || !result.data) {
+      setK8sNotice(result?.errorMessage || `${cluster?.name || '集群'} 删除失败`)
+      return false
+    }
+    applyKubernetesCatalog(result.data)
     k8sTerminalTabs.value = k8sTerminalTabs.value.filter((tab) => tab.clusterId !== id)
-    k8sContexts.value = k8sContexts.value.filter((context) => context.name !== cluster?.context_name)
     if (k8sSelectedClusterId.value === id) k8sSelectedClusterId.value = null
     if (k8sActiveClusterId.value === id) k8sActiveClusterId.value = null
     if (k8sActiveTerminalId.value && !k8sTerminalTabs.value.some((tab) => tab.id === k8sActiveTerminalId.value)) {
       k8sActiveTerminalId.value = k8sTerminalTabs.value[0]?.id || null
+      k8sTerminalTabs.value.forEach((tab) => {
+        tab.isActive = tab.id === k8sActiveTerminalId.value
+      })
     }
     setK8sNotice(`${cluster?.name || '集群'} 已删除`)
+    return true
   }
 
   const syncK8sBastion = (bastionUuid: string) => {
     const bastion = k8sBastions.value.find((item) => item.uuid === bastionUuid)
-    if (!bastion) return
+    if (!bastion) return false
+    if (!window.aiops?.syncKubernetesBastion) {
+      setK8sNotice('Kubernetes bastion API 不可用')
+      return false
+    }
     setK8sSyncingBastion(bastionUuid, true)
     setK8sNotice(`正在同步 ${bastion.label}`)
-    window.setTimeout(() => {
-      const existing = k8sClusters.value.filter((cluster) => cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastionUuid)
-      if (!existing.length) {
-        addK8sCluster({
-          name: `${bastion.label}-k8s`,
-          contextName: `${bastion.label}/synced`,
-          serverUrl: `${bastion.ip}:6443`,
-          defaultNamespace: 'default',
-          sourceType: 'jumpserver',
-          bastionUuid
-        })
+    void window.aiops
+      .syncKubernetesBastion(bastionUuid)
+      .then((result) => {
+        if (!result?.ok || !result.data) {
+          setK8sNotice(result?.errorMessage || `${bastion.label} Kubernetes 资产同步失败`)
+          return false
+        }
+        applyKubernetesCatalog(result.data)
         k8sConfigTab.value = 'jumpserver'
-        setK8sNotice(`${bastion.label} Kubernetes 资产已同步，新增 1 个`)
-      } else {
-        existing.forEach((cluster) => {
-          cluster.updated_at = '刚刚'
-        })
-        setK8sNotice(`${bastion.label} Kubernetes 资产已同步，更新 ${existing.length} 个`)
-      }
-      setK8sSyncingBastion(bastionUuid, false)
-    }, 320)
+        setK8sNotice(
+          result.data.syncedCount
+            ? `${bastion.label} Kubernetes 资产已同步，新增 ${result.data.syncedCount} 个`
+            : `${bastion.label} Kubernetes 资产已同步，更新 ${result.data.updatedCount} 个`
+        )
+        return true
+      })
+      .catch((error) => {
+        setK8sNotice(error instanceof Error ? error.message : `${bastion.label} Kubernetes 资产同步失败`)
+      })
+      .finally(() => {
+        setK8sSyncingBastion(bastionUuid, false)
+      })
+    return true
   }
 
   const toggleK8sBastionCollapsed = (uuid: string) => {
@@ -6116,43 +7819,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!source?.sshSession?.connectionId) return null
     const sourceSession = source.sshSession
     const forkSession: TerminalSshSession = {
-      ...sourceSession,
-      connectionId: createMockSshConnectionId({
-        id: sourceSession.assetId,
-        host: sourceSession.host,
-        port: sourceSession.port,
-        username: sourceSession.username,
-        asset_type: sourceSession.authType || 'person'
-      }),
+      host: sourceSession.host,
+      port: sourceSession.port,
+      username: sourceSession.username,
+      assetId: sourceSession.assetId,
+      assetName: sourceSession.assetName,
+      assetType: sourceSession.assetType,
+      organizationId: sourceSession.organizationId,
+      authType: sourceSession.authType,
       sourcePanelId: source.id,
-      forkFromConnectionId: sourceSession.connectionId,
-      createdAt: Date.now()
+      forkFromConnectionId: sourceSession.connectionId
     }
     const forkPanel: TerminalPanel = {
       id: createId('panel'),
       title: `${source.title} fork`,
       cwd: source.cwd,
       kind: 'terminal',
-      output: '',
-      outputSegments: [],
-      status: 'running',
+      output: `aiopsterm ssh ${sourceSession.username}@${sourceSession.host}:${sourceSession.port}\n`,
+      outputSegments: createTerminalSegments(`aiopsterm ssh ${sourceSession.username}@${sourceSession.host}:${sourceSession.port}\n`, 'input'),
+      status: 'ready',
       split: source.split,
       sshSession: forkSession
     }
-    const message = [
-      `[fork ssh] source=${source.title}`,
-      `[fork ssh] reused ${sourceSession.username}@${sourceSession.host}:${sourceSession.port}`,
-      `[fork ssh] sourceConnectionId=${sourceSession.connectionId}`,
-      `[fork ssh] newConnectionId=${forkSession.connectionId}`,
-      '$ '
-    ].join('\n')
-    setTerminalOutput(forkPanel, `${message}\n`)
     panels.value.push(forkPanel)
     activePanelId.value = forkPanel.id
+    const contextId = sourceSession.assetId || sourceSession.connectionId || forkPanel.id
     selectedContexts.value = [
-      ...selectedContexts.value.filter((item) => item.id !== (sourceSession.assetId || sourceSession.connectionId)),
+      ...selectedContexts.value.filter((item) => item.id !== contextId),
       {
-        id: sourceSession.assetId || sourceSession.connectionId,
+        id: contextId,
         kind: 'hosts',
         label: sourceSession.host,
         detail: `${sourceSession.assetName} fork`
@@ -6163,11 +7858,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const knowledgePanelId = (relPath: string) => `kb:${relPath}`
 
-  const openKnowledgeFile = (relPath: string) => {
+  let knowledgeJumpTokenSeed = 0
+
+  const createKnowledgeJumpState = (range?: { startLine?: number; endLine?: number }) => {
+    if (!range?.startLine) return {}
+    knowledgeJumpTokenSeed += 1
+    return {
+      startLine: range.startLine,
+      ...(range.endLine ? { endLine: range.endLine } : {}),
+      jumpToken: knowledgeJumpTokenSeed
+    }
+  }
+
+  const openKnowledgeFile = (relPath: string, range?: { startLine?: number; endLine?: number }) => {
     const node = findKnowledgeNode(relPath)
     if (!node || node.type !== 'file') return null
     const existing = panels.value.find((panel) => panel.kind === 'knowledge' && panel.knowledge?.relPath === relPath)
     if (existing) {
+      existing.knowledge = {
+        relPath,
+        isImage: isKnowledgeImagePath(relPath),
+        ...createKnowledgeJumpState(range)
+      }
       activePanelId.value = existing.id
       kbSelectedKeys.value = [relPath]
       return existing
@@ -6182,7 +7894,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       outputSegments: [],
       knowledge: {
         relPath,
-        isImage: isKnowledgeImagePath(relPath)
+        isImage: isKnowledgeImagePath(relPath),
+        ...createKnowledgeJumpState(range)
       }
     }
     panels.value.push(panel)
@@ -6290,6 +8003,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
+  const reportTerminalExecutionUnavailable = (command: string, panelIds: string[] = [], reason = '终端会话不可用，请先打开本地 shell 或连接 SSH') => {
+    setTopNotice(reason)
+    terminalSecurityPrompt.value = null
+    return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
+  }
+
+  const terminalWriteFailureReason = (result?: Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>) =>
+    result?.errorMessage || '终端写入失败，请重新打开本地 shell 或连接 SSH'
+
+  const canWriteTerminalExecution = (execution: Pick<TerminalSecurityExecution, 'panelIds' | 'writeToShell'>) => {
+    if (!execution.writeToShell) return true
+    if (typeof window.aiops?.writeTerminal !== 'function') return false
+    return execution.panelIds.every((panelId) => {
+      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+      return Boolean(panel?.sessionId)
+    })
+  }
+
   const prepareTerminalSecurityExecution = (execution: TerminalSecurityExecution): TerminalSecurityDecision => {
     const result = validateCommandSecurity(securitySettings.value, execution.command)
     if (result.requiresApproval) {
@@ -6313,44 +8044,89 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
 
     terminalSecurityPrompt.value = null
+    if (!execution.writeToShell) applyTerminalExecution(execution)
+    return { status: 'allow', execution }
+  }
+
+  const writeTerminalExecution = async (execution: TerminalSecurityExecution): Promise<TerminalSecurityDecision> => {
+    if (!execution.writeToShell) {
+      applyTerminalExecution(execution)
+      return { status: 'allow', execution }
+    }
+    if (!canWriteTerminalExecution(execution)) {
+      return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
+    }
+    for (const panelId of execution.panelIds) {
+      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+      if (!panel?.sessionId) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
+      const result = await window.aiops.writeTerminal(panel.sessionId, execution.shellText || execution.inputText)
+      if (result?.ok === false) {
+        return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, terminalWriteFailureReason(result))
+      }
+    }
     applyTerminalExecution(execution)
-    return { status: 'allow' }
+    return { status: 'allow', execution }
   }
 
   const executeTerminalCommand = (panelId: string, command: string, options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'outputText' | 'shellText' | 'writeToShell' | 'source'>> = {}) => {
     const text = command.trim()
     if (!text) return { status: 'allow' } as TerminalSecurityDecision
-    return prepareTerminalSecurityExecution({
+    const writeToShell = options.writeToShell ?? true
+    const execution: TerminalSecurityExecution = {
       command: text,
       panelIds: [panelId],
       inputText: options.inputText ?? `${text}\n`,
-      outputText: options.outputText ?? `[mock] ${text}\n$ `,
+      outputText: options.outputText,
       shellText: options.shellText ?? `${text}\n`,
-      writeToShell: options.writeToShell ?? false,
+      writeToShell,
       source: options.source ?? 'direct'
-    })
+    }
+    return prepareTerminalSecurityExecution(execution)
+  }
+
+  const runTerminalCommand = async (
+    panelId: string,
+    command: string,
+    options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'outputText' | 'shellText' | 'writeToShell' | 'source'>> = {}
+  ) => {
+    const decision = executeTerminalCommand(panelId, command, options)
+    if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
+    return writeTerminalExecution(decision.execution)
   }
 
   const executeGlobalTerminalCommand = (command: string) => {
     const text = command.trim()
     if (!text) return { status: 'allow' } as TerminalSecurityDecision
-    const terminalPanelIds = panels.value.filter((panel) => panel.kind !== 'knowledge').map((panel) => panel.id)
-    return prepareTerminalSecurityExecution({
+    const terminalPanelIds = panels.value.filter((panel) => panel.kind !== 'knowledge' && panel.sessionId).map((panel) => panel.id)
+    if (!terminalPanelIds.length || typeof window.aiops?.writeTerminal !== 'function') {
+      return reportTerminalExecutionUnavailable(text, panels.value.filter((panel) => panel.kind !== 'knowledge').map((panel) => panel.id))
+    }
+    const execution: TerminalSecurityExecution = {
       command: text,
       panelIds: terminalPanelIds,
       inputText: `${text}\n`,
-      outputText: `[mock broadcast] ${text}\n$ `,
       shellText: `${text}\n`,
-      writeToShell: false,
+      writeToShell: true,
       source: 'global'
-    })
+    }
+    return prepareTerminalSecurityExecution(execution)
+  }
+
+  const runGlobalTerminalCommand = async (command: string) => {
+    const decision = executeGlobalTerminalCommand(command)
+    if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
+    return writeTerminalExecution(decision.execution)
   }
 
   const approveTerminalSecurityPrompt = () => {
     const prompt = terminalSecurityPrompt.value
     if (!prompt) return null
-    applyTerminalExecution(prompt.execution)
+    if (!canWriteTerminalExecution(prompt.execution)) {
+      reportTerminalExecutionUnavailable(prompt.command, prompt.panelIds)
+      return null
+    }
     terminalSecurityPrompt.value = null
+    if (!prompt.execution.writeToShell) applyTerminalExecution(prompt.execution)
     return prompt.execution
   }
 
@@ -6372,13 +8148,58 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const panel = resolveActiveWritableTerminalPanel()
     const text = command.trim()
     if (!panel || !text) return null
-    return executeTerminalCommand(panel.id, text, { source: 'agent' })
+    return executeTerminalCommand(panel.id, text, { source: 'agent', writeToShell: true })
+  }
+
+  const runActiveTerminalCommand = async (command: string, source: TerminalCommandSource = 'agent') => {
+    const panel = resolveActiveWritableTerminalPanel()
+    const text = command.trim()
+    if (!panel || !text) return null
+    return runTerminalCommand(panel.id, text, { source, writeToShell: true })
   }
 
   const appendActiveTerminalInput = (command: string) => {
     const panel = resolveActiveWritableTerminalPanel()
     if (!panel) return null
     return executeTerminalCommand(panel.id, command, { writeToShell: false, source: 'agent' })
+  }
+
+  const buildTerminalCommandContext = (panel: TerminalPanel): TerminalCommandGenerationContext => {
+    const ssh = panel.sshSession
+    return {
+      host: ssh?.host || '127.0.0.1',
+      username: ssh?.username || 'local',
+      cwd: panel.cwd || '~',
+      shell: panel.sessionId ? 'local-shell' : 'bash',
+      connectionType: ssh ? ('ssh' as const) : ('local' as const)
+    }
+  }
+
+  const generateTerminalCommand = async (panelId: string, instruction: string, modelName?: string) => {
+    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    const prompt = instruction.trim()
+    if (!panel || panel.kind === 'knowledge' || !prompt) return null
+    const selectedModel = modelName || terminalCommandModelOptions.value[0] || config.value.modelName || 'aiopsterm-local-agent'
+
+    const result = await window.aiops.generateTerminalCommand({
+      panelId: panel.id,
+      instruction: prompt,
+      modelName: selectedModel,
+      context: buildTerminalCommandContext(panel)
+    })
+    if (!result.ok || !result.data) return null
+    const record = result.data
+    terminalCommandGenerationRecords.value = [record, ...terminalCommandGenerationRecords.value].slice(0, 20)
+    return record
+  }
+
+  const injectGeneratedTerminalCommand = (panelId: string, command: string) => {
+    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    const text = command.trim()
+    if (!panel || panel.kind === 'knowledge' || !text) return null
+    appendTerminalSegment(panel, text, 'input')
+    recordMacroTerminalInput(panel.id, text)
+    return { status: 'allow' } as TerminalSecurityDecision
   }
 
   const buildPlainTextFromAiParts = (parts: AiContentPart[]) =>
@@ -6394,7 +8215,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
       .join('')
 
-  const appendChatExchange = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[]) => {
+  const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
+    const result = await window.aiops.generateAiChatResponse(input)
+    const message = chatMessages.value.find((item) => item.id === assistantId)
+    if (!message || message.state !== 'streaming') return
+    message.state = 'done'
+    message.text = result.ok && result.data?.text ? result.data.text : result.errorMessage || 'AI 响应生成失败'
+    void updateCurrentConversationSnapshot()
+  }
+
+  const hostContextForExchangeRequest = (context: AiContextOption): NonNullable<AiChatExchangeRequestInput['hosts']>[number] | null => {
+    if (context.kind !== 'hosts' || !context.label.trim()) return null
+    return {
+      id: context.id,
+      kind: 'hosts',
+      label: context.label,
+      detail: context.detail
+    }
+  }
+
+  const appendChatExchange = async (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[]) => {
     const safeContentParts = contentParts?.filter((part) => part.type !== 'text' || part.text.trim()) || []
     const hasStructuredParts = safeContentParts.some((part) => part.type !== 'text')
     const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
@@ -6421,41 +8261,42 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       : ''
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
     const commandLabel = commandDisplay ? `\n命令：${commandDisplay}` : ''
-    chatMessages.value.push({
-      id: createId('msg'),
-      role: 'user',
-      text: `${prompt}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}`,
-      contentParts: safeContentParts.length || hasStructuredParts ? safeContentParts : undefined,
-      hosts: overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
+    const userText = `${prompt}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}`
+    const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
+    const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
+    const request = await window.aiops.createAiChatExchangeRequest({
+      text: userText,
+      hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts']
     })
-    const assistantId = createId('msg')
-    chatMessages.value.push({
-      id: assistantId,
-      role: 'assistant',
-      text: `${selectedSkills.map((skill) => `Activated Skill: ${skill.name}`).join('\n')}${selectedSkills.length ? '\n\n' : ''}正在读取当前终端、资产和知识库上下文...\n\n计划：\n1. 确认目标环境。\n2. 生成只读检查命令。\n3. 等待用户确认后执行。`,
-      state: 'streaming'
+    if (!request.ok || !request.data) return false
+    const userMessage = chatHistoryMessageToChatMessage(request.data.userMessage)
+    userMessage.contentParts = safeContentParts.length || hasStructuredParts ? safeContentParts : undefined
+    userMessage.hosts = hostContexts
+    const assistantMessage = chatHistoryMessageToChatMessage(request.data.assistantMessage)
+    chatMessages.value.push(userMessage)
+    chatMessages.value.push(assistantMessage)
+    void generateAiResponseForMessage(assistantMessage.id, {
+      prompt: userText,
+      messages: [...historyForBackend, { role: 'user', text: userText }],
+      contexts: messageContexts.map((item) => ({ id: item.id, kind: item.kind, label: item.label })),
+      skills: selectedSkills.map((skill) => ({ name: skill.name, description: skill.description, content: skill.content })),
+      command: selectedCommandRef.value
+        ? { id: selectedCommandId.value || undefined, label: selectedCommandRef.value.label, command: selectedCommandRef.value.command }
+        : commandDisplay
+          ? { id: selectedCommandId.value || undefined, label: commandDisplay }
+          : null,
+      model: config.value.modelName,
+      mode: mode.value === 'agents' ? 'agent' : 'command'
     })
-    window.setTimeout(() => {
-      const message = chatMessages.value.find((item) => item.id === assistantId)
-      if (message) {
-        message.state = 'done'
-        message.text = `${message.text}\n\n当前为本地 mock 响应，未连接任何远端 AI 服务。`
-      }
-    }, 700)
-    const conversation = conversations.value.find((item) => item.id === selectedConversationId.value)
-    if (conversation) {
-      conversation.summary = prompt
-      conversation.updatedAt = '刚刚'
-      conversation.ts = Math.max(Date.now(), ...conversations.value.map((item) => item.ts)) + 1
-    }
+    await updateCurrentConversationSnapshot(prompt, { notifyFailure: true, notifyUnavailable: true })
     return true
   }
 
   const sendChat = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[]) => {
-    appendChatExchange(text, contentParts, overrideHosts)
+    return appendChatExchange(text, contentParts, overrideHosts)
   }
 
-  const resendUserMessageFromParts = (messageId: string, contentParts: AiContentPart[], overrideHosts?: AiContextOption[]) => {
+  const resendUserMessageFromParts = async (messageId: string, contentParts: AiContentPart[], overrideHosts?: AiContextOption[]) => {
     const index = chatMessages.value.findIndex((message) => message.id === messageId && message.role === 'user')
     if (index === -1) return false
     const originalHosts = chatMessages.value[index].hosts
@@ -6466,81 +8307,91 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return appendChatExchange(prompt, contentParts, overrideHosts ?? originalHosts)
   }
 
-  const createConversation = () => {
-    const conversation: ConversationItem = {
-      id: createId('conv'),
-      title: '新会话',
-      summary: '等待输入运维目标',
-      updatedAt: '刚刚',
-      ts: Math.max(Date.now(), ...conversations.value.map((item) => item.ts)) + 1
-    }
-    conversations.value.unshift(conversation)
-    selectedConversationId.value = conversation.id
-    chatMessages.value = [{ id: createId('msg'), role: 'assistant', text: '请输入本次运维目标。', state: 'done' }]
-    return conversation
+  const createConversation = async () => {
+    if (!window.aiops?.createChatConversation) return null
+    const result = await window.aiops.createChatConversation()
+    if (!result?.ok || !result.data) return null
+    applyChatHistorySnapshot({
+      conversations: result.data.conversations,
+      selectedConversationId: result.data.selectedConversationId
+    })
+    await restoreChatMessagesFromBackend(result.data.conversation.id)
+    return conversations.value.find((conversation) => conversation.id === result.data!.conversation.id) || cloneConversationRecord(result.data.conversation)
   }
 
-  const deleteConversation = (id: string) => {
-    conversations.value = conversations.value.filter((conversation) => conversation.id !== id)
-    if (selectedConversationId.value === id) {
-      selectedConversationId.value = conversations.value[0]?.id || ''
+  const deleteConversation = async (id: string) => {
+    if (!window.aiops?.deleteChatConversation) return false
+    const result = await window.aiops.deleteChatConversation(id)
+    if (!result?.ok || !result.data) return false
+    applyChatHistorySnapshot({
+      conversations: result.data.conversations,
+      selectedConversationId: result.data.selectedConversationId
+    })
+    if (selectedConversationId.value) {
+      await restoreChatMessagesFromBackend(selectedConversationId.value)
+    } else {
+      chatMessages.value = []
     }
+    return true
   }
 
   const selectConversation = (id: string) => {
     selectedConversationId.value = id
   }
 
-  const renameConversation = (id: string, title: string) => {
+  const renameConversation = async (id: string, title: string) => {
     const nextTitle = title.trim()
     const conversation = conversations.value.find((item) => item.id === id)
     if (!conversation || !nextTitle) return false
-    conversation.title = nextTitle
-    conversation.updatedAt = '刚刚'
-    conversation.ts = Math.max(Date.now(), ...conversations.value.map((item) => item.ts)) + 1
+    if (!window.aiops?.updateChatConversation) {
+      setTopNotice('会话历史写入服务不可用')
+      return false
+    }
+    const result = await window.aiops.updateChatConversation({
+      id,
+      title: nextTitle,
+      summary: conversation.summary,
+      favorite: conversation.favorite,
+      messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
+    })
+    if (!result?.ok || !result.data) return false
+    applyChatHistorySnapshot({
+      conversations: result.data.conversations,
+      selectedConversationId: result.data.selectedConversationId
+    })
     return true
   }
 
-  const toggleConversationFavorite = (id: string) => {
+  const toggleConversationFavorite = async (id: string) => {
     const conversation = conversations.value.find((item) => item.id === id)
     if (!conversation) return false
-    conversation.favorite = !conversation.favorite
+    const nextFavorite = !conversation.favorite
+    if (!window.aiops?.updateChatConversation) {
+      setTopNotice('会话历史写入服务不可用')
+      return false
+    }
+    const result = await window.aiops.updateChatConversation({
+      id,
+      title: conversation.title,
+      summary: conversation.summary,
+      favorite: nextFavorite,
+      messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
+    })
+    if (!result?.ok || !result.data) return false
+    applyChatHistorySnapshot({
+      conversations: result.data.conversations,
+      selectedConversationId: result.data.selectedConversationId
+    })
     return true
   }
 
-  const restoreConversation = (id: string) => {
-    const conversation = conversations.value.find((item) => item.id === id)
-    if (!conversation) return false
-    selectedConversationId.value = id
-    chatMessages.value = [
-      {
-        id: createId('msg'),
-        role: 'system',
-        text: `已恢复会话：${conversation.title}`
-      },
-      {
-        id: createId('msg'),
-        role: 'user',
-        text: conversation.summary || conversation.title,
-        hosts: conversation.ipAddress
-          ? [
-              {
-                id: `history-host-${conversation.id}`,
-                kind: 'hosts',
-                label: conversation.ipAddress,
-                detail: conversation.title
-              }
-            ]
-          : undefined
-      },
-      {
-        id: createId('msg'),
-        role: 'assistant',
-        text: `这是 ${conversation.title} 的本地历史摘要。继续输入后会基于当前上下文生成新的运维计划。`,
-        state: 'done'
-      }
-    ]
-    return true
+  const restoreConversation = async (id: string) => {
+    const restored = await restoreChatMessagesFromBackend(id)
+    if (restored) return true
+    if (await loadChatConversationsFromBackend({ restoreIfEmpty: false })) {
+      return restoreChatMessagesFromBackend(id)
+    }
+    return false
   }
 
   const toggleContext = (context: AiContextOption) => {
@@ -6556,7 +8407,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const applyCommandPreset = (id: string, prompt: string) => {
     selectedCommandId.value = id
     selectedCommandRef.value = null
-    sendChat(prompt)
+    void sendChat(prompt)
   }
 
   const selectCommandPreset = (id: string | null, commandRef?: AiCommandChipRef | null) => {
@@ -6564,18 +8415,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectedCommandRef.value = id && commandRef ? { ...commandRef } : null
   }
 
-  const setMessageFeedback = (id: string, feedback: 'up' | 'down') => {
-    const message = chatMessages.value.find((item) => item.id === id)
-    if (message) {
-      message.feedback = message.feedback === feedback ? undefined : feedback
-    }
+  const applyMessageMetadataSnapshot = (messageId: string, messages: AiChatHistoryMessage[]) => {
+    const snapshot = messages.find((message) => message.id === messageId)
+    const message = chatMessages.value.find((item) => item.id === messageId)
+    if (!snapshot || !message) return false
+    message.favorite = snapshot.favorite
+    message.feedback = snapshot.feedback
+    return true
   }
 
-  const toggleMessageFavorite = (id: string) => {
+  const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
     const message = chatMessages.value.find((item) => item.id === id)
-    if (message) {
-      message.favorite = !message.favorite
+    if (!message || !selectedConversationId.value) return false
+    if (!window.aiops?.saveChatMessageMetadata) {
+      setTopNotice('AI 消息写入服务不可用')
+      return false
     }
+    const nextFeedback = message.feedback === feedback ? null : feedback
+    const result = await window.aiops.saveChatMessageMetadata({
+      conversationId: selectedConversationId.value,
+      messageId: id,
+      feedback: nextFeedback
+    })
+    if (!result?.ok || !result.data) return false
+    return applyMessageMetadataSnapshot(id, result.data.messages)
+  }
+
+  const toggleMessageFavorite = async (id: string) => {
+    const message = chatMessages.value.find((item) => item.id === id)
+    if (!message || !selectedConversationId.value) return false
+    if (!window.aiops?.saveChatMessageMetadata) {
+      setTopNotice('AI 消息写入服务不可用')
+      return false
+    }
+    const result = await window.aiops.saveChatMessageMetadata({
+      conversationId: selectedConversationId.value,
+      messageId: id,
+      favorite: !message.favorite
+    })
+    if (!result?.ok || !result.data) return false
+    return applyMessageMetadataSnapshot(id, result.data.messages)
   }
 
   const retryAssistantMessage = (messageId?: string) => {
@@ -6585,7 +8464,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const history = assistantIndex >= 0 ? chatMessages.value.slice(0, assistantIndex) : chatMessages.value
     const lastUserMessage = [...history].reverse().find((message) => message.role === 'user')
     if (lastUserMessage) {
-      sendChat(lastUserMessage.text, lastUserMessage.contentParts, lastUserMessage.hosts)
+      void sendChat(lastUserMessage.text, lastUserMessage.contentParts, lastUserMessage.hosts)
       return true
     }
     return false
@@ -6626,53 +8505,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const relPath = title
     const existing = findKnowledgeNode(relPath)
     if (existing?.type === 'dir') return existing
-    if (window.aiops?.kbMkdir) {
-      await window.aiops.kbMkdir('', title)
-      await refreshKnowledgeTree()
-      const created = findKnowledgeNode(relPath)
-      if (created?.type === 'dir') return created
+    if (!window.aiops?.kbMkdir) {
+      setTopNotice('知识库写入服务不可用')
+      return null
     }
-    const node: KnowledgeNode = {
-      id: createId('kb'),
-      key: relPath,
-      relPath,
-      title,
-      type: 'dir',
-      children: []
-    }
-    insertKnowledgeNode('', node)
-    persistKnowledgeBase()
-    return node
+    await window.aiops.kbMkdir('', title)
+    await refreshKnowledgeTree()
+    const created = findKnowledgeNode(relPath)
+    return created?.type === 'dir' ? created : null
   }
 
   const summarizeMessageToKnowledge = async (messageId: string) => {
     const message = chatMessages.value.find((item) => item.id === messageId)
     if (!message) return null
     const content = messageSummaryContent(message)
-    await ensureLocalKnowledgeDir('summary')
+    const summaryDir = await ensureLocalKnowledgeDir('summary')
+    if (!summaryDir) return null
     const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
     const fallbackRelPath = createKbRelPath('summary', fileName)
-    let relPath = fallbackRelPath
-
-    if (window.aiops?.kbCreateFile) {
-      const result = await window.aiops.kbCreateFile('summary', fileName, content)
-      relPath = result?.relPath || fallbackRelPath
-      if (window.aiops.kbWriteFile) {
-        await window.aiops.kbWriteFile(relPath, content)
-      }
-      await refreshKnowledgeTree()
-    } else {
-      insertKnowledgeNode('summary', {
-        id: createId('kb'),
-        key: relPath,
-        relPath,
-        title: fileName,
-        type: 'file',
-        size: content.length
-      })
-      kbUsedBytes.value += content.length
-      persistKnowledgeBase()
+    if (!window.aiops?.kbCreateFile || !window.aiops?.kbWriteFile) {
+      setTopNotice('知识库写入服务不可用')
+      return null
     }
+    const result = await window.aiops.kbCreateFile('summary', fileName, content)
+    const relPath = result?.relPath || fallbackRelPath
+    await window.aiops.kbWriteFile(relPath, content)
+    await refreshKnowledgeTree()
 
     kbSelectedKeys.value = [relPath]
     openKnowledgeFile(relPath)
@@ -6717,18 +8575,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       enabled: true,
       editable: true
     }
-    settingsSkills.value.unshift(skill)
-    persistSkills()
-    try {
-      const created = await window.aiops?.createSkill?.({ name: skill.name, description: skill.description }, skill.content)
-      if (created) {
-        const existing = settingsSkills.value.find((item) => item.name === created.name)
-        if (existing) Object.assign(existing, created)
-      }
-    } catch {
-      setSettingsNotice(`${name} 已保存到本地，技能桥接创建失败`)
+    if (!window.aiops?.createSkill) {
+      setSettingsNotice('Skill 创建服务不可用')
+      return null
     }
-    return skill
+    try {
+      const created = await window.aiops.createSkill({ name: skill.name, description: skill.description }, skill.content)
+      await loadSkillsFromBridge()
+      if (created) {
+        applySkillsList([created, ...settingsSkills.value.filter((item) => item.name !== created.name)])
+      }
+      return created || skill
+    } catch {
+      setSettingsNotice(`${name} 创建失败`)
+      return null
+    }
   }
 
   return {
@@ -6739,6 +8600,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     agentsLeftOpen,
     topUpdateState,
     topNotice,
+    setTopNotice,
     onboardingCompleted,
     onboardingActiveTour,
     onboardingActiveStepIndex,
@@ -6757,12 +8619,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectedConversationId,
     chatMessages,
     terminalSecurityPrompt,
+    terminalCommandGenerationRecords,
     selectedContexts,
     aiSkillContextOptions,
     selectedCommandId,
     selectedCommandRef,
     filesUiMode,
     fileSessions,
+    fileSessionFolders,
     selectedLeftFileSessionId,
     selectedRightFileSessionId,
     selectedLeftFileSession,
@@ -6771,6 +8635,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     transferTaskGroups,
     transferTaskCount,
     transferOverallPercent,
+    refreshFileSessionCatalog,
+    refreshFileTransferTasks,
+    terminalCommandModelOptions,
     snippetGroups,
     quickCommands,
     selectedSnippetGroupUuid,
@@ -6788,6 +8655,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     kbExpandedKeys,
     kbSelectedKeys,
     kbSearchQuery,
+    kbContentSearchResults,
+    kbSearchStatus,
+    kbSearchLoading,
+    kbSearchError,
+    kbContentSearchVisible,
     kbClipboard,
     kbImportJobs,
     kbUsedBytes,
@@ -6808,6 +8680,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionDragActive,
     extensionInstallingPackageName,
     aliasCommands,
+    refreshAliasCommands,
     aliasSearchQuery,
     filteredAliasCommands,
     k8sContexts,
@@ -6841,6 +8714,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceOutputTitle,
     k8sResourceLoading,
     k8sCopiedCommand,
+    k8sAgentClusterId,
+    k8sAgentContextName,
+    k8sAgentStatus,
+    k8sAgentCommandDraft,
+    k8sAgentCommandHistory,
+    k8sAgentRuns,
+    k8sAgentLastResult,
+    k8sAgentTesting,
     k8sProxyConfig,
     k8sProxyConfigOpen,
     activeSettingsSection,
@@ -6854,6 +8735,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sshAgentConfigModalOpen,
     sshAgentSelectedKey,
     sshAgentKeyChainOptions,
+    aiModelOptions,
+    lockedAiModelOptions,
     settingModelOptions,
     addModelSwitch,
     modelProviders,
@@ -6914,6 +8797,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     localK8sClusters,
     filteredK8sBastions,
     k8sActiveTerminal,
+    k8sAgentCluster,
+    k8sAgentCurrentCluster,
     k8sResourceCluster,
     k8sActiveNamespaces,
     filteredK8sResources,
@@ -6923,7 +8808,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     onboardingActiveStep,
     todoItems,
     todoProgress,
+    aiContextCatalog,
     hydrateConfig,
+    loadChatConversationsFromBackend,
+    refreshAiContextCatalog,
     saveConfig,
     setSettingsNotice,
     setActiveSettingsSection,
@@ -6936,6 +8824,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resetOnboarding,
     selectTheme,
     selectBackground,
+    uploadCustomBackground,
+    selectCustomBackground,
+    clearCustomBackground,
     updateBackgroundTuning,
     updateDefaultLayout,
     updateLanguage,
@@ -6955,6 +8846,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     addSshAgentKey,
     removeSshAgentKey,
     updateWorkspacePreferences,
+    refreshAiModelCatalog,
     updateModelOption,
     removeModelOption,
     toggleAddModelSwitch,
@@ -6977,11 +8869,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closeMcpConfigEditor,
     updateMcpConfigEditorContent,
     saveMcpConfigEditor,
+    refreshMcpServersFromBridge,
     updatePrivacySettings,
     updateBillingSettings,
     setUserNotice,
     openAccountCenter,
     closeAccountCenter,
+    refreshUserAccount,
     openUserLogin,
     setUserLoginTab,
     loginUser,
@@ -7000,6 +8894,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     handleTopUpdateClick,
     openSettingsExternalAction,
     openSkillsFolder,
+    refreshSkillsFromBridge,
     reloadSkills,
     toggleMcpServerExpanded,
     setMcpServerTab,
@@ -7025,6 +8920,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveShortcutRecording,
     cancelShortcutRecording,
     resetAllShortcuts,
+    installShortcutRuntime,
+    uninstallShortcutRuntime,
+    triggerShortcutAction,
+    handleDeepLink,
     openTrustedDeviceRevoke,
     confirmTrustedDeviceRevoke,
     toggleMode,
@@ -7032,14 +8931,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setFilesUiMode,
     selectFileSession,
     openFileSession,
+    ensureFileSessionForTerminalPanel,
     closeFileSession,
     addRemoteFileSession,
     addRemoteFileSessionFromSftpPayload,
+    persistFileSession,
+    updateFileSession,
+    saveFileSessionFolder,
+    deleteFileSessionFolder,
     pushFileTransferTask,
+    recordFileTransferTask,
     cancelFileTransferTask,
     createSnippetGroup,
     renameSnippetGroup,
     deleteSnippetGroup,
+    refreshQuickCommands,
     createQuickCommand,
     updateQuickCommand,
     deleteQuickCommand,
@@ -7053,6 +8959,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     stopMacroRecording,
     cancelMacroRecording,
     refreshKnowledgeTree,
+    searchKnowledgeContent,
+    reindexKnowledgeContent,
+    refreshKnowledgeSearchStatus,
     findKnowledgeNode,
     selectKnowledgeNode,
     openKnowledgeFile,
@@ -7063,6 +8972,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     pasteKnowledgeNodes,
     addKnowledgeImportJob,
     addKnowledgeFilesToChat,
+    refreshExtensionPlugins,
     selectExtension,
     setExtensionDragActive,
     installExtensionPlugin,
@@ -7077,6 +8987,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveAliasCommand,
     cancelAliasEdit,
     deleteAliasCommand,
+    refreshKubernetesCatalog,
     switchK8sContext,
     reloadK8sConfig,
     clearK8sSearch,
@@ -7086,12 +8997,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closeK8sProxyConfig,
     updateK8sProxyConfig,
     saveK8sProxyConfig,
+    setK8sAgentCluster,
     connectK8sCluster,
     disconnectK8sCluster,
     openK8sTerminal,
+    createNewK8sTerminalTab,
     closeK8sTerminalTab,
     setActiveK8sTerminal,
+    resizeK8sTerminal,
+    endK8sTerminalSession,
     sendK8sTerminalCommand,
+    executeK8sTerminalAiCommand,
+    runK8sAgentKubectl,
+    testK8sAgentConnection,
+    refreshK8sAgentNamespaces,
+    cleanupK8sAgent,
     setK8sResourceKind,
     setK8sResourceNamespace,
     refreshK8sResources,
@@ -7105,6 +9025,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sendK8sResourceCommand,
     testK8sClusterConnection,
     selectK8sImportContext,
+    importK8sKubeconfigContent,
+    importK8sKubeconfigFile,
     addK8sCluster,
     updateK8sCluster,
     requestDeleteK8sCluster,
@@ -7116,7 +9038,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     toggleLeft,
     toggleRight,
     createPanel,
-    registerMockSshSession,
+    registerSshSession,
+    applySshTerminalSession,
     canForkSshPanel,
     forkSshPanel,
     closePanel,
@@ -7129,11 +9052,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     replaceTerminalOutput,
     getHighlightedTerminalOutput,
     executeTerminalCommand,
+    runTerminalCommand,
+    writeTerminalExecution,
     executeGlobalTerminalCommand,
+    runGlobalTerminalCommand,
     approveTerminalSecurityPrompt,
     cancelTerminalSecurityPrompt,
     stageActiveTerminalCommand,
+    runActiveTerminalCommand,
     appendActiveTerminalInput,
+    generateTerminalCommand,
+    injectGeneratedTerminalCommand,
     sendChat,
     resendUserMessageFromParts,
     createConversation,

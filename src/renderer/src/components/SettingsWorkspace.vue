@@ -144,12 +144,7 @@
           v-else
           class="settings-content-page"
         >
-          <h3>{{ activeNavLabel }}</h3>
-          <div class="settings-section-card">
-            <p class="settings-placeholder">
-              该设置入口已按 External reference 左侧导航保留，后续切片会继续读取对应 External reference 源码后补齐完整内容。
-            </p>
-          </div>
+          <GeneralSettings />
         </section>
       </div>
     </main>
@@ -165,16 +160,17 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h } from 'vue'
-import { Brain, LockKeyhole, Monitor, Upload, X } from 'lucide-vue-next'
+import { Brain, ExternalLink, FolderOpen, LockKeyhole, MessageSquare, Monitor, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   settingsBackgroundPresets,
   settingsLanguageOptions,
   settingsNavItems,
   settingsSecretPatterns,
   settingsThemeOptions
-} from '@/data/mockData'
+} from '@/config/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 import SettingsPanel from '@/components/panels/SettingsPanel.vue'
+import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 
 const workspace = useWorkspaceStore()
@@ -223,20 +219,27 @@ const awsRegionOptions = [
   'us-gov-east-1',
   'us-gov-west-1'
 ]
-const customBackgroundCss =
-  'radial-gradient(circle at 25% 25%, #ffffff 0 1px, transparent 2px), radial-gradient(circle at 76% 60%, #b9d8ff 0 1px, transparent 2px), linear-gradient(145deg, #020617, #111827 55%, #1e293b)'
-
 const themeGroups = computed(() => ({
   system: settingsThemeOptions.filter((item) => item.group === 'system'),
   default: settingsThemeOptions.filter((item) => item.group === 'default'),
   official: settingsThemeOptions.filter((item) => item.group === 'official')
 }))
 
-const activeNavLabel = computed(() => settingsNavItems.find((item) => item.key === workspace.activeSettingsSection)?.label || '设置')
+const customBackgroundImage = computed(() =>
+  workspace.config.background.lastCustomImage || (workspace.config.background.mode === 'custom' ? workspace.config.background.image : '')
+)
+
+const hasSelectedBackgroundImage = computed(() => Boolean(workspace.config.background.image && workspace.config.background.mode !== 'none'))
+
+const backgroundImageCss = (image: string) => {
+  if (!image) return 'none'
+  if (/^(?:file|https?|data|blob):/i.test(image)) return `url("${image.replace(/"/g, '\\"')}")`
+  return `url("${image.replace(/"/g, '\\"')}")`
+}
 
 const workspaceBackgroundStyle = computed(() => {
   const preset = settingsBackgroundPresets.find((item) => item.id === workspace.config.background.image)
-  const background = workspace.config.background.mode === 'custom' ? customBackgroundCss : preset?.css || customBackgroundCss
+  const background = workspace.config.background.mode === 'custom' ? backgroundImageCss(workspace.config.background.image) : preset?.css || 'none'
   return {
     '--settings-bg-image': background,
     '--settings-bg-opacity': `${workspace.config.background.opacity}`,
@@ -293,23 +296,43 @@ const GeneralSettings = defineComponent({
               h('div', { class: 'settings-upload-section' }, [
                 h('span', '自定义上传（支持JPG、PNG、WebP、GIF）'),
                 h('div', { class: 'settings-bg-grid compact' }, [
-                  h('button', {
-                    class: ['settings-bg-tile preset custom-preview', { active: workspace.config.background.mode === 'custom' }],
-                    style: { background: customBackgroundCss },
-                    onClick: () => workspace.selectBackground('custom', 'custom-star-field')
-                  }),
+                  customBackgroundImage.value
+                    ? h(
+                        'button',
+                        {
+                          class: ['settings-bg-tile preset custom-preview', { active: workspace.config.background.mode === 'custom' }],
+                          style: { backgroundImage: backgroundImageCss(customBackgroundImage.value) },
+                          title: '自定义背景',
+                          onClick: () => workspace.selectCustomBackground()
+                        },
+                        [
+                          h(
+                            'span',
+                            {
+                              class: 'settings-bg-delete',
+                              title: '删除自定义背景',
+                              onClick: (event: MouseEvent) => {
+                                event.stopPropagation()
+                                workspace.clearCustomBackground()
+                              }
+                            },
+                            [h(Trash2)]
+                          )
+                        ]
+                      )
+                    : null,
                   h(
                     'button',
                     {
                       class: 'settings-bg-tile upload',
                       title: '上传',
-                      onClick: () => workspace.setSettingsNotice('已打开自定义背景上传入口')
+                      onClick: () => workspace.uploadCustomBackground()
                     },
                     [h(Upload)]
                   )
                 ])
               ]),
-              workspace.config.background.mode !== 'none'
+              hasSelectedBackgroundImage.value
                 ? h('div', { class: 'settings-sliders' }, [
                     h('label', [
                       h('span', '透明度'),
@@ -927,11 +950,11 @@ const KeywordHighlightEditorPage = defineComponent({
             h('button', { class: 'settings-button', onClick: () => workspace.closeKeywordHighlightEditor() }, 'Close')
           ])
         ]),
-        h('textarea', {
-          class: 'keyword-highlight-json-editor',
-          value: workspace.keywordHighlightEditorContent,
-          spellcheck: 'false',
-          onInput: (event: Event) => workspace.updateKeywordHighlightEditorContent((event.target as HTMLTextAreaElement).value)
+        h(SettingsJsonEditor, {
+          modelValue: workspace.keywordHighlightEditorContent,
+          editorClass: 'keyword-highlight-json-editor',
+          'onUpdate:modelValue': (value: string) => workspace.updateKeywordHighlightEditorContent(value),
+          onSave: () => workspace.saveKeywordHighlightEditor()
         }),
         workspace.keywordHighlightEditorError ? h('div', { class: 'editor-error keyword-highlight-error' }, workspace.keywordHighlightEditorError) : null
       ])
@@ -952,11 +975,11 @@ const SecurityConfigEditorPage = defineComponent({
             h('button', { class: 'settings-button', onClick: () => workspace.closeSecurityConfigEditor() }, 'Close')
           ])
         ]),
-        h('textarea', {
-          class: 'security-config-json-editor',
-          value: workspace.securityConfigEditorContent,
-          spellcheck: 'false',
-          onInput: (event: Event) => workspace.updateSecurityConfigEditorContent((event.target as HTMLTextAreaElement).value)
+        h(SettingsJsonEditor, {
+          modelValue: workspace.securityConfigEditorContent,
+          editorClass: 'security-config-json-editor',
+          'onUpdate:modelValue': (value: string) => workspace.updateSecurityConfigEditorContent(value),
+          onSave: () => workspace.saveSecurityConfigEditor()
         }),
         workspace.securityConfigEditorError ? h('div', { class: 'editor-error security-config-error' }, workspace.securityConfigEditorError) : null
       ])
@@ -1103,17 +1126,11 @@ const McpConfigEditorPage = defineComponent({
             h('button', { class: 'settings-button', onClick: () => workspace.closeMcpConfigEditor() }, 'Close')
           ])
         ]),
-        h('textarea', {
-          class: 'mcp-config-json-editor',
-          value: workspace.mcpConfigEditorContent,
-          spellcheck: 'false',
-          onInput: (event: Event) => workspace.updateMcpConfigEditorContent((event.target as HTMLTextAreaElement).value),
-          onKeydown: (event: KeyboardEvent) => {
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-              event.preventDefault()
-              void workspace.saveMcpConfigEditor(true)
-            }
-          }
+        h(SettingsJsonEditor, {
+          modelValue: workspace.mcpConfigEditorContent,
+          editorClass: 'mcp-config-json-editor',
+          'onUpdate:modelValue': (value: string) => workspace.updateMcpConfigEditorContent(value),
+          onSave: () => workspace.saveMcpConfigEditor(true)
         }),
         workspace.mcpConfigEditorError ? h('div', { class: 'editor-error mcp-config-error' }, workspace.mcpConfigEditorError) : null
       ])
@@ -1351,31 +1368,66 @@ const PrivacySettingsPage = defineComponent({
 const AboutSettingsPage = defineComponent({
   name: 'AboutSettingsPage',
   setup() {
+    const updateButtonText = computed(() => {
+      switch (workspace.aboutSettings.updateStatus) {
+        case 'checking':
+          return 'Checking'
+        case 'latest':
+          return 'Check Update (Latest Version)'
+        case 'available':
+          return `Download Update (${workspace.aboutSettings.newVersion || workspace.aboutSettings.version})`
+        case 'downloading':
+          return 'Downloading'
+        case 'downloaded':
+          return 'Install'
+        case 'error':
+          return 'Check Update Error'
+        default:
+          return 'Check Update'
+      }
+    })
+    const updateDescription = computed(() => {
+      if (workspace.aboutSettings.updateStatus === 'available') return `New Version ${workspace.aboutSettings.newVersion || workspace.aboutSettings.version}`
+      if (workspace.aboutSettings.updateStatus === 'downloaded') return 'Download complete. Install can be requested through the update bridge.'
+      if (workspace.aboutSettings.updateStatus === 'error') return 'Update check failed. Try again when the local update bridge is available.'
+      return `Version ${workspace.aboutSettings.version}`
+    })
     return () =>
       h('div', { class: 'about-settings-page' }, [
         h('div', { class: 'about-card settings-section-card' }, [
           h('div', { class: 'about-logo-self' }, 'A'),
           h('h3', 'aiopsterm'),
-          h('p', `Version ${workspace.aboutSettings.version}`),
+          h('p', updateDescription.value),
+          workspace.aboutSettings.updateStatus === 'downloading'
+            ? h('div', { class: 'about-download-progress' }, [
+                h('div', { class: 'about-progress-track' }, [
+                  h('span', {
+                    style: { width: `${workspace.aboutSettings.progress}%` }
+                  })
+                ]),
+                h('small', `Downloading (${workspace.aboutSettings.progress}%)`)
+              ])
+            : null,
           h(
             'button',
             {
               class: 'settings-button',
-              disabled: workspace.aboutSettings.updateStatus === 'checking',
+              disabled: workspace.aboutSettings.updateStatus === 'checking' || workspace.aboutSettings.updateStatus === 'downloading',
               onClick: () => workspace.checkAboutUpdate()
             },
-            workspace.aboutSettings.updateStatus === 'checking' ? 'Checking' : workspace.aboutSettings.updateStatus === 'latest' ? 'Check Update (Latest Version)' : 'Check Update'
-          )
+            updateButtonText.value
+          ),
+          h('small', { class: 'about-copyright' }, `Copyright © ${new Date().getFullYear()} aiopsterm All rights reserved.`)
         ]),
         h('div', { class: 'settings-section-card diagnostics-card' }, [
-          h('strong', 'Log Diagnostics'),
+          h('div', { class: 'diagnostics-card-header' }, [h(FolderOpen, { class: 'diagnostics-icon' }), h('strong', 'Log Diagnostics')]),
           h('small', 'Open the local log directory for troubleshooting.'),
-          h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('日志目录') }, 'Open Log Dir')
+          h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('日志目录') }, [h(FolderOpen), 'Open Log Dir'])
         ]),
         h('div', { class: 'settings-section-card diagnostics-card' }, [
-          h('strong', 'Feedback'),
+          h('div', { class: 'diagnostics-card-header' }, [h(MessageSquare, { class: 'diagnostics-icon' }), h('strong', 'Feedback')]),
           h('small', 'Submit feedback through the product issue channel.'),
-          h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('反馈页面') }, 'Submit Feedback')
+          h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('反馈页面') }, [h(ExternalLink), 'Submit Feedback'])
         ])
       ])
   }

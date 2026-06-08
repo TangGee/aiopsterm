@@ -43,7 +43,7 @@
 
 <script setup lang="ts">
 import { CheckCircle2 } from 'lucide-vue-next'
-import { onboardingModules } from '@/data/mockData'
+import { onboardingModules } from '@/config/onboarding'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()

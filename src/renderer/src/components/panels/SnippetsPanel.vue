@@ -20,7 +20,7 @@
       </div>
       <div class="recording-actions">
         <button @click="workspace.cancelMacroRecording">取消</button>
-        <button @click="workspace.stopMacroRecording">停止录制</button>
+        <button @click="stopMacroRecording">停止录制</button>
       </div>
     </div>
 
@@ -334,7 +334,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import {
   ArrowLeft,
   Check,
@@ -383,6 +383,10 @@ sudo systemctl status nginx
 sleep==3000
 ctrl+c`
 
+onMounted(() => {
+  void workspace.refreshQuickCommands()
+})
+
 const scriptLineCount = computed(() => Math.max(1, commandForm.content.split('\n').length))
 
 const activateSearch = () => {
@@ -425,15 +429,15 @@ const startAddGroup = () => {
   nextTick(() => groupInput.value?.focus())
 }
 
-const confirmGroupEdit = () => {
+const confirmGroupEdit = async () => {
   if (!editingGroupName.value.trim()) {
     cancelGroupEdit()
     return
   }
   if (editingGroupId.value === null) {
-    workspace.createSnippetGroup(editingGroupName.value)
+    await workspace.createSnippetGroup(editingGroupName.value)
   } else if (editingGroupId.value) {
-    workspace.renameSnippetGroup(editingGroupId.value, editingGroupName.value)
+    await workspace.renameSnippetGroup(editingGroupId.value, editingGroupName.value)
   }
   cancelGroupEdit()
 }
@@ -463,7 +467,7 @@ const openEditCommand = (id: number) => {
   commandForm.groupUuid = command.group_uuid || ''
 }
 
-const saveCommand = () => {
+const saveCommand = async () => {
   if (!commandForm.name.trim() || !commandForm.content.trim()) return
   const payload = {
     snippet_name: commandForm.name.trim(),
@@ -471,9 +475,9 @@ const saveCommand = () => {
     group_uuid: commandForm.groupUuid || null
   }
   if (isEditMode.value && editingCommandId.value !== null) {
-    workspace.updateQuickCommand(editingCommandId.value, payload)
+    await workspace.updateQuickCommand(editingCommandId.value, payload)
   } else {
-    workspace.createQuickCommand(payload)
+    await workspace.createQuickCommand(payload)
   }
   cancelEditCommand()
 }
@@ -487,9 +491,13 @@ const cancelEditCommand = () => {
   commandForm.groupUuid = ''
 }
 
-const toggleMacroRecording = () => {
+const stopMacroRecording = async () => {
+  await workspace.stopMacroRecording()
+}
+
+const toggleMacroRecording = async () => {
   if (workspace.isMacroRecording) {
-    workspace.stopMacroRecording()
+    await stopMacroRecording()
     return
   }
   workspace.startMacroRecording(workspace.activePanelId)
@@ -523,8 +531,8 @@ const editCommandFromMenu = () => {
   commandMenu.visible = false
 }
 
-const deleteCommandFromMenu = () => {
-  workspace.deleteQuickCommand(commandMenu.commandId)
+const deleteCommandFromMenu = async () => {
+  await workspace.deleteQuickCommand(commandMenu.commandId)
   commandMenu.visible = false
 }
 
@@ -537,8 +545,8 @@ const editGroupFromMenu = () => {
   nextTick(() => groupInput.value?.focus())
 }
 
-const deleteGroupFromMenu = () => {
-  workspace.deleteSnippetGroup(groupMenu.groupUuid)
+const deleteGroupFromMenu = async () => {
+  await workspace.deleteSnippetGroup(groupMenu.groupUuid)
   groupMenu.visible = false
 }
 
@@ -560,8 +568,8 @@ const handleDragOver = (index: number) => {
   dragOverIndex.value = index
 }
 
-const handleDrop = (targetId: number) => {
-  if (draggingId.value !== null) workspace.reorderQuickCommand(draggingId.value, targetId)
+const handleDrop = async (targetId: number) => {
+  if (draggingId.value !== null) await workspace.reorderQuickCommand(draggingId.value, targetId)
   clearDragState()
 }
 

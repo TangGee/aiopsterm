@@ -90,6 +90,11 @@
         <button @click="workspace.createPanel('below')"><PanelBottom /> 向下拆分</button>
         <button @click="startRealShell"><Terminal /> 打开本地 shell</button>
         <button
+          :class="{ active: commandDialog.visible }"
+          title="AI 命令生成"
+          @click="openCommandDialog(workspace.activePanelId)"
+        ><Sparkles /> AI 命令</button>
+        <button
           :class="{ active: globalInputVisible }"
           @click="toggleGlobalInput"
         ><RadioTower /> 全局执行</button>
@@ -188,6 +193,9 @@
           v-if="panel.kind === 'knowledge' && panel.knowledge"
           :rel-path="panel.knowledge.relPath"
           :is-image="panel.knowledge.isImage"
+          :start-line="panel.knowledge.startLine"
+          :end-line="panel.knowledge.endLine"
+          :jump-token="panel.knowledge.jumpToken"
         />
         <template v-else>
         <div
@@ -233,6 +241,63 @@
           >
             <X />
           </button>
+        </div>
+        <div
+          v-if="commandDialog.visible && commandDialog.panelId === panel.id"
+          ref="commandDialogRef"
+          class="terminal-command-dialog"
+          :class="{ loading: commandDialog.loading }"
+          :style="commandDialogStyle(panel.id)"
+          tabindex="-1"
+          @keydown.esc.stop.prevent="closeCommandDialog"
+        >
+          <div class="command-dialog-card">
+            <button
+              class="command-dialog-close"
+              title="关闭"
+              @click="closeCommandDialog"
+            >
+              <X />
+            </button>
+            <textarea
+              ref="commandDialogInput"
+              v-model="commandDialog.instruction"
+              rows="1"
+              placeholder="描述要生成的命令"
+              :disabled="commandDialog.loading"
+              @input="resizeCommandDialogInput"
+              @keydown.enter.prevent="submitCommandDialog"
+            ></textarea>
+            <footer>
+              <span :class="{ visible: commandDialog.loading }">
+                <LoaderCircle />
+                生成中
+              </span>
+              <div>
+                <select
+                  v-model="commandDialog.modelName"
+                  :disabled="commandDialog.loading || !workspace.terminalCommandModelOptions.length"
+                >
+                  <option
+                    v-for="model in workspace.terminalCommandModelOptions"
+                    :key="model"
+                    :value="model"
+                  >
+                    {{ model }}
+                  </option>
+                </select>
+                <small><kbd>Enter</kbd> 提交 · <kbd>Esc</kbd> 关闭</small>
+              </div>
+            </footer>
+            <p v-if="commandDialog.error">{{ commandDialog.error }}</p>
+            <div
+              v-if="commandDialog.generatedCommand"
+              class="generated-command-row"
+            >
+              <code>{{ commandDialog.generatedCommand }}</code>
+              <button @click="applyGeneratedCommand(panel.id)">插入</button>
+            </div>
+          </div>
         </div>
         <div class="pane-title">
           <span>{{ panel.title }}</span>
@@ -340,6 +405,8 @@
         </template>
       </div>
     </div>
+
+    <TransferProgress v-if="workspace.activeModule === 'workspace'" />
   </section>
 </template>
 
@@ -349,10 +416,11 @@ import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, Clock, ListTree, Minus, PanelBottom, PanelRight, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
-import { commandSuggestions } from '@/data/mockData'
+import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBottom, PanelRight, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
+import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
+import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const search = ref('')
@@ -365,6 +433,8 @@ const menu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
 const termMenu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
 const terminalGrid = ref<HTMLElement | null>(null)
 const searchOverlayInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
+const commandDialogInput = ref<HTMLTextAreaElement | HTMLTextAreaElement[] | null>(null)
+const commandDialogRef = ref<HTMLElement | HTMLElement[] | null>(null)
 const searchOverlayPanelId = ref('')
 const searchMatchCount = ref(0)
 const searchMatchIndex = ref(0)
@@ -381,16 +451,26 @@ let offExit: (() => void) | null = null
 const fontSize = ref(12)
 const terminalElements = new Map<string, HTMLElement>()
 const terminalViews = new Map<string, { terminal: XtermTerminal; fit: FitAddon; search: SearchAddon; lastOutput: string }>()
+const commandDialog = reactive({
+  visible: false,
+  panelId: '',
+  instruction: '',
+  modelName: '',
+  generatedCommand: '',
+  loading: false,
+  error: '',
+  top: 0,
+  left: 0,
+  width: 520
+})
 
-type TerminalSuggestion = {
-  command: string
-  source: 'base' | 'history' | 'ai'
-  explanation?: string
-}
+type TerminalSuggestion = TerminalCommandSuggestion
 
 const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
 const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
+let suggestionRequestId = 0
+let commandGenerationRequestId = 0
 
 const showDashboard = ref(true)
 
@@ -482,6 +562,7 @@ const openMenu = (event: MouseEvent, panelId: string) => {
 
 const openTerminalMenu = (event: MouseEvent, panelId: string) => {
   workspace.activePanelId = panelId
+  hideSuggestions()
   termMenu.visible = true
   termMenu.x = event.clientX
   termMenu.y = event.clientY
@@ -627,13 +708,59 @@ const cloneSelected = () => {
   menu.visible = false
 }
 
-const forkSelected = () => {
-  workspace.forkSshPanel(menu.panelId)
+const startSshTerminalForPanel = async (panel: TerminalPanel) => {
+  const ssh = panel.sshSession
+  if (!ssh || !window.aiops?.createTerminal) return
+  await nextTick()
+  const view = terminalViews.get(panel.id)
+  view?.fit.fit()
+  try {
+    const session = await window.aiops.createTerminal({
+      kind: 'ssh',
+      assetId: ssh.assetId,
+      title: panel.title,
+      cols: view?.terminal.cols,
+      rows: view?.terminal.rows,
+      ssh: {
+        host: ssh.host,
+        port: ssh.port,
+        username: ssh.username,
+        ...(ssh.forkFromConnectionId ? { forkFromConnectionId: ssh.forkFromConnectionId } : {})
+      }
+    })
+    workspace.applySshTerminalSession(panel.id, session, {
+      id: ssh.assetId,
+      name: ssh.assetName,
+      title: ssh.assetName,
+      host: ssh.host,
+      port: ssh.port,
+      username: ssh.username,
+      group_name: ssh.organizationId,
+      asset_type: ssh.assetType,
+      auth_type: ssh.authType
+    })
+  } catch (error) {
+    workspace.appendTerminalOutput(panel.id, `[aiopsterm] SSH launch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+  }
+}
+
+const forkSelected = async () => {
+  const forkPanel = workspace.forkSshPanel(menu.panelId)
   menu.visible = false
+  if (forkPanel) await startSshTerminalForPanel(forkPanel)
 }
 
 const activeView = () => terminalViews.get(workspace.activePanelId)
 const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId)
+
+const getSuggestionContext = (panelId: string, mode: TerminalCommandSuggestionContext['mode'] = 'base'): TerminalCommandSuggestionContext => {
+  const panel = panelById(panelId)
+  return {
+    panelId,
+    mode,
+    ...(panel?.sshSession?.host ? { host: panel.sshSession.host } : {})
+  }
+}
 
 const handleTabDragStart = (event: DragEvent, panel: TerminalPanel) => {
   if (panel.kind !== 'knowledge' || !panel.knowledge?.relPath || !event.dataTransfer) return
@@ -663,12 +790,13 @@ const pasteClipboard = async (panelId = workspace.activePanelId) => {
   if (!text) return
   const panel = panelById(panelId)
   if (!panel || panel.kind === 'knowledge') return
-  if (panel.sessionId && window.aiops) {
-    await window.aiops.writeTerminal(panel.sessionId, text)
-  } else {
-    workspace.appendTerminalInput(panel.id, text)
-    syncTerminalView(panel)
-  }
+  const result = await workspace.runTerminalCommand(panel.id, text, {
+    inputText: text,
+    shellText: text,
+    writeToShell: true,
+    source: 'direct'
+  })
+  if (result?.status === 'allow') syncTerminalView(panel)
   menu.visible = false
 }
 
@@ -733,6 +861,158 @@ const getSearchOverlayInput = () => {
   return input
 }
 
+const getCommandDialogInput = () => {
+  const input = commandDialogInput.value
+  if (Array.isArray(input)) {
+    return input.find((item) => item?.isConnected) || input[0] || null
+  }
+  return input
+}
+
+const focusCommandDialogInput = () => {
+  const input = getCommandDialogInput()
+  if (input && typeof input.focus === 'function') {
+    input.focus({ preventScroll: true })
+  }
+}
+
+const resizeCommandDialogInput = () => {
+  const input = getCommandDialogInput()
+  if (!input) return
+  input.style.height = 'auto'
+  input.style.height = `${Math.max(28, input.scrollHeight)}px`
+  nextTick(() => updateCommandDialogPosition(commandDialog.panelId))
+}
+
+const commandDialogStyle = (panelId: string) => {
+  if (commandDialog.panelId !== panelId) return {}
+  return {
+    top: `${commandDialog.top}px`,
+    left: `${commandDialog.left}px`,
+    width: `${commandDialog.width}px`
+  }
+}
+
+const updateCommandDialogPosition = async (panelId = commandDialog.panelId) => {
+  if (!commandDialog.visible || !panelId) return
+  const host = terminalElements.get(panelId)
+  const pane = host?.closest('.terminal-pane') as HTMLElement | null
+  if (!host || !pane) return
+  const view = terminalViews.get(panelId)
+  const margin = 18
+  const paneWidth = pane.clientWidth || pane.getBoundingClientRect().width || 640
+  const paneHeight = pane.clientHeight || pane.getBoundingClientRect().height || 420
+  const dialogWidth = Math.max(320, Math.min(600, paneWidth - margin * 2, 520))
+  commandDialog.width = Math.floor(dialogWidth)
+
+  await nextTick()
+  const dialogElement = (Array.isArray(commandDialogRef.value) ? commandDialogRef.value.find((item) => item?.isConnected) : commandDialogRef.value) as HTMLElement | null
+  const dialogHeight = dialogElement?.querySelector('.command-dialog-card')?.clientHeight || dialogElement?.clientHeight || 118
+  const cell = view ? estimateTerminalCellSize(view, panelId) : { height: 18 }
+  const cursorY = view?.terminal.buffer.active.cursorY || 0
+  const cursorTop = host.offsetTop + cursorY * cell.height
+  const below = cursorTop + cell.height + margin
+  const bottom = paneHeight - dialogHeight - margin
+  const top = below + dialogHeight <= paneHeight - margin ? below : bottom
+
+  commandDialog.left = Math.max(margin, Math.min(Math.round((paneWidth - dialogWidth) / 2), paneWidth - dialogWidth - margin))
+  commandDialog.top = Math.max(margin, Math.min(Math.round(top), Math.max(margin, bottom)))
+}
+
+const resetCommandDialog = () => {
+  commandDialog.instruction = ''
+  commandDialog.generatedCommand = ''
+  commandDialog.loading = false
+  commandDialog.error = ''
+}
+
+const openCommandDialog = async (panelId = workspace.activePanelId) => {
+  const panel = workspace.panels.find((item) => item.id === panelId)
+  if (!panel || panel.kind === 'knowledge') return
+  workspace.activePanelId = panelId
+  commandDialog.visible = true
+  commandDialog.panelId = panelId
+  commandDialog.modelName = commandDialog.modelName || workspace.terminalCommandModelOptions[0] || workspace.config.modelName
+  commandDialog.error = ''
+  termMenu.visible = false
+  menu.visible = false
+  aiButtonPanelId.value = ''
+  void workspace.refreshAiModelCatalog()
+  await nextTick()
+  resizeCommandDialogInput()
+  await updateCommandDialogPosition(panelId)
+  focusCommandDialogInput()
+}
+
+const closeCommandDialog = () => {
+  resetCommandDialog()
+  commandDialog.visible = false
+  commandDialog.panelId = ''
+  const active = workspace.activePanel
+  if (active?.kind !== 'knowledge') {
+    nextTick(() => terminalViews.get(active.id)?.terminal.focus())
+  }
+}
+
+const submitCommandDialog = async () => {
+  const panelId = commandDialog.panelId
+  if (!panelId || commandDialog.loading) return
+  if (!commandDialog.instruction.trim()) {
+    commandDialog.error = '请输入命令描述'
+    return
+  }
+  if (!workspace.terminalCommandModelOptions.length) {
+    await workspace.refreshAiModelCatalog()
+  }
+  if (!workspace.terminalCommandModelOptions.length) {
+    commandDialog.error = '没有可用命令模型'
+    return
+  }
+  if (!workspace.terminalCommandModelOptions.includes(commandDialog.modelName)) {
+    commandDialog.modelName = workspace.terminalCommandModelOptions[0]
+  }
+  commandDialog.loading = true
+  commandDialog.error = ''
+  commandDialog.generatedCommand = ''
+  const instruction = commandDialog.instruction.trim()
+  const requestId = ++commandGenerationRequestId
+  try {
+    const record = await workspace.generateTerminalCommand(panelId, instruction, commandDialog.modelName)
+    if (requestId !== commandGenerationRequestId || !commandDialog.visible || commandDialog.panelId !== panelId) return
+    commandDialog.loading = false
+    if (!record) {
+      commandDialog.error = '命令生成失败'
+      commandDialog.instruction = instruction
+      return
+    }
+    commandDialog.generatedCommand = record.command
+    applyGeneratedCommand(panelId)
+  } catch (error) {
+    if (requestId !== commandGenerationRequestId || !commandDialog.visible || commandDialog.panelId !== panelId) return
+    commandDialog.loading = false
+    commandDialog.error = error instanceof Error ? error.message : '命令生成失败'
+    commandDialog.instruction = instruction
+  }
+}
+
+const applyGeneratedCommand = (panelId: string) => {
+  if (!commandDialog.generatedCommand.trim()) return
+  const result = workspace.injectGeneratedTerminalCommand(panelId, commandDialog.generatedCommand)
+  if (result?.status === 'allow') {
+    const panel = panelById(panelId)
+    if (panel) syncTerminalView(panel)
+    command.value = commandDialog.generatedCommand
+    commandHistory.value = [commandDialog.generatedCommand, ...commandHistory.value.filter((item) => item !== commandDialog.generatedCommand)].slice(0, 10)
+    commandDialog.instruction = ''
+    commandDialog.generatedCommand = ''
+    commandDialog.error = ''
+    nextTick(() => {
+      resizeCommandDialogInput()
+      focusCommandDialogInput()
+    })
+  }
+}
+
 const focusSearchOverlayInput = () => {
   const input = getSearchOverlayInput()
   if (input && typeof input.focus === 'function') {
@@ -787,26 +1067,27 @@ const sendCommand = async (panel: TerminalPanel) => {
   }
   const text = command.value.trim()
   if (!text) return
-  command.value = ''
   hideSuggestions()
-  showDashboard.value = false
-  commandHistory.value = [text, ...commandHistory.value.filter((item) => item !== text)].slice(0, 10)
-  const decision = workspace.executeTerminalCommand(panel.id, text, {
-    outputText: panel.sessionId ? undefined : `[mock] ${text}\n$ `,
-    writeToShell: Boolean(panel.sessionId),
+  const decision = await workspace.runTerminalCommand(panel.id, text, {
+    writeToShell: true,
     source: 'direct'
   })
-  if (decision.status === 'allow' && panel.sessionId && window.aiops) {
-    await window.aiops.writeTerminal(panel.sessionId, `${text}\n`)
+  if (decision.status === 'allow') {
+    command.value = ''
+    showDashboard.value = false
+    commandHistory.value = [text, ...commandHistory.value.filter((item) => item !== text)].slice(0, 10)
+    syncTerminalView(panel)
   }
-  syncTerminalView(panel)
 }
 
-const updateSuggestions = (panelId: string) => {
-  const query = command.value.trim().toLowerCase()
+const updateSuggestions = async (panelId: string) => {
+  const rawQuery = command.value.trim()
+  const query = rawQuery.toLowerCase()
+  const requestId = ++suggestionRequestId
   suggestionPanel.panelId = panelId
   suggestionSelectionMode.value = false
   activeSuggestion.value = -1
+  aiSuggestLoading.value = false
   if (!query) {
     suggestionItems.value = []
     suggestionPanel.panelId = ''
@@ -815,14 +1096,21 @@ const updateSuggestions = (panelId: string) => {
   const history = commandHistory.value
     .filter((item) => item.toLowerCase().includes(query))
     .map((item) => ({ command: item, source: 'history' as const, explanation: 'history' }))
-  const base = commandSuggestions
-    .filter((item) => item.toLowerCase().includes(query))
-    .map((item) => ({ command: item, source: 'base' as const, explanation: 'base command' }))
+  let base: TerminalSuggestion[] = []
+  try {
+    base = window.aiops?.getTerminalCommandSuggestions
+      ? await window.aiops.getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'base'))
+      : []
+  } catch {
+    base = []
+  }
+  if (requestId !== suggestionRequestId || suggestionPanel.panelId !== panelId || command.value.trim().toLowerCase() !== query) return
   suggestionItems.value = [...history, ...base].slice(0, 6)
   nextTick(() => updateSuggestionsPosition(panelId))
 }
 
 const hideSuggestions = () => {
+  suggestionRequestId += 1
   suggestionItems.value = []
   suggestionPanel.panelId = ''
   suggestionSelectionMode.value = false
@@ -850,26 +1138,35 @@ const applySuggestion = (value: string) => {
   hideSuggestions()
 }
 
-const triggerAiSuggestion = () => {
-  if (!command.value.trim() || suggestionSelectionMode.value || aiSuggestLoading.value || hasAiSuggestion.value) return
+const triggerAiSuggestion = async () => {
+  const rawQuery = command.value.trim()
+  const query = rawQuery.toLowerCase()
+  const panelId = suggestionPanel.panelId || workspace.activePanelId
+  if (!rawQuery || suggestionSelectionMode.value || aiSuggestLoading.value || hasAiSuggestion.value) return
+  const requestId = ++suggestionRequestId
   aiSuggestLoading.value = true
   updateSuggestionsPosition()
-  window.setTimeout(() => {
-    suggestionItems.value = [
-      { command: `${command.value.trim()} --help`, source: 'ai' as const, explanation: 'AI suggestion' },
-      ...suggestionItems.value
-    ].slice(0, 6)
+  try {
+    const aiSuggestions = window.aiops?.getTerminalCommandSuggestions
+      ? await window.aiops.getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'ai'))
+      : []
+    if (requestId !== suggestionRequestId || command.value.trim().toLowerCase() !== query) return
+    suggestionItems.value = [...aiSuggestions, ...suggestionItems.value].slice(0, 6)
+  } catch {
+    if (requestId !== suggestionRequestId) return
+  } finally {
+    if (requestId !== suggestionRequestId) return
     aiSuggestLoading.value = false
     nextTick(() => updateSuggestionsPosition())
-  }, 300)
+  }
 }
 
 const sendGlobalCommand = async () => {
   const text = globalCommand.value.trim()
   if (!text) return
-  const decision = workspace.executeGlobalTerminalCommand(text)
+  const decision = await workspace.runGlobalTerminalCommand(text)
   workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
-  if (decision.status === 'blocked' || decision.status === 'needs-approval') return
+  if (decision.status !== 'allow') return
   commandHistory.value = [text, ...commandHistory.value.filter((item) => item !== text)].slice(0, 10)
   showDashboard.value = false
   globalCommand.value = ''
@@ -878,14 +1175,7 @@ const sendGlobalCommand = async () => {
 const approveSecurityPrompt = async () => {
   const execution = workspace.approveTerminalSecurityPrompt()
   if (!execution) return
-  if (execution.writeToShell && window.aiops) {
-    for (const panelId of execution.panelIds) {
-      const panel = workspace.panels.find((item) => item.id === panelId)
-      if (panel?.sessionId) {
-        await window.aiops.writeTerminal(panel.sessionId, execution.shellText || execution.inputText)
-      }
-    }
-  }
+  if (execution.writeToShell) await workspace.writeTerminalExecution(execution)
   workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
 }
 
@@ -925,7 +1215,7 @@ const splitFromTermMenu = (direction: 'right' | 'below') => {
 }
 
 const openFileManagerFromMenu = () => {
-  workspace.setActiveModule('files')
+  workspace.ensureFileSessionForTerminalPanel(termMenu.panelId || workspace.activePanelId)
   termMenu.visible = false
 }
 
@@ -943,7 +1233,7 @@ const chatSelectionToAi = (panelId: string) => {
   if (selected) {
     workspace.rightPanelOpen = true
     workspace.selectedContexts = [...workspace.selectedContexts.filter((item) => item.id !== `terminal-${panelId}`), { id: `terminal-${panelId}`, kind: 'hosts', label: `Terminal selection: ${selected.slice(0, 24)}` }]
-    workspace.sendChat(`Terminal output:\n\`\`\`\n${selected}\n\`\`\``)
+    void workspace.sendChat(`Terminal output:\n\`\`\`\n${selected}\n\`\`\``)
     view?.terminal.clearSelection()
   }
   aiButtonPanelId.value = ''
@@ -995,7 +1285,22 @@ const handleShortcut = async (event: KeyboardEvent) => {
     menu.visible = false
     termMenu.visible = false
     closeSearchOverlay()
+    if (commandDialog.visible) closeCommandDialog()
     hideSuggestions()
+    return
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    if (commandDialog.visible) {
+      const activeInput = getCommandDialogInput()
+      if (document.activeElement === activeInput) {
+        terminalViews.get(commandDialog.panelId)?.terminal.focus()
+      } else {
+        focusCommandDialogInput()
+      }
+      return
+    }
+    openCommandDialog(workspace.activePanelId)
     return
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
@@ -1015,7 +1320,7 @@ const handleShortcut = async (event: KeyboardEvent) => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'm') {
     event.preventDefault()
-    workspace.setActiveModule('files')
+    workspace.ensureFileSessionForTerminalPanel(workspace.activePanelId)
   }
 }
 
@@ -1049,5 +1354,26 @@ watch(
       }
     })
   }
+)
+
+watch(
+  () => workspace.activePanelId,
+  (panelId) => {
+    if (commandDialog.visible && commandDialog.panelId !== panelId) {
+      resetCommandDialog()
+      commandDialog.visible = false
+      commandDialog.panelId = ''
+    }
+  }
+)
+
+watch(
+  () => workspace.terminalCommandModelOptions.join('|'),
+  (models) => {
+    if (!commandDialog.modelName || !models.split('|').includes(commandDialog.modelName)) {
+      commandDialog.modelName = workspace.terminalCommandModelOptions[0] || workspace.config.modelName
+    }
+  },
+  { immediate: true }
 )
 </script>

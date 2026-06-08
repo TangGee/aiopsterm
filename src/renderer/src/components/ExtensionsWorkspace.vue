@@ -121,29 +121,64 @@
               class="markdown_readme_container"
             >
               <div class="rendered_markdown">
-                <h2>Jumpserver Support</h2>
-                <p>支持资产同步与资产直连，保留堡垒机连接、目标资产连接、认证和代理阶段的运行状态。</p>
+                <h2>{{ workspace.selectedExtension.name }}</h2>
+                <p>{{ workspace.selectedExtension.detailSummary || workspace.selectedExtension.description }}</p>
                 <h3>插件能力</h3>
-                <ul class="feature_bullets">
-                  <li><b>资产同步：</b>同步组织、主机和账号信息。</li>
-                  <li><b>资产直连：</b>从资产列表直接打开 SSH 会话。</li>
-                  <li><b>认证联动：</b>保留堡垒机代理和审计链路。</li>
-                  <li><b>连接日志：</b>展示连接、认证、目标主机进入等阶段。</li>
+                <ul
+                  v-if="workspace.selectedExtension.functions?.length"
+                  class="feature_bullets"
+                >
+                  <li
+                    v-for="item in workspace.selectedExtension.functions"
+                    :key="item.title"
+                  >
+                    <b>{{ item.title }}：</b>{{ item.desc }}
+                  </li>
                 </ul>
+                <div
+                  v-else
+                  class="empty_readme"
+                >
+                  暂无功能说明
+                </div>
                 <h3>接入步骤</h3>
-                <ul class="guide_list">
-                  <li>在资产管理中新增 Jumpserver 数据源。</li>
-                  <li>填写堡垒机地址、组织和认证信息。</li>
-                  <li>同步资产并确认主机分组。</li>
-                  <li>从终端或文件管理中选择资产直连。</li>
+                <ul
+                  v-if="workspace.selectedExtension.guideSteps?.length"
+                  class="guide_list"
+                >
+                  <li
+                    v-for="step in workspace.selectedExtension.guideSteps"
+                    :key="step"
+                  >
+                    {{ step }}
+                  </li>
                 </ul>
+                <div
+                  v-else
+                  class="empty_readme"
+                >
+                  暂无接入步骤
+                </div>
                 <h3>连接日志</h3>
-                <div class="mock_terminal">
-                  <p><span>[10:15:49]</span> ● connecting to bastion host</p>
-                  <p><span>[10:15:50]</span> ✓ connected to bastion host</p>
-                  <p><span>[10:15:50]</span> ● connecting to target</p>
-                  <p><span>[10:15:51]</span> ● authenticating</p>
-                  <p><span>[10:15:51]</span> ✓ connected to target</p>
+                <div
+                  v-if="workspace.selectedExtension.connectionLog?.length"
+                  class="connection_log_terminal"
+                >
+                  <p
+                    v-for="entry in workspace.selectedExtension.connectionLog"
+                    :key="`${entry.time}-${entry.message}`"
+                    :class="`connection_log_${entry.status}`"
+                  >
+                    <span>[{{ entry.time }}]</span>
+                    <b>{{ connectionLogStatusMark(entry.status) }}</b>
+                    {{ entry.message }}
+                  </p>
+                </div>
+                <div
+                  v-else
+                  class="empty_readme"
+                >
+                  暂无连接日志
                 </div>
               </div>
             </div>
@@ -269,7 +304,9 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPlugin } from '@/data/mockData'
+import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
+
+type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
 const workspace = useWorkspaceStore()
 
@@ -298,6 +335,12 @@ const formatSize = (size?: number) => {
     index++
   }
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
+}
+
+const connectionLogStatusMark = (status: 'progress' | 'success' | 'error') => {
+  if (status === 'success') return '✓'
+  if (status === 'error') return '!'
+  return '●'
 }
 
 const installStageText = (stage?: ExtensionInstallStage) => {

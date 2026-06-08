@@ -79,7 +79,7 @@ import { computed, ref } from 'vue'
 import { ChevronDown, Plus, X } from 'lucide-vue-next'
 import FileBrowser from '@/components/files/FileBrowser.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileSessionInfo } from '@/data/mockData'
+import type { FileSessionInfo } from '@shared/preload'
 
 const props = defineProps<{
   side: 'left' | 'right'
@@ -139,14 +139,15 @@ const isDuplicatePayload = (payload: Record<string, unknown>) => {
   })
 }
 
-const openDroppedSession = (event: DragEvent) => {
+const openDroppedSession = async (event: DragEvent) => {
   const payload = readSftpDragPayload(event)
   if (payload) {
     if (isDuplicatePayload(payload)) {
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
       return
     }
-    store.addRemoteFileSessionFromSftpPayload(payload, props.side)
+    const session = await store.addRemoteFileSessionFromSftpPayload(payload, props.side)
+    if (!session && event.dataTransfer) event.dataTransfer.dropEffect = 'none'
     return
   }
   const sessionId = event.dataTransfer?.getData('application/x-aiopsterm-file-session')
@@ -155,13 +156,13 @@ const openDroppedSession = (event: DragEvent) => {
   if (sessionId !== otherSelectedId) store.openFileSession(sessionId, props.side)
 }
 
-const handleEmptyDrop = (event: DragEvent) => {
+const handleEmptyDrop = async (event: DragEvent) => {
   dropActive.value = false
-  openDroppedSession(event)
+  await openDroppedSession(event)
 }
 
-const handlePanelDrop = (event: DragEvent) => {
+const handlePanelDrop = async (event: DragEvent) => {
   dropActive.value = false
-  openDroppedSession(event)
+  await openDroppedSession(event)
 }
 </script>

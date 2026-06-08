@@ -1,0 +1,105 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => '/tmp/aiopsterm-assets-test'
+  }
+}))
+
+vi.mock('electron-store', () => {
+  class MockStore<T extends Record<string, unknown>> {
+    store: T
+
+    constructor(options?: { defaults?: T }) {
+      this.store = JSON.parse(JSON.stringify(options?.defaults || {}))
+    }
+
+    get<K extends keyof T>(key: K): T[K] {
+      return this.store[key]
+    }
+
+    set<K extends keyof T>(key: K, value: T[K]) {
+      this.store[key] = value
+    }
+  }
+
+  return { default: MockStore }
+})
+
+vi.mock('better-sqlite3', () => {
+  throw new Error('force electron-store asset backend in tests')
+})
+
+const loadBackend = async () => {
+  vi.resetModules()
+  const modulePath = '../src/main/backend/assets'
+  return import(modulePath)
+}
+
+describe('assets backend boundary', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('owns asset id generation when saving new assets', async () => {
+    const backend = await loadBackend()
+    const saved = backend.saveAsset({
+      name: 'backend-owned-host',
+      title: 'backend-owned-host',
+      host: '10.77.1.5',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['manual']
+    })
+
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.id).toMatch(/^asset-/)
+    expect(saved.data?.id).not.toMatch(/^asset-local-|^managed-local-|^asset-import-/)
+    expect(backend.listAssets().assets.some((asset: { id: string }) => asset.id === saved.data?.id)).toBe(true)
+  })
+
+  it('owns custom folder uuid generation and only updates existing folders by uuid', async () => {
+    const backend = await loadBackend()
+    const created = backend.saveAssetFolder({ name: '后端文件夹', description: 'backend-owned folder' })
+
+    expect(created.ok).toBe(true)
+    expect(created.data?.uuid).toMatch(/^folder-/)
+    expect(backend.listAssets().folders).toContainEqual(expect.objectContaining({ uuid: created.data?.uuid, name: '后端文件夹' }))
+
+    const updated = backend.saveAssetFolder({ uuid: created.data!.uuid, name: '后端归档', description: 'updated' })
+    expect(updated.ok).toBe(true)
+    expect(updated.data).toMatchObject({ uuid: created.data!.uuid, name: '后端归档', description: 'updated' })
+
+    const ignoredClientUuid = backend.saveAssetFolder({ uuid: 'custom-folder-client-draft', name: '客户端草稿', description: 'client draft' })
+    expect(ignoredClientUuid.ok).toBe(true)
+    expect(ignoredClientUuid.data?.uuid).toMatch(/^folder-/)
+    expect(ignoredClientUuid.data?.uuid).not.toBe('custom-folder-client-draft')
+  })
+
+  it('refreshes organization assets and returns a backend-owned snapshot', async () => {
+    const backend = await loadBackend()
+    const refreshed = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data).toMatchObject({ refreshed: 1, created: 1, updated: 0 })
+    expect(refreshed.data?.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'asset-5-synced',
+          title: 'jumpserver-org-synced-asset',
+          data_source: 'refresh',
+          organizationId: 'org-1',
+          tags: ['jumpserver', 'synced']
+        })
+      ])
+    )
+
+    const refreshedAgain = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+    expect(refreshedAgain.data).toMatchObject({ refreshed: 1, created: 0, updated: 1 })
+    expect(refreshedAgain.data?.assets.filter((asset: { id: string }) => asset.id === 'asset-5-synced')).toHaveLength(1)
+  })
+})

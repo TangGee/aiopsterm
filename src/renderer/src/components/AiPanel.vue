@@ -200,7 +200,7 @@
         >
           <Download />
         </button>
-        <span class="mock-badge">{{ workspace.config.modelProvider }}</span>
+        <span class="model-provider-badge">{{ workspace.config.modelProvider }}</span>
       </div>
     </header>
 
@@ -411,7 +411,7 @@
             type="button"
             class="primary"
             data-testid="ai-message-command-run"
-            @click.stop="runMessageCommand(message)"
+            @click.stop="void runMessageCommand(message)"
           >
             <Play />
             <span>运行</span>
@@ -663,7 +663,7 @@
 
     <div class="model-strip">
       <span>{{ workspace.config.modelName }}</span>
-      <em>{{ workspace.config.modelEndpoint || '本地 mock，无远端调用' }}</em>
+      <em>{{ workspace.config.modelEndpoint || '本地后端响应，未配置远端提供商' }}</em>
     </div>
     <span
       v-if="chatExportNotice"
@@ -802,7 +802,7 @@
                 v-for="model in filteredModelOptions"
                 :key="model.id"
                 type="button"
-                :data-onboarding-id="model.id === aiModelOptions[0]?.id ? 'ai-model-option' : undefined"
+                :data-onboarding-id="model.id === workspace.aiModelOptions[0]?.id ? 'ai-model-option' : undefined"
                 :class="{ selected: workspace.config.modelName === model.id }"
                 @click="selectModel(model.id)"
               >
@@ -820,7 +820,7 @@
                 :key="`locked-${model.id}`"
                 type="button"
                 class="locked-model-option"
-                :title="lockedModelTooltip(model.tier)"
+                :title="lockedModelTooltip(model.tier || 'VIP')"
                 disabled
               >
                 <LockKeyhole class="locked-model-icon" />
@@ -1051,13 +1051,23 @@
       </button>
       <button
         type="button"
-        class="voice-placeholder-button"
+        class="voice-input-button"
+        :class="{ recording: voiceRecording, transcribing: voiceTranscribing }"
         data-testid="ai-voice-button"
-        title="语音输入暂未启用"
-        :disabled="streaming"
-        @click.stop="showVoicePlaceholder"
+        :title="voiceButtonTitle"
+        :aria-pressed="voiceRecording ? 'true' : 'false'"
+        :disabled="streaming || voiceTranscribing"
+        @click.stop="toggleVoiceInput"
       >
-        <Mic />
+        <span
+          v-if="voiceRecording"
+          class="voice-recording-animation"
+          aria-hidden="true"
+        >
+          <span class="voice-recording-pulse"></span>
+        </span>
+        <LoaderCircle v-else-if="voiceTranscribing" />
+        <Mic v-else />
       </button>
       <button
         type="submit"
@@ -1077,7 +1087,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component, type ComponentPublicInstance } from 'vue'
 import {
   Bot,
   Brain,
@@ -1118,17 +1128,6 @@ import {
   X,
   Zap
 } from 'lucide-vue-next'
-import {
-  aiChatModeOptions,
-  aiContextCategories,
-  aiModelOptions,
-  lockedAiModelOptions,
-  aiOpenedHosts,
-  type AiChatMode,
-  type AiContextKind,
-  type AiContextOption,
-  type KnowledgeNode
-} from '@/data/mockData'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
   AiChatChipContentPart,
@@ -1139,13 +1138,35 @@ import type {
   AiImageContentPart,
   AiSkillChipContentPart,
   AiSupportedImageType,
+  ChatMessage,
   ConversationItem
 } from '@/stores/workspace'
 import type { TodoItem } from '@/stores/workspace'
+import type { AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
 
 defineProps<{ agentMode?: boolean }>()
 
 const workspace = useWorkspaceStore()
+type AiChatMode = 'agent' | 'cmd'
+type AiContextCategoryView = {
+  id: AiContextKind
+  label: string
+  icon: Component
+  options: AiContextOption[]
+}
+
+const aiChatModeOptions: Array<{ id: AiChatMode; label: string; detail: string }> = [
+  { id: 'agent', label: 'Agent', detail: '自动规划并等待确认' },
+  { id: 'cmd', label: 'Command', detail: '生成命令与解释' }
+]
+
+const aiContextCategoryIcons: Record<AiContextKind, Component> = {
+  hosts: Server,
+  docs: FileText,
+  images: Image,
+  skills: Bot,
+  chats: Search
+}
 const draft = ref('')
 const imageInputParts = ref<AiImageContentPart[]>([])
 const fileInputParts = ref<AiDocChipContentPart[]>([])
@@ -1184,6 +1205,14 @@ const modelQuery = ref('')
 const dropActive = ref(false)
 const syncingFromEditable = ref(false)
 const inputPlaceholderNotice = ref('')
+const voiceRecording = ref(false)
+const voiceTranscribing = ref(false)
+const voiceRecordingStartedAt = ref(0)
+const voiceAutoSendAfterInput = ref(false)
+const voiceMediaRecorder = ref<MediaRecorder | null>(null)
+const voiceMediaStream = ref<MediaStream | null>(null)
+const voiceAudioChunks = ref<Blob[]>([])
+const voiceRecordingMimeType = ref('')
 const chatSearchOpen = ref(false)
 const chatSearchTerm = ref('')
 const chatSearchMatchCount = ref(0)
@@ -1199,8 +1228,21 @@ const chatExportNotice = ref('')
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
 let chatExportNoticeTimer: number | undefined
+let voiceRecordingLimitTimer: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = '收藏'
+const voiceRecordingLimitMs = 60_000
+const voiceRecordingMinimumMs = 220
+const voiceMaxAudioBytes = 50 * 1024 * 1024
+const preferredVoiceMimeTypes = [
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/webm;codecs=opus',
+  'audio/mp3',
+  'audio/m4a',
+  'audio/aac',
+  'audio/wav'
+]
 const supportedImageTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const imagePartMediaTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
 const chatAttachmentFilters = [
@@ -1236,6 +1278,11 @@ const maxHostContexts = 5
 const todoMaxItems = 20
 const todoShowSubtasks = true
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
+const voiceButtonTitle = computed(() => {
+  if (voiceRecording.value) return '停止语音录制'
+  if (voiceTranscribing.value) return '语音转写中'
+  return '开始语音输入'
+})
 const focusedTodo = computed(() => workspace.todoItems.find((todo) => todo.isFocused || todo.status === 'in_progress') || null)
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
 const focusedTodoId = computed(() => focusedTodo.value?.id || null)
@@ -1338,19 +1385,85 @@ const plainTextForPart = (part: AiContentPart) => {
 const messagePlainText = (message: { text: string; contentParts?: AiContentPart[] }) =>
   message.contentParts?.length ? message.contentParts.map(plainTextForPart).join('') : message.text
 
-const markdownForMessage = (message: { role: string; text: string; contentParts?: AiContentPart[]; hosts?: AiContextOption[] }) => {
-  const role = message.role === 'user' ? 'User' : message.role === 'assistant' ? 'aiopsterm' : 'System'
-  const body = message.contentParts?.length ? message.contentParts.map(markdownTextForPart).join('') : message.text
-  const hosts = message.hosts?.length ? `\n\nHosts: ${message.hosts.map((host) => host.label).join(', ')}` : ''
-  if (message.role === 'system') return `**${role}:**\n\n${body}${hosts}\n`
-  if (message.contentParts?.some((part) => part.type === 'image')) return `**${role}:**\n\n${body}${hosts}\n`
-  return `**${role}:**\n\n${escapeMarkdownFence(body)}${hosts}\n`
+const markdownTextForMessage = (message: { text: string; contentParts?: AiContentPart[] }) =>
+  message.contentParts?.length ? message.contentParts.map(markdownTextForPart).join('') : message.text
+
+const markdownRoleLabelForMessage = (message: Pick<ChatMessage, 'role'>) =>
+  message.role === 'user' ? 'User' : message.role === 'assistant' ? 'aiopsterm' : 'System'
+
+const markdownHostsForMessage = (message: Pick<ChatMessage, 'hosts'>) =>
+  message.hosts?.length ? `\n\nHosts: ${message.hosts.map((host) => host.label).join(', ')}` : ''
+
+const contextTruncationExportText = (message: ChatMessage) => {
+  const text = messagePlainText(message)
+  try {
+    const parsed = JSON.parse(text) as { status?: string }
+    if (parsed.status === 'compressing') return 'Context is being compressed.'
+    if (parsed.status === 'completed') return 'Context has been truncated.'
+  } catch {
+    // Keep plain-text compatibility for locally generated truncation messages.
+  }
+  if (message.partial) return 'Context is being compressed.'
+  return text.trim() || 'Context has been truncated.'
+}
+
+const markdownForMessage = (message: ChatMessage) => {
+  const role = markdownRoleLabelForMessage(message)
+  const roleHeader = `**${role}:**`
+  const body = markdownTextForMessage(message)
+  const plainText = messagePlainText(message)
+  const hosts = markdownHostsForMessage(message)
+
+  if (message.ask === 'command' || message.say === 'command') {
+    const command = message.executedCommand || plainText
+    return command.trim() ? `${roleHeader}\n\n\`\`\`bash\n${escapeMarkdownFence(command)}\n\`\`\`${hosts}\n` : ''
+  }
+
+  if (message.say === 'command_output') {
+    if (!plainText.trim()) return ''
+    if (plainText.startsWith('Terminal output:') && plainText.includes('```')) {
+      return `**OUTPUT**\n\n${plainText}${hosts}\n`
+    }
+    return `**OUTPUT**\n\n\`\`\`\n${escapeMarkdownFence(plainText)}\n\`\`\`${hosts}\n`
+  }
+
+  if (message.ask === 'mcp_tool_call' && message.mcpToolCall) {
+    const toolCall = {
+      'MCP SERVER': message.mcpToolCall.serverName,
+      TOOL: message.mcpToolCall.toolName,
+      PARAMETERS: message.mcpToolCall.arguments || {}
+    }
+    return `${roleHeader}\n\n\`\`\`json\n${JSON.stringify(toolCall, null, 2)}\n\`\`\`${hosts}\n`
+  }
+
+  if (message.ask === 'followup') {
+    const options = message.followupOptions || []
+    const optionList = options.length
+      ? `\n\nOptions:\n\n${options.map((option) => `- ${message.selectedOption === option ? '[x]' : '[ ]'} ${option}`).join('\n\n')}`
+      : ''
+    return `${roleHeader}\n\n${escapeMarkdownFence(plainText)}${optionList}${hosts}\n`
+  }
+
+  if (message.say === 'search_result') {
+    return plainText.trim() ? `${roleHeader}\n\n**Search Result**\n\`\`\`\n${escapeMarkdownFence(plainText)}\n\`\`\`${hosts}\n` : ''
+  }
+
+  if (message.say === 'context_truncated') {
+    return `${roleHeader}\n\n${contextTruncationExportText(message)}${hosts}\n`
+  }
+
+  if (message.action === 'approved') return `${roleHeader}\n\n✅ Approved${hosts}\n`
+  if (message.action === 'rejected') return `${roleHeader}\n\n❌ Rejected${hosts}\n`
+
+  if (message.role === 'system') return `${roleHeader}\n\n${body}${hosts}\n`
+  if (message.contentParts?.some((part) => part.type === 'image')) return `${roleHeader}\n\n${body}${hosts}\n`
+  return `${roleHeader}\n\n${escapeMarkdownFence(body)}${hosts}\n`
 }
 
 const buildChatExportMarkdown = () => {
   const title = getCurrentConversationTitle()
   const header = `# ${title}\n\n> Exported on: ${new Date().toLocaleString()} from aiopsterm\n\n---\n\n`
-  return `${header}${workspace.chatMessages.map(markdownForMessage).join('\n---\n\n')}`
+  return `${header}${workspace.chatMessages.map(markdownForMessage).filter(Boolean).join('\n---\n\n')}`
 }
 
 const showChatExportNotice = (message: string) => {
@@ -1398,14 +1511,13 @@ const isCommandSuggestionMessage = (message: { role: string; contentParts?: AiCo
   return Boolean(message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command') || message.text.trim().startsWith('/'))
 }
 
-const runMessageCommand = (message: { text: string; contentParts?: AiContentPart[]; executedCommand?: string }) => {
+const runMessageCommand = async (message: { text: string; contentParts?: AiContentPart[]; executedCommand?: string }) => {
   const command = messagePlainText(message).trim()
   if (!command) {
     showChatExportNotice('没有可运行的命令。')
     return
   }
-  const decision = workspace.stageActiveTerminalCommand(command)
-  message.executedCommand = command
+  const decision = await workspace.runActiveTerminalCommand(command, 'agent')
   if (decision?.status === 'needs-approval') {
     showChatExportNotice('命令已送入终端安全确认。')
     return
@@ -1414,17 +1526,24 @@ const runMessageCommand = (message: { text: string; contentParts?: AiContentPart
     showChatExportNotice('命令被安全策略拦截。')
     return
   }
+  if (decision?.status === 'unavailable') {
+    showChatExportNotice(decision.reason)
+    return
+  }
+  message.executedCommand = command
   showChatExportNotice('命令已写入终端输入区。')
 }
 
-const toggleMessageFavorite = (id: string) => {
-  workspace.toggleMessageFavorite(id)
+const toggleMessageFavorite = async (id: string) => {
+  const saved = await workspace.toggleMessageFavorite(id)
+  if (!saved) return
   const message = workspace.chatMessages.find((item) => item.id === id)
   showChatExportNotice(message?.favorite ? '已收藏消息。' : '已取消收藏。')
 }
 
-const setMessageFeedback = (id: string, feedback: 'up' | 'down') => {
-  workspace.setMessageFeedback(id, feedback)
+const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
+  const saved = await workspace.setMessageFeedback(id, feedback)
+  if (!saved) return
   const message = workspace.chatMessages.find((item) => item.id === id)
   const current = message?.feedback
   showChatExportNotice(current ? (current === 'up' ? '已标记有帮助。' : '已标记无帮助。') : '已取消反馈。')
@@ -1469,6 +1588,7 @@ const openHistoryMenu = async () => {
   closeCommandPopup()
   modeMenuOpen.value = false
   closeModelMenu()
+  await workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false })
   historyMenuOpen.value = true
   await nextTick()
   historySearchInputRef.value?.focus()
@@ -1493,20 +1613,26 @@ const clearHistorySearch = () => {
   void nextTick(() => historySearchInputRef.value?.focus())
 }
 
-const createNewAiConversation = () => {
-  workspace.createConversation()
+const createNewAiConversation = async () => {
+  const created = await workspace.createConversation()
   historySearchTerm.value = ''
   historyCurrentPage.value = 1
-  closeHistoryMenu()
-  showChatExportNotice('已新建会话。')
+  if (created) {
+    closeHistoryMenu()
+    showChatExportNotice('已新建会话。')
+  } else {
+    showChatExportNotice('新建会话失败。')
+  }
 }
 
-const restoreHistoryConversation = (id: string) => {
+const restoreHistoryConversation = async (id: string) => {
   if (editingHistoryId.value) return
-  const restored = workspace.restoreConversation(id)
+  const restored = await workspace.restoreConversation(id)
   if (restored) {
     closeHistoryMenu()
     showChatExportNotice('已恢复历史会话。')
+  } else {
+    showChatExportNotice('历史会话恢复失败。')
   }
 }
 
@@ -1526,25 +1652,25 @@ const cancelHistoryTitleEdit = () => {
   editingHistoryTitle.value = ''
 }
 
-const saveHistoryTitle = (id: string) => {
+const saveHistoryTitle = async (id: string) => {
   if (!editingHistoryId.value) return
-  const saved = workspace.renameConversation(id, editingHistoryTitle.value)
+  const saved = await workspace.renameConversation(id, editingHistoryTitle.value)
   cancelHistoryTitleEdit()
   showChatExportNotice(saved ? '历史标题已更新。' : '历史标题未更新。')
 }
 
-const deleteHistoryConversation = (id: string) => {
-  workspace.deleteConversation(id)
+const deleteHistoryConversation = async (id: string) => {
+  const deleted = await workspace.deleteConversation(id)
   if (visibleHistoryConversations.value.length === 0 && historyCurrentPage.value > 1) {
     historyCurrentPage.value -= 1
   }
-  showChatExportNotice('历史会话已删除。')
+  showChatExportNotice(deleted ? '历史会话已删除。' : '历史会话删除失败。')
 }
 
-const toggleHistoryFavorite = (id: string) => {
-  workspace.toggleConversationFavorite(id)
+const toggleHistoryFavorite = async (id: string) => {
+  const toggled = await workspace.toggleConversationFavorite(id)
   const conversation = workspace.conversations.find((item) => item.id === id)
-  showChatExportNotice(conversation?.favorite ? '历史会话已收藏。' : '已取消历史收藏。')
+  showChatExportNotice(toggled ? (conversation?.favorite ? '历史会话已收藏。' : '已取消历史收藏。') : '历史收藏更新失败。')
 }
 
 const loadMoreHistoryConversations = async () => {
@@ -1702,7 +1828,14 @@ const setEditEditableRef = (el: Element | ComponentPublicInstance | null) => {
   editEditableRef.value = el instanceof HTMLElement ? el : null
 }
 
-const selectedContextCategory = computed(() => aiContextCategories.find((category) => category.id === contextLevel.value))
+const aiContextCategories = computed<AiContextCategoryView[]>(() =>
+  workspace.aiContextCatalog.categories.map((category) => ({
+    ...category,
+    icon: aiContextCategoryIcons[category.id] || Search,
+    options: category.options.map((option) => ({ ...option }))
+  }))
+)
+const selectedContextCategory = computed(() => aiContextCategories.value.find((category) => category.id === contextLevel.value))
 const docsCurrentNodes = computed(() => {
   if (!docsCurrentRelDir.value) return workspace.knowledgeTree
   const currentNode = workspace.findKnowledgeNode(docsCurrentRelDir.value)
@@ -1746,17 +1879,19 @@ const commandOptions = computed<AiCommandOption[]>(() => {
 const displayedOpenedHosts = computed(() => {
   if (chatMode.value !== 'agent') return []
   const keyword = contextQuery.value.trim().toLowerCase()
-  return aiOpenedHosts
+  return workspace.aiContextCatalog.openedHosts
     .filter((host) => !keyword || `${host.label} ${host.detail || ''}`.toLowerCase().includes(keyword))
     .slice(0, 4)
 })
-const visibleContextCategories = computed(() => aiContextCategories.filter((category) => category.id !== 'hosts' || chatMode.value === 'agent'))
+const visibleContextCategories = computed(() => aiContextCategories.value.filter((category) => category.id !== 'hosts' || chatMode.value === 'agent'))
 const filteredContextOptions = computed(() => {
   const options =
     contextLevel.value === 'docs'
       ? docsContextOptions.value
       : contextLevel.value === 'skills'
-        ? workspace.aiSkillContextOptions
+        ? workspace.aiSkillContextOptions.length
+          ? workspace.aiSkillContextOptions
+          : selectedContextCategory.value?.options || []
         : selectedContextCategory.value?.options || []
   const keyword = contextQuery.value.trim().toLowerCase()
   if (!keyword) return options
@@ -1790,8 +1925,8 @@ const matchesModelQuery = (model: { id: string; label: string; detail?: string; 
   if (!keyword) return true
   return `${model.id} ${model.label} ${displayModelName(model.label)} ${model.detail || ''} ${model.tier || ''}`.toLowerCase().includes(keyword)
 }
-const filteredModelOptions = computed(() => aiModelOptions.filter(matchesModelQuery))
-const filteredLockedModelOptions = computed(() => lockedAiModelOptions.filter(matchesModelQuery))
+const filteredModelOptions = computed(() => workspace.aiModelOptions.filter(matchesModelQuery))
+const filteredLockedModelOptions = computed(() => workspace.lockedAiModelOptions.filter(matchesModelQuery))
 
 const measureUiTextWidthPx = (text: string) => {
   if (!text) return 0
@@ -1817,7 +1952,7 @@ const modeDropdownWidthPx = computed(() => {
 })
 
 const modelSelectWidthPx = computed(() => {
-  const option = aiModelOptions.find((model) => model.id === workspace.config.modelName)
+  const option = workspace.aiModelOptions.find((model) => model.id === workspace.config.modelName)
   const raw = option?.label || workspace.config.modelName
   const thinkingExtra = isThinkingModelName(raw) ? THINKING_ICON_SELECT_EXTRA_PX : 0
   const width = Math.ceil(measureUiTextWidthPx(displayModelName(raw))) + SELECT_CHROME_PX + thinkingExtra
@@ -1825,12 +1960,12 @@ const modelSelectWidthPx = computed(() => {
 })
 
 const modelDropdownWidthPx = computed(() => {
-  const availableMaxWidth = aiModelOptions.reduce((max, model) => {
+  const availableMaxWidth = workspace.aiModelOptions.reduce((max, model) => {
     const thinkingExtra = isThinkingModelName(model.label) ? THINKING_ICON_SELECT_EXTRA_PX : 0
     const width = Math.ceil(measureUiTextWidthPx(displayModelName(model.label))) + DROPDOWN_ROW_CHROME_PX + thinkingExtra
     return Math.max(max, width)
   }, 0)
-  const lockedMaxWidth = lockedAiModelOptions.reduce((max, model) => {
+  const lockedMaxWidth = workspace.lockedAiModelOptions.reduce((max, model) => {
     const width = Math.ceil(measureUiTextWidthPx(model.label)) + DROPDOWN_ROW_CHROME_PX + LOCK_ROW_ICON_EXTRA_PX + VIP_TAG_ROW_EXTRA_PX
     return Math.max(max, width)
   }, 0)
@@ -2496,12 +2631,18 @@ const shouldTriggerCommandPopupForPendingSlash = (editable: HTMLElement | null, 
   return false
 }
 
-const openCommandPopupForTarget = (target: 'main' | 'edit') => {
+const shouldTriggerCommandPopupFromEditableText = () => {
+  const text = editablePlainText()
+  return /(?:^|\s)\/$/.test(text)
+}
+
+const openCommandPopupForTarget = async (target: 'main' | 'edit') => {
   if (target === 'edit') {
     saveEditSelection()
   } else {
     saveEditableSelection()
   }
+  await workspace.refreshKnowledgeTree({ persist: false })
   commandTarget.value = target
   commandPopupOpen.value = true
   closeContextPopup()
@@ -2509,7 +2650,8 @@ const openCommandPopupForTarget = (target: 'main' | 'edit') => {
   closeModelMenu()
   commandQuery.value = ''
   commandKeyboardIndex.value = -1
-  void nextTick(() => commandSearchInputRef.value?.focus())
+  await nextTick()
+  commandSearchInputRef.value?.focus()
 }
 
 function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') {
@@ -2527,6 +2669,7 @@ function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiCo
   contextQuery.value = ''
   contextKeyboardIndex.value = -1
   if (level === 'docs') resetDocsContextNavigation()
+  void workspace.refreshAiContextCatalog({ hydrateSelection: false })
   void nextTick(() => contextSearchInputRef.value?.focus())
 }
 
@@ -2806,12 +2949,12 @@ const handleEditEditablePaste = (event: ClipboardEvent) => {
   insertPlainTextAtEditCursor(text)
 }
 
-const confirmMessageEdit = () => {
+const confirmMessageEdit = async () => {
   if (!editingMessageId.value) return
   const contentParts = extractContentPartsFromEditable(editEditableRef.value)
   const hasSendableContent = contentParts.some((part) => part.type !== 'text' || part.text.trim())
   if (!hasSendableContent) return
-  const sent = workspace.resendUserMessageFromParts(editingMessageId.value, contentParts, editHostContexts.value.map(cloneContextOption))
+  const sent = await workspace.resendUserMessageFromParts(editingMessageId.value, contentParts, editHostContexts.value.map(cloneContextOption))
   if (sent) cancelMessageEdit()
 }
 
@@ -2829,7 +2972,7 @@ const handleEditEditableKeydown = (event: KeyboardEvent) => {
       saveEditSelection()
       if (!shouldOpenAfterKey && getCharBeforeCaret(editEditableRef.value, editSavedRange.value) !== '/') return
       if (!shouldOpenAfterKey && !shouldTriggerCommandPopupForSlash(editEditableRef.value, editSavedRange.value)) return
-      openCommandPopupForTarget('edit')
+      void openCommandPopupForTarget('edit')
     }, 0)
     return
   }
@@ -3072,11 +3215,15 @@ const showInputPlaceholderNotice = (message: string) => {
   }, 2400)
 }
 
-const currentAttachmentTaskId = () => workspace.selectedConversationId || 'local-chat'
+const ensureAttachmentConversationId = async () => {
+  if (workspace.selectedConversationId.trim()) return workspace.selectedConversationId.trim()
+  const created = await workspace.createConversation()
+  return created?.id || ''
+}
 
 const handleFileUpload = async () => {
   if (streaming.value) return
-  const taskId = currentAttachmentTaskId().trim()
+  const taskId = await ensureAttachmentConversationId()
   if (!taskId) {
     showInputPlaceholderNotice('请先创建会话后再上传文件。')
     return
@@ -3111,9 +3258,221 @@ const handleFileUpload = async () => {
   }
 }
 
-const showVoicePlaceholder = () => {
-  if (streaming.value) return
-  showInputPlaceholderNotice('语音输入为本地占位，暂未启用录音识别。')
+const clearVoiceTimers = () => {
+  if (voiceRecordingLimitTimer) {
+    window.clearTimeout(voiceRecordingLimitTimer)
+    voiceRecordingLimitTimer = undefined
+  }
+}
+
+const clearVoiceMedia = () => {
+  const recorder = voiceMediaRecorder.value
+  if (recorder) {
+    recorder.ondataavailable = null
+    recorder.onerror = null
+    recorder.onstop = null
+  }
+  if (recorder && recorder.state !== 'inactive') {
+    try {
+      recorder.stop()
+    } catch {
+      // Recorder can already be inactive while the stop event is queued.
+    }
+  }
+  voiceMediaRecorder.value = null
+  voiceMediaStream.value?.getTracks().forEach((track) => track.stop())
+  voiceMediaStream.value = null
+  voiceAudioChunks.value = []
+  voiceRecordingMimeType.value = ''
+}
+
+const bestVoiceMimeType = () => {
+  if (typeof MediaRecorder === 'undefined') return ''
+  return preferredVoiceMimeTypes.find((format) => MediaRecorder.isTypeSupported(format)) || ''
+}
+
+const shouldUseBrowserVoiceRecorder = () =>
+  localStorage.getItem('aiopsterm.voice.browserRecorder') === 'enabled' &&
+  typeof MediaRecorder !== 'undefined' &&
+  Boolean(navigator.mediaDevices?.getUserMedia)
+
+const appendVoiceTranscriptionToInput = (text: string) => {
+  restoreEditableSelection()
+  const prefix = draft.value.trim() && !/\s$/.test(draft.value) ? ' ' : ''
+  insertPlainTextAtEditableCursor(`${prefix}${text}`)
+  requestAnimationFrame(moveEditableCaretToEnd)
+}
+
+const handleVoiceTranscriptionComplete = async (text: string) => {
+  const normalized = text.trim()
+  if (!normalized) {
+    showInputPlaceholderNotice('语音识别结果为空。')
+    return
+  }
+  appendVoiceTranscriptionToInput(normalized)
+  showInputPlaceholderNotice(`语音转写完成：${normalized}`)
+  if (voiceAutoSendAfterInput.value) {
+    await nextTick()
+    handleSend()
+  }
+}
+
+const audioBlobToBase64 = async (blob: Blob) => {
+  const arrayBuffer = await blob.arrayBuffer()
+  const bytes = new Uint8Array(arrayBuffer)
+  let binary = ''
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return btoa(binary)
+}
+
+const audioFormatFromMimeType = (mimeType = '') => {
+  const normalized = mimeType.toLowerCase()
+  if (normalized.includes('mp3') || normalized.includes('mpeg')) return 'mp3'
+  if (normalized.includes('m4a')) return 'm4a'
+  if (normalized.includes('aac')) return 'aac'
+  if (normalized.includes('ogg') || normalized.includes('opus') || normalized.includes('webm')) return 'ogg-opus'
+  if (normalized.includes('wav')) return 'wav'
+  if (normalized.includes('pcm')) return 'pcm'
+  return 'wav'
+}
+
+const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
+  voiceTranscribing.value = true
+  try {
+    const result = await window.aiops.transcribeVoiceInput(input)
+    if (!result.ok || !result.data?.text) {
+      showInputPlaceholderNotice(`语音识别失败：${result.errorMessage || result.errorCode || '识别结果为空'}`)
+      return
+    }
+    await handleVoiceTranscriptionComplete(result.data.text)
+  } catch (error) {
+    showInputPlaceholderNotice(`语音识别失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    voiceTranscribing.value = false
+  }
+}
+
+const processVoiceRecording = async (elapsed: number, options: { reachedLimit?: boolean; audioBlob?: Blob } = {}) => {
+  if (!options.reachedLimit && elapsed < voiceRecordingMinimumMs) {
+    showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
+    return
+  }
+  if (options.audioBlob) {
+    if (options.audioBlob.size < 1024) {
+      showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
+      return
+    }
+    if (options.audioBlob.size > voiceMaxAudioBytes) {
+      showInputPlaceholderNotice('音频文件超过 50 MiB，无法识别。')
+      return
+    }
+  }
+  let transcriptionInput: VoiceTranscriptionInput = {
+    durationMs: elapsed,
+    source: options.audioBlob ? 'browser' : 'local-dev'
+  }
+  if (options.audioBlob) {
+    transcriptionInput = {
+      ...transcriptionInput,
+      audioData: await audioBlobToBase64(options.audioBlob),
+      audioFormat: audioFormatFromMimeType(options.audioBlob.type),
+      audioSize: options.audioBlob.size
+    }
+  }
+  await transcribeVoiceInput(transcriptionInput)
+}
+
+const scheduleVoiceRecordingLimit = () => {
+  voiceRecordingStartedAt.value = Date.now()
+  voiceRecording.value = true
+  voiceRecordingLimitTimer = window.setTimeout(() => {
+    if (!voiceRecording.value) return
+    showInputPlaceholderNotice('录制时间到达上限，已自动停止录制。')
+    void finishVoiceRecording({ reachedLimit: true })
+  }, voiceRecordingLimitMs)
+}
+
+const startBrowserVoiceRecorder = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 16000
+    }
+  })
+  const mimeType = bestVoiceMimeType()
+  const recorder = new MediaRecorder(stream, {
+    ...(mimeType ? { mimeType } : {}),
+    audioBitsPerSecond: 128000
+  })
+
+  voiceMediaStream.value = stream
+  voiceMediaRecorder.value = recorder
+  voiceRecordingMimeType.value = mimeType
+  voiceAudioChunks.value = []
+
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) voiceAudioChunks.value.push(event.data)
+  }
+  recorder.onerror = () => {
+    voiceRecording.value = false
+    clearVoiceTimers()
+    clearVoiceMedia()
+    showInputPlaceholderNotice('语音录制失败。')
+  }
+  recorder.onstop = () => {
+    const elapsed = Date.now() - voiceRecordingStartedAt.value
+    const audioBlob = new Blob(voiceAudioChunks.value, { type: voiceRecordingMimeType.value || 'audio/webm' })
+    clearVoiceMedia()
+    void processVoiceRecording(elapsed, { audioBlob })
+  }
+  recorder.start(100)
+  scheduleVoiceRecordingLimit()
+}
+
+const startVoiceRecording = async () => {
+  if (streaming.value || voiceRecording.value || voiceTranscribing.value) return
+  closePopups()
+  restoreEditableSelection()
+  if (shouldUseBrowserVoiceRecorder()) {
+    try {
+      await startBrowserVoiceRecorder()
+      return
+    } catch (error) {
+      const message = error instanceof Error && error.name === 'NotAllowedError' ? '麦克风权限被拒绝，已切换为本地语音转写后端。' : '麦克风不可用，已切换为本地语音转写后端。'
+      showInputPlaceholderNotice(message)
+      clearVoiceMedia()
+    }
+  }
+  scheduleVoiceRecordingLimit()
+}
+
+const finishVoiceRecording = async (options: { reachedLimit?: boolean } = {}) => {
+  if (!voiceRecording.value) return
+  const elapsed = Date.now() - voiceRecordingStartedAt.value
+  voiceRecording.value = false
+  if (voiceRecordingLimitTimer) {
+    window.clearTimeout(voiceRecordingLimitTimer)
+    voiceRecordingLimitTimer = undefined
+  }
+  const recorder = voiceMediaRecorder.value
+  if (recorder) {
+    if (recorder.state !== 'inactive') recorder.stop()
+    return
+  }
+  await processVoiceRecording(elapsed, options)
+}
+
+const toggleVoiceInput = () => {
+  if (streaming.value || voiceTranscribing.value) return
+  if (voiceRecording.value) {
+    void finishVoiceRecording()
+    return
+  }
+  void startVoiceRecording()
 }
 
 const handleImageSelected = async (event: Event) => {
@@ -3192,7 +3551,7 @@ const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFoc
   closeHistoryMenu()
 }
 
-const handleSend = () => {
+const handleSend = async () => {
   if (streaming.value) {
     const message = [...workspace.chatMessages].reverse().find((item) => item.state === 'streaming')
     if (message) {
@@ -3202,7 +3561,8 @@ const handleSend = () => {
     return
   }
   const contentParts = extractEditableContentParts()
-  workspace.sendChat(draft.value, contentParts)
+  const sent = await workspace.sendChat(draft.value, contentParts)
+  if (!sent) return
   imageInputParts.value = []
   fileInputParts.value = []
   setDraft('')
@@ -3377,7 +3737,13 @@ const closeCommandPopup = (options: { restoreFocus?: boolean } = {}) => {
   }
 }
 
-const openContextCategory = (category: AiContextKind) => {
+const openContextCategory = async (category: AiContextKind) => {
+  if (category === 'skills') {
+    await workspace.refreshSkillsFromBridge()
+  }
+  if (category === 'docs') {
+    await workspace.refreshKnowledgeTree({ persist: false })
+  }
   contextLevel.value = category
   contextQuery.value = ''
   contextKeyboardIndex.value = -1
@@ -3519,9 +3885,10 @@ const handleEditableKeydown = (event: KeyboardEvent) => {
     const shouldOpenAfterKey = shouldTriggerCommandPopupForPendingSlash(editableRef.value, savedRange.value)
     window.setTimeout(() => {
       saveEditableSelection()
-      if (!shouldOpenAfterKey && getCharBeforeCaret(editableRef.value, savedRange.value) !== '/') return
-      if (!shouldOpenAfterKey && !shouldTriggerCommandPopupForSlash(editableRef.value, savedRange.value)) return
-      openCommandPopupForTarget('main')
+      const hasInsertedSlashToken = shouldTriggerCommandPopupFromEditableText()
+      if (!shouldOpenAfterKey && getCharBeforeCaret(editableRef.value, savedRange.value) !== '/' && !hasInsertedSlashToken) return
+      if (!shouldOpenAfterKey && !shouldTriggerCommandPopupForSlash(editableRef.value, savedRange.value) && !hasInsertedSlashToken) return
+      void openCommandPopupForTarget('main')
     }, 0)
   } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault()
@@ -3570,7 +3937,7 @@ const handleContextKeydown = (event: KeyboardEvent) => {
         applyContext(displayedOpenedHosts.value[contextKeyboardIndex.value])
       } else if (contextKeyboardIndex.value >= displayedOpenedHosts.value.length) {
         const category = visibleContextCategories.value[contextKeyboardIndex.value - displayedOpenedHosts.value.length]
-        if (category) openContextCategory(category.id)
+        if (category) void openContextCategory(category.id)
       }
     } else {
       const option = filteredContextOptions.value[contextKeyboardIndex.value]
@@ -3730,9 +4097,17 @@ watch(
   { immediate: true }
 )
 
+onMounted(() => {
+  void workspace.refreshAiModelCatalog({ replaceSettingsOptions: false })
+  void workspace.refreshAiContextCatalog({ hydrateSelection: true })
+})
+
 onBeforeUnmount(() => {
   if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
   if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
+  if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)
+  clearVoiceTimers()
+  clearVoiceMedia()
   clearChatHighlights()
 })
 

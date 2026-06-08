@@ -351,16 +351,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Check, ChevronDown, ChevronRight, Folder, FolderInput, FolderMinus, MessageSquare, Pencil, RefreshCw, Search, Star, Trash2, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileSessionInfo } from '@/data/mockData'
+import type { FileSessionFolderRecord, FileSessionInfo } from '@shared/preload'
 
-type CustomFolder = {
-  uuid: string
-  name: string
-  description: string
-}
+type CustomFolder = FileSessionFolderRecord
 
 type ContextMenuTarget = 'session' | 'folder' | ''
 
@@ -399,20 +395,7 @@ const folderFormError = ref('')
 const showIpMode = computed(() => workspace.workspacePreferences.showIpMode)
 const expandedGroups = computed(() => workspace.workspacePreferences.expandedGroups)
 let sessionClickTimer: number | null = null
-let folderCreateCounter = 3
-
-const customFolders = ref<CustomFolder[]>([
-  {
-    uuid: 'files-folder-a',
-    name: '核心业务',
-    description: '常用远程文件资产'
-  },
-  {
-    uuid: 'files-folder-b',
-    name: '临时排障',
-    description: '短期调试入口'
-  }
-])
+const customFolders = computed<CustomFolder[]>(() => workspace.fileSessionFolders)
 
 const filesGroupKeys: Record<string, string> = {
   最近连接: 'recent_connections',
@@ -557,16 +540,6 @@ const resetFolderForms = () => {
   folderFormError.value = ''
 }
 
-const createFolderUuid = () => {
-  let uuid = `files-folder-${folderCreateCounter}`
-  while (customFolders.value.some((folder) => folder.uuid === uuid)) {
-    folderCreateCounter += 1
-    uuid = `files-folder-${folderCreateCounter}`
-  }
-  folderCreateCounter += 1
-  return uuid
-}
-
 const closeContextMenu = () => {
   contextMenu.visible = false
   contextMenu.target = ''
@@ -615,6 +588,10 @@ watch(activeTab, () => {
 
 onBeforeUnmount(() => {
   clearSessionClickTimer()
+})
+
+onMounted(() => {
+  void workspace.refreshFileSessionCatalog()
 })
 
 const handleSessionClick = (sessionId: string) => {
@@ -703,10 +680,10 @@ const beginCommentEdit = () => {
   contextMenu.visible = false
 }
 
-const saveComment = (sessionId: string) => {
+const saveComment = async (sessionId: string) => {
   const session = workspace.fileSessions.find((item) => item.id === sessionId)
   if (session) {
-    session.comment = editingComment.value
+    await workspace.updateFileSession(session.id, { comment: editingComment.value })
   }
   cancelComment()
 }
@@ -719,8 +696,8 @@ const cancelComment = () => {
 const toggleContextFavorite = () => {
   const session = contextSession.value
   if (session && session.favorite !== undefined) {
-    session.favorite = !session.favorite
-    session.group = session.favorite ? '最近连接' : '主机'
+    const nextFavorite = !session.favorite
+    void workspace.updateFileSession(session.id, { favorite: nextFavorite, group: nextFavorite ? '最近连接' : '主机' })
   }
   contextMenu.visible = false
 }
@@ -738,19 +715,17 @@ const moveContextSession = () => {
   contextMenu.visible = false
 }
 
-const moveAssetToFolder = (folderUuid: string) => {
+const moveAssetToFolder = async (folderUuid: string) => {
   const session = workspace.fileSessions.find((item) => item.id === moveModal.sessionId)
   if (!session) return
-  session.folderUuid = folderUuid
-  session.group = '主机'
+  await workspace.updateFileSession(session.id, { folderUuid, group: '主机' })
   closeMoveModal()
 }
 
-const removeFromFolderContextSession = () => {
+const removeFromFolderContextSession = async () => {
   const session = contextSession.value
   if (session) {
-    session.group = '最近连接'
-    session.folderUuid = undefined
+    await workspace.updateFileSession(session.id, { folderUuid: undefined, group: '最近连接' })
   }
   contextMenu.visible = false
 }
@@ -761,20 +736,16 @@ const createFolderFromMoveModal = () => {
   createFolderModal.visible = true
 }
 
-const saveCreatedFolder = () => {
+const saveCreatedFolder = async () => {
   const name = createFolderForm.name.trim()
   if (!name) {
     folderFormError.value = '请输入文件夹名称'
     return
   }
-  customFolders.value = [
-    ...customFolders.value,
-    {
-      uuid: createFolderUuid(),
-      name,
-      description: createFolderForm.description.trim()
-    }
-  ]
+  await workspace.saveFileSessionFolder({
+    name,
+    description: createFolderForm.description.trim()
+  })
   closeCreateFolderModal()
 }
 
@@ -789,15 +760,13 @@ const editContextFolder = () => {
   closeContextMenu()
 }
 
-const saveEditedFolder = () => {
+const saveEditedFolder = async () => {
   const name = editFolderForm.name.trim()
   if (!name) {
     folderFormError.value = '请输入文件夹名称'
     return
   }
-  customFolders.value = customFolders.value.map((folder) =>
-    folder.uuid === editFolderForm.uuid ? { ...folder, name, description: editFolderForm.description.trim() } : folder
-  )
+  await workspace.saveFileSessionFolder({ uuid: editFolderForm.uuid, name, description: editFolderForm.description.trim() })
   closeEditFolderModal()
 }
 
@@ -809,16 +778,10 @@ const deleteContextFolder = () => {
   closeContextMenu()
 }
 
-const confirmDeleteFolder = () => {
+const confirmDeleteFolder = async () => {
   const folderUuid = deleteFolderModal.folderUuid
   if (!folderUuid) return
-  workspace.fileSessions.forEach((session) => {
-    if (session.folderUuid === folderUuid) {
-      session.folderUuid = undefined
-      session.group = '最近连接'
-    }
-  })
-  customFolders.value = customFolders.value.filter((folder) => folder.uuid !== folderUuid)
+  await workspace.deleteFileSessionFolder(folderUuid)
   removeExpandedGroup(folderUuid)
   closeDeleteFolderModal()
 }

@@ -110,7 +110,7 @@ const defaultModelSettings = {
   options: [
     { name: 'gpt-5', locked: true, checked: true, type: 'standard' as const, apiProvider: 'default' },
     { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard' as const, apiProvider: 'default' },
-    { name: 'ops-local-agent', locked: false, checked: true, type: 'standard' as const, apiProvider: 'default' },
+    { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard' as const, apiProvider: 'default' },
     { name: 'custom-maintenance', locked: false, checked: false, type: 'custom' as const, apiProvider: 'openai' }
   ]
 }
@@ -133,14 +133,16 @@ const defaultSkills = [
     description: 'Collect symptoms, recent changes, and affected services.',
     enabled: true,
     editable: true,
-    content: 'When incident triage is requested, collect scope, blast radius, and recent deployments first.'
+    content: 'When incident triage is requested, collect scope, blast radius, and recent deployments first.',
+    path: '/tmp/aiopsterm/skills/incident-triage/SKILL.md'
   },
   {
     name: 'k8s-rollout',
     description: 'Guide Kubernetes rollout inspection and rollback planning.',
     enabled: true,
     editable: true,
-    content: 'Prefer kubectl describe, events, image pull checks, and rollback safety checks.'
+    content: 'Prefer kubectl describe, events, image pull checks, and rollback safety checks.',
+    path: '/tmp/aiopsterm/skills/k8s-rollout/SKILL.md'
   }
 ]
 
@@ -196,6 +198,13 @@ describe('workspace store', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     ;(globalThis as any).__resetKnowledgeTreeMock?.()
+    ;(globalThis as any).__resetAssetStoreMock?.()
+    ;(globalThis as any).__resetKubernetesCatalogMock?.()
+    ;(globalThis as any).__resetFileSessionCatalogMock?.()
+    ;(globalThis as any).__resetChatHistoryStoreMock?.()
+    ;(globalThis as any).__resetExtensionPluginStoreMock?.()
+    ;(globalThis as any).__resetUserAccountStoreMock?.()
+    ;(globalThis as any).__resetMcpStoreMock?.()
     vi.useFakeTimers()
   })
 
@@ -271,8 +280,10 @@ describe('workspace store', () => {
     expect(store.getHighlightedTerminalOutput(store.activePanelId)).toContain('\x1b[1;38;5;')
   })
 
-  it('switches modes and creates mock ai responses', async () => {
+  it('switches modes and requests backend ai responses', async () => {
     const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    vi.mocked(window.aiops.saveConfig).mockClear()
 
     store.toggleMode()
     expect(store.mode).toBe('agents')
@@ -289,19 +300,48 @@ describe('workspace store', () => {
     expect(store.rightPanelOpen).toBe(false)
     await store.checkTopUpdate()
     expect(store.topUpdateState).toBe('local')
+    vi.mocked(window.aiops.checkUpdate).mockResolvedValueOnce({
+      available: true,
+      channel: 'manual',
+      isUpdateAvailable: true,
+      updateInfo: { version: '0.1.2', channel: 'manual' }
+    })
+    await store.checkTopUpdate()
+    expect(store.topUpdateState).toBe('available')
+    expect(store.aboutSettings.newVersion).toBe('0.1.2')
+    await store.handleTopUpdateClick()
+    expect(window.aiops.downloadAppUpdate).toHaveBeenCalledWith('0.1.2')
+    expect(window.aiops.installAppUpdate).toHaveBeenCalledWith('0.1.2')
+    expect(store.topUpdateState).toBe('local')
+    expect(store.topNotice).toBe('更新安装请求已提交')
 
     store.toggleContext({ id: 'skill:incident-triage', kind: 'skills', label: 'incident-triage', detail: 'Collect symptoms' })
     expect(store.aiSkillContextOptions.some((option) => option.id === 'skill:incident-triage')).toBe(true)
-    store.sendChat('检查生产磁盘')
+    await store.sendChat('检查生产磁盘')
     expect(store.chatMessages.some((message) => message.role === 'user')).toBe(true)
+    expect(store.chatMessages.at(-2)?.id).toBe('aichat-request-test-1-user')
+    expect(store.chatMessages.at(-1)?.id).toBe('aichat-request-test-1-assistant')
     expect(store.chatMessages.at(-2)?.text).toContain('Skill Instructions')
     expect(store.chatMessages.at(-2)?.text).toContain('# Skill Activated: incident-triage')
     expect(store.chatMessages.at(-2)?.contentParts).toBeUndefined()
-    expect(store.chatMessages.at(-1)?.text).toContain('Activated Skill: incident-triage')
+    expect(store.chatMessages.at(-1)?.text).toContain('正在请求 aiopsterm AI 后端')
     expect(store.chatMessages.at(-1)?.state).toBe('streaming')
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('检查生产磁盘')
+      })
+    )
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('检查生产磁盘'),
+        skills: [expect.objectContaining({ name: 'incident-triage' })]
+      })
+    )
 
     await vi.runAllTimersAsync()
     expect(store.chatMessages.at(-1)?.state).toBe('done')
+    expect(store.chatMessages.at(-1)?.text).toContain('Activated Skill: incident-triage')
+    expect(store.chatMessages.at(-1)?.text).toContain('aiopsterm 本地后端生成')
   })
 
   it('keeps configuration changes in local state before bridge persistence', async () => {
@@ -313,9 +353,33 @@ describe('workspace store', () => {
     expect(store.config.modelProvider).toBe('ollama')
     expect(store.config.modelEndpoint).toBe('http://localhost:11434')
     expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.dataset.themeId).toBe('light')
+    expect(document.documentElement.classList.contains('theme-light')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#eef1f6')
+
+    await store.saveConfig({ theme: 'kanagawa-wave' })
+    expect(store.config.theme).toBe('kanagawa-wave')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.dataset.themeId).toBe('kanagawa-wave')
+    expect(document.documentElement.classList.contains('theme-dark')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#7e9cd8')
+
+    await store.saveConfig({ theme: 'auto' })
+    expect(store.config.theme).toBe('auto')
+    expect(document.documentElement.dataset.themeId).toBe('light')
+    ;(globalThis as any).__setSystemThemeMock('dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.dataset.themeId).toBe('dark')
+    ;(globalThis as any).__setSystemThemeMock('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.dataset.themeId).toBe('light')
+
+    await store.saveConfig({ theme: 'not-a-theme' as any })
+    expect(store.config.theme).toBe('dark')
+    expect(document.documentElement.dataset.themeId).toBe('dark')
   })
 
-  it('hydrates and migrates persisted External reference-style onboarding completion state', async () => {
+  it('normalizes legacy mock AI model configuration to the local backend provider', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
@@ -326,6 +390,38 @@ describe('workspace store', () => {
       modelProvider: 'mock',
       modelEndpoint: '',
       modelName: 'mock-ops-agent',
+      watermark: 'open',
+      background: {
+        mode: 'none',
+        image: '',
+        opacity: 0.15,
+        brightness: 0.45
+      }
+    } as any)
+
+    await store.hydrateConfig()
+
+    expect(store.config.modelProvider).toBe('local')
+    expect(store.config.modelName).toBe('aiopsterm-local-agent')
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelProvider: 'local',
+        modelName: 'aiopsterm-local-agent'
+      })
+    )
+  })
+
+  it('hydrates and migrates persisted External reference-style onboarding completion state', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      language: 'zh-CN',
+      theme: 'dark',
+      defaultMode: 'terminal',
+      leftPanelOpen: true,
+      rightPanelOpen: true,
+      modelProvider: 'local',
+      modelEndpoint: '',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -428,15 +524,11 @@ describe('workspace store', () => {
         }),
         knowledgeBase: expect.objectContaining({
           tree: expect.arrayContaining([expect.objectContaining({ relPath: 'commands', type: 'dir' })]),
-          usedBytes: 350208,
+          usedBytes: 374784,
           totalBytes: 1073741824
         }),
         aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'll', command: 'ls -alF' })]),
-        shortcuts: defaultShortcuts,
-        rules: defaultRules,
         skills: defaultSkills,
-        mcpServers: defaultMcpServers,
-        mcpToolStates: defaultMcpToolStates,
         onboarding: {
           version: 2,
           guideTabAutoOpened: true,
@@ -449,6 +541,11 @@ describe('workspace store', () => {
         }
       })
     )
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith({
+      shortcuts: undefined,
+      rules: undefined,
+      customInstructions: undefined
+    })
   })
 
   it('migrates missing persisted terminal and workspace preferences to aiopsterm defaults', async () => {
@@ -459,9 +556,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -521,17 +618,18 @@ describe('workspace store', () => {
         }),
         knowledgeBase: expect.objectContaining({
           tree: expect.arrayContaining([expect.objectContaining({ relPath: 'commands' })]),
-          usedBytes: 350208,
+          usedBytes: 374784,
           totalBytes: 1073741824
         }),
         aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'll' })]),
-        shortcuts: defaultShortcuts,
-        rules: defaultRules,
-        skills: defaultSkills,
-        mcpServers: defaultMcpServers,
-        mcpToolStates: defaultMcpToolStates
+        skills: defaultSkills
       })
     )
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith({
+      shortcuts: undefined,
+      rules: undefined,
+      customInstructions: undefined
+    })
   })
 
   it('hydrates and migrates External reference-style editor settings', async () => {
@@ -542,9 +640,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -657,9 +755,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -793,9 +891,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -921,9 +1019,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1003,13 +1101,13 @@ describe('workspace store', () => {
       { id: 'rule-a', content: 'release must include rollback', enabled: false, isEditing: false },
       { id: 'rule-a-2', content: 'inspect logs first', enabled: true, isEditing: false }
     ])
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith(
       expect.objectContaining({
-        customInstructions: '',
+        customInstructions: '  legacy global instruction  ',
         rules: [
-          { id: 'rule-custom-instructions', content: 'legacy global instruction', enabled: true },
-          { id: 'rule-a', content: 'release must include rollback', enabled: false },
-          { id: 'rule-a-2', content: 'inspect logs first', enabled: true }
+          { id: 'rule-a', content: '  release must include rollback  ', enabled: false, isEditing: true },
+          { id: 'rule-a', content: 'inspect logs first' },
+          { id: '', content: '   ' }
         ]
       })
     )
@@ -1023,9 +1121,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1170,9 +1268,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1313,9 +1411,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1394,14 +1492,14 @@ describe('workspace store', () => {
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
     ])
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith(
       expect.objectContaining({
-        shortcuts: [
-          { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Alt+T' },
-          { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Alt+A' },
-          { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
-          { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
-        ]
+        shortcuts: expect.objectContaining({
+          newTerminal: 'Ctrl+Alt+T',
+          toggleAi: ' Ctrl+Alt+A ',
+          switchToSpecificTab: 'Alt+1',
+          unknownAction: 'Ctrl+Alt+X'
+        })
       })
     )
   })
@@ -1414,9 +1512,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1558,15 +1656,29 @@ describe('workspace store', () => {
 
   it('hydrates persisted External reference-style quick command groups and snippets', async () => {
     const store = useWorkspaceStore()
+    vi.mocked(window.aiops.getQuickCommands).mockResolvedValueOnce({
+      groups: [{ id: 11, uuid: 'group-release', group_name: '发布命令' }],
+      snippets: [
+        {
+          id: 21,
+          uuid: 'snippet-release',
+          snippet_name: '发布检查',
+          snippet_content: 'git status\nsleep==500\nreturn',
+          group_uuid: 'group-release',
+          create_at: '2026-06-03 12:00',
+          update_at: '2026-06-03 12:00'
+        }
+      ]
+    })
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
       language: 'zh-CN',
       theme: 'dark',
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1615,20 +1727,7 @@ describe('workspace store', () => {
       skills: defaultSkills,
       mcpServers: defaultMcpServers,
       mcpToolStates: defaultMcpToolStates,
-      quickCommands: {
-        groups: [{ id: 11, uuid: 'group-release', group_name: '发布命令' }],
-        snippets: [
-          {
-            id: 21,
-            uuid: 'snippet-release',
-            snippet_name: '发布检查',
-            snippet_content: 'git status\nsleep==500\nreturn',
-            group_uuid: 'group-release',
-            create_at: '2026-06-03 12:00',
-            update_at: '2026-06-03 12:00'
-          }
-        ]
-      },
+      quickCommands: { groups: [], snippets: [] },
       knowledgeBase: {
         tree: [
           {
@@ -1669,7 +1768,110 @@ describe('workspace store', () => {
         group_uuid: 'group-release'
       })
     ])
+    expect(window.aiops.getQuickCommands).toHaveBeenCalled()
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('hydrates file transfer task snapshots from the backend boundary', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([
+      {
+        id: 'backend-transfer-1',
+        type: 'download',
+        name: 'backend.log',
+        source: '/home/deploy/backend.log',
+        target: '/tmp/backend.log',
+        progress: 160,
+        speed: '1 MB/s',
+        status: 'running',
+        children: [
+          {
+            id: 'backend-transfer-child',
+            type: 'download',
+            name: 'backend-child.log',
+            source: '/home/deploy/backend-child.log',
+            target: '/tmp/backend-child.log',
+            progress: 40,
+            speed: '512 KB/s',
+            status: 'running'
+          }
+        ]
+      },
+      {
+        id: 'invalid-transfer',
+        type: 'download',
+        name: '',
+        source: '',
+        target: '',
+        progress: 20,
+        speed: 'pending',
+        status: 'running'
+      } as any
+    ])
+
+    await store.hydrateConfig()
+
+    expect(window.aiops.listFileTransferTasks).toHaveBeenCalled()
+    expect(store.fileTransferTasks).toEqual([
+      expect.objectContaining({
+        id: 'backend-transfer-1',
+        type: 'download',
+        name: 'backend.log',
+        source: '/home/deploy/backend.log',
+        target: '/tmp/backend.log',
+        progress: 100,
+        status: 'running',
+        children: [expect.objectContaining({ id: 'backend-transfer-child', progress: 40 })]
+      })
+    ])
+  })
+
+  it('cancels file transfer tasks through the backend boundary', async () => {
+    const store = useWorkspaceStore()
+    store.pushFileTransferTask({
+      id: 'backend-transfer-1',
+      type: 'download',
+      name: 'backend.log',
+      source: '/home/deploy/backend.log',
+      target: '/tmp/backend.log',
+      progress: 60,
+      speed: '1 MB/s',
+      status: 'running',
+      children: [
+        {
+          id: 'backend-transfer-child',
+          type: 'download',
+          name: 'backend-child.log',
+          source: '/home/deploy/backend-child.log',
+          target: '/tmp/backend-child.log',
+          progress: 40,
+          speed: '512 KB/s',
+          status: 'running'
+        }
+      ]
+    })
+    vi.mocked(window.aiops.cancelFileTransferTask).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        id: 'backend-transfer-child',
+        taskIds: ['backend-transfer-1', 'backend-transfer-child'],
+        status: 'aborted'
+      }
+    })
+
+    await expect(store.cancelFileTransferTask('backend-transfer-child')).resolves.toBe(true)
+
+    expect(window.aiops.cancelFileTransferTask).toHaveBeenCalledWith({ id: 'backend-transfer-child' })
+    expect(store.fileTransferTasks.find((task) => task.id === 'backend-transfer-1')).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        speed: '已取消',
+        progress: 60,
+        children: [expect.objectContaining({ id: 'backend-transfer-child', status: 'failed', speed: '已取消', progress: 40 })]
+      })
+    )
+    await vi.advanceTimersByTimeAsync(800)
+    expect(store.fileTransferTasks.some((task) => task.id === 'backend-transfer-1')).toBe(false)
   })
 
   it('hydrates persisted External reference-style alias commands', async () => {
@@ -1680,9 +1882,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1741,8 +1943,7 @@ describe('workspace store', () => {
         totalBytes: 1073741824
       },
       aliasCommands: [
-        { id: 'alias-hosts', alias: 'hosts', command: 'cat /etc/hosts', createdAt: 1780487400000 },
-        { id: 'alias-df', alias: 'dfh', command: 'df -h', createdAt: 1780487401000 }
+        { id: 'alias-stale', alias: 'stale', command: 'echo stale config alias', createdAt: 1780487300000 }
       ],
       onboarding: {
         version: 2,
@@ -1756,12 +1957,22 @@ describe('workspace store', () => {
       }
     })
 
+    vi.mocked(window.aiops.listAliasCommands).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        { id: 'alias-hosts', alias: 'hosts', command: 'cat /etc/hosts', createdAt: 1780487400000 },
+        { id: 'alias-df', alias: 'dfh', command: 'df -h', createdAt: 1780487401000 }
+      ]
+    })
+
     await store.hydrateConfig()
 
     expect(store.aliasCommands).toEqual([
       expect.objectContaining({ id: 'alias-hosts', alias: 'hosts', command: 'cat /etc/hosts', edit: false }),
       expect.objectContaining({ id: 'alias-df', alias: 'dfh', command: 'df -h', edit: false })
     ])
+    expect(store.aliasCommands.some((alias) => alias.alias === 'stale')).toBe(false)
+    expect(window.aiops.listAliasCommands).toHaveBeenCalled()
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
@@ -1773,9 +1984,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -1869,9 +2080,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -2044,9 +2255,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -2185,9 +2396,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -2286,9 +2497,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -2439,9 +2650,9 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
-      modelProvider: 'mock',
+      modelProvider: 'local',
       modelEndpoint: '',
-      modelName: 'mock-ops-agent',
+      modelName: 'aiopsterm-local-agent',
       watermark: 'open',
       background: {
         mode: 'none',
@@ -2542,38 +2753,313 @@ describe('workspace store', () => {
 
   it('keeps agent conversations sorted and updates active conversation metadata on send', async () => {
     const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
 
     expect(store.sortedConversations[0].id).toBe('conv-1')
     store.selectConversation('conv-3')
-    store.sendChat('排查慢查询')
+    await store.sendChat('排查慢查询')
 
     expect(store.sortedConversations[0].id).toBe('conv-3')
     expect(store.sortedConversations[0].summary).toBe('排查慢查询')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'conv-3',
+        summary: '排查慢查询',
+        messages: expect.arrayContaining([expect.objectContaining({ role: 'user', text: expect.stringContaining('排查慢查询') })])
+      })
+    )
 
     await vi.runAllTimersAsync()
   })
 
-  it('manages External reference-style AI history conversation actions', () => {
+  it('does not fabricate conversation metadata after chat sends when the history write bridge is unavailable', async () => {
     const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
 
-    expect(store.renameConversation('conv-2', 'K8s 发布复盘')).toBe(true)
+    const originalUpdate = window.aiops.updateChatConversation
+    const originalOrder = store.sortedConversations.map((conversation) => conversation.id)
+    const originalConversation = store.conversations.find((conversation) => conversation.id === 'conv-3')
+    expect(originalConversation).toBeTruthy()
+    const originalSummary = originalConversation!.summary
+    const originalUpdatedAt = originalConversation!.updatedAt
+    const originalTs = originalConversation!.ts
+
+    try {
+      ;(window.aiops as any).updateChatConversation = undefined
+
+      store.selectConversation('conv-3')
+      await expect(store.sendChat('客户端不应伪造会话摘要')).resolves.toBe(true)
+
+      expect(store.chatMessages.some((message) => message.role === 'user' && message.text.includes('客户端不应伪造会话摘要'))).toBe(true)
+      expect(store.sortedConversations.map((conversation) => conversation.id)).toEqual(originalOrder)
+      expect(store.conversations.find((conversation) => conversation.id === 'conv-3')).toEqual(
+        expect.objectContaining({
+          summary: originalSummary,
+          updatedAt: originalUpdatedAt,
+          ts: originalTs
+        })
+      )
+      expect(store.topNotice).toBe('会话历史写入服务不可用')
+
+      await vi.runAllTimersAsync()
+      expect(store.conversations.find((conversation) => conversation.id === 'conv-3')).toEqual(
+        expect.objectContaining({
+          summary: originalSummary,
+          updatedAt: originalUpdatedAt,
+          ts: originalTs
+        })
+      )
+    } finally {
+      ;(window.aiops as any).updateChatConversation = originalUpdate
+    }
+  })
+
+  it('opens terminal-scoped file sessions and generates External reference-style terminal commands', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshAiModelCatalog()
+
+    expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
+    expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
+    const localSession = store.ensureFileSessionForTerminalPanel(store.activePanelId, 'left')
+    expect(localSession).toEqual(expect.objectContaining({ id: 'local', kind: 'local' }))
+    expect(store.activeModule).toBe('files')
+    expect(store.selectedLeftFileSessionId).toBe('local')
+    expect(store.activePanel.output).toContain('[file manager] opened Local on left transfer pane')
+
+    store.setActiveModule('workspace')
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-terminal-file',
+      name: 'terminal-file-host',
+      host: '10.8.0.9',
+      port: 22,
+      username: 'deploy',
+      group_name: '生产',
+      asset_type: 'person'
+    })
+    expect(store.activePanel.sshSession?.connectionId).toBeUndefined()
+    const appliedSshSession = store.applySshTerminalSession(store.activePanelId, {
+      id: 'test-session-asset-terminal-file',
+      shell: 'ssh',
+      cwd: '/home/deploy',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-test-session-asset-terminal-file',
+        host: '10.8.0.9',
+        port: 22,
+        username: 'deploy',
+        assetId: 'asset-terminal-file',
+        assetName: 'terminal-file-host',
+        assetType: 'person',
+        organizationId: '生产',
+        title: 'terminal-file-host',
+        createdAt: 1717200001000
+      }
+    })
+    expect(appliedSshSession).toEqual(expect.objectContaining({ connectionId: 'ssh-test-session-asset-terminal-file', createdAt: 1717200001000 }))
+    const remoteSession = store.ensureFileSessionForTerminalPanel(store.activePanelId, 'right')
+    expect(remoteSession).toEqual(
+      expect.objectContaining({
+        id: 'asset-terminal-file',
+        label: 'terminal-file-host',
+        host: '10.8.0.9',
+        rootPath: '/home/deploy'
+      })
+    )
+    expect(store.selectedRightFileSessionId).toBe('asset-terminal-file')
+
+    vi.mocked(window.aiops.generateTerminalCommand).mockClear()
+    const record = await store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')
+    expect(window.aiops.generateTerminalCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        panelId: store.activePanelId,
+        instruction: '检查磁盘空间',
+        modelName: 'aiopsterm-local-agent',
+        context: expect.objectContaining({ host: '10.8.0.9', username: 'deploy', connectionType: 'ssh' })
+      })
+    )
+    expect(record).toEqual(expect.objectContaining({ command: 'df -h', modelName: 'aiopsterm-local-agent' }))
+    expect(record?.context).toEqual(expect.objectContaining({ host: '10.8.0.9', username: 'deploy', connectionType: 'ssh' }))
+    expect(store.terminalCommandGenerationRecords[0]).toEqual(record)
+
+    const decision = store.injectGeneratedTerminalCommand(store.activePanelId, record!.command)
+    expect(decision?.status).toBe('allow')
+    expect(store.activePanel.output).toContain('df -h')
+    expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'df -h', scope: 'input' })
+  })
+
+  it('does not fabricate Files SFTP sessions or file-session updates when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshFileSessionCatalog()
+
+    const originalSaveFromPayload = window.aiops.saveFileSessionFromSftpPayload
+    const originalUpdateFileSession = window.aiops.updateFileSession
+    const originalAsset = store.fileSessions.find((session) => session.id === 'asset-1')
+    expect(originalAsset).toBeTruthy()
+    const originalComment = originalAsset!.comment
+    const originalSessionCount = store.fileSessions.length
+
+    try {
+      ;(window.aiops as any).saveFileSessionFromSftpPayload = undefined
+      await expect(
+        store.addRemoteFileSessionFromSftpPayload(
+          {
+            uuid: 'asset-client-fake',
+            host: '10.77.0.4',
+            title: 'client-fake',
+            username: 'ops'
+          },
+          'right'
+        )
+      ).resolves.toBeNull()
+      expect(store.fileSessions).toHaveLength(originalSessionCount)
+      expect(store.fileSessions.some((session) => session.id === 'asset-client-fake')).toBe(false)
+      expect(store.selectedRightFileSessionId).not.toBe('asset-client-fake')
+      expect(store.topNotice).toBe('文件会话写入服务不可用')
+
+      ;(window.aiops as any).updateFileSession = undefined
+      await expect(store.updateFileSession('asset-1', { comment: '客户端伪造备注' })).resolves.toBeNull()
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.comment).toBe(originalComment)
+      expect(store.topNotice).toBe('文件会话写入服务不可用')
+    } finally {
+      ;(window.aiops as any).saveFileSessionFromSftpPayload = originalSaveFromPayload
+      ;(window.aiops as any).updateFileSession = originalUpdateFileSession
+    }
+  })
+
+  it('manages External reference-style AI history conversation actions through backend snapshots', async () => {
+    const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+
+    expect(await store.renameConversation('conv-2', 'K8s 发布复盘')).toBe(true)
     expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.title).toBe('K8s 发布复盘')
-    expect(store.renameConversation('conv-2', '   ')).toBe(false)
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'conv-2', title: 'K8s 发布复盘' }))
+    expect(await store.renameConversation('conv-2', '   ')).toBe(false)
 
-    expect(store.toggleConversationFavorite('conv-2')).toBe(true)
+    expect(await store.toggleConversationFavorite('conv-2')).toBe(true)
     expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.favorite).toBe(true)
-    expect(store.toggleConversationFavorite('missing')).toBe(false)
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'conv-2', favorite: true }))
+    expect(await store.toggleConversationFavorite('missing')).toBe(false)
 
-    expect(store.restoreConversation('conv-2')).toBe(true)
+    expect(await store.restoreConversation('conv-2')).toBe(true)
     expect(store.selectedConversationId).toBe('conv-2')
-    expect(store.chatMessages[0].text).toContain('已恢复会话')
-    expect(store.chatMessages.at(-1)?.text).toContain('K8s 发布复盘')
+    expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('conv-2')
+    expect(store.chatMessages[0].text).toContain('历史会话已从 aiopsterm 后端恢复')
+    expect(store.chatMessages.at(-1)?.text).toContain('K8s 发布失败历史包含 Pod 事件')
+    expect(store.chatMessages.at(-1)?.text).not.toContain('本地历史摘要')
     expect(store.chatMessages.find((message) => message.role === 'user')?.hosts?.[0].label).toBe('prod-cluster')
 
-    const created = store.createConversation()
-    expect(created.title).toBe('新会话')
-    expect(store.selectedConversationId).toBe(created.id)
+    const created = await store.createConversation()
+    expect(window.aiops.createChatConversation).toHaveBeenCalled()
+    expect(created?.title).toBe('新会话')
+    expect(store.selectedConversationId).toBe(created?.id)
     expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+  })
+
+  it('does not fabricate AI history title or favorite writes when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+
+    const originalUpdate = window.aiops.updateChatConversation
+    const originalConversation = store.conversations.find((conversation) => conversation.id === 'conv-2')
+    expect(originalConversation).toBeTruthy()
+    const originalTitle = originalConversation!.title
+    const originalFavorite = originalConversation!.favorite
+
+    try {
+      ;(window.aiops as any).updateChatConversation = undefined
+
+      await expect(store.renameConversation('conv-2', '客户端伪造标题')).resolves.toBe(false)
+      expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.title).toBe(originalTitle)
+      expect(store.topNotice).toBe('会话历史写入服务不可用')
+
+      await expect(store.toggleConversationFavorite('conv-2')).resolves.toBe(false)
+      expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.favorite).toBe(originalFavorite)
+      expect(store.topNotice).toBe('会话历史写入服务不可用')
+    } finally {
+      ;(window.aiops as any).updateChatConversation = originalUpdate
+    }
+  })
+
+  it('does not optimistically fabricate AI history metadata when backend title or favorite writes fail', async () => {
+    const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+
+    const originalOrder = store.sortedConversations.map((conversation) => conversation.id)
+    const originalConversation = store.conversations.find((conversation) => conversation.id === 'conv-2')
+    expect(originalConversation).toBeTruthy()
+    const originalTitle = originalConversation!.title
+    const originalFavorite = originalConversation!.favorite
+    const originalUpdatedAt = originalConversation!.updatedAt
+    const originalTs = originalConversation!.ts
+
+    vi.mocked(window.aiops.updateChatConversation).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'CHAT_HISTORY_SAVE_FAILED',
+      errorMessage: 'Save failed.'
+    })
+    await expect(store.renameConversation('conv-2', '客户端乐观标题')).resolves.toBe(false)
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-2')).toEqual(
+      expect.objectContaining({
+        title: originalTitle,
+        favorite: originalFavorite,
+        updatedAt: originalUpdatedAt,
+        ts: originalTs
+      })
+    )
+    expect(store.sortedConversations.map((conversation) => conversation.id)).toEqual(originalOrder)
+
+    vi.mocked(window.aiops.updateChatConversation).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'CHAT_HISTORY_SAVE_FAILED',
+      errorMessage: 'Save failed.'
+    })
+    await expect(store.toggleConversationFavorite('conv-2')).resolves.toBe(false)
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-2')).toEqual(
+      expect.objectContaining({
+        title: originalTitle,
+        favorite: originalFavorite,
+        updatedAt: originalUpdatedAt,
+        ts: originalTs
+      })
+    )
+    expect(store.sortedConversations.map((conversation) => conversation.id)).toEqual(originalOrder)
+  })
+
+  it('does not fabricate AI message favorite or feedback writes when the preload bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-2')
+    const assistant = store.chatMessages.find((message) => message.id === 'hist-conv-2-assistant')
+    expect(assistant).toBeTruthy()
+
+    const originalSave = window.aiops.saveChatMessageMetadata
+    try {
+      ;(window.aiops as any).saveChatMessageMetadata = undefined
+      await expect(store.toggleMessageFavorite(assistant!.id)).resolves.toBe(false)
+      expect(assistant!.favorite).toBeUndefined()
+      expect(store.topNotice).toBe('AI 消息写入服务不可用')
+
+      await expect(store.setMessageFeedback(assistant!.id, 'up')).resolves.toBe(false)
+      expect(assistant!.feedback).toBeUndefined()
+      expect(store.topNotice).toBe('AI 消息写入服务不可用')
+    } finally {
+      ;(window.aiops as any).saveChatMessageMetadata = originalSave
+    }
+
+    vi.mocked(window.aiops.saveChatMessageMetadata).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'CHAT_HISTORY_MESSAGE_SAVE_FAILED',
+      errorMessage: 'Message metadata save failed.'
+    })
+    await expect(store.toggleMessageFavorite(assistant!.id)).resolves.toBe(false)
+    expect(assistant!.favorite).toBeUndefined()
+
+    vi.mocked(window.aiops.saveChatMessageMetadata).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'CHAT_HISTORY_MESSAGE_SAVE_FAILED',
+      errorMessage: 'Message metadata save failed.'
+    })
+    await expect(store.setMessageFeedback(assistant!.id, 'down')).resolves.toBe(false)
+    expect(assistant!.feedback).toBeUndefined()
   })
 
   it('manages External reference-style context chips, command presets, message actions, and todos', async () => {
@@ -2586,19 +3072,33 @@ describe('workspace store', () => {
     expect(store.selectedContexts.some((context) => context.id === 'doc-linux')).toBe(false)
 
     store.applyCommandPreset('diagnose', '生成诊断计划')
+    await vi.runAllTimersAsync()
     expect(store.selectedCommandId).toBe('diagnose')
     expect(store.chatMessages.at(-2)?.text).toContain('生成诊断计划')
 
     const assistant = store.chatMessages.find((message) => message.role === 'assistant')
     expect(assistant).toBeTruthy()
-    store.toggleMessageFavorite(assistant!.id)
-    store.setMessageFeedback(assistant!.id, 'up')
+    await expect(store.toggleMessageFavorite(assistant!.id)).resolves.toBe(true)
+    await expect(store.setMessageFeedback(assistant!.id, 'up')).resolves.toBe(true)
     expect(assistant!.favorite).toBe(true)
     expect(assistant!.feedback).toBe('up')
-    store.setMessageFeedback(assistant!.id, 'up')
+    expect(window.aiops.saveChatMessageMetadata).toHaveBeenCalledWith({
+      conversationId: store.selectedConversationId,
+      messageId: assistant!.id,
+      favorite: true
+    })
+    expect(window.aiops.saveChatMessageMetadata).toHaveBeenCalledWith({
+      conversationId: store.selectedConversationId,
+      messageId: assistant!.id,
+      feedback: 'up'
+    })
+    await expect(store.setMessageFeedback(assistant!.id, 'up')).resolves.toBe(true)
     expect(assistant!.feedback).toBeUndefined()
+    await store.restoreConversation(store.selectedConversationId)
+    const restoredAssistant = store.chatMessages.find((message) => message.id === assistant!.id)
+    expect(restoredAssistant).toEqual(expect.objectContaining({ favorite: true, feedback: undefined }))
 
-    store.sendChat('重新执行发布检查')
+    await store.sendChat('重新执行发布检查')
     await vi.runAllTimersAsync()
     const retryTarget = store.chatMessages.at(-1)!
     expect(retryTarget.role).toBe('assistant')
@@ -2615,17 +3115,27 @@ describe('workspace store', () => {
     expect(store.settingsSkills[0].name).toBe(skillSummary?.name)
 
     store.activePanelId = 'panel-main'
-    const terminalDecision = store.stageActiveTerminalCommand('echo ai-message')
+    const unavailableTerminalDecision = await store.runActiveTerminalCommand('echo ai-message')
+    expect(unavailableTerminalDecision?.status).toBe('unavailable')
+    expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: echo ai-message')
+    expect(store.activePanel.output).not.toContain('echo ai-message')
+    expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
+
+    store.activePanel.sessionId = 'terminal-ai-message'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const terminalDecision = await store.runActiveTerminalCommand('echo ai-message')
     expect(terminalDecision?.status).toBe('allow')
-    expect(store.activePanel.output).toContain('[mock] echo ai-message')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-ai-message', 'echo ai-message\n')
+    expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'echo ai-message\n', scope: 'input' })
 
     expect(store.todoProgress.total).toBe(3)
     expect(store.todoProgress.completed).toBe(1)
     expect(store.todoProgress.percent).toBe(33)
   })
 
-  it('manages External reference-style quick command scripts and macro snippets', () => {
+  it('manages External reference-style quick command scripts and macro snippets', async () => {
     const store = useWorkspaceStore()
+    await store.refreshQuickCommands()
 
     expect(store.filteredQuickCommands.some((command) => command.snippet_name === '当前目录')).toBe(true)
     store.selectedSnippetGroupUuid = 'group-monitor'
@@ -2635,59 +3145,53 @@ describe('workspace store', () => {
     expect(store.activePanel.output).toContain('df -h')
     expect(store.activePanel.output).toContain('du -sh * | sort -h')
 
-    store.createQuickCommand({ snippet_name: '危险删除', snippet_content: 'rm /tmp/file', group_uuid: null })
-    const dangerousSnippet = store.quickCommands.find((command) => command.snippet_name === '危险删除')!
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    const decision = store.runQuickCommand(dangerousSnippet.id, true)
+    const dangerousSnippet = await store.createQuickCommand({ snippet_name: '危险删除', snippet_content: 'rm /tmp/file', group_uuid: null })
+    expect(dangerousSnippet).toBeTruthy()
+    expect(dangerousSnippet?.uuid).toMatch(/^quick-snippet-test-/)
+    vi.mocked(window.aiops.saveQuickCommandSnippet).mockClear()
+    const decision = store.runQuickCommand(dangerousSnippet!.id, true)
     expect(decision?.status).toBe('needs-approval')
     expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/file')
     expect(store.activePanel.output).not.toContain('[snippet] 危险删除')
     store.approveTerminalSecurityPrompt()
     expect(store.activePanel.output).toContain('[snippet] 危险删除')
 
-    store.createSnippetGroup('发布命令')
+    await store.createSnippetGroup('发布命令')
     const group = store.snippetGroups.find((item) => item.group_name === '发布命令')
     expect(group).toBeTruthy()
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        quickCommands: expect.objectContaining({
-          groups: expect.arrayContaining([expect.objectContaining({ uuid: group!.uuid, group_name: '发布命令' })])
-        })
-      })
-    )
+    expect(group!.uuid).toMatch(/^quick-group-test-/)
+    expect(window.aiops.saveQuickCommandGroup).toHaveBeenCalledWith({ group_name: '发布命令' })
 
-    store.createQuickCommand({ snippet_name: '回滚确认', snippet_content: 'echo rollback\nctrl+c', group_uuid: group!.uuid })
+    await store.createQuickCommand({ snippet_name: '回滚确认', snippet_content: 'echo rollback\nctrl+c', group_uuid: group!.uuid })
     expect(store.quickCommands.some((command) => command.snippet_name === '回滚确认')).toBe(true)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+    expect(window.aiops.saveQuickCommandSnippet).toHaveBeenCalledWith(
       expect.objectContaining({
-        quickCommands: expect.objectContaining({
-          snippets: expect.arrayContaining([expect.objectContaining({ snippet_name: '回滚确认', group_uuid: group!.uuid })])
-        })
+        snippet_name: '回滚确认',
+        snippet_content: 'echo rollback\nctrl+c',
+        group_uuid: group!.uuid
       })
     )
 
     const rollback = store.quickCommands.find((command) => command.snippet_name === '回滚确认')!
-    store.updateQuickCommand(rollback.id, { snippet_name: '回滚确认更新', snippet_content: 'echo updated', group_uuid: null })
+    await store.updateQuickCommand(rollback.id, { snippet_name: '回滚确认更新', snippet_content: 'echo updated', group_uuid: null })
     expect(store.quickCommands.some((command) => command.snippet_name === '回滚确认更新' && command.group_uuid === null)).toBe(true)
 
-    store.renameSnippetGroup(group!.uuid, '发布命令更新')
+    await store.renameSnippetGroup(group!.uuid, '发布命令更新')
     expect(store.snippetGroups.find((item) => item.uuid === group!.uuid)?.group_name).toBe('发布命令更新')
 
     store.startMacroRecording()
     store.recordMacroCommand('uptime')
-    store.stopMacroRecording()
+    await store.stopMacroRecording()
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-') && command.snippet_content.includes('uptime'))).toBe(true)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+    expect(window.aiops.saveQuickCommandSnippet).toHaveBeenCalledWith(
       expect.objectContaining({
-        quickCommands: expect.objectContaining({
-          snippets: expect.arrayContaining([expect.objectContaining({ snippet_content: 'uptime' })])
-        })
+        snippet_content: 'uptime'
       })
     )
 
     const countBeforeEmptyMacro = store.quickCommands.length
     store.startMacroRecording()
-    store.stopMacroRecording()
+    await store.stopMacroRecording()
     expect(store.quickCommands).toHaveLength(countBeforeEmptyMacro)
 
     store.setMacroSleepThreshold(400)
@@ -2698,15 +3202,92 @@ describe('workspace store', () => {
     store.recordMacroTerminalInput('panel-main', 'e\n', 1200)
     store.recordMacroTerminalInput('panel-main', '\x1b[A', 1700)
     store.recordMacroTerminalInput('other-panel', 'ignored\n', 1800)
-    const savedMacro = store.stopMacroRecording()
+    const savedMacro = await store.stopMacroRecording()
     expect(savedMacro?.snippet_content).toBe('date\nsleep==500\nup')
 
     store.startMacroRecording('panel-main')
     for (let index = 0; index < 50; index += 1) {
       store.recordMacroCommand(`limit-${index}`, 2000 + index)
     }
+    await Promise.resolve()
+    await Promise.resolve()
     expect(store.isMacroRecording).toBe(false)
     expect(store.macroLimitReason).toBe('count')
+  })
+
+  it('loads knowledge tree from the backend bridge instead of renderer mock defaults', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.knowledgeTree).toEqual([])
+    expect(store.kbUsedBytes).toBe(0)
+
+    await store.refreshKnowledgeTree({ persist: false })
+
+    expect(window.aiops.kbEnsureRoot).toHaveBeenCalled()
+    expect(window.aiops.kbListDir).toHaveBeenCalledWith('')
+    expect(store.findKnowledgeNode('Markdown语法指南.md')).toEqual(expect.objectContaining({ type: 'file' }))
+    expect(store.findKnowledgeNode('commands/rollback-plan.md')).toEqual(expect.objectContaining({ type: 'file' }))
+    expect(store.kbUsedBytes).toBe(374784)
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('loads AI model options from the backend bridge instead of renderer mock defaults', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.aiModelOptions).toEqual([])
+    expect(store.lockedAiModelOptions).toEqual([])
+    expect(store.settingModelOptions).toEqual([])
+    expect(store.terminalCommandModelOptions).toEqual([])
+
+    await store.refreshAiModelCatalog()
+
+    expect(window.aiops.listAiModels).toHaveBeenCalled()
+    expect(store.aiModelOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'aiopsterm-local-agent', label: 'aiopsterm-local-agent' }),
+        expect.objectContaining({ id: 'ops-model', apiProvider: 'openai' })
+      ])
+    )
+    expect(store.lockedAiModelOptions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'gpt-5-pro', locked: true, tier: 'VIP' })])
+    )
+    expect(store.settingModelOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true }),
+        expect.objectContaining({ name: 'custom-maintenance', type: 'custom', apiProvider: 'openai' })
+      ])
+    )
+    expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
+    expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('loads AI @ context candidates from the backend bridge instead of renderer mock defaults', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.aiContextCatalog.categories).toEqual([])
+    expect(store.selectedContexts).toEqual([])
+
+    await store.refreshAiContextCatalog()
+
+    expect(window.aiops.listAiContextCatalog).toHaveBeenCalled()
+    expect(store.aiContextCatalog.openedHosts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'opened-local', label: '127.0.0.1' }),
+        expect.objectContaining({ id: 'asset-1', label: '10.24.8.12' })
+      ])
+    )
+    expect(store.aiContextCatalog.categories.find((category) => category.id === 'hosts')?.options).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'asset-3', label: '10.32.6.9' })])
+    )
+    expect(store.aiContextCatalog.categories.find((category) => category.id === 'chats')?.options).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'chat:conv-2', label: 'K8s 发布失败' })])
+    )
+    expect(store.selectedContexts.map((context) => context.id)).toEqual(['opened-local', 'asset-1'])
+
+    store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
+    await store.refreshAiContextCatalog()
+    expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
   })
 
   it('persists External reference-style knowledge base create, rename, paste, delete, and import completion state', async () => {
@@ -2755,7 +3336,13 @@ describe('workspace store', () => {
     await store.deleteKnowledgeNodes(['Deploy-v2.md'])
     expect(store.findKnowledgeNode('Deploy-v2.md')).toBeNull()
 
-    await store.addKnowledgeImportJob('Runbooks/imported-note.md', '/tmp/imported-note.md', 'file')
+    await expect(store.addKnowledgeImportJob('Runbooks/fake-import.md')).resolves.toBe(false)
+    expect(store.findKnowledgeNode('Runbooks/fake-import.md')).toBeNull()
+    expect(store.kbImportJobs).toEqual([])
+    expect(store.topNotice).toBe('知识库导入需要真实本地路径')
+
+    await expect(store.addKnowledgeImportJob('Runbooks/imported-note.md', '/tmp/imported-note.md', 'file')).resolves.toBe(true)
+    expect(window.aiops.kbImportFile).toHaveBeenCalledWith('/tmp/imported-note.md', 'Runbooks')
     expect(store.findKnowledgeNode('Runbooks/imported-note.md')).toBeTruthy()
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2773,6 +3360,7 @@ describe('workspace store', () => {
 
   it('opens External reference-style knowledge editor panels and synchronizes rename, delete, and cut moves', async () => {
     const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
 
     const opened = store.openKnowledgeFile('Markdown语法指南.md')
     expect(opened).toEqual(
@@ -2813,8 +3401,72 @@ describe('workspace store', () => {
     expect(store.findKnowledgeNode('Summary to Doc.md')).toBeTruthy()
   })
 
+  it('does not fabricate knowledge CRUD or message-summary results when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.openKnowledgeFile('Markdown语法指南.md')
+    store.copyKnowledgeNodes(['commands/Summary to Doc.md'], 'copy')
+    store.chatMessages.push({
+      id: 'assistant-no-kb-bridge',
+      role: 'assistant',
+      text: 'Persist this only through the knowledge bridge.',
+      state: 'done'
+    })
+
+    const originalTree = JSON.stringify(store.knowledgeTree)
+    const originalPanels = store.panels.map((panel) => panel.id)
+    const originalAiops = {
+      kbCreateFile: window.aiops.kbCreateFile,
+      kbMkdir: window.aiops.kbMkdir,
+      kbRename: window.aiops.kbRename,
+      kbDelete: window.aiops.kbDelete,
+      kbCopy: window.aiops.kbCopy,
+      kbMove: window.aiops.kbMove,
+      kbWriteFile: window.aiops.kbWriteFile
+    }
+
+    try {
+      ;(window.aiops as any).kbCreateFile = undefined
+      ;(window.aiops as any).kbMkdir = undefined
+      expect(await store.createKnowledgeNode('file', '', 'NoBridge.md')).toBeNull()
+      expect(store.findKnowledgeNode('NoBridge.md')).toBeNull()
+      expect(store.topNotice).toBe('知识库写入服务不可用')
+
+      ;(window.aiops as any).kbRename = undefined
+      await store.renameKnowledgeNode('Markdown语法指南.md', 'Markdown-local-fake.md')
+      expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('Markdown-local-fake.md')).toBeNull()
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanels)
+      expect(store.topNotice).toBe('知识库重命名服务不可用')
+
+      ;(window.aiops as any).kbDelete = undefined
+      await store.deleteKnowledgeNodes(['Markdown语法指南.md'])
+      expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanels)
+      expect(store.topNotice).toBe('知识库删除服务不可用')
+
+      ;(window.aiops as any).kbCopy = undefined
+      ;(window.aiops as any).kbMove = undefined
+      await store.pasteKnowledgeNodes('')
+      expect(store.findKnowledgeNode('Summary to Doc.md')).toBeNull()
+      expect(store.findKnowledgeNode('commands/Summary to Doc.md')).toBeTruthy()
+      expect(store.topNotice).toBe('知识库复制移动服务不可用')
+
+      ;(window.aiops as any).kbWriteFile = undefined
+      expect(await store.summarizeMessageToKnowledge('assistant-no-kb-bridge')).toBeNull()
+      expect(store.findKnowledgeNode('summary')).toBeNull()
+      expect(store.findKnowledgeNode('summary/ai-message-assistant-no-kb-bridge.md')).toBeNull()
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanels)
+      expect(store.topNotice).toBe('知识库写入服务不可用')
+      expect(JSON.stringify(store.knowledgeTree)).toBe(originalTree)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('adds External reference-style knowledge docs and images to AI context and includes them in chat payloads', async () => {
     const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
 
     await store.addKnowledgeFilesToChat(['Markdown语法指南.md', 'images/interface.png'])
 
@@ -2843,7 +3495,7 @@ describe('workspace store', () => {
     expect(store.selectedContexts.filter((context) => context.id === 'kb-doc:Markdown语法指南.md')).toHaveLength(1)
     expect(store.selectedContexts.filter((context) => context.id === 'kb-image:images/interface.png')).toHaveLength(1)
 
-    store.sendChat('生成知识库摘要')
+    await store.sendChat('生成知识库摘要')
     const userMessage = store.chatMessages.at(-2)
     expect(userMessage?.role).toBe('user')
     expect(userMessage?.text).toContain('Knowledge Context:')
@@ -2863,7 +3515,7 @@ describe('workspace store', () => {
       name: 'screenshot.png'
     }
 
-    store.sendChat('检查回滚计划', [
+    await store.sendChat('检查回滚计划', [
       {
         type: 'chip',
         chipType: 'doc',
@@ -2895,13 +3547,13 @@ describe('workspace store', () => {
       label: '/rollback-plan',
       path: 'commands/rollback-plan.md'
     })
-    store.sendChat('按知识库命令执行')
+    await store.sendChat('按知识库命令执行')
     expect(store.chatMessages.at(-2)?.text).toContain('命令：/rollback-plan')
   })
 
   it('truncates a user message and resends edited ai content parts', async () => {
     const store = useWorkspaceStore()
-    store.sendChat('旧消息', [{ type: 'text', text: '旧消息' }])
+    await store.sendChat('旧消息', [{ type: 'text', text: '旧消息' }])
     const originalUserId = store.chatMessages.at(-2)?.id
     expect(originalUserId).toBeTruthy()
     expect(store.chatMessages.at(-1)?.role).toBe('assistant')
@@ -2910,10 +3562,10 @@ describe('workspace store', () => {
       { type: 'text' as const, text: '新消息' },
       { type: 'chip' as const, chipType: 'command' as const, ref: { command: '/rollback-plan', label: '/rollback-plan' } }
     ]
-    const sent = store.resendUserMessageFromParts(originalUserId!, editedParts)
+    const sent = await store.resendUserMessageFromParts(originalUserId!, editedParts)
 
     expect(sent).toBe(true)
-    expect(store.chatMessages).toHaveLength(4)
+    expect(store.chatMessages).toHaveLength(2)
     expect(store.chatMessages.find((message) => message.id === originalUserId)).toBeUndefined()
     expect(store.chatMessages.at(-2)?.role).toBe('user')
     expect(store.chatMessages.at(-2)?.contentParts).toEqual(editedParts)
@@ -2924,12 +3576,12 @@ describe('workspace store', () => {
   it('truncates and resends with edited host context without mutating selected contexts', async () => {
     const store = useWorkspaceStore()
     const originalSelectedContextIds = store.selectedContexts.map((context) => context.id)
-    store.sendChat('旧主机检查', [{ type: 'text', text: '旧主机检查' }])
+    await store.sendChat('旧主机检查', [{ type: 'text', text: '旧主机检查' }])
     const originalUserId = store.chatMessages.at(-2)?.id
     expect(store.chatMessages.at(-2)?.hosts?.map((context) => context.id)).toEqual(originalSelectedContextIds)
 
-    const editedHosts = [{ id: 'opened-mysql', kind: 'hosts' as const, label: '10.32.6.9', detail: 'mysql-primary' }]
-    const sent = store.resendUserMessageFromParts(originalUserId!, [{ type: 'text', text: '改查 MySQL 主机' }], editedHosts)
+    const editedHosts = [{ id: 'asset-3', kind: 'hosts' as const, label: '10.32.6.9', detail: 'mysql-primary' }]
+    const sent = await store.resendUserMessageFromParts(originalUserId!, [{ type: 'text', text: '改查 MySQL 主机' }], editedHosts)
 
     expect(sent).toBe(true)
     expect(store.selectedContexts.map((context) => context.id)).toEqual(originalSelectedContextIds)
@@ -2941,35 +3593,76 @@ describe('workspace store', () => {
   it('manages External reference-style extension plugin state and alias validation', async () => {
     const store = useWorkspaceStore()
 
+    await store.refreshExtensionPlugins()
+
+    const jumpserver = store.extensionPlugins.find((plugin) => plugin.pluginId === 'jumpserverSupport')
+    expect(jumpserver?.detailSummary).toContain('资产同步')
+    expect(jumpserver?.guideSteps).toEqual(expect.arrayContaining(['同步资产并确认主机分组。']))
+    expect(jumpserver?.connectionLog).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: 'success', message: 'connected to bastion host' })])
+    )
+
     expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
     store.updateExtensionSettings({ aliasStatus: false })
     expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
     store.updateExtensionSettings({ aliasStatus: true })
     expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
 
-    store.installExtensionPlugin('cloud-assets')
+    const installPromise = store.installExtensionPlugin('cloud-assets')
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBe(true)
     await vi.runOnlyPendingTimersAsync()
+    await installPromise
+    expect(window.aiops.installExtensionPlugin).toHaveBeenCalledWith({
+      plugin: expect.objectContaining({ pluginId: 'cloud-assets', installed: false, latestVersion: '0.9.1' })
+    })
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(true)
 
-    store.updateExtensionPlugin('ops-runbook')
+    const updatePromise = store.updateExtensionPlugin('ops-runbook')
     expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
     await vi.runOnlyPendingTimersAsync()
+    await updatePromise
+    expect(window.aiops.updateExtensionPlugin).toHaveBeenCalledWith({
+      plugin: expect.objectContaining({ pluginId: 'ops-runbook', installed: true, hasUpdate: true })
+    })
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'ops-runbook')?.hasUpdate).toBe(false)
 
-    store.subscribeExtensionPlugin('private-automation-pack')
+    await store.subscribeExtensionPlugin('private-automation-pack')
+    expect(window.aiops.openExtensionSubscription).toHaveBeenCalledWith({
+      plugin: expect.objectContaining({
+        pluginId: 'private-automation-pack',
+        installed: false,
+        installable: false,
+        isPrivate: true
+      })
+    })
     expect(store.extensionNotice).toContain('订阅')
 
-    expect(store.dropExtensionPackage('bad.zip')).toBe(false)
+    await expect(store.dropExtensionPackage('bad.zip')).resolves.toBe(false)
     expect(store.extensionNotice).toContain('.external-reference')
-    expect(store.dropExtensionPackage('local-pack.external-reference')).toBe(true)
+    const dropPromise = store.dropExtensionPackage('local-pack.external-reference')
+    expect(store.extensionInstallingPackageName).toBe('local pack')
+    await vi.runOnlyPendingTimersAsync()
+    await expect(dropPromise).resolves.toBe(true)
+    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({
+      fileName: 'local-pack.external-reference',
+      filePath: '',
+      size: undefined,
+      existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook'])
+    })
     expect(store.selectedExtensionId).toContain('local-local-pack')
 
     store.createAliasCommand()
     store.updateAliasDraft('new', { alias: 'll', command: 'ls' })
-    expect(store.saveAliasCommand('new').reason).toBe('duplicate')
+    expect((await store.saveAliasCommand('new')).reason).toBe('duplicate')
     store.updateAliasDraft('new', { alias: 'hosts', command: 'cat /etc/hosts' })
-    expect(store.saveAliasCommand('new').ok).toBe(true)
+    expect((await store.saveAliasCommand('new')).ok).toBe(true)
+    expect(window.aiops.saveAliasCommand).toHaveBeenCalledWith({
+      id: undefined,
+      previousAlias: undefined,
+      alias: 'hosts',
+      command: 'cat /etc/hosts',
+      createdAt: undefined
+    })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hosts')).toBe(true)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2980,7 +3673,14 @@ describe('workspace store', () => {
     const hosts = store.aliasCommands.find((alias) => alias.alias === 'hosts')!
     store.startAliasEdit(hosts.id)
     store.updateAliasDraft(hosts.id, { alias: 'hostsfile', command: 'cat /etc/hosts | head' })
-    expect(store.saveAliasCommand(hosts.id).ok).toBe(true)
+    expect((await store.saveAliasCommand(hosts.id)).ok).toBe(true)
+    expect(window.aiops.saveAliasCommand).toHaveBeenCalledWith({
+      id: hosts.id,
+      previousAlias: 'hosts',
+      alias: 'hostsfile',
+      command: 'cat /etc/hosts | head',
+      createdAt: expect.any(Number)
+    })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile' && alias.command === 'cat /etc/hosts | head')).toBe(true)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2988,7 +3688,8 @@ describe('workspace store', () => {
       })
     )
 
-    store.deleteAliasCommand(hosts.id)
+    expect((await store.deleteAliasCommand(hosts.id)).ok).toBe(true)
+    expect(window.aiops.deleteAliasCommand).toHaveBeenCalledWith({ id: hosts.id, alias: 'hostsfile' })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile')).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3002,7 +3703,8 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     try {
 
-    store.switchK8sContext('staging/devops')
+    await store.refreshKubernetesCatalog()
+    await store.switchK8sContext('staging/devops')
     expect(store.k8sContexts.find((context) => context.name === 'staging/devops')?.isActive).toBe(true)
 
     store.k8sSearchQuery = 'prod'
@@ -3025,25 +3727,117 @@ describe('workspace store', () => {
     expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connected')
     expect(store.k8sClusterNotice).toContain('proxy.internal:8443')
 
-    store.openK8sTerminal('k8s-2')
+    vi.mocked(window.aiops.createKubernetesTerminal).mockClear()
+    await store.openK8sTerminal('k8s-2')
     expect(store.k8sActiveTerminal?.clusterId).toBe('k8s-2')
-    store.sendK8sTerminalCommand('kubectl get ns')
-    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl get ns')
+    expect(store.k8sActiveTerminal?.sessionId).toBe('k8s-session-test-1')
+    expect(store.k8sActiveTerminal?.status).toBe('connected')
+    expect(store.k8sActiveTerminal?.cols).toBe(80)
+    expect(window.aiops.createKubernetesTerminal).toHaveBeenCalledWith({ clusterId: 'k8s-2', namespace: undefined, cols: undefined, rows: undefined })
+    await store.sendK8sTerminalCommand('kubectl get ns')
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl get ns')
+    expect(store.k8sActiveTerminal?.commandHistory[0]).toBe('kubectl get ns')
+    expect(store.k8sActiveTerminal?.lastCommandOutput).toContain('staging')
+
+    const reusedTerminalId = store.k8sActiveTerminal!.id
+    await store.openK8sTerminal('k8s-2')
+    expect(store.k8sActiveTerminal?.id).toBe(reusedTerminalId)
+    const newTerminal = (await store.createNewK8sTerminalTab('k8s-2'))!
+    expect(newTerminal.id).not.toBe(reusedTerminalId)
+    expect(newTerminal.name).toContain('staging-cluster-2')
+    await expect(store.resizeK8sTerminal(newTerminal.sessionId, 132, 36)).resolves.toBe(true)
+    expect(store.k8sActiveTerminal?.cols).toBe(132)
+    expect(store.k8sActiveTerminal?.rows).toBe(36)
+    expect(window.aiops.resizeKubernetesTerminal).toHaveBeenCalledWith(newTerminal.sessionId, 132, 36)
+    await expect(store.executeK8sTerminalAiCommand('kubectl get pods -n staging', newTerminal.id)).resolves.toBe(true)
+    expect(store.k8sActiveTerminal?.collectingAiOutput).toBe(false)
+    expect(store.chatMessages.at(-2)?.text).toContain('Terminal output')
+    expect(store.chatMessages.at(-2)?.hosts?.[0].label).toBe('staging-cluster')
+    await expect(store.endK8sTerminalSession(newTerminal.id)).resolves.toBe(true)
+    expect(window.aiops.closeKubernetesTerminal).toHaveBeenCalledWith(newTerminal.sessionId, 0)
+    expect(store.k8sActiveTerminal?.status).toBe('ended')
+    expect(store.k8sActiveTerminal?.output).toContain('[Terminal session ended]')
 
     store.k8sActiveClusterId = 'k8s-1'
-    store.describeK8sResource('k8s-pod-worker-1')
+    await store.describeK8sResource('k8s-pod-worker-1')
     expect(store.copyK8sResourceOutput()).toContain('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
-    const sentOutputCommand = store.sendK8sCurrentOutputToTerminal()
+    const sentOutputCommand = await store.sendK8sCurrentOutputToTerminal()
     expect(sentOutputCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
-    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
-    expect(store.sendK8sCurrentOutputToAi()).toBe(true)
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+    await expect(store.sendK8sCurrentOutputToAi()).resolves.toBe(true)
     expect(store.chatMessages.at(-2)?.text).toContain('Kubernetes 输出')
     expect(store.chatMessages.at(-2)?.hosts?.[0].label).toBe('prod-cluster')
     store.clearK8sResourceOutput()
     expect(store.k8sResourceOutputTitle).toBe('资源输出')
     expect(store.k8sCopiedCommand).toBe('')
 
-    const added = store.addK8sCluster({
+    expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
+    expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-1', contextName: 'prod/admin' })
+    const agentTest = await store.testK8sAgentConnection()
+    expect(agentTest.status).toBe('success')
+    expect(agentTest.output).toContain('Server Version')
+    await vi.advanceTimersByTimeAsync(160)
+    expect(store.k8sAgentTesting).toBe(false)
+    const namespaceRun = await store.refreshK8sAgentNamespaces()
+    expect(namespaceRun?.command).toBe('kubectl get namespaces')
+    expect(store.k8sResourceOutput).toContain('ingress-nginx')
+    store.k8sAgentCommandDraft = 'kubectl get services -A'
+    const agentRun = await store.runK8sAgentKubectl()
+    expect(agentRun.status).toBe('success')
+    expect(agentRun.id).toMatch(/^k8s-run-test-/)
+    expect(agentRun.id).not.toMatch(/^k8s-agent-run-/)
+    expect(agentRun.output).toContain('api-gateway')
+    expect(store.k8sAgentCommandHistory[0]).toBe('kubectl get services -A')
+    expect(store.k8sAgentRuns[0].contextName).toBe('prod/admin')
+    expect(store.k8sAgentRuns[0].durationMs).toBe(1)
+    store.cleanupK8sAgent()
+    expect(store.k8sAgentStatus).toBe('idle')
+    expect(store.k8sAgentCurrentCluster.clusterId).toBeNull()
+
+    const importResult = store.importK8sKubeconfigContent([
+      'apiVersion: v1',
+      'kind: Config',
+      'current-context: qa/dev',
+      'clusters:',
+      '- name: qa-cluster',
+      '  cluster:',
+      '    server: https://qa.k8s.local:6443',
+      'contexts:',
+      '- name: qa/dev',
+      '  context:',
+      '    cluster: qa-cluster',
+      '    namespace: qa'
+    ].join('\n'))
+    expect(importResult.success).toBe(true)
+    expect(importResult.currentContext).toBe('qa/dev')
+    expect(store.k8sImportContexts).toEqual([
+      { name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }
+    ])
+    expect(store.testK8sClusterConnection({ contextName: 'qa/dev' })).toBe(true)
+    expect(store.testK8sClusterConnection({ contextName: 'missing/dev' })).toBe(false)
+    vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
+      content: [
+        'apiVersion: v1',
+        'kind: Config',
+        'clusters:',
+        '- name: imported-cluster',
+        '  cluster:',
+        '    server: https://imported.k8s.local:6443',
+        'contexts:',
+        '- name: imported/admin',
+        '  context:',
+        '    cluster: imported-cluster',
+        '    namespace: imported'
+      ].join('\n'),
+      mtimeMs: 1717200000000,
+      size: 512
+    })
+    const fileImport = await store.importK8sKubeconfigFile('/tmp/imported-kubeconfig.yaml')
+    expect(fileImport.success).toBe(true)
+    expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/imported-kubeconfig.yaml')
+    expect(store.k8sImportContexts[0]).toMatchObject({ name: 'imported/admin', server: 'https://imported.k8s.local:6443' })
+
+    const added = await store.addK8sCluster({
       name: 'qa-cluster',
       contextName: 'qa/dev',
       serverUrl: 'https://qa.k8s.local:6443',
@@ -3052,7 +3846,7 @@ describe('workspace store', () => {
     expect(added?.id).toMatch(/^k8s-/)
     expect(store.k8sSelectedClusterId).toBe(added?.id)
 
-    store.updateK8sCluster(added!.id, { name: 'qa-renamed', autoConnect: true })
+    await store.updateK8sCluster(added!.id, { name: 'qa-renamed', autoConnect: true })
     expect(store.k8sClusters.find((cluster) => cluster.id === added!.id)?.name).toBe('qa-renamed')
     expect(store.k8sClusters.find((cluster) => cluster.id === added!.id)?.auto_connect).toBe(1)
 
@@ -3062,7 +3856,7 @@ describe('workspace store', () => {
     await vi.advanceTimersByTimeAsync(320)
     expect(store.k8sClusters.length).toBeGreaterThan(beforeSync)
 
-    store.deleteK8sCluster(added!.id)
+    await store.deleteK8sCluster(added!.id)
     expect(store.k8sClusters.some((cluster) => cluster.id === added!.id)).toBe(false)
     } finally {
       vi.useRealTimers()
@@ -3081,6 +3875,32 @@ describe('workspace store', () => {
     store.updateBackgroundTuning({ opacity: 0.35, brightness: 0.8 })
     expect(store.config.background.opacity).toBe(0.35)
     expect(store.config.background.brightness).toBe(0.8)
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/settings-bg.png'] })
+    vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
+      filePath: '/tmp/aiopsterm/backgrounds/settings-bg.png',
+      url: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png',
+      name: 'settings-bg.png',
+      size: 512
+    })
+    expect(await store.uploadCustomBackground()).toBe(true)
+    expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }]
+    })
+    expect(window.aiops.saveCustomBackground).toHaveBeenCalledWith('/tmp/settings-bg.png')
+    expect(store.config.background).toEqual(
+      expect.objectContaining({
+        mode: 'custom',
+        image: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png',
+        lastCustomImage: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png'
+      })
+    )
+    store.selectBackground('preset', 'dark-grid')
+    expect(store.selectCustomBackground()).toBe(true)
+    expect(store.config.background.mode).toBe('custom')
+    store.clearCustomBackground()
+    expect(store.config.background.lastCustomImage).toBe('')
+    expect(store.config.background.mode).toBe('none')
 
     store.updateTerminalSettings({ terminalType: 'vt220', cursorStyle: 'underline', showCloseButton: false })
     expect(store.terminalSettings.terminalType).toBe('vt220')
@@ -3122,6 +3942,12 @@ describe('workspace store', () => {
       minimap: false,
       mouseWheelZoom: false
     })
+    expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('18px')
+    expect(document.documentElement.style.getPropertyValue('--editor-line-height')).toBe('24px')
+    expect(document.documentElement.style.getPropertyValue('--editor-tab-size')).toBe('4')
+    expect(document.documentElement.dataset.editorWordWrap).toBe('on')
+    expect(document.documentElement.dataset.editorMinimap).toBe('off')
+    expect(document.documentElement.dataset.editorMouseWheelZoom).toBe('off')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         editorSettings: {
@@ -3135,6 +3961,9 @@ describe('workspace store', () => {
         }
       })
     )
+    store.updateEditorSettings({ tabSize: 6 })
+    expect(store.editorSettings.tabSize).toBe(6)
+    expect(document.documentElement.style.getPropertyValue('--editor-tab-size')).toBe('6')
 
     vi.mocked(window.aiops.saveConfig).mockClear()
     store.openSshProxyConfig()
@@ -3233,6 +4062,7 @@ describe('workspace store', () => {
     store.closeSshAgentConfig()
     expect(store.sshAgentConfigModalOpen).toBe(false)
 
+    await store.refreshAiModelCatalog()
     store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
     expect(store.modelProviders.openai.baseUrl).toBe('https://gateway.local')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -3303,12 +4133,12 @@ describe('workspace store', () => {
     )
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updateModelOption('ops-local-agent', false)
-    expect(store.settingModelOptions.find((model) => model.name === 'ops-local-agent')?.checked).toBe(false)
+    store.updateModelOption('aiopsterm-local-agent', false)
+    expect(store.settingModelOptions.find((model) => model.name === 'aiopsterm-local-agent')?.checked).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         modelSettings: expect.objectContaining({
-          options: expect.arrayContaining([expect.objectContaining({ name: 'ops-local-agent', checked: false })])
+          options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent', checked: false })])
         })
       })
     )
@@ -3388,6 +4218,9 @@ describe('workspace store', () => {
 
   it('manages remaining External reference-style settings lists and toggles', async () => {
     const store = useWorkspaceStore()
+
+    await store.refreshUserAccount()
+    await store.refreshExtensionPlugins()
 
     store.selectExtension('Alias')
     expect(store.selectedExtensionId).toBe('Alias')
@@ -3638,43 +4471,21 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     store.closeMcpConfigEditor()
     expect(removeMcpConfigFileListener).toHaveBeenCalled()
 
-    vi.mocked(window.aiops.saveConfig).mockClear()
     vi.mocked(window.aiops.toggleMcpServer).mockClear()
-    await store.toggleMcpServerDisabled('filesystem')
+    await expect(store.toggleMcpServerDisabled('filesystem')).resolves.toBe(true)
     expect(store.mcpServers.find((server) => server.name === 'filesystem')?.disabled).toBe(true)
     expect(window.aiops.toggleMcpServer).toHaveBeenCalledWith('filesystem', true)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mcpServers: expect.arrayContaining([expect.objectContaining({ name: 'filesystem', status: 'disabled', disabled: true })]),
-        mcpToolStates: expect.objectContaining({
-          'filesystem:read_file': true
-        })
-      })
-    )
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    store.toggleMcpTool('filesystem', 'read_file')
-    expect(store.mcpServers.find((server) => server.name === 'filesystem')?.tools.find((tool) => tool.name === 'read_file')?.enabled).toBe(false)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mcpToolStates: expect.objectContaining({
-          'filesystem:read_file': false
-        })
-      })
-    )
+    expect(store.mcpServers.find((server) => server.name === 'filesystem')?.status).toBe('disabled')
 
-    vi.mocked(window.aiops.saveConfig).mockClear()
+    vi.mocked(window.aiops.setMcpToolState).mockClear()
+    await expect(store.toggleMcpTool('filesystem', 'read_file')).resolves.toBe(true)
+    expect(store.mcpServers.find((server) => server.name === 'filesystem')?.tools.find((tool) => tool.name === 'read_file')?.enabled).toBe(false)
+    expect(window.aiops.setMcpToolState).toHaveBeenCalledWith('filesystem', 'read_file', false)
+
     vi.mocked(window.aiops.deleteMcpServer).mockClear()
-    await store.deleteMcpServer('ops-inventory')
+    await expect(store.deleteMcpServer('ops-inventory')).resolves.toBe(true)
     expect(store.mcpServers.some((server) => server.name === 'ops-inventory')).toBe(false)
     expect(window.aiops.deleteMcpServer).toHaveBeenCalledWith('ops-inventory')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mcpServers: expect.not.arrayContaining([expect.objectContaining({ name: 'ops-inventory' })]),
-        mcpToolStates: expect.not.objectContaining({
-          'ops-inventory:lookup_asset': expect.any(Boolean)
-        })
-      })
-    )
 
     const createdSkill = {
       name: 'new-skill',
@@ -3767,71 +4578,54 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
 
     store.addSettingsRule()
     const rule = store.settingsRules[0]
+    expect(rule.id).toBe('rule-draft-new')
+    expect(rule.isDraft).toBe(true)
     store.updateSettingsRuleDraft(rule.id, 'must ask before restart')
-    expect(store.saveSettingsRule(rule.id)).toBe(true)
-    expect(store.settingsRules[0].content).toBe('must ask before restart')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customInstructions: '',
-        rules: expect.arrayContaining([expect.objectContaining({ id: rule.id, content: 'must ask before restart', enabled: true })])
-      })
-    )
+    expect(await store.saveSettingsRule(rule.id)).toBe(true)
+    const savedRule = store.settingsRules.find((item) => item.content === 'must ask before restart')!
+    expect(savedRule.id).toMatch(/^rule-test-/)
+    expect(savedRule.isDraft).toBeUndefined()
+    expect(window.aiops.saveSettingsRule).toHaveBeenCalledWith({ content: 'must ask before restart', enabled: true })
 
-    store.editSettingsRule(rule.id)
-    store.updateSettingsRuleDraft(rule.id, 'discard this draft')
-    store.cancelSettingsRuleEdit(rule.id)
-    expect(store.settingsRules.find((item) => item.id === rule.id)?.content).toBe('must ask before restart')
+    store.editSettingsRule(savedRule.id)
+    store.updateSettingsRuleDraft(savedRule.id, 'discard this draft')
+    store.cancelSettingsRuleEdit(savedRule.id)
+    expect(store.settingsRules.find((item) => item.id === savedRule.id)?.content).toBe('must ask before restart')
 
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    store.toggleSettingsRule(rule.id)
-    expect(store.settingsRules.find((item) => item.id === rule.id)?.enabled).toBe(false)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rules: expect.arrayContaining([expect.objectContaining({ id: rule.id, content: 'must ask before restart', enabled: false })])
-      })
-    )
+    vi.mocked(window.aiops.saveSettingsRule).mockClear()
+    await store.toggleSettingsRule(savedRule.id)
+    expect(store.settingsRules.find((item) => item.id === savedRule.id)?.enabled).toBe(false)
+    expect(window.aiops.saveSettingsRule).toHaveBeenCalledWith({ id: savedRule.id, content: 'must ask before restart', enabled: false })
 
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    store.deleteSettingsRule(rule.id)
-    expect(store.settingsRules.some((item) => item.id === rule.id)).toBe(false)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rules: expect.not.arrayContaining([expect.objectContaining({ id: rule.id })])
-      })
-    )
+    vi.mocked(window.aiops.deleteSettingsRule).mockClear()
+    await store.deleteSettingsRule(savedRule.id)
+    expect(store.settingsRules.some((item) => item.id === savedRule.id)).toBe(false)
+    expect(window.aiops.deleteSettingsRule).toHaveBeenCalledWith(savedRule.id)
 
     store.startShortcutRecording('newTerminal')
     store.updateShortcutRecording('Ctrl+Shift+N')
-    expect(store.saveShortcutRecording()).toBe(true)
+    expect(await store.saveShortcutRecording()).toBe(true)
     expect(store.settingsShortcuts.find((shortcut) => shortcut.id === 'newTerminal')?.shortcut).toBe('Ctrl+Shift+N')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        shortcuts: expect.arrayContaining([expect.objectContaining({ id: 'newTerminal', shortcut: 'Ctrl+Shift+N' })])
-      })
-    )
+    expect(window.aiops.saveSettingsShortcut).toHaveBeenCalledWith({ id: 'newTerminal', shortcut: 'Ctrl+Shift+N' })
 
     store.startShortcutRecording('quickCommand')
     store.updateShortcutRecording('Ctrl+Shift+N')
-    expect(store.saveShortcutRecording()).toBe(false)
+    expect(await store.saveShortcutRecording()).toBe(false)
     expect(store.settingsNotice).toBe('快捷键已被占用')
 
     store.startShortcutRecording('switchToSpecificTab')
     store.updateShortcutRecording('Alt+1')
-    expect(store.saveShortcutRecording()).toBe(false)
+    expect(await store.saveShortcutRecording()).toBe(false)
     expect(store.settingsNotice).toBe('快捷键格式无效')
 
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    store.resetAllShortcuts()
+    vi.mocked(window.aiops.resetSettingsShortcuts).mockClear()
+    await store.resetAllShortcuts()
     expect(store.settingsShortcuts).toEqual(defaultShortcuts)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        shortcuts: defaultShortcuts
-      })
-    )
+    expect(window.aiops.resetSettingsShortcuts).toHaveBeenCalled()
 
     store.openTrustedDeviceRevoke(2)
     expect(store.trustedDeviceModal.open).toBe(true)
-    store.confirmTrustedDeviceRevoke()
+    await store.confirmTrustedDeviceRevoke()
     expect(store.trustedDevices.some((device) => device.id === 2)).toBe(false)
 
     store.openAccountCenter()
@@ -3839,64 +4633,85 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     store.closeAccountCenter()
     expect(store.userAccountCenterOpen).toBe(false)
 
-    store.openUserLogin()
+    await store.openUserLogin()
     expect(store.activeModule).toBe('user')
     expect(store.userProfile.skippedLogin).toBe(true)
     expect(store.userLoginTab).toBe('account')
     store.setUserLoginTab('email')
     expect(store.userLoginTab).toBe('email')
-    expect(store.loginWithAccount('', '')).toBe(false)
+    expect(await store.loginWithAccount('', '')).toBe(false)
     expect(store.userNotice).toBe('请输入用户名和密码')
-    expect(store.loginWithAccount('verify-device', 'secret')).toBe(false)
+    expect(await store.loginWithAccount('verify-device', 'secret')).toBe(false)
     expect(store.userProfile.needDeviceVerification).toBe(true)
     expect(store.userNotice).toBe('当前设备需要验证后才能登录')
-    expect(store.loginWithAccount('ops_login', 'secret')).toBe(true)
+    expect(await store.loginWithAccount('ops_login', 'secret')).toBe(true)
     expect(store.userProfile.skippedLogin).toBe(false)
     expect(store.userProfile.username).toBe('ops_login')
-    store.logoutUser()
-    expect(store.sendUserLoginCode('email', 'bad')).toBe(false)
+    expect(store.userProfile.registrationCode).toBe(9)
+    expect(store.userProfile.lastLoginMethod).toBe('account')
+    expect(store.userProfile.localDatabaseReady).toBe(true)
+    await store.logoutUser()
+    expect(store.userProfile.localDatabaseReady).toBe(false)
+    expect(await store.sendUserLoginCode('email', 'bad')).toBe(false)
     expect(store.userNotice).toBe('邮箱格式不正确')
-    expect(store.sendUserLoginCode('email', 'login@example.local')).toBe(true)
+    expect(await store.sendUserLoginCode('email', 'login@example.local')).toBe(true)
     await vi.advanceTimersByTimeAsync(120)
     expect(store.userLoginCodeCountdown.email).toBe(300)
-    expect(store.loginWithEmail('login@example.local', '246810')).toBe(true)
+    expect(await store.loginWithEmail('login@example.local', '246810')).toBe(true)
     expect(store.userProfile.email).toBe('login@example.local')
+    expect(store.userProfile.registrationCode).toBe(2)
+    expect(store.userProfile.lastLoginMethod).toBe('email')
     expect(store.userLoginCodeCountdown.email).toBe(0)
-    store.logoutUser()
-    expect(store.sendUserLoginCode('mobile', '13800000001')).toBe(true)
+    expect(store.canEditUserEmail).toBe(false)
+    expect(await store.sendUserContactCode('email', 'ops@example.local')).toBe(false)
+    expect(store.userNotice).toBe('当前登录方式不允许修改邮箱')
+    expect(store.canEditUserMobile).toBe(true)
+    await store.logoutUser()
+    expect(await store.sendUserLoginCode('mobile', '13800000001')).toBe(true)
     await vi.advanceTimersByTimeAsync(120)
     expect(store.userLoginCodeCountdown.mobile).toBe(300)
-    expect(store.loginWithMobile('13800000001', '135790')).toBe(true)
+    expect(await store.loginWithMobile('13800000001', '135790')).toBe(true)
     expect(store.userProfile.mobile).toBe('13800000001')
-    store.logoutUser()
-    expect(store.skipUserLogin()).toBe(true)
+    expect(store.userProfile.registrationCode).toBe(7)
+    expect(store.userProfile.lastLoginMethod).toBe('mobile')
+    expect(store.canEditUserMobile).toBe(false)
+    expect(await store.sendUserContactCode('mobile', '13800000002')).toBe(false)
+    expect(store.userNotice).toBe('当前登录方式不允许修改手机号')
+    await store.logoutUser()
+    expect(await store.skipUserLogin()).toBe(true)
     expect(store.userProfile.username).toBe('guest')
+    expect(store.userProfile.uid).toBe(999999999)
+    expect(store.userProfile.lastLoginMethod).toBe('skip')
     expect(store.billingSettings.skippedLogin).toBe(true)
 
-    expect(store.updateUserProfile({ username: 'bad-name!' })).toBe(false)
+    expect(await store.updateUserProfile({ username: 'bad-name!' })).toBe(false)
     expect(store.userNotice).toBe('用户名仅支持字母、数字和下划线')
-    expect(store.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead' })).toBe(true)
+    expect(await store.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead' })).toBe(true)
     expect(store.userProfile.name).toBe('Ops Lead')
 
-    expect(store.sendUserContactCode('email', 'broken-email')).toBe(false)
+    expect(await store.sendUserContactCode('email', 'broken-email')).toBe(false)
     expect(store.userNotice).toBe('邮箱格式不正确')
-    expect(store.sendUserContactCode('email', 'ops@example.local')).toBe(true)
+    expect(await store.sendUserContactCode('email', 'ops@example.local')).toBe(true)
     await vi.advanceTimersByTimeAsync(120)
     expect(store.userContactCodeCountdown.email).toBe(300)
     await vi.advanceTimersByTimeAsync(1000)
     expect(store.userContactCodeCountdown.email).toBe(299)
-    expect(store.bindUserContact('email', 'ops@example.local', '')).toBe(false)
+    expect(await store.bindUserContact('email', 'ops@example.local', '')).toBe(false)
     expect(store.userNotice).toBe('请输入邮箱验证码')
-    expect(store.bindUserContact('email', 'ops@example.local', '123456')).toBe(true)
+    expect(await store.bindUserContact('email', 'ops@example.local', '123456')).toBe(true)
     expect(store.userProfile.email).toBe('ops@example.local')
     expect(store.userContactCodeCountdown.email).toBe(0)
 
-    store.userProfile.authProvider = 'sso'
+    ;(globalThis as any).__setUserAccountProfileMock?.({ authProvider: 'sso' })
+    await store.refreshUserAccount()
     expect(store.canResetUserPassword).toBe(false)
-    expect(store.resetUserPassword('Aa123456!')).toBe(false)
-    expect(store.userNotice).toBe('当前登录方式不允许修改密码')
-    store.userProfile.authProvider = 'local'
-    expect(store.resetUserPassword('Aa123456!')).toBe(true)
+    expect(await store.resetUserPassword('Aa123456!')).toBe(false)
+    expect(store.userNotice).toBe('SSO 用户不能修改密码')
+    ;(globalThis as any).__setUserAccountProfileMock?.({ authProvider: 'local' })
+    await store.refreshUserAccount()
+    expect(await store.resetUserPassword('Aa123456!')).toBe(true)
+    expect(store.userNotice).toBe('密码重置成功')
+    expect(store.userProfile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
 
     vi.mocked(window.aiops.saveConfig).mockClear()
     store.updatePrivacySettings({ telemetry: 'disabled', secretRedaction: 'enabled' })
@@ -3916,10 +4731,160 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.privacySettings.deactivateModalOpen).toBe(true)
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
 
-    store.checkAboutUpdate()
+    const latestCheck = store.checkAboutUpdate()
     expect(store.aboutSettings.updateStatus).toBe('checking')
-    await vi.runOnlyPendingTimersAsync()
+    await latestCheck
     expect(store.aboutSettings.updateStatus).toBe('latest')
+    expect(window.aiops.checkUpdate).toHaveBeenCalled()
+    expect(window.aiops.openExternalUrl).not.toHaveBeenCalledWith('https://aiopsterm.local/docs')
+
+    store.setActiveSettingsSection('docs')
+    await Promise.resolve()
+    expect(store.activeSettingsSection).toBe('general')
+    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/docs')
+
+    await store.openSettingsExternalAction('日志目录')
+    expect(window.aiops.openLogDir).toHaveBeenCalled()
+    expect(store.settingsNotice).toBe('日志目录已打开')
+    await store.openSettingsExternalAction('反馈页面')
+    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/feedback')
+    expect(store.settingsNotice).toBe('反馈页面已打开')
+
+    vi.mocked(window.aiops.checkUpdate).mockResolvedValueOnce({
+      available: true,
+      channel: 'manual',
+      isUpdateAvailable: true,
+      updateInfo: { version: '0.1.1', channel: 'manual' }
+    })
+    await store.checkAboutUpdate()
+    expect(store.aboutSettings.updateStatus).toBe('available')
+    expect(store.aboutSettings.newVersion).toBe('0.1.1')
+    await store.checkAboutUpdate()
+    expect(store.aboutSettings.updateStatus).toBe('downloaded')
+    expect(store.aboutSettings.progress).toBe(100)
+    expect(window.aiops.downloadAppUpdate).toHaveBeenCalledWith('0.1.1')
+    await store.checkAboutUpdate()
+    expect(window.aiops.installAppUpdate).toHaveBeenCalledWith('0.1.1')
+    expect(store.aboutSettings.updateStatus).toBe('latest')
+    expect(store.aboutSettings.version).toBe('0.1.1')
+  })
+
+  it('does not fabricate Skill writes when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshSkillsFromBridge()
+
+    const originalSkills = JSON.stringify(store.settingsSkills)
+    const originalIncident = store.settingsSkills.find((skill) => skill.name === 'incident-triage')
+    expect(originalIncident).toBeTruthy()
+
+    const originalAiops = {
+      createSkill: window.aiops.createSkill,
+      updateSkill: window.aiops.updateSkill,
+      setSkillEnabled: window.aiops.setSkillEnabled,
+      deleteSkill: window.aiops.deleteSkill
+    }
+
+    try {
+      ;(window.aiops as any).createSkill = undefined
+      await store.openSkillModal('create')
+      store.skillModal.name = 'no-bridge-skill'
+      store.skillModal.description = 'no bridge skill'
+      store.skillModal.content = 'no bridge skill content'
+      await expect(store.saveSkillModal()).resolves.toBe(false)
+      expect(store.settingsSkills.some((skill) => skill.name === 'no-bridge-skill')).toBe(false)
+      expect(store.settingsNotice).toBe('Skill 创建服务不可用')
+
+      store.chatMessages.push({
+        id: 'assistant-skill-no-bridge',
+        role: 'assistant',
+        text: 'Bridge missing reusable workflow',
+        state: 'done'
+      })
+      await expect(store.summarizeMessageToSkill('assistant-skill-no-bridge')).resolves.toBeNull()
+      expect(store.settingsSkills.some((skill) => skill.name.includes('bridge-missing-reusable'))).toBe(false)
+      expect(store.settingsNotice).toBe('Skill 创建服务不可用')
+
+      ;(window.aiops as any).updateSkill = undefined
+      await store.openSkillModal('edit', 'incident-triage')
+      store.skillModal.description = 'local fake edit'
+      store.skillModal.content = 'local fake content'
+      await expect(store.saveSkillModal()).resolves.toBe(false)
+      expect(store.settingsSkills.find((skill) => skill.name === 'incident-triage')?.content).toBe(originalIncident?.content)
+      expect(store.settingsNotice).toBe('Skill 保存服务不可用')
+
+      ;(window.aiops as any).setSkillEnabled = undefined
+      await store.toggleSkillEnabled('incident-triage')
+      expect(store.settingsSkills.find((skill) => skill.name === 'incident-triage')?.enabled).toBe(originalIncident?.enabled)
+      expect(store.settingsNotice).toBe('Skill 状态服务不可用')
+
+      ;(window.aiops as any).deleteSkill = undefined
+      await store.deleteSkill('incident-triage')
+      expect(store.settingsSkills.some((skill) => skill.name === 'incident-triage')).toBe(true)
+      expect(store.settingsNotice).toBe('Skill 删除服务不可用')
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
+  it('does not fabricate MCP writes when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+
+    const originalServers = JSON.stringify(store.mcpServers)
+    const originalFilesystem = store.mcpServers.find((server) => server.name === 'filesystem')
+    expect(originalFilesystem).toBeTruthy()
+
+    const originalAiops = {
+      writeMcpConfig: window.aiops.writeMcpConfig,
+      toggleMcpServer: window.aiops.toggleMcpServer,
+      setMcpToolState: window.aiops.setMcpToolState,
+      deleteMcpServer: window.aiops.deleteMcpServer
+    }
+
+    try {
+      ;(window.aiops as any).writeMcpConfig = undefined
+      await store.openMcpConfigEditor()
+      store.updateMcpConfigEditorContent(
+        JSON.stringify(
+          {
+            mcpServers: {
+              filesystem: {
+                type: 'stdio',
+                disabled: true,
+                command: 'npx',
+                args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+                timeout: 60
+              }
+            }
+          },
+          null,
+          2
+        )
+      )
+      await expect(store.saveMcpConfigEditor(true)).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('MCP 配置保存服务不可用')
+      expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+      store.closeMcpConfigEditor()
+
+      ;(window.aiops as any).toggleMcpServer = undefined
+      await expect(store.toggleMcpServerDisabled('filesystem')).resolves.toBe(false)
+      expect(store.mcpServers.find((server) => server.name === 'filesystem')?.disabled).toBe(originalFilesystem?.disabled)
+      expect(store.settingsNotice).toBe('MCP 状态服务不可用')
+
+      ;(window.aiops as any).setMcpToolState = undefined
+      await expect(store.toggleMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(store.mcpServers.find((server) => server.name === 'filesystem')?.tools.find((tool) => tool.name === 'read_file')?.enabled).toBe(true)
+      expect(store.settingsNotice).toBe('MCP Tool 状态服务不可用')
+
+      ;(window.aiops as any).deleteMcpServer = undefined
+      await expect(store.deleteMcpServer('ops-inventory')).resolves.toBe(false)
+      expect(store.mcpServers.some((server) => server.name === 'ops-inventory')).toBe(true)
+      expect(store.settingsNotice).toBe('MCP 删除服务不可用')
+      expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
   })
 
   it('manages External reference-style onboarding guide, tour preparation, and completion state', () => {
@@ -3989,5 +4954,44 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.onboardingCompleted.aiChat).toBe(false)
     expect(store.onboardingActiveTour).toBeNull()
     expect(store.config.onboarding?.guideTabAutoOpened).toBe(false)
+  })
+
+  it('routes self-owned aiopsterm protocol links into product shell state', () => {
+    const store = useWorkspaceStore()
+
+    store.handleDeepLink({
+      url: 'aiopsterm://open/settings?section=mcp',
+      action: 'open',
+      target: 'settings',
+      module: 'settings',
+      settingsSection: 'mcp',
+      acceptedAt: 1780490000000
+    })
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('mcp')
+    expect(store.rightPanelOpen).toBe(false)
+    expect(store.topNotice).toContain('aiopsterm://')
+
+    store.handleDeepLink({
+      url: 'aiopsterm://open/files',
+      action: 'open',
+      target: 'files',
+      module: 'files',
+      acceptedAt: 1780490000100
+    })
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('files')
+    expect(store.leftPanelOpen).toBe(true)
+    expect(store.rightPanelOpen).toBe(true)
+
+    store.handleDeepLink({
+      url: 'aiopsterm://open?target=agents',
+      action: 'open',
+      target: 'agents',
+      acceptedAt: 1780490000200
+    })
+    expect(store.mode).toBe('agents')
+    expect(store.agentsLeftOpen).toBe(true)
   })
 })

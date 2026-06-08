@@ -106,11 +106,16 @@
                   :key="asset.id"
                   class="host-card-wrapper"
                 >
-                  <button
+                  <div
                     class="host-card"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`${asset.title} 主机${asset.username ? `, ${asset.username}` : ''}`"
                     :data-onboarding-id="asset.id === flatFilteredAssets[0]?.id ? 'asset-card' : undefined"
                     @click="selectedAssetId = asset.id"
-                    @dblclick="connectAsset(asset.id)"
+                    @dblclick.stop="connectAsset(asset.id)"
+                    @keydown.enter.prevent="connectAsset(asset.id)"
+                    @keydown.space.prevent="selectedAssetId = asset.id"
                     @contextmenu.prevent="openAssetContextMenu($event, asset.id)"
                   >
                     <span class="host-card-icon">
@@ -140,7 +145,7 @@
                         <Trash2 />
                       </button>
                     </span>
-                  </button>
+                  </div>
                 </div>
               </div>
             </template>
@@ -821,7 +826,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   CircleHelp,
   Copy,
@@ -839,7 +844,9 @@ import {
   Upload,
   X
 } from 'lucide-vue-next'
-import { assetManagementEntries, mockAssets, type MockAsset, type MockAssetGroup } from '@/data/mockData'
+import { assetManagementEntries } from '@/config/assets'
+import type { AiopsAssetAuthType, AiopsAssetInput, AiopsAssetRecord, AiopsAssetType, AiopsKeychainInput, AiopsKeychainRecord, AiopsKeychainType } from '@shared/preload'
+import { parseAssetImportContent, type ImportedAssetDraft } from '@/services/assetImportRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 defineProps<{ query: string }>()
@@ -859,7 +866,19 @@ const exportModalOpen = ref(false)
 const exportCheckedIds = ref<string[]>([])
 const exportQuery = ref('')
 const selectedRows = ref<string[]>([])
-const assets = ref<MockAsset[]>(mockAssets.map((asset) => ({ ...asset, tags: [...asset.tags] })))
+type AssetRecord = AiopsAssetRecord & {
+  password?: string
+  needProxy?: boolean
+  proxyName?: string
+}
+
+type AssetGroup = {
+  key: string
+  title: string
+  children: AssetRecord[]
+}
+
+const assets = ref<AssetRecord[]>([])
 const form = reactive({
   id: '',
   title: '',
@@ -867,8 +886,8 @@ const form = reactive({
   username: '',
   group: '生产',
   port: 22,
-  asset_type: 'person' as MockAsset['asset_type'],
-  auth_type: 'password' as MockAsset['auth_type'],
+  asset_type: 'person' as AiopsAssetType,
+  auth_type: 'password' as AiopsAssetAuthType,
   password: '',
   keyId: '',
   proxyName: '',
@@ -877,33 +896,7 @@ const form = reactive({
   switchBrand: 'cisco'
 })
 
-type KeychainItem = {
-  id: string
-  name: string
-  type: string
-  privateKey: string
-  publicKey: string
-  passphrase: string
-}
-
-const keychains = ref<KeychainItem[]>([
-  {
-    id: 'key-1',
-    name: 'prod-ed25519',
-    type: 'ed25519',
-    privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----',
-    publicKey: 'ssh-ed25519 AAAA... prod',
-    passphrase: ''
-  },
-  {
-    id: 'key-2',
-    name: 'staging-rsa',
-    type: 'rsa',
-    privateKey: '-----BEGIN RSA PRIVATE KEY-----',
-    publicKey: 'ssh-rsa AAAA... staging',
-    passphrase: ''
-  }
-])
+const keychains = ref<AiopsKeychainRecord[]>([])
 const keyQuery = ref('')
 const keyEditorOpen = ref(false)
 const keyEditMode = ref(false)
@@ -928,7 +921,7 @@ const confirmState = reactive<{
   title: string
   message: string
   expectedText: string
-  action: null | (() => void)
+  action: null | (() => void | Promise<void>)
 }>({
   open: false,
   title: '',
@@ -945,9 +938,12 @@ type ImportPreviewAsset = {
   username: string
   group: string
   port: number
-  auth_type: MockAsset['auth_type']
-  asset_type: MockAsset['asset_type']
+  auth_type: AiopsAssetAuthType
+  asset_type: AiopsAssetType
   comment: string
+  password?: string
+  needProxy?: boolean
+  proxyName?: string
 }
 
 const importPreviewOpen = ref(false)
@@ -973,8 +969,8 @@ const onboardingHostDraft = {
   username: 'local',
   group: '生产',
   port: 22,
-  asset_type: 'person' as MockAsset['asset_type'],
-  auth_type: 'password' as MockAsset['auth_type'],
+  asset_type: 'person' as AiopsAssetType,
+  auth_type: 'password' as AiopsAssetAuthType,
   password: '',
   keyId: '',
   proxyName: '',
@@ -989,7 +985,61 @@ const filteredManagementEntries = computed(() => {
   return assetManagementEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(keyword))
 })
 
-const assetGroups = computed<MockAssetGroup[]>(() => {
+const refreshAssets = async () => {
+  const snapshot = await window.aiops?.listAssets?.()
+  applyAssetSnapshot(snapshot)
+}
+
+const refreshKeychains = async () => {
+  keychains.value = (await window.aiops?.listKeychains?.()) || []
+}
+
+const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}): AiopsAssetInput => ({
+  id: asset.id,
+  name: asset.name,
+  title: asset.title,
+  host: asset.host,
+  ip: asset.ip,
+  group: asset.group,
+  group_name: asset.group_name,
+  status: asset.status,
+  username: asset.username,
+  port: asset.port,
+  asset_type: asset.asset_type,
+  auth_type: asset.auth_type,
+  comment: asset.comment,
+  data_source: asset.data_source,
+  tags: [...asset.tags],
+  favorite: asset.favorite,
+  folderUuid: asset.folderUuid,
+  organizationId: asset.organizationId,
+  tunnelState: asset.tunnelState,
+  needProxy: asset.needProxy,
+  proxyName: asset.proxyName,
+  keychainId: asset.keychainId,
+  ...patch
+})
+
+const saveAssetRecord = async (input: AiopsAssetInput) => {
+  const result = await window.aiops?.saveAsset?.(input)
+  if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '资产保存失败')
+  await refreshAssets()
+  return result.data
+}
+
+const applyAssetSnapshot = (snapshot?: { assets: AiopsAssetRecord[] }) => {
+  assets.value = (snapshot?.assets || []).map((asset) => ({ ...asset, tags: [...asset.tags] }))
+}
+
+const deleteAssetRecords = async (assetIds: string[]) => {
+  for (const id of assetIds) {
+    const result = await window.aiops?.deleteAsset?.(id)
+    if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
+  }
+  await refreshAssets()
+}
+
+const assetGroups = computed<AssetGroup[]>(() => {
   const groupNames = Array.from(new Set(assets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
   return groupNames.map((group) => ({
     key: `group-${group}`,
@@ -998,7 +1048,7 @@ const assetGroups = computed<MockAssetGroup[]>(() => {
   }))
 })
 
-const filterGroups = (groups: MockAssetGroup[], keyword: string) => {
+const filterGroups = (groups: AssetGroup[], keyword: string) => {
   const normalized = keyword.trim().toLowerCase()
   if (!normalized) return groups
   return groups
@@ -1024,7 +1074,7 @@ const managedSourceAssets = computed(() => {
   if (!managedOrganization.value) return nonOrganizationAssets
   return nonOrganizationAssets.filter((asset) => asset.group_name === managedOrganization.value?.group_name || asset.tags.includes('synced'))
 })
-const managedFilteredGroups = computed<MockAssetGroup[]>(() => {
+const managedFilteredGroups = computed<AssetGroup[]>(() => {
   const groups = Array.from(new Set(managedSourceAssets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
   return filterGroups(
     groups.map((group) => ({
@@ -1118,7 +1168,7 @@ const editAsset = (assetId: string | null) => {
     asset_type: asset.asset_type,
     auth_type: asset.auth_type,
     password: '',
-    keyId: '',
+    keyId: asset.keychainId || '',
     proxyName: '',
     jumpHostId: '',
     bastionType: asset.asset_type === 'organization' ? 'jumpserver' : 'jumpserver',
@@ -1144,7 +1194,7 @@ const cloneAsset = (assetId: string | null) => {
     asset_type: asset.asset_type,
     auth_type: asset.auth_type,
     password: '',
-    keyId: '',
+    keyId: asset.keychainId || '',
     proxyName: '',
     jumpHostId: '',
     bastionType: 'jumpserver',
@@ -1161,19 +1211,23 @@ const removeAsset = (assetId: string | null) => {
   assetContextMenuId.value = null
   confirmState.open = true
   confirmState.title = '删除主机'
-  confirmState.message = `确定删除 ${asset.title}？此操作只会更新 aiopsterm 本地 mock 状态。`
+  confirmState.message = `确定删除 ${asset.title}？此操作会更新本地资产库。`
   confirmState.expectedText = asset.title
   confirmState.action = () => deleteAssets([assetId])
   confirmInput.value = ''
 }
 
-const deleteAssets = (assetIds: string[]) => {
-  const idSet = new Set(assetIds)
-  assets.value = assets.value.filter((asset) => !idSet.has(asset.id))
-  selectedRows.value = selectedRows.value.filter((id) => !idSet.has(id))
-  selectedAssetId.value = selectedAssetId.value && idSet.has(selectedAssetId.value) ? null : selectedAssetId.value
-  exportCheckedIds.value = exportCheckedIds.value.filter((id) => !idSet.has(id))
-  importNotice.value = `已删除 ${assetIds.length} 个主机。`
+const deleteAssets = async (assetIds: string[]) => {
+  try {
+    await deleteAssetRecords(assetIds)
+    const idSet = new Set(assetIds)
+    selectedRows.value = selectedRows.value.filter((id) => !idSet.has(id))
+    selectedAssetId.value = selectedAssetId.value && idSet.has(selectedAssetId.value) ? null : selectedAssetId.value
+    exportCheckedIds.value = exportCheckedIds.value.filter((id) => !idSet.has(id))
+    importNotice.value = `已删除 ${assetIds.length} 个主机。`
+  } catch (error) {
+    importNotice.value = error instanceof Error ? error.message : '删除主机失败。'
+  }
 }
 
 const confirmBulkDelete = () => {
@@ -1191,7 +1245,7 @@ const toggleManagedVisibleSelection = (checked: boolean) => {
   selectedRows.value = checked ? Array.from(new Set([...selectedRows.value, ...visibleIds])) : selectedRows.value.filter((id) => !visibleIds.includes(id))
 }
 
-const connectAsset = (assetId: string | null) => {
+const connectAsset = async (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset || asset.asset_type === 'organization') {
@@ -1202,13 +1256,27 @@ const connectAsset = (assetId: string | null) => {
   workspace.createPanel()
   workspace.renamePanel(workspace.activePanelId, asset.name || asset.title)
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
-  workspace.registerMockSshSession(workspace.activePanelId, asset)
-  workspace.appendTerminalInput(workspace.activePanelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
-  workspace.appendTerminalOutput(workspace.activePanelId, `[mock ssh] ${asset.name || asset.title}\n$ `)
+  const panelId = workspace.activePanelId
+  workspace.registerSshSession(panelId, asset)
+  workspace.appendTerminalInput(panelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
+  try {
+    const session = await window.aiops?.createTerminal?.({
+      kind: 'ssh',
+      assetId: asset.id,
+      title: asset.name || asset.title,
+      cols: 100,
+      rows: 30
+    })
+    workspace.applySshTerminalSession(panelId, session, asset)
+  } catch (error) {
+    workspace.appendTerminalOutput(panelId, `[aiopsterm] SSH launch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+  }
   workspace.selectedContexts = [
     ...workspace.selectedContexts.filter((item) => item.id !== asset.id),
     { id: asset.id, kind: 'hosts', label: asset.host, detail: asset.name || asset.title }
   ]
+  editorOpen.value = false
+  editMode.value = false
   if (workspace.onboardingActiveTour === 'addAndConnectHost') {
     workspace.nextOnboardingStep()
   }
@@ -1224,14 +1292,12 @@ const openAssetContextMenu = (event: MouseEvent, assetId: string) => {
   contextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
 }
 
-const submitForm = () => {
+const submitForm = async () => {
   const title = form.title.trim() || form.host.trim() || '未命名主机'
   const host = form.host.trim() || '127.0.0.1'
   const group = form.group.trim() || 'Hosts'
-  const generatedId = form.id || `asset-local-${Date.now()}`
-  const baseAsset: MockAsset = {
-    id: generatedId,
-    uuid: generatedId,
+  const baseAsset: AiopsAssetInput = {
+    ...(form.id ? { id: form.id } : {}),
     name: title,
     title,
     host,
@@ -1245,46 +1311,33 @@ const submitForm = () => {
     asset_type: form.asset_type,
     auth_type: form.auth_type,
     comment: editMode.value ? '本地编辑' : '本地创建',
-    data_source: form.asset_type === 'organization' ? 'refresh' : 'manual'
+    data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
+    keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
+    ...(form.password.trim() ? { password: form.password } : {})
   }
-  if (editMode.value && form.id) {
-    assets.value = assets.value.map((asset) => (asset.id === form.id ? { ...asset, ...baseAsset, id: asset.id, uuid: asset.uuid } : asset))
-  } else {
-    assets.value = [...assets.value, baseAsset]
-    selectedAssetId.value = baseAsset.id
-  }
-  importNotice.value = `${editMode.value ? '已保存' : '已创建'} ${title}。当前为本地 mock。`
-  editorOpen.value = false
-  if (workspace.onboardingActiveTour === 'addAndConnectHost') {
-    workspace.jumpOnboardingStep('connect-asset')
+  try {
+    const saved = await saveAssetRecord(baseAsset)
+    selectedAssetId.value = saved.id
+    importNotice.value = `${editMode.value ? '已保存' : '已创建'} ${title}。`
+    editorOpen.value = false
+    if (workspace.onboardingActiveTour === 'addAndConnectHost') {
+      workspace.jumpOnboardingStep('connect-asset')
+    }
+  } catch (error) {
+    importNotice.value = error instanceof Error ? error.message : '资产保存失败。'
   }
 }
 
-const refreshOrganizationAsset = () => {
+const refreshOrganizationAsset = async () => {
   if (contextAsset.value) {
-    const exists = assets.value.some((asset) => asset.id === `${contextAsset.value!.id}-synced`)
-    if (!exists) {
-      const synced: MockAsset = {
-        id: `${contextAsset.value.id}-synced`,
-        uuid: `${contextAsset.value.uuid}-synced`,
-        name: `${contextAsset.value.title}-synced-asset`,
-        title: `${contextAsset.value.title}-synced-asset`,
-        host: '10.90.0.15',
-        ip: '10.90.0.15',
-        group: contextAsset.value.group,
-        group_name: contextAsset.value.group_name,
-        status: 'online',
-        tags: ['jumpserver', 'synced'],
-        username: 'jump',
-        port: 22,
-        asset_type: 'person',
-        auth_type: 'keyBased',
-        comment: '刷新来源资产',
-        data_source: 'refresh'
-      }
-      assets.value = [...assets.value, synced]
+    try {
+      const result = await window.aiops?.refreshOrganizationAssets?.({ organizationId: contextAsset.value.id })
+      if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
+      applyAssetSnapshot(result.data)
+      importNotice.value = `已刷新堡垒机资源 ${contextAsset.value.title}。`
+    } catch (error) {
+      importNotice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败。'
     }
-    importNotice.value = `已刷新堡垒机资源 ${contextAsset.value.title}。`
   }
   assetContextMenuId.value = null
 }
@@ -1320,28 +1373,24 @@ const openManagedAssetEdit = (assetId: string) => {
   managedEditorOpen.value = true
 }
 
-const submitManagedForm = () => {
+const submitManagedForm = async () => {
   const title = managedForm.title.trim() || managedForm.host.trim() || 'managed-host'
   const host = managedForm.host.trim() || '127.0.0.1'
   if (managedEditMode.value && managedForm.id) {
-    assets.value = assets.value.map((asset) => {
-      if (asset.id !== managedForm.id) return asset
-      const editable = asset.data_source === 'manual'
-      return {
-        ...asset,
-        title: editable ? title : asset.title,
-        name: editable ? title : asset.name,
-        host: editable ? host : asset.host,
-        ip: editable ? host : asset.ip,
-        comment: managedForm.comment
-      }
-    })
-    importNotice.value = `已更新资产 ${title}。`
+    const asset = assets.value.find((item) => item.id === managedForm.id)
+    if (!asset) return
+    const editable = asset.data_source === 'manual'
+    const nextPatch = {
+      title: editable ? title : asset.title,
+      name: editable ? title : asset.name,
+      host: editable ? host : asset.host,
+      ip: editable ? host : asset.ip,
+      comment: managedForm.comment
+    }
+    await saveAssetRecord(toAssetInput(asset, nextPatch))
+    importNotice.value = `已更新资产 ${editable ? title : asset.title}。`
   } else {
-    const generatedId = `managed-local-${Date.now()}`
-    const row: MockAsset = {
-      id: generatedId,
-      uuid: generatedId,
+    await saveAssetRecord({
       name: title,
       title,
       host,
@@ -1356,43 +1405,29 @@ const submitManagedForm = () => {
       auth_type: 'password',
       comment: managedForm.comment,
       data_source: 'manual'
-    }
-    assets.value = [...assets.value, row]
+    })
     importNotice.value = `已添加资产 ${title}。`
   }
   managedEditorOpen.value = false
 }
 
-const refreshManagedAssets = () => {
-  const source = managedOrganization.value
-  if (source) {
-    const generatedId = `${source.id}-managed-${Date.now()}`
-    const refreshed: MockAsset = {
-      id: generatedId,
-      uuid: generatedId,
-      name: `${source.title}-refresh-${managedAssets.value.length + 1}`,
-      title: `${source.title}-refresh-${managedAssets.value.length + 1}`,
-      host: `10.90.0.${managedAssets.value.length + 20}`,
-      ip: `10.90.0.${managedAssets.value.length + 20}`,
-      group: source.group,
-      group_name: source.group_name,
-      status: 'online',
-      tags: ['jumpserver', 'synced'],
-      username: 'jump',
-      port: 22,
-      asset_type: 'person',
-      auth_type: 'keyBased',
-      comment: '刷新来源资产',
-      data_source: 'refresh'
-    }
-    assets.value = [...assets.value, refreshed]
+const refreshManagedAssets = async () => {
+  try {
+    const result = await window.aiops?.refreshOrganizationAssets?.(
+      managedOrganization.value ? { organizationId: managedOrganization.value.id } : undefined
+    )
+    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新资产表失败。')
+    applyAssetSnapshot(result.data)
+    selectedRows.value = selectedRows.value.filter((id) => result.data?.assets.some((asset) => asset.id === id))
+    importNotice.value = `已刷新资产表，共 ${result.data.assets.filter((asset) => asset.asset_type !== 'organization').length} 条。`
+  } catch (error) {
+    importNotice.value = error instanceof Error ? error.message : '刷新资产表失败。'
   }
-  importNotice.value = `已刷新资产表，共 ${managedAssets.value.length} 条。`
 }
 
-const isExportGroupChecked = (children: MockAsset[]) => children.length > 0 && children.every((asset) => exportCheckedIds.value.includes(asset.id))
+const isExportGroupChecked = (children: AssetRecord[]) => children.length > 0 && children.every((asset) => exportCheckedIds.value.includes(asset.id))
 
-const toggleExportGroup = (children: MockAsset[], checked: boolean) => {
+const toggleExportGroup = (children: AssetRecord[], checked: boolean) => {
   const ids = children.map((asset) => asset.id)
   exportCheckedIds.value = checked ? Array.from(new Set([...exportCheckedIds.value, ...ids])) : exportCheckedIds.value.filter((id) => !ids.includes(id))
 }
@@ -1411,7 +1446,7 @@ const selectAllExportKeys = () => {
   exportCheckedIds.value = assets.value.map((asset) => asset.id)
 }
 
-const toExportPayload = (asset: MockAsset) => ({
+const toExportPayload = (asset: AssetRecord) => ({
   username: asset.username,
   ip: asset.host,
   label: asset.title,
@@ -1458,90 +1493,23 @@ const readFileAsText = (file: File) =>
     reader.readAsText(file, 'utf-8')
   })
 
-const normalizeImportItem = (raw: any, index: number): ImportPreviewAsset | null => {
-  if (!raw || typeof raw !== 'object') return null
-  const host = String(raw.ip || raw.host || raw.address || '').trim()
-  const username = String(raw.username || raw.user || 'root').trim()
-  if (!host || !username) return null
-  const title = String(raw.label || raw.title || raw.name || host).trim()
-  const group = String(raw.group_name || raw.group || 'Imported').trim()
-  const port = Number(raw.port) || 22
-  const authType = raw.auth_type === 'keyBased' || raw.authType === 'keyBased' ? 'keyBased' : 'password'
-  const assetType = raw.asset_type === 'organization' || raw.asset_type === 'switch' ? raw.asset_type : 'person'
-  const duplicate = assets.value.find((asset) => asset.host === host && asset.username === username && asset.port === port)
+const toImportPreviewAsset = (draft: ImportedAssetDraft, index: number): ImportPreviewAsset => {
+  const duplicate = assets.value.find((asset) => asset.host === draft.host && asset.username === draft.username && asset.port === draft.port)
   return {
-    previewId: `import-${index}-${host}-${port}`,
+    previewId: `import-${index}-${draft.host}-${draft.port}`,
     duplicateId: duplicate?.id,
-    title,
-    host,
-    username,
-    group,
-    port,
-    auth_type: authType,
-    asset_type: assetType,
-    comment: String(raw.comment || raw.description || '')
+    title: draft.title,
+    host: draft.host,
+    username: draft.username,
+    group: draft.group,
+    port: draft.port,
+    auth_type: draft.auth_type,
+    asset_type: draft.asset_type,
+    comment: draft.comment,
+    password: draft.password,
+    needProxy: draft.needProxy,
+    proxyName: draft.proxyName
   }
-}
-
-const parseJsonImport = (content: string) => {
-  const parsed = JSON.parse(content)
-  const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.assets) ? parsed.assets : []
-  return rows.map(normalizeImportItem).filter(Boolean) as ImportPreviewAsset[]
-}
-
-const parseKeyValueSession = (lines: string[], fallbackName: string) => {
-  const raw: Record<string, string> = { label: fallbackName }
-  for (const line of lines) {
-    const equalIndex = line.indexOf('=')
-    if (equalIndex < 0) continue
-    const key = line.slice(0, equalIndex).trim().replace(/^[SD]:/, '').replace(/"/g, '').toLowerCase()
-    const value = line.slice(equalIndex + 1).trim().replace(/^"|"$/g, '')
-    if (!value) continue
-    if (['host', 'hostname', 'ip', 'address'].includes(key)) raw.ip = value
-    if (['username', 'user', 'user_name'].includes(key)) raw.username = value
-    if (['port'].includes(key)) raw.port = value
-    if (['description', 'name', 'label'].includes(key)) raw.label = value
-    if (key.includes('auth') && value.toLowerCase().includes('public')) raw.auth_type = 'keyBased'
-    if (key.includes('identity') || key.includes('privatekey')) raw.auth_type = 'keyBased'
-  }
-  return raw
-}
-
-const parseTextImport = (content: string, fileName: string) => {
-  const sessions: ImportPreviewAsset[] = []
-  const blocks = content
-    .split(/\n\s*\n|\r?\n(?=\[)/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-  if (blocks.some((block) => block.includes('='))) {
-    blocks.forEach((block, index) => {
-      const lines = block.split(/\r?\n/).map((line) => line.trim())
-      const parsed = normalizeImportItem(parseKeyValueSession(lines, fileName.replace(/\.[^.]+$/, '')), index)
-      if (parsed) sessions.push(parsed)
-    })
-  }
-  if (sessions.length) return sessions
-  return content
-    .split(/\r?\n/)
-    .map((line, index) => {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) return null
-      const parts = trimmed.split(/[,;\t]/).map((part) => part?.trim())
-      const [titlePart, hostPart, userPart, groupPart, portPart] = parts
-      const sshMatch = trimmed.match(/(?:ssh\s+)?(?:(?<user>[^@\s]+)@)?(?<host>[a-zA-Z0-9_.-]+)(?::(?<port>\d+))?/)
-      const host = hostPart || sshMatch?.groups?.host || titlePart
-      return normalizeImportItem(
-        {
-          label: titlePart || host,
-          ip: host,
-          username: userPart || sshMatch?.groups?.user || 'root',
-          group_name: groupPart || 'Imported',
-          port: portPart || sshMatch?.groups?.port || 22
-        },
-        index
-      )
-    })
-    .filter(Boolean) as ImportPreviewAsset[]
 }
 
 const handleAssetImportFile = async (event: Event) => {
@@ -1550,8 +1518,7 @@ const handleAssetImportFile = async (event: Event) => {
   if (!file) return
   try {
     const content = await readFileAsText(file)
-    const ext = file.name.split('.').pop()?.toLowerCase()
-    const preview = ext === 'json' ? parseJsonImport(content) : parseTextImport(content, file.name)
+    const preview = parseAssetImportContent(content, file.name).map(toImportPreviewAsset)
     if (!preview.length) {
       importNotice.value = '导入文件没有可识别的主机。'
       return
@@ -1570,11 +1537,9 @@ const closeImportPreview = () => {
   importPreviewAssets.value = []
 }
 
-const importPreviewToAsset = (item: ImportPreviewAsset, existing?: MockAsset): MockAsset => {
-  const generatedId = `asset-import-${Date.now()}-${item.previewId}`
+const importPreviewToAsset = (item: ImportPreviewAsset, existing?: AssetRecord): AiopsAssetInput => {
   return {
-    id: existing?.id || generatedId,
-    uuid: existing?.uuid || generatedId,
+    ...(existing ? { id: existing.id } : {}),
     name: item.title,
     title: item.title,
     host: item.host,
@@ -1588,28 +1553,25 @@ const importPreviewToAsset = (item: ImportPreviewAsset, existing?: MockAsset): M
     asset_type: item.asset_type,
     auth_type: item.auth_type,
     comment: item.comment,
+    password: item.password,
+    needProxy: item.needProxy,
+    proxyName: item.proxyName,
     data_source: 'manual'
   }
 }
 
-const confirmImportAssets = (overwrite: boolean) => {
+const confirmImportAssets = async (overwrite: boolean) => {
   let imported = 0
   let skipped = 0
-  const nextAssets = [...assets.value]
   for (const item of importPreviewAssets.value) {
-    const existingIndex = item.duplicateId ? nextAssets.findIndex((asset) => asset.id === item.duplicateId) : -1
-    if (existingIndex >= 0 && !overwrite) {
+    const existing = item.duplicateId ? assets.value.find((asset) => asset.id === item.duplicateId) : undefined
+    if (existing && !overwrite) {
       skipped++
       continue
     }
-    if (existingIndex >= 0) {
-      nextAssets[existingIndex] = importPreviewToAsset(item, nextAssets[existingIndex])
-    } else {
-      nextAssets.push(importPreviewToAsset(item))
-    }
+    await saveAssetRecord(importPreviewToAsset(item, existing))
     imported++
   }
-  assets.value = nextAssets
   importNotice.value = skipped ? `已导入 ${imported} 个主机，跳过 ${skipped} 个重复主机。` : `已导入 ${imported} 个主机。`
   closeImportPreview()
 }
@@ -1622,19 +1584,19 @@ const openNewKeyPanel = () => {
   keyEditorOpen.value = true
 }
 
-const editKey = (keyId: string | null) => {
+const editKey = async (keyId: string | null) => {
   if (!keyId) return
-  const key = keychains.value.find((item) => item.id === keyId)
+  const key = await window.aiops?.getKeychain?.(keyId)
   if (!key) return
   keyEditMode.value = true
   keyFormError.value = ''
   keyImportNotice.value = ''
-  Object.assign(keyForm, { id: key.id, name: key.name, privateKey: key.privateKey, publicKey: key.publicKey, passphrase: key.passphrase })
+  Object.assign(keyForm, { id: key.id, name: key.name, privateKey: key.privateKey || '', publicKey: key.publicKey, passphrase: key.passphrase || '' })
   keyEditorOpen.value = true
   keyContextMenuId.value = null
 }
 
-const detectKeyType = (privateKey = '', publicKey = ''): 'rsa' | 'ed25519' | 'ecdsa' => {
+const detectKeyType = (privateKey = '', publicKey = ''): AiopsKeychainType => {
   const publicAlgorithm = publicKey.trim().split(/\s+/)[0]?.toLowerCase()
   if (publicAlgorithm === 'ssh-ed25519') return 'ed25519'
   if (publicAlgorithm === 'ssh-rsa') return 'rsa'
@@ -1673,26 +1635,37 @@ const validateKeyForm = () => {
   return ''
 }
 
-const submitKeyForm = () => {
+const saveKeychainRecord = async (input: AiopsKeychainInput) => {
+  const result = await window.aiops?.saveKeychain?.(input)
+  if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '密钥保存失败')
+  await refreshKeychains()
+  return result.data
+}
+
+const submitKeyForm = async () => {
   const error = validateKeyForm()
   if (error) {
     keyFormError.value = error
     return
   }
   const name = keyForm.name.trim()
-  const row: KeychainItem = {
-    id: keyForm.id || `key-local-${Date.now()}`,
+  const row: AiopsKeychainInput = {
+    id: keyForm.id || undefined,
     name,
     type: detectKeyType(keyForm.privateKey, keyForm.publicKey),
     privateKey: keyForm.privateKey.trim(),
     publicKey: keyForm.publicKey.trim(),
     passphrase: keyForm.passphrase
   }
-  keychains.value = keyEditMode.value && keyForm.id ? keychains.value.map((key) => (key.id === keyForm.id ? row : key)) : [...keychains.value, row]
-  selectedKeyId.value = row.id
-  keyFormError.value = ''
-  keyImportNotice.value = `${keyEditMode.value ? '已保存' : '已创建'} ${row.name}。`
-  keyEditorOpen.value = false
+  try {
+    const saved = await saveKeychainRecord(row)
+    selectedKeyId.value = saved.id
+    keyFormError.value = ''
+    keyImportNotice.value = `${keyEditMode.value ? '已保存' : '已创建'} ${saved.name}。`
+    keyEditorOpen.value = false
+  } catch (saveError) {
+    keyFormError.value = saveError instanceof Error ? saveError.message : '密钥保存失败。'
+  }
 }
 
 const removeKey = (keyId: string | null) => {
@@ -1704,9 +1677,15 @@ const removeKey = (keyId: string | null) => {
   confirmState.title = '删除密钥'
   confirmState.message = `确定删除密钥 ${key.name}？`
   confirmState.expectedText = key.name
-  confirmState.action = () => {
-    keychains.value = keychains.value.filter((item) => item.id !== keyId)
+  confirmState.action = async () => {
+    const result = await window.aiops?.deleteKeychain?.(keyId)
+    if (!result?.ok) {
+      keyImportNotice.value = result?.errorMessage || '密钥删除失败。'
+      return
+    }
+    await refreshKeychains()
     selectedKeyId.value = selectedKeyId.value === keyId ? null : selectedKeyId.value
+    form.keyId = form.keyId === keyId ? '' : form.keyId
     keyImportNotice.value = `已删除密钥 ${key.name}。`
   }
   confirmInput.value = ''
@@ -1776,9 +1755,9 @@ const closeConfirm = () => {
   confirmInput.value = ''
 }
 
-const runConfirmAction = () => {
+const runConfirmAction = async () => {
   if (confirmState.expectedText && confirmInput.value !== confirmState.expectedText) return
-  confirmState.action?.()
+  await confirmState.action?.()
   closeConfirm()
 }
 
@@ -1819,4 +1798,13 @@ watch(
   },
   { immediate: true }
 )
+
+onMounted(() => {
+  refreshAssets().catch((error) => {
+    importNotice.value = error instanceof Error ? error.message : '资产加载失败。'
+  })
+  refreshKeychains().catch((error) => {
+    keyImportNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
+  })
+})
 </script>

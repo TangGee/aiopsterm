@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
+import { pathToFileURL } from 'url'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { watch } from 'fs'
@@ -7,25 +8,216 @@ import type { FSWatcher } from 'fs'
 import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'fs/promises'
 import Store from 'electron-store'
 import AdmZip from 'adm-zip'
+import {
+  deleteAsset,
+  deleteAssetFolder,
+  deleteKeychain,
+  getAsset,
+  getAssetSecret,
+  getKeychain,
+  getKeychainSecret,
+  listAssets,
+  listKeychains,
+  refreshOrganizationAssets,
+  saveAsset,
+  saveAssetFolder,
+  saveKeychain
+} from './backend/assets'
+import { createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
+import { listAiContextCatalog } from './backend/aiContext'
+import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
+import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
+import {
+  createChatConversation,
+  deleteChatConversation,
+  listChatConversations,
+  restoreChatConversation,
+  saveChatMessageMetadata,
+  updateChatConversation
+} from './backend/chatHistory'
+import {
+  connectDatabaseConnection,
+  createDatabaseAiDrawerRequest,
+  createDatabaseAiPaneRequest,
+  createDatabaseCatalog,
+  createDatabaseGroup,
+  deleteDatabaseGroup,
+  disconnectDatabaseConnection,
+  executeDatabaseSql,
+  generateDatabaseAiDrawerResponse,
+  generateDatabaseAiPaneResponse,
+  getDatabaseTableDdl,
+  listDatabaseCatalog,
+  moveDatabaseConnection,
+  moveDatabaseGroup,
+  mutateDatabaseTable,
+  queryDatabaseTable,
+  refreshDatabaseConnection,
+  removeDatabaseConnection,
+  renameDatabaseGroup,
+  saveDatabaseConnection,
+  testDatabaseConnection
+} from './backend/database'
+import {
+  cancelExtensionInstall,
+  installExtensionPackage,
+  installExtensionPlugin,
+  listExtensionPlugins,
+  openExtensionSubscription,
+  uninstallExtensionPlugin,
+  updateExtensionPlugin
+} from './backend/extensions'
+import {
+  cancelFileTransferTask,
+  deleteFileSession,
+  deleteFileSessionFolder,
+  listFileSessionCatalog,
+  listFileTransferTasks,
+  listFiles as listBackendFiles,
+  mutateFileEntry,
+  recordFileTransferTask,
+  readFileContent,
+  saveFileSession,
+  saveFileSessionFolder,
+  saveFileSessionFromSftpPayload,
+  transferFileEntry,
+  updateFileSession,
+  writeFileContent
+} from './backend/files'
+import {
+  addKubernetesCluster,
+  connectKubernetesCluster,
+  closeKubernetesTerminal,
+  createKubernetesTerminal,
+  deleteKubernetesCluster,
+  disconnectKubernetesCluster,
+  executeKubernetesCommand,
+  listKubernetesCatalog,
+  resizeKubernetesTerminal,
+  switchKubernetesContext,
+  syncKubernetesBastion,
+  updateKubernetesCluster
+} from './backend/kubernetes'
+import { checkModelProvider, listAiModels } from './backend/modelProviders'
+import {
+  deleteQuickCommandGroup,
+  deleteQuickCommandSnippet,
+  getQuickCommands,
+  reorderQuickCommands,
+  saveQuickCommandGroup,
+  saveQuickCommandSnippet,
+  saveQuickCommands
+} from './backend/quickCommands'
+import {
+  deleteSettingsRule,
+  getSettingsPreferences,
+  resetSettingsShortcuts,
+  saveSettingsRule,
+  saveSettingsShortcut
+} from './backend/settingsPreferences'
+import { generateTerminalCommand, getTerminalCommandSuggestions } from './backend/terminalSuggestions'
+import { createSshTerminalConnectionInfo, createTerminalWriteResult } from './backend/terminal'
+import {
+  bindUserContact,
+  getUserAccount,
+  loginUserAccount,
+  logoutUserAccount,
+  openUserLogin,
+  resetUserPassword,
+  revokeTrustedDevice,
+  sendUserContactCode,
+  sendUserLoginCode,
+  skipUserLogin,
+  updateUserProfile
+} from './backend/userAccount'
+import { transcribeVoiceInput } from './backend/voice'
+import {
+  aiopstermProtocolPrefix,
+  aiopstermProtocolScheme,
+  parseAiopstermDeepLink,
+  type AiopstermDeepLinkPayload
+} from '@shared/deepLink'
 import type {
   AliasCommandConfig,
+  AliasCommandDeleteInput,
+  AliasCommandSaveInput,
+  AiChatExchangeRequestInput,
+  AiChatMessageMetadataInput,
+  AiChatResponseInput,
+  AppUpdateProgressEvent,
+  AiChatConversationUpdateInput,
+  AiopsAssetInput,
+  AiopsCustomFolderSaveInput,
+  AiopsKeychainInput,
+  AiopsOrganizationAssetRefreshInput,
+  AiopsUserCodeInput,
+  AiopsUserContactBindInput,
+  AiopsUserLoginInput,
+  AiopsUserPasswordInput,
+  AiopsUserProfileUpdateInput,
   EditorUserConfig,
+  DatabaseConnectionSaveInput,
+  DatabaseConnectionTestInput,
+  DatabaseCreateDatabaseInput,
+  DatabaseConnectionMoveInput,
+  DatabaseGroupCreateInput,
+  DatabaseGroupUpdateInput,
+  DatabaseAiDrawerRequestInput,
+  DatabaseAiDrawerResponseInput,
+  DatabaseAiPaneRequestInput,
+  DatabaseAiPaneResponseInput,
+  DatabaseSqlExecuteInput,
+  DatabaseTableDdlInput,
+  DatabaseTableMutationInput,
+  DatabaseTableQueryInput,
+  ExtensionInstallProgress,
+  ExtensionPackageInstallInput,
+  ExtensionPluginOperationInput,
+  ExtensionSubscriptionInput,
+  FileContentOptions,
+  FileEntryMutation,
+  FileListOptions,
+  FileSessionFolderSaveInput,
+  FileSessionInfo,
+  FileSessionPatch,
+  FileTransferTaskCancelInput,
+  FileTransferTaskRecordInput,
+  FileTransferOperation,
   KeywordHighlightUserConfig,
   KnowledgeBaseNodeConfig,
+  KnowledgeBaseSearchResult,
+  KnowledgeBaseSearchStatus,
+  KubernetesClusterInput,
+  KubernetesClusterUpdateInput,
+  KubernetesCommandInput,
+  KubernetesTerminalCreateInput,
   KnowledgeBaseUserConfig,
   McpConfigFile,
   McpServerUserConfig,
   McpToolStatesUserConfig,
+  ModelProviderCheckInput,
   ModelSettingsUserConfig,
+  QuickCommandGroupSaveInput,
+  QuickCommandReorderInput,
+  QuickCommandSnippetSaveInput,
+  QuickCommandsUserConfig,
   SecurityUserConfig,
+  SettingsPreferencesSeedInput,
+  SettingsRuleSaveInput,
+  SettingsShortcutSaveInput,
   ShortcutUserConfig,
   SkillMetadataConfig,
   SkillUserConfig,
   SshAgentKeyConfig,
   SshProxyConfig,
+  TerminalCommandGenerationInput,
+  TerminalCommandSuggestionContext,
+  TerminalCreateOptions,
   UserConfig,
+  VoiceTranscriptionInput,
   UserRuleConfig
 } from '@shared/preload'
+import type { ClientChannel } from 'ssh2'
 
 type PtyProcess = {
   write(data: string): void
@@ -41,11 +233,26 @@ type PtyModule = {
 
 type TerminalSession = {
   id: string
-  process: ChildProcessWithoutNullStreams | PtyProcess
+  process: ChildProcessWithoutNullStreams | PtyProcess | SshShellSession
   shell: string
   cwd: string
   window: BrowserWindow
-  kind: 'pty' | 'process'
+  kind: 'pty' | 'process' | 'ssh'
+}
+
+type SshShellSession = {
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  kill(): void
+}
+
+type Ssh2Client = {
+  on(event: 'ready', listener: () => void): Ssh2Client
+  on(event: 'error', listener: (error: Error) => void): Ssh2Client
+  on(event: 'close' | 'end', listener: () => void): Ssh2Client
+  connect(config: Record<string, unknown>): void
+  shell(options: Record<string, unknown>, callback: (error: Error | undefined, stream: ClientChannel) => void): void
+  end(): void
 }
 
 type SkillImportResult = {
@@ -159,7 +366,7 @@ const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
       size: 18432
     }
   ],
-  usedBytes: 350208,
+  usedBytes: 374784,
   totalBytes: 1024 * 1024 * 1024
 }
 
@@ -169,15 +376,16 @@ const defaultConfig: UserConfig = {
   defaultMode: 'terminal',
   leftPanelOpen: true,
   rightPanelOpen: true,
-  modelProvider: 'mock',
+  modelProvider: 'local',
   modelEndpoint: '',
-  modelName: 'mock-ops-agent',
+  modelName: 'aiopsterm-local-agent',
   watermark: 'open',
   background: {
     mode: 'none',
     image: '',
     opacity: 0.15,
-    brightness: 0.45
+    brightness: 0.45,
+    lastCustomImage: ''
   },
   terminal: {
     terminalType: 'xterm-256color',
@@ -286,7 +494,7 @@ const defaultConfig: UserConfig = {
     options: [
       { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
       { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-      { name: 'ops-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
+      { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
       { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
     ]
   },
@@ -387,6 +595,7 @@ const store = new Store<{ config: UserConfig }>({
 
 const sessions = new Map<string, TerminalSession>()
 let mainWindow: BrowserWindow | null = null
+const pendingDeepLinks: AiopstermDeepLinkPayload[] = []
 let securityConfigWatcher: FSWatcher | null = null
 let keywordHighlightConfigWatcher: FSWatcher | null = null
 let mcpConfigWatcher: FSWatcher | null = null
@@ -703,6 +912,63 @@ const rendererUrl = process.env.ELECTRON_RENDERER_URL
 app.setName('aiopsterm')
 app.setAppUserModelId('app.aiopsterm.desktop')
 
+const focusWindow = (targetWindow = mainWindow || BrowserWindow.getAllWindows()[0]) => {
+  if (!targetWindow || targetWindow.isDestroyed()) return null
+  if (targetWindow.isMinimized()) targetWindow.restore()
+  targetWindow.focus()
+  return targetWindow
+}
+
+const dispatchDeepLinkToRenderer = (payload: AiopstermDeepLinkPayload) => {
+  const targetWindow = focusWindow()
+  if (!targetWindow) return false
+  targetWindow.webContents.send('app:deep-link', payload)
+  return true
+}
+
+const handleDeepLinkUrl = (rawUrl: string) => {
+  const parsed = parseAiopstermDeepLink(rawUrl)
+  if (!parsed.valid) {
+    return { success: false, reason: parsed.reason }
+  }
+
+  const payload = {
+    ...parsed.payload,
+    acceptedAt: Date.now()
+  }
+  pendingDeepLinks.push(payload)
+  dispatchDeepLinkToRenderer(payload)
+  return { success: true, payload }
+}
+
+const findDeepLinkArg = (argv: string[]) => argv.find((arg) => typeof arg === 'string' && arg.startsWith(aiopstermProtocolPrefix))
+
+const registerDeepLinkProtocol = () => {
+  if (!app.isDefaultProtocolClient(aiopstermProtocolScheme)) {
+    app.setAsDefaultProtocolClient(aiopstermProtocolScheme)
+  }
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+registerDeepLinkProtocol()
+if (!gotSingleInstanceLock) {
+  const deepLinkArg = findDeepLinkArg(process.argv)
+  if (deepLinkArg) handleDeepLinkUrl(deepLinkArg)
+  app.quit()
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    focusWindow()
+    const deepLinkArg = findDeepLinkArg(commandLine)
+    if (deepLinkArg) handleDeepLinkUrl(deepLinkArg)
+  })
+}
+
+app.on('open-url', (event, url) => {
+  if (!url.startsWith(aiopstermProtocolPrefix)) return
+  event.preventDefault()
+  handleDeepLinkUrl(url)
+})
+
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1344,
@@ -746,9 +1012,24 @@ const getDefaultShell = () => {
   return process.env.SHELL || '/bin/bash'
 }
 
+const normalizeModelProvider = (value: unknown): UserConfig['modelProvider'] => {
+  const provider = String(value || '').trim()
+  if (!provider || provider === 'mock' || provider === 'local') return 'local'
+  if (provider === 'litellm' || provider === 'openai-compatible' || provider === 'ollama' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic') return provider
+  return defaultConfig.modelProvider
+}
+
+const normalizeModelName = (value: unknown) => {
+  const modelName = String(value || '').trim()
+  if (!modelName || modelName === 'mock-ops-agent' || modelName === 'ops-local-agent' || modelName === 'aiopsterm-local-agent') return defaultConfig.modelName
+  return modelName
+}
+
 const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
+  modelProvider: normalizeModelProvider(patch.modelProvider || base.modelProvider),
+  modelName: normalizeModelName(patch.modelName || base.modelName),
   background: {
     ...base.background,
     ...(patch.background || {})
@@ -820,6 +1101,8 @@ const getSkillFilePath = (skillDirName: string) => join(getSkillsUserPath(), ski
 const getKnowledgeBasePath = () => join(app.getPath('userData'), 'knowledgebase')
 const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-knowledge-initialized')
 const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
+const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
+const getLogDirPath = () => join(app.getPath('userData'), 'logs')
 
 const blockedKnowledgeImportExtensions = new Set([
   '.exe',
@@ -858,8 +1141,45 @@ const blockedKnowledgeImportExtensions = new Set([
 ])
 
 const knowledgeImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
+const knowledgeSearchExtensions = new Set([
+  '.md',
+  '.markdown',
+  '.txt',
+  '.log',
+  '.json',
+  '.jsonc',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.ini',
+  '.conf',
+  '.cfg',
+  '.csv',
+  '.tsv',
+  '.sql',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.py',
+  '.js',
+  '.ts',
+  '.go',
+  '.rs',
+  '.java',
+  '.c',
+  '.cpp',
+  '.h',
+  '.html',
+  '.css',
+  '.xml'
+])
 const maxKnowledgeImportBytes = 10 * 1024 * 1024
+const maxKnowledgeSearchFileBytes = 2 * 1024 * 1024
+const maxKnowledgeSearchQueryLength = 512
 const maxChatAttachmentBytes = 10 * 1024 * 1024
+const maxCustomBackgroundBytes = 20 * 1024 * 1024
+const maxLocalTextReadBytes = 2 * 1024 * 1024
+const allowedCustomBackgroundExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
 const allowedChatAttachmentExtensions = new Set([
   '.txt',
   '.md',
@@ -886,11 +1206,42 @@ const allowedChatAttachmentExtensions = new Set([
 
 const normalizeKnowledgeRelPath = (relPath: string) => relPath.replace(/\\/g, '/').replace(/^\/+/, '')
 
+type KnowledgeSearchChunk = {
+  id: string
+  path: string
+  startLine: number
+  endLine: number
+  text: string
+  normalizedText: string
+  tokens: string[]
+}
+
+type KnowledgeSearchIndex = {
+  chunks: KnowledgeSearchChunk[]
+  status: KnowledgeBaseSearchStatus
+}
+
+let knowledgeSearchIndex: KnowledgeSearchIndex | null = null
+
+const invalidateKnowledgeSearchIndex = () => {
+  knowledgeSearchIndex = null
+}
+
 const normalizeChatAttachmentTaskId = (taskId: string) => taskId.trim().replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 96)
 
 const sanitizeChatAttachmentName = (name: string) => {
   const cleaned = basename(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim()
   return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : `attachment-${Date.now()}.txt`
+}
+
+const sanitizeCustomBackgroundName = (name: string) => {
+  const ext = extname(name).toLowerCase()
+  const base = basename(name, ext)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+  return `${base || `background-${Date.now()}`}${ext}`
 }
 
 const isSafeKnowledgeBasename = (name: string) => {
@@ -948,6 +1299,149 @@ const getKnowledgeMimeType = (relPath: string) => {
     '.svg': 'image/svg+xml'
   }
   return mimeTypes[ext] || 'application/octet-stream'
+}
+
+const isKnowledgeSearchableFile = (relPath: string, size: number) => {
+  const ext = extname(relPath).toLowerCase()
+  return size <= maxKnowledgeSearchFileBytes && knowledgeSearchExtensions.has(ext)
+}
+
+const normalizeKnowledgeSearchText = (value: string) => value.toLowerCase().normalize('NFKC')
+
+const tokenizeKnowledgeSearch = (value: string) =>
+  Array.from(new Set(normalizeKnowledgeSearchText(value).match(/[\p{L}\p{N}_-]+/gu) || [])).filter((token) => token.length > 1)
+
+const createKnowledgeSearchSnippet = (text: string, queryTokens: string[]) => {
+  const compact = text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+  if (!compact) return ''
+  const normalized = normalizeKnowledgeSearchText(compact)
+  const firstMatch = queryTokens.reduce((best, token) => {
+    const index = normalized.indexOf(token)
+    return index === -1 ? best : Math.min(best, index)
+  }, Number.POSITIVE_INFINITY)
+  if (!Number.isFinite(firstMatch)) return compact.slice(0, 260)
+  const start = Math.max(0, firstMatch - 80)
+  const end = Math.min(compact.length, firstMatch + 180)
+  return `${start > 0 ? '...' : ''}${compact.slice(start, end)}${end < compact.length ? '...' : ''}`
+}
+
+const chunkKnowledgeSearchText = (relPath: string, content: string): KnowledgeSearchChunk[] => {
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const chunks: KnowledgeSearchChunk[] = []
+  const maxLines = 36
+  const overlapLines = 6
+  for (let start = 0; start < lines.length; start += maxLines - overlapLines) {
+    const slice = lines.slice(start, start + maxLines)
+    const text = slice.join('\n').trim()
+    if (!text) continue
+    chunks.push({
+      id: `${relPath}:${start + 1}`,
+      path: relPath,
+      startLine: start + 1,
+      endLine: Math.min(lines.length, start + slice.length),
+      text,
+      normalizedText: normalizeKnowledgeSearchText(text),
+      tokens: tokenizeKnowledgeSearch(text)
+    })
+    if (start + maxLines >= lines.length) break
+  }
+  return chunks
+}
+
+const walkKnowledgeSearchFiles = async (relDir = ''): Promise<Array<{ relPath: string; size: number }>> => {
+  const files: Array<{ relPath: string; size: number }> = []
+  const entries = await listKnowledgeDir(relDir)
+  for (const entry of entries) {
+    if (entry.type === 'dir') {
+      files.push(...(await walkKnowledgeSearchFiles(entry.relPath)))
+    } else if (isKnowledgeSearchableFile(entry.relPath, entry.size || 0)) {
+      files.push({ relPath: entry.relPath, size: entry.size || 0 })
+    }
+  }
+  return files
+}
+
+const buildKnowledgeSearchIndex = async (): Promise<KnowledgeSearchIndex> => {
+  await ensureKnowledgeBaseDirectory()
+  const files = await walkKnowledgeSearchFiles('')
+  const chunks: KnowledgeSearchChunk[] = []
+  for (const file of files) {
+    const { absPath } = resolveKnowledgePath(file.relPath)
+    try {
+      const content = await readFile(absPath, 'utf-8')
+      chunks.push(...chunkKnowledgeSearchText(file.relPath, content))
+    } catch {
+      // Ignore unreadable/binary-like text files; the tree and editor read paths still surface file errors.
+    }
+  }
+  return {
+    chunks,
+    status: {
+      totalFiles: files.length,
+      totalChunks: chunks.length,
+      provider: 'aiopsterm-local',
+      model: 'lexical',
+      updatedAt: Date.now()
+    }
+  }
+}
+
+const getKnowledgeSearchIndex = async () => {
+  if (!knowledgeSearchIndex) {
+    knowledgeSearchIndex = await buildKnowledgeSearchIndex()
+  }
+  return knowledgeSearchIndex
+}
+
+const scoreKnowledgeChunk = (chunk: KnowledgeSearchChunk, query: string, queryTokens: string[]) => {
+  const normalizedQuery = normalizeKnowledgeSearchText(query)
+  let matchCount = 0
+  let score = 0
+  if (chunk.normalizedText.includes(normalizedQuery)) {
+    matchCount += 1
+    score += 1.5
+  }
+  for (const token of queryTokens) {
+    const occurrences = chunk.normalizedText.split(token).length - 1
+    if (occurrences <= 0) continue
+    matchCount += occurrences
+    score += Math.min(occurrences, 4) * (chunk.tokens.includes(token) ? 0.55 : 0.3)
+  }
+  const fileName = normalizeKnowledgeSearchText(basename(chunk.path))
+  if (queryTokens.some((token) => fileName.includes(token))) {
+    score += 0.35
+  }
+  return { score, matchCount }
+}
+
+const searchKnowledgeIndex = async (query: string, options?: { maxResults?: number; minScore?: number }): Promise<KnowledgeBaseSearchResult[]> => {
+  const normalizedQuery = typeof query === 'string' ? query.trim() : ''
+  if (!normalizedQuery || normalizedQuery.length > maxKnowledgeSearchQueryLength) return []
+  const queryTokens = tokenizeKnowledgeSearch(normalizedQuery)
+  if (!queryTokens.length) return []
+  const maxResults = Math.min(Math.max(Math.floor(options?.maxResults || 20), 1), 50)
+  const minScore = Math.max(options?.minScore ?? 0.15, 0)
+  const index = await getKnowledgeSearchIndex()
+  return index.chunks
+    .map((chunk) => {
+      const scored = scoreKnowledgeChunk(chunk, normalizedQuery, queryTokens)
+      return {
+        path: chunk.path,
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        score: Number(scored.score.toFixed(4)),
+        snippet: createKnowledgeSearchSnippet(chunk.text, queryTokens),
+        matchCount: scored.matchCount
+      }
+    })
+    .filter((result) => result.score >= minScore && result.matchCount > 0)
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine)
+    .slice(0, maxResults)
 }
 
 const knowledgeSeedContent = (node: KnowledgeBaseNodeConfig) => {
@@ -1058,6 +1552,7 @@ const syncKnowledgeBaseConfigFromDisk = async () => {
     totalBytes: config.knowledgeBase?.totalBytes || defaultKnowledgeBaseConfig.totalBytes
   }
   store.set('config', mergeConfig(config, { knowledgeBase: nextKnowledgeBase }))
+  invalidateKnowledgeSearchIndex()
   return nextKnowledgeBase
 }
 
@@ -1458,6 +1953,35 @@ const syncMcpConfigFromContent = (content: string) => {
   store.set('config', mergeConfig(current, { mcpServers: nextServers, mcpToolStates: nextToolStates }))
 }
 
+const setMcpToolState = (serverName: string, toolName: string, enabled: boolean) => {
+  const normalizedServerName = serverName.trim()
+  const normalizedToolName = toolName.trim()
+  if (!normalizedServerName || !normalizedToolName) {
+    throw new Error('MCP server and tool names are required')
+  }
+  const current = getConfig()
+  const servers = cloneMcpServers(current.mcpServers) || []
+  const server = servers.find((item) => item.name === normalizedServerName)
+  if (!server) {
+    throw new Error(`MCP server not found: ${normalizedServerName}`)
+  }
+  const tool = server.tools.find((item) => item.name === normalizedToolName)
+  if (!tool) {
+    throw new Error(`MCP tool not found: ${normalizedServerName}:${normalizedToolName}`)
+  }
+  tool.enabled = enabled
+  store.set(
+    'config',
+    mergeConfig(current, {
+      mcpServers: servers,
+      mcpToolStates: {
+        ...(current.mcpToolStates || {}),
+        [`${normalizedServerName}:${normalizedToolName}`]: enabled
+      }
+    })
+  )
+}
+
 const broadcastMcpConfigChanged = (content: string) => {
   BrowserWindow.getAllWindows().forEach((window) => {
     if (!window.isDestroyed()) {
@@ -1551,10 +2075,209 @@ const loadPty = (): PtyModule | null => {
   }
 }
 
+const loadSsh2 = (): { Client: new () => Ssh2Client } | null => {
+  try {
+    return require('ssh2') as { Client: new () => Ssh2Client }
+  } catch {
+    return null
+  }
+}
+
+const resolveSshTarget = (options: TerminalCreateOptions) => {
+  const asset = options.assetId ? getAsset(options.assetId) : null
+  const secret = options.assetId ? getAssetSecret(options.assetId) : {}
+  const keychainSecret = asset?.keychainId ? getKeychainSecret(asset.keychainId) : {}
+  const host = options.ssh?.host || asset?.host || ''
+  const username = options.ssh?.username || asset?.username || ''
+  const port = Number(options.ssh?.port || asset?.port || 22)
+  return {
+    asset,
+    host,
+    username,
+    port,
+    password: options.ssh?.password || secret.password,
+    privateKey: options.ssh?.privateKey || secret.privateKey || keychainSecret.privateKey,
+    passphrase: options.ssh?.passphrase || secret.passphrase || keychainSecret.passphrase,
+    title: options.title || asset?.name || asset?.title || host
+  }
+}
+
+const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
+  const ssh2 = loadSsh2()
+  if (!ssh2) {
+    owner.webContents.send('terminal:data', { id, data: '\n[aiopsterm] ssh2 runtime is not available. Run npm install and rebuild native modules if needed.\n' })
+    owner.webContents.send('terminal:exit', { id, code: 1 })
+    return {
+      shell: 'ssh',
+      cwd: '~',
+      session: {
+        write: () => undefined,
+        resize: () => undefined,
+        kill: () => undefined
+      } satisfies SshShellSession,
+      connection: resolveSshTarget(options)
+    }
+  }
+
+  const target = resolveSshTarget(options)
+  if (!target.host || !target.username || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) {
+    owner.webContents.send('terminal:data', { id, data: '\n[aiopsterm] SSH target requires host, username, and a valid port.\n' })
+    owner.webContents.send('terminal:exit', { id, code: 1 })
+    return {
+      shell: 'ssh',
+      cwd: '~',
+      session: {
+        write: () => undefined,
+        resize: () => undefined,
+        kill: () => undefined
+      } satisfies SshShellSession,
+      connection: target
+    }
+  }
+
+  const client = new ssh2.Client()
+  let stream: ClientChannel | null = null
+  let closed = false
+  let cols = options.cols || 100
+  let rows = options.rows || 30
+  const pendingWrites: string[] = []
+
+  const finish = (code: number | null) => {
+    if (closed) return
+    closed = true
+    sessions.delete(id)
+    owner.webContents.send('terminal:exit', { id, code })
+  }
+
+  const session: SshShellSession = {
+    write(data: string) {
+      if (closed) return
+      if (stream) {
+        stream.write(data)
+      } else {
+        pendingWrites.push(data)
+      }
+    },
+    resize(nextCols: number, nextRows: number) {
+      cols = nextCols
+      rows = nextRows
+      if (stream && typeof (stream as unknown as { setWindow?: (...args: number[]) => void }).setWindow === 'function') {
+        ;(stream as unknown as { setWindow: (...args: number[]) => void }).setWindow(rows, cols, 0, 0)
+      }
+    },
+    kill() {
+      closed = true
+      try {
+        stream?.close()
+      } catch {}
+      try {
+        client.end()
+      } catch {}
+    }
+  }
+
+  owner.webContents.send('terminal:data', {
+    id,
+    data: `[aiopsterm] connecting ${target.username}@${target.host}:${target.port}\n`
+  })
+
+  client
+    .on('ready', () => {
+      if (closed) return
+      client.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
+        if (error) {
+          owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] SSH shell failed: ${error.message}\n` })
+          finish(1)
+          return
+        }
+        stream = channel
+        owner.webContents.send('terminal:data', { id, data: `[aiopsterm] connected ${target.username}@${target.host}:${target.port}\n` })
+        while (pendingWrites.length) {
+          stream.write(pendingWrites.shift() || '')
+        }
+        channel.on('data', (chunk: Buffer | string) => owner.webContents.send('terminal:data', { id, data: chunk.toString() }))
+        channel.stderr.on('data', (chunk: Buffer | string) => owner.webContents.send('terminal:data', { id, data: chunk.toString() }))
+        channel.on('close', () => finish(0))
+      })
+    })
+    .on('error', (error) => {
+      owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] SSH connection failed: ${error.message}\n` })
+      finish(1)
+    })
+    .on('close', () => finish(null))
+
+  const connectConfig: Record<string, unknown> = {
+    host: target.host,
+    port: target.port,
+    username: target.username,
+    readyTimeout: 20000,
+    keepaliveInterval: 10000
+  }
+  if (target.password) connectConfig.password = target.password
+  if (target.privateKey) connectConfig.privateKey = target.privateKey
+  if (target.passphrase) connectConfig.passphrase = target.passphrase
+  if (!target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) connectConfig.agent = process.env.SSH_AUTH_SOCK
+  client.connect(connectConfig)
+
+  return {
+    shell: 'ssh',
+    cwd: target.username ? `/home/${target.username}` : '~',
+    session,
+    connection: target
+  }
+}
+
 const registerIpc = () => {
   ipcMain.handle('app:platform', () => process.platform)
   ipcMain.handle('app:shell', () => getDefaultShell())
-  ipcMain.handle('app:check-update', () => ({ available: false, channel: 'local' as const }))
+  ipcMain.handle('app:check-update', () => checkAppUpdate(app.getVersion()))
+  ipcMain.handle('app:download-update', (event, version: string) => {
+    const emit = (progress: AppUpdateProgressEvent) => event.sender.send('app:update-progress', progress)
+    return downloadAppUpdate({ version }, emit)
+  })
+  ipcMain.handle('app:install-update', (_event, version?: string) => installAppUpdate({ version }))
+  ipcMain.handle('chat-history:list', () => listChatConversations())
+  ipcMain.handle('chat-history:create', () => createChatConversation())
+  ipcMain.handle('chat-history:update', (_event, input: AiChatConversationUpdateInput) => updateChatConversation(input))
+  ipcMain.handle('chat-history:delete', (_event, id: string) => deleteChatConversation(id))
+  ipcMain.handle('chat-history:restore', (_event, id: string) => restoreChatConversation(id))
+  ipcMain.handle('chat-history:message-metadata', (_event, input: AiChatMessageMetadataInput) => saveChatMessageMetadata(input))
+  ipcMain.handle('ai:context-catalog', () => listAiContextCatalog())
+  ipcMain.handle('user:get-account', () => getUserAccount())
+  ipcMain.handle('user:open-login', () => openUserLogin())
+  ipcMain.handle('user:login', (_event, input: AiopsUserLoginInput) => loginUserAccount(input))
+  ipcMain.handle('user:logout', () => logoutUserAccount())
+  ipcMain.handle('user:skip-login', () => skipUserLogin())
+  ipcMain.handle('user:send-login-code', (_event, input: AiopsUserCodeInput) => sendUserLoginCode(input))
+  ipcMain.handle('user:update-profile', (_event, input: AiopsUserProfileUpdateInput) => updateUserProfile(input))
+  ipcMain.handle('user:reset-password', (_event, input: AiopsUserPasswordInput) => resetUserPassword(input))
+  ipcMain.handle('user:send-contact-code', (_event, input: AiopsUserCodeInput) => sendUserContactCode(input))
+  ipcMain.handle('user:bind-contact', (_event, input: AiopsUserContactBindInput) => bindUserContact(input))
+  ipcMain.handle('user:revoke-trusted-device', (_event, id: number) => revokeTrustedDevice(id))
+  ipcMain.handle('app:get-protocol-prefix', () => aiopstermProtocolPrefix)
+  ipcMain.handle('app:handle-protocol-url', async (_event, rawUrl: string) => handleDeepLinkUrl(rawUrl))
+  ipcMain.handle('app:consume-deep-links', async () => {
+    const queue = [...pendingDeepLinks]
+    pendingDeepLinks.length = 0
+    return queue
+  })
+  ipcMain.handle('app:open-external-url', async (_event, rawUrl: string) => {
+    const parsed = new URL(rawUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('Only http and https URLs can be opened')
+    }
+    await shell.openExternal(parsed.toString())
+  })
+  ipcMain.handle('app:open-log-dir', async () => {
+    const logDir = getLogDirPath()
+    await mkdir(logDir, { recursive: true })
+    if (process.env.NODE_ENV === 'test') {
+      return { path: logDir }
+    }
+    const result = await shell.openPath(logDir)
+    if (result) throw new Error(result)
+    return { path: logDir }
+  })
   ipcMain.handle('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
@@ -1573,6 +2296,41 @@ const registerIpc = () => {
     const next = mergeConfig(getConfig(), patch)
     store.set('config', next)
     return next
+  })
+  ipcMain.handle('settings-preferences:get', (_event, seed?: SettingsPreferencesSeedInput) => {
+    const result = getSettingsPreferences(seed || getConfig())
+    if (result.ok && result.data) {
+      store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts, rules: result.data.rules, customInstructions: '' }))
+    }
+    return result
+  })
+  ipcMain.handle('settings-preferences:save-rule', (_event, input: SettingsRuleSaveInput) => {
+    const result = saveSettingsRule(input)
+    if (result.ok && result.data) {
+      store.set('config', mergeConfig(getConfig(), { rules: result.data.rules, customInstructions: '' }))
+    }
+    return result
+  })
+  ipcMain.handle('settings-preferences:delete-rule', (_event, id: string) => {
+    const result = deleteSettingsRule(id)
+    if (result.ok && result.data) {
+      store.set('config', mergeConfig(getConfig(), { rules: result.data.rules, customInstructions: '' }))
+    }
+    return result
+  })
+  ipcMain.handle('settings-preferences:save-shortcut', (_event, input: SettingsShortcutSaveInput) => {
+    const result = saveSettingsShortcut(input)
+    if (result.ok && result.data) {
+      store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts }))
+    }
+    return result
+  })
+  ipcMain.handle('settings-preferences:reset-shortcuts', () => {
+    const result = resetSettingsShortcuts()
+    if (result.ok && result.data) {
+      store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts }))
+    }
+    return result
   })
   ipcMain.handle('security-config:path', async () => ensureSecurityConfigFile())
   ipcMain.handle('security-config:read', async () => {
@@ -1599,6 +2357,10 @@ const registerIpc = () => {
     broadcastKeywordHighlightConfigChanged(content)
   })
   ipcMain.handle('mcp-config:path', async () => ensureMcpConfigFile())
+  ipcMain.handle('mcp:get-servers', async () => {
+    await ensureMcpConfigFile()
+    return cloneMcpServers(getConfig().mcpServers) || []
+  })
   ipcMain.handle('mcp-config:read', async () => {
     const configPath = await ensureMcpConfigFile()
     return readFile(configPath, 'utf-8')
@@ -1631,6 +2393,9 @@ const registerIpc = () => {
     await writeFile(configPath, nextContent, 'utf-8')
     syncMcpConfigFromContent(nextContent)
     broadcastMcpConfigChanged(nextContent)
+  })
+  ipcMain.handle('mcp:set-tool-state', async (_event, serverName: string, toolName: string, enabled: boolean) => {
+    setMcpToolState(serverName, toolName, Boolean(enabled))
   })
   ipcMain.handle('skills:get-all', async () => syncSkillsConfigFromDisk())
   ipcMain.handle('skills:get-enabled', async () => {
@@ -1724,7 +2489,39 @@ const registerIpc = () => {
     await writeFile(result.filePath, zipBuffer)
     return { success: true, filePath: result.filePath }
   })
+  ipcMain.handle('assets:list', () => listAssets())
+  ipcMain.handle('assets:save', (_event, asset: AiopsAssetInput) => saveAsset(asset))
+  ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
+  ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))
+  ipcMain.handle('assets:folder:save', (_event, folder: AiopsCustomFolderSaveInput) => saveAssetFolder(folder))
+  ipcMain.handle('assets:folder:delete', (_event, uuid: string) => deleteAssetFolder(uuid))
+  ipcMain.handle('assets:keychains:list', () => listKeychains())
+  ipcMain.handle('assets:keychains:get', (_event, id: string) => getKeychain(id))
+  ipcMain.handle('assets:keychains:save', (_event, keychain: AiopsKeychainInput) => saveKeychain(keychain))
+  ipcMain.handle('assets:keychains:delete', (_event, id: string) => deleteKeychain(id))
+  ipcMain.handle('quick-commands:get', () => getQuickCommands())
+  ipcMain.handle('quick-commands:save', (_event, config: QuickCommandsUserConfig) => saveQuickCommands(config))
+  ipcMain.handle('quick-commands:group:save', (_event, input: QuickCommandGroupSaveInput) => saveQuickCommandGroup(input))
+  ipcMain.handle('quick-commands:group:delete', (_event, uuid: string) => deleteQuickCommandGroup(uuid))
+  ipcMain.handle('quick-commands:snippet:save', (_event, input: QuickCommandSnippetSaveInput) => saveQuickCommandSnippet(input))
+  ipcMain.handle('quick-commands:snippet:delete', (_event, id: number) => deleteQuickCommandSnippet(id))
+  ipcMain.handle('quick-commands:reorder', (_event, input: QuickCommandReorderInput) => reorderQuickCommands(input))
+  ipcMain.handle('aliases:list', (_event, query?: string) => listAliasCommands(query || ''))
+  ipcMain.handle('aliases:save', (_event, input: AliasCommandSaveInput) => saveAliasCommand(input))
+  ipcMain.handle('aliases:delete', (_event, input: AliasCommandDeleteInput) => deleteAliasCommand(input))
   ipcMain.handle('dialog:open-file', async (event, options) => {
+    if (
+      process.env.NODE_ENV === 'test' &&
+      Array.isArray(options?.properties) &&
+      options.properties.includes('openFile') &&
+      Array.isArray(options?.filters) &&
+      options.filters.some((filter: { name?: string }) => filter?.name === 'Images')
+    ) {
+      const backgroundPath = join(app.getPath('userData'), 'e2e-background.png')
+      const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+      await writeFile(backgroundPath, png1x1)
+      return { canceled: false, filePaths: [backgroundPath] }
+    }
     if (
       process.env.NODE_ENV === 'test' &&
       Array.isArray(options?.properties) &&
@@ -1735,6 +2532,34 @@ const registerIpc = () => {
       const attachmentPath = join(app.getPath('userData'), 'e2e-chat-attachment.md')
       await writeFile(attachmentPath, '# E2E chat attachment\n\nGenerated by the aiopsterm test harness.\n', 'utf-8')
       return { canceled: false, filePaths: [attachmentPath] }
+    }
+    if (
+      process.env.NODE_ENV === 'test' &&
+      Array.isArray(options?.properties) &&
+      options.properties.includes('openFile') &&
+      Array.isArray(options?.filters) &&
+      options.filters.some((filter: { name?: string }) => filter?.name === 'YAML Files')
+    ) {
+      const kubeconfigPath = join(app.getPath('userData'), 'e2e-kubeconfig.yaml')
+      await writeFile(
+        kubeconfigPath,
+        [
+          'apiVersion: v1',
+          'kind: Config',
+          'current-context: e2e/admin',
+          'clusters:',
+          '- name: e2e-cluster',
+          '  cluster:',
+          '    server: https://e2e.k8s.local:6443',
+          'contexts:',
+          '- name: e2e/admin',
+          '  context:',
+          '    cluster: e2e-cluster',
+          '    namespace: e2e'
+        ].join('\n'),
+        'utf-8'
+      )
+      return { canceled: false, filePaths: [kubeconfigPath] }
     }
     if (process.env.NODE_ENV === 'test' && Array.isArray(options?.properties) && options.properties.includes('openDirectory')) {
       const importPath = join(app.getPath('userData'), 'e2e-imported-note.md')
@@ -1750,6 +2575,39 @@ const registerIpc = () => {
     }
     const owner = BrowserWindow.fromWebContents(event.sender)
     return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+  })
+  ipcMain.handle('settings:save-custom-background', async (_event, srcAbsPath: string) => {
+    if (!srcAbsPath || typeof srcAbsPath !== 'string') throw new Error('srcAbsPath is required')
+    if (!isAbsolute(srcAbsPath)) throw new Error('srcAbsPath must be absolute')
+    const metadata = await stat(srcAbsPath)
+    if (!metadata.isFile()) throw new Error('Background source must be a file')
+    if (metadata.size > maxCustomBackgroundBytes) throw new Error('Background file too large')
+    const ext = extname(srcAbsPath).toLowerCase()
+    if (!allowedCustomBackgroundExtensions.has(ext)) throw new Error('Background file type not allowed')
+
+    const backgroundDir = getCustomBackgroundsPath()
+    await mkdir(backgroundDir, { recursive: true })
+    const finalName = await ensureUniqueKnowledgeName(backgroundDir, sanitizeCustomBackgroundName(basename(srcAbsPath)))
+    const finalPath = join(backgroundDir, finalName)
+    await cp(srcAbsPath, finalPath)
+    return {
+      filePath: finalPath,
+      url: pathToFileURL(finalPath).href,
+      name: finalName,
+      size: metadata.size
+    }
+  })
+  ipcMain.handle('files:read-local', async (_event, filePath: string) => {
+    if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
+    if (!isAbsolute(filePath)) throw new Error('filePath must be absolute')
+    const metadata = await stat(filePath)
+    if (!metadata.isFile()) throw new Error('Source must be a file')
+    if (metadata.size > maxLocalTextReadBytes) throw new Error('File too large')
+    return {
+      content: await readFile(filePath, 'utf-8'),
+      mtimeMs: metadata.mtimeMs,
+      size: metadata.size
+    }
   })
   ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => {
     if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
@@ -1977,14 +2835,45 @@ const registerIpc = () => {
     await syncKnowledgeBaseConfigFromDisk()
     return { jobId, relPath: destFolderRel }
   })
+  ipcMain.handle('kb:search', async (_event, query: string, options?: { maxResults?: number; minScore?: number }) => searchKnowledgeIndex(query, options))
+  ipcMain.handle('kb:search-status', async () => {
+    const index = await getKnowledgeSearchIndex()
+    return index.status
+  })
+  ipcMain.handle('kb:reindex', async () => {
+    knowledgeSearchIndex = await buildKnowledgeSearchIndex()
+    return {
+      files: knowledgeSearchIndex.status.totalFiles,
+      chunks: knowledgeSearchIndex.status.totalChunks
+    }
+  })
 
-  ipcMain.handle('terminal:create', (event, options: { cwd?: string; shell?: string; cols?: number; rows?: number } = {}) => {
+  ipcMain.handle('terminal:create', (event, options: TerminalCreateOptions = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner) {
       throw new Error('No owner window for terminal session')
     }
 
     const id = randomUUID()
+    if (options.kind === 'ssh' || options.ssh || options.assetId) {
+      const result = createSshTerminal(owner, id, options)
+      sessions.set(id, {
+        id,
+        process: result.session,
+        shell: result.shell,
+        cwd: result.cwd,
+        window: owner,
+        kind: 'ssh'
+      })
+      return {
+        id,
+        shell: result.shell,
+        cwd: result.cwd,
+        kind: 'ssh' as const,
+        connection: createSshTerminalConnectionInfo(id, result.connection, options)
+      }
+    }
+
     const terminalShell = options.shell || getDefaultShell()
     const cwd = options.cwd || app.getPath('home')
     const ptyModule = loadPty()
@@ -2049,53 +2938,127 @@ const registerIpc = () => {
 
   ipcMain.handle('terminal:write', (_event, id: string, data: string) => {
     const session = sessions.get(id)
-    if (!session) return
+    if (!session) return createTerminalWriteResult(id, data, false)
     if (session.kind === 'pty') {
       ;(session.process as PtyProcess).write(data)
+    } else if (session.kind === 'ssh') {
+      ;(session.process as SshShellSession).write(data)
     } else {
       ;(session.process as ChildProcessWithoutNullStreams).stdin.write(data)
     }
+    return createTerminalWriteResult(id, data, true)
   })
 
   ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) => {
     const session = sessions.get(id)
-    if (!session || session.kind !== 'pty') return
-    ;(session.process as PtyProcess).resize(cols, rows)
+    if (!session) return
+    if (session.kind === 'pty') {
+      ;(session.process as PtyProcess).resize(cols, rows)
+    } else if (session.kind === 'ssh') {
+      ;(session.process as SshShellSession).resize(cols, rows)
+    }
   })
 
   ipcMain.handle('terminal:kill', (_event, id: string) => {
     const session = sessions.get(id)
     if (!session) return
-    session.process.kill()
+    if (session.kind === 'ssh') {
+      ;(session.process as SshShellSession).kill()
+    } else {
+      session.process.kill()
+    }
     sessions.delete(id)
   })
 
-  ipcMain.handle('files:list', async (_event, directory: string) => {
-    const entries = await readdir(directory, { withFileTypes: true })
-    const result = await Promise.all(
-      entries.slice(0, 500).map(async (entry) => {
-        const fullPath = join(directory, entry.name)
-        const metadata = await stat(fullPath)
-        return {
-          name: entry.name,
-          path: fullPath,
-          type: entry.isDirectory() ? ('directory' as const) : ('file' as const),
-          size: metadata.size,
-          modifiedAt: metadata.mtimeMs
-        }
-      })
-    )
-    return result.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
+  ipcMain.handle('terminal:suggestions', (_event, query: string, context?: TerminalCommandSuggestionContext) =>
+    getTerminalCommandSuggestions(query, context)
+  )
+  ipcMain.handle('terminal:command:generate', (_event, input: TerminalCommandGenerationInput) => generateTerminalCommand(input))
+  ipcMain.handle('models:list', () => listAiModels())
+  ipcMain.handle('models:check-provider', (_event, input: ModelProviderCheckInput) => checkModelProvider(input))
+  ipcMain.handle('extensions:list', () => listExtensionPlugins())
+  ipcMain.handle('extensions:install-plugin', (event, input: ExtensionPluginOperationInput) => {
+    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    return installExtensionPlugin(input, emit)
   })
+  ipcMain.handle('extensions:update-plugin', (event, input: ExtensionPluginOperationInput) => {
+    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    return updateExtensionPlugin(input, emit)
+  })
+  ipcMain.handle('extensions:install-package', (event, input: ExtensionPackageInstallInput) => {
+    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    return installExtensionPackage(input, emit)
+  })
+  ipcMain.handle('extensions:uninstall-plugin', (_event, input: ExtensionPluginOperationInput) => uninstallExtensionPlugin(input))
+  ipcMain.handle('extensions:open-subscription', (_event, input: ExtensionSubscriptionInput) =>
+    openExtensionSubscription(input, (url) => shell.openExternal(url))
+  )
+  ipcMain.handle('extensions:cancel-install', (_event, pluginId: string) => cancelExtensionInstall(pluginId))
+  ipcMain.handle('ai:chat-exchange-request', (_event, input: AiChatExchangeRequestInput) => createAiChatExchangeRequest(input))
+  ipcMain.handle('ai:chat-response', (_event, input: AiChatResponseInput) => generateAiChatResponse(input))
+  ipcMain.handle('voice:transcribe', (_event, input?: VoiceTranscriptionInput) => transcribeVoiceInput(input))
+  ipcMain.handle('database:catalog', () => listDatabaseCatalog())
+  ipcMain.handle('database:test-connection', (_event, input: DatabaseConnectionTestInput) => testDatabaseConnection(input))
+  ipcMain.handle('database:save-connection', (_event, input: DatabaseConnectionSaveInput) => saveDatabaseConnection(input))
+  ipcMain.handle('database:group:create', (_event, input: DatabaseGroupCreateInput) => createDatabaseGroup(input))
+  ipcMain.handle('database:group:rename', (_event, input: DatabaseGroupUpdateInput) => renameDatabaseGroup(input))
+  ipcMain.handle('database:group:move', (_event, input: DatabaseGroupUpdateInput) => moveDatabaseGroup(input))
+  ipcMain.handle('database:group:delete', (_event, id: string) => deleteDatabaseGroup(id))
+  ipcMain.handle('database:connection:move', (_event, input: DatabaseConnectionMoveInput) => moveDatabaseConnection(input))
+  ipcMain.handle('database:connection:remove', (_event, connectionId: string) => removeDatabaseConnection(connectionId))
+  ipcMain.handle('database:connection:connect', (_event, connectionId: string) => connectDatabaseConnection(connectionId))
+  ipcMain.handle('database:connection:disconnect', (_event, connectionId: string) => disconnectDatabaseConnection(connectionId))
+  ipcMain.handle('database:connection:refresh', (_event, connectionId: string) => refreshDatabaseConnection(connectionId))
+  ipcMain.handle('database:create-database', (_event, input: DatabaseCreateDatabaseInput) => createDatabaseCatalog(input))
+  ipcMain.handle('database:execute-sql', (_event, input: DatabaseSqlExecuteInput) => executeDatabaseSql(input))
+  ipcMain.handle('database:table-ddl', (_event, input: DatabaseTableDdlInput) => getDatabaseTableDdl(input))
+  ipcMain.handle('database:query-table', (_event, input: DatabaseTableQueryInput) => queryDatabaseTable(input))
+  ipcMain.handle('database:mutate-table', (_event, input: DatabaseTableMutationInput) => mutateDatabaseTable(input))
+  ipcMain.handle('database:ai-pane-request', (_event, input: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(input))
+  ipcMain.handle('database:ai-pane-response', (_event, input: DatabaseAiPaneResponseInput) => generateDatabaseAiPaneResponse(input))
+  ipcMain.handle('database:ai-drawer-request', (_event, input: DatabaseAiDrawerRequestInput) => createDatabaseAiDrawerRequest(input))
+  ipcMain.handle('database:ai-drawer-response', (_event, input: DatabaseAiDrawerResponseInput) => generateDatabaseAiDrawerResponse(input))
+  ipcMain.handle('kubernetes:catalog', () => listKubernetesCatalog())
+  ipcMain.handle('kubernetes:context:switch', (_event, contextName: string) => switchKubernetesContext(contextName))
+  ipcMain.handle('kubernetes:cluster:add', (_event, input: KubernetesClusterInput) => addKubernetesCluster(input))
+  ipcMain.handle('kubernetes:cluster:update', (_event, id: string, input: KubernetesClusterUpdateInput) => updateKubernetesCluster(id, input))
+  ipcMain.handle('kubernetes:cluster:delete', (_event, id: string) => deleteKubernetesCluster(id))
+  ipcMain.handle('kubernetes:cluster:connect', (_event, id: string) => connectKubernetesCluster(id))
+  ipcMain.handle('kubernetes:cluster:disconnect', (_event, id: string) => disconnectKubernetesCluster(id))
+  ipcMain.handle('kubernetes:bastion:sync', (_event, bastionUuid: string) => syncKubernetesBastion(bastionUuid))
+  ipcMain.handle('kubernetes:terminal:create', (_event, input: KubernetesTerminalCreateInput) => createKubernetesTerminal(input))
+  ipcMain.handle('kubernetes:terminal:resize', (_event, id: string, cols: number, rows: number) => resizeKubernetesTerminal(id, cols, rows))
+  ipcMain.handle('kubernetes:terminal:close', (_event, id: string, exitCode?: number) => closeKubernetesTerminal(id, exitCode))
+  ipcMain.handle('kubernetes:execute-command', (_event, input: KubernetesCommandInput) => executeKubernetesCommand(input))
+  ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())
+  ipcMain.handle('files:sessions:save', (_event, session: FileSessionInfo) => saveFileSession(session))
+  ipcMain.handle('files:sessions:save-from-sftp-payload', (_event, payload: Record<string, unknown>) => saveFileSessionFromSftpPayload(payload))
+  ipcMain.handle('files:sessions:update', (_event, id: string, patch: FileSessionPatch) => updateFileSession(id, patch))
+  ipcMain.handle('files:sessions:delete', (_event, id: string) => deleteFileSession(id))
+  ipcMain.handle('files:sessions:folder:save', (_event, folder: FileSessionFolderSaveInput) => saveFileSessionFolder(folder))
+  ipcMain.handle('files:sessions:folder:delete', (_event, uuid: string) => deleteFileSessionFolder(uuid))
+  ipcMain.handle('files:list', async (_event, directory: string, options?: FileListOptions) => listBackendFiles(directory, options))
+  ipcMain.handle('files:read-content', async (_event, filePath: string, options?: FileContentOptions) => readFileContent(filePath, options))
+  ipcMain.handle('files:write-content', async (_event, filePath: string, content: string, options?: FileContentOptions) =>
+    writeFileContent(filePath, content, options)
+  )
+  ipcMain.handle('files:mutate-entry', async (_event, mutation: FileEntryMutation, options?: FileListOptions) =>
+    mutateFileEntry(mutation, options)
+  )
+  ipcMain.handle('files:transfer-entry', async (_event, operation: FileTransferOperation, options?: FileListOptions) =>
+    transferFileEntry(operation, options)
+  )
+  ipcMain.handle('files:transfer-task:record', async (_event, input: FileTransferTaskRecordInput) => recordFileTransferTask(input))
+  ipcMain.handle('files:transfer-task:cancel', async (_event, input: FileTransferTaskCancelInput) => cancelFileTransferTask(input))
+  ipcMain.handle('files:list-transfer-tasks', async () => listFileTransferTasks())
 }
 
 app.whenReady().then(async () => {
   registerIpc()
   await Promise.all([startSecurityConfigWatcher(), startKeywordHighlightConfigWatcher(), startMcpConfigWatcher(), startSkillsWatcher()])
   createWindow()
+  const deepLinkArg = findDeepLinkArg(process.argv)
+  if (deepLinkArg) handleDeepLinkUrl(deepLinkArg)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2105,7 +3068,13 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  sessions.forEach((session) => session.process.kill())
+  sessions.forEach((session) => {
+    if (session.kind === 'ssh') {
+      ;(session.process as SshShellSession).kill()
+    } else {
+      session.process.kill()
+    }
+  })
   sessions.clear()
   if (process.platform !== 'darwin') {
     app.quit()

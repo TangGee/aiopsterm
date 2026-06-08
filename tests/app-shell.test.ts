@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -27,8 +27,41 @@ type MockXtermInstance = {
   emitSelection: (text: string, position?: MockSelectionPosition) => void
 }
 
-const { mockXtermInstances } = vi.hoisted(() => ({
-  mockXtermInstances: [] as MockXtermInstance[]
+const { mockXtermInstances, monacoMocks } = vi.hoisted(() => ({
+  mockXtermInstances: [] as MockXtermInstance[],
+  monacoMocks: {
+    model: {
+      updateOptions: vi.fn(),
+      getOffsetAt: vi.fn(() => 0),
+      getPositionAt: vi.fn(() => ({ lineNumber: 1, column: 1 })),
+      getLineCount: vi.fn(() => 20),
+      getLineMaxColumn: vi.fn(() => 80),
+      getValueInRange: vi.fn(() => ''),
+      getFullModelRange: vi.fn(() => ({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }))
+    },
+    editorInstance: {
+      getValue: vi.fn(() => ''),
+      setValue: vi.fn(),
+      getModel: vi.fn(),
+      addCommand: vi.fn(),
+      onDidChangeModelContent: vi.fn(),
+      onDidChangeCursorPosition: vi.fn(),
+      onDidChangeCursorSelection: vi.fn(),
+      onDidScrollChange: vi.fn(),
+      getPosition: vi.fn(() => ({ lineNumber: 1, column: 1 })),
+      getSelection: vi.fn(() => ({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 })),
+      getScrollTop: vi.fn(() => 0),
+      setPosition: vi.fn(),
+      setSelection: vi.fn(),
+      revealPositionInCenterIfOutsideViewport: vi.fn(),
+      executeEdits: vi.fn(),
+      focus: vi.fn(),
+      updateOptions: vi.fn(),
+      layout: vi.fn(),
+      dispose: vi.fn()
+    },
+    create: vi.fn()
+  }
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -89,6 +122,51 @@ vi.mock('@xterm/addon-search', () => ({
     clearDecorations: vi.fn()
   }))
 }))
+
+vi.mock('monaco-editor/esm/vs/editor/editor.api', () => {
+  monacoMocks.editorInstance.getModel.mockReturnValue(monacoMocks.model)
+  monacoMocks.editorInstance.onDidChangeModelContent.mockReturnValue({ dispose: vi.fn() })
+  monacoMocks.editorInstance.onDidChangeCursorPosition.mockReturnValue({ dispose: vi.fn() })
+  monacoMocks.editorInstance.onDidChangeCursorSelection.mockReturnValue({ dispose: vi.fn() })
+  monacoMocks.editorInstance.onDidScrollChange.mockReturnValue({ dispose: vi.fn() })
+  monacoMocks.create.mockReturnValue(monacoMocks.editorInstance)
+  class Range {
+    startLineNumber: number
+    startColumn: number
+    endLineNumber: number
+    endColumn: number
+    constructor(startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number) {
+      this.startLineNumber = startLineNumber
+      this.startColumn = startColumn
+      this.endLineNumber = endLineNumber
+      this.endColumn = endColumn
+    }
+  }
+  return {
+    editor: {
+      create: monacoMocks.create,
+      setModelLanguage: vi.fn()
+    },
+    KeyMod: { CtrlCmd: 2048 },
+    KeyCode: { KeyS: 49, Enter: 3 },
+    Range
+  }
+})
+
+vi.mock('monaco-editor/esm/vs/editor/contrib/folding/browser/folding', () => ({}))
+vi.mock('monaco-editor/esm/vs/editor/contrib/find/browser/findController', () => ({}))
+vi.mock('monaco-editor/esm/vs/basic-languages/sql/sql.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/basic-languages/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: class EditorWorker {} }))
+vi.mock('monaco-editor/esm/vs/language/json/json.worker?worker', () => ({ default: class JsonWorker {} }))
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    run: vi.fn(async ({ nodes }: { nodes?: Element[] }) => {
+      nodes?.forEach((node) => node.setAttribute('data-processed', 'true'))
+    })
+  }
+}))
 import AppShell from '@/components/AppShell.vue'
 import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import AiPanel from '@/components/AiPanel.vue'
@@ -112,9 +190,9 @@ import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SnippetsPanel from '@/components/panels/SnippetsPanel.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
+import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { initialFileSessions } from '@/data/mockData'
-import type { KeywordHighlightUserConfig } from '@shared/preload'
+import type { FileSessionInfo, KeywordHighlightUserConfig } from '@shared/preload'
 
 const waitForDatabaseSqlResult = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -122,12 +200,99 @@ const waitForDatabaseSqlResult = async () => {
 }
 
 const waitForDatabaseDbAiDone = async () => {
-  await new Promise((resolve) => window.setTimeout(resolve, 380))
+  await new Promise((resolve) => window.setTimeout(resolve, 180))
   await flushPromises()
 }
 
+const waitForDatabaseCatalog = async () => {
+  await flushPromises()
+  await new Promise((resolve) => window.setTimeout(resolve, 0))
+  await flushPromises()
+}
+
+const loadTestFileSession = async (id = 'local'): Promise<FileSessionInfo> => {
+  const result = await window.aiops.listFileSessionCatalog()
+  const session = result.data?.sessions.find((item) => item.id === id)
+  if (!result.ok || !session) throw new Error(`File session not found: ${id}`)
+  return session
+}
+
+type TestWrapperLike = { find: (selector: string) => { exists: () => boolean; text: () => string } }
+type WrapperSelectorLike = { find: (selector: string) => { exists: () => boolean } }
+
+const waitForSelector = async (wrapper: WrapperSelectorLike, selector: string) => {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await flushPromises()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await flushPromises()
+    if (wrapper.find(selector).exists()) return
+  }
+  throw new Error(`Selector did not appear: ${selector}`)
+}
+
+const waitForDatabaseTableData = async (wrapper?: TestWrapperLike) => {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await flushPromises()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await flushPromises()
+    if (
+      !wrapper ||
+      wrapper.find('.db-data-workspace .db-result-table').exists() ||
+      wrapper.find('.db-data-workspace .db-result-table tbody tr').exists() ||
+      wrapper.find('.db-data-workspace .db-result-empty').exists() ||
+      wrapper.find('.db-data-workspace .db-result-error').exists()
+    ) {
+      return
+    }
+  }
+  if (wrapper) {
+    throw new Error(
+      JSON.stringify({
+        dataText: wrapper.find('.db-data-workspace').exists() ? wrapper.find('.db-data-workspace').text() : 'Database data workspace did not render',
+        queryCalls: vi.mocked(window.aiops.queryDatabaseTable).mock.calls.length,
+        lastQuery: vi.mocked(window.aiops.queryDatabaseTable).mock.calls.at(-1)?.[0]
+      })
+    )
+  }
+}
+
+const dispatchShortcut = (key: string, init: Partial<KeyboardEventInit> = {}) => {
+  const event = new KeyboardEvent('keydown', {
+    key,
+    code: init.code,
+    ctrlKey: init.ctrlKey,
+    shiftKey: init.shiftKey,
+    altKey: init.altKey,
+    metaKey: init.metaKey,
+    bubbles: true,
+    cancelable: true
+  })
+  document.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
 describe('AppShell', () => {
-  it('renders primary product surfaces', () => {
+  beforeEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+    ;(globalThis as any).__resetAssetStoreMock?.()
+    ;(globalThis as any).__resetKubernetesCatalogMock?.()
+    ;(globalThis as any).__resetFileSessionCatalogMock?.()
+    ;(globalThis as any).__resetKnowledgeTreeMock?.()
+    ;(globalThis as any).__resetDatabaseTableRowsMock?.()
+    ;(globalThis as any).__resetExtensionPluginStoreMock?.()
+    ;(globalThis as any).__resetFileEntriesMock?.()
+    ;(globalThis as any).__resetChatHistoryStoreMock?.()
+    ;(globalThis as any).__resetUserAccountStoreMock?.()
+    ;(globalThis as any).__resetMcpStoreMock?.()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    shortcutRuntime.destroy()
+  })
+
+  it('renders primary product surfaces', async () => {
     const wrapper = mount(AppShell, {
       global: {
         plugins: [createPinia()],
@@ -136,6 +301,7 @@ describe('AppShell', () => {
         }
       }
     })
+    await flushPromises()
 
     expect(wrapper.text()).toContain('aiopsterm')
     expect(wrapper.text()).toContain('直接连接')
@@ -143,6 +309,102 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('prod-bastion')
     expect(wrapper.text()).toContain('智能助手')
     expect(wrapper.text()).toContain('local shell')
+  })
+
+  it('consumes pending aiopsterm protocol links on mount and unregisters listener', async () => {
+    const stopDeepLink = vi.fn()
+    vi.mocked(window.aiops.consumeDeepLinks).mockResolvedValueOnce([
+      {
+        url: 'aiopsterm://open/settings?section=shortcuts',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'shortcuts',
+        acceptedAt: 1780490000000
+      }
+    ])
+    vi.mocked(window.aiops.onDeepLink).mockReturnValueOnce(stopDeepLink)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    expect(window.aiops.onDeepLink).toHaveBeenCalled()
+    expect(window.aiops.consumeDeepLinks).toHaveBeenCalled()
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('shortcuts')
+    expect(store.topNotice).toContain('aiopsterm://')
+
+    const listener = vi.mocked(window.aiops.onDeepLink).mock.calls.at(-1)?.[0]
+    listener?.({
+      url: 'aiopsterm://open/database',
+      action: 'open',
+      target: 'database',
+      module: 'database',
+      acceptedAt: 1780490000100
+    })
+    expect(store.activeModule).toBe('database')
+
+    wrapper.unmount()
+    expect(stopDeepLink).toHaveBeenCalled()
+  })
+
+  it('binds External reference-style configured shortcuts at runtime', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    expect(store.panels).toHaveLength(1)
+    expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(true)
+    expect(store.panels).toHaveLength(2)
+    expect(store.activePanelId).toBe(store.panels[1].id)
+
+    expect(store.rightPanelOpen).toBe(true)
+    expect(dispatchShortcut('A', { ctrlKey: true, shiftKey: true, code: 'KeyA' })).toBe(true)
+    expect(store.rightPanelOpen).toBe(false)
+
+    store.startShortcutRecording('newTerminal')
+    expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(false)
+    expect(store.panels).toHaveLength(2)
+    store.cancelShortcutRecording()
+
+    store.startShortcutRecording('newTerminal')
+    store.updateShortcutRecording('Ctrl+Alt+N')
+    expect(await store.saveShortcutRecording()).toBe(true)
+    expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(false)
+    expect(store.panels).toHaveLength(2)
+    expect(dispatchShortcut('N', { ctrlKey: true, altKey: true, code: 'KeyN' })).toBe(true)
+    expect(store.panels).toHaveLength(3)
+
+    expect(dispatchShortcut('1', { altKey: true, code: 'Digit1' })).toBe(true)
+    expect(store.activePanelId).toBe(store.panels[0].id)
+    expect(dispatchShortcut('3', { altKey: true, code: 'Digit3' })).toBe(true)
+    expect(store.activePanelId).toBe(store.panels[2].id)
+
+    expect(dispatchShortcut('P', { ctrlKey: true, shiftKey: true, code: 'KeyP' })).toBe(true)
+    expect(store.activeModule).toBe('snippets')
+    expect(store.leftPanelOpen).toBe(true)
+
+    wrapper.unmount()
   })
 
   it('matches External reference-style top layout controls for modes, sidebars, update badge, and window controls', async () => {
@@ -182,6 +444,7 @@ describe('AppShell', () => {
       props: { query: 'mysql' },
       global: { plugins: [pinia] }
     })
+    await flushPromises()
     const store = useWorkspaceStore()
     expect(assets.text()).toContain('主机管理')
     expect(assets.text()).toContain('密钥管理')
@@ -203,19 +466,27 @@ describe('AppShell', () => {
     await assetFormInputs.at(2)!.setValue('ops')
     await assetFormInputs.at(4)!.setValue('测试')
     await assetFormInputs.at(5)!.setValue('2222')
+    vi.mocked(window.aiops.saveAsset).mockClear()
     await assets.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAsset).toHaveBeenCalledWith(expect.not.objectContaining({ id: expect.stringMatching(/^asset-local-/) }))
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
     expect(assets.text()).toContain('unit-host')
 
+    vi.mocked(window.aiops.createTerminal).mockClear()
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.trigger('dblclick')
+    await flushPromises()
     expect(store.activePanel.title).toBe('unit-host')
-    expect(store.activePanel.output).toContain('[mock ssh] unit-host')
+    expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.10.10.10:2222')
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
 
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.find('button[title="删除"]').trigger('click')
     expect(assets.find('.asset-confirm-modal').text()).toContain('删除主机')
     expect(assets.find('.asset-confirm-modal footer .danger').attributes('disabled')).toBeDefined()
     await assets.find('.asset-confirm-modal input').setValue('unit-host')
     await assets.find('.asset-confirm-modal footer .danger').trigger('click')
-    expect(assets.text()).not.toContain('unit-host')
+    await flushPromises()
+    expect(assets.findAll('.host-card').some((card) => card.text().includes('unit-host'))).toBe(false)
 
     await assets.findAll('.asset-action-button').find((button) => button.text().includes('导出'))!.trigger('click')
     expect(assets.find('.export-assets-modal').text()).toContain('选择导出主机')
@@ -231,12 +502,14 @@ describe('AppShell', () => {
     expect((assets.find('.asset-form-panel input').element as HTMLInputElement).value).toBe('onboarding-demo')
     expect(assets.find('[data-onboarding-id="asset-form-fields"]').exists()).toBe(true)
     await assets.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+    await flushPromises()
     expect(store.onboardingActiveStep?.id).toBe('connect-asset')
 
     const keys = mount(AssetsPanel, {
       props: { query: '' },
       global: { plugins: [pinia] }
     })
+    await flushPromises()
     await keys.findAll('.asset-management-item').find((button) => button.text().includes('密钥管理'))!.trigger('click')
     expect(keys.text()).toContain('prod-ed25519')
     await keys.find('[data-testid="key-new-button"]').trigger('click')
@@ -246,6 +519,13 @@ describe('AppShell', () => {
     expect(keys.text()).toContain('请输入私钥')
     await keys.find('.key-form-panel textarea').setValue('-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----')
     await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveKeychain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'unit-key',
+        type: 'ed25519'
+      })
+    )
     expect(keys.text()).toContain('unit-key')
     expect(keys.findAll('.keychain-card').find((button) => button.text().includes('unit-key'))!.text()).toContain('类型ed25519')
 
@@ -265,6 +545,10 @@ describe('AppShell', () => {
       readAsText() {
         this.onload?.()
       }
+      readAsDataURL() {
+        this.result = `data:text/plain;base64,${Buffer.from(keyReaderPayload).toString('base64')}`
+        this.onload?.()
+      }
     }
     Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockKeyImportFileReader })
     Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockKeyImportFileReader })
@@ -280,9 +564,11 @@ describe('AppShell', () => {
     await flushPromises()
     expect(keys.text()).toContain('已导入 unit-rsa.pem，识别为 RSA')
     await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    await flushPromises()
     expect(keys.findAll('.keychain-card').find((button) => button.text().includes('import-unit'))!.text()).toContain('类型rsa')
 
     await keys.find('[data-testid="key-new-button"]').trigger('click')
+    await flushPromises()
     await keys.find('.key-form-panel input').setValue('drop-unit')
     keyReaderPayload = '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----'
     await keys.find('.key-drop-area').trigger('drop', {
@@ -293,6 +579,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(keys.text()).toContain('已导入 drop-ed25519.key，识别为 ED25519')
     await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    await flushPromises()
     expect(keys.findAll('.keychain-card').find((button) => button.text().includes('drop-unit'))!.text()).toContain('类型ed25519')
     Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalKeyFileReader })
     Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalKeyFileReader })
@@ -302,16 +589,28 @@ describe('AppShell', () => {
       clientY: 210
     })
     expect(keys.find('.asset-context-menu').text()).toContain('删除')
+    await keys.find('.asset-context-menu').get('button').trigger('click')
+    await flushPromises()
+    expect(window.aiops.getKeychain).toHaveBeenCalledWith(expect.stringMatching(/^key-test-/))
+    await keys.find('.key-form-panel button[title="关闭"]').trigger('click')
+    await keys.findAll('.keychain-card').find((button) => button.text().includes('unit-key'))!.trigger('contextmenu', {
+      clientX: 310,
+      clientY: 210
+    })
     await keys.find('.asset-context-menu .delete').trigger('click')
     expect(keys.find('.asset-confirm-modal').text()).toContain('删除密钥')
     await keys.find('.asset-confirm-modal input').setValue('unit-key')
     await keys.find('.asset-confirm-modal footer .danger').trigger('click')
+    await flushPromises()
+    expect(window.aiops.deleteKeychain).toHaveBeenCalled()
     expect(keys.text()).not.toContain('unit-key')
 
     const knowledge = mount(KnowledgePanel, {
       props: { query: 'Markdown' },
       global: { plugins: [createPinia()] }
     })
+    await flushPromises()
+    await knowledge.vm.$nextTick()
     expect(knowledge.text()).toContain('Markdown语法指南.md')
     expect(knowledge.text()).not.toContain('interface.png')
   })
@@ -344,11 +643,11 @@ describe('AppShell', () => {
     expect(exportCall?.[0]).toBe('/tmp/assets-export.json')
     expect(JSON.parse(String(exportCall?.[1]))).toEqual([
       expect.objectContaining({
-        username: 'root',
+        username: 'ops',
         ip: '10.24.8.12',
         label: 'prod-bastion',
         group_name: '生产',
-        auth_type: 'password',
+        auth_type: 'keyBased',
         port: 22
       })
     ])
@@ -356,22 +655,27 @@ describe('AppShell', () => {
 
     const originalFileReader = window.FileReader
     const originalGlobalFileReader = globalThis.FileReader
-    const importPayload = JSON.stringify([
-      { username: 'root', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
+    let assetImportPayload = JSON.stringify([
+      { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
       { username: 'ops', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200 }
     ])
     class MockAssetImportFileReader {
-      result = importPayload
+      result = ''
       onload: null | (() => void) = null
       onerror: null | (() => void) = null
       readAsText() {
+        this.result = assetImportPayload
+        this.onload?.()
+      }
+      readAsDataURL() {
+        this.result = 'data:image/png;base64,aW1wb3J0LWZpbGU='
         this.onload?.()
       }
     }
     Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockAssetImportFileReader })
     Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockAssetImportFileReader })
     const importFile = new File(
-      [importPayload],
+      [assetImportPayload],
       'external-reference-assets.json',
       { type: 'application/json' }
     )
@@ -384,9 +688,33 @@ describe('AppShell', () => {
     await flushPromises()
     expect(assets.find('.import-assets-modal').text()).toContain('其中 1 个与现有主机重复')
     expect(assets.find('.import-assets-modal').text()).toContain('imported-json')
+    vi.mocked(window.aiops.saveAsset).mockClear()
     await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('跳过重复'))!.trigger('click')
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls).toEqual([
+      [expect.objectContaining({ host: '10.55.0.9' })]
+    ])
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls[0]?.[0]).not.toHaveProperty('id')
     expect(assets.text()).toContain('imported-json')
-    expect(assets.text()).not.toContain('prod-bastion-imported')
+    expect(assets.findAll('.host-card').some((card) => card.text().includes('prod-bastion-imported'))).toBe(false)
+
+    const mobaPayload = [
+      '[Bookmarks]',
+      'moba-prod=#109#0%10.88.1.5%22%mobauser%%-1%10.88.1.1%2200%jumpuser%-1%2224%-1%_ProfileDir_/keys/moba.pem'
+    ].join('\n')
+    assetImportPayload = mobaPayload
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [new File([mobaPayload], 'MobaXterm.mxtsessions', { type: 'text/plain' })]
+    })
+    await input.trigger('change')
+    await flushPromises()
+    expect(assets.find('.import-assets-modal').text()).toContain('moba-prod')
+    expect(assets.find('.import-assets-modal').text()).toContain('10.88.1.5')
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
+    expect(assets.text()).toContain('moba-prod')
+    expect(assets.text()).toContain('mobauser')
     Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
     Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
 
@@ -396,7 +724,12 @@ describe('AppShell', () => {
     })
     await managed.findAll('.asset-management-item').find((button) => button.text().includes('组织资产管理'))!.trigger('click')
     expect(managed.text()).toContain('全部组织资产')
-    expect(managed.find('.asset-table-footer').text()).toContain('共 4 条')
+    expect(managed.find('.asset-table-footer').text()).toContain('共 6 条')
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockClear()
+    await managed.find('.asset-table-toolbar button[title="刷新"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.refreshOrganizationAssets).toHaveBeenCalledWith(undefined)
+    expect(managed.text()).toContain('jumpserver-org-synced-asset')
     await managed.find('.asset-table-toolbar .asset-search-input input').setValue('mysql')
     expect(managed.text()).toContain('mysql-primary')
     expect(managed.text()).not.toContain('prod-bastion')
@@ -405,12 +738,15 @@ describe('AppShell', () => {
     await managed.findAll('.managed-asset-form input').at(0)!.setValue('managed-unit')
     await managed.findAll('.managed-asset-form input').at(1)!.setValue('10.77.0.7')
     await managed.find('.managed-asset-form textarea').setValue('手动组织资产')
+    vi.mocked(window.aiops.saveAsset).mockClear()
     await managed.find('.managed-asset-form .asset-submit-button').trigger('click')
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
     expect(managed.text()).toContain('managed-unit')
     await managed.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('managed-unit'))!.find('input[type="checkbox"]').setValue(true)
     await managed.findAll('.asset-table-toolbar .asset-action-button').find((button) => button.text().includes('批量删除'))!.trigger('click')
     expect(managed.find('.asset-confirm-modal').text()).toContain('批量删除主机')
     await managed.find('.asset-confirm-modal footer .danger').trigger('click')
+    await flushPromises()
     expect(managed.text()).not.toContain('managed-unit')
 
     const organization = mount(AssetsPanel, {
@@ -422,13 +758,17 @@ describe('AppShell', () => {
       clientX: 220,
       clientY: 180
     })
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockClear()
     await organization.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('刷新资产'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.refreshOrganizationAssets).toHaveBeenCalledWith({ organizationId: 'asset-5' })
     expect(organization.text()).toContain('jumpserver-org-synced-asset')
     await organization.findAll('.host-card').find((button) => button.text().includes('jumpserver-org'))!.trigger('contextmenu', {
       clientX: 220,
       clientY: 180
     })
     await organization.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('管理资产'))!.trigger('click')
+    await flushPromises()
     expect(organization.text()).toContain('管理资产 · jumpserver-org')
     await organization.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('jumpserver-org-synced-asset'))!.findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
     expect((organization.findAll('.managed-asset-form input').at(0)!.element as HTMLInputElement).disabled).toBe(true)
@@ -445,6 +785,7 @@ describe('AppShell', () => {
     const wrapper = mount(WorkspacePanel, {
       global: { plugins: [pinia] }
     })
+    await flushPromises()
     const store = useWorkspaceStore()
 
     try {
@@ -471,6 +812,7 @@ describe('AppShell', () => {
       const filesPanel = mount(FilesPanel, {
         global: { plugins: [pinia] }
       })
+      await flushPromises()
       expect(filesPanel.find('.workspace-button').attributes('title')).toBe('显示主机名')
       expect(filesPanel.text()).toContain('10.24.8.12')
 
@@ -486,6 +828,7 @@ describe('AppShell', () => {
       const remounted = mount(WorkspacePanel, {
         global: { plugins: [pinia] }
       })
+      await flushPromises()
       expect(remounted.text()).not.toContain('prod-bastion')
       remounted.unmount()
 
@@ -522,10 +865,12 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('workspace-unit')
       await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.44.0.9')
       await wrapper.findAll('.workspace-host-form input').at(2)!.setValue('ops')
-      await wrapper.findAll('.workspace-host-form input').at(3)!.setValue('Workspace')
-      await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('2201')
+      await wrapper.findAll('.workspace-host-form input').at(3)!.setValue('')
+      await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('Workspace')
+      await wrapper.findAll('.workspace-host-form input').at(5)!.setValue('2201')
       await wrapper.find('.workspace-host-form textarea').setValue('工作区新增主机')
       await wrapper.find('.workspace-host-form').trigger('submit')
+      await flushPromises()
       expect(wrapper.find('.workspace-host-modal').exists()).toBe(false)
       expect(wrapper.text()).toContain('workspace-unit')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit'))!.trigger('contextmenu', {
@@ -537,20 +882,26 @@ describe('AppShell', () => {
       expect(wrapper.find('.workspace-host-modal').text()).toContain('编辑主机')
       await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('workspace-unit-edited')
       await wrapper.find('.workspace-host-form').trigger('submit')
+      await flushPromises()
       expect(wrapper.text()).toContain('workspace-unit-edited')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('contextmenu')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('克隆'))!.trigger('click')
       expect((wrapper.findAll('.workspace-host-form input').at(0)!.element as HTMLInputElement).value).toBe('workspace-unit-edited_Clone')
       await wrapper.find('.workspace-host-form').trigger('submit')
+      await flushPromises()
       expect(wrapper.text()).toContain('workspace-unit-edited_Clone')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited_Clone'))!.trigger('contextmenu')
       await wrapper.find('.workspace-node-menu .delete').trigger('click')
       expect(wrapper.find('.files-folder-confirm').text()).toContain('删除主机')
       await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
       expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('workspace-unit-edited_Clone'))).toBe(false)
+      vi.mocked(window.aiops.createTerminal).mockClear()
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
+      await flushPromises()
       expect(store.activePanel.title).toBe('workspace-unit-edited')
-      expect(store.activePanel.output).toContain('[mock ssh] workspace-unit-edited')
+      expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.44.0.9:2201')
+      expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'workspace-unit-edited' }))
 
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
@@ -576,6 +927,7 @@ describe('AppShell', () => {
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('编辑备注'))!.trigger('click')
       await filesPanel.find('.files-comment-edit input').setValue('新备注')
       await filesPanel.find('.files-comment-edit input').trigger('keydown', { key: 'Enter' })
+      await flushPromises()
       expect(filesPanel.find('.files-comment-edit').exists()).toBe(false)
       expect(filesPanel.text()).toContain('(新备注)')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
@@ -618,6 +970,7 @@ describe('AppShell', () => {
       expect(filesPanel.find('.files-folder-modal').exists()).toBe(true)
       expect(filesPanel.find('.files-folder-modal').text()).toContain('核心业务')
       await filesPanel.findAll('.files-folder-option').find((button) => button.text().includes('临时排障'))!.trigger('click')
+      await flushPromises()
       expect(filesPanel.find('.files-folder-modal').exists()).toBe(false)
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBe('files-folder-b')
       expect(filesPanel.text()).toContain('临时排障')
@@ -652,6 +1005,7 @@ describe('AppShell', () => {
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('staging-files'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('从文件夹移除')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
+      await flushPromises()
       expect(store.fileSessions.find((session) => session.id === 'folder_asset-2')?.folderUuid).toBeUndefined()
       expect(store.fileSessions.find((session) => session.id === 'folder_asset-2')?.group).toBe('最近连接')
       expect(filesPanel.text()).toContain('最近连接')
@@ -667,6 +1021,7 @@ describe('AppShell', () => {
       await filesPanel.find('.files-folder-form input').setValue('临时归档')
       await filesPanel.find('.files-folder-form textarea').setValue('归档中的远程文件入口')
       await filesPanel.find('.files-folder-form').trigger('submit')
+      await flushPromises()
       expect(filesPanel.find('.files-folder-modal').exists()).toBe(false)
       expect(filesPanel.text()).toContain('临时归档')
       expect(filesPanel.text()).toContain('prod-bastion')
@@ -674,6 +1029,7 @@ describe('AppShell', () => {
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
       expect(filesPanel.find('.files-folder-confirm').text()).toContain('文件夹内 1 个资产将移出文件夹')
       await filesPanel.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBeUndefined()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('最近连接')
       expect(filesPanel.text()).not.toContain('临时归档')
@@ -683,6 +1039,7 @@ describe('AppShell', () => {
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
       expect(filesPanel.find('.files-folder-confirm').text()).toContain('确定删除文件夹 核心业务')
       await filesPanel.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
       expect(filesPanel.text()).not.toContain('核心业务')
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
@@ -692,6 +1049,7 @@ describe('AppShell', () => {
       await filesPanel.find('.files-folder-form input').setValue('新建文件夹')
       await filesPanel.find('.files-folder-form textarea').setValue('从移动弹窗创建')
       await filesPanel.find('.files-folder-form').trigger('submit')
+      await flushPromises()
       expect(filesPanel.text()).toContain('新建文件夹')
 
       await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
@@ -712,7 +1070,10 @@ describe('AppShell', () => {
       await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('值班归档')
       await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
       expect(wrapper.text()).toContain('值班归档')
-      await wrapper.find('.workspace-row-action.refresh').trigger('click')
+      await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('jumpserver-org'))!.trigger('contextmenu')
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('刷新')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('刷新'))!.trigger('click')
+      await wrapper.vm.$nextTick()
       expect(wrapper.text()).toContain('正在刷新堡垒机资源')
 
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
@@ -721,16 +1082,20 @@ describe('AppShell', () => {
       expect((wrapper.find('.workspace-comment-edit input').element as HTMLInputElement).value).toBe('生产入口')
       await wrapper.find('.workspace-comment-edit input').setValue('工作区备注')
       await wrapper.find('.workspace-comment-edit input').trigger('keydown', { key: 'Enter' })
+      await flushPromises()
       expect(wrapper.text()).toContain('(工作区备注)')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').text()).toContain('从文件夹移除')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
+      await flushPromises()
       expect(wrapper.text()).toContain('已从 核心业务 移除 prod-bastion')
+      expect(wrapper.find('.workspace-node-menu').exists()).toBe(false)
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').text()).toContain('移动到文件夹')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
       expect(wrapper.find('.workspace-folder-modal').text()).toContain('值班归档')
       await wrapper.findAll('.files-folder-option').find((button) => button.text().includes('值班归档'))!.trigger('click')
+      await flushPromises()
       expect(wrapper.text()).toContain('已移动 prod-bastion 到 值班归档')
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('值班归档'))!.trigger('contextmenu')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
@@ -744,9 +1109,12 @@ describe('AppShell', () => {
       expect(wrapper.find('.workspace-management-modal').text()).toContain('管理资产 · jumpserver-org')
       await wrapper.find('.workspace-management-modal header button').trigger('click')
 
+      vi.mocked(window.aiops.createTerminal).mockClear()
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('dblclick')
+      await flushPromises()
       expect(store.activePanel.title).toBe('prod-bastion')
-      expect(store.activePanel.output).toContain('[mock ssh] prod-bastion')
+      expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.24.8.12:22')
+      expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-1', title: 'prod-bastion' }))
       expect(store.selectedContexts.some((context) => context.id === 'asset-1')).toBe(true)
       filesPanel.unmount()
     } finally {
@@ -762,6 +1130,8 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await store.refreshUserAccount()
+    await rail.vm.$nextTick()
     const originalFileReader = window.FileReader
     const originalGlobalFileReader = globalThis.FileReader
     class MockAvatarFileReader {
@@ -806,30 +1176,37 @@ describe('AppShell', () => {
       await panel.find('button[title="编辑"]').trigger('click')
       await panel.findAll('.user-info-form input').at(1)!.setValue('bad-name!')
       await panel.find('button[title="保存"]').trigger('click')
+      await flushPromises()
       expect(store.userNotice).toBe('用户名仅支持字母、数字和下划线')
       await panel.findAll('.user-info-form input').at(0)!.setValue('Ops Lead')
       await panel.findAll('.user-info-form input').at(1)!.setValue('ops_lead')
       await panel.find('button[title="保存"]').trigger('click')
+      await flushPromises()
       expect(store.userProfile.name).toBe('Ops Lead')
 
       await panel.find('button[title="修改邮箱"]').trigger('click')
       await panel.find('.user-modal-card input').setValue('ops@example.local')
       await panel.find('.user-code-row button').trigger('click')
+      await flushPromises()
       await vi.advanceTimersByTimeAsync(120)
       await panel.vm.$nextTick()
       expect(panel.find('.user-code-row button').text()).toContain('300s')
       await panel.findAll('.user-modal-card input').at(1)!.setValue('123456')
       await panel.find('.user-modal-card footer .primary').trigger('click')
+      await flushPromises()
       expect(store.userProfile.email).toBe('ops@example.local')
 
       await panel.find('button[title="重置密码"]').trigger('click')
       await panel.find('.user-modal-card input[type="password"]').setValue('Aa123456!')
       await panel.findAll('.user-modal-card input[type="password"]').at(1)!.setValue('Aa123456!')
       await panel.find('.user-modal-card footer .primary').trigger('click')
-      expect(store.userNotice).toContain('密码重置')
+      await flushPromises()
+      expect(store.userNotice).toBe('密码重置成功')
+      expect(store.userProfile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
 
       await panel.find('.user-avatar.large').trigger('click')
-      await panel.find('.avatar-settings-modal input').setValue('OP')
+      expect(panel.find('.avatar-preview-placeholder').text()).toContain('点击上传头像')
+      expect(panel.find('.avatar-settings-modal footer .primary').attributes('disabled')).toBeDefined()
       const avatarFileInput = panel.find('.avatar-settings-modal input[type="file"]')
       Object.defineProperty(avatarFileInput.element, 'files', {
         configurable: true,
@@ -839,10 +1216,12 @@ describe('AppShell', () => {
       await panel.vm.$nextTick()
       expect(panel.find('.avatar-preview-box img').exists()).toBe(true)
       await panel.find('.avatar-settings-modal footer .primary').trigger('click')
-      expect(store.userProfile.avatarInitials).toBe('OP')
+      await flushPromises()
       expect(store.userProfile.avatarImageUrl).toBe('data:image/png;base64,avatar')
+      expect(store.userNotice).toBe('头像更新成功')
 
       await panel.find('.user-info-footer .danger').trigger('click')
+      await flushPromises()
       expect(store.userProfile.skippedLogin).toBe(true)
       await panel.vm.$nextTick()
       expect(panel.text()).toContain('请先登录')
@@ -854,31 +1233,38 @@ describe('AppShell', () => {
       await panel.findAll('.user-login-form input').at(0)!.setValue('verify-device')
       await panel.findAll('.user-login-form input').at(1)!.setValue('secret')
       await panel.find('.user-login-form .primary').trigger('click')
+      await flushPromises()
       await panel.vm.$nextTick()
       expect(store.userNotice).toBe('当前设备需要验证后才能登录')
       expect(panel.text()).toContain('当前设备需要验证后才能登录')
       await panel.findAll('.user-login-form input').at(0)!.setValue('ops_return')
       await panel.findAll('.user-login-form input').at(1)!.setValue('secret')
       await panel.find('.user-login-form .primary').trigger('click')
+      await flushPromises()
       await panel.vm.$nextTick()
       expect(store.userProfile.skippedLogin).toBe(false)
       expect(store.userProfile.username).toBe('ops_return')
 
       await panel.find('.user-info-footer .danger').trigger('click')
+      await flushPromises()
       await panel.vm.$nextTick()
       await panel.findAll('.user-login-tabs button').find((button) => button.text().includes('邮箱登录'))!.trigger('click')
       await panel.findAll('.user-login-form input').at(0)!.setValue('login@example.local')
       await panel.find('.user-code-row button').trigger('click')
+      await flushPromises()
       await vi.advanceTimersByTimeAsync(120)
       await panel.vm.$nextTick()
       expect(panel.find('.user-code-row button').text()).toContain('300s')
       await panel.findAll('.user-login-form input').at(1)!.setValue('246810')
       await panel.find('.user-login-form .primary').trigger('click')
+      await flushPromises()
       expect(store.userProfile.email).toBe('login@example.local')
 
       await panel.find('.user-info-footer .danger').trigger('click')
+      await flushPromises()
       await panel.vm.$nextTick()
       await panel.find('.user-skip-login button').trigger('click')
+      await flushPromises()
       expect(store.userProfile.username).toBe('guest')
       expect(store.billingSettings.skippedLogin).toBe(true)
     } finally {
@@ -988,21 +1374,33 @@ describe('AppShell', () => {
 
       await wrapper.find('.agents-search input').setValue('conv-2')
       await wrapper.find('.conversation-item').trigger('click')
+      await flushPromises()
       expect(store.selectedConversationId).toBe('conv-2')
+      expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('conv-2')
+      expect(store.chatMessages.at(-1)?.text).toContain('K8s 发布失败历史包含 Pod 事件')
 
       await wrapper.find('.conversation-item').trigger('keydown', { key: 'Delete' })
+      await flushPromises()
       expect(store.conversations.some((conversation) => conversation.id === 'conv-2')).toBe(false)
+      expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('conv-2')
 
       await wrapper.find('.agents-search input').setValue('conv-3')
       await wrapper.find('.conversation-item').trigger('click')
+      await flushPromises()
       expect(store.selectedConversationId).toBe('conv-3')
+      expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('conv-3')
+      expect(store.chatMessages.at(-1)?.text).toContain('数据库慢查询历史包含慢日志摘要')
       await wrapper.find('.delete-btn').trigger('click')
+      await flushPromises()
       expect(store.conversations.some((conversation) => conversation.id === 'conv-3')).toBe(false)
+      expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('conv-3')
 
       await wrapper.find('.new-chat-btn').trigger('click')
+      await flushPromises()
       expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
       expect(store.selectedConversationId).toMatch(/^conv-/)
       expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+      expect(window.aiops.createChatConversation).toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
@@ -1020,12 +1418,7 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.showSaveDialog).mockClear()
     vi.mocked(window.aiops.writeLocalFile).mockClear()
     vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/ai-chat-export.md' })
-    store.chatMessages = [
-      { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
-      { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划', contentParts: [{ type: 'text', text: '检查生产数据库 rollback 计划' }] },
-      { id: 'search-assistant', role: 'assistant', text: 'rollback 计划：先确认连接，再生成只读 SQL。', state: 'done' }
-    ]
-    store.conversations = Array.from({ length: 23 }, (_, index) => ({
+    const historyConversations = Array.from({ length: 23 }, (_, index) => ({
       id: `history-${index + 1}`,
       title: index === 0 ? '生产巡检' : index === 1 ? '发布回滚会话' : `历史会话 ${index + 1}`,
       summary: index === 1 ? '包含 nginx 发布上下文' : `历史摘要 ${index + 1}`,
@@ -1034,10 +1427,33 @@ describe('AppShell', () => {
       ipAddress: index === 1 ? '10.24.8.12' : undefined,
       favorite: index === 0 || index === 2
     }))
+    ;(globalThis as any).__setChatHistoryStoreMock?.(
+      historyConversations,
+      {
+        'history-1': [
+          { id: 'history-1-system', role: 'system', text: '历史会话已从 aiopsterm 后端恢复。' },
+          { id: 'history-1-user', role: 'user', text: '历史摘要 1' },
+          { id: 'history-1-assistant', role: 'assistant', text: '生产巡检后端历史快照。', state: 'done' }
+        ],
+        'history-2': [
+          { id: 'history-2-system', role: 'system', text: '历史会话已从 aiopsterm 后端恢复。' },
+          { id: 'history-2-user', role: 'user', text: '包含 nginx 发布上下文', hosts: [{ id: 'history-host-2', kind: 'hosts', label: '10.24.8.12', detail: '发布回滚会话' }] },
+          { id: 'history-2-assistant', role: 'assistant', text: '发布回滚会话后端恢复内容。', state: 'done' }
+        ]
+      },
+      'history-1'
+    )
+    store.chatMessages = [
+      { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
+      { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划', contentParts: [{ type: 'text', text: '检查生产数据库 rollback 计划' }] },
+      { id: 'search-assistant', role: 'assistant', text: 'rollback 计划：先确认连接，再生成只读 SQL。', state: 'done' }
+    ]
+    store.conversations = historyConversations
     store.selectedConversationId = 'history-1'
     await wrapper.vm.$nextTick()
 
     await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(true)
     expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-history-search-input"]').element)
@@ -1060,30 +1476,44 @@ describe('AppShell', () => {
     await firstHistoryItem.find('button[title="编辑标题"]').trigger('click')
     await wrapper.find('[data-testid="ai-history-title-input"]').setValue('生产巡检复盘')
     await wrapper.find('[data-testid="ai-history-title-input"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(store.conversations.find((conversation) => conversation.id === 'history-1')?.title).toBe('生产巡检复盘')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1', title: '生产巡检复盘' }))
     if (!wrapper.find('[data-testid="ai-history-dropdown"]').exists()) {
       await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
+      await flushPromises()
       await wrapper.vm.$nextTick()
     }
 
     await wrapper.find('[data-testid="ai-history-search-input"]').setValue('发布回滚会话')
     await wrapper.vm.$nextTick()
     await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('发布回滚会话'))!.find('button[title="收藏"]').trigger('click')
+    await flushPromises()
     expect(store.conversations.find((conversation) => conversation.id === 'history-2')?.favorite).toBe(true)
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-2', favorite: true }))
     await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('发布回滚会话'))!.trigger('click')
+    await flushPromises()
     expect(store.selectedConversationId).toBe('history-2')
-    expect(store.chatMessages[0].text).toContain('已恢复会话')
+    expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('history-2')
+    expect(store.chatMessages[0].text).toContain('历史会话已从 aiopsterm 后端恢复')
+    expect(store.chatMessages.at(-1)?.text).toContain('发布回滚会话后端恢复内容')
+    expect(store.chatMessages.at(-1)?.text).not.toContain('本地历史摘要')
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await wrapper.find('[data-testid="ai-history-search-input"]').setValue('历史会话 3')
     await wrapper.vm.$nextTick()
     await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('历史会话 3'))!.find('button[title="删除历史"]').trigger('click')
+    await flushPromises()
     expect(store.conversations.some((conversation) => conversation.id === 'history-3')).toBe(false)
+    expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('history-3')
     await wrapper.find('[data-testid="ai-new-chat"]').trigger('click')
+    await flushPromises()
     expect(store.selectedConversationId).toMatch(/^conv-/)
     expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+    expect(window.aiops.createChatConversation).toHaveBeenCalled()
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
     store.selectedConversationId = 'history-1'
     store.chatMessages = [
@@ -1091,6 +1521,14 @@ describe('AppShell', () => {
       { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划', contentParts: [{ type: 'text', text: '检查生产数据库 rollback 计划' }] },
       { id: 'search-assistant', role: 'assistant', text: 'rollback 计划：先确认连接，再生成只读 SQL。', state: 'done' }
     ]
+    await window.aiops.updateChatConversation({
+      id: 'history-1',
+      messages: [
+        { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
+        { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划' },
+        { id: 'search-assistant', role: 'assistant', text: 'rollback 计划：先确认连接，再生成只读 SQL。', state: 'done' }
+      ]
+    })
     await wrapper.vm.$nextTick()
 
     await wrapper.find('.ai-panel').trigger('keydown', { key: 'f', ctrlKey: true })
@@ -1115,6 +1553,72 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(false)
     expect(wrapper.find('.ai-chat-search-highlight').exists()).toBe(false)
 
+    store.chatMessages.push(
+      {
+        id: 'export-command',
+        role: 'assistant',
+        text: 'kubectl get pods -n prod',
+        ask: 'command',
+        executedCommand: 'kubectl get pods -n prod',
+        state: 'done'
+      },
+      {
+        id: 'export-command-output',
+        role: 'assistant',
+        text: 'pod/api-0 Ready\npod/job-42 Completed',
+        say: 'command_output',
+        state: 'done'
+      },
+      {
+        id: 'export-mcp-tool',
+        role: 'assistant',
+        text: 'search logs',
+        ask: 'mcp_tool_call',
+        mcpToolCall: {
+          serverName: 'ops-mcp',
+          toolName: 'search_logs',
+          arguments: { service: 'api', limit: 20 }
+        },
+        state: 'done'
+      },
+      {
+        id: 'export-followup',
+        role: 'assistant',
+        text: '选择下一步操作？',
+        ask: 'followup',
+        followupOptions: ['只读检查', '执行回滚'],
+        selectedOption: '只读检查',
+        state: 'done'
+      },
+      {
+        id: 'export-search-result',
+        role: 'assistant',
+        text: '2026-06-04 api rollback-safe result',
+        say: 'search_result',
+        state: 'done'
+      },
+      {
+        id: 'export-context-truncated',
+        role: 'system',
+        text: '{"status":"completed"}',
+        say: 'context_truncated'
+      },
+      {
+        id: 'export-approved',
+        role: 'assistant',
+        text: '',
+        action: 'approved',
+        state: 'done'
+      },
+      {
+        id: 'export-rejected',
+        role: 'assistant',
+        text: '',
+        action: 'rejected',
+        state: 'done'
+      }
+    )
+
     await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
     await flushPromises()
     expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({
@@ -1122,10 +1626,25 @@ describe('AppShell', () => {
       filters: [{ name: 'Markdown Files', extensions: ['md'] }]
     })
     const exportCall = vi.mocked(window.aiops.writeLocalFile).mock.calls.at(-1)
+    const exportMarkdown = String(exportCall?.[1])
     expect(exportCall?.[0]).toBe('/tmp/ai-chat-export.md')
-    expect(String(exportCall?.[1])).toContain('from aiopsterm')
-    expect(String(exportCall?.[1])).toContain('**User:**')
-    expect(String(exportCall?.[1])).toContain('rollback 计划')
+    expect(exportMarkdown).toContain('from aiopsterm')
+    expect(exportMarkdown).toContain('**User:**')
+    expect(exportMarkdown).toContain('rollback 计划')
+    expect(exportMarkdown).toContain('```bash\nkubectl get pods -n prod\n```')
+    expect(exportMarkdown).toContain('**OUTPUT**')
+    expect(exportMarkdown).toContain('pod/api-0 Ready')
+    expect(exportMarkdown).toContain('"MCP SERVER": "ops-mcp"')
+    expect(exportMarkdown).toContain('"TOOL": "search_logs"')
+    expect(exportMarkdown).toContain('"service": "api"')
+    expect(exportMarkdown).toContain('Options:')
+    expect(exportMarkdown).toContain('- [x] 只读检查')
+    expect(exportMarkdown).toContain('- [ ] 执行回滚')
+    expect(exportMarkdown).toContain('**Search Result**')
+    expect(exportMarkdown).toContain('2026-06-04 api rollback-safe result')
+    expect(exportMarkdown).toContain('Context has been truncated.')
+    expect(exportMarkdown).toContain('Approved')
+    expect(exportMarkdown).toContain('Rejected')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('聊天已导出')
 
     const assistantMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('rollback 计划'))
@@ -1137,11 +1656,14 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('消息已复制')
 
     await assistantMessage!.find('button[title="收藏"]').trigger('click')
+    await flushPromises()
     expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.favorite).toBe(true)
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('已收藏消息')
     await assistantMessage!.find('button[title="有帮助"]').trigger('click')
+    await flushPromises()
     expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.feedback).toBe('up')
     await assistantMessage!.find('button[title="无帮助"]').trigger('click')
+    await flushPromises()
     expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.feedback).toBe('down')
 
     await assistantMessage!.find('[data-testid="ai-message-to-knowledge"]').trigger('click')
@@ -1172,7 +1694,15 @@ describe('AppShell', () => {
     await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
-    expect(store.activePanel.output).toContain('[mock] uptime')
+    await flushPromises()
+    expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: uptime')
+    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBeUndefined()
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('终端会话不可用')
+    store.activePanel.sessionId = 'terminal-command-panel'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime')
     expect(commandMessage!.find('[data-testid="ai-message-executed-command"]').text()).toContain('uptime')
 
@@ -1197,6 +1727,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.context-select-popup .select-list button.keyboard-selected').exists()).toBe(false)
 
     await findContextButton('文档')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     contextSearchInput = wrapper.find('.context-select-popup header input')
     expect(document.activeElement).toBe(contextSearchInput.element)
@@ -1227,8 +1758,10 @@ describe('AppShell', () => {
     expectContextMainMenu()
 
     await findContextButton('文档')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await findContextButton('commands')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await wrapper.find('.context-select-popup header input').setValue('Summary')
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Backspace' })
@@ -1249,6 +1782,7 @@ describe('AppShell', () => {
     await findContextButton('文档')!.trigger('mouseover')
     expect(findContextButton('文档')!.classes()).toContain('keyboard-selected')
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.context-select-popup header button').exists()).toBe(true)
     expect(findContextButton('commands')).toBeTruthy()
@@ -1262,6 +1796,7 @@ describe('AppShell', () => {
     await wrapper.find('[data-onboarding-id="ai-context-trigger"]').trigger('click')
     await wrapper.vm.$nextTick()
     await findContextButton('文档')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'ArrowDown' })
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Enter' })
@@ -1276,8 +1811,10 @@ describe('AppShell', () => {
     await wrapper.find('[data-onboarding-id="ai-context-trigger"]').trigger('click')
     await wrapper.vm.$nextTick()
     await findContextButton('文档')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await findContextButton('commands')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await wrapper.find('.ai-panel').trigger('keydown', { key: 'Escape' })
     await wrapper.vm.$nextTick()
@@ -1308,8 +1845,10 @@ describe('AppShell', () => {
     await wrapper.find('.user-message-edit-container .context-trigger-tag').trigger('click')
     await wrapper.vm.$nextTick()
     await findContextButton('文档')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await findContextButton('commands')!.trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Escape' })
     await wrapper.vm.$nextTick()
@@ -1383,7 +1922,9 @@ describe('AppShell', () => {
 
     await mainInput.trigger('keydown', { key: '/' })
     await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await flushPromises()
     await wrapper.vm.$nextTick()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
 
     expect(wrapper.find('.command-select-popup').exists()).toBe(true)
     expect(wrapper.find('.command-select-popup .select-list').text()).toContain('rollback-plan')
@@ -1453,7 +1994,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-onboarding-id="ai-model-option"]').exists()).toBe(true)
     await wrapper.find('[data-onboarding-id="ai-model-option"]').trigger('click')
-    expect(store.config.modelName).toBe('mock-ops-agent')
+    expect(store.config.modelName).toBe('aiopsterm-local-agent')
     await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
     const thinkingModelRow = wrapper.findAll('.ai-model-popup .select-list button').find((button) => button.text().includes('gpt-5'))
     expect(thinkingModelRow).toBeTruthy()
@@ -1466,7 +2007,7 @@ describe('AppShell', () => {
     expect(lockedModelRow!.find('.locked-model-icon').exists()).toBe(true)
     expect(lockedModelRow!.text()).toContain('VIP')
     await lockedModelRow!.trigger('click')
-    expect(store.config.modelName).toBe('mock-ops-agent')
+    expect(store.config.modelName).toBe('aiopsterm-local-agent')
 
     const modelSearchInput = wrapper.find('.ai-model-popup header input')
     expect(modelSearchInput.exists()).toBe(true)
@@ -1524,6 +2065,8 @@ describe('AppShell', () => {
     expect(wrapper.find('.context-select-popup .select-list').text()).toContain('文档')
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'ArrowDown' })
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.context-select-popup header button').exists()).toBe(true)
     expect(wrapper.find('.context-select-popup .select-list').text()).toContain('commands')
     await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Escape' })
@@ -1543,6 +2086,8 @@ describe('AppShell', () => {
     const docsCategory = wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('文档'))
     expect(docsCategory).toBeTruthy()
     await docsCategory!.trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.context-select-popup header button').exists()).toBe(true)
     await wrapper.find('.context-select-popup header input').setValue('Markdown')
     const markdownDoc = wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('Markdown语法指南.md'))
@@ -1556,6 +2101,8 @@ describe('AppShell', () => {
     await wrapper.find('[data-onboarding-id="ai-context-trigger"]').trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('文档'))!.trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
     await wrapper.find('.context-select-popup header input').setValue('Markdown')
     await wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('Markdown语法指南.md'))!.trigger('click')
     await wrapper.vm.$nextTick()
@@ -1577,7 +2124,9 @@ describe('AppShell', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.command-select-popup').exists()).toBe(false)
-    pathTextNode.remove()
+    Array.from(mainInput.element.childNodes).forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) node.remove()
+    })
     await mainInput.trigger('input')
 
     const slashTextNode = document.createTextNode('/')
@@ -1619,7 +2168,7 @@ describe('AppShell', () => {
 
     const voiceButton = wrapper.find('[data-testid="ai-voice-button"]')
     expect(voiceButton.exists()).toBe(true)
-    expect(voiceButton.attributes('title')).toBe('语音输入暂未启用')
+    expect(voiceButton.attributes('title')).toBe('开始语音输入')
     expect(voiceButton.attributes('disabled')).toBeUndefined()
     const fileUploadButton = wrapper.find('[data-testid="ai-file-upload-button"]')
     expect(fileUploadButton.exists()).toBe(true)
@@ -1640,11 +2189,22 @@ describe('AppShell', () => {
       ]
     })
     expect(window.aiops.stageChatAttachment).toHaveBeenCalledWith({ taskId: store.selectedConversationId, srcAbsPath: '/tmp/ai-attachment.log' })
-    expect(wrapper.find('.chat-editable .mention-chip-doc').text()).toContain('ai-attachment.log')
+    expect(wrapper.findAll('.chat-editable .mention-chip-doc').some((chip) => chip.text().includes('ai-attachment.log'))).toBe(true)
     expect(wrapper.find('.input-placeholder-notice').text()).toContain('已添加文件：ai-attachment.log')
+    vi.mocked(window.aiops.transcribeVoiceInput).mockClear()
     await voiceButton.trigger('click')
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音输入为本地占位')
+    expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).toContain('recording')
+    expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('停止语音录制')
+    await new Promise((resolve) => window.setTimeout(resolve, 240))
+    await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.transcribeVoiceInput).toHaveBeenCalledWith(expect.objectContaining({ source: 'local-dev', durationMs: expect.any(Number) }))
+    expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
+    expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('开始语音输入')
+    expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音转写完成')
+    expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).toContain('语音输入：请检查当前主机状态')
 
     const markdownContext = store.selectedContexts.find((context) => context.label === 'Markdown语法指南.md')!
     await wrapper.find(`.chat-editable [data-context-id="${markdownContext.id}"] button`).trigger('click')
@@ -1653,6 +2213,8 @@ describe('AppShell', () => {
     await wrapper.find('.context-trigger-tag').trigger('click')
     const docsCategoryAgain = wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('文档'))
     await docsCategoryAgain!.trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
     await wrapper.find('.context-select-popup header input').setValue('Markdown')
     const markdownDocAgain = wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('Markdown语法指南.md'))
     await markdownDocAgain!.trigger('click')
@@ -1680,12 +2242,27 @@ describe('AppShell', () => {
     mainSelection?.removeAllRanges()
     mainSelection?.addRange(sendSlashRange)
     await mainInput.trigger('keydown', { key: '/' })
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
+    await waitForSelector(wrapper, '.command-select-popup header input')
     await wrapper.find('.command-select-popup header input').setValue('rollback')
     await wrapper.find('.command-select-popup .select-list button').trigger('click')
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
+    vi.mocked(window.aiops.generateAiChatResponse).mockClear()
     await wrapper.find('.chat-input button[type="submit"]').trigger('submit')
+    await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('检查回滚窗口')
+      })
+    )
+    expect(store.chatMessages.at(-2)?.id).toBe('aichat-request-test-1-user')
+    expect(store.chatMessages.at(-1)?.id).toBe('aichat-request-test-1-assistant')
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('检查回滚窗口'),
+        command: expect.objectContaining({ label: '/rollback-plan', command: '/rollback-plan' })
+      })
+    )
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')).toBe(true)
@@ -1842,6 +2419,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.user-message-edit-container .mention-chip-doc').text()).toContain('edit-attachment.sql')
 
     await wrapper.find('.message-edit-actions .primary').trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     expect(store.chatMessages.find((message) => message.id === originalUserMessageId)).toBeUndefined()
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'text' && part.text.includes('编辑后的回滚窗口'))).toBe(true)
@@ -1849,7 +2427,7 @@ describe('AppShell', () => {
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'skill')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc' && part.ref.name === 'edit-attachment.sql')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image' && part.name === 'edit.png')).toBe(true)
-    expect(store.chatMessages.at(-2)?.hosts?.map((context) => context.id)).toEqual(['asset-1', 'opened-mysql'])
+    expect(store.chatMessages.at(-2)?.hosts?.map((context) => context.id)).toEqual(['asset-1', 'asset-3'])
     expect(wrapper.find('.user-message-edit-container').exists()).toBe(false)
     expect(wrapper.find('.message.user').text()).toContain('编辑后的回滚窗口')
     expect(wrapper.find('.message.user .message-image-part img').exists()).toBe(true)
@@ -1910,6 +2488,83 @@ describe('AppShell', () => {
     await wrapper.find('.todo-inline-header').trigger('click')
     expect(wrapper.find('.todo-inline-display ol').exists()).toBe(false)
     expect(wrapper.find('.focus-chain-highlight').exists()).toBe(false)
+  })
+
+  it('shows Fork SSH Channel only for External reference-style SSH terminal panels', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    await wrapper.find('.terminal-tab').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    expect(wrapper.find('.tab-menu').text()).not.toContain('Fork SSH Channel')
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-fork-unit',
+      name: 'fork-source',
+      host: '10.8.0.6',
+      port: 2222,
+      username: 'ops',
+      group_name: '生产',
+      asset_type: 'person',
+      auth_type: 'keyBased'
+    })
+    store.applySshTerminalSession(
+      store.activePanelId,
+      {
+        id: 'test-session-source-fork-unit',
+        shell: 'ssh',
+        cwd: '/home/ops',
+        kind: 'ssh',
+        connection: {
+          connectionId: 'ssh-source-fork-unit',
+          host: '10.8.0.6',
+          port: 2222,
+          username: 'ops',
+          assetId: 'asset-fork-unit',
+          assetName: 'fork-source',
+          assetType: 'person',
+          organizationId: '生产',
+          authType: 'keyBased',
+          title: 'fork-source',
+          createdAt: 1717200000000
+        }
+      },
+      {
+        id: 'asset-fork-unit',
+        name: 'fork-source',
+        host: '10.8.0.6',
+        port: 2222,
+        username: 'ops',
+        group_name: '生产',
+        asset_type: 'person',
+        auth_type: 'keyBased'
+      }
+    )
+    await wrapper.find('.terminal-tab').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    expect(wrapper.find('.tab-menu').text()).toContain('Fork SSH Channel')
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
+    await flushPromises()
+    expect(store.activePanel.title).toBe('local shell fork')
+    expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.8.0.6:2222')
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'ssh',
+        assetId: 'asset-fork-unit',
+        title: 'local shell fork',
+        ssh: expect.objectContaining({ host: '10.8.0.6', port: 2222, username: 'ops', forkFromConnectionId: 'ssh-source-fork-unit' })
+      })
+    )
+    expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
+    expect(store.activePanel.sshSession?.connectionId).toBe('ssh-test-session-asset-fork-unit')
+    expect(store.activePanel.sshSession?.forkFromConnectionId).toBe('ssh-source-fork-unit')
+    expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit' && context.detail === 'fork-source fork')).toBe(true)
+
+    wrapper.unmount()
   })
 
   it('matches External reference-style terminal context menu, search overlay, suggestions, and global command bar', async () => {
@@ -1994,9 +2649,14 @@ describe('AppShell', () => {
     xterm.buffer.active.cursorX = 6
     xterm.buffer.active.cursorY = 8
     await wrapper.find('.command-line input').setValue('df')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     const suggestions = wrapper.find('.terminal-suggestions')
     expect(suggestions.exists()).toBe(true)
+    expect(window.aiops.getTerminalCommandSuggestions).toHaveBeenCalledWith(
+      'df',
+      expect.objectContaining({ panelId: store.activePanelId, mode: 'base' })
+    )
     expect(suggestions.attributes('style')).toContain('left: 54px')
     expect(suggestions.attributes('style')).toContain('top: 165.6px')
     expect(wrapper.text()).toContain('df -h')
@@ -2008,9 +2668,23 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-suggestions .terminal-suggestion-arrow').exists()).toBe(true)
     expect(wrapper.find('.terminal-suggestions .terminal-suggestion-arrow').attributes('style')).toContain('top: 3px')
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
-    expect(store.activePanel.output).toContain('[mock] df -h')
+    await flushPromises()
+    expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: df -h')
+    expect(store.activePanel.output).not.toContain('df -h')
+    expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
+    expect((wrapper.find('.command-line input').element as HTMLInputElement).value).toBe('df -h')
 
+    let resolveAiSuggestions: (value: Awaited<ReturnType<typeof window.aiops.getTerminalCommandSuggestions>>) => void = () => undefined
+    vi.mocked(window.aiops.getTerminalCommandSuggestions)
+      .mockImplementationOnce(async () => [{ command: 'top -o %CPU', source: 'base', explanation: 'base command' }])
+      .mockImplementationOnce(async (_query, context) => {
+        if (context?.mode !== 'ai') return []
+        return await new Promise((resolve) => {
+          resolveAiSuggestions = resolve
+        })
+      })
     await wrapper.find('.command-line input').setValue('top')
+    await flushPromises()
     await wrapper.vm.$nextTick()
     const aiTrigger = wrapper.find('.terminal-suggestions .ai-trigger')
     expect(aiTrigger.exists()).toBe(true)
@@ -2022,7 +2696,12 @@ describe('AppShell', () => {
     await wrapper.find('.command-line input').trigger('keydown', { key: 'ArrowRight' })
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-suggestions .terminal-suggestion-arrow').attributes('style')).toContain('top: 33px')
-    await new Promise((resolve) => window.setTimeout(resolve, 350))
+    expect(window.aiops.getTerminalCommandSuggestions).toHaveBeenCalledWith(
+      'top',
+      expect.objectContaining({ panelId: store.activePanelId, mode: 'ai' })
+    )
+    resolveAiSuggestions([{ command: 'top --help', source: 'ai', explanation: 'AI suggestion' }])
+    await flushPromises()
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('top --help')
     expect(wrapper.find('.terminal-suggestions .ai-trigger').exists()).toBe(false)
@@ -2032,10 +2711,11 @@ describe('AppShell', () => {
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
     expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/file')
     expect(wrapper.find('.terminal-security-prompt').exists()).toBe(true)
-    expect(store.activePanel.output).not.toContain('[mock] rm /tmp/file')
+    expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: rm /tmp/file')
     await wrapper.find('.terminal-security-prompt .primary').trigger('click')
     expect(store.terminalSecurityPrompt).toBeNull()
-    expect(store.activePanel.output).toContain('[mock] rm /tmp/file')
+    expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: rm /tmp/file')
+    expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
 
     store.securitySettings = {
       security: {
@@ -2064,13 +2744,13 @@ describe('AppShell', () => {
     const missingTermFindNextCalls = searchAddon.findNext.mock.calls.length
     await wrapper.find('.terminal-search-overlay input').trigger('keydown', { key: 'Enter' })
     expect(searchAddon.findNext.mock.calls).toHaveLength(missingTermFindNextCalls)
-    await wrapper.find('.terminal-search-overlay input').setValue('df')
+    await wrapper.find('.terminal-search-overlay input').setValue('ERROR')
     expect(wrapper.find('.terminal-search-overlay').text()).toContain('1/')
-    expect(searchAddon.findNext).toHaveBeenCalledWith('df', { incremental: true, caseSensitive: false })
+    expect(searchAddon.findNext).toHaveBeenCalledWith('ERROR', { incremental: true, caseSensitive: false })
     await wrapper.find('.terminal-search-overlay button[title="下一个"]').trigger('click')
-    expect(searchAddon.findNext).toHaveBeenCalledWith('df', { caseSensitive: false })
+    expect(searchAddon.findNext).toHaveBeenCalledWith('ERROR', { caseSensitive: false })
     await wrapper.find('.terminal-search-overlay button[title="上一个"]').trigger('click')
-    expect(searchAddon.findPrevious).toHaveBeenCalledWith('df', { caseSensitive: false })
+    expect(searchAddon.findPrevious).toHaveBeenCalledWith('ERROR', { caseSensitive: false })
     const searchInput = wrapper.find('.terminal-search-overlay input')
     const clearSearchButton = wrapper.find('.terminal-search-overlay div button')
     await clearSearchButton.trigger('click')
@@ -2087,11 +2767,70 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-global-command').exists()).toBe(true)
     await wrapper.find('.terminal-global-command input').setValue('uptime')
     await wrapper.find('.terminal-global-command input').trigger('keydown', { key: 'Enter' })
-    expect(store.panels.every((panel) => panel.output.includes('[mock broadcast] uptime'))).toBe(true)
+    await flushPromises()
+    expect(store.panels.every((panel) => !panel.output.includes('[aiopsterm] broadcast queued without live sessions: uptime'))).toBe(true)
+    expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
+    expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('uptime')
 
+    store.activePanel.sessionId = 'terminal-live-component'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    await wrapper.find('.command-line input').setValue('whoami')
+    await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-live-component', 'whoami\n')
+    expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'whoami\n', scope: 'input' })
+    expect((wrapper.find('.command-line input').element as HTMLInputElement).value).toBe('')
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-command-dialog').exists()).toBe(true)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.listAiModels).toHaveBeenCalled()
+    expect(wrapper.find('.terminal-command-dialog select').text()).toContain('aiopsterm-local-agent')
+    expect(wrapper.find('.terminal-command-dialog select').text()).not.toContain('gpt-5-Thinking')
+    await wrapper.find('.terminal-command-dialog textarea').setValue('检查磁盘空间')
+    vi.mocked(window.aiops.generateTerminalCommand).mockClear()
+    await wrapper.find('.terminal-command-dialog textarea').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.terminal-command-dialog').classes()).toContain('loading')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.generateTerminalCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        panelId: store.activePanelId,
+        instruction: '检查磁盘空间',
+        modelName: 'aiopsterm-local-agent'
+      })
+    )
+    expect(store.terminalCommandGenerationRecords[0]).toEqual(expect.objectContaining({ instruction: '检查磁盘空间', command: 'df -h' }))
+    expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'df -h', scope: 'input' })
+    expect(wrapper.find('.terminal-command-dialog').exists()).toBe(true)
+    expect((wrapper.find('.terminal-command-dialog textarea').element as HTMLTextAreaElement).value).toBe('')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-command-dialog').exists()).toBe(false)
+
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-terminal-files-unit',
+      name: 'terminal-files-host',
+      host: '10.45.0.12',
+      port: 22,
+      username: 'deploy',
+      group_name: '生产',
+      asset_type: 'person'
+    })
     await wrapper.find('.xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('文件管理'))!.trigger('click')
     expect(store.activeModule).toBe('files')
+    expect(store.selectedLeftFileSessionId).toBe('asset-terminal-files-unit')
+    expect(store.fileSessions.find((session) => session.id === 'asset-terminal-files-unit')).toEqual(
+      expect.objectContaining({
+        label: 'terminal-files-host',
+        host: '10.45.0.12',
+        rootPath: '/home/deploy'
+      })
+    )
+    expect(store.panels.find((panel) => panel.id === store.activePanelId)?.output).toContain('[file manager] opened terminal-files-host on left transfer pane')
 
     store.setActiveModule('workspace')
     store.updateTerminalSettings({ rightMouseEvent: 'paste' })
@@ -2121,12 +2860,14 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await flushPromises()
 
     try {
       expect(wrapper.text()).toContain('拖拽模式')
       expect(wrapper.find('.files-transfer-layout').exists()).toBe(true)
       expect(wrapper.text()).toContain('新增连接 或 左侧拖拽至此')
-      expect(wrapper.text()).toContain('任务列表')
+      expect(store.fileTransferTasks).toEqual([])
+      expect(wrapper.find('.transfer-progress-panel').exists()).toBe(false)
       expect(store.selectedRightFileSessionId).toBe('local')
 
       await wrapper.findAll('.files-session-header button[title="关闭"]').at(0)!.trigger('click')
@@ -2147,6 +2888,7 @@ describe('AppShell', () => {
           getData: vi.fn((type: string) => (type === 'application/x-asset-sftp' ? JSON.stringify(sftpPayload) : ''))
         }
       })
+      expect(window.aiops.saveFileSessionFromSftpPayload).toHaveBeenCalledWith(sftpPayload)
       expect(store.selectedRightFileSessionId).toBe('asset-dropped')
       expect(store.fileSessions.find((session) => session.id === 'asset-dropped')).toEqual(
         expect.objectContaining({
@@ -2228,27 +2970,57 @@ describe('AppShell', () => {
           getData: vi.fn((type: string) => dragPayload.get(type) || '')
         }
       })
+      await flushPromises()
+      expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+        { kind: 'upload-file', localPath: '/release-note.md', remoteDirectory: '/home/staging/boot' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+      )
       expect(store.fileTransferTasks.find((task) => task.source === '/release-note.md' && task.target === '/home/staging/boot/release-note.md')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'release-note.md',
           fromHost: '127.0.0.1',
           toHost: '10.24.9.20',
-          status: 'running'
+          status: 'success'
         })
       )
+
+      await rightBrowser.find('.file-drop-zone').trigger('drop', {
+        dataTransfer: {
+          files: [{ path: '/tmp/os-drop.log' }],
+          getData: vi.fn(() => '')
+        }
+      })
+      await flushPromises()
+      expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+        { kind: 'upload-path', localPath: '/tmp/os-drop.log', remoteDirectory: '/home/staging' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+      )
+      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/os-drop.log' && task.target === '/home/staging/os-drop.log')).toEqual(
+        expect.objectContaining({
+          type: 'upload',
+          name: 'os-drop.log',
+          toHost: '10.24.9.20',
+          status: 'success'
+        })
+      )
+      expect(store.fileTransferTasks.some((task) => task.name === 'dropped-item' || task.source === 'drag-source')).toBe(false)
 
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/local-upload.log'] })
       const uploadFileButton = rightBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传文件')!
       await uploadFileButton.trigger('click')
       await flushPromises()
       expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openFile'], defaultPath: '/home/staging' }))
-      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload.log' && task.target === '/home/staging')).toEqual(
+      expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+        { kind: 'upload-file', localPath: '/tmp/local-upload.log', remoteDirectory: '/home/staging' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+      )
+      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload.log' && task.target === '/home/staging/local-upload.log')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'local-upload.log',
           toHost: '10.24.9.20',
-          status: 'running'
+          status: 'success'
         })
       )
 
@@ -2257,19 +3029,29 @@ describe('AppShell', () => {
       await uploadDirectoryButton.trigger('click')
       await flushPromises()
       expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openDirectory'], defaultPath: '/home/staging' }))
-      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload-dir' && task.target === '/home/staging')).toEqual(
+      expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+        { kind: 'upload-directory', localPath: '/tmp/local-upload-dir', remoteDirectory: '/home/staging' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+      )
+      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload-dir' && task.target === '/home/staging/local-upload-dir')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'local-upload-dir',
           isGroup: true,
-          stage: 'scanning'
+          stage: 'scanning',
+          status: 'success'
         })
       )
 
       const remoteFileRow = rightBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
       await remoteFileRow.trigger('dblclick')
       await flushPromises()
+      expect(window.aiops.readFileContent).toHaveBeenCalledWith(
+        '/home/staging/release-note.md',
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2', host: '10.24.9.20', rootPath: '/home/staging' })
+      )
       expect(wrapper.find('.files-floating-editor').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="files-editor-monaco"]').exists()).toBe(true)
       expect(wrapper.find('.files-editor-toolbar').text()).toContain('编辑文件 /home/staging/release-note.md')
       const editorCount = wrapper.findAll('.files-floating-editor').length
       await remoteFileRow.trigger('dblclick')
@@ -2288,9 +3070,14 @@ describe('AppShell', () => {
       expect(wrapper.find('.files-floating-editor').attributes('style')).not.toBe(editorBeforeResize)
       await wrapper.find('.files-editor-toolbar button[title="全屏"]').trigger('click')
       expect(wrapper.find('.files-floating-editor').classes()).toContain('fullscreen')
-      await wrapper.find('.files-floating-editor textarea').setValue('changed remote note')
+      await wrapper.find('.files-editor-body').setValue('changed remote note')
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }))
-      await wrapper.vm.$nextTick()
+      await flushPromises()
+      expect(window.aiops.writeFileContent).toHaveBeenCalledWith(
+        '/home/staging/release-note.md',
+        'changed remote note',
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2', host: '10.24.9.20', rootPath: '/home/staging' })
+      )
       expect(store.fileTransferTasks.find((task) => task.name === 'save release-note.md' && task.source === '/home/staging/release-note.md')).toEqual(
         expect.objectContaining({
           type: 'r2r',
@@ -2299,7 +3086,7 @@ describe('AppShell', () => {
           speed: '已保存'
         })
       )
-      await wrapper.find('.files-floating-editor textarea').setValue('changed remote note again')
+      await wrapper.find('.files-editor-body').setValue('changed remote note again')
       await wrapper.find('.files-editor-toolbar button[title="关闭"]').trigger('click')
       expect(wrapper.find('.file-modal-card.small').text()).toContain('保存确认')
       await wrapper.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('取消'))!.trigger('click')
@@ -2308,8 +3095,7 @@ describe('AppShell', () => {
       await wrapper.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('不保存'))!.trigger('click')
       expect(wrapper.find('.files-floating-editor').exists()).toBe(false)
 
-      store.pushFileTransferTask({
-        id: 'test-group-transfer',
+      const runningTransfer = await window.aiops.recordFileTransferTask({
         type: 'r2r',
         name: 'deploy-dir',
         source: '/tmp/deploy-dir',
@@ -2333,14 +3119,18 @@ describe('AppShell', () => {
           }
         ]
       })
+      expect(runningTransfer.ok).toBe(true)
+      const runningTransferTask = store.pushFileTransferTask(runningTransfer.data!.task)!
       await wrapper.vm.$nextTick()
       const groupTransferTask = wrapper.findAll('.transfer-task').find((task) => task.text().includes('deploy-dir'))!
       await groupTransferTask.find('.transfer-task-progress button').trigger('click')
       expect(wrapper.text()).toContain('app.log')
       await groupTransferTask.find('.transfer-task-children button[title="取消"]').trigger('click')
-      expect(store.fileTransferTasks.find((task) => task.id === 'test-group-transfer')?.status).toBe('failed')
+      await flushPromises()
+      expect(window.aiops.cancelFileTransferTask).toHaveBeenCalledWith({ id: runningTransferTask.children![0].id })
+      expect(store.fileTransferTasks.find((task) => task.id === runningTransferTask.id)?.status).toBe('failed')
       await vi.advanceTimersByTimeAsync(800)
-      expect(store.fileTransferTasks.some((task) => task.id === 'test-group-transfer')).toBe(false)
+      expect(store.fileTransferTasks.some((task) => task.id === runningTransferTask.id)).toBe(false)
 
       await wrapper.find('.transfer-progress-panel header button').trigger('click')
       expect(wrapper.find('.transfer-fab').exists()).toBe(true)
@@ -2355,9 +3145,10 @@ describe('AppShell', () => {
   it('supports External reference-style file table hidden toggle, rename, more menu, and move dialog', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const localSession = await loadTestFileSession('local')
     const wrapper = mount(FileBrowser, {
       props: {
-        session: initialFileSessions[0],
+        session: localSession,
         uiMode: 'default'
       },
       global: { plugins: [pinia] }
@@ -2381,7 +3172,13 @@ describe('AppShell', () => {
     await releaseRow.find('.file-row-actions button[title="重命名"]').trigger('click')
     await releaseRow.find('.file-rename-row input').setValue('release-note-v2.md')
     await releaseRow.find('.file-rename-row button[title="确认"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'rename', oldPath: '/tmp/local-picked/release-note.md', newPath: '/tmp/local-picked/release-note-v2.md' },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
     expect(wrapper.text()).toContain('release-note-v2.md')
+    expect(wrapper.text()).toContain('重命名成功')
 
     const renamedRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note-v2.md'))!
     await renamedRow.find('.file-row-actions button[title="权限"]').trigger('click')
@@ -2390,6 +3187,11 @@ describe('AppShell', () => {
     await wrapper.findAll('.permission-check input').find((input) => (input.element as HTMLInputElement).value === '执行')!.setValue(true)
     await wrapper.find('.permission-recursive input').setValue(true)
     await wrapper.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'chmod', path: '/tmp/local-picked/release-note-v2.md', mode: '744', recursive: true },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
     expect(wrapper.text()).toContain('权限已更新为 744')
     expect(wrapper.text()).toContain('-744')
 
@@ -2399,15 +3201,19 @@ describe('AppShell', () => {
     await renamedRow.find('.file-row-actions button[title="下载"]').trigger('click')
     await flushPromises()
     expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({ defaultPath: 'release-note-v2.md' })
+    expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+      { kind: 'download-file', remotePath: '/tmp/local-picked/release-note-v2.md', localPath: '/tmp/downloads/release-note-v2.md' },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
     expect(store.fileTransferTasks.find((task) => task.name === 'release-note-v2.md' && task.target === '/tmp/downloads/release-note-v2.md')).toEqual(
       expect.objectContaining({
         type: 'download',
         name: 'release-note-v2.md',
         fromHost: '127.0.0.1',
-        status: 'running'
+        status: 'success'
       })
     )
-    expect(wrapper.text()).toContain('release-note-v2.md 已加入下载任务')
+    expect(wrapper.text()).toContain('release-note-v2.md 下载成功')
 
     await renamedRow.find('.file-row-actions button[title="更多"]').trigger('click')
     expect(wrapper.find('.file-more-menu').exists()).toBe(true)
@@ -2416,8 +3222,8 @@ describe('AppShell', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/tmp/local-picked/release-note-v2.md')
     expect(wrapper.text()).toContain('绝对路径已复制')
     await renamedRow.find('.file-row-actions button[title="更多"]').trigger('click')
-    await wrapper.find('.file-more-menu').findAll('button').find((button) => button.text().includes('移动'))!.trigger('click')
-    expect(wrapper.text()).toContain('移动到')
+    await wrapper.find('.file-more-menu').findAll('button').find((button) => button.text().includes('复制'))!.trigger('click')
+    expect(wrapper.text()).toContain('复制到')
     expect(wrapper.find('.move-breadcrumb-row').exists()).toBe(true)
     await wrapper.find('.move-breadcrumb-menu-trigger').trigger('click')
     await flushPromises()
@@ -2438,6 +3244,11 @@ describe('AppShell', () => {
     const beforeConflictTasks = store.fileTransferTasks.length
     await wrapper.find('.file-modal-card.small input').setValue('release-note-v2_1.md')
     await wrapper.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('重命名'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'copy', srcPath: '/tmp/local-picked/release-note-v2.md', targetPath: '/tmp/local-picked/release-note-v2_1.md', overwrite: false },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
     expect(store.fileTransferTasks).toHaveLength(beforeConflictTasks + 1)
     expect(store.fileTransferTasks.find((task) => task.target === '/tmp/local-picked/release-note-v2_1.md')).toEqual(
       expect.objectContaining({
@@ -2445,29 +3256,27 @@ describe('AppShell', () => {
         source: '/tmp/local-picked/release-note-v2.md',
         target: '/tmp/local-picked/release-note-v2_1.md',
         type: 'r2r',
-        status: 'running'
+        status: 'success'
       })
     )
 
     const secondRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note-v2.md'))!
     await secondRow.find('.file-row-actions button[title="更多"]').trigger('click')
     await wrapper.find('.file-more-menu').findAll('button').find((button) => button.text().includes('移动'))!.trigger('click')
-    ;(wrapper.vm as any).entries.push({
-      name: 'release-note-v2_1.md',
-      path: '/tmp/local-picked/release-note-v2_1.md',
-      type: 'file',
-      mode: '-rw-r--r--',
-      size: 1,
-      modifiedAt: '2026-06-04 13:10'
-    })
     await wrapper.find('.file-modal-card footer .primary').trigger('click')
     await flushPromises()
     expect((wrapper.find('.file-modal-card.small input').element as HTMLInputElement).value).toBe('release-note-v2_2.md')
     await wrapper.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('覆盖'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'move', srcPath: '/tmp/local-picked/release-note-v2.md', targetPath: '/tmp/local-picked/release-note-v2.md', overwrite: true },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
     expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-picked/release-note-v2.md' && task.target === '/tmp/local-picked/release-note-v2.md')).toEqual(
       expect.objectContaining({
         name: 'release-note-v2.md',
-        target: '/tmp/local-picked/release-note-v2.md'
+        target: '/tmp/local-picked/release-note-v2.md',
+        status: 'success'
       })
     )
 
@@ -2475,6 +3284,11 @@ describe('AppShell', () => {
     await wrapper.find('.file-more-menu').findAll('button').find((button) => button.text().includes('删除'))!.trigger('click')
     expect(wrapper.find('.file-delete-confirm').text()).toContain('/tmp/local-picked/release-note-v2.md')
     await wrapper.find('.file-delete-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'delete', path: '/tmp/local-picked/release-note-v2.md', recursive: false },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
     expect(wrapper.text()).toContain('删除成功')
     expect(wrapper.text()).not.toContain('release-note-v2.md')
   })
@@ -2486,6 +3300,8 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('快捷命令')
     expect(wrapper.text()).toContain('命令组')
@@ -2515,6 +3331,7 @@ describe('AppShell', () => {
     await wrapper.find('.snippet-edit-panel input').setValue('新片段')
     await wrapper.find('.script-editor-container textarea').setValue('pwd\nsleep==1000\nctrl+c')
     await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
+    await flushPromises()
     expect(store.quickCommands.some((command) => command.snippet_name === '新片段')).toBe(true)
 
     const commandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('磁盘巡检'))!
@@ -2529,6 +3346,7 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('录制中')
     store.recordMacroTerminalInput(store.activePanelId, 'uptime\n')
     await wrapper.findAll('.recording-status-bar button').find((button) => button.text().includes('停止录制'))!.trigger('click')
+    await flushPromises()
     expect(store.isMacroRecording).toBe(false)
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-') && command.snippet_content.includes('uptime'))).toBe(true)
 
@@ -2537,6 +3355,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('date')
     await wrapper.findAll('.recording-status-bar button').find((button) => button.text().includes('停止录制'))!.trigger('click')
+    await flushPromises()
     expect(store.isMacroRecording).toBe(false)
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-'))).toBe(true)
   })
@@ -2555,13 +3374,14 @@ describe('AppShell', () => {
     store.recordMacroTerminalInput('panel-main', '\x1b[A', 1600)
     store.recordMacroTerminalInput('panel-main', 'whoami\n', 1650)
     store.recordMacroTerminalInput('panel-secondary', 'ignored\n', 1700)
-    const saved = store.stopMacroRecording()
+    const saved = await store.stopMacroRecording()
     expect(saved?.snippet_content).toBe('uptime\nsleep==600\nup\nwhoami')
 
     store.startMacroRecording('panel-main')
     for (let index = 0; index < 50; index += 1) {
       store.recordMacroCommand(`cmd-${index}`, 2000 + index)
     }
+    await flushPromises()
     expect(store.isMacroRecording).toBe(false)
     expect(store.macroLimitReason).toBe('count')
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-') && command.snippet_content.includes('cmd-49'))).toBe(true)
@@ -2573,15 +3393,15 @@ describe('AppShell', () => {
     expect(store.quickCommands.some((command) => command.snippet_content === 'staged command')).toBe(false)
   })
 
-  it('keeps External reference paste mode from submitting the final quick command after sleep lines', () => {
+  it('keeps External reference paste mode from submitting the final quick command after sleep lines', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
-    const command = store.createQuickCommand({
+    const command = (await store.createQuickCommand({
       snippet_name: '粘贴不执行最后一行',
       snippet_content: 'echo first\nsleep==500\necho second',
       group_uuid: null
-    })!
+    }))!
 
     store.runQuickCommand(command.id, false)
     expect(store.activePanel.output).toContain('echo first')
@@ -2598,15 +3418,34 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('知识库')
     expect(wrapper.text()).toContain('commands')
     expect(wrapper.text()).toContain('我的容量')
 
     await wrapper.find('.kb-search input').setValue('interface')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('interface.png')
+    expect(wrapper.find('.kb-search-results').exists()).toBe(true)
+    expect(wrapper.text()).toContain('内容搜索')
+    expect(wrapper.text()).toContain('commands/diagnose.md')
+    expect(window.aiops.kbSearch).toHaveBeenCalledWith('interface', { maxResults: 12, minScore: 0.15 })
+    await wrapper.find('.kb-search-result').trigger('click')
+    expect(store.activePanel).toEqual(
+      expect.objectContaining({
+        id: 'kb:commands/diagnose.md',
+        kind: 'knowledge',
+        knowledge: expect.objectContaining({ relPath: 'commands/diagnose.md', startLine: 2, endLine: 8 })
+      })
+    )
     expect(wrapper.text()).not.toContain('Summary to Doc.md')
     await wrapper.find('.kb-search input').setValue('')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    store.kbSelectedKeys = []
 
     await wrapper.find('.kb-add-button').trigger('click')
     expect(wrapper.find('.kb-add-menu').exists()).toBe(true)
@@ -2649,6 +3488,8 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await flushPromises()
+    await panel.vm.$nextTick()
 
     const markdownNode = panel.findAll('.kb-tree-node').find((node) => node.text().includes('Markdown语法指南.md'))!
     await markdownNode.trigger('click')
@@ -2656,7 +3497,7 @@ describe('AppShell', () => {
       expect.objectContaining({
         id: 'kb:Markdown语法指南.md',
         kind: 'knowledge',
-        knowledge: { relPath: 'Markdown语法指南.md', isImage: false }
+        knowledge: expect.objectContaining({ relPath: 'Markdown语法指南.md', isImage: false })
       })
     )
 
@@ -2668,10 +3509,41 @@ describe('AppShell', () => {
     await workspace.vm.$nextTick()
     expect(workspace.find('.kb-editor-root').exists()).toBe(true)
     expect(workspace.text()).toContain('Markdown语法指南.md')
+    expect(workspace.find('[data-testid="kb-editor-monaco"]').exists()).toBe(true)
     const textarea = workspace.find('.kb-editor-textarea')
     expect((textarea.element as HTMLTextAreaElement).value).toBe('content:Markdown语法指南.md')
 
-    const markdownContent = '# Runbook\n\n![diagram](images/interface.png)\n\n| Name | State |\n| :--- | ---: |\n| api | ok |\n\n```bash\necho ok\n```'
+    store.openKnowledgeFile('commands/diagnose.md', { startLine: 2, endLine: 8 })
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(workspace.text()).toContain('diagnose.md')
+    expect(monacoMocks.editorInstance.setSelection).toHaveBeenCalledWith({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 8,
+      endColumn: 80
+    })
+    const diagnosePanelId = store.activePanelId
+    store.openKnowledgeFile('commands/diagnose.md', { startLine: 5, endLine: 6 })
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(store.activePanelId).toBe(diagnosePanelId)
+    expect(monacoMocks.editorInstance.setSelection).toHaveBeenCalledWith({
+      startLineNumber: 5,
+      startColumn: 1,
+      endLineNumber: 6,
+      endColumn: 80
+    })
+    store.openKnowledgeFile('Markdown语法指南.md')
+    await flushPromises()
+    await workspace.vm.$nextTick()
+
+    const markdownContent =
+      '# Runbook\n\n![diagram](images/interface.png)\n\n| Name | State |\n| :--- | ---: |\n| api | ok |\n\n```bash\necho ok\n```\n\n```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```\n\n<script>alert(1)</script>\n<img src="javascript:alert(1)" onerror="alert(2)" alt="bad">\n<a href="javascript:alert(3)" onclick="alert(4)">bad link</a>'
     await textarea.setValue(markdownContent)
     await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('预览'))!.trigger('click')
     await flushPromises()
@@ -2681,7 +3553,13 @@ describe('AppShell', () => {
     expect(preview.find('h1').text()).toBe('Runbook')
     expect(preview.find('table').exists()).toBe(true)
     expect(preview.find('pre code').text()).toContain('echo ok')
+    expect(preview.find('pre code').classes()).toContain('hljs')
+    expect(preview.find('.mermaid').attributes('data-processed')).toBe('true')
     expect(preview.find('img').attributes('src')).toContain(Buffer.from('images/interface.png').toString('base64'))
+    expect(preview.html()).not.toContain('<script')
+    expect(preview.html()).not.toContain('onerror')
+    expect(preview.html()).not.toContain('onclick')
+    expect(preview.html()).not.toContain('javascript:')
     expect(window.aiops.kbReadFile).toHaveBeenCalledWith('images/interface.png', 'base64')
 
     await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('编辑'))!.trigger('click')
@@ -2796,10 +3674,12 @@ describe('AppShell', () => {
   it('matches External reference-style extension list, plugin details, built-ins, and Alias CRUD', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.refreshExtensionPlugins()
+    await store.refreshAliasCommands()
     const panel = mount(ExtensionsPanel, {
       global: { plugins: [pinia] }
     })
-    const store = useWorkspaceStore()
 
     expect(panel.text()).toContain('插件')
     expect(panel.text()).toContain('Jumpserver Support')
@@ -2813,6 +3693,18 @@ describe('AppShell', () => {
     expect(panel.find('button[title="安装"]').exists()).toBe(true)
     expect(panel.find('button[title="订阅"]').exists()).toBe(true)
     expect(panel.find('button[title="更新"]').exists()).toBe(true)
+
+    await panel.find('button[title="订阅"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.openExtensionSubscription).toHaveBeenCalledWith({
+      plugin: expect.objectContaining({
+        pluginId: 'private-automation-pack',
+        installed: false,
+        installable: false,
+        isPrivate: true
+      })
+    })
+    expect(store.extensionNotice).toContain('订阅')
 
     const badDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
     Object.defineProperty(badDrop, 'dataTransfer', { configurable: true, value: { files: [{ name: 'plugin.zip' }] } })
@@ -2830,9 +3722,21 @@ describe('AppShell', () => {
     panel.element.dispatchEvent(validDrop)
     await panel.vm.$nextTick()
     expect(store.extensionDragActive).toBe(false)
-    expect(store.selectedExtensionId).toBe('local-local-tools')
+    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({
+      fileName: 'local-tools.external-reference',
+      filePath: '',
+      size: undefined,
+      existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'cloud-assets'])
+    })
     expect(store.extensionInstallLoadingMap['local-local-tools']).toBe(true)
-    expect(panel.text()).toContain('Installing')
+    expect(store.extensionInstallProgressMap['local-local-tools']).toMatchObject({ stage: 'installing', percent: 100 })
+    expect(panel.text()).toContain('正在安装 local tools')
+    expect(store.selectedExtensionId).toBe('jumpserverSupport')
+    await new Promise((resolve) => setTimeout(resolve, 140))
+    await flushPromises()
+    await panel.vm.$nextTick()
+    expect(store.selectedExtensionId).toBe('local-local-tools')
+    expect(store.extensionPlugins.some((plugin) => plugin.pluginId === 'local-local-tools' && plugin.installed)).toBe(true)
 
     await panel.find('.extension_search_box input').setValue('Alias')
     expect(panel.text()).toContain('Alias')
@@ -2902,6 +3806,14 @@ describe('AppShell', () => {
     await aliasRow.find('button[title="删除"]').trigger('click')
     expect(store.aliasCommands.some((alias) => alias.alias === 'ports')).toBe(false)
 
+    store.selectExtension('jumpserverSupport')
+    await workspace.vm.$nextTick()
+    expect(workspace.text()).toContain('Jumpserver Support')
+    expect(workspace.text()).toContain('同步资产并确认主机分组')
+    expect(workspace.text()).toContain('connected to bastion host')
+    expect(workspace.find('.connection_log_terminal').exists()).toBe(true)
+    expect(workspace.find('.mock_terminal').exists()).toBe(false)
+
     store.selectExtension('ops-runbook')
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('Ops Runbook')
@@ -2913,19 +3825,41 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('卸载')
     expect(workspace.text()).toContain('更新')
 
-    store.updateExtensionPlugin('ops-runbook')
+    void store.updateExtensionPlugin('ops-runbook')
     await workspace.vm.$nextTick()
+    expect(window.aiops.updateExtensionPlugin).toHaveBeenCalledWith({
+      plugin: expect.objectContaining({ pluginId: 'ops-runbook', installed: true, hasUpdate: true })
+    })
     expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
     expect(store.selectedExtensionInstallProgress?.stage).toBe('downloading')
     expect(workspace.text()).toContain('取消')
-    store.cancelExtensionInstall('ops-runbook')
+    await store.cancelExtensionInstall('ops-runbook')
     await workspace.vm.$nextTick()
+    expect(window.aiops.cancelExtensionInstall).toHaveBeenCalledWith('ops-runbook')
     expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
     expect(store.selectedExtensionInstallProgress?.stage).toBe('cancelled')
 
-    store.installExtensionPlugin('cloud-assets')
+    store.selectExtension('private-automation-pack')
+    await workspace.vm.$nextTick()
+    const subscribeButton = workspace.findAll('button').find((button) => button.text() === '订阅')!
+    await subscribeButton.trigger('click')
+    await flushPromises()
+    expect(window.aiops.openExtensionSubscription).toHaveBeenLastCalledWith({
+      plugin: expect.objectContaining({
+        pluginId: 'private-automation-pack',
+        installed: false,
+        installable: false,
+        isPrivate: true
+      })
+    })
+    expect(store.extensionNotice).toContain('订阅')
+
+    void store.installExtensionPlugin('cloud-assets')
     store.selectExtension('cloud-assets')
     await workspace.vm.$nextTick()
+    expect(window.aiops.installExtensionPlugin).toHaveBeenCalledWith({
+      plugin: expect.objectContaining({ pluginId: 'cloud-assets', installed: false, latestVersion: '0.9.1' })
+    })
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBe(true)
     expect(workspace.text()).toContain('取消')
     expect(workspace.text()).toContain('Downloading')
@@ -2940,6 +3874,8 @@ describe('AppShell', () => {
         global: { plugins: [pinia] }
       })
       const store = useWorkspaceStore()
+      await flushPromises()
+      await panel.vm.$nextTick()
 
       expect(panel.text()).toContain('prod-cluster')
       expect(panel.text()).toContain('staging/devops')
@@ -2954,9 +3890,9 @@ describe('AppShell', () => {
       await stagingRow.find('button[title="更多"]').trigger('click')
       expect(store.k8sClusterActionMenuId).toBe('k8s-2')
       await stagingRow.find('.k8s-cluster-menu').findAll('button').find((button) => button.text().includes('连接'))!.trigger('click')
-      expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connecting')
-      await vi.advanceTimersByTimeAsync(280)
+      await flushPromises()
       expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connected')
+      expect(window.aiops.connectKubernetesCluster).toHaveBeenCalledWith('k8s-2')
 
       await stagingRow.find('button[title="更多"]').trigger('click')
       await stagingRow.find('.k8s-cluster-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
@@ -2966,39 +3902,72 @@ describe('AppShell', () => {
       const workspace = mount(KubernetesWorkspace, {
         global: { plugins: [pinia] }
       })
-    expect(workspace.text()).toContain('Kubernetes')
-    expect(workspace.text()).toContain('prod/admin')
-    expect(workspace.text()).toContain('本地集群')
-    expect(workspace.text()).toContain('堡垒机资源')
+      await flushPromises()
+      await workspace.vm.$nextTick()
+      expect(workspace.text()).toContain('Kubernetes')
+      expect(workspace.text()).toContain('prod/admin')
+      expect(workspace.text()).toContain('本地集群')
+      expect(workspace.text()).toContain('堡垒机资源')
 
-    await workspace.findAll('.k8s-context-item').find((item) => item.text().includes('prod/admin'))!.trigger('click')
-    expect(store.k8sContexts.find((context) => context.name === 'prod/admin')?.isActive).toBe(true)
+      await workspace.findAll('.k8s-context-item').find((item) => item.text().includes('prod/admin'))!.trigger('click')
+      expect(store.k8sContexts.find((context) => context.name === 'prod/admin')?.isActive).toBe(true)
 
-    store.selectK8sCluster('k8s-1')
-    await workspace.vm.$nextTick()
-    expect(workspace.text()).toContain('危险区域')
-    await workspace.find('.k8s-detail-form label input').setValue('prod-renamed')
-    await workspace.find('.k8s-form-actions .primary').trigger('click')
-    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')?.name).toBe('prod-renamed')
-    await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('Agent 代理'))!.trigger('click')
-    expect(store.k8sProxyConfigOpen).toBe(true)
-    await workspace.find('.k8s-proxy-config-modal .k8s-switch-row input').setValue(true)
-    await workspace.find('.k8s-proxy-config-modal select').setValue('HTTPS')
-    const proxyInputs = workspace.findAll('.k8s-proxy-config-modal input')
-    await proxyInputs[1].setValue('proxy.k8s.local')
-    await proxyInputs[2].setValue('9443')
-    await workspace.find('.k8s-proxy-config-modal footer .primary').trigger('click')
-    expect(store.k8sProxyConfig).toMatchObject({ enabled: true, type: 'HTTPS', host: 'proxy.k8s.local', port: 9443 })
-    await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('连接'))!.trigger('click')
-    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')?.connection_status).toBe('connecting')
-    await vi.advanceTimersByTimeAsync(280)
-    expect(store.k8sClusterNotice).toContain('proxy.k8s.local:9443')
-    await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('打开终端'))!.trigger('click')
-    expect(store.k8sActiveTerminal?.clusterId).toBe('k8s-1')
+      store.selectK8sCluster('k8s-1')
+      await workspace.vm.$nextTick()
+      expect(workspace.text()).toContain('危险区域')
+      await workspace.find('.k8s-detail-form label input').setValue('prod-renamed')
+      await workspace.find('.k8s-form-actions .primary').trigger('click')
+      expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')?.name).toBe('prod-renamed')
+      await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('Agent 代理'))!.trigger('click')
+      expect(store.k8sProxyConfigOpen).toBe(true)
+      await workspace.find('.k8s-proxy-config-modal .k8s-switch-row input').setValue(true)
+      await workspace.find('.k8s-proxy-config-modal select').setValue('HTTPS')
+      const proxyInputs = workspace.findAll('.k8s-proxy-config-modal input')
+      await proxyInputs[1].setValue('proxy.k8s.local')
+      await proxyInputs[2].setValue('9443')
+      await workspace.find('.k8s-proxy-config-modal footer .primary').trigger('click')
+      expect(store.k8sProxyConfig).toMatchObject({ enabled: true, type: 'HTTPS', host: 'proxy.k8s.local', port: 9443 })
+      if (store.k8sSelectedCluster?.connection_status === 'connected') {
+        await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('断开'))!.trigger('click')
+        await flushPromises()
+        await workspace.vm.$nextTick()
+      }
+      await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('连接'))!.trigger('click')
+      await flushPromises()
+      expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')?.connection_status).toBe('connected')
+      expect(store.k8sClusterNotice).toContain('proxy.k8s.local:9443')
+      vi.mocked(window.aiops.createKubernetesTerminal).mockClear()
+      await workspace.findAll('.k8s-form-actions.inline button').find((button) => button.text().includes('打开终端'))!.trigger('click')
+      await flushPromises()
+      await workspace.vm.$nextTick()
+      expect(store.k8sActiveTerminal?.clusterId).toBe('k8s-1')
+      expect(window.aiops.createKubernetesTerminal).toHaveBeenCalledWith({ clusterId: 'k8s-1', namespace: undefined, cols: undefined, rows: undefined })
+      expect(workspace.find('.k8s-terminal-meta').text()).toContain('Session:')
+      expect(workspace.find('.k8s-terminal-meta').text()).toContain('Status: connected')
 
     await workspace.find('.k8s-command-line input').setValue('kubectl get pods -A')
     await workspace.find('.k8s-command-line').trigger('submit')
-    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl get pods -A')
+    await flushPromises()
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl get pods -A')
+    await workspace.vm.$nextTick()
+    expect(workspace.find('.k8s-terminal-history').text()).toContain('kubectl get pods -A')
+    const firstTerminalId = store.k8sActiveTerminal!.id
+    await workspace.find('.k8s-terminal-tabs .k8s-workspace-button').trigger('click')
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(store.k8sActiveTerminal?.id).not.toBe(firstTerminalId)
+    expect(store.k8sTerminalTabs.filter((tab) => tab.clusterId === 'k8s-1')).toHaveLength(2)
+    await workspace.find('.k8s-terminal-meta button[title="同步尺寸"]').trigger('click')
+    await flushPromises()
+    expect(store.k8sActiveTerminal?.cols).toBe(88)
+    await workspace.find('.k8s-command-line input').setValue('kubectl get ns')
+    await workspace.find('.k8s-terminal-meta button[title="采集命令输出到 AI"]').trigger('click')
+    expect(store.chatMessages.at(-2)?.text).toContain('Terminal output')
+    expect(store.chatMessages.at(-2)?.hosts?.[0].label).toBe('prod-renamed')
+    await workspace.find('.k8s-terminal-meta button[title="结束会话"]').trigger('click')
+    await flushPromises()
+    expect(store.k8sActiveTerminal?.status).toBe('ended')
+    expect((workspace.find('.k8s-command-line input').element as HTMLInputElement).disabled).toBe(true)
 
     store.k8sActiveClusterId = 'k8s-1'
     store.k8sResourceNamespace = 'all'
@@ -3010,6 +3979,23 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Services')
     expect(workspace.text()).toContain('Nodes')
     expect(workspace.text()).toContain('api-gateway-6d8c9bb7f6-l6j2m')
+    expect(workspace.find('.k8s-agent-bar').text()).toContain('Agent')
+    expect(workspace.find('.k8s-agent-bar').text()).toContain('prod/admin')
+    await workspace.find('.k8s-agent-bar button').trigger('click')
+    expect(store.k8sResourceOutput).toContain('Server Version')
+    await vi.advanceTimersByTimeAsync(160)
+    await workspace.findAll('.k8s-agent-bar button').find((button) => button.text().includes('Namespaces'))!.trigger('click')
+    expect(store.k8sResourceOutput).toContain('kubectl get namespaces')
+    expect(store.k8sResourceOutput).toContain('ingress-nginx')
+    await workspace.find('.k8s-agent-command input').setValue('kubectl get deployments -A')
+    await workspace.find('.k8s-agent-command').trigger('submit')
+    expect(store.k8sAgentRuns[0].command).toBe('kubectl get deployments -A')
+    expect(store.k8sResourceOutput).toContain('api-gateway')
+    expect(workspace.find('.k8s-agent-history').text()).toContain('kubectl get deployments -A')
+    await workspace.find('.k8s-agent-bar select').setValue('k8s-2')
+    expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-2', contextName: 'staging/devops' })
+    await workspace.findAll('.k8s-agent-bar button').find((button) => button.text().includes('Cleanup'))!.trigger('click')
+    expect(store.k8sAgentStatus).toBe('idle')
     await workspace.find('.k8s-resource-filter select').setValue('ops')
     expect(store.k8sResourceNamespace).toBe('ops')
     expect(workspace.text()).toContain('billing-worker-7f9d6f9dd9-rx8mm')
@@ -3024,14 +4010,17 @@ describe('AppShell', () => {
     await workspace.find('.k8s-resource-output-actions button[title="复制输出"]').trigger('click')
     expect(store.k8sClusterNotice).toBe('Kubernetes 输出已复制')
     await workspace.find('.k8s-resource-output-actions button[title="发送输出命令到终端"]').trigger('click')
-    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
+    await flushPromises()
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
     await workspace.find('.k8s-resource-output-actions button[title="发送输出到 AI"]').trigger('click')
     expect(store.chatMessages.at(-2)?.text).toContain('Kubernetes 输出')
     await workspace.find('.k8s-resource-output-actions button[title="清空输出"]').trigger('click')
     expect(store.k8sResourceOutputTitle).toBe('资源输出')
     await billingRow.find('button[title="Describe"]').trigger('click')
+    await flushPromises()
     await billingRow.find('button[title="发送到终端"]').trigger('click')
-    expect(store.k8sActiveTerminal?.output).toContain('[mock kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+    await flushPromises()
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     await workspace.find('.k8s-resource-search input').setValue('')
     await workspace.findAll('.k8s-resource-kind-tabs button').find((button) => button.text().includes('Nodes'))!.trigger('click')
     expect(store.k8sResourceKind).toBe('nodes')
@@ -3048,9 +4037,52 @@ describe('AppShell', () => {
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('添加集群')
     expect(workspace.text()).toContain('Context')
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/prod-kubeconfig.yaml'] })
+    vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
+      content: [
+        'apiVersion: v1',
+        'kind: Config',
+        'current-context: prod/admin',
+        'clusters:',
+        '- name: prod-cluster',
+        '  cluster:',
+        '    server: https://prod.k8s.local:6443',
+        '- name: staging-cluster',
+        '  cluster:',
+        '    server: https://staging.k8s.local:6443',
+        'contexts:',
+        '- name: prod/admin',
+        '  context:',
+        '    cluster: prod-cluster',
+        '    namespace: default',
+        '- name: staging/devops',
+        '  context:',
+        '    cluster: staging-cluster',
+        '    namespace: staging'
+      ].join('\n'),
+      mtimeMs: 1717200000000,
+      size: 1024
+    })
     await workspace.find('.k8s-file-picker-row button').trigger('click')
-    expect(store.k8sClusterNotice).toContain('已选择 kubeconfig 文件')
-    await workspace.find('.k8s-test-connection button').trigger('click')
+    await Promise.resolve()
+    await Promise.resolve()
+    await workspace.vm.$nextTick()
+    expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+      defaultPath: '~/.kube',
+      properties: ['openFile'],
+      filters: [
+        { name: 'All Files', extensions: ['*'] },
+        { name: 'YAML Files', extensions: ['yaml', 'yml'] }
+      ]
+    })
+    expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/prod-kubeconfig.yaml')
+    expect(store.k8sClusterNotice).toContain('发现 2 个 Context')
+    expect(store.k8sImportContexts).toHaveLength(2)
+    const testConnectionButton = workspace.find('.k8s-test-connection button')
+    expect(testConnectionButton.attributes('disabled')).toBeUndefined()
+    await testConnectionButton.trigger('click')
+    await Promise.resolve()
+    await workspace.vm.$nextTick()
     expect(store.k8sTestResult).toBe(true)
     await workspace.find('.k8s-add-cluster-modal footer .primary').trigger('click')
     expect(store.k8sClusters.some((cluster) => cluster.name === 'prod-cluster')).toBe(true)
@@ -3065,6 +4097,7 @@ describe('AppShell', () => {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
     })
+    await waitForDatabaseCatalog()
 
     expect(wrapper.text()).toContain('Database')
     expect(wrapper.text()).toContain('Default Group')
@@ -3092,7 +4125,12 @@ describe('AppShell', () => {
     await wrapper.find('.db-search input').setValue('metrics')
     expect(wrapper.text()).toContain('metrics-mysql')
     expect(wrapper.text()).not.toContain('orders-postgres')
-    await wrapper.find('.db-search input').setValue('')
+    expect(wrapper.find('.db-search-clear').exists()).toBe(true)
+    await wrapper.find('.db-search-clear').trigger('click')
+    expect((wrapper.find('.db-search input').element as HTMLInputElement).value).toBe('')
+    await wrapper.find('.db-search input').setValue('oracle')
+    await wrapper.find('.db-search input').trigger('keydown', { key: 'Escape' })
+    expect((wrapper.find('.db-search input').element as HTMLInputElement).value).toBe('')
 
     await wrapper.find('button[title="Add"]').trigger('click')
     expect(wrapper.find('.db-add-menu').exists()).toBe(true)
@@ -3118,9 +4156,31 @@ describe('AppShell', () => {
     expect((wrapper.findAll('.db-connection-modal input').at(6)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://manual-host:15432/manualdb')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('PostgreSQL 16 mock')
+    expect(window.aiops.testDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dbType: 'postgresql',
+        name: 'e2e-postgres',
+        host: '10.10.10.20',
+        port: 5432,
+        user: 'root',
+        sslMode: 'verify-full',
+        url: 'jdbc:postgresql://manual-host:15432/manualdb'
+      })
+    )
+    expect(wrapper.text()).toContain('PostgreSQL 16 local backend validation')
     await wrapper.find('.db-connection-modal').trigger('submit')
     await flushPromises()
+    expect(window.aiops.saveDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'create',
+        connection: expect.objectContaining({
+          dbType: 'postgresql',
+          name: 'e2e-postgres',
+          host: '10.10.10.20',
+          sslMode: 'verify-full'
+        })
+      })
+    )
     expect(wrapper.text()).toContain('e2e-postgres')
 
     const postgresRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-postgres'))!
@@ -3133,6 +4193,16 @@ describe('AppShell', () => {
     await editInputs.at(0)!.setValue('orders-pg-edited')
     await wrapper.find('.db-connection-modal').trigger('submit')
     await flushPromises()
+    expect(window.aiops.saveDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'edit',
+        id: 'conn-prod-pg',
+        connection: expect.objectContaining({
+          name: 'orders-pg-edited',
+          password: ''
+        })
+      })
+    )
     expect(wrapper.text()).toContain('orders-pg-edited')
 
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/aiopsterm/unit-cache.sqlite3'] })
@@ -3148,9 +4218,28 @@ describe('AppShell', () => {
     await sqliteInputs.at(0)!.setValue('unit-sqlite')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('SQLite mock')
+    expect(window.aiops.testDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dbType: 'sqlite',
+        name: 'unit-sqlite',
+        filePath: '/tmp/aiopsterm/unit-cache.sqlite3',
+        readonly: true,
+        url: 'sqlite:///tmp/aiopsterm/unit-cache.sqlite3'
+      })
+    )
+    expect(wrapper.text()).toContain('SQLite local backend validation')
     await wrapper.find('.db-connection-modal').trigger('submit')
     await flushPromises()
+    expect(window.aiops.saveDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'create',
+        connection: expect.objectContaining({
+          dbType: 'sqlite',
+          name: 'unit-sqlite',
+          filePath: '/tmp/aiopsterm/unit-cache.sqlite3'
+        })
+      })
+    )
     expect(wrapper.text()).toContain('unit-sqlite')
 
     await wrapper.find('button[title="Add"]').trigger('click')
@@ -3176,9 +4265,28 @@ describe('AppShell', () => {
     await oracleInputs.at(6)!.setValue('jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Oracle mock')
+    expect(window.aiops.testDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dbType: 'oracle',
+        name: 'hr-oracle-url',
+        user: 'hr',
+        database: 'ORCLPDB1',
+        url: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1'
+      })
+    )
+    expect(wrapper.text()).toContain('Oracle local backend validation')
     await wrapper.find('.db-connection-modal').trigger('submit')
     await flushPromises()
+    expect(window.aiops.saveDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'create',
+        connection: expect.objectContaining({
+          dbType: 'oracle',
+          name: 'hr-oracle-url',
+          url: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1'
+        })
+      })
+    )
     expect(wrapper.text()).toContain('hr-oracle-url')
 
     const defaultGroupRow = wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes('Default Group'))!
@@ -3198,15 +4306,33 @@ describe('AppShell', () => {
 
     await defaultGroupRow.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('New Group'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createDatabaseGroup).toHaveBeenCalledWith({ name: 'New Group', parentId: 'group-default' })
     expect(wrapper.find('.db-tree-edit').exists()).toBe(true)
     await wrapper.find('.db-tree-edit').setValue('Child DB Group')
     await wrapper.find('.db-tree-edit').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(window.aiops.renameDatabaseGroup).toHaveBeenCalledWith({ id: 'group-new-group', name: 'Child DB Group' })
     expect(wrapper.text()).toContain('Child DB Group')
     await wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes('Child DB Group'))!.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
     expect(wrapper.find('.db-popup-submenu').text()).toContain('Root Group')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Root Group'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.moveDatabaseGroup).toHaveBeenCalledWith({ id: 'group-new-group', parentId: null })
     expect(wrapper.text()).toContain('Group moved to root')
+    await wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes('Child DB Group'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Delete Group'))!.trigger('click')
+    expect(wrapper.find('.db-operation-confirm').text()).toContain('Delete Group')
+    expect(wrapper.find('.db-operation-confirm').text()).toContain('Child DB Group')
+    await wrapper.find('.db-operation-confirm footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+    expect(wrapper.findAll('.db-tree-row.group').some((row) => row.text().includes('Child DB Group'))).toBe(true)
+    await wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes('Child DB Group'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Delete Group'))!.trigger('click')
+    await wrapper.find('.db-operation-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(window.aiops.deleteDatabaseGroup).toHaveBeenCalledWith('group-new-group')
+    expect(wrapper.findAll('.db-tree-row.group').some((row) => row.text().includes('Child DB Group'))).toBe(false)
 
     const metricsConnectionRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!
     await metricsConnectionRow.trigger('contextmenu')
@@ -3216,17 +4342,25 @@ describe('AppShell', () => {
     expect(metricsMenuButtons.find((button) => button.text().includes('Create Database'))!.attributes('disabled')).toBeDefined()
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Production'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.moveDatabaseConnection).toHaveBeenCalledWith({ connectionId: 'conn-metrics-mysql', groupId: 'group-prod' })
     expect(wrapper.findAll('.db-tree > ul > li').find((group) => group.text().includes('Production'))!.text()).toContain('metrics-mysql')
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Root Group'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.moveDatabaseConnection).toHaveBeenCalledWith({ connectionId: 'conn-metrics-mysql', groupId: 'group-default' })
     expect(wrapper.findAll('.db-tree > ul > li').find((group) => group.text().includes('Default Group'))!.text()).toContain('metrics-mysql')
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Refresh'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.refreshDatabaseConnection).toHaveBeenCalledWith('conn-metrics-mysql')
     expect(wrapper.text()).toContain('Connection schema refreshed')
 
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Open Connection'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.connectDatabaseConnection).toHaveBeenCalledWith('conn-metrics-mysql')
     expect(wrapper.text()).toContain('Connection opened')
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
     expect(wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Create Database'))!.attributes('disabled')).toBeUndefined()
@@ -3242,7 +4376,13 @@ describe('AppShell', () => {
     await createDbNameInput.setValue('ignored_metrics')
     expect((wrapper.find('.db-create-modal textarea').element as HTMLTextAreaElement).value).toBe('CREATE DATABASE `manual_metrics`;')
     await wrapper.find('.db-create-modal').trigger('submit')
-    expect(wrapper.text()).toContain('Database created in local mock state')
+    await flushPromises()
+    expect(window.aiops.createDatabaseCatalog).toHaveBeenCalledWith({
+      connectionId: 'conn-metrics-mysql',
+      requestedName: 'manual_metrics',
+      sql: 'CREATE DATABASE `manual_metrics`;'
+    })
+    expect(wrapper.text()).toContain('Database created in workspace catalog')
     expect(wrapper.text()).toContain('manual_metrics')
 
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-pg-edited'))!.trigger('contextmenu')
@@ -3250,6 +4390,12 @@ describe('AppShell', () => {
     await wrapper.find('.db-create-modal input').setValue('reporting')
     expect((wrapper.find('.db-create-modal textarea').element as HTMLTextAreaElement).value).toBe('CREATE DATABASE "reporting";')
     await wrapper.find('.db-create-modal').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.createDatabaseCatalog).toHaveBeenCalledWith({
+      connectionId: 'conn-prod-pg',
+      requestedName: 'reporting',
+      sql: 'CREATE DATABASE "reporting";'
+    })
     expect(wrapper.text()).toContain('reporting')
 
     await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
@@ -3271,13 +4417,21 @@ describe('AppShell', () => {
     await wrapper.findAll('.db-sql-toolbar select').at(1)!.setValue('metrics')
     const unitSqliteOptionValue = wrapper.findAll('.db-sql-toolbar option').find((option) => option.text().includes('unit-sqlite'))!.attributes('value')!
     await sqlToolbarSelectsForMetrics.at(0)!.setValue(unitSqliteOptionValue)
+    await flushPromises()
+    expect(window.aiops.connectDatabaseConnection).toHaveBeenCalledWith(unitSqliteOptionValue)
     expect(wrapper.text()).toContain('Connection auto-connected for SQL context')
     expect(wrapper.findAll('.db-sql-toolbar select')).toHaveLength(2)
     expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('unit-cache.sqlite3')
     await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('e2e-postgres'))!.trigger('click')
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-prod-pg')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('orders')
+    expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
+    await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-pg-edited'))!.trigger('click')
     await wrapper.find('button[title="New SQL"]').trigger('click')
-    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('Query 2'))).toBe(true)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('Query 3'))).toBe(true)
     expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-prod-pg')
     const sqlToolbarSelectsForPg = wrapper.findAll('.db-sql-toolbar select')
     expect(sqlToolbarSelectsForPg).toHaveLength(3)
@@ -3418,7 +4572,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-result-running').text()).toContain('select * from public.audit_events')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-sql-overview').exists()).toBe(false)
-    expect(wrapper.find('.db-result-table').text()).toContain('mock query ok')
+    expect(wrapper.find('.db-result-table').text()).toContain('backend query ok')
     expect(wrapper.find('.db-result-tabs').text()).toContain('#2-1')
     editorElement.setSelectionRange(0, 'select * from public.orders'.length)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
@@ -3434,9 +4588,26 @@ describe('AppShell', () => {
     const convertEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const selectedConvertSql = 'select id from "public"."orders" where status = \'open\''
     convertEditorElement.setSelectionRange(0, selectedConvertSql.length)
+    vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mockClear()
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
     expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    expect(wrapper.find('.db-ai-drawer').attributes('data-request-id')).toBe('dbai-drawer-request-test-1')
+    expect(window.aiops.createDatabaseAiDrawerRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'convert',
+        sourceSql: selectedConvertSql,
+        targetDialect: 'postgresql',
+        context: expect.objectContaining({
+          connectionId: 'conn-prod-pg',
+          dbType: 'postgresql',
+          databaseName: 'orders',
+          schemaName: 'public',
+          contextSummary: expect.stringContaining('selection')
+        })
+      })
+    )
     await new Promise((resolve) => window.setTimeout(resolve, 90))
     await flushPromises()
     expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
@@ -3446,15 +4617,35 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-ai-section').text()).toContain('Read the active database context')
     expect(wrapper.find('.db-ai-dialect-row').text()).toContain('Target Dialect')
     expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('postgresql')
+    expect(window.aiops.generateDatabaseAiDrawerResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'convert',
+        sourceSql: selectedConvertSql,
+        targetDialect: 'postgresql',
+        context: expect.objectContaining({
+          connectionId: 'conn-prod-pg',
+          dbType: 'postgresql',
+          databaseName: 'orders',
+          schemaName: 'public',
+          contextSummary: expect.stringContaining('selection')
+        })
+      })
+    )
     await wrapper.find('.db-ai-dialect-row select').setValue('mssql')
-    await wrapper.vm.$nextTick()
+    await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-drawer').text()).toContain('SQL Server')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Text-only conversion')
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('SELECT TOP (100)')
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('[public].[orders]')
     expect(wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.attributes('disabled')).toBeDefined()
+    expect(window.aiops.generateDatabaseAiDrawerResponse).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: 'convert',
+        targetDialect: 'mssql'
+      })
+    )
     await wrapper.find('.db-ai-dialect-row select').setValue('postgresql')
-    await wrapper.vm.$nextTick()
+    await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('"public"."orders"')
     expect(wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.attributes('disabled')).toBeUndefined()
     const readOnlyEditorBefore = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
@@ -3512,10 +4703,13 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-ai-request-list').exists()).toBe(true)
     expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.text()).join(' ')).toContain('Convert SQL')
     expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.text()).join(' ')).toContain('Optimize SQL')
+    expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.attributes('data-request-id'))).toContain('dbai-drawer-request-test-1')
     await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Convert SQL'))!.trigger('click')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
+    expect(wrapper.find('.db-ai-drawer').attributes('data-request-id')).toBe('dbai-drawer-request-test-1')
     expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('postgresql')
     await wrapper.find('.db-ai-dialect-row select').setValue('mssql')
+    await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('[public].[orders]')
     await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Optimize SQL'))!.trigger('click')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Optimize SQL')
@@ -3581,6 +4775,10 @@ describe('AppShell', () => {
     await ordersTable.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Copy Table'))!.trigger('mouseenter')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Copy Table DDL'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.getDatabaseTableDdl).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: 'conn-prod-pg', databaseName: 'orders', schemaName: 'public', tableName: 'orders' })
+    )
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE public.orders'))
     expect(wrapper.text()).toContain('DDL copied')
 
@@ -3591,14 +4789,22 @@ describe('AppShell', () => {
 
     await ordersTable.trigger('dblclick')
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(true)
+    await waitForDatabaseTableData(wrapper)
     expect(wrapper.find('.db-where-bar').text()).toContain('orders')
     expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: ?')
     expect(wrapper.find('.db-toolbar-total-unknown').text()).toBe('?')
+    expect(wrapper.find('.db-toolbar-page-count').exists()).toBe(false)
+    expect(wrapper.find('button.db-toolbar-total').exists()).toBe(false)
+    const dataPageInput = wrapper.find('.db-toolbar input[type="number"]')
+    expect(dataPageInput.attributes('min')).toBe('1')
+    expect(dataPageInput.attributes('max')).toBeUndefined()
+    expect(dataPageInput.attributes('title')).toBeUndefined()
     await wrapper.find('.db-toolbar-total').trigger('click')
     expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 4')
     await wrapper.find('.db-toolbar select').setValue('10')
     expect(wrapper.find('.db-result-table tbody tr').exists()).toBe(true)
     expect(wrapper.find('.db-toolbar-total-unknown').exists()).toBe(false)
+    expect(wrapper.find('.db-toolbar-btn-next').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-toolbar-btn-last').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.db-toolbar-btn-add-row').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-toolbar-btn-delete-row').attributes('disabled')).toBeDefined()
@@ -3699,7 +4905,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.find('.db-result-table tbody tr.deleted').exists()).toBe(false)
     expect(wrapper.find('.db-edit-summary').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Changes saved to local mock state (1 statement)')
+    expect(wrapper.text()).toContain('Changes saved through backend table store (1 statement)')
     const resetOwnerHeader = wrapper.findAll('.db-result-table th').find((header) => header.text().includes('owner'))!
     await resetOwnerHeader.find('button[title="Filter"]').trigger('click')
     await wrapper.find('.db-filter-row.all button').trigger('click')
@@ -3721,6 +4927,7 @@ describe('AppShell', () => {
     expect(metricEventsTable).toBeTruthy()
     const metricEventsRow = metricEventsTable!
     await metricEventsRow.trigger('dblclick')
+    await waitForDatabaseTableData(wrapper)
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('metric_events'))).toBe(true)
     expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: ?')
     await wrapper.find('.db-result-table tbody tr').trigger('click')
@@ -3741,7 +4948,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('INSERT INTO `metrics`.`metric_events`')
     await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Changes saved to local mock state (2 statements)')
+    expect(wrapper.text()).toContain('Changes saved through backend table store (2 statements)')
     expect(wrapper.find('.db-edit-summary').exists()).toBe(false)
 
     await wrapper.find('.db-search input').setValue('audit-oracle')
@@ -3758,6 +4965,7 @@ describe('AppShell', () => {
     await oracleTablesFolder.find('button').trigger('click')
     const oracleTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('AUDIT_LOG'))!
     await oracleTable.trigger('dblclick')
+    await waitForDatabaseTableData(wrapper)
     await wrapper.find('.db-result-table tbody tr').trigger('click')
     const oracleActionCell = wrapper.find('.db-result-table tbody tr').findAll('td').at(3)!
     await oracleActionCell.trigger('dblclick')
@@ -3775,6 +4983,9 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-context-menu').exists()).toBe(true)
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('View DDL'))!.trigger('click')
     await flushPromises()
+    expect(window.aiops.getDatabaseTableDdl).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: 'conn-prod-pg', databaseName: 'orders', schemaName: 'public', tableName: 'orders' })
+    )
     expect((wrapper.find('.db-ddl-modal textarea').element as HTMLTextAreaElement).value).toContain('CREATE TABLE')
     await wrapper.find('.db-ddl-toolbar').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE public.orders'))
@@ -3792,7 +5003,8 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-danger-confirm').text()).toContain('TRUNCATE TABLE')
     await wrapper.find('.db-danger-confirm input').setValue('orders')
     await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
-    expect(wrapper.text()).toContain('Table truncated in local mock state')
+    await waitForDatabaseTableData(wrapper)
+    expect(wrapper.text()).toContain('Table truncated through backend table store')
     await ordersDataTab.trigger('click')
     expect(wrapper.find('.db-result-table tbody tr').exists()).toBe(false)
     expect(wrapper.find('.db-toolbar-total').text()).toContain('Total: 0')
@@ -3801,9 +5013,41 @@ describe('AppShell', () => {
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Drop'))!.trigger('click')
     expect(wrapper.find('.db-danger-confirm').text()).toContain('DROP TABLE')
     expect(wrapper.find('.db-danger-confirm footer .danger').attributes('disabled')).toBeDefined()
+    const mutateDatabaseTableImplementation = vi.mocked(window.aiops.mutateDatabaseTable).getMockImplementation()
+    expect(mutateDatabaseTableImplementation).toBeDefined()
+    vi.mocked(window.aiops.mutateDatabaseTable).mockImplementationOnce(async (input) => {
+      const result = await mutateDatabaseTableImplementation!(input)
+      if (!result.ok || !result.data?.catalog) return result
+      return {
+        ...result,
+        data: {
+          ...result.data,
+          catalog: {
+            ...result.data.catalog,
+            groups: [...result.data.catalog.groups, { id: 'group-backend-drop-refresh', name: 'Backend Drop Refresh' }],
+            groupParents: { ...result.data.catalog.groupParents, 'group-backend-drop-refresh': null },
+            defaults: {
+              ...result.data.catalog.defaults,
+              expandedGroupIds: [...result.data.catalog.defaults.expandedGroupIds, 'group-backend-drop-refresh']
+            }
+          }
+        }
+      }
+    })
     await wrapper.find('.db-danger-confirm input').setValue('orders')
     await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateDatabaseTable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders',
+        mutations: [{ kind: 'drop' }]
+      })
+    )
     await waitForDatabaseDbAiDone()
+    expect(wrapper.text()).toContain('Backend Drop Refresh')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('DROP TABLE public.orders')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Generated SQL')
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable'))
@@ -3825,6 +5069,28 @@ describe('AppShell', () => {
       Reflect.deleteProperty(document, 'execCommand')
     }
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('DROP TABLE public.orders;')
+    await expect(
+      window.aiops.queryDatabaseTable({
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders',
+        filters: [],
+        sort: null,
+        whereRaw: null,
+        page: 1,
+        pageSize: 100,
+        withTotal: true
+      })
+    ).resolves.toMatchObject({ ok: false, errorCode: 'DB_TABLE_NOT_FOUND' })
+    await expect(
+      window.aiops.getDatabaseTableDdl({
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      })
+    ).resolves.toMatchObject({ ok: false, errorCode: 'DB_TABLE_NOT_FOUND' })
     expect(wrapper.findAll('.db-ai-request-list button').some((button) => button.text().includes('Drop Table'))).toBe(true)
     expect(wrapper.findAll('.db-tree-row.table').some((row) => row.text().trim() === 'orders')).toBe(false)
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(false)
@@ -3840,7 +5106,7 @@ describe('AppShell', () => {
     await wrapper.find('button[title="Run all"]').trigger('click')
     expect(wrapper.find('.db-result-running').text()).toContain('syntax_error')
     await waitForDatabaseSqlResult()
-    expect(wrapper.find('.db-result-error').text()).toContain('Mock SQL parser rejected')
+    expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor rejected')
     const dbAiRequestCountBeforeDiagnose = wrapper.findAll('.db-ai-request-list button').length
     await wrapper.find('.db-result-error button').trigger('click')
     expect(wrapper.find('.db-result-diagnose-btn').classes()).toContain('loading')
@@ -3857,28 +5123,58 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-result-tabs').text()).toContain('#')
 
     const removableConnection = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!
+    const unitSqliteConnectionId = wrapper.findAll('.db-sql-toolbar option').find((option) => option.text().includes('unit-sqlite'))?.attributes('value') ?? 'conn-unit-sqlite'
     await removableConnection.trigger('contextmenu')
     expect(wrapper.find('.db-context-menu').text()).toContain('Close Connection')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Close Connection'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.disconnectDatabaseConnection).toHaveBeenCalledWith(unitSqliteConnectionId)
+    expect(wrapper.text()).toContain('Connection closed')
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Open Connection'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.connectDatabaseConnection).toHaveBeenCalledWith(unitSqliteConnectionId)
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Query Console'))!.trigger('click')
     expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe(
-      wrapper.findAll('.db-sql-toolbar option').find((option) => option.text().includes('unit-sqlite'))!.attributes('value')
+      unitSqliteConnectionId
     )
     const unitSqliteQueryTitle = wrapper.findAll('.db-workspace-tab').find((tab) => tab.classes().includes('active'))!.text()
     expect(unitSqliteQueryTitle).toContain('Query')
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Remove'))!.trigger('click')
+    expect(wrapper.find('.db-operation-confirm').text()).toContain('Remove Connection')
+    expect(wrapper.find('.db-operation-confirm').text()).toContain('unit-sqlite')
+    await wrapper.find('.db-operation-confirm footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('unit-sqlite'))).toBe(true)
+    const tabCountBeforeConnectionRemove = wrapper.findAll('.db-workspace-tab').length
+    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))!.trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Remove'))!.trigger('click')
+    await wrapper.find('.db-operation-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(window.aiops.removeDatabaseConnection).toHaveBeenCalledWith(unitSqliteConnectionId)
     expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('unit-sqlite'))).toBe(false)
-    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text() === unitSqliteQueryTitle)).toBe(false)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('unit-sqlite'))).toBe(false)
+    expect(wrapper.findAll('.db-workspace-tab').length).toBeLessThan(tabCountBeforeConnectionRemove)
 
     wrapper.unmount()
   })
 
   it('supports Monaco-like SQL editor indentation, run shortcut, and find/replace controls', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.updateEditorSettings({ tabSize: 4, lineHeight: 24, fontSize: 18, wordWrap: 'on' })
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
-      global: { plugins: [createPinia()] }
+      global: { plugins: [pinia] }
     })
+    await waitForDatabaseCatalog()
 
+    const workspaceStyle = wrapper.find('.database-workspace').attributes('style')
+    expect(workspaceStyle).toContain('--db-sql-editor-line-height: 24px')
+    expect(workspaceStyle).toContain('--db-sql-editor-font-size: 18px')
+    expect(workspaceStyle).toContain('--db-sql-editor-tab-size: 4')
     await wrapper.find('button[title="New SQL"]').trigger('click')
     const editor = wrapper.find('.db-sql-editor')
     await editor.setValue('select 1;')
@@ -3887,9 +5183,9 @@ describe('AppShell', () => {
     editorElement.setSelectionRange(0, 0)
     await editor.trigger('keydown', { key: 'Tab' })
     await flushPromises()
-    expect(editorElement.value).toBe('  select 1;')
-    expect(editorElement.selectionStart).toBe(2)
-    expect(wrapper.find('.db-sql-editor-footer').text()).toContain('Ln 1, Col 3')
+    expect(editorElement.value).toBe('    select 1;')
+    expect(editorElement.selectionStart).toBe(4)
+    expect(wrapper.find('.db-sql-editor-footer').text()).toContain('Ln 1, Col 5')
 
     await editor.trigger('keydown', { key: 'Tab', shiftKey: true })
     await flushPromises()
@@ -3900,11 +5196,11 @@ describe('AppShell', () => {
     editorElement.setSelectionRange(0, 'select 1;\nselect 2;\n'.length)
     await editor.trigger('keydown', { key: 'Tab' })
     await flushPromises()
-    expect(editorElement.value).toBe('  select 1;\n  select 2;\nselect 3;')
-    expect(editorElement.selectionStart).toBe(2)
-    expect(editorElement.selectionEnd).toBe('  select 1;\n  select 2;\n'.length)
+    expect(editorElement.value).toBe('    select 1;\n    select 2;\nselect 3;')
+    expect(editorElement.selectionStart).toBe(4)
+    expect(editorElement.selectionEnd).toBe('    select 1;\n    select 2;\n'.length)
 
-    editorElement.setSelectionRange(0, '  select 1;\n  select 2;\n'.length)
+    editorElement.setSelectionRange(0, '    select 1;\n    select 2;\n'.length)
     await editor.trigger('keydown', { key: 'Tab', shiftKey: true })
     await flushPromises()
     expect(editorElement.value).toBe('select 1;\nselect 2;\nselect 3;')
@@ -3950,6 +5246,7 @@ describe('AppShell', () => {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
     })
+    await waitForDatabaseCatalog()
 
     await wrapper.find('button[title="New SQL"]').trigger('click')
     await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
@@ -3974,10 +5271,13 @@ describe('AppShell', () => {
 
   it('opens the Database DB AI pane with active context, streaming chat, resize, and persisted state', async () => {
     localStorage.removeItem('aiopsterm.database.dbAiPane')
+    vi.mocked(window.aiops.createDatabaseAiPaneRequest).mockClear()
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockClear()
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
     })
+    await waitForDatabaseCatalog()
 
     await wrapper.find('button[title="New SQL"]').trigger('click')
     await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
@@ -3992,6 +5292,28 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+    expect(window.aiops.createDatabaseAiPaneRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Summarize schema and generate a SELECT',
+        context: expect.objectContaining({
+          connectionId: 'conn-prod-pg',
+          databaseName: 'orders',
+          schemaName: 'public',
+          contextSummary: expect.stringContaining('orders-postgres')
+        }),
+        activeSql: 'select * from public.orders;'
+      })
+    )
+    expect(wrapper.findAll('.db-ai-pane-message').at(0)!.attributes('data-message-id')).toBe('dbai-pane-request-test-1-user')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.attributes('data-message-id')).toBe('dbai-pane-request-test-1-assistant')
+    expect(window.aiops.generateDatabaseAiPaneResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'dbai-pane-request-test-1',
+        assistantMessageId: 'dbai-pane-request-test-1-assistant',
+        prompt: 'Summarize schema and generate a SELECT',
+        activeSql: 'select * from public.orders;'
+      })
+    )
     await new Promise((resolve) => window.setTimeout(resolve, 115))
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
@@ -4000,9 +5322,14 @@ describe('AppShell', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 380))
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Cancelled')
+    await new Promise((resolve) => window.setTimeout(resolve, 360))
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Cancelled')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('当前响应由 aiopsterm DB AI 本地后端生成')
 
     await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Query'))!.trigger('click')
     await wrapper.find('.db-sql-toolbar .db-picker--connection').setValue('conn-metrics-mysql')
+    await flushPromises()
     await wrapper.find('.db-ai-pane-context-head button').trigger('click')
     expect((wrapper.find('.db-ai-pane-connection').element as HTMLSelectElement).value).toBe('conn-metrics-mysql')
     expect((wrapper.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('metrics')
@@ -4010,6 +5337,7 @@ describe('AppShell', () => {
     expect((wrapper.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('cache.db')
     expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('local-cache is not connected')
     await wrapper.find('.db-ai-pane-connect-row button').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.db-ai-pane-context-card').text()).not.toContain('is not connected')
 
     const resizer = wrapper.find('.db-ai-pane-resizer')
@@ -4033,7 +5361,7 @@ describe('AppShell', () => {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
     })
-    await remounted.vm.$nextTick()
+    await waitForDatabaseCatalog()
     expect(remounted.find('.db-ai-pane').exists()).toBe(true)
     expect((remounted.find('.db-ai-pane-connection').element as HTMLSelectElement).value).toBe('conn-local-cache')
     expect((remounted.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('cache.db')
@@ -4049,6 +5377,7 @@ describe('AppShell', () => {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
     })
+    await waitForDatabaseCatalog()
 
     await wrapper.find('button[title="New SQL"]').trigger('click')
     const editor = wrapper.find('.db-sql-editor')
@@ -4080,6 +5409,7 @@ describe('AppShell', () => {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
     })
+    await waitForDatabaseCatalog()
 
     await wrapper.find('button[title="New SQL"]').trigger('click')
     const panes = wrapper.find('.db-sql-panes')
@@ -4138,6 +5468,10 @@ describe('AppShell', () => {
     expect(panel.text()).toContain('终端')
     expect(panel.text()).toContain('AI 偏好设置')
     expect(panel.text()).toContain('文档')
+    await panel.findAll('.settings-nav-item').find((item) => item.text().includes('文档'))!.trigger('click')
+    await flushPromises()
+    expect(store.activeSettingsSection).toBe('general')
+    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/docs')
 
     const workspace = mount(SettingsWorkspace, {
       global: { plugins: [pinia] }
@@ -4146,7 +5480,16 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('基础设置')
     expect(workspace.text()).toContain('默认背景')
     expect(workspace.text()).toContain('自定义上传（支持JPG、PNG、WebP、GIF）')
+    expect(workspace.text()).toContain('Termius Light')
+    expect(workspace.text()).toContain('Kanagawa Dragon')
+    expect(workspace.text()).toContain('Catppuccin Latte')
     expect(workspace.text()).toContain('打开入门引导')
+    await workspace.find('.theme-select').setValue('catppuccin-latte')
+    await flushPromises()
+    expect(store.config.theme).toBe('catppuccin-latte')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.dataset.themeId).toBe('catppuccin-latte')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#1e66f5')
     await workspace.find('.settings-button.primary').trigger('click')
     expect(store.onboardingGuideOpen).toBe(true)
     await workspace.vm.$nextTick()
@@ -4159,6 +5502,29 @@ describe('AppShell', () => {
     expect(store.config.background.mode).toBe('preset')
     await workspace.find('.settings-sliders input[type="range"]').setValue('0.5')
     expect(store.config.background.opacity).toBe(0.5)
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/settings-custom-bg.webp'] })
+    vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
+      filePath: '/tmp/aiopsterm/backgrounds/settings-custom-bg.webp',
+      url: 'file:///tmp/aiopsterm/backgrounds/settings-custom-bg.webp',
+      name: 'settings-custom-bg.webp',
+      size: 256
+    })
+    await workspace.find('.settings-bg-tile.upload').trigger('click')
+    await flushPromises()
+    expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }]
+    })
+    expect(window.aiops.saveCustomBackground).toHaveBeenCalledWith('/tmp/settings-custom-bg.webp')
+    expect(store.config.background.mode).toBe('custom')
+    expect(store.config.background.image).toBe('file:///tmp/aiopsterm/backgrounds/settings-custom-bg.webp')
+    const customPreview = workspace.find('.settings-bg-tile.custom-preview')
+    expect(customPreview.exists()).toBe(true)
+    expect(customPreview.attributes('style')).toContain('settings-custom-bg.webp')
+    await customPreview.find('.settings-bg-delete').trigger('click')
+    await flushPromises()
+    expect(store.config.background.mode).toBe('none')
+    expect(store.config.background.lastCustomImage).toBe('')
 
     const layoutRadios = workspace.findAll('input[name="defaultLayout"]')
     await layoutRadios[1].setValue(true)
@@ -4170,6 +5536,9 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.saveConfig).mockClear()
     await workspace.findAll('input.settings-number')[0].setValue('18')
     expect(store.editorSettings.fontSize).toBe(18)
+    expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('18px')
+    expect(document.documentElement.style.getPropertyValue('--editor-line-height')).toBe('26px')
+    expect(document.documentElement.style.getPropertyValue('--editor-tab-size')).toBe('4')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         editorSettings: expect.objectContaining({
@@ -4186,10 +5555,16 @@ describe('AppShell', () => {
     await workspace.findAll('input[name="mouseWheelZoom"]')[1].setValue(true)
     expect(store.editorSettings.minimap).toBe(false)
     expect(store.editorSettings.mouseWheelZoom).toBe(false)
+    expect(document.documentElement.dataset.editorMinimap).toBe('off')
+    expect(document.documentElement.dataset.editorMouseWheelZoom).toBe('off')
+    await workspace.findAll('input[name="wordWrap"]')[0].setValue(true)
+    expect(store.editorSettings.wordWrap).toBe('on')
+    expect(document.documentElement.dataset.editorWordWrap).toBe('on')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         editorSettings: expect.objectContaining({
           fontSize: 18,
+          wordWrap: 'on',
           minimap: false,
           mouseWheelZoom: false
         })
@@ -4318,6 +5693,40 @@ describe('AppShell', () => {
     const openAiCard = workspace.findAll('.provider-card').find((card) => card.text().includes('OpenAI Compatible & Responses'))!
     expect(openAiCard.text()).toContain('Preview:')
     expect(openAiCard.text()).toContain('/responses')
+    vi.mocked(window.aiops.checkModelProvider).mockClear()
+    let resolveProviderCheck: (value: any) => void = () => undefined
+    vi.mocked(window.aiops.checkModelProvider).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveProviderCheck = resolve
+        })
+    )
+    const checkClick = openAiCard.findAll('button').find((button) => button.text() === 'Check')!.trigger('click')
+    await workspace.vm.$nextTick()
+    expect(store.modelCheckState.openai).toBe('checking')
+    resolveProviderCheck({
+      ok: true,
+      data: {
+        provider: 'openai',
+        label: 'OpenAI Compatible',
+        modelId: 'gpt-5',
+        endpoint: 'https://api.openai.com/v1/responses',
+        message: 'OpenAI Compatible configuration validated by test backend.',
+        durationMs: 1
+      }
+    })
+    await checkClick
+    await flushPromises()
+    expect(window.aiops.checkModelProvider).toHaveBeenCalledWith({
+      provider: 'openai',
+      config: expect.objectContaining({
+        baseUrl: 'https://api.openai.com',
+        modelId: 'gpt-5',
+        apiFormat: 'responses'
+      })
+    })
+    expect(store.modelCheckState.openai).toBe('success')
+    expect(workspace.text()).toContain('OpenAI Compatible configuration validated by test backend.')
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('AI 偏好设置'))!.trigger('click')
     await workspace.vm.$nextTick()
@@ -4338,6 +5747,17 @@ describe('AppShell', () => {
     await workspace.findAll('.security-config-row button').find((button) => button.text().includes('打开安全配置'))!.trigger('click')
     expect(store.securityConfigEditorOpen).toBe(true)
     expect(workspace.text()).toContain('security-config.json')
+    expect(workspace.find('[data-testid="security-config-json-editor-monaco"]').exists()).toBe(true)
+    expect(monacoMocks.create).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        language: 'json',
+        fontSize: store.editorSettings.fontSize,
+        tabSize: store.editorSettings.tabSize,
+        wordWrap: store.editorSettings.wordWrap,
+        minimap: expect.objectContaining({ enabled: store.editorSettings.minimap })
+      })
+    )
     const securityEditor = workspace.find('.security-config-json-editor')
     expect((securityEditor.element as HTMLTextAreaElement).value).toContain('"security"')
     await securityEditor.setValue('{invalid json')
@@ -4467,6 +5887,7 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    await store.refreshUserAccount()
     const clickNav = async (label: string) => {
       await panel.findAll('.settings-nav-item').find((item) => item.text().includes(label))!.trigger('click')
       await workspace.vm.$nextTick()
@@ -4487,6 +5908,16 @@ describe('AppShell', () => {
     await workspace.findAll('.settings-form-row').find((row) => row.text().includes('Keyword Highlighting Configuration'))!.find('button').trigger('click')
     expect(store.keywordHighlightEditorOpen).toBe(true)
     expect(workspace.text()).toContain('keyword-highlight.json')
+    expect(workspace.find('[data-testid="keyword-highlight-json-editor-monaco"]').exists()).toBe(true)
+    expect(monacoMocks.create).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        language: 'json',
+        fontSize: store.editorSettings.fontSize,
+        tabSize: store.editorSettings.tabSize,
+        wordWrap: store.editorSettings.wordWrap
+      })
+    )
     const keywordEditor = workspace.find('.keyword-highlight-json-editor')
     expect((keywordEditor.element as HTMLTextAreaElement).value).toContain('keyword-highlight')
     await keywordEditor.setValue('{invalid json')
@@ -4539,8 +5970,19 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('MCP Servers')
     expect(workspace.text()).toContain('filesystem')
     await workspace.findAll('.settings-section-title-row .settings-button').find((button) => button.text().includes('Add Server'))!.trigger('click')
+    await flushPromises()
     expect(store.mcpConfigEditorOpen).toBe(true)
     expect(workspace.text()).toContain('mcp_settings.json')
+    expect(workspace.find('[data-testid="mcp-config-json-editor-monaco"]').exists()).toBe(true)
+    expect(monacoMocks.create).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        language: 'json',
+        fontSize: store.editorSettings.fontSize,
+        tabSize: store.editorSettings.tabSize,
+        wordWrap: store.editorSettings.wordWrap
+      })
+    )
     const mcpEditor = workspace.find('.mcp-config-json-editor')
     expect((mcpEditor.element as HTMLTextAreaElement).value).toContain('"mcpServers"')
     await mcpEditor.setValue('{invalid json')
@@ -4559,18 +6001,15 @@ describe('AppShell', () => {
     await mcpEditor.setValue(JSON.stringify(mcpConfig, null, 2))
     await new Promise((resolve) => window.setTimeout(resolve, 2100))
     expect(window.aiops.writeMcpConfig).toHaveBeenCalledWith(JSON.stringify(mcpConfig, null, 2))
+    await mcpEditor.trigger('keydown', { key: 's', ctrlKey: true })
+    expect(JSON.parse(String(vi.mocked(window.aiops.writeMcpConfig).mock.calls.at(-1)?.[0]))).toEqual(mcpConfig)
     await workspace.findAll('.mcp-config-toolbar .settings-button').find((button) => button.text() === 'Close')!.trigger('click')
     expect(store.mcpConfigEditorOpen).toBe(false)
     await clickNav('MCP')
     await workspace.find('.mcp-tool-header button').trigger('click')
+    await flushPromises()
     expect(store.mcpServers[0].tools[0].enabled).toBe(false)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mcpToolStates: expect.objectContaining({
-          'filesystem:read_file': false
-        })
-      })
-    )
+    expect(window.aiops.setMcpToolState).toHaveBeenCalledWith('filesystem', 'read_file', false)
 
     await clickNav('Skills')
     expect(workspace.text()).toContain('incident-triage')
@@ -4599,13 +6038,9 @@ describe('AppShell', () => {
     const ruleTextarea = workspace.find('.rule-edit textarea')
     await ruleTextarea.setValue('新增规则')
     await workspace.find('.rule-edit .primary').trigger('click')
+    await flushPromises()
     expect(store.settingsRules.some((rule) => rule.content === '新增规则')).toBe(true)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customInstructions: '',
-        rules: expect.arrayContaining([expect.objectContaining({ content: '新增规则', enabled: true })])
-      })
-    )
+    expect(window.aiops.saveSettingsRule).toHaveBeenCalledWith(expect.objectContaining({ content: '新增规则', enabled: true }))
 
     await clickNav('快捷键')
     expect(workspace.text()).toContain('快捷键设置')
@@ -4613,18 +6048,16 @@ describe('AppShell', () => {
     expect(store.shortcutRecording.actionId).toBe('newTerminal')
     await workspace.find('.shortcut-modal input').setValue('Ctrl+K')
     await workspace.find('.shortcut-modal footer .primary').trigger('click')
+    await flushPromises()
     expect(store.settingsShortcuts.find((shortcut) => shortcut.id === 'newTerminal')?.shortcut).toBe('Ctrl+K')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        shortcuts: expect.arrayContaining([expect.objectContaining({ id: 'newTerminal', shortcut: 'Ctrl+K' })])
-      })
-    )
+    expect(window.aiops.saveSettingsShortcut).toHaveBeenCalledWith({ id: 'newTerminal', shortcut: 'Ctrl+K' })
 
     await clickNav('可信设备')
     expect(workspace.text()).toContain('Linux Workstation')
     await workspace.findAll('.trusted-device-item .danger').find((button) => !(button.element as HTMLButtonElement).disabled)!.trigger('click')
     expect(store.trustedDeviceModal.open).toBe(true)
     await workspace.find('.settings-modal-card footer .primary').trigger('click')
+    await flushPromises()
     expect(store.trustedDevices).toHaveLength(1)
 
     await clickNav('隐私')
@@ -4647,7 +6080,40 @@ describe('AppShell', () => {
 
     await clickNav('关于')
     expect(workspace.text()).toContain('Log Diagnostics')
-    await workspace.find('.about-card .settings-button').trigger('click')
+    expect(workspace.text()).toContain('Feedback')
+    vi.mocked(window.aiops.checkUpdate).mockClear()
+    const aboutUpdateClick = workspace.find('.about-card .settings-button').trigger('click')
     expect(store.aboutSettings.updateStatus).toBe('checking')
+    await aboutUpdateClick
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(store.aboutSettings.updateStatus).toBe('latest')
+    expect(workspace.text()).toContain('Check Update (Latest Version)')
+    expect(window.aiops.checkUpdate).toHaveBeenCalled()
+
+    vi.mocked(window.aiops.checkUpdate).mockResolvedValueOnce({
+      available: true,
+      channel: 'manual',
+      isUpdateAvailable: true,
+      updateInfo: { version: '0.1.1', channel: 'manual' }
+    })
+    await workspace.find('.about-card .settings-button').trigger('click')
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(workspace.text()).toContain('Download Update (0.1.1)')
+    await workspace.find('.about-card .settings-button').trigger('click')
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(window.aiops.downloadAppUpdate).toHaveBeenCalledWith('0.1.1')
+    expect(store.aboutSettings.updateStatus).toBe('downloaded')
+    expect(workspace.text()).toContain('Install')
+    await workspace.find('.about-card .settings-button').trigger('click')
+    await flushPromises()
+    expect(window.aiops.installAppUpdate).toHaveBeenCalledWith('0.1.1')
+    expect(store.aboutSettings.updateStatus).toBe('latest')
+    await workspace.findAll('.diagnostics-card .settings-button').find((button) => button.text().includes('Open Log Dir'))!.trigger('click')
+    expect(window.aiops.openLogDir).toHaveBeenCalled()
+    await workspace.findAll('.diagnostics-card .settings-button').find((button) => button.text().includes('Submit Feedback'))!.trigger('click')
+    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/feedback')
   })
 })

@@ -145,7 +145,9 @@
 import { computed, type Component } from 'vue'
 import { Cloud, CloudDownload, Crown, FileText, Layers, LoaderCircle, PackageOpen, Pencil, RefreshCw, Search, ShieldCheck, WandSparkles } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPlugin } from '@/data/mockData'
+import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
+
+type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
 const workspace = useWorkspaceStore()
 
@@ -192,6 +194,6 @@ const handleDragLeave = (event: DragEvent) => {
 
 const handleDrop = (event: DragEvent) => {
   const file = event.dataTransfer?.files?.[0]
-  workspace.dropExtensionPackage(file?.name || '')
+  workspace.dropExtensionPackage(file ? { name: file.name, path: (file as File & { path?: string }).path, size: file.size } : '')
 }
 </script>

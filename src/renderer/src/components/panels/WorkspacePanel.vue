@@ -467,6 +467,25 @@
               placeholder="请输入用户名"
             />
           </label>
+          <label v-if="hostForm.authType === 'password'">
+            <span>密码</span>
+            <input
+              v-model="hostForm.password"
+              type="password"
+              placeholder="留空则保留已保存密码"
+            />
+          </label>
+          <label
+            v-else
+            class="workspace-host-form-wide"
+          >
+            <span>私钥</span>
+            <textarea
+              v-model="hostForm.privateKey"
+              rows="4"
+              placeholder="留空则使用 SSH Agent 或已保存私钥"
+            />
+          </label>
           <label>
             <span>分组</span>
             <input
@@ -627,7 +646,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   AppWindowMac,
   Check,
@@ -650,25 +669,21 @@ import {
   Trash2,
   X
 } from 'lucide-vue-next'
-import { mockAssets, type MockAsset } from '@/data/mockData'
+import type { AiopsAssetAuthType, AiopsAssetInput, AiopsAssetRecord, AiopsAssetType, AiopsCustomFolderRecord, AiopsCustomFolderSaveInput } from '@shared/preload'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
 type WorkspaceTabKey = 'direct' | 'bastion'
 type HostModalMode = 'create' | 'edit' | 'clone'
 type FolderModalMode = 'create' | 'edit-custom' | 'edit-direct'
-type WorkspaceAssetType = MockAsset['asset_type']
+type WorkspaceAssetType = AiopsAssetType
 
 const workspaceTabs: Array<{ key: WorkspaceTabKey; label: string }> = [
   { key: 'direct', label: '直接连接' },
   { key: 'bastion', label: '堡垒机资源' }
 ]
 
-type WorkspaceAsset = MockAsset & {
-  favorite?: boolean
-  tunnelState?: 'created' | 'active'
-  folderUuid?: string
-  organizationId?: string
+type WorkspaceAsset = AiopsAssetRecord & {
   isLocalShell?: boolean
 }
 
@@ -685,11 +700,7 @@ type WorkspaceGroup = {
   organizationId?: string
 }
 
-type CustomFolder = {
-  uuid: string
-  name: string
-  description: string
-}
+type CustomFolder = AiopsCustomFolderRecord
 
 const defaultDirectGroups = ['生产', '预发', '数据库', '维护']
 const activeWorkspace = ref<WorkspaceTabKey>('direct')
@@ -703,31 +714,12 @@ const refreshingGroupKey = ref('')
 const notice = ref('')
 const commentAssetId = ref('')
 const editingComment = ref('')
+const assetBackendReady = ref(false)
 let hostCreateCounter = 6
-let folderCreateCounter = 2
 
-const workspaceAssets = ref<WorkspaceAsset[]>(
-  mockAssets.map((asset, index) => ({
-    ...asset,
-    favorite: index === 0 || asset.asset_type === 'organization',
-    folderUuid: asset.id === 'asset-1' || asset.id === 'asset-3' ? 'custom-folder-a' : undefined,
-    organizationId: asset.id === 'asset-1' || asset.id === 'asset-3' ? 'org-1' : undefined,
-    tunnelState: asset.id === 'asset-3' ? 'created' : asset.id === 'asset-2' ? 'active' : undefined
-  }))
-)
+const workspaceAssets = ref<WorkspaceAsset[]>([])
 
-const customFolders = ref<CustomFolder[]>([
-  {
-    uuid: 'custom-folder-a',
-    name: '核心业务',
-    description: '常用堡垒机业务资产'
-  },
-  {
-    uuid: 'custom-folder-b',
-    name: '临时排障',
-    description: '短期排障入口'
-  }
-])
+const customFolders = ref<CustomFolder[]>([])
 
 const folderModal = reactive({ visible: false, mode: 'create' as FolderModalMode, targetKey: '', fromMove: false })
 const folderForm = reactive({ name: '', description: '' })
@@ -742,8 +734,11 @@ const hostForm = reactive({
   username: '',
   group: '',
   port: '22',
-  authType: 'password' as WorkspaceAsset['auth_type'],
-  comment: ''
+  authType: 'password' as AiopsAssetAuthType,
+  comment: '',
+  password: '',
+  privateKey: '',
+  passphrase: ''
 })
 const hostFormError = ref('')
 const deleteAssetModal = reactive({ visible: false, assetId: '' })
@@ -904,6 +899,67 @@ const managedOrganizationAssets = computed(() => {
 
 const findEditableAsset = (assetId: string) => workspaceAssets.value.find((item) => item.id === assetId) || null
 
+const toAssetInput = (asset: WorkspaceAsset, patch: Partial<AiopsAssetInput> = {}): AiopsAssetInput => ({
+  id: asset.id,
+  name: asset.name,
+  title: asset.title,
+  host: asset.host,
+  ip: asset.ip,
+  group: asset.group,
+  group_name: asset.group_name,
+  status: asset.status,
+  username: asset.username,
+  port: asset.port,
+  asset_type: asset.asset_type,
+  auth_type: asset.auth_type,
+  comment: asset.comment,
+  data_source: asset.data_source,
+  tags: [...asset.tags],
+  favorite: asset.favorite,
+  folderUuid: asset.folderUuid,
+  organizationId: asset.organizationId,
+  tunnelState: asset.tunnelState,
+  needProxy: asset.needProxy,
+  proxyName: asset.proxyName,
+  ...patch
+})
+
+const refreshAssets = async () => {
+  if (!window.aiops?.listAssets) return
+  const snapshot = await window.aiops.listAssets()
+  workspaceAssets.value = snapshot.assets.map((asset) => ({ ...asset, tags: [...asset.tags] }))
+  customFolders.value = snapshot.folders.map((folder) => ({ ...folder }))
+  assetBackendReady.value = true
+}
+
+const saveAssetRecord = async (input: AiopsAssetInput) => {
+  const result = await window.aiops?.saveAsset?.(input)
+  if (!result?.ok || !result.data) {
+    throw new Error(result?.errorMessage || '资产保存失败')
+  }
+  await refreshAssets()
+  return result.data
+}
+
+const deleteAssetRecord = async (assetId: string) => {
+  const result = await window.aiops?.deleteAsset?.(assetId)
+  if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
+  await refreshAssets()
+}
+
+const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
+  const result = await window.aiops?.saveAssetFolder?.(folder)
+  if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '文件夹保存失败')
+  await refreshAssets()
+  return result.data
+}
+
+const deleteFolderRecord = async (folderUuid: string) => {
+  const result = await window.aiops?.deleteAssetFolder?.(folderUuid)
+  if (!result?.ok) throw new Error(result?.errorMessage || '文件夹删除失败')
+  await refreshAssets()
+}
+
 const isGroupExpanded = (key: string) => !!searchValue.value.trim() || expandedGroups.value.includes(key)
 
 const updateExpandedGroups = (next: string[]) => {
@@ -1025,6 +1081,9 @@ const openCreateHost = () => {
   hostForm.port = '22'
   hostForm.authType = activeWorkspace.value === 'bastion' ? 'keyBased' : 'password'
   hostForm.comment = ''
+  hostForm.password = ''
+  hostForm.privateKey = ''
+  hostForm.passphrase = ''
   hostFormError.value = ''
 }
 
@@ -1050,6 +1109,9 @@ const closeDeleteGroupModal = () => {
 const closeHostModal = () => {
   hostModal.visible = false
   hostModal.assetId = ''
+  hostForm.password = ''
+  hostForm.privateKey = ''
+  hostForm.passphrase = ''
   hostFormError.value = ''
 }
 
@@ -1064,17 +1126,7 @@ const closeManagementModal = () => {
   managementModal.query = ''
 }
 
-const createFolderUuid = () => {
-  let uuid = `custom-folder-${folderCreateCounter}`
-  while (customFolders.value.some((folder) => folder.uuid === uuid)) {
-    folderCreateCounter += 1
-    uuid = `custom-folder-${folderCreateCounter}`
-  }
-  folderCreateCounter += 1
-  return uuid
-}
-
-const saveFolderForm = () => {
+const saveFolderForm = async () => {
   const name = folderForm.name.trim()
   if (!name) {
     folderFormError.value = '请输入文件夹名称'
@@ -1088,23 +1140,30 @@ const saveFolderForm = () => {
 
   if (folderModal.mode === 'create') {
     const folder = {
-      uuid: createFolderUuid(),
       name,
       description: folderForm.description.trim()
     }
-    customFolders.value = [...customFolders.value, folder]
-    expandGroup(folder.uuid)
-    notice.value = `已创建文件夹 ${folder.name}`
-    closeFolderModal()
+    try {
+      const saved = await saveFolderRecord(folder)
+      expandGroup(saved.uuid)
+      notice.value = `已创建文件夹 ${saved.name}`
+      closeFolderModal()
+    } catch (error) {
+      folderFormError.value = error instanceof Error ? error.message : '文件夹保存失败'
+    }
     return
   }
 
   if (folderModal.mode === 'edit-custom') {
     const folder = customFolders.value.find((item) => item.uuid === folderModal.targetKey)
     if (folder) {
-      folder.name = name
-      folder.description = folderForm.description.trim()
-      notice.value = `已更新文件夹 ${folder.name}`
+      try {
+        const saved = await saveFolderRecord({ ...folder, name, description: folderForm.description.trim() })
+        notice.value = `已更新文件夹 ${saved.name}`
+      } catch (error) {
+        folderFormError.value = error instanceof Error ? error.message : '文件夹保存失败'
+        return
+      }
     }
     closeFolderModal()
     return
@@ -1136,7 +1195,7 @@ const selectAsset = (assetId: string) => {
   selectedAssetId.value = assetId
 }
 
-const connectAsset = (assetId: string) => {
+const connectAsset = async (assetId: string) => {
   selectedAssetId.value = assetId
   const asset = allAssets.value.find((item) => item.id === assetId)
   if (!asset || asset.asset_type === 'organization') {
@@ -1146,9 +1205,25 @@ const connectAsset = (assetId: string) => {
   workspace.createPanel()
   workspace.renamePanel(workspace.activePanelId, asset.name)
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
-  workspace.registerMockSshSession(workspace.activePanelId, asset)
-  workspace.appendTerminalInput(workspace.activePanelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
-  workspace.appendTerminalOutput(workspace.activePanelId, `[mock ssh] ${asset.name}\n$ `)
+  if (asset.isLocalShell) {
+    workspace.appendTerminalOutput(workspace.activePanelId, '[aiopsterm] open local shell from Workspace. Use "打开本地 shell" to attach a live shell.\n')
+  } else {
+    const panelId = workspace.activePanelId
+    workspace.registerSshSession(panelId, asset)
+    workspace.appendTerminalInput(panelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
+    try {
+      const session = await window.aiops?.createTerminal?.({
+        kind: 'ssh',
+        assetId: asset.id,
+        title: asset.name,
+        cols: 100,
+        rows: 30
+      })
+      workspace.applySshTerminalSession(panelId, session, asset)
+    } catch (error) {
+      workspace.appendTerminalOutput(panelId, `[aiopsterm] SSH launch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+    }
+  }
   workspace.selectedContexts = [
     ...workspace.selectedContexts.filter((item) => item.id !== asset.id),
     { id: asset.id, kind: 'hosts', label: asset.host, detail: asset.name }
@@ -1198,11 +1273,18 @@ const openContextComment = () => {
   closeContextMenu()
 }
 
-const saveComment = (assetId: string) => {
+const saveComment = async (assetId: string) => {
   const asset = findEditableAsset(assetId)
   if (asset) {
-    asset.comment = editingComment.value.trim()
-    notice.value = asset.comment ? `已更新备注 ${asset.comment}` : '已清空备注'
+    const nextComment = editingComment.value.trim()
+    asset.comment = nextComment
+    workspaceAssets.value = workspaceAssets.value.map((item) => (item.id === assetId ? { ...item, comment: nextComment } : item))
+    try {
+      const saved = await saveAssetRecord(toAssetInput(asset, { comment: nextComment }))
+      notice.value = saved.comment ? `已更新备注 ${saved.comment}` : '已清空备注'
+    } catch (error) {
+      notice.value = error instanceof Error ? error.message : '备注保存失败'
+    }
   }
   cancelComment()
 }
@@ -1216,6 +1298,7 @@ const toggleTunnel = () => {
   const asset = findEditableAsset(contextMenuAssetId.value || '')
   if (asset) {
     asset.tunnelState = asset.tunnelState === 'active' ? 'created' : 'active'
+    window.aiops?.saveAsset?.(toAssetInput(asset, { tunnelState: asset.tunnelState }))
     notice.value = asset.tunnelState === 'active' ? `隧道已连接 ${asset.name}` : `隧道已创建 ${asset.name}`
   }
   closeContextMenu()
@@ -1231,24 +1314,30 @@ const openMoveModalFromContext = () => {
   if (contextMenuAssetId.value) openMoveModal(contextMenuAssetId.value)
 }
 
-const moveAssetToFolder = (folderUuid: string) => {
+const moveAssetToFolder = async (folderUuid: string) => {
   const asset = findEditableAsset(moveModal.assetId)
   if (!asset) return
-  asset.folderUuid = folderUuid
-  if (!asset.organizationId) asset.organizationId = organizationAssets.value[0]?.uuid || 'org-1'
-  expandGroup(folderUuid)
-  notice.value = `已移动 ${asset.name} 到 ${folderNameByUuid(folderUuid)}`
-  closeMoveModal()
+  try {
+    await saveAssetRecord(toAssetInput(asset, { folderUuid, organizationId: asset.organizationId || organizationAssets.value[0]?.uuid }))
+    expandGroup(folderUuid)
+    notice.value = `已移动 ${asset.name} 到 ${folderNameByUuid(folderUuid)}`
+    closeMoveModal()
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '移动资产失败'
+  }
 }
 
-const removeAssetFromFolder = (assetId: string) => {
+const removeAssetFromFolder = async (assetId: string) => {
   const asset = findEditableAsset(assetId)
   if (!asset || !asset.folderUuid) return
   const folderName = folderNameByUuid(asset.folderUuid)
-  asset.folderUuid = undefined
-  if (!asset.organizationId) asset.organizationId = organizationAssets.value[0]?.uuid || 'org-1'
-  if (asset.organizationId) expandGroup(asset.organizationId)
-  notice.value = `已从 ${folderName} 移除 ${asset.name}`
+  try {
+    await saveAssetRecord(toAssetInput(asset, { folderUuid: undefined, organizationId: asset.organizationId || organizationAssets.value[0]?.uuid }))
+    if (asset.organizationId) expandGroup(asset.organizationId)
+    notice.value = `已从 ${folderName} 移除 ${asset.name}`
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '移除资产失败'
+  }
   closeContextMenu()
 }
 
@@ -1347,16 +1436,15 @@ const confirmDeleteGroup = () => {
   const group = sourceGroups.value.find((item) => item.key === deleteGroupModal.groupKey)
   if (!group) return
   if (group.type === 'custom-folder') {
-    workspaceAssets.value.forEach((asset) => {
-      if (asset.folderUuid === group.folderUuid) {
-        asset.folderUuid = undefined
-        if (!asset.organizationId) asset.organizationId = organizationAssets.value[0]?.uuid || 'org-1'
-      }
-    })
-    customFolders.value = customFolders.value.filter((folder) => folder.uuid !== group.folderUuid)
-    removeExpandedGroup(group.key)
-    notice.value = `已删除文件夹 ${group.title}`
-    closeDeleteGroupModal()
+    deleteFolderRecord(group.folderUuid || group.key)
+      .then(() => {
+        removeExpandedGroup(group.key)
+        notice.value = `已删除文件夹 ${group.title}`
+        closeDeleteGroupModal()
+      })
+      .catch((error) => {
+        notice.value = error instanceof Error ? error.message : '删除文件夹失败'
+      })
     return
   }
   if (group.type === 'direct-group' && group.groupName) {
@@ -1384,6 +1472,9 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostForm.port = String(asset?.port || 22)
   hostForm.authType = asset?.auth_type || (activeWorkspace.value === 'bastion' ? 'keyBased' : 'password')
   hostForm.comment = asset?.comment || ''
+  hostForm.password = ''
+  hostForm.privateKey = ''
+  hostForm.passphrase = ''
   hostFormError.value = ''
   closeContextMenu()
 }
@@ -1417,11 +1508,42 @@ const createHostId = () => {
   return id
 }
 
-const saveHostForm = () => {
+const buildHostInput = (id: string | undefined, port: number, sourceAsset?: WorkspaceAsset): AiopsAssetInput => {
+  const shouldAttachOrganization = activeWorkspace.value === 'bastion' && hostForm.assetType !== 'organization'
+  return {
+    id,
+    name: hostForm.title.trim(),
+    title: hostForm.title.trim(),
+    host: hostForm.host.trim(),
+    ip: hostForm.host.trim(),
+    username: hostForm.username.trim(),
+    group: hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : '未分组'),
+    group_name: hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : '未分组'),
+    port,
+    asset_type: hostForm.assetType,
+    auth_type: hostForm.authType,
+    comment: hostForm.comment.trim(),
+    data_source: hostForm.assetType === 'organization' ? 'refresh' : sourceAsset?.data_source || 'manual',
+    tags: hostForm.assetType === 'organization' ? ['jumpserver'] : ['ssh'],
+    favorite: sourceAsset?.favorite ?? false,
+    tunnelState: sourceAsset?.tunnelState,
+    organizationId:
+      hostForm.assetType === 'organization'
+        ? undefined
+        : shouldAttachOrganization
+          ? organizationAssets.value[0]?.uuid || sourceAsset?.organizationId
+          : sourceAsset?.organizationId,
+    folderUuid: hostModal.mode === 'clone' && activeWorkspace.value === 'bastion' ? sourceAsset?.folderUuid : sourceAsset?.folderUuid,
+    ...(hostForm.password.trim() ? { password: hostForm.password } : {}),
+    ...(hostForm.privateKey.trim() ? { privateKey: hostForm.privateKey } : {}),
+    ...(hostForm.passphrase.trim() ? { passphrase: hostForm.passphrase } : {})
+  }
+}
+
+const saveHostForm = async () => {
   const title = hostForm.title.trim()
   const host = hostForm.host.trim()
   const username = hostForm.username.trim()
-  const group = hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : '未分组')
   const port = parseHostPort()
   if (!title || !host || !username) {
     hostFormError.value = '请填写主机名、地址和用户名'
@@ -1437,57 +1559,26 @@ const saveHostForm = () => {
   if (hostModal.mode === 'edit') {
     const asset = findEditableAsset(hostModal.assetId)
     if (!asset) return
-    asset.name = title
-    asset.title = title
-    asset.host = host
-    asset.ip = host
-    asset.username = username
-    asset.group = group
-    asset.group_name = group
-    asset.port = port
-    asset.auth_type = hostForm.authType
-    asset.asset_type = hostForm.assetType
-    asset.comment = hostForm.comment.trim()
-    asset.data_source = hostForm.assetType === 'organization' ? 'refresh' : asset.data_source
-    notice.value = `已更新主机 ${asset.name}`
-    closeHostModal()
+    try {
+      const saved = await saveAssetRecord(buildHostInput(asset.id, port, asset))
+      notice.value = `已更新主机 ${saved.name}`
+      closeHostModal()
+    } catch (error) {
+      hostFormError.value = error instanceof Error ? error.message : '主机保存失败'
+    }
     return
   }
 
   const id = createHostId()
-  const shouldAttachOrganization = activeWorkspace.value === 'bastion' && hostForm.assetType !== 'organization'
   const sourceAsset = hostModal.mode === 'clone' ? findEditableAsset(hostModal.assetId) : null
-  const asset: WorkspaceAsset = {
-    id,
-    uuid: id,
-    name: title,
-    title,
-    host,
-    ip: host,
-    group,
-    group_name: group,
-    status: 'online',
-    tags: hostForm.assetType === 'organization' ? ['jumpserver'] : ['ssh'],
-    username,
-    port,
-    asset_type: hostForm.assetType,
-    auth_type: hostForm.authType,
-    comment: hostForm.comment.trim(),
-    data_source: hostForm.assetType === 'organization' ? 'refresh' : 'manual',
-    favorite: false,
-    tunnelState: sourceAsset?.tunnelState,
-    organizationId:
-      hostForm.assetType === 'organization'
-        ? undefined
-        : shouldAttachOrganization
-          ? organizationAssets.value[0]?.uuid || 'org-1'
-          : sourceAsset?.organizationId,
-    folderUuid: hostModal.mode === 'clone' && activeWorkspace.value === 'bastion' ? sourceAsset?.folderUuid : undefined
+  try {
+    const saved = await saveAssetRecord(buildHostInput(id, port, sourceAsset || undefined))
+    expandGroup(saved.asset_type === 'organization' ? saved.uuid : saved.folderUuid || `group-${saved.group}`)
+    notice.value = `${hostModal.mode === 'clone' ? '已克隆主机' : '已创建主机'} ${saved.name}`
+    closeHostModal()
+  } catch (error) {
+    hostFormError.value = error instanceof Error ? error.message : '主机保存失败'
   }
-  workspaceAssets.value = [...workspaceAssets.value, asset]
-  expandGroup(asset.asset_type === 'organization' ? asset.uuid : asset.folderUuid || `group-${asset.group}`)
-  notice.value = `${hostModal.mode === 'clone' ? '已克隆主机' : '已创建主机'} ${asset.name}`
-  closeHostModal()
 }
 
 const openDeleteContextAsset = () => {
@@ -1497,24 +1588,26 @@ const openDeleteContextAsset = () => {
   closeContextMenu()
 }
 
-const confirmDeleteAsset = () => {
+const confirmDeleteAsset = async () => {
   const asset = deleteAssetInfo.value
   if (!asset) return
-  workspaceAssets.value = workspaceAssets.value.filter((item) => item.id !== asset.id)
-  if (asset.asset_type === 'organization') {
-    workspaceAssets.value.forEach((item) => {
-      if (item.organizationId === asset.uuid) {
-        item.organizationId = undefined
-        item.folderUuid = undefined
-      }
-    })
-    removeExpandedGroup(asset.uuid)
+  try {
+    await deleteAssetRecord(asset.id)
+    if (asset.asset_type === 'organization') removeExpandedGroup(asset.uuid)
+    workspace.selectedContexts = workspace.selectedContexts.filter((context) => context.id !== asset.id)
+    selectedAssetId.value = selectedAssetId.value === asset.id ? null : selectedAssetId.value
+    notice.value = `已删除主机 ${asset.name}`
+    closeDeleteAssetModal()
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '删除主机失败'
   }
-  workspace.selectedContexts = workspace.selectedContexts.filter((context) => context.id !== asset.id)
-  selectedAssetId.value = selectedAssetId.value === asset.id ? null : selectedAssetId.value
-  notice.value = `已删除主机 ${asset.name}`
-  closeDeleteAssetModal()
 }
+
+onMounted(() => {
+  refreshAssets().catch((error) => {
+    notice.value = error instanceof Error ? error.message : '资产加载失败'
+  })
+})
 
 watch(activeWorkspace, () => {
   closeMenus()
