@@ -1512,16 +1512,32 @@ const confirmExport = async () => {
   const date = new Date().toISOString().slice(0, 10)
   const fileName = `external-reference-assets-${date}.json`
   const selected = assets.value.filter((asset) => resolvedExportIds.value.includes(asset.id)).map(toExportPayload)
-  const result = await window.aiops?.showSaveDialog?.({
-    defaultPath: fileName,
-    filters: [{ name: 'JSON Files', extensions: ['json'] }]
-  })
+  const showSaveDialog = window.aiops?.showSaveDialog
+  if (typeof showSaveDialog !== 'function') {
+    importNotice.value = '导出保存对话框服务不可用。'
+    return
+  }
+  let result: Awaited<ReturnType<typeof showSaveDialog>>
+  try {
+    result = await showSaveDialog({
+      defaultPath: fileName,
+      filters: [{ name: 'JSON Files', extensions: ['json'] }]
+    })
+  } catch {
+    importNotice.value = '导出保存对话框打开失败。'
+    return
+  }
   if (result?.canceled || !result?.filePath) {
     importNotice.value = '已取消导出。'
     return
   }
+  const writeLocalFile = window.aiops?.writeLocalFile
+  if (typeof writeLocalFile !== 'function') {
+    importNotice.value = '导出文件写入服务不可用。'
+    return
+  }
   try {
-    await window.aiops?.writeLocalFile?.(result.filePath, JSON.stringify(selected, null, 2))
+    await writeLocalFile(result.filePath, JSON.stringify(selected, null, 2))
   } catch {
     importNotice.value = '导出文件写入失败。'
     return

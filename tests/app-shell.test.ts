@@ -903,6 +903,52 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
   })
 
+  it('does not fabricate Assets export success when save or file write bridges are unavailable or fail', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    await assets.findAll('.asset-action-button').find((button) => button.text().includes('导出'))!.trigger('click')
+    await assets.findAll('.export-assets-modal .export-leaf-row').find((row) => row.text().includes('prod-bastion'))!.find('input').setValue(true)
+
+    const originalAiops = {
+      showSaveDialog: window.aiops.showSaveDialog,
+      writeLocalFile: window.aiops.writeLocalFile
+    }
+
+    try {
+      ;(window.aiops as any).showSaveDialog = undefined
+      await assets.find('.export-assets-modal footer button:last-child').trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('导出保存对话框服务不可用')
+      expect(assets.find('.export-assets-modal').exists()).toBe(true)
+      expect(window.aiops.writeLocalFile).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).showSaveDialog = originalAiops.showSaveDialog
+      ;(window.aiops as any).writeLocalFile = undefined
+      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/assets-export-missing-write.json' })
+      await assets.find('.export-assets-modal footer button:last-child').trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('导出文件写入服务不可用')
+      expect(assets.find('.export-assets-modal').exists()).toBe(true)
+
+      ;(window.aiops as any).writeLocalFile = originalAiops.writeLocalFile
+      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/assets-export-write-failed.json' })
+      vi.mocked(window.aiops.writeLocalFile!).mockRejectedValueOnce(new Error('disk full'))
+      await assets.find('.export-assets-modal footer button:last-child').trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('导出文件写入失败')
+      expect(assets.find('.export-assets-modal').exists()).toBe(true)
+      expect(assets.text()).not.toContain('已导出 1 个主机')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not fabricate Workspace host favorite, comment, or tunnel state before asset writes succeed', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
