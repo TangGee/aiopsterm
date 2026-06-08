@@ -328,6 +328,19 @@ describe('files backend content boundary', () => {
 
     const saved = await writeFileContent(path, 'created through backend\n', { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
     expect(saved.ok).toBe(true)
+    expect(saved.data.task).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^transfer-/),
+        type: 'r2r',
+        name: expect.stringContaining('new-'),
+        source: path,
+        target: path,
+        fromHost: 'staging-app',
+        toHost: 'staging-app',
+        status: 'success',
+        speed: '已保存'
+      })
+    )
 
     const reread = await readFileContent(path, { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
     expect(reread.ok).toBe(true)
@@ -348,10 +361,30 @@ describe('files backend content boundary', () => {
 
     const chmodded = await mutateFileEntry({ kind: 'chmod', path: renamedPath, mode: '700' }, { kind: 'remote', sessionId: 'ssh-staging' })
     expect(chmodded.ok).toBe(true)
+    expect(chmodded.data.task).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^transfer-/),
+        type: 'r2r',
+        name: expect.stringContaining('chmod mutate-'),
+        source: renamedPath,
+        target: 'permissions',
+        status: 'success'
+      })
+    )
     expect((await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).find((entry) => entry.path === renamedPath)?.mode).toBe('-700')
 
     const deleted = await mutateFileEntry({ kind: 'delete', path: renamedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
     expect(deleted.ok).toBe(true)
+    expect(deleted.data.task).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^transfer-/),
+        type: 'r2r',
+        name: expect.stringContaining('delete mutate-'),
+        source: renamedPath,
+        target: '/home/staging',
+        status: 'success'
+      })
+    )
     expect((await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).map((entry) => entry.path)).not.toContain(renamedPath)
   })
 
@@ -363,10 +396,29 @@ describe('files backend content boundary', () => {
 
     const copied = await mutateFileEntry({ kind: 'copy', srcPath: sourcePath, targetPath: copiedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
     expect(copied.ok).toBe(true)
+    expect(copied.data.task).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^transfer-/),
+        type: 'r2r',
+        name: expect.stringContaining('copy-move-'),
+        source: sourcePath,
+        target: copiedPath,
+        status: 'success'
+      })
+    )
     expect((await readFileContent(copiedPath, { kind: 'remote', sessionId: 'ssh-staging' })).data?.content).toBe('copy move remote content\n')
 
     const moved = await mutateFileEntry({ kind: 'move', srcPath: sourcePath, targetPath: movedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
     expect(moved.ok).toBe(true)
+    expect(moved.data.task).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^transfer-/),
+        type: 'r2r',
+        source: sourcePath,
+        target: movedPath,
+        status: 'success'
+      })
+    )
     const paths = (await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).map((entry) => entry.path)
     expect(paths).toContain(copiedPath)
     expect(paths).toContain(movedPath)
@@ -551,6 +603,18 @@ describe('files backend content boundary', () => {
 
       const saved = await writeFileContent(filePath, 'local backend content\n', { kind: 'local', sessionId: 'local', host: 'localhost' })
       expect(saved.ok).toBe(true)
+      expect(saved.data.task).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          type: 'r2r',
+          name: 'save note.txt',
+          source: filePath,
+          target: filePath,
+          fromHost: 'localhost',
+          toHost: 'localhost',
+          status: 'success'
+        })
+      )
 
       const reread = await readFileContent(filePath, { kind: 'local', sessionId: 'local', host: 'localhost' })
       expect(reread.ok).toBe(true)
@@ -573,10 +637,30 @@ describe('files backend content boundary', () => {
 
       const chmodded = await mutateFileEntry({ kind: 'chmod', path: renamedPath, mode: '600' }, { kind: 'local', sessionId: 'local' })
       expect(chmodded.ok).toBe(true)
+      expect(chmodded.data.task).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          name: 'chmod renamed.txt',
+          source: renamedPath,
+          target: 'permissions',
+          type: 'r2r',
+          status: 'success'
+        })
+      )
       expect((await listFiles(dir, { kind: 'local', sessionId: 'local' })).find((entry) => entry.name === 'renamed.txt')?.mode).toBe('-600')
 
       const deleted = await mutateFileEntry({ kind: 'delete', path: renamedPath }, { kind: 'local', sessionId: 'local' })
       expect(deleted.ok).toBe(true)
+      expect(deleted.data.task).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          name: 'delete renamed.txt',
+          source: renamedPath,
+          target: dir,
+          type: 'r2r',
+          status: 'success'
+        })
+      )
       expect((await listFiles(dir, { kind: 'local', sessionId: 'local' })).map((entry) => entry.name)).not.toContain('renamed.txt')
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -593,10 +677,30 @@ describe('files backend content boundary', () => {
 
       const copied = await mutateFileEntry({ kind: 'copy', srcPath: sourcePath, targetPath: copiedPath }, { kind: 'local', sessionId: 'local' })
       expect(copied.ok).toBe(true)
+      expect(copied.data.task).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          name: 'copied.txt',
+          source: sourcePath,
+          target: copiedPath,
+          type: 'r2r',
+          status: 'success'
+        })
+      )
       expect((await readFileContent(copiedPath, { kind: 'local', sessionId: 'local' })).data?.content).toBe('local copy move content\n')
 
       const moved = await mutateFileEntry({ kind: 'move', srcPath: sourcePath, targetPath: movedPath }, { kind: 'local', sessionId: 'local' })
       expect(moved.ok).toBe(true)
+      expect(moved.data.task).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          name: 'moved.txt',
+          source: sourcePath,
+          target: movedPath,
+          type: 'r2r',
+          status: 'success'
+        })
+      )
       const names = (await listFiles(dir, { kind: 'local', sessionId: 'local' })).map((entry) => entry.name)
       expect(names).toContain('copied.txt')
       expect(names).toContain('moved.txt')

@@ -985,18 +985,8 @@ const confirmPermissions = async () => {
   const target = permissionsTarget.value
   loading.value = true
   try {
-    await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value })
-    await workspace.recordFileTransferTask({
-      type: 'r2r',
-      name: `chmod ${target.name}`,
-      source: target.path,
-      target: recursivePermission.value ? 'recursive permissions' : 'permissions',
-      progress: 100,
-      speed: '完成',
-      status: 'success',
-      fromHost: props.session.host,
-      toHost: props.session.host
-    })
+    const result = await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value })
+    if (result?.task) workspace.pushFileTransferTask(result.task)
     await loadEntries()
     fileNotice.value = `权限已更新为 ${permissionCode.value}`
     permissionsTarget.value = null
@@ -1147,18 +1137,8 @@ const queueMoveTarget = async (name: string, overwrite = false) => {
   const targetPath = `${moveDialog.targetPath}/${name}`.replace(/\/+/g, '/')
   loading.value = true
   try {
-    await mutateEntry({ kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite })
-    await workspace.recordFileTransferTask({
-      type: 'r2r',
-      name,
-      source: entry.path,
-      target: targetPath,
-      progress: 100,
-      speed: '完成',
-      status: 'success',
-      fromHost: props.session.host,
-      toHost: props.session.host
-    })
+    const result = await mutateEntry({ kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite })
+    if (result?.task) workspace.pushFileTransferTask(result.task)
     if (dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await loadEntries()
     fileNotice.value = moveDialog.type === 'copy' ? '复制成功' : '移动成功'
     closeMoveDialog()
@@ -1202,18 +1182,8 @@ const confirmDeleteEntry = async () => {
   if (!entry) return
   loading.value = true
   try {
-    await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' })
-    await workspace.recordFileTransferTask({
-      type: 'r2r',
-      name: `delete ${entry.name}`,
-      source: entry.path,
-      target: currentPath.value,
-      progress: 100,
-      speed: '完成',
-      status: 'success',
-      fromHost: props.session.host,
-      toHost: props.session.host
-    })
+    const result = await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' })
+    if (result?.task) workspace.pushFileTransferTask(result.task)
     await loadEntries()
     fileNotice.value = '删除成功'
     closeDeleteDialog()

@@ -3817,6 +3817,7 @@ describe('AppShell', () => {
       expect(wrapper.find('.files-floating-editor').attributes('style')).not.toBe(editorBeforeResize)
       await wrapper.find('.files-editor-toolbar button[title="全屏"]').trigger('click')
       expect(wrapper.find('.files-floating-editor').classes()).toContain('fullscreen')
+      vi.mocked(window.aiops.recordFileTransferTask).mockClear()
       await wrapper.find('.files-editor-body').setValue('changed remote note')
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }))
       await flushPromises()
@@ -3833,6 +3834,7 @@ describe('AppShell', () => {
           speed: '已保存'
         })
       )
+      expect(window.aiops.recordFileTransferTask).not.toHaveBeenCalled()
       await wrapper.find('.files-editor-body').setValue('changed remote note again')
       await wrapper.find('.files-editor-toolbar button[title="关闭"]').trigger('click')
       expect(wrapper.find('.file-modal-card.small').text()).toContain('保存确认')
@@ -3928,6 +3930,7 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('重命名成功')
 
     const renamedRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note-v2.md'))!
+    vi.mocked(window.aiops.recordFileTransferTask).mockClear()
     await renamedRow.find('.file-row-actions button[title="权限"]').trigger('click')
     expect(wrapper.find('.file-modal-card.small').text()).toContain('权限设置 - release-note-v2.md')
     expect((wrapper.find('.permission-code input').element as HTMLInputElement).value).toBe('644')
@@ -4038,6 +4041,7 @@ describe('AppShell', () => {
     )
     expect(wrapper.text()).toContain('删除成功')
     expect(wrapper.text()).not.toContain('release-note-v2.md')
+    expect(window.aiops.recordFileTransferTask).not.toHaveBeenCalled()
   })
 
   it('does not silently ignore Files open/upload/download dialog bridge failures', async () => {

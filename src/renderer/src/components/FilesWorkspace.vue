@@ -356,8 +356,6 @@ const getFileLanguage = (filePath: string) => {
   return map[ext] || 'text'
 }
 
-const getFileName = (filePath: string) => filePath.split('/').filter(Boolean).at(-1) || 'untitled'
-
 const fileContentOptions = (payload: { sessionId: string; host: string }): FileContentOptions => {
   const session = workspace.fileSessions.find((item) => item.id === payload.sessionId)
   return {
@@ -509,23 +507,13 @@ const saveFileEditor = async (key: string, needClose: boolean) => {
     editor.action = 'edit'
     editor.dirty = false
     editor.saved = true
+    if (result.data?.task) workspace.pushFileTransferTask(result.data.task)
   } catch (error) {
     editor.error = error instanceof Error ? error.message : '保存文件失败'
     return
   } finally {
     editor.loading = false
   }
-  await workspace.recordFileTransferTask({
-    type: 'r2r',
-    name: `save ${getFileName(editor.filePath)}`,
-    source: editor.filePath,
-    target: editor.filePath,
-    progress: 100,
-    speed: '已保存',
-    status: 'success',
-    fromHost: editor.host,
-    toHost: editor.host
-  })
   closeConfirm.visible = false
   if (needClose) removeFileEditor(key)
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { dirname as getLocalDirname, join } from 'path'
+import { basename as getLocalBasename, dirname as getLocalDirname, join } from 'path'
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
 import type {
   FileSessionCatalog,
@@ -210,6 +210,56 @@ const transferToHost = (options: FileListOptions) => options.toHost || options.h
 const registerActiveFileTransferTask = (task: FileTransferTask) => {
   if (task.status !== 'running') return
   activeFileTransferTasks.set(task.id, cloneFileTransferTask(task))
+}
+
+const createCompletedFileTransferTask = (input: FileTransferTaskRecordInput) => cloneFileTransferTask(createFileTransferTaskRecord({ progress: 100, status: 'success', speed: '完成', ...input }))
+
+const fileTransferTaskHosts = (options: FileListOptions) => ({
+  ...(transferFromHost(options) ? { fromHost: transferFromHost(options) } : {}),
+  ...(transferToHost(options) ? { toHost: transferToHost(options) } : {})
+})
+
+const taskBasename = (path: string, options: FileListOptions) => (options.kind === 'remote' ? basename(path) : getLocalBasename(path))
+const taskDirname = (path: string, options: FileListOptions) => (options.kind === 'remote' ? dirname(path) : getLocalDirname(path))
+
+const writeContentTask = (path: string, options: FileContentOptions) =>
+  createCompletedFileTransferTask({
+    type: 'r2r',
+    name: `save ${taskBasename(path, options)}`,
+    source: path,
+    target: path,
+    speed: '已保存',
+    ...fileTransferTaskHosts(options)
+  })
+
+const mutationTask = (mutation: FileEntryMutation, resultPath: string, options: FileListOptions): FileTransferTask | undefined => {
+  if (mutation.kind === 'rename') return undefined
+  if (mutation.kind === 'chmod') {
+    return createCompletedFileTransferTask({
+      type: 'r2r',
+      name: `chmod ${taskBasename(resultPath, options)}`,
+      source: resultPath,
+      target: mutation.recursive ? 'recursive permissions' : 'permissions',
+      ...fileTransferTaskHosts(options)
+    })
+  }
+  if (mutation.kind === 'delete') {
+    return createCompletedFileTransferTask({
+      type: 'r2r',
+      name: `delete ${taskBasename(resultPath, options)}`,
+      source: resultPath,
+      target: taskDirname(resultPath, options),
+      ...fileTransferTaskHosts(options)
+    })
+  }
+  const source = mutation.srcPath
+  return createCompletedFileTransferTask({
+    type: 'r2r',
+    name: taskBasename(resultPath, options),
+    source,
+    target: resultPath,
+    ...fileTransferTaskHosts(options)
+  })
 }
 
 export const recordFileTransferTask = async (input: FileTransferTaskRecordInput): Promise<FileTransferTaskRecordResult> => {
@@ -595,7 +645,7 @@ export const writeFileContent = async (filePath: string, content: string, option
       await mkdir(getLocalDirname(path), { recursive: true })
       await writeFile(path, text, 'utf-8')
       const metadata = await stat(path)
-      return { ok: true, data: { size: metadata.size, mtimeMs: metadata.mtimeMs } }
+      return { ok: true, data: { size: metadata.size, mtimeMs: metadata.mtimeMs, task: writeContentTask(path, options) } }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code === 'EACCES' || code === 'EPERM') return { ok: false, errorCode: 'permission', errorMessage: 'Permission denied' }
@@ -606,7 +656,7 @@ export const writeFileContent = async (filePath: string, content: string, option
   const modifiedAt = Date.now()
   remoteFileContents[path] = { content: text, mtimeMs: modifiedAt }
   upsertRemoteFileEntry(path, size, modifiedAt)
-  return { ok: true, data: { size, mtimeMs: modifiedAt } }
+  return { ok: true, data: { size, mtimeMs: modifiedAt, task: writeContentTask(path, options) } }
 }
 
 const chmodRecursive = async (path: string, mode: number) => {
@@ -720,8 +770,10 @@ const mutateRemoteFileEntry = async (mutation: FileEntryMutation): Promise<FileE
 }
 
 export const mutateFileEntry = async (mutation: FileEntryMutation, options: FileListOptions = {}): Promise<FileEntryMutationResult> => {
-  if (options.kind === 'remote') return mutateRemoteFileEntry(mutation)
-  return mutateLocalFileEntry(mutation)
+  const result = options.kind === 'remote' ? await mutateRemoteFileEntry(mutation) : await mutateLocalFileEntry(mutation)
+  if (!result.ok || !result.data?.path) return result
+  const task = mutationTask(mutation, result.data.path, options)
+  return task ? { ...result, data: { ...result.data, task } } : result
 }
 
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {

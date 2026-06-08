@@ -3356,6 +3356,39 @@ const dirnameFileMock = (path: string) => {
   return index <= 0 ? '/' : normalized.slice(0, index)
 }
 const basenameFileMock = (path: string) => normalizeFileDirMock(path).split('/').filter(Boolean).at(-1) || path
+const fileTransferTaskHostsMock = (options?: any) => ({
+  ...(options?.fromHost || options?.host ? { fromHost: options.fromHost || options.host } : {}),
+  ...(options?.toHost || options?.host ? { toHost: options.toHost || options.host } : {})
+})
+const createFileTransferTaskMock = (input: any) => {
+  const status = input.status === 'running' || input.status === 'success' || input.status === 'failed' || input.status === 'error' ? input.status : 'success'
+  const createTaskId = () => `transfer-test-${fileTransferTaskSequenceMock++}`
+  return {
+    id: createTaskId(),
+    type: input.type === 'download' || input.type === 'upload' || input.type === 'r2r' ? input.type : 'r2r',
+    name: String(input.name || '').trim(),
+    source: String(input.source || '').trim(),
+    target: String(input.target || '').trim(),
+    progress: typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : status === 'success' ? 100 : 0,
+    speed: String(input.speed || (status === 'success' ? '完成' : 'pending')),
+    status,
+    ...(input.stage === 'scanning' || input.stage === 'pending' ? { stage: input.stage } : {}),
+    ...(input.isGroup ? { isGroup: true } : {}),
+    ...(input.fromHost ? { fromHost: input.fromHost } : {}),
+    ...(input.toHost ? { toHost: input.toHost } : {}),
+    ...(typeof input.totalFiles === 'number' ? { totalFiles: input.totalFiles } : {}),
+    ...(typeof input.finishedFiles === 'number' ? { finishedFiles: input.finishedFiles } : {}),
+    ...(Array.isArray(input.children)
+      ? {
+          children: input.children.map((child: any) => ({
+            ...child,
+            id: createTaskId(),
+            progress: typeof child.progress === 'number' ? Math.max(0, Math.min(100, Math.round(child.progress))) : 0
+          }))
+        }
+      : {})
+  }
+}
 const ensureFileDirMock = (directory: string) => {
   const dir = normalizeFileDirMock(directory)
   if (fileEntriesMock.some((entry) => dirnameFileMock(entry.path) === dir)) return
@@ -4278,11 +4311,21 @@ Object.defineProperty(window, 'aiops', {
         mtimeMs: 1717200000000
       }
     })),
-    writeFileContent: vi.fn(async (_filePath: string, content: string) => ({
+    writeFileContent: vi.fn(async (filePath: string, content: string, options?: any) => ({
       ok: true,
       data: {
         size: content.length,
-        mtimeMs: 1717200001000
+        mtimeMs: 1717200001000,
+        task: createFileTransferTaskMock({
+          type: 'r2r',
+          name: `save ${basenameFileMock(filePath)}`,
+          source: filePath,
+          target: filePath,
+          progress: 100,
+          speed: '已保存',
+          status: 'success',
+          ...fileTransferTaskHostsMock(options)
+        })
       }
     })),
     stageChatAttachment: vi.fn(async ({ taskId, srcAbsPath }: { taskId: string; srcAbsPath: string }) => {
@@ -5714,7 +5757,7 @@ Object.defineProperty(window, 'aiops', {
         ...fileEntriesMock.filter((entry) => dirnameFileMock(entry.path) === dir).map((entry) => ({ ...entry }))
       ]
     }),
-    mutateFileEntry: vi.fn(async (mutation: any) => {
+    mutateFileEntry: vi.fn(async (mutation: any, options?: any) => {
       if (mutation.kind === 'rename') {
         const oldPath = normalizeFileDirMock(mutation.oldPath)
         const newPath = normalizeFileDirMock(mutation.newPath)
@@ -5729,12 +5772,48 @@ Object.defineProperty(window, 'aiops', {
         const path = normalizeFileDirMock(mutation.path)
         const before = fileEntriesMock.length
         fileEntriesMock = fileEntriesMock.filter((entry) => entry.path !== path && !entry.path.startsWith(`${path}/`))
-        return { ok: true, data: { affected: before - fileEntriesMock.length, path, mtimeMs: Date.now() } }
+        return {
+          ok: true,
+          data: {
+            affected: before - fileEntriesMock.length,
+            path,
+            mtimeMs: Date.now(),
+            task: createFileTransferTaskMock({
+              type: 'r2r',
+              name: `delete ${basenameFileMock(path)}`,
+              source: path,
+              target: dirnameFileMock(path),
+              progress: 100,
+              speed: '完成',
+              status: 'success',
+              ...fileTransferTaskHostsMock(options)
+            })
+          }
+        }
       }
       if (mutation.kind === 'copy' || mutation.kind === 'move') {
         const srcPath = normalizeFileDirMock(mutation.srcPath)
         const targetPath = normalizeFileDirMock(mutation.targetPath)
-        if (srcPath === targetPath) return { ok: true, data: { affected: 0, path: targetPath, mtimeMs: Date.now() } }
+        if (srcPath === targetPath) {
+          return {
+            ok: true,
+            data: {
+              affected: 0,
+              path: targetPath,
+              mtimeMs: Date.now(),
+              task: createFileTransferTaskMock({
+                type: 'r2r',
+                name: basenameFileMock(targetPath),
+                source: srcPath,
+                target: targetPath,
+                progress: 100,
+                speed: '完成',
+                status: 'success',
+                ...fileTransferTaskHostsMock(options)
+              })
+            }
+          }
+        }
         const entry = fileEntriesMock.find((item) => item.path === srcPath)
         if (!entry) return { ok: false, errorCode: 'not_found', errorMessage: 'File entry not found' }
         fileEntriesMock = fileEntriesMock.filter((item) => item.path !== targetPath && !item.path.startsWith(`${targetPath}/`))
@@ -5743,7 +5822,24 @@ Object.defineProperty(window, 'aiops', {
         if (mutation.kind === 'move') {
           fileEntriesMock = fileEntriesMock.filter((item) => item.path !== srcPath && !item.path.startsWith(`${srcPath}/`))
         }
-        return { ok: true, data: { affected: 1, path: targetPath, mtimeMs: copied.modifiedAt } }
+        return {
+          ok: true,
+          data: {
+            affected: 1,
+            path: targetPath,
+            mtimeMs: copied.modifiedAt,
+            task: createFileTransferTaskMock({
+              type: 'r2r',
+              name: basenameFileMock(targetPath),
+              source: srcPath,
+              target: targetPath,
+              progress: 100,
+              speed: '完成',
+              status: 'success',
+              ...fileTransferTaskHostsMock(options)
+            })
+          }
+        }
       }
       if (mutation.kind === 'chmod') {
         const path = normalizeFileDirMock(mutation.path)
@@ -5752,7 +5848,25 @@ Object.defineProperty(window, 'aiops', {
         const prefix = entry.type === 'directory' ? 'd' : entry.type === 'link' ? 'l' : '-'
         entry.mode = `${prefix}${String(mutation.mode).slice(-3)}`
         entry.modifiedAt = Date.now()
-        return { ok: true, data: { affected: 1, path, mode: String(mutation.mode).slice(-3), mtimeMs: entry.modifiedAt } }
+        return {
+          ok: true,
+          data: {
+            affected: 1,
+            path,
+            mode: String(mutation.mode).slice(-3),
+            mtimeMs: entry.modifiedAt,
+            task: createFileTransferTaskMock({
+              type: 'r2r',
+              name: `chmod ${basenameFileMock(path)}`,
+              source: path,
+              target: mutation.recursive ? 'recursive permissions' : 'permissions',
+              progress: 100,
+              speed: '完成',
+              status: 'success',
+              ...fileTransferTaskHostsMock(options)
+            })
+          }
+        }
       }
       return { ok: false, errorCode: 'unsupported', errorMessage: 'Unsupported file mutation' }
     }),
@@ -5801,7 +5915,7 @@ Object.defineProperty(window, 'aiops', {
           fileEntriesMock.push({ ...entry, name: basenameFileMock(targetPath), path: targetPath, modifiedAt: Date.now() })
         }
         const mtimeMs = Date.now()
-        const taskResult = await window.aiops.recordFileTransferTask({
+        const task = createFileTransferTaskMock({
           type: 'r2r',
           name: basenameFileMock(sourcePath),
           source: operation.remotePath,
@@ -5821,13 +5935,13 @@ Object.defineProperty(window, 'aiops', {
             bytes: 128,
             files: 1,
             mtimeMs,
-            task: taskResult.data?.task
+            task
           }
         }
       }
       if (operation.kind === 'download-file') {
         const mtimeMs = Date.now()
-        const taskResult = await window.aiops.recordFileTransferTask({
+        const task = createFileTransferTaskMock({
           type: 'download',
           name: basenameFileMock(operation.remotePath),
           source: operation.remotePath,
@@ -5847,7 +5961,7 @@ Object.defineProperty(window, 'aiops', {
             bytes: 128,
             files: 1,
             mtimeMs,
-            task: taskResult.data?.task
+            task
           }
         }
       }
@@ -5874,23 +5988,21 @@ Object.defineProperty(window, 'aiops', {
           files: 1,
           mtimeMs: Date.now(),
           itemKind: isDirectory ? ('directory' as const) : ('file' as const),
-          task: (
-            await window.aiops.recordFileTransferTask({
-              type: 'upload',
-              name,
-              source: operation.localPath,
-              target: path,
-              progress: 100,
-              speed: '完成',
-              status: 'success',
-              ...(options?.fromHost ? { fromHost: options.fromHost } : {}),
-              toHost: options?.toHost || options?.host,
-              stage: isDirectory ? 'scanning' : 'pending',
-              isGroup: isDirectory,
-              totalFiles: 1,
-              finishedFiles: 1
-            })
-          ).data?.task
+          task: createFileTransferTaskMock({
+            type: 'upload',
+            name,
+            source: operation.localPath,
+            target: path,
+            progress: 100,
+            speed: '完成',
+            status: 'success',
+            ...(options?.fromHost ? { fromHost: options.fromHost } : {}),
+            toHost: options?.toHost || options?.host,
+            stage: isDirectory ? 'scanning' : 'pending',
+            isGroup: isDirectory,
+            totalFiles: 1,
+            finishedFiles: 1
+          })
         }
       }
     }),

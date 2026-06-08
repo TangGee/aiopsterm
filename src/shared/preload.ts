@@ -1238,6 +1238,7 @@ export type FileReadContentResult = AiopsMutationResult<{
 export type FileWriteContentResult = AiopsMutationResult<{
   size: number
   mtimeMs: number
+  task?: FileTransferTask
 }>
 
 export type FileEntryMutation =
@@ -1252,6 +1253,7 @@ export type FileEntryMutationResult = AiopsMutationResult<{
   path?: string
   mode?: string
   mtimeMs: number
+  task?: FileTransferTask
 }>
 
 export type FileTransferOperation =
