@@ -23,6 +23,21 @@ const defaultAiPreferences = {
   shellIntegrationTimeout: 4
 }
 
+const defaultTerminalSettings = {
+  terminalType: 'xterm-256color',
+  fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+  fontSize: 12,
+  scrollBack: 1000,
+  cursorStyle: 'block' as const,
+  cursorBlink: true,
+  lineHeight: 1,
+  pinchZoomStatus: true,
+  showCloseButton: true,
+  sshAgentsStatus: false,
+  middleMouseEvent: 'paste' as const,
+  rightMouseEvent: 'contextMenu' as const
+}
+
 const defaultEditorSettings = {
   fontSize: 14,
   lineHeight: 0,
@@ -5033,7 +5048,7 @@ describe('workspace store', () => {
     expect(store.config.background.lastCustomImage).toBe('')
     expect(store.config.background.mode).toBe('none')
 
-    store.updateTerminalSettings({ terminalType: 'vt220', cursorStyle: 'underline', showCloseButton: false })
+    await expect(store.updateTerminalSettings({ terminalType: 'vt220', cursorStyle: 'underline', showCloseButton: false })).resolves.toBe(true)
     expect(store.terminalSettings.terminalType).toBe('vt220')
     expect(store.terminalSettings.cursorStyle).toBe('underline')
     expect(store.terminalSettings.showCloseButton).toBe(false)
@@ -5152,7 +5167,7 @@ describe('workspace store', () => {
     expect(store.sshProxyConfigModalOpen).toBe(false)
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updateTerminalSettings({ sshAgentsStatus: true })
+    await expect(store.updateTerminalSettings({ sshAgentsStatus: true })).resolves.toBe(true)
     expect(store.terminalSettings.sshAgentsStatus).toBe(true)
     expect(await store.refreshSshAgentKeychainOptions()).toBe(true)
     expect(window.aiops.listSshAgentKeychainOptions).toHaveBeenCalled()
@@ -5550,6 +5565,76 @@ describe('workspace store', () => {
         secretRedaction: 'enabled',
         dataSync: 'enabled'
       })
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate terminal setting writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialSnapshot = JSON.stringify({
+      config: store.config.terminal,
+      settings: store.terminalSettings
+    })
+    const assertTerminalSettingsUnchanged = () => {
+      expect(
+        JSON.stringify({
+          config: store.config.terminal,
+          settings: store.terminalSettings
+        })
+      ).toBe(initialSnapshot)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateTerminalSettings({ terminalType: 'vt220' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('终端设置保存服务不可用')
+      assertTerminalSettingsUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateTerminalSettings({ terminalType: 'vt220' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('终端设置保存失败')
+      assertTerminalSettingsUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        terminal: {
+          ...defaultTerminalSettings,
+          terminalType: 'xterm-256color'
+        }
+      } as any)
+      await expect(store.updateTerminalSettings({ terminalType: 'vt220' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('终端设置保存失败')
+      assertTerminalSettingsUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('terminal save offline'))
+      await expect(store.updateTerminalSettings({ terminalType: 'vt220' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('terminal save offline')
+      assertTerminalSettingsUnchanged()
+
+      await expect(
+        store.updateTerminalSettings({
+          terminalType: 'vt220',
+          cursorStyle: 'underline',
+          showCloseButton: false,
+          middleMouseEvent: 'closeTab'
+        })
+      ).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('终端设置已保存')
+      expect(store.terminalSettings.terminalType).toBe('vt220')
+      expect(store.terminalSettings.cursorStyle).toBe('underline')
+      expect(store.terminalSettings.showCloseButton).toBe(false)
+      expect(store.terminalSettings.middleMouseEvent).toBe('closeTab')
+      expect(store.config.terminal).toEqual(
+        expect.objectContaining({
+          terminalType: 'vt220',
+          cursorStyle: 'underline',
+          showCloseButton: false,
+          middleMouseEvent: 'closeTab'
+        })
+      )
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }

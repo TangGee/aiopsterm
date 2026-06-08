@@ -1040,6 +1040,28 @@ const normalizeTerminalConfig = (source?: Partial<TerminalUserConfig>) => {
   }
 }
 
+const isTerminalSettingsSnapshot = (source: unknown): source is TerminalUserConfig => {
+  if (!isRecord(source)) return false
+  return (
+    (terminalTypes as readonly string[]).includes(source.terminalType as string) &&
+    typeof source.fontFamily === 'string' &&
+    source.fontFamily.trim().length > 0 &&
+    typeof source.fontSize === 'number' &&
+    Number.isFinite(source.fontSize) &&
+    typeof source.scrollBack === 'number' &&
+    Number.isFinite(source.scrollBack) &&
+    (terminalCursorStyles as readonly string[]).includes(source.cursorStyle as string) &&
+    typeof source.cursorBlink === 'boolean' &&
+    typeof source.lineHeight === 'number' &&
+    Number.isFinite(source.lineHeight) &&
+    typeof source.pinchZoomStatus === 'boolean' &&
+    typeof source.showCloseButton === 'boolean' &&
+    typeof source.sshAgentsStatus === 'boolean' &&
+    middleMouseEventActions.includes(source.middleMouseEvent as TerminalMouseEventAction) &&
+    rightMouseEventActions.includes(source.rightMouseEvent as TerminalSettings['rightMouseEvent'])
+  )
+}
+
 const normalizeWorkspacePreferences = (source?: Partial<WorkspaceUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
   const incomingExpandedGroups = Array.isArray(incoming.expandedGroups)
@@ -4310,10 +4332,52 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setSettingsNotice('编辑器设置已保存')
   }
 
-  const updateTerminalSettings = (patch: Partial<TerminalSettings>) => {
-    terminalSettings.value = normalizeTerminalConfig({ ...terminalSettings.value, ...patch }).normalized
-    saveConfig({ terminal: { ...terminalSettings.value } })
-    setSettingsNotice('终端设置已保存')
+  const getTerminalSettingsSnapshot = (): TerminalUserConfig => ({ ...terminalSettings.value })
+
+  const cloneTerminalSettingsSnapshot = (settings: TerminalSettings): TerminalUserConfig => ({ ...settings })
+
+  const terminalSettingsSnapshotsMatch = (left: TerminalSettings, right: TerminalSettings) =>
+    JSON.stringify(cloneTerminalSettingsSnapshot(left)) === JSON.stringify(cloneTerminalSettingsSnapshot(right))
+
+  const persistTerminalSettings = async (nextSettings: TerminalSettings) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('终端设置保存服务不可用')
+      return false
+    }
+    const normalizedSettings = normalizeTerminalConfig(nextSettings).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        terminal: cloneTerminalSettingsSnapshot(normalizedSettings)
+      })
+      if (!isRecord(savedConfig) || !isTerminalSettingsSnapshot(savedConfig.terminal)) {
+        setSettingsNotice('终端设置保存失败')
+        return false
+      }
+      const savedSettings = normalizeTerminalConfig(savedConfig.terminal).normalized
+      if (!terminalSettingsSnapshotsMatch(savedSettings, normalizedSettings)) {
+        setSettingsNotice('终端设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        terminal: cloneTerminalSettingsSnapshot(savedSettings)
+      } as Partial<UserConfig>)
+      terminalSettings.value = cloneTerminalSettingsSnapshot(savedSettings)
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '终端设置保存失败')
+      return false
+    }
+  }
+
+  const updateTerminalSettings = async (patch: Partial<TerminalSettings>) => {
+    const nextSettings = normalizeTerminalConfig({ ...getTerminalSettingsSnapshot(), ...patch }).normalized
+    const saved = await persistTerminalSettings(nextSettings)
+    if (saved) {
+      setSettingsNotice('终端设置已保存')
+    }
+    return saved
   }
 
   const resetSshProxyForm = () => {

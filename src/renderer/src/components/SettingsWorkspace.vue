@@ -501,7 +501,10 @@ const TerminalSettings = defineComponent({
                   {
                     class: 'settings-select small',
                     value: workspace.terminalSettings.middleMouseEvent,
-                    onChange: (event: Event) => workspace.updateTerminalSettings({ middleMouseEvent: (event.target as HTMLSelectElement).value as any })
+                    onChange: (event: Event) =>
+                      restoreSelectOnFailedSave(event, workspace.terminalSettings.middleMouseEvent, (value) =>
+                        workspace.updateTerminalSettings({ middleMouseEvent: value as any })
+                      )
                   },
                   [
                     h('option', { value: 'none' }, '无'),
@@ -518,7 +521,10 @@ const TerminalSettings = defineComponent({
                   {
                     class: 'settings-select small',
                     value: workspace.terminalSettings.rightMouseEvent,
-                    onChange: (event: Event) => workspace.updateTerminalSettings({ rightMouseEvent: (event.target as HTMLSelectElement).value as any })
+                    onChange: (event: Event) =>
+                      restoreSelectOnFailedSave(event, workspace.terminalSettings.rightMouseEvent, (value) =>
+                        workspace.updateTerminalSettings({ rightMouseEvent: value as any })
+                      )
                   },
                   [h('option', { value: 'none' }, '无'), h('option', { value: 'paste' }, '粘贴剪贴板'), h('option', { value: 'contextMenu' }, '显示右键菜单')]
                 )

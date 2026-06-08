@@ -3472,19 +3472,19 @@ describe('AppShell', () => {
     expect(store.panels.find((panel) => panel.id === store.activePanelId)?.output).toContain('[file manager] opened terminal-files-host on left transfer pane')
 
     store.setActiveModule('workspace')
-    store.updateTerminalSettings({ rightMouseEvent: 'paste' })
+    await expect(store.updateTerminalSettings({ rightMouseEvent: 'paste' })).resolves.toBe(true)
     await wrapper.find('.xterm-host').trigger('contextmenu')
     expect(store.activePanel.output).toContain('clipboard-command')
     expect(wrapper.find('.terminal-context-menu').exists()).toBe(false)
 
-    store.updateTerminalSettings({ middleMouseEvent: 'contextMenu' })
+    await expect(store.updateTerminalSettings({ middleMouseEvent: 'contextMenu' })).resolves.toBe(true)
     await wrapper.find('.xterm-host').trigger('mousedown', { button: 1 })
     expect(wrapper.find('.terminal-context-menu').exists()).toBe(true)
 
     store.createPanel()
     await wrapper.vm.$nextTick()
     const activePanelId = store.activePanelId
-    store.updateTerminalSettings({ middleMouseEvent: 'closeTab' })
+    await expect(store.updateTerminalSettings({ middleMouseEvent: 'closeTab' })).resolves.toBe(true)
     await wrapper.findAll('.xterm-host').at(1)!.trigger('mousedown', { button: 1 })
     expect(store.panels.some((panel) => panel.id === activePanelId)).toBe(false)
 
@@ -6936,6 +6936,56 @@ describe('AppShell', () => {
     expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(false)
     expect((autoExecuteCheckbox.element as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('does not leave terminal setting controls visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('terminal')
+    await workspace.vm.$nextTick()
+    const savedTerminalSettings = {
+      ...store.terminalSettings
+    }
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      terminal: savedTerminalSettings
+    })
+    const terminalTypeSelect = workspace.findAll('select.settings-select').at(0)!
+    expect((terminalTypeSelect.element as HTMLSelectElement).value).toBe('xterm-256color')
+    await terminalTypeSelect.setValue('vt220')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('终端设置保存失败')
+    expect(store.terminalSettings.terminalType).toBe('xterm-256color')
+    expect((terminalTypeSelect.element as HTMLSelectElement).value).toBe('xterm-256color')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      terminal: savedTerminalSettings
+    })
+    const fontSizeInput = workspace.findAll('input.settings-number').at(0)!
+    expect((fontSizeInput.element as HTMLInputElement).value).toBe('12')
+    await fontSizeInput.setValue('18')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('终端设置保存失败')
+    expect(store.terminalSettings.fontSize).toBe(12)
+    expect((fontSizeInput.element as HTMLInputElement).value).toBe('12')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      terminal: savedTerminalSettings
+    })
+    const showCloseSwitch = workspace.findAll('.settings-switch input').at(2)!
+    expect((showCloseSwitch.element as HTMLInputElement).checked).toBe(true)
+    await showCloseSwitch.setValue(false)
+    await flushPromises()
+    expect(store.settingsNotice).toBe('终端设置保存失败')
+    expect(store.terminalSettings.showCloseButton).toBe(true)
+    expect((showCloseSwitch.element as HTMLInputElement).checked).toBe(true)
   })
 
   it('matches External reference-style remaining settings pages for extensions, MCP, skills, rules, shortcuts, privacy, devices, billing, and about', async () => {
