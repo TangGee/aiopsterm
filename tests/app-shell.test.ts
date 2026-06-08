@@ -477,14 +477,16 @@ describe('AppShell', () => {
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.trigger('dblclick')
     await flushPromises()
     expect(store.activePanel.title).toBe('unit-host')
-    expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.10.10.10:2222')
+    expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.10.10.10:2222')
+    expect(store.activePanel.outputSegments).toEqual([])
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
+    expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.10.10.10', port: 2222, username: 'ops' }))
 
     vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('unit ssh refused'))
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.trigger('dblclick')
     await flushPromises()
     expect(store.activePanel.title).toBe('unit-host')
-    expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.10.10.10:2222')
+    expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.10.10.10:2222')
     expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
     expect(assets.text()).toContain('unit ssh refused')
 
@@ -919,14 +921,16 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
       await flushPromises()
       expect(store.activePanel.title).toBe('workspace-unit-edited')
-      expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.44.0.9:2201')
+      expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.44.0.9:2201')
+      expect(store.activePanel.outputSegments).toEqual([])
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'workspace-unit-edited' }))
+      expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.44.0.9', port: 2201, username: 'ops' }))
 
       vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('workspace ssh refused'))
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
       await flushPromises()
       expect(store.activePanel.title).toBe('workspace-unit-edited')
-      expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.44.0.9:2201')
+      expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.44.0.9:2201')
       expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
       expect(wrapper.text()).toContain('workspace ssh refused')
 
@@ -1140,8 +1144,9 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('dblclick')
       await flushPromises()
       expect(store.activePanel.title).toBe('prod-bastion')
-      expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.24.8.12:22')
+      expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.24.8.12:22')
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-1', title: 'prod-bastion' }))
+      expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ assetId: 'asset-1', host: '10.24.8.12', port: 22, username: 'ops' }))
       expect(store.selectedContexts.some((context) => context.id === 'asset-1')).toBe(true)
       filesPanel.unmount()
     } finally {
@@ -2577,7 +2582,8 @@ describe('AppShell', () => {
     await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
     await flushPromises()
     expect(store.activePanel.title).toBe('local shell fork')
-    expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.8.0.6:2222')
+    expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.8.0.6:2222')
+    expect(store.activePanel.outputSegments).toEqual([])
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'ssh',

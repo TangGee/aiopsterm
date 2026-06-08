@@ -7838,8 +7838,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       title: `${source.title} fork`,
       cwd: source.cwd,
       kind: 'terminal',
-      output: `aiopsterm ssh ${sourceSession.username}@${sourceSession.host}:${sourceSession.port}\n`,
-      outputSegments: createTerminalSegments(`aiopsterm ssh ${sourceSession.username}@${sourceSession.host}:${sourceSession.port}\n`, 'input'),
+      output: '',
+      outputSegments: [],
       status: 'ready',
       split: source.split,
       sshSession: forkSession

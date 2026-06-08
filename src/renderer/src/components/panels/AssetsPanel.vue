@@ -1263,7 +1263,6 @@ const connectAsset = async (assetId: string | null) => {
     return
   }
   workspace.registerSshSession(panelId, asset)
-  workspace.appendTerminalInput(panelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
   try {
     const session = await window.aiops.createTerminal({
       kind: 'ssh',
