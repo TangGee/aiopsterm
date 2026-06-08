@@ -41,6 +41,8 @@ import {
   updateChatConversation
 } from './backend/chatHistory'
 import {
+  cancelDatabaseAiDrawerResponse,
+  cancelDatabaseAiPaneResponse,
   connectDatabaseConnection,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
@@ -61,6 +63,8 @@ import {
   removeDatabaseConnection,
   renameDatabaseGroup,
   saveDatabaseConnection,
+  startDatabaseAiDrawerResponse,
+  startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from './backend/database'
 import {
@@ -168,8 +172,10 @@ import type {
   DatabaseConnectionMoveInput,
   DatabaseGroupCreateInput,
   DatabaseGroupUpdateInput,
+  DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerRequestInput,
   DatabaseAiDrawerResponseInput,
+  DatabaseAiPaneLifecycleInput,
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneResponseInput,
   DatabaseSqlExecuteInput,
@@ -3031,8 +3037,12 @@ const registerIpc = () => {
   ipcMain.handle('database:query-table', (_event, input: DatabaseTableQueryInput) => queryDatabaseTable(input))
   ipcMain.handle('database:mutate-table', (_event, input: DatabaseTableMutationInput) => mutateDatabaseTable(input))
   ipcMain.handle('database:ai-pane-request', (_event, input: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(input))
+  ipcMain.handle('database:ai-pane-start', (_event, input: DatabaseAiPaneLifecycleInput) => startDatabaseAiPaneResponse(input))
+  ipcMain.handle('database:ai-pane-cancel', (_event, input: DatabaseAiPaneLifecycleInput) => cancelDatabaseAiPaneResponse(input))
   ipcMain.handle('database:ai-pane-response', (_event, input: DatabaseAiPaneResponseInput) => generateDatabaseAiPaneResponse(input))
   ipcMain.handle('database:ai-drawer-request', (_event, input: DatabaseAiDrawerRequestInput) => createDatabaseAiDrawerRequest(input))
+  ipcMain.handle('database:ai-drawer-start', (_event, input: DatabaseAiDrawerLifecycleInput) => startDatabaseAiDrawerResponse(input))
+  ipcMain.handle('database:ai-drawer-cancel', (_event, input: DatabaseAiDrawerLifecycleInput) => cancelDatabaseAiDrawerResponse(input))
   ipcMain.handle('database:ai-drawer-response', (_event, input: DatabaseAiDrawerResponseInput) => generateDatabaseAiDrawerResponse(input))
   ipcMain.handle('kubernetes:catalog', () => listKubernetesCatalog())
   ipcMain.handle('kubernetes:context:switch', (_event, contextName: string) => switchKubernetesContext(contextName))

@@ -1618,6 +1618,15 @@ export type DatabaseAiPaneRequestResult = AiopsMutationResult<{
   assistantMessage: DatabaseAiPaneMessageRecord
 }>
 
+export type DatabaseAiPaneLifecycleInput = {
+  requestId: string
+  assistantMessageId?: string
+}
+
+export type DatabaseAiPaneLifecycleResult = AiopsMutationResult<{
+  assistantMessage: DatabaseAiPaneMessageRecord
+}>
+
 export type DatabaseAiPaneResponseResult = AiopsMutationResult<{
   requestId: string
   assistantMessage: DatabaseAiPaneMessageRecord
@@ -1631,6 +1640,7 @@ export type DatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'conver
 export type DatabaseAiTargetDialect = DatabaseEngineCode | 'mssql'
 
 export type DatabaseAiDrawerResponseInput = {
+  requestId?: string
   action: DatabaseAiDrawerAction
   sourceSql: string
   targetDialect?: DatabaseAiTargetDialect
@@ -1663,7 +1673,14 @@ export type DatabaseAiDrawerRequestInput = DatabaseAiDrawerResponseInput
 
 export type DatabaseAiDrawerRequestResult = AiopsMutationResult<DatabaseAiDrawerRequestRecord>
 
+export type DatabaseAiDrawerLifecycleInput = {
+  requestId: string
+}
+
+export type DatabaseAiDrawerLifecycleResult = AiopsMutationResult<DatabaseAiDrawerRequestRecord>
+
 export type DatabaseAiDrawerResponseResult = AiopsMutationResult<{
+  request: DatabaseAiDrawerRequestRecord
   text: string
   reasoning: string
   sql: string
@@ -2007,8 +2024,12 @@ export type AiopsPreloadApi = {
   queryDatabaseTable: (input: DatabaseTableQueryInput) => Promise<DatabaseTableQueryResult>
   mutateDatabaseTable: (input: DatabaseTableMutationInput) => Promise<DatabaseTableMutationResult>
   createDatabaseAiPaneRequest: (input: DatabaseAiPaneRequestInput) => Promise<DatabaseAiPaneRequestResult>
+  startDatabaseAiPaneResponse: (input: DatabaseAiPaneLifecycleInput) => Promise<DatabaseAiPaneLifecycleResult>
+  cancelDatabaseAiPaneResponse: (input: DatabaseAiPaneLifecycleInput) => Promise<DatabaseAiPaneLifecycleResult>
   generateDatabaseAiPaneResponse: (input: DatabaseAiPaneResponseInput) => Promise<DatabaseAiPaneResponseResult>
   createDatabaseAiDrawerRequest: (input: DatabaseAiDrawerRequestInput) => Promise<DatabaseAiDrawerRequestResult>
+  startDatabaseAiDrawerResponse: (input: DatabaseAiDrawerLifecycleInput) => Promise<DatabaseAiDrawerLifecycleResult>
+  cancelDatabaseAiDrawerResponse: (input: DatabaseAiDrawerLifecycleInput) => Promise<DatabaseAiDrawerLifecycleResult>
   generateDatabaseAiDrawerResponse: (input: DatabaseAiDrawerResponseInput) => Promise<DatabaseAiDrawerResponseResult>
   listKubernetesCatalog: () => Promise<KubernetesCatalogResult>
   switchKubernetesContext: (contextName: string) => Promise<KubernetesContextSwitchResult>

@@ -3,12 +3,16 @@ import type {
   DatabaseColumnFilter,
   DatabaseColumnSort,
   DatabaseAiDrawerAction,
+  DatabaseAiDrawerLifecycleInput,
+  DatabaseAiDrawerLifecycleResult,
   DatabaseAiDrawerRequestInput,
   DatabaseAiDrawerRequestRecord,
   DatabaseAiDrawerRequestResult,
   DatabaseAiDrawerResponseInput,
   DatabaseAiDrawerResponseResult,
   DatabaseAiTargetDialect,
+  DatabaseAiPaneLifecycleInput,
+  DatabaseAiPaneLifecycleResult,
   DatabaseAiPaneMessageRecord,
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneRequestResult,
@@ -622,6 +626,8 @@ export function resetDatabaseBackendSeed() {
   databaseGroups = databaseGroupSeed.map((group) => ({ ...group }))
   databaseGroupParents = { ...databaseGroupParentSeed }
   databaseConnections = databaseConnectionSeed.map(cloneDatabaseConnection)
+  databaseAiPaneMessages.clear()
+  databaseAiDrawerRequests.clear()
 }
 
 export async function listDatabaseCatalog(): Promise<DatabaseCatalogResult> {
@@ -797,6 +803,9 @@ const normalizeSql = (sql: string) => sql.trim().replace(/\s+/g, ' ')
 export const DATABASE_AI_PANE_RESPONSE_MIN_DELAY_MS = 500
 export const DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS = 260
 
+const databaseAiPaneMessages = new Map<string, DatabaseAiPaneMessageRecord>()
+const databaseAiDrawerRequests = new Map<string, DatabaseAiDrawerRequestRecord>()
+
 const databaseAiPaneMessageRecord = (
   input: {
     requestId: string
@@ -817,6 +826,75 @@ const databaseAiPaneMessageRecord = (
   createdAt: input.createdAt,
   updatedAt: input.createdAt
 })
+
+const cloneDatabaseAiPaneMessageRecord = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({ ...message })
+
+const storeDatabaseAiPaneMessage = (message: DatabaseAiPaneMessageRecord) => {
+  databaseAiPaneMessages.set(message.id, cloneDatabaseAiPaneMessageRecord(message))
+  return message
+}
+
+const findDatabaseAiPaneAssistantMessage = (input: DatabaseAiPaneLifecycleInput): DatabaseAiPaneMessageRecord | null => {
+  const assistantMessageId = trim(input.assistantMessageId)
+  if (assistantMessageId) {
+    const message = databaseAiPaneMessages.get(assistantMessageId)
+    if (message?.role === 'assistant') return cloneDatabaseAiPaneMessageRecord(message)
+  }
+  const requestId = trim(input.requestId)
+  if (!requestId) return null
+  return (
+    Array.from(databaseAiPaneMessages.values())
+      .filter((message) => message.role === 'assistant' && message.requestId === requestId)
+      .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
+  )
+}
+
+const updateDatabaseAiPaneAssistantMessage = (
+  input: DatabaseAiPaneLifecycleInput,
+  patch: Partial<Pick<DatabaseAiPaneMessageRecord, 'status' | 'content' | 'updatedAt'>>
+): DatabaseAiPaneMessageRecord | null => {
+  const existing = findDatabaseAiPaneAssistantMessage(input)
+  if (!existing) return null
+  const updated: DatabaseAiPaneMessageRecord = {
+    ...existing,
+    ...patch,
+    updatedAt: patch.updatedAt ?? Date.now()
+  }
+  databaseAiPaneMessages.set(updated.id, cloneDatabaseAiPaneMessageRecord(updated))
+  return updated
+}
+
+const cloneDatabaseAiDrawerRequestRecord = (request: DatabaseAiDrawerRequestRecord): DatabaseAiDrawerRequestRecord => ({
+  ...request,
+  backendContext: { ...request.backendContext }
+})
+
+const storeDatabaseAiDrawerRequest = (request: DatabaseAiDrawerRequestRecord) => {
+  databaseAiDrawerRequests.set(request.id, cloneDatabaseAiDrawerRequestRecord(request))
+  return request
+}
+
+const findDatabaseAiDrawerRequest = (input: DatabaseAiDrawerLifecycleInput): DatabaseAiDrawerRequestRecord | null => {
+  const requestId = trim(input.requestId)
+  if (!requestId) return null
+  const request = databaseAiDrawerRequests.get(requestId)
+  return request ? cloneDatabaseAiDrawerRequestRecord(request) : null
+}
+
+const updateDatabaseAiDrawerRequest = (
+  input: DatabaseAiDrawerLifecycleInput,
+  patch: Partial<Pick<DatabaseAiDrawerRequestRecord, 'status' | 'text' | 'targetDialect' | 'updatedAt'>>
+): DatabaseAiDrawerRequestRecord | null => {
+  const existing = findDatabaseAiDrawerRequest(input)
+  if (!existing) return null
+  const updated = {
+    ...existing,
+    ...patch,
+    updatedAt: patch.updatedAt ?? Date.now()
+  }
+  databaseAiDrawerRequests.set(updated.id, cloneDatabaseAiDrawerRequestRecord(updated))
+  return updated
+}
 
 const databaseAiDrawerActionName = (action: DatabaseAiDrawerAction) => {
   switch (action) {
@@ -1535,28 +1613,53 @@ export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestIn
     trim(input.context.contextSummary) ||
     [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
   const userCreatedAt = startedAt
+  const userMessage = storeDatabaseAiPaneMessage(
+    databaseAiPaneMessageRecord({
+      requestId,
+      role: 'user',
+      status: 'done',
+      content: prompt,
+      contextSummary,
+      createdAt: userCreatedAt
+    })
+  )
+  const assistantMessage = storeDatabaseAiPaneMessage(
+    databaseAiPaneMessageRecord({
+      requestId,
+      role: 'assistant',
+      status: 'queued',
+      content: '',
+      contextSummary,
+      createdAt: userCreatedAt + 1
+    })
+  )
   return {
     ok: true,
     data: {
       requestId,
-      userMessage: databaseAiPaneMessageRecord({
-        requestId,
-        role: 'user',
-        status: 'done',
-        content: prompt,
-        contextSummary,
-        createdAt: userCreatedAt
-      }),
-      assistantMessage: databaseAiPaneMessageRecord({
-        requestId,
-        role: 'assistant',
-        status: 'queued',
-        content: '',
-        contextSummary,
-        createdAt: userCreatedAt + 1
-      })
+      userMessage,
+      assistantMessage
     }
   }
+}
+
+export function startDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput): DatabaseAiPaneLifecycleResult {
+  const existing = findDatabaseAiPaneAssistantMessage(input)
+  if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
+  if (existing.status === 'cancelled' || existing.status === 'done') return { ok: true, data: { assistantMessage: existing } }
+  const assistantMessage = updateDatabaseAiPaneAssistantMessage(input, { status: 'streaming' })
+  return assistantMessage ? { ok: true, data: { assistantMessage } } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
+}
+
+export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput): DatabaseAiPaneLifecycleResult {
+  const existing = findDatabaseAiPaneAssistantMessage(input)
+  if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
+  if (existing.status === 'done') return { ok: true, data: { assistantMessage: existing } }
+  const assistantMessage = updateDatabaseAiPaneAssistantMessage(input, {
+    status: 'cancelled',
+    content: existing.content || 'Response cancelled before the first chunk.'
+  })
+  return assistantMessage ? { ok: true, data: { assistantMessage } } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
 }
 
 export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneResponseInput): Promise<DatabaseAiPaneResponseResult> {
@@ -1620,21 +1723,39 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
 
   const requestId = input.requestId || `dbai-pane-request-${randomUUID()}`
   const text = lines.join('\n')
+  const existing = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  if (existing?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        requestId,
+        assistantMessage: existing,
+        text: existing.content,
+        provider: 'aiopsterm-local',
+        durationMs: Math.max(1, Date.now() - startedAt)
+      }
+    }
+  }
+  const assistantMessage = storeDatabaseAiPaneMessage(
+    databaseAiPaneMessageRecord(
+      {
+        requestId,
+        role: 'assistant',
+        status: 'done',
+        content: text,
+        contextSummary: contextLine,
+        createdAt: existing?.createdAt ?? startedAt
+      },
+      input.assistantMessageId || existing?.id || `dbai-pane-message-${randomUUID()}`
+    )
+  )
+  assistantMessage.updatedAt = Date.now()
+  databaseAiPaneMessages.set(assistantMessage.id, cloneDatabaseAiPaneMessageRecord(assistantMessage))
   return {
     ok: true,
     data: {
       requestId,
-      assistantMessage: databaseAiPaneMessageRecord(
-        {
-          requestId,
-          role: 'assistant',
-          status: 'done',
-          content: text,
-          contextSummary: contextLine,
-          createdAt: startedAt
-        },
-        input.assistantMessageId || `dbai-pane-message-${randomUUID()}`
-      ),
+      assistantMessage,
       text,
       provider: 'aiopsterm-local',
       durationMs: Math.max(1, Date.now() - startedAt)
@@ -1676,7 +1797,23 @@ export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerReque
     createdAt: now,
     updatedAt: now
   }
-  return { ok: true, data: request }
+  return { ok: true, data: storeDatabaseAiDrawerRequest(request) }
+}
+
+export function startDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleInput): DatabaseAiDrawerLifecycleResult {
+  const existing = findDatabaseAiDrawerRequest(input)
+  if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+  if (existing.status === 'cancelled') return { ok: true, data: existing }
+  const request = updateDatabaseAiDrawerRequest(input, { status: 'streaming', text: '' })
+  return request ? { ok: true, data: request } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+}
+
+export function cancelDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleInput): DatabaseAiDrawerLifecycleResult {
+  const existing = findDatabaseAiDrawerRequest(input)
+  if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+  if (existing.status === 'done' || existing.status === 'error') return { ok: true, data: existing }
+  const request = updateDatabaseAiDrawerRequest(input, { status: 'cancelled' })
+  return request ? { ok: true, data: request } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
 }
 
 export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerResponseInput): Promise<DatabaseAiDrawerResponseResult> {
@@ -1696,15 +1833,59 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
   const dialect = drawerTargetDialect(input)
   const generatedSql = buildDrawerGeneratedSql(input, dialect)
   const reasoning = buildDrawerReasoning(input, generatedSql, dialect)
+  const requestId = trim(input.requestId)
   const elapsedMs = Date.now() - startedAt
   if (elapsedMs < DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS) {
     await wait(DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS - elapsedMs)
   }
 
+  const existing = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  if (existing?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        request: existing,
+        text: existing.text,
+        reasoning: '',
+        sql: '',
+        provider: 'aiopsterm-local',
+        durationMs: Math.max(1, Date.now() - startedAt)
+      }
+    }
+  }
+
+  const text = composeDrawerResponseText(reasoning, generatedSql)
+  const request =
+    existing && requestId
+      ? updateDatabaseAiDrawerRequest({ requestId }, { status: 'done', text, targetDialect: dialect })
+      : storeDatabaseAiDrawerRequest({
+          id: requestId || `dbai-drawer-request-${randomUUID()}`,
+          action,
+          label: databaseAiDrawerActionName(action),
+          status: 'done',
+          contextSummary: trim(input.context.contextSummary),
+          sourceSql: input.sourceSql,
+          text,
+          targetDialect: dialect,
+          backendContext: {
+            connectionId: trim(input.context.connectionId),
+            dbType: input.context.dbType || '',
+            databaseName: trim(input.context.databaseName),
+            schemaName: trim(input.context.schemaName) || undefined,
+            tableName: trim(input.context.tableName) || undefined,
+            contextSummary: trim(input.context.contextSummary) || undefined
+          },
+          createdAt: startedAt,
+          updatedAt: Date.now()
+        })
+
+  if (!request) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+
   return {
     ok: true,
     data: {
-      text: composeDrawerResponseText(reasoning, generatedSql),
+      request,
+      text,
       reasoning,
       sql: generatedSql,
       provider: 'aiopsterm-local',

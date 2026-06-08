@@ -4796,10 +4796,11 @@ describe('AppShell', () => {
     const selectedConvertSql = 'select id from "public"."orders" where status = \'open\''
     convertEditorElement.setSelectionRange(0, selectedConvertSql.length)
     vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mockClear()
+    vi.mocked(window.aiops.startDatabaseAiDrawerResponse).mockClear()
+    vi.mocked(window.aiops.cancelDatabaseAiDrawerResponse).mockClear()
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
-    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
     expect(wrapper.find('.db-ai-drawer').attributes('data-request-id')).toBe('dbai-drawer-request-test-1')
     expect(window.aiops.createDatabaseAiDrawerRequest).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4815,9 +4816,9 @@ describe('AppShell', () => {
         })
       })
     )
-    await new Promise((resolve) => window.setTimeout(resolve, 90))
     await flushPromises()
     expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(window.aiops.startDatabaseAiDrawerResponse).toHaveBeenCalledWith({ requestId: 'dbai-drawer-request-test-1' })
     await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-status').text()).toContain('Done')
     expect(wrapper.findAll('.db-ai-section header').map((header) => header.text())).toEqual(['Reasoning', 'Response'])
@@ -4826,6 +4827,7 @@ describe('AppShell', () => {
     expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('postgresql')
     expect(window.aiops.generateDatabaseAiDrawerResponse).toHaveBeenCalledWith(
       expect.objectContaining({
+        requestId: 'dbai-drawer-request-test-1',
         action: 'convert',
         sourceSql: selectedConvertSql,
         targetDialect: 'postgresql',
@@ -4923,8 +4925,10 @@ describe('AppShell', () => {
     await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Convert SQL'))!.trigger('click')
     expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('mssql')
     await wrapper.find('button[title="AI Explain SQL"]').trigger('click')
-    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    await flushPromises()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
     await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+    expect(window.aiops.cancelDatabaseAiDrawerResponse).toHaveBeenCalled()
     expect(wrapper.find('.db-ai-status').text()).toContain('Cancelled')
     await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-status').text()).toContain('Cancelled')
@@ -5479,6 +5483,8 @@ describe('AppShell', () => {
   it('opens the Database DB AI pane with active context, streaming chat, resize, and persisted state', async () => {
     localStorage.removeItem('aiopsterm.database.dbAiPane')
     vi.mocked(window.aiops.createDatabaseAiPaneRequest).mockClear()
+    vi.mocked(window.aiops.startDatabaseAiPaneResponse).mockClear()
+    vi.mocked(window.aiops.cancelDatabaseAiPaneResponse).mockClear()
     vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockClear()
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
@@ -5498,7 +5504,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema and generate a SELECT')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
     expect(window.aiops.createDatabaseAiPaneRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: 'Summarize schema and generate a SELECT',
@@ -5513,6 +5519,10 @@ describe('AppShell', () => {
     )
     expect(wrapper.findAll('.db-ai-pane-message').at(0)!.attributes('data-message-id')).toBe('dbai-pane-request-test-1-user')
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.attributes('data-message-id')).toBe('dbai-pane-request-test-1-assistant')
+    expect(window.aiops.startDatabaseAiPaneResponse).toHaveBeenCalledWith({
+      requestId: 'dbai-pane-request-test-1',
+      assistantMessageId: 'dbai-pane-request-test-1-assistant'
+    })
     expect(window.aiops.generateDatabaseAiPaneResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'dbai-pane-request-test-1',
@@ -5525,6 +5535,10 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
     await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
+    expect(window.aiops.cancelDatabaseAiPaneResponse).toHaveBeenCalledWith({
+      requestId: 'dbai-pane-request-test-1',
+      assistantMessageId: 'dbai-pane-request-test-1-assistant'
+    })
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.classes()).toContain('cancelled')
     await new Promise((resolve) => window.setTimeout(resolve, 380))
     await flushPromises()

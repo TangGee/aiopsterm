@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  cancelDatabaseAiDrawerResponse,
+  cancelDatabaseAiPaneResponse,
   connectDatabaseConnection,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
@@ -21,6 +23,8 @@ import {
   renameDatabaseGroup,
   resetDatabaseBackendSeed,
   saveDatabaseConnection,
+  startDatabaseAiDrawerResponse,
+  startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from '@shared/database'
 
@@ -383,6 +387,51 @@ describe('database backend boundary', () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(475)
   })
 
+  it('keeps DB AI pane lifecycle status behind the database backend boundary', async () => {
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    expect(created.ok).toBe(true)
+    const requestId = created.data!.requestId
+    const assistantMessageId = created.data!.assistantMessage.id
+
+    const started = startDatabaseAiPaneResponse({ requestId, assistantMessageId })
+    expect(started.data?.assistantMessage).toMatchObject({ id: assistantMessageId, status: 'streaming' })
+
+    const responsePromise = generateDatabaseAiPaneResponse({
+      requestId,
+      assistantMessageId,
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    const cancelled = cancelDatabaseAiPaneResponse({ requestId, assistantMessageId })
+    expect(cancelled.data?.assistantMessage).toMatchObject({
+      id: assistantMessageId,
+      status: 'cancelled',
+      content: 'Response cancelled before the first chunk.'
+    })
+
+    const lateResponse = await responsePromise
+    expect(lateResponse.data?.assistantMessage).toMatchObject({
+      id: assistantMessageId,
+      status: 'cancelled'
+    })
+    expect(lateResponse.data?.text).not.toContain('当前响应由 aiopsterm DB AI 本地后端生成')
+  })
+
   it('generates DB AI drawer SQL behind the database backend boundary', async () => {
     const created = await createDatabaseAiDrawerRequest({
       action: 'convert',
@@ -434,6 +483,40 @@ describe('database backend boundary', () => {
     expect(result.data?.reasoning).toContain('aiopsterm DB AI 本地后端生成')
     expect(result.data?.text).toContain('```sql')
     expect(elapsedMs).toBeGreaterThanOrEqual(240)
+  })
+
+  it('keeps DB AI drawer lifecycle status behind the database backend boundary', async () => {
+    const created = await createDatabaseAiDrawerRequest({
+      action: 'convert',
+      sourceSql: 'select id from "public"."orders"',
+      targetDialect: 'mssql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        contextSummary: 'orders-postgres · postgresql · orders · public'
+      }
+    })
+
+    expect(created.ok).toBe(true)
+    const requestId = created.data!.id
+    expect(startDatabaseAiDrawerResponse({ requestId }).data).toMatchObject({ id: requestId, status: 'streaming' })
+
+    const responsePromise = generateDatabaseAiDrawerResponse({
+      requestId,
+      action: created.data!.action,
+      sourceSql: created.data!.sourceSql,
+      targetDialect: created.data!.targetDialect,
+      context: created.data!.backendContext
+    })
+
+    expect(cancelDatabaseAiDrawerResponse({ requestId }).data).toMatchObject({ id: requestId, status: 'cancelled' })
+
+    const lateResponse = await responsePromise
+    expect(lateResponse.data?.request).toMatchObject({ id: requestId, status: 'cancelled' })
+    expect(lateResponse.data?.text).toBe('')
+    expect(lateResponse.data?.sql).toBe('')
   })
 
   it('completes drawer SQL from the supplied cursor prefix', async () => {

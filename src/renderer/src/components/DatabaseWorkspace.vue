@@ -2300,7 +2300,6 @@ type SqlResultViewState = {
 }
 
 type DbAiRequest = DatabaseAiDrawerRequestRecord
-type DbAiScheduledTimer = { id: number; kind: 'streaming' }
 type DbAiPaneContext = {
   connectionId: string
   catalogName: string
@@ -2309,7 +2308,6 @@ type DbAiPaneContext = {
 }
 type DbAiPaneMessageStatus = 'queued' | 'streaming' | 'done' | 'cancelled'
 type DbAiPaneMessage = DatabaseAiPaneMessageRecord
-type DbAiPaneTimer = { id: number; messageId: string; kind: 'streaming' }
 type DbAiPaneQuickPrompt = 'explainActive' | 'schemaSummary' | 'selectSample'
 
 type SqlHistory = {
@@ -3018,7 +3016,6 @@ const dbAiPaneContext = reactive<DbAiPaneContext>({
 })
 const dbAiPaneDraft = ref('')
 const dbAiPaneMessages = ref<DbAiPaneMessage[]>([])
-const dbAiPaneTimers = new Map<string, DbAiPaneTimer[]>()
 const dbAiPaneMessageListRef = ref<HTMLElement | null>(null)
 let dbAiPaneResizeStartX = 0
 let dbAiPaneResizeStartWidth = DB_AI_PANE_DEFAULT_WIDTH
@@ -3026,7 +3023,6 @@ let dbAiPaneContextTouched = false
 const dbAiOpen = ref(false)
 const dbAiRequests = ref<Record<string, DbAiRequest>>({})
 const dbAiActiveReqId = ref<string | null>(null)
-const dbAiTimers = new Map<string, DbAiScheduledTimer[]>()
 const sqlDiagnose = reactive({
   running: false,
   error: '',
@@ -4083,9 +4079,12 @@ async function sendDbAiPaneMessage(promptOverride = '') {
 }
 
 async function requestDbAiPaneResponse(messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) {
-  clearDbAiPaneTimers(messageId)
-  const timerId = window.setTimeout(() => markDbAiPaneMessageStreaming(messageId), 80)
-  dbAiPaneTimers.set(messageId, [{ id: timerId, messageId, kind: 'streaming' }])
+  const started = await window.aiops.startDatabaseAiPaneResponse({ requestId, assistantMessageId: messageId })
+  if (!started.ok || !started.data) {
+    showNotice(started.errorMessage || 'DB AI pane request failed to start')
+    return
+  }
+  applyDbAiPaneAssistantMessage(started.data.assistantMessage)
   try {
     const result = await window.aiops.generateDatabaseAiPaneResponse({
       requestId,
@@ -4111,20 +4110,15 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
   }
 }
 
-function markDbAiPaneMessageStreaming(messageId: string) {
+function applyDbAiPaneAssistantMessage(assistantMessage: DbAiPaneMessage) {
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
-    if (message.id !== messageId || message.status === 'cancelled' || message.status === 'done') return message
-    return {
-      ...message,
-      status: 'streaming',
-      updatedAt: Date.now()
-    }
+    if (message.id !== assistantMessage.id) return message
+    return assistantMessage
   })
   scrollDbAiPaneMessagesToBottom()
 }
 
 function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponseResult) {
-  clearDbAiPaneTimers(messageId)
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled') return message
     if (result.ok && result.data?.assistantMessage) return result.data.assistantMessage
@@ -4138,27 +4132,21 @@ function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponse
   scrollDbAiPaneMessagesToBottom()
 }
 
-function cancelDbAiPaneResponse() {
+async function cancelDbAiPaneResponse() {
   const activeAssistant = [...dbAiPaneMessages.value]
     .reverse()
     .find((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
   if (!activeAssistant) return
-  clearDbAiPaneTimers(activeAssistant.id)
-  dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) =>
-    message.id === activeAssistant.id
-      ? {
-          ...message,
-          status: 'cancelled',
-          content: message.content || 'Response cancelled before the first chunk.',
-          updatedAt: Date.now()
-        }
-      : message
-  )
+  const result = await window.aiops.cancelDatabaseAiPaneResponse({ requestId: activeAssistant.requestId, assistantMessageId: activeAssistant.id })
+  if (!result.ok || !result.data) {
+    showNotice(result.errorMessage || 'DB AI pane cancel failed')
+    return
+  }
+  applyDbAiPaneAssistantMessage(result.data.assistantMessage)
   showNotice('DB AI pane response stopped')
 }
 
 function resetDbAiPaneConversation() {
-  clearAllDbAiPaneTimers()
   dbAiPaneMessages.value = []
   dbAiPaneDraft.value = ''
   showNotice('DB AI pane conversation reset')
@@ -4176,17 +4164,6 @@ function scrollDbAiPaneMessagesToBottom() {
     const el = dbAiPaneMessageListRef.value
     if (el) el.scrollTop = el.scrollHeight
   })
-}
-
-function clearDbAiPaneTimers(messageId: string) {
-  const timers = dbAiPaneTimers.get(messageId)
-  if (!timers) return
-  timers.forEach((timer) => window.clearTimeout(timer.id))
-  dbAiPaneTimers.delete(messageId)
-}
-
-function clearAllDbAiPaneTimers() {
-  Array.from(dbAiPaneTimers.keys()).forEach((messageId) => clearDbAiPaneTimers(messageId))
 }
 
 function clampDbAiPaneWidth(value: number) {
@@ -6561,17 +6538,18 @@ function patchDbAiRequest(reqId: string, patch: Partial<DbAiRequest>) {
 }
 
 async function requestDbAiDrawerResponse(reqId: string) {
-  clearDbAiTimers(reqId)
   const request = dbAiRequests.value[reqId]
   if (!request) return
-  patchDbAiRequest(reqId, { status: 'queued', text: '', updatedAt: Date.now() })
   const expectedDialect = request.targetDialect
-  const streamingTimer = window.setTimeout(() => {
-    markDbAiRequestStreaming(reqId)
-  }, 80)
-  dbAiTimers.set(reqId, [{ id: streamingTimer, kind: 'streaming' }])
+  const started = await window.aiops.startDatabaseAiDrawerResponse({ requestId: reqId })
+  if (!started.ok || !started.data) {
+    showNotice(started.errorMessage || 'DB AI drawer request failed to start')
+    return
+  }
+  patchDbAiRequest(reqId, { status: started.data.status, text: started.data.text, updatedAt: started.data.updatedAt })
   try {
     const result = await window.aiops.generateDatabaseAiDrawerResponse({
+      requestId: reqId,
       action: request.action,
       sourceSql: request.sourceSql,
       targetDialect: expectedDialect,
@@ -6591,22 +6569,19 @@ async function requestDbAiDrawerResponse(reqId: string) {
   }
 }
 
-function markDbAiRequestStreaming(reqId: string) {
-  const request = dbAiRequests.value[reqId]
-  if (!request || request.status !== 'queued') return
-  patchDbAiRequest(reqId, {
-    status: 'streaming',
-    updatedAt: Date.now()
-  })
-}
-
 function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult, expectedDialect?: DbAiTargetDialect) {
-  clearDbAiTimers(reqId)
   const request = dbAiRequests.value[reqId]
   if (!request || request.status === 'cancelled') return
   if (expectedDialect && request.targetDialect !== expectedDialect) return
   if (result.ok) {
-    patchDbAiRequest(reqId, { status: 'done', text: result.data?.text ?? '', updatedAt: Date.now() })
+    if (result.data?.request) {
+      dbAiRequests.value = {
+        ...dbAiRequests.value,
+        [reqId]: result.data.request
+      }
+    } else {
+      patchDbAiRequest(reqId, { status: 'done', text: result.data?.text ?? '', updatedAt: Date.now() })
+    }
     return
   }
   patchDbAiRequest(reqId, {
@@ -6614,17 +6589,6 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
     text: `Reasoning\n- ${result.errorMessage || 'DB AI drawer backend failed.'}`,
     updatedAt: Date.now()
   })
-}
-
-function clearDbAiTimers(reqId: string) {
-  const timers = dbAiTimers.get(reqId)
-  if (!timers) return
-  timers.forEach((timer) => window.clearTimeout(timer.id))
-  dbAiTimers.delete(reqId)
-}
-
-function clearAllDbAiTimers() {
-  Array.from(dbAiTimers.keys()).forEach((reqId) => clearDbAiTimers(reqId))
 }
 
 function setActiveDbAiRequest(reqId: string) {
@@ -6736,19 +6700,22 @@ async function diagnoseSqlError(result: SqlResult) {
   }
 }
 
-function cancelDbAiRequest() {
+async function cancelDbAiRequest() {
   const request = activeDbAiRequest.value
   if (!request) return
   if (request.status === 'done' || request.status === 'error') return
-  clearDbAiTimers(request.id)
-  patchDbAiRequest(request.id, { status: 'cancelled', updatedAt: Date.now() })
+  const result = await window.aiops.cancelDatabaseAiDrawerResponse({ requestId: request.id })
+  if (!result.ok || !result.data) {
+    showNotice(result.errorMessage || 'DB AI request cancel failed')
+    return
+  }
+  patchDbAiRequest(request.id, { status: result.data.status, text: result.data.text, updatedAt: result.data.updatedAt })
   showNotice('DB AI request cancelled')
 }
 
 function clearDbAiRequest() {
   const request = activeDbAiRequest.value
   if (request) {
-    clearDbAiTimers(request.id)
     const { [request.id]: _removed, ...rest } = dbAiRequests.value
     dbAiRequests.value = rest
     const fallback = Object.values(rest).sort((a, b) => b.createdAt - a.createdAt)[0]
@@ -6892,8 +6859,6 @@ onBeforeUnmount(() => {
   clearSqlDiagnoseTimers()
   window.removeEventListener('click', handleWindowClick)
   if (noticeTimer.value) window.clearTimeout(noticeTimer.value)
-  clearAllDbAiTimers()
-  clearAllDbAiPaneTimers()
   persistDbAiPaneState()
 })
 

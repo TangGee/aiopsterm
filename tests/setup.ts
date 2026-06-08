@@ -1009,6 +1009,8 @@ let databaseTableColumnsMock = cloneDatabaseTableColumns()
 let databaseTableDdlMock = cloneDatabaseTableDdl()
 let databaseAiPaneRequestSequenceMock = 1
 let databaseAiDrawerRequestSequenceMock = 1
+const databaseAiPaneMessagesMock = new Map<string, DatabaseAiPaneMessageRecord>()
+const databaseAiDrawerRequestsMock = new Map<string, DatabaseAiDrawerRequestRecord>()
 let aiChatExchangeRequestSequenceMock = 1
 let kubernetesTerminalSequenceMock = 1
 
@@ -1032,6 +1034,8 @@ function resetDatabaseTableRowsMock() {
   databaseTableDdlMock = cloneDatabaseTableDdl()
   databaseAiPaneRequestSequenceMock = 1
   databaseAiDrawerRequestSequenceMock = 1
+  databaseAiPaneMessagesMock.clear()
+  databaseAiDrawerRequestsMock.clear()
   resetDatabaseConnectionsMock()
 }
 
@@ -1137,6 +1141,59 @@ const databaseAiPaneMessageRecordMock = (
   createdAt: input.createdAt,
   updatedAt: input.createdAt
 })
+
+const cloneDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({ ...message })
+
+const storeDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord) => {
+  databaseAiPaneMessagesMock.set(message.id, cloneDatabaseAiPaneMessageMock(message))
+  return message
+}
+
+const findDatabaseAiPaneAssistantMessageMock = (input: { requestId: string; assistantMessageId?: string }) => {
+  if (input.assistantMessageId) {
+    const message = databaseAiPaneMessagesMock.get(input.assistantMessageId)
+    if (message?.role === 'assistant') return cloneDatabaseAiPaneMessageMock(message)
+  }
+  return (
+    Array.from(databaseAiPaneMessagesMock.values())
+      .filter((message) => message.role === 'assistant' && message.requestId === input.requestId)
+      .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
+  )
+}
+
+const updateDatabaseAiPaneAssistantMessageMock = (
+  input: { requestId: string; assistantMessageId?: string },
+  patch: Partial<Pick<DatabaseAiPaneMessageRecord, 'status' | 'content' | 'updatedAt'>>
+) => {
+  const existing = findDatabaseAiPaneAssistantMessageMock(input)
+  if (!existing) return null
+  const updated = { ...existing, ...patch, updatedAt: patch.updatedAt ?? Date.now() }
+  databaseAiPaneMessagesMock.set(updated.id, cloneDatabaseAiPaneMessageMock(updated))
+  return updated
+}
+
+const cloneDatabaseAiDrawerRequestMock = (request: DatabaseAiDrawerRequestRecord): DatabaseAiDrawerRequestRecord => ({
+  ...request,
+  backendContext: { ...request.backendContext }
+})
+
+const storeDatabaseAiDrawerRequestMock = (request: DatabaseAiDrawerRequestRecord) => {
+  databaseAiDrawerRequestsMock.set(request.id, cloneDatabaseAiDrawerRequestMock(request))
+  return request
+}
+
+const findDatabaseAiDrawerRequestMock = (requestId: string) => {
+  const request = databaseAiDrawerRequestsMock.get(requestId)
+  return request ? cloneDatabaseAiDrawerRequestMock(request) : null
+}
+
+const updateDatabaseAiDrawerRequestMock = (requestId: string, patch: Partial<Pick<DatabaseAiDrawerRequestRecord, 'status' | 'text' | 'targetDialect' | 'updatedAt'>>) => {
+  const existing = findDatabaseAiDrawerRequestMock(requestId)
+  if (!existing) return null
+  const updated = { ...existing, ...patch, updatedAt: patch.updatedAt ?? Date.now() }
+  databaseAiDrawerRequestsMock.set(updated.id, cloneDatabaseAiDrawerRequestMock(updated))
+  return updated
+}
 
 const databaseAiDrawerActionNameMock = (action: TestDatabaseAiDrawerAction) => {
   switch (action) {
@@ -4912,20 +4969,43 @@ Object.defineProperty(window, 'aiops', {
         input.context.contextSummary ||
         [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
       const createdAt = Date.now()
+      const userMessage = storeDatabaseAiPaneMessageMock(
+        databaseAiPaneMessageRecordMock(
+          { requestId, role: 'user', status: 'done', content: prompt, contextSummary, createdAt },
+          `${requestId}-user`
+        )
+      )
+      const assistantMessage = storeDatabaseAiPaneMessageMock(
+        databaseAiPaneMessageRecordMock(
+          { requestId, role: 'assistant', status: 'queued', content: '', contextSummary, createdAt: createdAt + 1 },
+          `${requestId}-assistant`
+        )
+      )
       return {
         ok: true,
         data: {
           requestId,
-          userMessage: databaseAiPaneMessageRecordMock(
-            { requestId, role: 'user', status: 'done', content: prompt, contextSummary, createdAt },
-            `${requestId}-user`
-          ),
-          assistantMessage: databaseAiPaneMessageRecordMock(
-            { requestId, role: 'assistant', status: 'queued', content: '', contextSummary, createdAt: createdAt + 1 },
-            `${requestId}-assistant`
-          )
+          userMessage,
+          assistantMessage
         }
       }
+    }),
+    startDatabaseAiPaneResponse: vi.fn(async (input: { requestId: string; assistantMessageId?: string }) => {
+      const existing = findDatabaseAiPaneAssistantMessageMock(input)
+      if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
+      if (existing.status === 'done' || existing.status === 'cancelled') return { ok: true, data: { assistantMessage: existing } }
+      const assistantMessage = updateDatabaseAiPaneAssistantMessageMock(input, { status: 'streaming' })!
+      return { ok: true, data: { assistantMessage } }
+    }),
+    cancelDatabaseAiPaneResponse: vi.fn(async (input: { requestId: string; assistantMessageId?: string }) => {
+      const existing = findDatabaseAiPaneAssistantMessageMock(input)
+      if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
+      if (existing.status === 'done') return { ok: true, data: { assistantMessage: existing } }
+      const assistantMessage = updateDatabaseAiPaneAssistantMessageMock(input, {
+        status: 'cancelled',
+        content: existing.content || 'Response cancelled before the first chunk.'
+      })!
+      return { ok: true, data: { assistantMessage } }
     }),
     generateDatabaseAiPaneResponse: vi.fn(
       (input: { requestId?: string; assistantMessageId?: string; prompt: string; context: { contextSummary?: string; connectionId: string; databaseName: string; schemaName?: string; dbType?: string } }) =>
@@ -4950,14 +5030,31 @@ Object.defineProperty(window, 'aiops', {
               '```'
             ].join('\n')
             const createdAt = Date.now()
+            const existing = findDatabaseAiPaneAssistantMessageMock({ requestId, assistantMessageId: input.assistantMessageId })
+            if (existing?.status === 'cancelled') {
+              resolve({
+                ok: true,
+                data: {
+                  requestId,
+                  assistantMessage: existing,
+                  text: existing.content,
+                  provider: 'aiopsterm-local' as const,
+                  durationMs: 1
+                }
+              })
+              return
+            }
+            const assistantMessage = storeDatabaseAiPaneMessageMock(
+              databaseAiPaneMessageRecordMock(
+                { requestId, role: 'assistant', status: 'done', content: text, contextSummary, createdAt },
+                input.assistantMessageId || existing?.id || `${requestId}-assistant`
+              )
+            )
             resolve({
               ok: true,
               data: {
                 requestId,
-                assistantMessage: databaseAiPaneMessageRecordMock(
-                  { requestId, role: 'assistant', status: 'done', content: text, contextSummary, createdAt },
-                  input.assistantMessageId || `${requestId}-assistant`
-                ),
+                assistantMessage,
                 text,
                 provider: 'aiopsterm-local' as const,
                 durationMs: 1
@@ -4997,11 +5094,26 @@ Object.defineProperty(window, 'aiops', {
           createdAt: now,
           updatedAt: now
         }
-        return { ok: true, data: request }
+        return { ok: true, data: storeDatabaseAiDrawerRequestMock(request) }
       }
     ),
+    startDatabaseAiDrawerResponse: vi.fn(async (input: { requestId: string }) => {
+      const existing = findDatabaseAiDrawerRequestMock(input.requestId)
+      if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+      if (existing.status === 'cancelled') return { ok: true, data: existing }
+      const request = updateDatabaseAiDrawerRequestMock(input.requestId, { status: 'streaming', text: '' })!
+      return { ok: true, data: request }
+    }),
+    cancelDatabaseAiDrawerResponse: vi.fn(async (input: { requestId: string }) => {
+      const existing = findDatabaseAiDrawerRequestMock(input.requestId)
+      if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+      if (existing.status === 'done' || existing.status === 'error') return { ok: true, data: existing }
+      const request = updateDatabaseAiDrawerRequestMock(input.requestId, { status: 'cancelled' })!
+      return { ok: true, data: request }
+    }),
     generateDatabaseAiDrawerResponse: vi.fn(
       (input: {
+        requestId?: string
         action: TestDatabaseAiDrawerAction
         sourceSql: string
         targetDialect?: TestDatabaseAiTargetDialect
@@ -5010,10 +5122,49 @@ Object.defineProperty(window, 'aiops', {
       }) =>
         new Promise((resolve) => {
           window.setTimeout(() => {
+            const existing = input.requestId ? findDatabaseAiDrawerRequestMock(input.requestId) : null
+            if (existing?.status === 'cancelled') {
+              resolve({
+                ok: true,
+                data: {
+                  request: existing,
+                  text: existing.text,
+                  reasoning: '',
+                  sql: '',
+                  provider: 'aiopsterm-local' as const,
+                  durationMs: 1
+                }
+              })
+              return
+            }
             const data = generateDatabaseAiDrawerTextMock(input)
+            const request =
+              input.requestId && existing
+                ? updateDatabaseAiDrawerRequestMock(input.requestId, { status: 'done', text: data.text, targetDialect: input.targetDialect || existing.targetDialect })!
+                : storeDatabaseAiDrawerRequestMock({
+                    id: input.requestId || `dbai-drawer-response-test-${databaseAiDrawerRequestSequenceMock++}`,
+                    action: input.action,
+                    label: databaseAiDrawerActionNameMock(input.action),
+                    status: 'done',
+                    contextSummary: input.context.contextSummary || '',
+                    sourceSql: input.sourceSql,
+                    text: data.text,
+                    targetDialect: input.targetDialect || input.context.dbType || 'postgresql',
+                    backendContext: {
+                      connectionId: '',
+                      dbType: input.context.dbType === 'mssql' ? '' : input.context.dbType,
+                      databaseName: input.context.databaseName || '',
+                      schemaName: input.context.schemaName,
+                      tableName: input.context.tableName,
+                      contextSummary: input.context.contextSummary
+                    },
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                  })
             resolve({
               ok: true,
               data: {
+                request,
                 ...data,
                 provider: 'aiopsterm-local' as const,
                 durationMs: 1

@@ -1,4 +1,6 @@
 export {
+  cancelDatabaseAiDrawerResponse,
+  cancelDatabaseAiPaneResponse,
   connectDatabaseConnection,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
@@ -20,5 +22,7 @@ export {
   renameDatabaseGroup,
   resetDatabaseBackendSeed,
   saveDatabaseConnection,
+  startDatabaseAiDrawerResponse,
+  startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from '@shared/database'
