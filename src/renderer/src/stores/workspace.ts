@@ -3612,6 +3612,44 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const getExtensionSettingsSnapshot = (): ExtensionUserConfig => ({ ...extensionSettings.value })
 
+  const persistExtensionSettings = async (nextSettings: ExtensionSettings) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('扩展设置保存服务不可用')
+      return false
+    }
+    const normalizedSettings = normalizeExtensionSettingsConfig(nextSettings).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        extensionSettings: { ...normalizedSettings }
+      })
+      if (!isRecord(savedConfig) || !isRecord(savedConfig.extensionSettings)) {
+        setSettingsNotice('扩展设置保存失败')
+        return false
+      }
+      const savedSettings = normalizeExtensionSettingsConfig(savedConfig.extensionSettings).normalized
+      if (
+        savedSettings.autoCompleteStatus !== normalizedSettings.autoCompleteStatus ||
+        savedSettings.quickVimStatus !== normalizedSettings.quickVimStatus ||
+        savedSettings.aliasStatus !== normalizedSettings.aliasStatus ||
+        savedSettings.highlightStatus !== normalizedSettings.highlightStatus
+      ) {
+        setSettingsNotice('扩展设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        extensionSettings: savedSettings
+      } as Partial<UserConfig>)
+      extensionSettings.value = { ...savedSettings }
+      ensureSelectedExtensionVisible()
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '扩展设置保存失败')
+      return false
+    }
+  }
+
   const getPrivacySnapshot = (): PrivacyUserConfig => ({
     telemetry: privacySettings.value.telemetry,
     secretRedaction: privacySettings.value.secretRedaction,
@@ -4522,11 +4560,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setSettingsNotice('AI 偏好设置已保存')
   }
 
-  const updateExtensionSettings = (patch: Partial<ExtensionSettings>) => {
-    extensionSettings.value = normalizeExtensionSettingsConfig({ ...extensionSettings.value, ...patch }).normalized
-    ensureSelectedExtensionVisible()
-    saveConfig({ extensionSettings: getExtensionSettingsSnapshot() })
+  const updateExtensionSettings = async (patch: Partial<ExtensionSettings>) => {
+    const nextSettings = normalizeExtensionSettingsConfig({ ...extensionSettings.value, ...patch }).normalized
+    const saved = await persistExtensionSettings(nextSettings)
+    if (!saved) return false
     setSettingsNotice('扩展设置已保存')
+    return true
   }
 
   const persistKeywordHighlightSettings = () => {

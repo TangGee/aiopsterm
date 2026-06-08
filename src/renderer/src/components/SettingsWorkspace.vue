@@ -1617,14 +1617,20 @@ const radioRow = (label: string, name: string, options: Array<{ label: string; c
 
 const infoRow = (label: string, value: string | ReturnType<typeof h>) => h('div', { class: 'info-row' }, [h('span', label), typeof value === 'string' ? h('span', value) : value])
 
-const switchRow = (label: string, checked: boolean, onChange: (checked: boolean) => void) =>
+const switchRow = (label: string, checked: boolean, onChange: (checked: boolean) => void | boolean | Promise<void | boolean>) =>
   h('div', { class: 'settings-form-row' }, [
     h('label', label),
     h('label', { class: 'settings-switch' }, [
       h('input', {
         type: 'checkbox',
         checked,
-        onChange: (event: Event) => onChange((event.target as HTMLInputElement).checked)
+        onChange: async (event: Event) => {
+          const input = event.target as HTMLInputElement
+          const saved = await onChange(input.checked)
+          if (saved === false) {
+            input.checked = checked
+          }
+        }
       }),
       h('span')
     ])

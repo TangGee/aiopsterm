@@ -4294,9 +4294,9 @@ describe('workspace store', () => {
     )
 
     expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
-    store.updateExtensionSettings({ aliasStatus: false })
+    await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
     expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
-    store.updateExtensionSettings({ aliasStatus: true })
+    await expect(store.updateExtensionSettings({ aliasStatus: true })).resolves.toBe(true)
     expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
 
     const installPromise = store.installExtensionPlugin('cloud-assets')
@@ -5555,6 +5555,74 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate extension setting writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    await store.refreshExtensionPlugins()
+    const originalSaveConfig = window.aiops.saveConfig
+    store.selectExtension('Alias')
+    const initialSnapshot = JSON.stringify({
+      config: store.config.extensionSettings,
+      settings: store.extensionSettings,
+      aliasVisible: store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias'),
+      selectedExtensionId: store.selectedExtensionId
+    })
+    const assertExtensionsUnchanged = () => {
+      expect(
+        JSON.stringify({
+          config: store.config.extensionSettings,
+          settings: store.extensionSettings,
+          aliasVisible: store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias'),
+          selectedExtensionId: store.selectedExtensionId
+        })
+      ).toBe(initialSnapshot)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('扩展设置保存服务不可用')
+      assertExtensionsUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('扩展设置保存失败')
+      assertExtensionsUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        extensionSettings: {
+          autoCompleteStatus: true,
+          quickVimStatus: true,
+          aliasStatus: true,
+          highlightStatus: true
+        }
+      } as any)
+      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('扩展设置保存失败')
+      assertExtensionsUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('extension save offline'))
+      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('extension save offline')
+      assertExtensionsUnchanged()
+
+      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('扩展设置已保存')
+      expect(store.extensionSettings.aliasStatus).toBe(false)
+      expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
+      expect(store.selectedExtensionId).toBe('jumpserverSupport')
+      expect(store.config.extensionSettings).toEqual({
+        autoCompleteStatus: true,
+        quickVimStatus: true,
+        aliasStatus: false,
+        highlightStatus: true
+      })
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
   it('manages remaining External reference-style settings lists and toggles', async () => {
     const store = useWorkspaceStore()
 
@@ -5563,7 +5631,7 @@ describe('workspace store', () => {
 
     store.selectExtension('Alias')
     expect(store.selectedExtensionId).toBe('Alias')
-    store.updateExtensionSettings({ aliasStatus: false })
+    await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
     expect(store.extensionSettings.aliasStatus).toBe(false)
     expect(store.selectedExtensionId).toBe('jumpserverSupport')
     expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
@@ -5579,7 +5647,7 @@ describe('workspace store', () => {
     )
     store.selectExtension('Alias')
     expect(store.selectedExtensionId).toBe('jumpserverSupport')
-    store.updateExtensionSettings({ aliasStatus: true })
+    await expect(store.updateExtensionSettings({ aliasStatus: true })).resolves.toBe(true)
     expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(true)
 
     vi.mocked(window.aiops.saveConfig).mockClear()

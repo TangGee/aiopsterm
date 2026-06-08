@@ -4585,11 +4585,11 @@ describe('AppShell', () => {
     await panel.find('.extension_item').trigger('click')
     expect(store.selectedExtensionId).toBe('Alias')
 
-    store.updateExtensionSettings({ aliasStatus: false })
+    await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
     await panel.vm.$nextTick()
     expect(panel.text()).not.toContain('Alias')
     expect(store.selectedExtensionId).toBe('jumpserverSupport')
-    store.updateExtensionSettings({ aliasStatus: true })
+    await expect(store.updateExtensionSettings({ aliasStatus: true })).resolves.toBe(true)
     await panel.find('.extension_search_box input').setValue('Alias')
     expect(panel.text()).toContain('Alias')
     await panel.find('.extension_item').trigger('click')
@@ -6867,6 +6867,36 @@ describe('AppShell', () => {
     target.remove()
   })
 
+  it('does not leave extension switches visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('extensions')
+    await workspace.vm.$nextTick()
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      extensionSettings: {
+        autoCompleteStatus: true,
+        quickVimStatus: true,
+        aliasStatus: true,
+        highlightStatus: true
+      }
+    })
+
+    const autoCompleteSwitch = workspace.findAll('.settings-switch input').at(0)!
+    expect((autoCompleteSwitch.element as HTMLInputElement).checked).toBe(true)
+    await autoCompleteSwitch.setValue(false)
+    await flushPromises()
+
+    expect(store.settingsNotice).toBe('扩展设置保存失败')
+    expect(store.extensionSettings.autoCompleteStatus).toBe(true)
+    expect((autoCompleteSwitch.element as HTMLInputElement).checked).toBe(true)
+  })
+
   it('matches External reference-style remaining settings pages for extensions, MCP, skills, rules, shortcuts, privacy, devices, billing, and about', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -6886,6 +6916,7 @@ describe('AppShell', () => {
     await clickNav('扩展')
     expect(workspace.text()).toContain('自动补全')
     await workspace.findAll('.settings-switch input').at(0)!.setValue(false)
+    await flushPromises()
     expect(store.extensionSettings.autoCompleteStatus).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
