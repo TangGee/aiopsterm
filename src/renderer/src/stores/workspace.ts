@@ -1084,6 +1084,20 @@ const normalizeWorkspacePreferences = (source?: Partial<WorkspaceUserConfig>) =>
   }
 }
 
+const isWorkspacePreferencesSnapshot = (source: unknown): source is WorkspaceUserConfig => {
+  if (!isRecord(source) || !Array.isArray(source.expandedGroups) || typeof source.showIpMode !== 'boolean') return false
+  const { changed } = normalizeWorkspacePreferences(source)
+  return !changed
+}
+
+const cloneWorkspacePreferencesSnapshot = (preferences: WorkspaceUserConfig): WorkspaceUserConfig => ({
+  showIpMode: preferences.showIpMode,
+  expandedGroups: [...preferences.expandedGroups]
+})
+
+const workspacePreferenceSnapshotsMatch = (left: WorkspaceUserConfig, right: WorkspaceUserConfig) =>
+  JSON.stringify(cloneWorkspacePreferencesSnapshot(left)) === JSON.stringify(cloneWorkspacePreferencesSnapshot(right))
+
 const editorWordWrapValues: EditorSettings['wordWrap'][] = ['on', 'off']
 
 const normalizeEditorSettingsConfig = (source?: Partial<EditorUserConfig>) => {
@@ -4798,9 +4812,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const updateWorkspacePreferences = (patch: Partial<WorkspaceUserConfig>) => {
-    workspacePreferences.value = normalizeWorkspacePreferences({ ...workspacePreferences.value, ...patch }).normalized
-    saveConfig({ workspacePreferences: { ...workspacePreferences.value, expandedGroups: [...workspacePreferences.value.expandedGroups] } })
+  const updateWorkspacePreferences = async (patch: Partial<WorkspaceUserConfig>) => {
+    const nextPreferences = normalizeWorkspacePreferences({ ...workspacePreferences.value, ...patch }).normalized
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setTopNotice('资源树偏好保存服务不可用')
+      return false
+    }
+    try {
+      const savedConfig = await saveConfigBridge({
+        workspacePreferences: cloneWorkspacePreferencesSnapshot(nextPreferences)
+      })
+      if (!isRecord(savedConfig) || !isWorkspacePreferencesSnapshot(savedConfig.workspacePreferences)) {
+        setTopNotice('资源树偏好保存失败')
+        return false
+      }
+      const savedPreferences = normalizeWorkspacePreferences(savedConfig.workspacePreferences).normalized
+      if (!workspacePreferenceSnapshotsMatch(savedPreferences, nextPreferences)) {
+        setTopNotice('资源树偏好保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        workspacePreferences: cloneWorkspacePreferencesSnapshot(savedPreferences)
+      } as Partial<UserConfig>)
+      workspacePreferences.value = cloneWorkspacePreferencesSnapshot(savedPreferences)
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : '资源树偏好保存失败')
+      return false
+    }
   }
 
   const updateModelOption = (name: string, checked: boolean) => {

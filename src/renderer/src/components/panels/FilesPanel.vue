@@ -501,13 +501,13 @@ const displaySession = (session: FileSessionInfo) => (showIpMode.value ? session
 
 const isGroupExpanded = (key: string) => !!query.value.trim() || expandedGroups.value.includes(key)
 
-const toggleGroup = (key: string) => {
+const toggleGroup = async (key: string) => {
   const next = expandedGroups.value.includes(key) ? expandedGroups.value.filter((item) => item !== key) : [...expandedGroups.value, key]
-  workspace.updateWorkspacePreferences({ expandedGroups: next })
+  await workspace.updateWorkspacePreferences({ expandedGroups: next })
 }
 
-const toggleDisplayMode = () => {
-  workspace.updateWorkspacePreferences({ showIpMode: !showIpMode.value })
+const toggleDisplayMode = async () => {
+  await workspace.updateWorkspacePreferences({ showIpMode: !showIpMode.value })
 }
 
 const positionContextMenu = (event: MouseEvent, menuItemCount: number) => {
@@ -526,9 +526,9 @@ const positionContextMenu = (event: MouseEvent, menuItemCount: number) => {
   contextMenu.y = top
 }
 
-const removeExpandedGroup = (groupKey: string) => {
-  if (!expandedGroups.value.includes(groupKey)) return
-  workspace.updateWorkspacePreferences({ expandedGroups: expandedGroups.value.filter((item) => item !== groupKey) })
+const removeExpandedGroup = async (groupKey: string) => {
+  if (!expandedGroups.value.includes(groupKey)) return true
+  return workspace.updateWorkspacePreferences({ expandedGroups: expandedGroups.value.filter((item) => item !== groupKey) })
 }
 
 const resetFolderForms = () => {
@@ -782,7 +782,7 @@ const confirmDeleteFolder = async () => {
   const folderUuid = deleteFolderModal.folderUuid
   if (!folderUuid) return
   await workspace.deleteFileSessionFolder(folderUuid)
-  removeExpandedGroup(folderUuid)
+  await removeExpandedGroup(folderUuid)
   closeDeleteFolderModal()
 }
 </script>

@@ -1075,6 +1075,74 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('(后端备注)')
   })
 
+  it('does not visually commit Workspace and Files resource tree preferences before config saves return matching snapshots', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const store = useWorkspaceStore()
+    const savedPreferences = () => ({
+      showIpMode: store.workspacePreferences.showIpMode,
+      expandedGroups: [...store.workspacePreferences.expandedGroups]
+    })
+    const rejectNextPreferenceSave = () => {
+      vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+        ...store.config,
+        workspacePreferences: savedPreferences()
+      })
+    }
+
+    rejectNextPreferenceSave()
+    await wrapper.find('.workspace-button[title="显示 IP"]').trigger('click')
+    await flushPromises()
+    expect(store.topNotice).toBe('资源树偏好保存失败')
+    expect(store.workspacePreferences.showIpMode).toBe(false)
+    expect(wrapper.find('.workspace-button').attributes('title')).toBe('显示 IP')
+    expect(wrapper.text()).toContain('prod-bastion')
+    expect(wrapper.text()).not.toContain('10.24.8.12')
+
+    await wrapper.find('.workspace-button[title="显示 IP"]').trigger('click')
+    await flushPromises()
+    expect(store.workspacePreferences.showIpMode).toBe(true)
+    expect(wrapper.find('.workspace-button').attributes('title')).toBe('显示主机名')
+    expect(wrapper.text()).toContain('10.24.8.12')
+
+    const filesPanel = mount(FilesPanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    expect(filesPanel.find('.workspace-button').attributes('title')).toBe('显示主机名')
+    expect(filesPanel.text()).toContain('10.24.8.12')
+
+    rejectNextPreferenceSave()
+    await filesPanel.find('.workspace-button[title="显示主机名"]').trigger('click')
+    await flushPromises()
+    expect(store.topNotice).toBe('资源树偏好保存失败')
+    expect(store.workspacePreferences.showIpMode).toBe(true)
+    expect(filesPanel.find('.workspace-button').attributes('title')).toBe('显示主机名')
+    expect(filesPanel.text()).toContain('10.24.8.12')
+
+    await filesPanel.find('.workspace-button[title="显示主机名"]').trigger('click')
+    await flushPromises()
+    expect(store.workspacePreferences.showIpMode).toBe(false)
+    expect(filesPanel.find('.workspace-button').attributes('title')).toBe('显示 IP')
+    expect(filesPanel.text()).toContain('prod-bastion')
+
+    rejectNextPreferenceSave()
+    await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+    await flushPromises()
+    expect(store.workspacePreferences.expandedGroups).toContain('recent_connections')
+    expect(filesPanel.text()).toContain('prod-bastion')
+
+    await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+    await flushPromises()
+    expect(store.workspacePreferences.expandedGroups).not.toContain('recent_connections')
+    expect(filesPanel.text()).not.toContain('prod-bastion')
+    filesPanel.unmount()
+  })
+
   it('matches External reference-style SSH resource tree tabs, display toggle, refresh, and context actions', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
@@ -1099,6 +1167,7 @@ describe('AppShell', () => {
       await wrapper.find('.workspace-search input').setValue('')
 
       await wrapper.find('.workspace-button[title="显示 IP"]').trigger('click')
+      await flushPromises()
       expect(wrapper.text()).toContain('10.24.8.12')
       expect(store.workspacePreferences.showIpMode).toBe(true)
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -1115,6 +1184,7 @@ describe('AppShell', () => {
       expect(filesPanel.text()).toContain('10.24.8.12')
 
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+      await flushPromises()
       expect(store.workspacePreferences.expandedGroups).not.toContain('recent_connections')
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1134,6 +1204,7 @@ describe('AppShell', () => {
       expect(filesPanel.text()).not.toContain('10.24.8.12')
       expect(filesPanel.text()).not.toContain('prod-bastion')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+      await flushPromises()
       expect(store.workspacePreferences.expandedGroups).toContain('recent_connections')
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1146,6 +1217,7 @@ describe('AppShell', () => {
       expect(wrapper.text()).toContain('10.24.8.12')
 
       await filesPanel.find('.workspace-button[title="显示主机名"]').trigger('click')
+      await flushPromises()
       expect(store.workspacePreferences.showIpMode).toBe(false)
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1286,6 +1358,7 @@ describe('AppShell', () => {
       expect(filesPanel.find('.files-comment-edit').exists()).toBe(false)
       expect(filesPanel.text()).toContain('(新备注)')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+      await flushPromises()
       expect(filesPanel.text()).not.toContain('prod-bastion')
       await filesPanel.find('.files-search input').setValue('prod')
       expect(filesPanel.text()).toContain('prod-bastion')
@@ -1350,12 +1423,14 @@ describe('AppShell', () => {
       expect(filesPanel.text()).not.toContain('prod-bastion')
       expect(filesPanel.text()).not.toContain('Local')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('临时排障'))!.trigger('click')
+      await flushPromises()
       expect(filesPanel.text()).toContain('prod-bastion')
       await filesPanel.findAll('.files-source-tabs button').find((button) => button.text().includes('直接连接'))!.trigger('click')
       expect(filesPanel.text()).toContain('Local')
       expect(filesPanel.text()).toContain('prod-bastion')
       expect(filesPanel.text()).toContain('核心业务')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('click')
+      await flushPromises()
       expect(filesPanel.text()).toContain('staging-files')
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('staging-files'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('从文件夹移除')
@@ -1389,6 +1464,7 @@ describe('AppShell', () => {
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('最近连接')
       expect(filesPanel.text()).not.toContain('临时归档')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+      await flushPromises()
       expect(filesPanel.text()).toContain('prod-bastion')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('contextmenu')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
@@ -1418,12 +1494,14 @@ describe('AppShell', () => {
       await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('值班窗口')
       await wrapper.find('.workspace-folder-modal .files-folder-form textarea').setValue('工作区值班资产')
       await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      await flushPromises()
       expect(wrapper.text()).toContain('值班窗口')
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('值班窗口'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').text()).toContain('编辑文件夹')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑文件夹'))!.trigger('click')
       await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('值班归档')
       await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      await flushPromises()
       expect(wrapper.text()).toContain('值班归档')
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('jumpserver-org'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').text()).toContain('刷新')
@@ -1459,6 +1537,7 @@ describe('AppShell', () => {
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
       expect(wrapper.find('.files-folder-confirm').text()).toContain('其中 1 个主机将移出该文件夹')
       await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
       expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('值班归档'))).toBe(false)
       expect(wrapper.text()).toContain('prod-bastion')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('jumpserver-org'))!.trigger('contextmenu')

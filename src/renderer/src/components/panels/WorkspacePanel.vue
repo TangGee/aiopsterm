@@ -987,32 +987,32 @@ const deleteFolderRecord = async (folderUuid: string) => {
 
 const isGroupExpanded = (key: string) => !!searchValue.value.trim() || expandedGroups.value.includes(key)
 
-const updateExpandedGroups = (next: string[]) => {
-  workspace.updateWorkspacePreferences({ expandedGroups: [...new Set(next)] })
-}
+const updateExpandedGroups = (next: string[]) => workspace.updateWorkspacePreferences({ expandedGroups: [...new Set(next)] })
 
-const toggleGroup = (key: string) => {
+const toggleGroup = async (key: string) => {
   const next = expandedGroups.value.includes(key)
     ? expandedGroups.value.filter((item) => item !== key)
     : [...expandedGroups.value, key]
-  updateExpandedGroups(next)
+  await updateExpandedGroups(next)
 }
 
-const expandGroup = (key: string) => {
+const expandGroup = async (key: string) => {
   if (!expandedGroups.value.includes(key)) {
-    updateExpandedGroups([...expandedGroups.value, key])
+    return updateExpandedGroups([...expandedGroups.value, key])
   }
+  return true
 }
 
-const removeExpandedGroup = (key: string) => {
+const removeExpandedGroup = async (key: string) => {
   if (expandedGroups.value.includes(key)) {
-    updateExpandedGroups(expandedGroups.value.filter((item) => item !== key))
+    return updateExpandedGroups(expandedGroups.value.filter((item) => item !== key))
   }
+  return true
 }
 
-const replaceExpandedGroup = (oldKey: string, newKey: string) => {
-  if (!expandedGroups.value.includes(oldKey)) return
-  updateExpandedGroups(expandedGroups.value.map((item) => (item === oldKey ? newKey : item)))
+const replaceExpandedGroup = async (oldKey: string, newKey: string) => {
+  if (!expandedGroups.value.includes(oldKey)) return true
+  return updateExpandedGroups(expandedGroups.value.map((item) => (item === oldKey ? newKey : item)))
 }
 
 const closeMenus = () => {
@@ -1170,7 +1170,7 @@ const saveFolderForm = async () => {
     }
     try {
       const saved = await saveFolderRecord(folder)
-      expandGroup(saved.uuid)
+      await expandGroup(saved.uuid)
       notice.value = `已创建文件夹 ${saved.name}`
       closeFolderModal()
     } catch (error) {
@@ -1206,7 +1206,7 @@ const saveFolderForm = async () => {
     if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '分组保存失败')
     applyWorkspaceAssetSnapshot(result.data)
     await refreshDirectGroupOptions()
-    replaceExpandedGroup(oldKey, newKey)
+    await replaceExpandedGroup(oldKey, newKey)
     notice.value = `已更新分组 ${name}`
     closeFolderModal()
   } catch (error) {
@@ -1218,8 +1218,8 @@ const displayAsset = (asset: WorkspaceAsset) => (showIpMode.value ? asset.ip || 
 
 const folderNameByUuid = (folderUuid?: string) => customFolders.value.find((folder) => folder.uuid === folderUuid)?.name || ''
 
-const toggleDisplayMode = () => {
-  workspace.updateWorkspacePreferences({ showIpMode: !showIpMode.value })
+const toggleDisplayMode = async () => {
+  await workspace.updateWorkspacePreferences({ showIpMode: !showIpMode.value })
 }
 
 const selectAsset = (assetId: string) => {
@@ -1377,7 +1377,7 @@ const moveAssetToFolder = async (folderUuid: string) => {
   if (!asset) return
   try {
     await saveAssetRecord(toAssetInput(asset, { folderUuid, organizationId: asset.organizationId || organizationAssets.value[0]?.uuid }))
-    expandGroup(folderUuid)
+    await expandGroup(folderUuid)
     notice.value = `已移动 ${asset.name} 到 ${folderNameByUuid(folderUuid)}`
     closeMoveModal()
   } catch (error) {
@@ -1391,7 +1391,7 @@ const removeAssetFromFolder = async (assetId: string) => {
   const folderName = folderNameByUuid(asset.folderUuid)
   try {
     await saveAssetRecord(toAssetInput(asset, { folderUuid: undefined, organizationId: asset.organizationId || organizationAssets.value[0]?.uuid }))
-    if (asset.organizationId) expandGroup(asset.organizationId)
+    if (asset.organizationId) await expandGroup(asset.organizationId)
     notice.value = `已从 ${folderName} 移除 ${asset.name}`
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '移除资产失败'
@@ -1412,7 +1412,7 @@ const refreshGroup = async (groupKey: string) => {
     if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
     applyWorkspaceAssetSnapshot(result.data)
     await refreshDirectGroupOptions()
-    if (organization) expandGroup(organization.uuid)
+    if (organization) await expandGroup(organization.uuid)
     notice.value = organization ? `${organization.name} 资源已刷新` : '堡垒机资源已刷新'
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败'
@@ -1473,8 +1473,8 @@ const confirmDeleteGroup = () => {
   if (!group) return
   if (group.type === 'custom-folder') {
     deleteFolderRecord(group.folderUuid || group.key)
-      .then(() => {
-        removeExpandedGroup(group.key)
+      .then(async () => {
+        await removeExpandedGroup(group.key)
         notice.value = `已删除文件夹 ${group.title}`
         closeDeleteGroupModal()
       })
@@ -1494,7 +1494,7 @@ const confirmDeleteGroup = () => {
         if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '删除分组失败')
         applyWorkspaceAssetSnapshot(result.data)
         await refreshDirectGroupOptions()
-        removeExpandedGroup(group.key)
+        await removeExpandedGroup(group.key)
         notice.value = `已删除分组 ${group.title}`
         closeDeleteGroupModal()
       })
@@ -1608,7 +1608,7 @@ const saveHostForm = async () => {
   const sourceAsset = hostModal.mode === 'clone' ? findEditableAsset(hostModal.assetId) : null
   try {
     const saved = await saveAssetRecord(buildHostInput(undefined, port, sourceAsset || undefined))
-    expandGroup(saved.asset_type === 'organization' ? saved.uuid : saved.folderUuid || `group-${saved.group}`)
+    await expandGroup(saved.asset_type === 'organization' ? saved.uuid : saved.folderUuid || `group-${saved.group}`)
     notice.value = `${hostModal.mode === 'clone' ? '已克隆主机' : '已创建主机'} ${saved.name}`
     closeHostModal()
   } catch (error) {
@@ -1628,7 +1628,7 @@ const confirmDeleteAsset = async () => {
   if (!asset) return
   try {
     await deleteAssetRecord(asset.id)
-    if (asset.asset_type === 'organization') removeExpandedGroup(asset.uuid)
+    if (asset.asset_type === 'organization') await removeExpandedGroup(asset.uuid)
     workspace.selectedContexts = workspace.selectedContexts.filter((context) => context.id !== asset.id)
     selectedAssetId.value = selectedAssetId.value === asset.id ? null : selectedAssetId.value
     notice.value = `已删除主机 ${asset.name}`

@@ -5126,6 +5126,68 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate Workspace and Files resource tree preferences when the config bridge is unavailable or rejects the snapshot', async () => {
+    const store = useWorkspaceStore()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialPreferences = {
+      showIpMode: store.workspacePreferences.showIpMode,
+      expandedGroups: [...store.workspacePreferences.expandedGroups]
+    }
+    const assertPreferencesUnchanged = () => {
+      expect(store.workspacePreferences).toEqual(initialPreferences)
+      expect(store.config.workspacePreferences).toEqual(initialPreferences)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateWorkspacePreferences({ showIpMode: true })).resolves.toBe(false)
+      expect(store.topNotice).toBe('资源树偏好保存服务不可用')
+      assertPreferencesUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateWorkspacePreferences({ showIpMode: true })).resolves.toBe(false)
+      expect(store.topNotice).toBe('资源树偏好保存失败')
+      assertPreferencesUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        workspacePreferences: initialPreferences
+      })
+      await expect(store.updateWorkspacePreferences({ showIpMode: true })).resolves.toBe(false)
+      expect(store.topNotice).toBe('资源树偏好保存失败')
+      assertPreferencesUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        workspacePreferences: {
+          showIpMode: true,
+          expandedGroups: ['recent_connections', 'recent_connections']
+        }
+      })
+      await expect(store.updateWorkspacePreferences({ showIpMode: true })).resolves.toBe(false)
+      expect(store.topNotice).toBe('资源树偏好保存失败')
+      assertPreferencesUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('workspace preferences offline'))
+      await expect(store.updateWorkspacePreferences({ showIpMode: true })).resolves.toBe(false)
+      expect(store.topNotice).toBe('workspace preferences offline')
+      assertPreferencesUnchanged()
+
+      await expect(store.updateWorkspacePreferences({ showIpMode: true, expandedGroups: ['recent_connections', 'group-生产', 'group-生产'] })).resolves.toBe(true)
+      expect(store.workspacePreferences).toEqual({
+        showIpMode: true,
+        expandedGroups: ['recent_connections', 'group-生产']
+      })
+      expect(store.config.workspacePreferences).toEqual({
+        showIpMode: true,
+        expandedGroups: ['recent_connections', 'group-生产']
+      })
+    } finally {
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+    }
+  })
+
   it('manages External reference-style settings state for general, terminal, model, and AI preferences', async () => {
     const store = useWorkspaceStore()
 
@@ -5182,7 +5244,7 @@ describe('workspace store', () => {
       })
     )
 
-    store.updateWorkspacePreferences({ showIpMode: true, expandedGroups: ['recent_connections', 'group-生产', 'group-生产'] })
+    await expect(store.updateWorkspacePreferences({ showIpMode: true, expandedGroups: ['recent_connections', 'group-生产', 'group-生产'] })).resolves.toBe(true)
     expect(store.workspacePreferences.showIpMode).toBe(true)
     expect(store.workspacePreferences.expandedGroups).toEqual(['recent_connections', 'group-生产'])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
