@@ -1,5 +1,6 @@
 export {
   addKubernetesCluster,
+  cleanupKubernetesAgent,
   connectKubernetesCluster,
   closeKubernetesTerminal,
   createKubernetesTerminal,

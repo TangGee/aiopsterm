@@ -1910,6 +1910,11 @@ export type KubernetesCommandResult = AiopsMutationResult<{
   source: 'terminal' | 'agent' | 'resource'
 }>
 
+export type KubernetesAgentCleanupResult = AiopsMutationResult<{
+  cleared: boolean
+  cleanedAt: string
+}>
+
 export type AiopsPreloadApi = {
   platform: () => Promise<string>
   shell: () => Promise<string>
@@ -2092,6 +2097,7 @@ export type AiopsPreloadApi = {
   resizeKubernetesTerminal: (id: string, cols: number, rows: number) => Promise<KubernetesTerminalMutationResult>
   closeKubernetesTerminal: (id: string, exitCode?: number) => Promise<KubernetesTerminalCloseResult>
   executeKubernetesCommand: (input: KubernetesCommandInput) => Promise<KubernetesCommandResult>
+  cleanupKubernetesAgent: () => Promise<KubernetesAgentCleanupResult>
   listFileSessionCatalog: () => Promise<FileSessionCatalogResult>
   saveFileSession: (session: FileSessionInfo) => Promise<FileSessionMutationResult>
   saveFileSessionFromSftpPayload: (payload: FileSessionSftpPayload) => Promise<FileSessionMutationResult>

@@ -7624,16 +7624,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const record = addK8sAgentRun(result, cluster)
     k8sResourceOutputTitle.value = `Namespaces / ${cluster.name}`
     k8sResourceOutput.value = `${record.command}\n\n${result.output || result.error || ''}`
-    setK8sNotice('Kubernetes namespaces 已刷新')
+    setK8sNotice(result.success ? 'Kubernetes namespaces 已刷新' : result.error || 'Kubernetes namespaces 刷新失败')
     return record
   }
 
-  const cleanupK8sAgent = () => {
+  const cleanupK8sAgent = async () => {
+    if (!window.aiops?.cleanupKubernetesAgent) {
+      setK8sNotice('Kubernetes Agent cleanup API 不可用')
+      return false
+    }
+    try {
+      const result = await window.aiops.cleanupKubernetesAgent()
+      if (!result?.ok || !result.data?.cleared) {
+        setK8sNotice(result?.errorMessage || 'Kubernetes Agent 清理失败')
+        return false
+      }
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : 'Kubernetes Agent 清理失败')
+      return false
+    }
     k8sAgentClusterId.value = null
     k8sAgentContextName.value = ''
     k8sAgentStatus.value = 'idle'
     k8sAgentLastResult.value = null
     setK8sNotice('Kubernetes Agent 已清理')
+    return true
   }
 
   const refreshK8sResources = async () => {
@@ -7648,14 +7663,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const result = await executeK8sBackendCommand(command, cluster.id, cluster.default_namespace, 'resource')
     if (!result) {
       k8sResourceLoading.value = false
-      return
+      return null
     }
-    addK8sAgentRun(result, cluster)
-    k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}\n\n已刷新 ${filteredK8sResources.value.length} 条资源。`
-    window.setTimeout(() => {
-      k8sResourceLoading.value = false
-    }, 180)
-    setK8sNotice('Kubernetes 资源已刷新')
+    const record = addK8sAgentRun(result, cluster)
+    k8sResourceOutput.value = result.success
+      ? `${command}\n\n${result.output || ''}\n\n已刷新 ${filteredK8sResources.value.length} 条资源。`
+      : `${command}\n\n${result.output || result.error || ''}`
+    k8sResourceLoading.value = false
+    setK8sNotice(result.success ? 'Kubernetes 资源已刷新' : result.error || 'Kubernetes 资源刷新失败')
+    return record
   }
 
   const describeK8sResource = async (resourceId: string) => {

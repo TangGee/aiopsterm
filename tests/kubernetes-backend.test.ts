@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   __resetKubernetesCatalogForTests,
+  cleanupKubernetesAgent,
   closeKubernetesTerminal,
   createKubernetesTerminal,
   executeKubernetesCommand,
@@ -214,5 +215,15 @@ describe('kubernetes backend boundary', () => {
     })
     expect(result.data?.output).toBe('Error from server (NotFound): pods "missing" not found')
     expect(result.data?.terminalOutput).toBe('[aiopsterm kubectl] kubectl describe pod missing -n ops\nError from server (NotFound): pods "missing" not found')
+  })
+
+  it('returns a backend-owned Kubernetes Agent cleanup result', async () => {
+    await expect(cleanupKubernetesAgent()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        cleared: true,
+        cleanedAt: '刚刚'
+      }
+    })
   })
 })

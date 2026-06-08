@@ -11,6 +11,7 @@ import type {
   KubernetesClusterTestInput,
   KubernetesClusterTestResult,
   KubernetesClusterUpdateInput,
+  KubernetesAgentCleanupResult,
   KubernetesCommandInput,
   KubernetesCommandResult,
   KubernetesContextInfo,
@@ -935,4 +936,11 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
       terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output)
     }
   }
+}
+
+export async function cleanupKubernetesAgent(): Promise<KubernetesAgentCleanupResult> {
+  return asResult(() => ({
+    cleared: true,
+    cleanedAt: nowLabel()
+  }))
 }

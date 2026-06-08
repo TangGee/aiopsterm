@@ -4294,7 +4294,8 @@ describe('workspace store', () => {
     expect(store.k8sAgentCommandHistory[0]).toBe('kubectl get services -A')
     expect(store.k8sAgentRuns[0].contextName).toBe('prod/admin')
     expect(store.k8sAgentRuns[0].durationMs).toBe(1)
-    store.cleanupK8sAgent()
+    await expect(store.cleanupK8sAgent()).resolves.toBe(true)
+    expect(window.aiops.cleanupKubernetesAgent).toHaveBeenCalled()
     expect(store.k8sAgentStatus).toBe('idle')
     expect(store.k8sAgentCurrentCluster.clusterId).toBeNull()
     vi.mocked(window.aiops.executeKubernetesCommand).mockClear()
@@ -4394,6 +4395,88 @@ describe('workspace store', () => {
     expect(store.k8sClusters.some((cluster) => cluster.id === added!.id)).toBe(false)
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it('does not fabricate Kubernetes Agent refresh or cleanup success when backend operations fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
+    expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-1', contextName: 'prod/admin' })
+
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'k8s-run-failed-namespaces',
+        command: 'kubectl get namespaces',
+        output: '',
+        terminalOutput: '',
+        success: false,
+        error: 'apiserver unavailable',
+        durationMs: 1,
+        startedAt: '刚刚',
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        namespace: 'default',
+        source: 'agent'
+      }
+    })
+    const namespaceRun = await store.refreshK8sAgentNamespaces()
+    expect(namespaceRun).toEqual(expect.objectContaining({ id: 'k8s-run-failed-namespaces', status: 'error', error: 'apiserver unavailable' }))
+    expect(store.k8sClusterNotice).toBe('apiserver unavailable')
+    expect(store.k8sClusterNotice).not.toBe('Kubernetes namespaces 已刷新')
+
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'k8s-run-failed-resources',
+        command: 'kubectl get pods --all-namespaces',
+        output: '',
+        terminalOutput: '',
+        success: false,
+        error: 'resource list denied',
+        durationMs: 1,
+        startedAt: '刚刚',
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        namespace: 'default',
+        source: 'resource'
+      }
+    })
+    const resourceRun = await store.refreshK8sResources()
+    expect(resourceRun).toEqual(expect.objectContaining({ id: 'k8s-run-failed-resources', status: 'error', error: 'resource list denied' }))
+    expect(store.k8sResourceLoading).toBe(false)
+    expect(store.k8sResourceOutput).toContain('resource list denied')
+    expect(store.k8sResourceOutput).not.toContain('已刷新')
+    expect(store.k8sClusterNotice).toBe('resource list denied')
+    expect(store.k8sClusterNotice).not.toBe('Kubernetes 资源已刷新')
+
+    const originalCleanup = window.aiops.cleanupKubernetesAgent
+    try {
+      ;(window.aiops as any).cleanupKubernetesAgent = undefined
+      await expect(store.cleanupK8sAgent()).resolves.toBe(false)
+      expect(store.k8sClusterNotice).toBe('Kubernetes Agent cleanup API 不可用')
+      expect(store.k8sAgentCurrentCluster.clusterId).toBe('k8s-1')
+      expect(store.k8sAgentStatus).toBe('ready')
+
+      ;(window.aiops as any).cleanupKubernetesAgent = originalCleanup
+      vi.mocked(window.aiops.cleanupKubernetesAgent!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'K8S_AGENT_CLEANUP_FAILED',
+        errorMessage: 'cleanup refused by backend'
+      })
+      await expect(store.cleanupK8sAgent()).resolves.toBe(false)
+      expect(store.k8sClusterNotice).toBe('cleanup refused by backend')
+      expect(store.k8sAgentCurrentCluster.clusterId).toBe('k8s-1')
+      expect(store.k8sAgentStatus).toBe('ready')
+
+      vi.mocked(window.aiops.cleanupKubernetesAgent!).mockRejectedValueOnce(new Error('cleanup bridge offline'))
+      await expect(store.cleanupK8sAgent()).resolves.toBe(false)
+      expect(store.k8sClusterNotice).toBe('cleanup bridge offline')
+      expect(store.k8sAgentCurrentCluster.clusterId).toBe('k8s-1')
+      expect(store.k8sAgentStatus).toBe('ready')
+    } finally {
+      ;(window.aiops as any).cleanupKubernetesAgent = originalCleanup
     }
   })
 

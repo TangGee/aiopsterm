@@ -4837,6 +4837,13 @@ Object.defineProperty(window, 'aiops', {
         exitCode
       }
     })),
+    cleanupKubernetesAgent: vi.fn(async () => ({
+      ok: true,
+      data: {
+        cleared: true,
+        cleanedAt: '刚刚'
+      }
+    })),
     listAiModels: vi.fn(async () => cloneAiModelCatalog()),
     checkModelProvider: vi.fn(
       async (input: {
