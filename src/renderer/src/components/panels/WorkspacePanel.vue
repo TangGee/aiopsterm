@@ -954,7 +954,11 @@ const refreshAssets = async () => {
 }
 
 const saveAssetRecord = async (input: AiopsAssetInput) => {
-  const result = await window.aiops?.saveAsset?.(input)
+  const saveAsset = window.aiops?.saveAsset
+  if (typeof saveAsset !== 'function') {
+    throw new Error('资产保存服务不可用')
+  }
+  const result = await saveAsset(input)
   if (!result?.ok || !result.data) {
     throw new Error(result?.errorMessage || '资产保存失败')
   }
@@ -1303,11 +1307,16 @@ const connectContextAsset = () => {
   closeContextMenu()
 }
 
-const toggleFavorite = () => {
+const toggleFavorite = async () => {
   const asset = findEditableAsset(contextMenuAssetId.value || '')
   if (asset) {
-    asset.favorite = !asset.favorite
-    notice.value = asset.favorite ? `已收藏 ${asset.name}` : `已取消收藏 ${asset.name}`
+    const nextFavorite = !Boolean(asset.favorite)
+    try {
+      const saved = await saveAssetRecord(toAssetInput(asset, { favorite: nextFavorite }))
+      notice.value = saved.favorite ? `已收藏 ${saved.name}` : `已取消收藏 ${saved.name}`
+    } catch (error) {
+      notice.value = error instanceof Error ? error.message : '收藏状态保存失败'
+    }
   }
   closeContextMenu()
 }
@@ -1328,14 +1337,14 @@ const saveComment = async (assetId: string) => {
   const asset = findEditableAsset(assetId)
   if (asset) {
     const nextComment = editingComment.value.trim()
-    asset.comment = nextComment
-    workspaceAssets.value = workspaceAssets.value.map((item) => (item.id === assetId ? { ...item, comment: nextComment } : item))
     try {
       const saved = await saveAssetRecord(toAssetInput(asset, { comment: nextComment }))
       notice.value = saved.comment ? `已更新备注 ${saved.comment}` : '已清空备注'
+      cancelComment()
     } catch (error) {
       notice.value = error instanceof Error ? error.message : '备注保存失败'
     }
+    return
   }
   cancelComment()
 }
@@ -1348,9 +1357,7 @@ const cancelComment = () => {
 const toggleTunnel = () => {
   const asset = findEditableAsset(contextMenuAssetId.value || '')
   if (asset) {
-    asset.tunnelState = asset.tunnelState === 'active' ? 'created' : 'active'
-    window.aiops?.saveAsset?.(toAssetInput(asset, { tunnelState: asset.tunnelState }))
-    notice.value = asset.tunnelState === 'active' ? `隧道已连接 ${asset.name}` : `隧道已创建 ${asset.name}`
+    notice.value = '隧道运行时服务尚未接入，未修改主机状态'
   }
   closeContextMenu()
 }

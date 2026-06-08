@@ -903,6 +903,68 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
   })
 
+  it('does not fabricate Workspace host favorite, comment, or tunnel state before asset writes succeed', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    const hostRow = (name: string) => {
+      const row = wrapper.findAll('.workspace-host-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace host row not found: ${name}`)
+      return row
+    }
+    const contextButton = (label: string) => {
+      const button = wrapper.find('.workspace-node-menu').findAll('button').find((item) => item.text().includes(label))
+      if (!button) throw new Error(`Workspace context button not found: ${label}`)
+      return button
+    }
+
+    await hostRow('prod-bastion').trigger('contextmenu')
+    expect(wrapper.find('.workspace-node-menu').text()).toContain('取消收藏')
+    vi.mocked(window.aiops.saveAsset).mockRejectedValueOnce(new Error('asset write offline'))
+    await contextButton('取消收藏').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('asset write offline')
+    await hostRow('prod-bastion').trigger('contextmenu')
+    expect(wrapper.find('.workspace-node-menu').text()).toContain('取消收藏')
+    await contextButton('取消收藏').trigger('click')
+    await flushPromises()
+    await hostRow('prod-bastion').trigger('contextmenu')
+    expect(wrapper.find('.workspace-node-menu').text()).toContain('加入收藏')
+
+    await hostRow('staging-api').trigger('contextmenu')
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await contextButton('隧道').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('隧道运行时服务尚未接入，未修改主机状态')
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
+
+    await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+    await hostRow('prod-bastion').trigger('contextmenu')
+    await contextButton('编辑备注').trigger('click')
+    await wrapper.find('.workspace-comment-edit input').setValue('失败备注')
+    vi.mocked(window.aiops.saveAsset).mockRejectedValueOnce(new Error('comment write offline'))
+    await wrapper.find('.workspace-comment-edit input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('comment write offline')
+    expect(wrapper.find('.workspace-comment-edit').exists()).toBe(true)
+    await wrapper.find('.workspace-comment-edit input').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.text()).toContain('(生产入口)')
+    expect(wrapper.text()).not.toContain('(失败备注)')
+    await hostRow('prod-bastion').trigger('contextmenu')
+    await contextButton('编辑备注').trigger('click')
+    await wrapper.find('.workspace-comment-edit input').setValue('后端备注')
+    await wrapper.find('.workspace-comment-edit input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.find('.workspace-comment-edit').exists()).toBe(false)
+    expect(wrapper.text()).toContain('(后端备注)')
+  })
+
   it('matches External reference-style SSH resource tree tabs, display toggle, refresh, and context actions', async () => {
     vi.useFakeTimers()
     const pinia = createPinia()
