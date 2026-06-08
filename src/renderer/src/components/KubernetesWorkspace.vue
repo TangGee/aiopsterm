@@ -794,7 +794,7 @@ const K8sAddClusterModal = defineComponent({
       testing.value = true
       try {
         if (store.k8sAddMode === 'manual' && form.kubeconfigContent.trim()) {
-          const parsed = store.importK8sKubeconfigContent(form.kubeconfigContent)
+          const parsed = await store.importK8sKubeconfigContent(form.kubeconfigContent)
           if (parsed.success && parsed.contexts.some((context) => context.name === form.contextName)) {
             applyImportedContexts(parsed.contexts)
           }

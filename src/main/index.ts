@@ -104,6 +104,7 @@ import {
   deleteKubernetesCluster,
   disconnectKubernetesCluster,
   executeKubernetesCommand,
+  importKubernetesKubeconfig,
   listKubernetesCatalog,
   resizeKubernetesTerminal,
   switchKubernetesContext,
@@ -205,6 +206,7 @@ import type {
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
   KubernetesClusterInput,
+  KubernetesKubeconfigImportInput,
   KubernetesClusterTestInput,
   KubernetesClusterUpdateInput,
   KubernetesCommandInput,
@@ -3062,6 +3064,7 @@ const registerIpc = () => {
   ipcMain.handle('kubernetes:cluster:add', (_event, input: KubernetesClusterInput) => addKubernetesCluster(input))
   ipcMain.handle('kubernetes:cluster:update', (_event, id: string, input: KubernetesClusterUpdateInput) => updateKubernetesCluster(id, input))
   ipcMain.handle('kubernetes:cluster:test', (_event, input: KubernetesClusterTestInput) => testKubernetesClusterConnection(input))
+  ipcMain.handle('kubernetes:kubeconfig:import', (_event, input: KubernetesKubeconfigImportInput) => importKubernetesKubeconfig(input))
   ipcMain.handle('kubernetes:cluster:delete', (_event, id: string) => deleteKubernetesCluster(id))
   ipcMain.handle('kubernetes:cluster:connect', (_event, id: string) => connectKubernetesCluster(id))
   ipcMain.handle('kubernetes:cluster:disconnect', (_event, id: string) => disconnectKubernetesCluster(id))

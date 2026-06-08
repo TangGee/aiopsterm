@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { readFile } from 'fs/promises'
 import type {
   AiopsMutationResult,
   KubernetesBastionGroup,
@@ -17,6 +18,8 @@ import type {
   KubernetesContextInfo,
   KubernetesContextSwitchResult,
   KubernetesImportContextInfo,
+  KubernetesKubeconfigImportInput,
+  KubernetesKubeconfigImportResult,
   KubernetesNamespaceInfo,
   KubernetesResource,
   KubernetesResourceKind,
@@ -385,10 +388,11 @@ const yamlValueAfter = (line: string, key: string) => {
   return match ? stripYamlScalar(match[1]) : ''
 }
 
-const parseKubeconfigContexts = (content: string) => {
+const parseKubeconfig = (content: string) => {
   const lines = content.split(/\r?\n/)
   const parsedClusters = new Map<string, string>()
   const parsedContexts: KubernetesImportContextInfo[] = []
+  const currentContext = lines.map((line) => yamlValueAfter(line, 'current-context')).find(Boolean) || ''
   let section: 'clusters' | 'contexts' | '' = ''
   let clusterName = ''
   let contextName = ''
@@ -465,8 +469,13 @@ const parseKubeconfigContexts = (content: string) => {
   }
   if (section === 'contexts') flushContext()
 
-  return parsedContexts.filter((context, index, list) => list.findIndex((item) => item.name === context.name) === index)
+  return {
+    contexts: parsedContexts.filter((context, index, list) => list.findIndex((item) => item.name === context.name) === index),
+    currentContext
+  }
 }
+
+const parseKubeconfigContexts = (content: string) => parseKubeconfig(content).contexts
 
 const findKubernetesTestContext = (contextName: string): KubernetesImportContextInfo | null => {
   const imported = importContexts.find((context) => context.name === contextName)
@@ -547,6 +556,48 @@ export const testKubernetesClusterConnection = async (input: KubernetesClusterTe
       message: '连接测试成功'
     }
   }, 'K8S_TEST_FAILED')
+
+export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImportInput): Promise<KubernetesKubeconfigImportResult> {
+  try {
+    const kubeconfigPath = input.kubeconfigPath?.trim() || ''
+    const providedContent = input.kubeconfigContent ?? ''
+    if (!kubeconfigPath && !providedContent.trim()) {
+      return { ok: false, errorCode: 'K8S_KUBECONFIG_REQUIRED', errorMessage: 'Kubeconfig path or content is required.' }
+    }
+    let kubeconfigContent = providedContent
+    if (!kubeconfigContent.trim()) {
+      try {
+        kubeconfigContent = await readFile(kubeconfigPath, 'utf-8')
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: 'K8S_KUBECONFIG_READ_FAILED',
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+    const parsed = parseKubeconfig(kubeconfigContent)
+    if (!parsed.contexts.length) {
+      return { ok: false, errorCode: 'K8S_KUBECONFIG_CONTEXTS_EMPTY', errorMessage: 'No kubeconfig contexts were found.' }
+    }
+    importContexts = parsed.contexts.map((context) => ({ ...context }))
+    return {
+      ok: true,
+      data: {
+        contexts: parsed.contexts.map((context) => ({ ...context })),
+        kubeconfigPath,
+        kubeconfigContent,
+        currentContext: parsed.currentContext
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_IMPORT_FAILED',
+      errorMessage: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
 
 export const addKubernetesCluster = async (input: KubernetesClusterInput): Promise<KubernetesClusterMutationResult> =>
   asResult(() => {

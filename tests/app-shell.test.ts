@@ -5009,11 +5009,8 @@ describe('AppShell', () => {
       '    cluster: staging-cluster',
       '    namespace: staging'
     ].join('\n')
-    vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
-      content: prodKubeconfigContent,
-      mtimeMs: 1717200000000,
-      size: 1024
-    })
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockClear()
+    vi.mocked(window.aiops.readLocalFile).mockClear()
     await workspace.find('.k8s-file-picker-row button').trigger('click')
     await flushPromises()
     await workspace.vm.$nextTick()
@@ -5025,7 +5022,8 @@ describe('AppShell', () => {
         { name: 'YAML Files', extensions: ['yaml', 'yml'] }
       ]
     })
-    expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/prod-kubeconfig.yaml')
+    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenCalledWith({ kubeconfigPath: '/tmp/prod-kubeconfig.yaml' })
+    expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
     expect(store.k8sClusterNotice).toContain('发现 2 个 Context')
     expect(store.k8sImportContexts).toHaveLength(2)
     const testConnectionButton = workspace.find('.k8s-test-connection button')

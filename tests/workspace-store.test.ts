@@ -4864,8 +4864,9 @@ describe('workspace store', () => {
       '    cluster: qa-cluster',
       '    namespace: qa'
     ].join('\n')
-    const importResult = store.importK8sKubeconfigContent(qaKubeconfigContent)
+    const importResult = await store.importK8sKubeconfigContent(qaKubeconfigContent)
     expect(importResult.success).toBe(true)
+    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenLastCalledWith({ kubeconfigContent: qaKubeconfigContent })
     expect(importResult.currentContext).toBe('qa/dev')
     expect(store.k8sImportContexts).toEqual([
       { name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }
@@ -4878,26 +4879,20 @@ describe('workspace store', () => {
       kubeconfigContent: qaKubeconfigContent
     })
     expect(await store.testK8sClusterConnection({ contextName: 'missing/dev', kubeconfigContent: qaKubeconfigContent })).toBe(false)
-    vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
-      content: [
-        'apiVersion: v1',
-        'kind: Config',
-        'clusters:',
-        '- name: imported-cluster',
-        '  cluster:',
-        '    server: https://imported.k8s.local:6443',
-        'contexts:',
-        '- name: imported/admin',
-        '  context:',
-        '    cluster: imported-cluster',
-        '    namespace: imported'
-      ].join('\n'),
-      mtimeMs: 1717200000000,
-      size: 512
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        contexts: [{ name: 'imported/admin', cluster: 'imported-cluster', server: 'https://imported.k8s.local:6443', namespace: 'imported' }],
+        kubeconfigPath: '/tmp/imported-kubeconfig.yaml',
+        kubeconfigContent: 'backend imported kubeconfig',
+        currentContext: 'imported/admin'
+      }
     })
+    vi.mocked(window.aiops.readLocalFile).mockClear()
     const fileImport = await store.importK8sKubeconfigFile('/tmp/imported-kubeconfig.yaml')
     expect(fileImport.success).toBe(true)
-    expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/imported-kubeconfig.yaml')
+    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenLastCalledWith({ kubeconfigPath: '/tmp/imported-kubeconfig.yaml' })
+    expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
     expect(store.k8sImportContexts[0]).toMatchObject({ name: 'imported/admin', server: 'https://imported.k8s.local:6443' })
 
     const added = await store.addK8sCluster({

@@ -333,6 +333,7 @@ export type AiContentPart = AiTextContentPart | AiChipContentPart | AiImageConte
 type K8sKubeconfigImportResult = {
   success: boolean
   contexts: K8sImportContextInfo[]
+  kubeconfigPath: string
   kubeconfigContent: string
   currentContext: string
   error?: string
@@ -673,109 +674,6 @@ const ONBOARDING_VERSION = 2
 const onboardingModuleIds: OnboardingModuleId[] = ['interfaceGuide', 'systemSettings', 'addAndConnectHost', 'aiChat']
 const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
 const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
-const stripYamlScalar = (value: string) => {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  const withoutComment = trimmed.replace(/\s+#.*$/, '').trim()
-  if ((withoutComment.startsWith('"') && withoutComment.endsWith('"')) || (withoutComment.startsWith("'") && withoutComment.endsWith("'"))) {
-    return withoutComment.slice(1, -1)
-  }
-  return withoutComment
-}
-const yamlValueAfter = (line: string, key: string) => {
-  const match = line.match(new RegExp(`^\\s*${key}\\s*:\\s*(.*)$`))
-  return match ? stripYamlScalar(match[1]) : ''
-}
-const parseKubeconfigContexts = (content: string): K8sKubeconfigImportResult => {
-  const lines = content.split(/\r?\n/)
-  const currentContext = lines.map((line) => yamlValueAfter(line, 'current-context')).find(Boolean) || ''
-  const clusters = new Map<string, string>()
-  const contexts: K8sImportContextInfo[] = []
-  let section: 'clusters' | 'contexts' | '' = ''
-  let clusterName = ''
-  let contextName = ''
-  let contextCluster = ''
-  let contextNamespace = ''
-
-  const flushContext = () => {
-    if (!contextName || !contextCluster) return
-    contexts.push({
-      name: contextName,
-      cluster: contextCluster,
-      server: clusters.get(contextCluster) || '',
-      namespace: contextNamespace || 'default'
-    })
-  }
-
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\t/g, '  ')
-    if (/^\s*clusters\s*:\s*$/.test(line)) {
-      flushContext()
-      section = 'clusters'
-      clusterName = ''
-      contextName = ''
-      contextCluster = ''
-      contextNamespace = ''
-      continue
-    }
-    if (/^\s*contexts\s*:\s*$/.test(line)) {
-      flushContext()
-      section = 'contexts'
-      clusterName = ''
-      contextName = ''
-      contextCluster = ''
-      contextNamespace = ''
-      continue
-    }
-    if (/^\s*(users|preferences|apiVersion|kind)\s*:/.test(line)) {
-      if (section === 'contexts') flushContext()
-      section = ''
-      clusterName = ''
-      contextName = ''
-      contextCluster = ''
-      contextNamespace = ''
-      continue
-    }
-    if (section === 'clusters') {
-      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
-      if (listName) {
-        clusterName = stripYamlScalar(listName[1])
-        if (!clusters.has(clusterName)) clusters.set(clusterName, '')
-        continue
-      }
-      const server = yamlValueAfter(line, 'server')
-      if (clusterName && server) clusters.set(clusterName, server)
-      continue
-    }
-    if (section === 'contexts') {
-      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
-      if (listName) {
-        flushContext()
-        contextName = stripYamlScalar(listName[1])
-        contextCluster = ''
-        contextNamespace = ''
-        continue
-      }
-      const cluster = yamlValueAfter(line, 'cluster')
-      if (contextName && cluster) {
-        contextCluster = cluster
-        continue
-      }
-      const namespace = yamlValueAfter(line, 'namespace')
-      if (contextName && namespace) contextNamespace = namespace
-    }
-  }
-  if (section === 'contexts') flushContext()
-
-  const uniqueContexts = contexts.filter((context, index, list) => list.findIndex((item) => item.name === context.name) === index)
-  return {
-    success: uniqueContexts.length > 0,
-    contexts: uniqueContexts,
-    kubeconfigContent: content,
-    currentContext,
-    error: uniqueContexts.length > 0 ? undefined : '未在 kubeconfig 中发现 contexts'
-  }
-}
 const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
 const MACRO_MAX_COMMAND_COUNT = 50
 const MACRO_DEFAULT_SLEEP_THRESHOLD_MS = 500
@@ -8758,8 +8656,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return k8sImportContexts.value.find((context) => context.name === contextName) || null
   }
 
-  const importK8sKubeconfigContent = (content: string) => {
-    const result = parseKubeconfigContexts(content)
+  const normalizeK8sKubeconfigImportResult = (result: Awaited<ReturnType<AiopsPreloadApi['importKubernetesKubeconfig']>>): K8sKubeconfigImportResult => {
+    if (result?.ok && result.data) {
+      return {
+        success: true,
+        contexts: result.data.contexts,
+        kubeconfigPath: result.data.kubeconfigPath,
+        kubeconfigContent: result.data.kubeconfigContent,
+        currentContext: result.data.currentContext
+      }
+    }
+    return {
+      success: false,
+      contexts: [],
+      kubeconfigPath: '',
+      kubeconfigContent: '',
+      currentContext: '',
+      error: result?.errorMessage || 'Kubeconfig 导入失败'
+    }
+  }
+
+  const importK8sKubeconfigContent = async (content: string) => {
+    const importKubeconfig = window.aiops?.importKubernetesKubeconfig
+    if (typeof importKubeconfig !== 'function') {
+      const failed: K8sKubeconfigImportResult = {
+        success: false,
+        contexts: [],
+        kubeconfigPath: '',
+        kubeconfigContent: '',
+        currentContext: '',
+        error: 'Kubeconfig 导入服务不可用'
+      }
+      setK8sNotice('Kubeconfig 导入服务不可用')
+      return failed
+    }
+    const result = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigContent: content }))
     if (result.success) {
       k8sImportContexts.value = result.contexts
       setK8sNotice(`已发现 ${result.contexts.length} 个 kubeconfig Context`)
@@ -8774,6 +8705,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const emptyResult: K8sKubeconfigImportResult = {
         success: false,
         contexts: [],
+        kubeconfigPath: '',
         kubeconfigContent: '',
         currentContext: '',
         error: '请选择 kubeconfig 文件'
@@ -8782,14 +8714,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return emptyResult
     }
     try {
-      const result = await window.aiops.readLocalFile(filePath)
-      const parsed = importK8sKubeconfigContent(result.content)
-      if (parsed.success) setK8sNotice(`已选择 kubeconfig 文件，发现 ${parsed.contexts.length} 个 Context`)
-      return parsed
+      const importKubeconfig = window.aiops?.importKubernetesKubeconfig
+      if (typeof importKubeconfig !== 'function') {
+        const failed: K8sKubeconfigImportResult = {
+          success: false,
+          contexts: [],
+          kubeconfigPath: '',
+          kubeconfigContent: '',
+          currentContext: '',
+          error: 'Kubeconfig 导入服务不可用'
+        }
+        setK8sNotice('Kubeconfig 导入服务不可用')
+        return failed
+      }
+      const imported = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigPath: filePath }))
+      if (imported.success) {
+        k8sImportContexts.value = imported.contexts
+        setK8sNotice(`已选择 kubeconfig 文件，发现 ${imported.contexts.length} 个 Context`)
+      } else {
+        setK8sNotice(`Kubeconfig 导入失败：${imported.error}`)
+      }
+      return imported
     } catch (error) {
       const failed: K8sKubeconfigImportResult = {
         success: false,
         contexts: [],
+        kubeconfigPath: '',
         kubeconfigContent: '',
         currentContext: '',
         error: error instanceof Error ? error.message : String(error)

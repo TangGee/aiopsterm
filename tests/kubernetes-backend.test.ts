@@ -5,9 +5,13 @@ import {
   closeKubernetesTerminal,
   createKubernetesTerminal,
   executeKubernetesCommand,
+  importKubernetesKubeconfig,
   resizeKubernetesTerminal,
   testKubernetesClusterConnection
 } from '@shared/kubernetes'
+import { mkdtemp, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
 describe('kubernetes backend boundary', () => {
   beforeEach(() => {
@@ -128,6 +132,57 @@ describe('kubernetes backend boundary', () => {
     await expect(testKubernetesClusterConnection({ contextName: '' })).resolves.toMatchObject({
       ok: false,
       errorCode: 'K8S_TEST_CONTEXT_REQUIRED'
+    })
+  })
+
+  it('imports kubeconfig contexts behind the backend boundary', async () => {
+    const kubeconfigContent = [
+      'apiVersion: v1',
+      'kind: Config',
+      'current-context: qa/dev',
+      'clusters:',
+      '- name: qa-cluster',
+      '  cluster:',
+      '    server: https://qa.k8s.local:6443',
+      'contexts:',
+      '- name: qa/dev',
+      '  context:',
+      '    cluster: qa-cluster',
+      '    namespace: qa'
+    ].join('\n')
+    const fromContent = await importKubernetesKubeconfig({ kubeconfigContent })
+    expect(fromContent).toMatchObject({
+      ok: true,
+      data: {
+        currentContext: 'qa/dev',
+        kubeconfigContent,
+        contexts: [{ name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }]
+      }
+    })
+
+    await expect(testKubernetesClusterConnection({ contextName: 'qa/dev' })).resolves.toMatchObject({
+      ok: true,
+      data: { serverUrl: 'https://qa.k8s.local:6443' }
+    })
+
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-kubeconfig-'))
+    const filePath = join(dir, 'config.yaml')
+    await writeFile(filePath, kubeconfigContent, 'utf-8')
+    await expect(importKubernetesKubeconfig({ kubeconfigPath: filePath })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        kubeconfigPath: filePath,
+        contexts: [{ name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }]
+      }
+    })
+
+    await expect(importKubernetesKubeconfig({})).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_REQUIRED'
+    })
+    await expect(importKubernetesKubeconfig({ kubeconfigContent: 'apiVersion: v1\nkind: Config\n' })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_CONTEXTS_EMPTY'
     })
   })
 

@@ -1845,6 +1845,18 @@ export type KubernetesImportContextInfo = {
   namespace: string
 }
 
+export type KubernetesKubeconfigImportInput = {
+  kubeconfigPath?: string | null
+  kubeconfigContent?: string | null
+}
+
+export type KubernetesKubeconfigImportResult = AiopsMutationResult<{
+  contexts: KubernetesImportContextInfo[]
+  kubeconfigPath: string
+  kubeconfigContent: string
+  currentContext: string
+}>
+
 export type KubernetesBastionGroup = {
   uuid: string
   label: string
@@ -2128,6 +2140,7 @@ export type AiopsPreloadApi = {
   addKubernetesCluster: (input: KubernetesClusterInput) => Promise<KubernetesClusterMutationResult>
   updateKubernetesCluster: (id: string, input: KubernetesClusterUpdateInput) => Promise<KubernetesClusterMutationResult>
   testKubernetesClusterConnection: (input: KubernetesClusterTestInput) => Promise<KubernetesClusterTestResult>
+  importKubernetesKubeconfig: (input: KubernetesKubeconfigImportInput) => Promise<KubernetesKubeconfigImportResult>
   deleteKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>
   connectKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>
   disconnectKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>
