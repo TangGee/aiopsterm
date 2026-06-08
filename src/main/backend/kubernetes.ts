@@ -10,5 +10,6 @@ export {
   resizeKubernetesTerminal,
   switchKubernetesContext,
   syncKubernetesBastion,
+  testKubernetesClusterConnection,
   updateKubernetesCluster
 } from '@shared/kubernetes'

@@ -792,16 +792,22 @@ const K8sAddClusterModal = defineComponent({
         return
       }
       testing.value = true
-      if (store.k8sAddMode === 'manual' && form.kubeconfigContent.trim()) {
-        const parsed = store.importK8sKubeconfigContent(form.kubeconfigContent)
-        if (parsed.success && parsed.contexts.some((context) => context.name === form.contextName)) {
-          applyImportedContexts(parsed.contexts)
+      try {
+        if (store.k8sAddMode === 'manual' && form.kubeconfigContent.trim()) {
+          const parsed = store.importK8sKubeconfigContent(form.kubeconfigContent)
+          if (parsed.success && parsed.contexts.some((context) => context.name === form.contextName)) {
+            applyImportedContexts(parsed.contexts)
+          }
         }
-      }
-      store.testK8sClusterConnection({ contextName: form.contextName, serverUrl: form.serverUrl })
-      window.setTimeout(() => {
+        await store.testK8sClusterConnection({
+          contextName: form.contextName,
+          serverUrl: form.serverUrl,
+          kubeconfigPath: store.k8sAddMode === 'import' ? form.kubeconfigPath : null,
+          kubeconfigContent: form.kubeconfigContent || null
+        })
+      } finally {
         testing.value = false
-      }, 120)
+      }
     }
 
     const submit = async () => {

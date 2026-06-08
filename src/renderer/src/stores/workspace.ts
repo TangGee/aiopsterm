@@ -55,6 +55,7 @@ import type {
   KubernetesBastionGroup,
   KubernetesCatalog,
   KubernetesClusterRecord,
+  KubernetesClusterTestInput,
   KubernetesConnectionStatus,
   KubernetesContextInfo,
   KubernetesImportContextInfo,
@@ -7542,13 +7543,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setK8sNotice(`已发送到 ${cluster.name} 终端`)
   }
 
-  const testK8sClusterConnection = (patch: { contextName?: string; serverUrl?: string }) => {
-    const contextName = patch.contextName?.trim() || ''
-    const context = contextName ? selectK8sImportContext(contextName) : null
-    const serverUrl = patch.serverUrl?.trim() || context?.server || ''
-    const ok = !!(contextName && serverUrl && (!context || context.name === contextName))
+  const testK8sClusterConnection = async (input: Partial<KubernetesClusterTestInput>) => {
+    if (!window.aiops?.testKubernetesClusterConnection) {
+      k8sTestResult.value = false
+      setK8sNotice('Kubernetes cluster test API 不可用')
+      return false
+    }
+    const result = await window.aiops.testKubernetesClusterConnection({
+      contextName: input.contextName || '',
+      serverUrl: input.serverUrl,
+      kubeconfigPath: input.kubeconfigPath,
+      kubeconfigContent: input.kubeconfigContent
+    })
+    const ok = Boolean(result?.ok && result.data?.isValid)
     k8sTestResult.value = ok
-    setK8sNotice(ok ? '连接测试成功' : '连接测试失败，请确认 Context 和 Server URL')
+    setK8sNotice(ok ? result.data?.message || '连接测试成功' : result?.errorMessage || result?.data?.message || '连接测试失败，请确认 Context 和 Server URL')
     return ok
   }
 

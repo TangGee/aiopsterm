@@ -221,6 +221,7 @@ const api: AiopsPreloadApi = {
   switchKubernetesContext: (contextName: string) => ipcRenderer.invoke('kubernetes:context:switch', contextName),
   addKubernetesCluster: (input) => ipcRenderer.invoke('kubernetes:cluster:add', input),
   updateKubernetesCluster: (id: string, input) => ipcRenderer.invoke('kubernetes:cluster:update', id, input),
+  testKubernetesClusterConnection: (input) => ipcRenderer.invoke('kubernetes:cluster:test', input),
   deleteKubernetesCluster: (id: string) => ipcRenderer.invoke('kubernetes:cluster:delete', id),
   connectKubernetesCluster: (id: string) => ipcRenderer.invoke('kubernetes:cluster:connect', id),
   disconnectKubernetesCluster: (id: string) => ipcRenderer.invoke('kubernetes:cluster:disconnect', id),

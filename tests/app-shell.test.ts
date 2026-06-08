@@ -4216,34 +4216,34 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('添加集群')
     expect(workspace.text()).toContain('Context')
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/prod-kubeconfig.yaml'] })
+    const prodKubeconfigContent = [
+      'apiVersion: v1',
+      'kind: Config',
+      'current-context: prod/admin',
+      'clusters:',
+      '- name: prod-cluster',
+      '  cluster:',
+      '    server: https://prod.k8s.local:6443',
+      '- name: staging-cluster',
+      '  cluster:',
+      '    server: https://staging.k8s.local:6443',
+      'contexts:',
+      '- name: prod/admin',
+      '  context:',
+      '    cluster: prod-cluster',
+      '    namespace: default',
+      '- name: staging/devops',
+      '  context:',
+      '    cluster: staging-cluster',
+      '    namespace: staging'
+    ].join('\n')
     vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
-      content: [
-        'apiVersion: v1',
-        'kind: Config',
-        'current-context: prod/admin',
-        'clusters:',
-        '- name: prod-cluster',
-        '  cluster:',
-        '    server: https://prod.k8s.local:6443',
-        '- name: staging-cluster',
-        '  cluster:',
-        '    server: https://staging.k8s.local:6443',
-        'contexts:',
-        '- name: prod/admin',
-        '  context:',
-        '    cluster: prod-cluster',
-        '    namespace: default',
-        '- name: staging/devops',
-        '  context:',
-        '    cluster: staging-cluster',
-        '    namespace: staging'
-      ].join('\n'),
+      content: prodKubeconfigContent,
       mtimeMs: 1717200000000,
       size: 1024
     })
     await workspace.find('.k8s-file-picker-row button').trigger('click')
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
     await workspace.vm.$nextTick()
     expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
       defaultPath: '~/.kube',
@@ -4258,9 +4258,16 @@ describe('AppShell', () => {
     expect(store.k8sImportContexts).toHaveLength(2)
     const testConnectionButton = workspace.find('.k8s-test-connection button')
     expect(testConnectionButton.attributes('disabled')).toBeUndefined()
+    vi.mocked(window.aiops.testKubernetesClusterConnection).mockClear()
     await testConnectionButton.trigger('click')
-    await Promise.resolve()
+    await flushPromises()
     await workspace.vm.$nextTick()
+    expect(window.aiops.testKubernetesClusterConnection).toHaveBeenCalledWith({
+      contextName: 'prod/admin',
+      serverUrl: 'https://prod.k8s.local:6443',
+      kubeconfigPath: '/tmp/prod-kubeconfig.yaml',
+      kubeconfigContent: prodKubeconfigContent
+    })
     expect(store.k8sTestResult).toBe(true)
     await workspace.find('.k8s-add-cluster-modal footer .primary').trigger('click')
     expect(store.k8sClusters.some((cluster) => cluster.name === 'prod-cluster')).toBe(true)

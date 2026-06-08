@@ -1723,6 +1723,21 @@ export type KubernetesClusterUpdateInput = {
   autoConnect?: boolean
 }
 
+export type KubernetesClusterTestInput = {
+  contextName: string
+  serverUrl?: string
+  kubeconfigPath?: string | null
+  kubeconfigContent?: string | null
+}
+
+export type KubernetesClusterTestResult = AiopsMutationResult<{
+  success: boolean
+  isValid: boolean
+  contextName: string
+  serverUrl: string
+  message: string
+}>
+
 export type KubernetesImportContextInfo = {
   name: string
   cluster: string
@@ -1999,6 +2014,7 @@ export type AiopsPreloadApi = {
   switchKubernetesContext: (contextName: string) => Promise<KubernetesContextSwitchResult>
   addKubernetesCluster: (input: KubernetesClusterInput) => Promise<KubernetesClusterMutationResult>
   updateKubernetesCluster: (id: string, input: KubernetesClusterUpdateInput) => Promise<KubernetesClusterMutationResult>
+  testKubernetesClusterConnection: (input: KubernetesClusterTestInput) => Promise<KubernetesClusterTestResult>
   deleteKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>
   connectKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>
   disconnectKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>

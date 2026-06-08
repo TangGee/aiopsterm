@@ -101,6 +101,7 @@ import {
   resizeKubernetesTerminal,
   switchKubernetesContext,
   syncKubernetesBastion,
+  testKubernetesClusterConnection,
   updateKubernetesCluster
 } from './backend/kubernetes'
 import { checkModelProvider, listAiModels } from './backend/modelProviders'
@@ -193,6 +194,7 @@ import type {
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
   KubernetesClusterInput,
+  KubernetesClusterTestInput,
   KubernetesClusterUpdateInput,
   KubernetesCommandInput,
   KubernetesTerminalCreateInput,
@@ -3036,6 +3038,7 @@ const registerIpc = () => {
   ipcMain.handle('kubernetes:context:switch', (_event, contextName: string) => switchKubernetesContext(contextName))
   ipcMain.handle('kubernetes:cluster:add', (_event, input: KubernetesClusterInput) => addKubernetesCluster(input))
   ipcMain.handle('kubernetes:cluster:update', (_event, id: string, input: KubernetesClusterUpdateInput) => updateKubernetesCluster(id, input))
+  ipcMain.handle('kubernetes:cluster:test', (_event, input: KubernetesClusterTestInput) => testKubernetesClusterConnection(input))
   ipcMain.handle('kubernetes:cluster:delete', (_event, id: string) => deleteKubernetesCluster(id))
   ipcMain.handle('kubernetes:cluster:connect', (_event, id: string) => connectKubernetesCluster(id))
   ipcMain.handle('kubernetes:cluster:disconnect', (_event, id: string) => disconnectKubernetesCluster(id))

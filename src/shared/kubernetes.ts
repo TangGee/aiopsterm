@@ -8,6 +8,8 @@ import type {
   KubernetesClusterInput,
   KubernetesClusterMutationResult,
   KubernetesClusterRecord,
+  KubernetesClusterTestInput,
+  KubernetesClusterTestResult,
   KubernetesClusterUpdateInput,
   KubernetesCommandInput,
   KubernetesCommandResult,
@@ -367,6 +369,119 @@ const cloneTerminalRecord = (record: KubernetesTerminalRecord): KubernetesTermin
 
 const findTerminalSession = (id: string) => terminalSessions.find((session) => session.id === id || session.sessionId === id)
 
+const stripYamlScalar = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const withoutComment = trimmed.replace(/\s+#.*$/, '').trim()
+  if ((withoutComment.startsWith('"') && withoutComment.endsWith('"')) || (withoutComment.startsWith("'") && withoutComment.endsWith("'"))) {
+    return withoutComment.slice(1, -1)
+  }
+  return withoutComment
+}
+
+const yamlValueAfter = (line: string, key: string) => {
+  const match = line.match(new RegExp(`^\\s*${key}\\s*:\\s*(.*)$`))
+  return match ? stripYamlScalar(match[1]) : ''
+}
+
+const parseKubeconfigContexts = (content: string) => {
+  const lines = content.split(/\r?\n/)
+  const parsedClusters = new Map<string, string>()
+  const parsedContexts: KubernetesImportContextInfo[] = []
+  let section: 'clusters' | 'contexts' | '' = ''
+  let clusterName = ''
+  let contextName = ''
+  let contextCluster = ''
+  let contextNamespace = ''
+
+  const flushContext = () => {
+    if (!contextName || !contextCluster) return
+    parsedContexts.push({
+      name: contextName,
+      cluster: contextCluster,
+      server: parsedClusters.get(contextCluster) || '',
+      namespace: contextNamespace || 'default'
+    })
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\t/g, '  ')
+    if (/^\s*clusters\s*:\s*$/.test(line)) {
+      flushContext()
+      section = 'clusters'
+      clusterName = ''
+      contextName = ''
+      contextCluster = ''
+      contextNamespace = ''
+      continue
+    }
+    if (/^\s*contexts\s*:\s*$/.test(line)) {
+      flushContext()
+      section = 'contexts'
+      clusterName = ''
+      contextName = ''
+      contextCluster = ''
+      contextNamespace = ''
+      continue
+    }
+    if (/^\s*(users|preferences|apiVersion|kind)\s*:/.test(line)) {
+      if (section === 'contexts') flushContext()
+      section = ''
+      clusterName = ''
+      contextName = ''
+      contextCluster = ''
+      contextNamespace = ''
+      continue
+    }
+    if (section === 'clusters') {
+      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
+      if (listName) {
+        clusterName = stripYamlScalar(listName[1])
+        if (!parsedClusters.has(clusterName)) parsedClusters.set(clusterName, '')
+        continue
+      }
+      const server = yamlValueAfter(line, 'server')
+      if (clusterName && server) parsedClusters.set(clusterName, server)
+      continue
+    }
+    if (section === 'contexts') {
+      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
+      if (listName) {
+        flushContext()
+        contextName = stripYamlScalar(listName[1])
+        contextCluster = ''
+        contextNamespace = ''
+        continue
+      }
+      const cluster = yamlValueAfter(line, 'cluster')
+      if (contextName && cluster) {
+        contextCluster = cluster
+        continue
+      }
+      const namespace = yamlValueAfter(line, 'namespace')
+      if (contextName && namespace) contextNamespace = namespace
+    }
+  }
+  if (section === 'contexts') flushContext()
+
+  return parsedContexts.filter((context, index, list) => list.findIndex((item) => item.name === context.name) === index)
+}
+
+const findKubernetesTestContext = (contextName: string): KubernetesImportContextInfo | null => {
+  const imported = importContexts.find((context) => context.name === contextName)
+  if (imported) return { ...imported }
+  const listed = contexts.find((context) => context.name === contextName)
+  if (listed) return { name: listed.name, cluster: listed.cluster, server: listed.server, namespace: listed.namespace }
+  const cluster = clusters.find((item) => item.context_name === contextName)
+  if (!cluster) return null
+  return {
+    name: cluster.context_name,
+    cluster: cluster.name,
+    server: cluster.server_url,
+    namespace: cluster.default_namespace || 'default'
+  }
+}
+
 const upsertContextForCluster = (cluster: KubernetesClusterRecord, isActive = cluster.is_active === 1) => {
   const context: KubernetesContextInfo = {
     name: cluster.context_name,
@@ -400,6 +515,37 @@ export const switchKubernetesContext = async (contextName: string): Promise<Kube
       currentContext: name
     }
   })
+
+export const testKubernetesClusterConnection = async (input: KubernetesClusterTestInput): Promise<KubernetesClusterTestResult> =>
+  asResult(() => {
+    const contextName = input.contextName?.trim() || ''
+    const requestedServerUrl = input.serverUrl?.trim() || ''
+    if (!contextName) {
+      throw Object.assign(new Error('Kubernetes context is required.'), { code: 'K8S_TEST_CONTEXT_REQUIRED' })
+    }
+
+    const content = input.kubeconfigContent?.trim() || ''
+    const parsedContexts = content ? parseKubeconfigContexts(content) : []
+    const context = content ? parsedContexts.find((item) => item.name === contextName) || null : findKubernetesTestContext(contextName)
+    if (content && !context) {
+      throw Object.assign(new Error('Kubernetes context not found in kubeconfig content.'), { code: 'K8S_TEST_CONTEXT_NOT_FOUND' })
+    }
+    const serverUrl = requestedServerUrl || context?.server || ''
+    if (!serverUrl) {
+      throw Object.assign(new Error('Kubernetes server URL is required.'), { code: 'K8S_TEST_SERVER_REQUIRED' })
+    }
+    if (context?.server && requestedServerUrl && context.server !== requestedServerUrl) {
+      throw Object.assign(new Error('Kubernetes server URL does not match the selected context.'), { code: 'K8S_TEST_SERVER_MISMATCH' })
+    }
+
+    return {
+      success: true,
+      isValid: true,
+      contextName,
+      serverUrl,
+      message: '连接测试成功'
+    }
+  }, 'K8S_TEST_FAILED')
 
 export const addKubernetesCluster = async (input: KubernetesClusterInput): Promise<KubernetesClusterMutationResult> =>
   asResult(() => {

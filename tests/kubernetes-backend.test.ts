@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { __resetKubernetesCatalogForTests, closeKubernetesTerminal, createKubernetesTerminal, executeKubernetesCommand, resizeKubernetesTerminal } from '@shared/kubernetes'
+import {
+  __resetKubernetesCatalogForTests,
+  closeKubernetesTerminal,
+  createKubernetesTerminal,
+  executeKubernetesCommand,
+  resizeKubernetesTerminal,
+  testKubernetesClusterConnection
+} from '@shared/kubernetes'
 
 describe('kubernetes backend boundary', () => {
   beforeEach(() => {
@@ -72,6 +79,55 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods -A')
     expect(result.data?.terminalOutput).toContain('ops\tbilling-worker-7f9d6f9dd9-rx8mm')
     expect(result.data?.durationMs).toBeGreaterThan(0)
+  })
+
+  it('tests add-cluster context validity through backend boundary', async () => {
+    await expect(testKubernetesClusterConnection({ contextName: 'prod/admin' })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        success: true,
+        isValid: true,
+        contextName: 'prod/admin',
+        serverUrl: 'https://prod.k8s.local:6443',
+        message: '连接测试成功'
+      }
+    })
+
+    const qaKubeconfigContent = [
+      'apiVersion: v1',
+      'kind: Config',
+      'clusters:',
+      '- name: qa-cluster',
+      '  cluster:',
+      '    server: https://qa.k8s.local:6443',
+      'contexts:',
+      '- name: qa/dev',
+      '  context:',
+      '    cluster: qa-cluster',
+      '    namespace: qa'
+    ].join('\n')
+    const fromContent = await testKubernetesClusterConnection({
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      kubeconfigContent: qaKubeconfigContent
+    })
+    expect(fromContent).toMatchObject({
+      ok: true,
+      data: {
+        isValid: true,
+        contextName: 'qa/dev',
+        serverUrl: 'https://qa.k8s.local:6443'
+      }
+    })
+
+    await expect(testKubernetesClusterConnection({ contextName: 'qa/dev', serverUrl: 'https://wrong.k8s.local:6443', kubeconfigContent: qaKubeconfigContent })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_TEST_SERVER_MISMATCH'
+    })
+    await expect(testKubernetesClusterConnection({ contextName: '' })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_TEST_CONTEXT_REQUIRED'
+    })
   })
 
   it('returns pod logs with backend status details', async () => {

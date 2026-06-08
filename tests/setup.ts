@@ -2176,6 +2176,92 @@ const upsertKubernetesContextMock = (cluster: TestKubernetesCluster, isActive = 
 
 const findKubernetesClusterMock = (id: string) => kubernetesCatalogMock.clusters.find((cluster) => cluster.id === id) || null
 
+const findKubernetesTestContextMock = (contextName: string) => {
+  const imported = kubernetesCatalogMock.importContexts.find((context) => context.name === contextName)
+  if (imported) return imported
+  const context = kubernetesCatalogMock.contexts.find((item) => item.name === contextName)
+  if (context) return { name: context.name, cluster: context.cluster, server: context.server, namespace: context.namespace }
+  const cluster = kubernetesCatalogMock.clusters.find((item) => item.context_name === contextName)
+  if (!cluster) return null
+  return {
+    name: cluster.context_name,
+    cluster: cluster.name,
+    server: cluster.server_url,
+    namespace: cluster.default_namespace
+  }
+}
+
+const parseKubernetesContextFromContentMock = (content: string, contextName: string) => {
+  const lines = content.split(/\r?\n/)
+  const clusters = new Map<string, string>()
+  let section = ''
+  let clusterName = ''
+  let activeContext = ''
+  let activeCluster = ''
+  let activeNamespace = ''
+
+  const valueAfter = (line: string, key: string) => {
+    const match = line.match(new RegExp(`^\\s*${key}\\s*:\\s*(.*)$`))
+    return trimMock(match?.[1]).replace(/^['"]|['"]$/g, '')
+  }
+  const flushContext = () => {
+    if (!activeContext || activeContext !== contextName || !activeCluster) return null
+    return {
+      name: activeContext,
+      cluster: activeCluster,
+      server: clusters.get(activeCluster) || '',
+      namespace: activeNamespace || 'default'
+    }
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\t/g, '  ')
+    if (/^\s*clusters\s*:\s*$/.test(line)) {
+      section = 'clusters'
+      clusterName = ''
+      activeContext = ''
+      activeCluster = ''
+      activeNamespace = ''
+      continue
+    }
+    if (/^\s*contexts\s*:\s*$/.test(line)) {
+      section = 'contexts'
+      clusterName = ''
+      activeContext = ''
+      activeCluster = ''
+      activeNamespace = ''
+      continue
+    }
+    if (section === 'clusters') {
+      const name = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
+      if (name) {
+        clusterName = trimMock(name[1])
+        clusters.set(clusterName, '')
+        continue
+      }
+      const server = valueAfter(line, 'server')
+      if (clusterName && server) clusters.set(clusterName, server)
+      continue
+    }
+    if (section === 'contexts') {
+      const name = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
+      if (name) {
+        const flushed = flushContext()
+        if (flushed) return flushed
+        activeContext = trimMock(name[1])
+        activeCluster = ''
+        activeNamespace = ''
+        continue
+      }
+      const cluster = valueAfter(line, 'cluster')
+      if (cluster) activeCluster = cluster
+      const namespace = valueAfter(line, 'namespace')
+      if (namespace) activeNamespace = namespace
+    }
+  }
+  return flushContext()
+}
+
 const defaultShortcuts = [
   { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
   { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
@@ -4415,6 +4501,30 @@ Object.defineProperty(window, 'aiops', {
       kubernetesCatalogMock.clusters = kubernetesCatalogMock.clusters.map((cluster) => (cluster.id === id ? updated : cluster))
       upsertKubernetesContextMock(updated)
       return k8sCatalogResultMock({ cluster: { ...updated } })
+    }),
+    testKubernetesClusterConnection: vi.fn(async (input: { contextName: string; serverUrl?: string; kubeconfigPath?: string | null; kubeconfigContent?: string | null }) => {
+      const contextName = trimMock(input.contextName)
+      const requestedServerUrl = trimMock(input.serverUrl)
+      if (!contextName) return { ok: false, errorCode: 'K8S_TEST_CONTEXT_REQUIRED', errorMessage: 'Kubernetes context is required.' }
+      const context = input.kubeconfigContent
+        ? parseKubernetesContextFromContentMock(input.kubeconfigContent, contextName)
+        : findKubernetesTestContextMock(contextName)
+      const serverUrl = requestedServerUrl || context?.server || ''
+      if (!context) return { ok: false, errorCode: 'K8S_TEST_CONTEXT_NOT_FOUND', errorMessage: 'Kubernetes context not found.' }
+      if (!serverUrl) return { ok: false, errorCode: 'K8S_TEST_SERVER_REQUIRED', errorMessage: 'Kubernetes server URL is required.' }
+      if (context.server && requestedServerUrl && context.server !== requestedServerUrl) {
+        return { ok: false, errorCode: 'K8S_TEST_SERVER_MISMATCH', errorMessage: 'Kubernetes server URL does not match the selected context.' }
+      }
+      return {
+        ok: true,
+        data: {
+          success: true,
+          isValid: true,
+          contextName,
+          serverUrl,
+          message: '连接测试成功'
+        }
+      }
     }),
     deleteKubernetesCluster: vi.fn(async (id: string) => {
       const existing = findKubernetesClusterMock(id)

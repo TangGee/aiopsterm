@@ -3916,7 +3916,7 @@ describe('workspace store', () => {
     expect(store.k8sAgentStatus).toBe('idle')
     expect(store.k8sAgentCurrentCluster.clusterId).toBeNull()
 
-    const importResult = store.importK8sKubeconfigContent([
+    const qaKubeconfigContent = [
       'apiVersion: v1',
       'kind: Config',
       'current-context: qa/dev',
@@ -3929,14 +3929,21 @@ describe('workspace store', () => {
       '  context:',
       '    cluster: qa-cluster',
       '    namespace: qa'
-    ].join('\n'))
+    ].join('\n')
+    const importResult = store.importK8sKubeconfigContent(qaKubeconfigContent)
     expect(importResult.success).toBe(true)
     expect(importResult.currentContext).toBe('qa/dev')
     expect(store.k8sImportContexts).toEqual([
       { name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }
     ])
-    expect(store.testK8sClusterConnection({ contextName: 'qa/dev' })).toBe(true)
-    expect(store.testK8sClusterConnection({ contextName: 'missing/dev' })).toBe(false)
+    expect(await store.testK8sClusterConnection({ contextName: 'qa/dev', serverUrl: 'https://qa.k8s.local:6443', kubeconfigContent: qaKubeconfigContent })).toBe(true)
+    expect(window.aiops.testKubernetesClusterConnection).toHaveBeenLastCalledWith({
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      kubeconfigPath: undefined,
+      kubeconfigContent: qaKubeconfigContent
+    })
+    expect(await store.testK8sClusterConnection({ contextName: 'missing/dev', kubeconfigContent: qaKubeconfigContent })).toBe(false)
     vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
       content: [
         'apiVersion: v1',
