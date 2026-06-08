@@ -65,6 +65,36 @@ export type AiopsAssetType = 'person' | 'organization' | 'switch'
 
 export type AiopsAssetAuthType = 'password' | 'keyBased'
 
+export type AiopsSshTunnelType = 'local_forward' | 'remote_forward' | 'dynamic_socks'
+
+export type AiopsSshTunnelState = 'created' | 'active'
+
+export type AiopsSshTunnelStartInput = {
+  assetId: string
+  type?: AiopsSshTunnelType
+  localPort?: number
+  remoteHost?: string
+  remotePort?: number
+  tunnelId?: string
+}
+
+export type AiopsSshTunnelStopInput = {
+  assetId?: string
+  tunnelId?: string
+}
+
+export type AiopsSshTunnelRecord = {
+  assetId: string
+  tunnelId: string
+  type: AiopsSshTunnelType
+  state: AiopsSshTunnelState
+  localPort?: number
+  remoteHost?: string
+  remotePort?: number
+  startedAt?: string
+  stoppedAt?: string
+}
+
 export type AiopsAssetRecord = {
   id: string
   uuid: string
@@ -85,7 +115,7 @@ export type AiopsAssetRecord = {
   favorite?: boolean
   folderUuid?: string
   organizationId?: string
-  tunnelState?: 'created' | 'active'
+  tunnelState?: AiopsSshTunnelState
   needProxy?: boolean
   proxyName?: string
   keychainId?: string
@@ -133,7 +163,7 @@ export type AiopsAssetInput = {
   favorite?: boolean
   folderUuid?: string
   organizationId?: string
-  tunnelState?: 'created' | 'active'
+  tunnelState?: AiopsSshTunnelState
   needProxy?: boolean
   proxyName?: string
   keychainId?: string
@@ -200,6 +230,13 @@ export type AiopsMutationResult<T> = {
   errorCode?: string
   errorMessage?: string
 }
+
+export type AiopsSshTunnelMutationResult = AiopsMutationResult<
+  AiopsAssetSnapshot & {
+    tunnel: AiopsSshTunnelRecord
+    message: string
+  }
+>
 
 export type FileSessionKind = 'local' | 'remote'
 
@@ -2023,6 +2060,8 @@ export type AiopsPreloadApi = {
   saveAsset: (asset: AiopsAssetInput) => Promise<AiopsMutationResult<AiopsAssetRecord>>
   deleteAsset: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
   refreshOrganizationAssets: (input?: AiopsOrganizationAssetRefreshInput) => Promise<AiopsOrganizationAssetRefreshResult>
+  startSshTunnel: (input: AiopsSshTunnelStartInput) => Promise<AiopsSshTunnelMutationResult>
+  stopSshTunnel: (input: AiopsSshTunnelStopInput) => Promise<AiopsSshTunnelMutationResult>
   saveAssetFolder: (folder: AiopsCustomFolderSaveInput) => Promise<AiopsMutationResult<AiopsCustomFolderRecord>>
   deleteAssetFolder: (uuid: string) => Promise<AiopsMutationResult<{ uuid: string }>>
   listKeychains: () => Promise<AiopsKeychainRecord[]>

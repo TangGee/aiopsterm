@@ -128,6 +128,7 @@ import {
   saveSettingsRule,
   saveSettingsShortcut
 } from './backend/settingsPreferences'
+import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { generateTerminalCommand, getTerminalCommandSuggestions } from './backend/terminalSuggestions'
 import { createSshTerminalConnectionInfo, createTerminalKillResult, createTerminalWriteResult } from './backend/terminal'
 import {
@@ -237,7 +238,9 @@ import type {
   UserRuleConfig,
   AiopsAssetGroupDeleteInput,
   AiopsAssetGroupListInput,
-  AiopsAssetGroupRenameInput
+  AiopsAssetGroupRenameInput,
+  AiopsSshTunnelStartInput,
+  AiopsSshTunnelStopInput
 } from '@shared/preload'
 import type { ClientChannel } from 'ssh2'
 
@@ -2519,6 +2522,8 @@ const registerIpc = () => {
   ipcMain.handle('assets:save', (_event, asset: AiopsAssetInput) => saveAsset(asset))
   ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
   ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))
+  ipcMain.handle('ssh:tunnel:start', (_event, input: AiopsSshTunnelStartInput) => startSshTunnel(input))
+  ipcMain.handle('ssh:tunnel:stop', (_event, input: AiopsSshTunnelStopInput) => stopSshTunnel(input))
   ipcMain.handle('assets:folder:save', (_event, folder: AiopsCustomFolderSaveInput) => saveAssetFolder(folder))
   ipcMain.handle('assets:folder:delete', (_event, uuid: string) => deleteAssetFolder(uuid))
   ipcMain.handle('assets:keychains:list', () => listKeychains())

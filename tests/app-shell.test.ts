@@ -1048,10 +1048,39 @@ describe('AppShell', () => {
     await hostRow('staging-api').trigger('contextmenu')
     expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
     vi.mocked(window.aiops.saveAsset).mockClear()
+    vi.mocked(window.aiops.stopSshTunnel).mockClear()
+    const originalStopSshTunnel = window.aiops.stopSshTunnel
+    ;(window.aiops as any).stopSshTunnel = undefined
     await contextButton('隧道').trigger('click')
     await flushPromises()
     expect(window.aiops.saveAsset).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('隧道运行时服务尚未接入，未修改主机状态')
+    expect(originalStopSshTunnel).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('隧道运行时服务不可用')
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
+    ;(window.aiops as any).stopSshTunnel = originalStopSshTunnel
+
+    await hostRow('staging-api').trigger('contextmenu')
+    vi.mocked(window.aiops.stopSshTunnel).mockResolvedValueOnce({ ok: false, errorCode: 'SSH_TUNNEL_STOP_FAILED', errorMessage: 'tunnel daemon offline' })
+    await contextButton('隧道').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+    expect(window.aiops.stopSshTunnel).toHaveBeenCalledWith({ assetId: 'asset-2' })
+    expect(wrapper.text()).toContain('tunnel daemon offline')
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
+
+    await hostRow('staging-api').trigger('contextmenu')
+    await contextButton('隧道').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('隧道已停止 staging-api')
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已创建')
+
+    vi.mocked(window.aiops.startSshTunnel).mockClear()
+    await hostRow('staging-api').trigger('contextmenu')
+    await contextButton('隧道').trigger('click')
+    await flushPromises()
+    expect(window.aiops.startSshTunnel).toHaveBeenCalledWith({ assetId: 'asset-2' })
+    expect(wrapper.text()).toContain('隧道已连接 staging-api')
     expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
 
     await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')

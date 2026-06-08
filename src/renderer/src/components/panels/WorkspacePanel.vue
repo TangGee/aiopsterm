@@ -689,7 +689,8 @@ import type {
   AiopsAssetSnapshot,
   AiopsAssetType,
   AiopsCustomFolderRecord,
-  AiopsCustomFolderSaveInput
+  AiopsCustomFolderSaveInput,
+  AiopsSshTunnelMutationResult
 } from '@shared/preload'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -1354,12 +1355,35 @@ const cancelComment = () => {
   editingComment.value = ''
 }
 
-const toggleTunnel = () => {
+const applyTunnelResult = (result: AiopsSshTunnelMutationResult, fallbackMessage: string) => {
+  if (!result.ok || !result.data) throw new Error(result.errorMessage || fallbackMessage)
+  applyWorkspaceAssetSnapshot(result.data)
+  notice.value = result.data.message || fallbackMessage
+}
+
+const toggleTunnel = async () => {
   const asset = findEditableAsset(contextMenuAssetId.value || '')
-  if (asset) {
-    notice.value = '隧道运行时服务尚未接入，未修改主机状态'
-  }
   closeContextMenu()
+  if (!asset) return
+  try {
+    if (asset.tunnelState === 'active') {
+      const stopTunnel = window.aiops?.stopSshTunnel
+      if (typeof stopTunnel !== 'function') {
+        notice.value = '隧道运行时服务不可用'
+        return
+      }
+      applyTunnelResult(await stopTunnel({ assetId: asset.id }), '隧道停止失败')
+      return
+    }
+    const startTunnel = window.aiops?.startSshTunnel
+    if (typeof startTunnel !== 'function') {
+      notice.value = '隧道运行时服务不可用'
+      return
+    }
+    applyTunnelResult(await startTunnel({ assetId: asset.id }), '隧道连接失败')
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '隧道运行失败'
+  }
 }
 
 const openMoveModal = (assetId: string) => {

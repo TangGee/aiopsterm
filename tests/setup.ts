@@ -2636,6 +2636,20 @@ type TestAssetRecord = {
   isLocalShell?: boolean
 }
 
+type TestSshTunnelType = 'local_forward' | 'remote_forward' | 'dynamic_socks'
+
+type TestSshTunnelRecord = {
+  assetId: string
+  tunnelId: string
+  type: TestSshTunnelType
+  state: 'created' | 'active'
+  localPort?: number
+  remoteHost?: string
+  remotePort?: number
+  startedAt?: string
+  stoppedAt?: string
+}
+
 type TestAssetInput = Partial<TestAssetRecord> & {
   name: string
   host: string
@@ -3076,6 +3090,7 @@ let assetStoreMock = defaultAssets.map(cloneAsset)
 let assetFolderStoreMock = defaultAssetFolders.map(cloneAssetFolder)
 let assetFolderSequenceMock = 1
 let keychainStoreMock = defaultKeychains.map(cloneKeychain)
+let sshTunnelStoreMock = new Map<string, TestSshTunnelRecord>()
 let quickCommandStoreMock = cloneQuickCommands()
 let quickCommandGroupSequenceMock = 1
 let quickCommandSnippetSequenceMock = 1
@@ -3254,6 +3269,7 @@ const resetAssetStoreMock = () => {
   assetFolderStoreMock = defaultAssetFolders.map(cloneAssetFolder)
   assetFolderSequenceMock = 1
   keychainStoreMock = defaultKeychains.map(cloneKeychain)
+  sshTunnelStoreMock = new Map()
   quickCommandStoreMock = cloneQuickCommands()
   quickCommandGroupSequenceMock = 1
   quickCommandSnippetSequenceMock = 1
@@ -3371,6 +3387,40 @@ const normalizeAssetInputMock = (input: TestAssetInput, existing?: TestAssetReco
     hasPrivateKey: Boolean(input.privateKey || input.keychainId || input.hasPrivateKey || existing?.hasPrivateKey)
   }
 }
+
+const assetSnapshotMock = () => ({
+  assets: assetStoreMock.map(cloneAsset),
+  folders: assetFolderStoreMock.map(cloneAssetFolder)
+})
+
+const normalizeSshTunnelTypeMock = (type?: TestSshTunnelType): TestSshTunnelType =>
+  type === 'local_forward' || type === 'remote_forward' || type === 'dynamic_socks' ? type : 'local_forward'
+
+const setAssetTunnelStateMock = (assetId: string, tunnelState: TestAssetRecord['tunnelState']) => {
+  const asset = assetStoreMock.find((item) => item.id === assetId)
+  if (!asset) return null
+  const nextAsset = { ...asset, tunnelState }
+  assetStoreMock = assetStoreMock.map((item) => (item.id === assetId ? nextAsset : item))
+  return nextAsset
+}
+
+const findTunnelAssetMock = (assetId?: string) => {
+  const id = String(assetId || '').trim()
+  const asset = assetStoreMock.find((item) => item.id === id)
+  if (!asset) return null
+  if (asset.isLocalShell) throw new Error('本地连接不支持 SSH 隧道')
+  if (asset.asset_type !== 'person') throw new Error('只有 SSH 主机资产支持隧道')
+  return asset
+}
+
+const tunnelResultMock = (tunnel: TestSshTunnelRecord, message: string) => ({
+  ok: true as const,
+  data: {
+    ...assetSnapshotMock(),
+    tunnel: { ...tunnel },
+    message
+  }
+})
 
 const refreshedAssetForOrganizationMock = (organization: TestAssetRecord, index: number): TestAssetInput => {
   const baseName = organization.title || organization.name || organization.host || 'organization'
@@ -4304,10 +4354,7 @@ Object.defineProperty(window, 'aiops', {
     kbSearchStatus: vi.fn(async () => ({ totalFiles: 3, totalChunks: 3, provider: 'aiopsterm-local', model: 'lexical', updatedAt: 1717200000000 })),
     kbReindex: vi.fn(async () => ({ files: 3, chunks: 3 })),
     onKbTransferProgress: vi.fn(() => () => undefined),
-    listAssets: vi.fn(async () => ({
-      assets: assetStoreMock.map(cloneAsset),
-      folders: assetFolderStoreMock.map(cloneAssetFolder)
-    })),
+    listAssets: vi.fn(async () => assetSnapshotMock()),
     listAssetGroups: vi.fn(async (input?: { assetTypes?: TestAssetRecord['asset_type'][] }) => listAssetGroupsMock(input)),
     renameAssetGroup: vi.fn(async (input: { oldName: string; newName: string; assetTypes?: TestAssetRecord['asset_type'][] }) => {
       const oldName = String(input.oldName || '').trim()
@@ -4376,6 +4423,58 @@ Object.defineProperty(window, 'aiops', {
           refreshed: created + updated,
           created,
           updated
+        }
+      }
+    }),
+    startSshTunnel: vi.fn(
+      async (input: { assetId: string; type?: TestSshTunnelType; localPort?: number; remoteHost?: string; remotePort?: number; tunnelId?: string }) => {
+        try {
+          const asset = findTunnelAssetMock(input.assetId)
+          if (!asset) return { ok: false, errorCode: 'SSH_TUNNEL_ASSET_NOT_FOUND', errorMessage: '隧道主机不存在' }
+          const tunnel: TestSshTunnelRecord = {
+            assetId: asset.id,
+            tunnelId: String(input.tunnelId || `tunnel-${asset.id}`),
+            type: normalizeSshTunnelTypeMock(input.type),
+            state: 'active',
+            ...(Number.isFinite(input.localPort) ? { localPort: Number(input.localPort) } : {}),
+            remoteHost: String(input.remoteHost || asset.host || asset.ip).trim(),
+            remotePort: Number.isFinite(input.remotePort) ? Number(input.remotePort) : asset.port,
+            startedAt: new Date(1717200000000).toISOString()
+          }
+          sshTunnelStoreMock.set(tunnel.tunnelId, tunnel)
+          setAssetTunnelStateMock(asset.id, 'active')
+          return tunnelResultMock(tunnel, `隧道已连接 ${asset.name}`)
+        } catch (error) {
+          return {
+            ok: false,
+            errorCode: 'SSH_TUNNEL_START_FAILED',
+            errorMessage: error instanceof Error ? error.message : String(error)
+          }
+        }
+      }
+    ),
+    stopSshTunnel: vi.fn(async (input: { assetId?: string; tunnelId?: string }) => {
+      try {
+        const assetId = String(input.assetId || '').trim()
+        const tunnelId = String(input.tunnelId || `tunnel-${assetId}`)
+        const activeTunnel = sshTunnelStoreMock.get(tunnelId)
+        const asset = findTunnelAssetMock(assetId || activeTunnel?.assetId)
+        if (!asset) return { ok: false, errorCode: 'SSH_TUNNEL_ASSET_NOT_FOUND', errorMessage: '隧道主机不存在' }
+        const tunnel: TestSshTunnelRecord = {
+          ...(activeTunnel || { assetId: asset.id, tunnelId, type: 'local_forward' as const }),
+          assetId: asset.id,
+          tunnelId,
+          state: 'created',
+          stoppedAt: new Date(1717200001000).toISOString()
+        }
+        sshTunnelStoreMock.delete(tunnelId)
+        setAssetTunnelStateMock(asset.id, 'created')
+        return tunnelResultMock(tunnel, `隧道已停止 ${asset.name}`)
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: 'SSH_TUNNEL_STOP_FAILED',
+          errorMessage: error instanceof Error ? error.message : String(error)
         }
       }
     }),
