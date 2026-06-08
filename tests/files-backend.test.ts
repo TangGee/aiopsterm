@@ -760,6 +760,86 @@ describe('files backend content boundary', () => {
         { method: 'writeFile', path: '/srv/archive/app-copy.log', content: 'hello log\n' }
       ])
     )
+    expect(ssh2Mock.calls.filter((call) => call.method === 'readFile' && call.path === '/srv/archive/app-copy.log')).toHaveLength(0)
+  })
+
+  it('accounts asset-backed remote copy bytes without reading copied content as text', async () => {
+    const sessionId = saveSftpAsset()
+    const binary = Buffer.from([255, 128, 0, 65, 10])
+    ssh2Mock.nodes.set('/srv/archive/source.bin', { type: 'file', content: binary, mode: 0o100600, mtime: 1_717_200_400 })
+
+    const copied = await transferFileEntry(
+      { kind: 'copy-remote', remotePath: '/srv/archive/source.bin', targetPath: '/srv/archive/copied.bin' },
+      { kind: 'remote', sessionId, fromHost: 'sftp-source', toHost: 'sftp-target' }
+    )
+
+    expect(copied.ok).toBe(true)
+    expect(copied.data).toEqual(
+      expect.objectContaining({
+        status: 'success',
+        source: '/srv/archive/source.bin',
+        target: '/srv/archive/copied.bin',
+        bytes: binary.length,
+        files: 1,
+        itemKind: 'file',
+        task: expect.objectContaining({
+          type: 'r2r',
+          name: 'source.bin',
+          source: '/srv/archive/source.bin',
+          target: '/srv/archive/copied.bin',
+          fromHost: 'sftp-source',
+          toHost: 'sftp-target',
+          status: 'success'
+        })
+      })
+    )
+    expect(ssh2Mock.nodes.get('/srv/archive/copied.bin')?.content).toEqual(binary)
+    expect(ssh2Mock.calls.filter((call) => call.method === 'readFile' && call.path === '/srv/archive/copied.bin')).toHaveLength(0)
+  })
+
+  it('accounts asset-backed remote directory copies from SFTP stats', async () => {
+    const sessionId = saveSftpAsset()
+    const nestedBytes = Buffer.from([0, 1, 2, 255])
+    ssh2Mock.nodes.set('/srv/logs/nested', { type: 'directory', mode: 0o040755, mtime: 1_717_200_400 })
+    ssh2Mock.nodes.set('/srv/logs/nested/trace.bin', { type: 'file', content: nestedBytes, mode: 0o100600, mtime: 1_717_200_400 })
+
+    const copied = await transferFileEntry(
+      { kind: 'copy-remote', remotePath: '/srv/logs', targetPath: '/srv/archive/logs-copy' },
+      { kind: 'remote', sessionId, fromHost: 'sftp-source', toHost: 'sftp-target' }
+    )
+
+    expect(copied.ok).toBe(true)
+    expect(copied.data).toEqual(
+      expect.objectContaining({
+        status: 'success',
+        source: '/srv/logs',
+        target: '/srv/archive/logs-copy',
+        bytes: 14,
+        files: 2,
+        itemKind: 'directory',
+        task: expect.objectContaining({
+          type: 'r2r',
+          name: 'logs',
+          source: '/srv/logs',
+          target: '/srv/archive/logs-copy',
+          stage: 'scanning',
+          isGroup: true,
+          totalFiles: 2,
+          finishedFiles: 2,
+          fromHost: 'sftp-source',
+          toHost: 'sftp-target',
+          status: 'success',
+          children: expect.arrayContaining([
+            expect.objectContaining({ type: 'r2r', name: 'app.log', source: '/srv/logs/app.log', target: '/srv/archive/logs-copy/app.log' }),
+            expect.objectContaining({ type: 'r2r', name: 'trace.bin', source: '/srv/logs/nested/trace.bin', target: '/srv/archive/logs-copy/nested/trace.bin' })
+          ])
+        })
+      })
+    )
+    expect(ssh2Mock.nodes.get('/srv/archive/logs-copy')?.type).toBe('directory')
+    expect(ssh2Mock.nodes.get('/srv/archive/logs-copy/app.log')?.content?.toString('utf-8')).toBe('hello log\n')
+    expect(ssh2Mock.nodes.get('/srv/archive/logs-copy/nested/trace.bin')?.content).toEqual(nestedBytes)
+    expect(ssh2Mock.calls.filter((call) => call.method === 'readFile' && call.path === '/srv/archive/logs-copy')).toHaveLength(0)
   })
 
   it('uploads and downloads asset-backed remote transfer entries through binary-safe SFTP operations', async () => {

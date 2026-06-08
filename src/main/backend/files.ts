@@ -342,6 +342,40 @@ const copyRemotePathViaSftp = async (sftp: SFTPWrapper, sourcePath: string, targ
   }
 }
 
+const collectRemoteCopyStatsViaSftp = async (
+  sftp: SFTPWrapper,
+  sourcePath: string,
+  targetPath: string,
+  options: FileListOptions
+): Promise<RemoteCopyTransferStats> => {
+  const stats = await sftpStat(sftp, sourcePath)
+  if (sftpEntryType(stats) !== 'directory') {
+    return { bytes: Number(stats.size || 0), fileCount: 1, itemKind: 'file', children: [] }
+  }
+
+  const result: RemoteCopyTransferStats = { bytes: 0, fileCount: 0, itemKind: 'directory', children: [] }
+  const collect = async (remoteDir: string, copiedDir: string) => {
+    const rows = (await sftpReaddir(sftp, remoteDir))
+      .filter((row) => row.filename !== '.' && row.filename !== '..')
+      .sort((left, right) => left.filename.localeCompare(right.filename))
+    for (const row of rows) {
+      const sourceChild = normalizeRemotePath(`${remoteDir}/${row.filename}`)
+      const targetChild = normalizeRemotePath(`${copiedDir}/${row.filename}`)
+      const rowType = sftpEntryType(row.attrs as Partial<SftpStats>)
+      if (rowType === 'directory') {
+        await collect(sourceChild, targetChild)
+        continue
+      }
+      const bytes = Number((row.attrs as Partial<SftpStats>)?.size || 0)
+      result.bytes += bytes
+      result.fileCount += 1
+      result.children.push(remoteCopyChildTask(row.filename, sourceChild, targetChild, options))
+    }
+  }
+  await collect(sourcePath, targetPath)
+  return result
+}
+
 const listRemoteFilesViaSftp = async (directory: string, options: FileListOptions): Promise<FileListEntry[] | null> => {
   const target = resolveRemoteSftpTarget(options)
   if (!target) return null
@@ -635,6 +669,48 @@ const fileTransferTaskHosts = (options: FileListOptions) => ({
   ...(transferFromHost(options) ? { fromHost: transferFromHost(options) } : {}),
   ...(transferToHost(options) ? { toHost: transferToHost(options) } : {})
 })
+
+type RemoteCopyTransferStats = {
+  bytes: number
+  fileCount: number
+  itemKind: 'file' | 'directory'
+  children: FileTransferTaskRecordPayload[]
+}
+
+const remoteCopyResultFileCount = (stats: RemoteCopyTransferStats) => (stats.itemKind === 'directory' ? Math.max(stats.fileCount, 1) : 1)
+
+const remoteCopyChildTask = (name: string, source: string, target: string, options: FileListOptions): FileTransferTaskRecordPayload => ({
+  type: 'r2r',
+  name,
+  source,
+  target,
+  progress: 100,
+  speed: '完成',
+  status: 'success',
+  stage: 'pending',
+  ...fileTransferTaskHosts(options)
+})
+
+const createRemoteCopyTransferTask = (source: string, target: string, stats: RemoteCopyTransferStats, options: FileListOptions) =>
+  createFileTransferTaskRecord({
+    type: 'r2r',
+    name: basename(source),
+    source,
+    target,
+    progress: 100,
+    speed: '完成',
+    status: 'success',
+    ...fileTransferTaskHosts(options),
+    ...(stats.itemKind === 'directory'
+      ? {
+          stage: 'scanning' as const,
+          isGroup: true,
+          totalFiles: stats.fileCount,
+          finishedFiles: stats.fileCount,
+          ...(stats.children.length ? { children: stats.children } : {})
+        }
+      : {})
+  })
 
 const taskBasename = (path: string, options: FileListOptions) => (options.kind === 'remote' ? basename(path) : getLocalBasename(path))
 const taskDirname = (path: string, options: FileListOptions) => (options.kind === 'remote' ? dirname(path) : getLocalDirname(path))
@@ -996,6 +1072,34 @@ const cloneRemoteEntryTree = (sourcePath: string, targetPath: string, modifiedAt
   return true
 }
 
+const collectRemoteCopyStatsFromSeed = (sourcePath: string, targetPath: string, options: FileListOptions): RemoteCopyTransferStats => {
+  const source = normalizeRemotePath(sourcePath)
+  const target = normalizeRemotePath(targetPath)
+  const entry = findRemoteEntry(source)
+  if (entry?.type === 'directory') {
+    const result: RemoteCopyTransferStats = { bytes: 0, fileCount: 0, itemKind: 'directory', children: [] }
+    const collect = (remoteDir: string) => {
+      for (const row of sortEntries((remoteSeedTree[remoteDir] || []).map((item) => ({ ...item })))) {
+        if (row.type === 'directory') {
+          collect(row.path)
+          continue
+        }
+        if (row.type !== 'file') continue
+        const content = remoteFileContents[row.path]?.content
+        const bytes = typeof content === 'string' ? Buffer.byteLength(content, 'utf-8') : Number(row.size || 0)
+        result.bytes += bytes
+        result.fileCount += 1
+        result.children.push(remoteCopyChildTask(row.name, row.path, row.path.replace(source, target), options))
+      }
+    }
+    collect(source)
+    return result
+  }
+  const content = remoteFileContents[source]?.content
+  const bytes = typeof content === 'string' ? Buffer.byteLength(content, 'utf-8') : Number(entry?.size || 0)
+  return { bytes, fileCount: 1, itemKind: 'file', children: [] }
+}
+
 const removeRemotePath = (path: string, recursive = false) => {
   const entry = findRemoteEntry(path)
   if (entry?.type === 'directory' && !recursive && (remoteSeedTree[path] || []).length) {
@@ -1227,6 +1331,49 @@ const downloadRemoteFileViaSftp = async (remotePath: string, localPath: string, 
         ...(options.toHost ? { toHost: options.toHost } : {})
       })
       return { ok: true, data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task } }
+    })
+  } catch (error) {
+    return fileError(error, 'transfer_failed')
+  }
+}
+
+const copyRemoteTransferViaSftp = async (
+  remotePath: string,
+  targetPath: string,
+  overwrite: boolean | undefined,
+  options: FileListOptions
+): Promise<FileTransferOperationResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const source = normalizeRemotePath(remotePath)
+  const destination = normalizeRemotePath(targetPath)
+  const mtimeMs = Date.now()
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      if (source !== destination) {
+        const existingTarget = await sftpStatOrNull(sftp, destination)
+        if (existingTarget) {
+          if (!overwrite) return { ok: false, errorCode: 'target_exists', errorMessage: 'Target already exists' }
+          await removeRemotePathViaSftp(sftp, destination, true)
+        }
+        await ensureRemoteParentDirs(sftp, dirname(destination))
+      }
+      const stats = await collectRemoteCopyStatsViaSftp(sftp, source, destination, options)
+      if (source !== destination) await copyRemotePathViaSftp(sftp, source, destination)
+      const task = createRemoteCopyTransferTask(source, destination, stats, options)
+      return {
+        ok: true,
+        data: {
+          status: 'success',
+          source,
+          target: destination,
+          bytes: stats.bytes,
+          files: remoteCopyResultFileCount(stats),
+          mtimeMs,
+          itemKind: stats.itemKind,
+          task
+        }
+      }
     })
   } catch (error) {
     return fileError(error, 'transfer_failed')
@@ -1488,24 +1635,26 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
     if (operation.kind === 'copy-remote') {
       const source = normalizeRemotePath(operation.remotePath)
       const target = normalizeRemotePath(operation.targetPath)
-      const result =
-        (await mutateRemoteFileEntryViaSftp({ kind: 'copy', srcPath: source, targetPath: target, overwrite: operation.overwrite }, options)) ||
-        (await mutateRemoteFileEntry({ kind: 'copy', srcPath: source, targetPath: target, overwrite: operation.overwrite }))
+      const sftpResult = await copyRemoteTransferViaSftp(source, target, operation.overwrite, { ...options, kind: 'remote' })
+      if (sftpResult) return sftpResult
+      const stats = collectRemoteCopyStatsFromSeed(source, target, options)
+      const result = await mutateRemoteFileEntry({ kind: 'copy', srcPath: source, targetPath: target, overwrite: operation.overwrite })
       if (!result.ok) return { ok: false, errorCode: result.errorCode, errorMessage: result.errorMessage }
-      const readResult = await readFileContent(result.data?.path || target, { ...options, kind: 'remote' })
-      const bytes = readResult.ok ? Buffer.byteLength(readResult.data?.content || '', 'utf-8') : 0
-      const task = createFileTransferTaskRecord({
-        type: 'r2r',
-        name: basename(source),
-        source,
-        target: result.data?.path || target,
-        progress: 100,
-        speed: '完成',
-        status: 'success',
-        fromHost: transferFromHost(options),
-        toHost: transferToHost(options)
-      })
-      return { ok: true, data: { status: 'success', source, target: result.data?.path || target, bytes, files: 1, mtimeMs, task } }
+      const destination = result.data?.path || target
+      const task = createRemoteCopyTransferTask(source, destination, stats, options)
+      return {
+        ok: true,
+        data: {
+          status: 'success',
+          source,
+          target: destination,
+          bytes: stats.bytes,
+          files: remoteCopyResultFileCount(stats),
+          mtimeMs,
+          itemKind: stats.itemKind,
+          task
+        }
+      }
     }
     if (operation.kind === 'download-file') {
       const source = normalizeRemotePath(operation.remotePath)
