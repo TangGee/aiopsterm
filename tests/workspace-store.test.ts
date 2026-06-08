@@ -212,9 +212,13 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
 
     expect(store.panels).toHaveLength(1)
+    expect(store.activePanel.output).toBe('')
+    expect(store.activePanel.outputSegments).toEqual([])
     store.createPanel('right')
     expect(store.panels).toHaveLength(2)
     expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.output).toBe('')
+    expect(store.activePanel.outputSegments).toEqual([])
 
     store.renamePanel(store.activePanelId, 'prod shell')
     expect(store.activePanel.title).toBe('prod shell')
@@ -233,6 +237,8 @@ describe('workspace store', () => {
     store.closePanels('all')
     expect(store.panels).toHaveLength(1)
     expect(store.panels[0].id).toBe('panel-main')
+    expect(store.panels[0].output).toBe('')
+    expect(store.panels[0].outputSegments).toEqual([])
   })
 
   it('applies keyword highlight to terminal display without mutating raw output', () => {

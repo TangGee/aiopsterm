@@ -768,7 +768,7 @@ test('terminal tab operations and visual baseline', async () => {
     await page.locator('.terminal-context-menu button').filter({ hasText: '搜索' }).click()
     await expect(page.locator('.terminal-search-overlay')).toBeVisible()
     await page.locator('.terminal-search-overlay input').fill('aiopsterm')
-    await expect(page.locator('.terminal-search-overlay')).toContainText(/1\/\d+/)
+    await expect(page.locator('.terminal-search-overlay')).not.toContainText(/1\/\d+/)
     await page.keyboard.press('Escape')
 
     await page.locator('.xterm-host').first().click({ button: 'right' })

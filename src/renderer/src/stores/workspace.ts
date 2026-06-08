@@ -2404,6 +2404,21 @@ const setTerminalOutput = (panel: TerminalPanel, text: string, scope: TerminalOu
   panel.outputSegments = createTerminalSegments(text, scope)
 }
 
+const createEmptyTerminalPanel = (
+  id: string,
+  title: string,
+  split?: PanelDirection
+): TerminalPanel => ({
+  id,
+  title,
+  cwd: '~',
+  kind: 'terminal',
+  output: '',
+  outputSegments: [],
+  status: 'ready',
+  ...(split ? { split } : {})
+})
+
 export const useWorkspaceStore = defineStore('workspace', () => {
   const mode = ref<'terminal' | 'agents'>('terminal')
   const activeModule = ref<ModuleKey>('workspace')
@@ -2435,15 +2450,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   })
   const activePanelId = ref('panel-main')
   const panels = ref<TerminalPanel[]>([
-    {
-      id: 'panel-main',
-      title: 'local shell',
-      cwd: '~',
-      kind: 'terminal',
-      status: 'ready',
-      output: 'aiopsterm local shell\n$ ',
-      outputSegments: createTerminalSegments('aiopsterm local shell\n$ ')
-    }
+    createEmptyTerminalPanel('panel-main', 'local shell')
   ])
 
   const applyCurrentTheme = () => {
@@ -7748,16 +7755,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createPanel = (split?: PanelDirection) => {
-    const panel: TerminalPanel = {
-      id: createId('panel'),
-      title: split ? `split ${panels.value.length}` : `shell ${panels.value.length}`,
-      cwd: '~',
-      kind: 'terminal',
-      output: 'aiopsterm local shell\n$ ',
-      outputSegments: createTerminalSegments('aiopsterm local shell\n$ '),
-      status: 'ready',
-      split
-    }
+    const panel = createEmptyTerminalPanel(createId('panel'), split ? `split ${panels.value.length}` : `shell ${panels.value.length}`, split)
     panels.value.push(panel)
     activePanelId.value = panel.id
   }
@@ -7772,7 +7770,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.sessionId = undefined
     panel.knowledge = undefined
     panel.sshSession = undefined
-    setTerminalOutput(panel, 'aiopsterm dashboard\n$ ')
+    setTerminalOutput(panel, '')
   }
 
   const closePanel = (id = activePanelId.value) => {
@@ -7792,17 +7790,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const closeAllPanels = () => {
-    panels.value = [
-      {
-        id: 'panel-main',
-        title: 'local shell',
-        cwd: '~',
-        kind: 'terminal',
-        status: 'ready',
-        output: 'aiopsterm local shell\n$ ',
-        outputSegments: createTerminalSegments('aiopsterm local shell\n$ ')
-      }
-    ]
+    panels.value = [createEmptyTerminalPanel('panel-main', 'local shell')]
     activePanelId.value = 'panel-main'
   }
 
