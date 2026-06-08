@@ -1677,7 +1677,8 @@ const loadMoreHistoryConversations = async () => {
   if (historyLoadingMore.value || !hasMoreHistoryConversations.value) return
   historyLoadingMore.value = true
   try {
-    await new Promise((resolve) => window.setTimeout(resolve, 300))
+    const refreshed = await workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+    if (!refreshed) return
     historyCurrentPage.value += 1
   } finally {
     historyLoadingMore.value = false

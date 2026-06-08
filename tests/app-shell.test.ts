@@ -1316,7 +1316,7 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
     try {
-      store.conversations = Array.from({ length: 25 }, (_, index) => ({
+      const pagedConversations = Array.from({ length: 25 }, (_, index) => ({
         id: `conv-page-${index + 1}`,
         title: `分页会话 ${index + 1}`,
         summary: `summary ${index + 1}`,
@@ -1324,18 +1324,19 @@ describe('AppShell', () => {
         ts: 10_000 - index,
         ipAddress: index === 0 ? '10.0.0.1' : undefined
       }))
+      ;(globalThis as any).__setChatHistoryStoreMock?.(pagedConversations)
+      store.conversations = pagedConversations
       await wrapper.vm.$nextTick()
       expect(wrapper.findAll('.conversation-item')).toHaveLength(20)
       expect(wrapper.text()).toContain('分页会话 20')
       expect(wrapper.text()).not.toContain('分页会话 21')
       expect(wrapper.text()).not.toContain('summary 1')
 
-      const loadMorePromise = wrapper.find('.load-more-btn').trigger('click')
+      vi.mocked(window.aiops.listChatConversations).mockClear()
+      await wrapper.find('.load-more-btn').trigger('click')
+      await flushPromises()
       await wrapper.vm.$nextTick()
-      expect(wrapper.find('.load-more-btn').text()).toContain('加载中')
-      await vi.advanceTimersByTimeAsync(300)
-      await loadMorePromise
-      await wrapper.vm.$nextTick()
+      expect(window.aiops.listChatConversations).toHaveBeenCalledTimes(1)
       expect(wrapper.findAll('.conversation-item')).toHaveLength(25)
       expect(wrapper.text()).toContain('分页会话 25')
       expect(wrapper.find('.load-more-btn').exists()).toBe(false)
@@ -1356,7 +1357,7 @@ describe('AppShell', () => {
       expect(wrapper.text()).toContain('分页会话 20')
       expect(wrapper.text()).not.toContain('分页会话 21')
 
-      store.conversations = [
+      const actionConversations = [
         {
           id: 'conv-1',
           title: '生产巡检',
@@ -1382,6 +1383,19 @@ describe('AppShell', () => {
           ipAddress: '10.32.6.9'
         }
       ]
+      ;(globalThis as any).__setChatHistoryStoreMock?.(actionConversations, {
+        'conv-2': [
+          { id: 'hist-conv-2-system', role: 'system', text: '历史会话已从 aiopsterm 后端恢复。' },
+          { id: 'hist-conv-2-user', role: 'user', text: '检查 Pod 事件和镜像拉取' },
+          { id: 'hist-conv-2-assistant', role: 'assistant', text: 'K8s 发布失败历史包含 Pod 事件、镜像拉取状态和回滚检查记录。', state: 'done' }
+        ],
+        'conv-3': [
+          { id: 'hist-conv-3-system', role: 'system', text: '历史会话已从 aiopsterm 后端恢复。' },
+          { id: 'hist-conv-3-user', role: 'user', text: '梳理慢日志和索引建议' },
+          { id: 'hist-conv-3-assistant', role: 'assistant', text: '数据库慢查询历史包含慢日志摘要、疑似缺失索引和 SQL 优化建议。', state: 'done' }
+        ]
+      })
+      store.conversations = actionConversations
       await wrapper.find('.agents-search input').setValue('')
       await wrapper.vm.$nextTick()
       expect(wrapper.text()).toContain('10:30')
@@ -1491,6 +1505,13 @@ describe('AppShell', () => {
     expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-history-search-input"]').element)
     expect(wrapper.findAll('.ai-history-item')).toHaveLength(20)
     expect(wrapper.find('[data-testid="ai-history-load-more"]').exists()).toBe(true)
+    vi.mocked(window.aiops.listChatConversations).mockClear()
+    await wrapper.find('[data-testid="ai-history-load-more"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.listChatConversations).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('.ai-history-item')).toHaveLength(23)
+    expect(wrapper.find('[data-testid="ai-history-load-more"]').exists()).toBe(false)
     await wrapper.find('[data-testid="ai-history-search-input"]').setValue('nginx')
     expect(wrapper.findAll('.ai-history-item')).toHaveLength(0)
     expect(wrapper.find('.ai-history-empty').text()).toContain('暂无数据')

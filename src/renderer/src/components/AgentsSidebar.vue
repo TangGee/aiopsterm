@@ -155,7 +155,8 @@ const loadMoreConversations = async () => {
   if (isLoadingMore.value || !hasMoreConversations.value) return
   isLoadingMore.value = true
   try {
-    await new Promise((resolve) => window.setTimeout(resolve, 300))
+    const refreshed = await workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+    if (!refreshed) return
     currentPage.value += 1
   } finally {
     isLoadingMore.value = false
