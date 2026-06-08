@@ -1765,6 +1765,7 @@ export type KubernetesCommandResult = AiopsMutationResult<{
   runId: string
   command: string
   output: string
+  terminalOutput: string
   success: boolean
   error: string
   durationMs: number

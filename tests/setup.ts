@@ -4817,12 +4817,14 @@ Object.defineProperty(window, 'aiops', {
         ].join('\n')
       }
       const success = !output.startsWith('Error from server')
+      const terminalOutput = `[aiopsterm kubectl] ${command}${output ? `\n${output}` : ''}`
       return {
         ok: true,
         data: {
           runId: `k8s-run-test-${command.length}-${input.source || 'terminal'}`,
           command,
           output,
+          terminalOutput,
           success,
           error: success ? '' : output,
           durationMs: 1,

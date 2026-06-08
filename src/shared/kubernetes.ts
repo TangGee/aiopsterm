@@ -727,6 +727,11 @@ const renderCommand = (input: KubernetesCommandInput) => {
   return `command executed through aiopsterm Kubernetes backend: ${command}`
 }
 
+const renderTerminalCommandOutput = (command: string, output: string, error = '') => {
+  const body = output || error
+  return `[aiopsterm kubectl] ${command}${body ? `\n${body}` : ''}`
+}
+
 export async function executeKubernetesCommand(input: KubernetesCommandInput): Promise<KubernetesCommandResult> {
   const startedAt = Date.now()
   const command = normalize(input.command)
@@ -747,6 +752,7 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
       runId: `k8s-run-${randomUUID()}`,
       command,
       output,
+      terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output),
       success,
       error: success ? '' : output,
       durationMs: Math.max(1, Date.now() - startedAt),

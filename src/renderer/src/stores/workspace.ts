@@ -7211,50 +7211,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesCommand']>>['data']>
+  type K8sAgentRunInput = Omit<K8sBackendCommandData, 'terminalOutput'> & Partial<Pick<K8sBackendCommandData, 'terminalOutput'>>
 
-  const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData> => {
+  const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData | null> => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
     if (!window.aiops?.executeKubernetesCommand) {
-      return {
-        runId: `k8s-run-unavailable-${clusterId}`,
-        command,
-        output: '',
-        success: false,
-        error: 'Kubernetes command API is unavailable.',
-        durationMs: 0,
-        startedAt: '刚刚',
-        clusterId,
-        contextName: cluster?.context_name || k8sAgentContextName.value || 'unknown-context',
-        namespace,
-        source
-      }
+      setK8sNotice('Kubernetes command API 不可用')
+      return null
     }
-    const result = await window.aiops.executeKubernetesCommand({
-      command,
-      clusterId,
-      clusterName: cluster?.name,
-      contextName: cluster?.context_name,
-      namespace,
-      defaultNamespace: cluster?.default_namespace,
-      source
-    })
-    if (result.ok && result.data) return result.data
-    return {
-      runId: `k8s-run-failed-${clusterId}`,
-      command,
-      output: '',
-      success: false,
-      error: result.errorMessage || 'Kubernetes command failed.',
-      durationMs: 0,
-      startedAt: '刚刚',
-      clusterId,
-      contextName: cluster?.context_name || k8sAgentContextName.value || 'unknown-context',
-      namespace,
-      source
+    try {
+      const result = await window.aiops.executeKubernetesCommand({
+        command,
+        clusterId,
+        clusterName: cluster?.name,
+        contextName: cluster?.context_name,
+        namespace,
+        defaultNamespace: cluster?.default_namespace,
+        source
+      })
+      if (result.ok && result.data) return result.data
+      setK8sNotice(result.errorMessage || 'Kubernetes command failed.')
+      return null
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : 'Kubernetes command failed.')
+      return null
     }
   }
-
-  const formatK8sTerminalCommandResult = (command: string, output: string, error = '') => `[aiopsterm kubectl] ${command}${output || error ? `\n${output || error}` : ''}`
 
   const sendK8sTerminalCommand = async (command: string) => {
     const tab = k8sActiveTerminal.value
@@ -7262,12 +7244,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!tab || !text || tab.status === 'ended') return ''
     if (tab.status === 'connecting') tab.status = 'connected'
     const result = await executeK8sBackendCommand(text, tab.clusterId, tab.namespace, 'terminal')
-    const displayResult = formatK8sTerminalCommandResult(text, result.output, result.error)
+    if (!result) {
+      tab.collectingAiOutput = false
+      return ''
+    }
+    const terminalOutput = result.terminalOutput || ''
     tab.commandHistory = [text, ...tab.commandHistory.filter((item) => item !== text)].slice(0, 20)
     tab.lastCommand = text
-    tab.lastCommandOutput = displayResult
-    appendK8sTerminalOutput(tab, text)
-    appendK8sTerminalOutput(tab, displayResult)
+    tab.lastCommandOutput = terminalOutput
+    if (terminalOutput) appendK8sTerminalOutput(tab, terminalOutput)
     if (tab.collectingAiOutput) {
       tab.collectingAiOutput = false
       const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)
@@ -7279,10 +7264,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             detail: `${cluster.context_name} / ${tab.namespace}`
           }
         : undefined
-      void sendChat(`Terminal output:\n\`\`\`\n${displayResult || 'Command executed successfully, no output returned'}\n\`\`\``, undefined, host ? [host] : undefined)
+      void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput || 'Command executed successfully, no output returned'}\n\`\`\``, undefined, host ? [host] : undefined)
       setK8sNotice(`${tab.name} 命令输出已发送到 AI`)
     }
-    return displayResult
+    return terminalOutput
   }
 
   const executeK8sTerminalAiCommand = async (command: string, tabId?: string) => {
@@ -7338,7 +7323,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceNamespace.value = namespace
   }
 
-  const addK8sAgentRun = (result: K8sBackendCommandData, fallbackCluster?: K8sCluster | null) => {
+  const addK8sAgentRun = (result: K8sAgentRunInput, fallbackCluster?: K8sCluster | null) => {
     const cluster = fallbackCluster ?? k8sAgentCluster.value
     const record: K8sAgentRunRecord = {
       id: result.runId,
@@ -7384,12 +7369,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sAgentStatus.value = 'running'
     const namespace = k8sResourceNamespace.value === 'all' ? cluster.default_namespace || 'default' : k8sResourceNamespace.value
     const result = await executeK8sBackendCommand(text, cluster.id, namespace, 'agent')
+    if (!result) {
+      k8sAgentStatus.value = 'error'
+      k8sResourceOutputTitle.value = `Agent kubectl / ${cluster.name}`
+      k8sResourceOutput.value = text
+      return null
+    }
     const record = addK8sAgentRun(result, cluster)
     k8sAgentCommandHistory.value = [text, ...k8sAgentCommandHistory.value.filter((item) => item !== text)].slice(0, 12)
     k8sAgentCommandDraft.value = text
     k8sAgentStatus.value = result.success ? 'ready' : 'error'
     k8sResourceOutputTitle.value = `Agent kubectl / ${cluster.name}`
-    k8sResourceOutput.value = `${text}\n\n${result.output}`
+    k8sResourceOutput.value = `${text}\n\n${result.output || result.error || ''}`
     setK8sNotice(result.success ? 'Kubernetes Agent 命令执行完成' : 'Kubernetes Agent 命令执行失败')
     return record
   }
@@ -7400,6 +7391,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const record = cluster
       ? await runK8sAgentKubectl('kubectl version --request-timeout=10s')
       : addK8sAgentLocalFailure('kubectl version --request-timeout=10s', 'No cluster selected')
+    if (!record) {
+      k8sAgentStatus.value = 'error'
+      k8sResourceOutputTitle.value = 'Agent Test Connection'
+      window.setTimeout(() => {
+        k8sAgentTesting.value = false
+      }, 160)
+      setK8sNotice('Kubernetes Agent 连接测试失败')
+      return null
+    }
     k8sAgentStatus.value = record.status === 'success' ? 'ready' : 'error'
     k8sResourceOutputTitle.value = 'Agent Test Connection'
     k8sResourceOutput.value = `${record.command}\n\n${record.output || record.error || ''}`
@@ -7417,6 +7417,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     const result = await executeK8sBackendCommand('kubectl get namespaces', cluster.id, cluster.default_namespace, 'agent')
+    if (!result) return null
     const record = addK8sAgentRun(result, cluster)
     k8sResourceOutputTitle.value = `Namespaces / ${cluster.name}`
     k8sResourceOutput.value = `${record.command}\n\n${result.output || result.error || ''}`
@@ -7442,6 +7443,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceOutputTitle.value = `${cluster.name} / ${k8sKindLabels[k8sResourceKind.value]}`
     const command = `kubectl get ${k8sKindLabels[k8sResourceKind.value].toLowerCase()} ${k8sResourceNamespace.value === 'all' ? '--all-namespaces' : `-n ${k8sResourceNamespace.value}`}`
     const result = await executeK8sBackendCommand(command, cluster.id, cluster.default_namespace, 'resource')
+    if (!result) {
+      k8sResourceLoading.value = false
+      return
+    }
     addK8sAgentRun(result, cluster)
     k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}\n\n已刷新 ${filteredK8sResources.value.length} 条资源。`
     window.setTimeout(() => {
@@ -7456,6 +7461,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const command = buildK8sResourceCommand(resource, 'describe')
     k8sResourceOutputTitle.value = `Describe ${resource.name}`
     const result = await executeK8sBackendCommand(command, resource.clusterId, resource.namespace, 'resource')
+    if (!result) return
     k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}`
   }
 
@@ -7465,6 +7471,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const command = buildK8sResourceCommand(resource, 'logs')
     k8sResourceOutputTitle.value = `Logs ${resource.name}`
     const result = await executeK8sBackendCommand(command, resource.clusterId, resource.namespace, 'resource')
+    if (!result) return
     k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}`
   }
 
@@ -7505,7 +7512,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return ''
     }
     await openK8sTerminal(cluster.id)
-    await sendK8sTerminalCommand(command)
+    const terminalOutput = await sendK8sTerminalCommand(command)
+    if (!terminalOutput) return ''
     setK8sNotice(`已发送到 ${cluster.name} 终端`)
     return command
   }
@@ -7534,7 +7542,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const cluster = resource ? k8sClusters.value.find((item) => item.id === resource.clusterId) : null
     if (!resource || !cluster || (action === 'logs' && resource.kind !== 'pods')) return
     await openK8sTerminal(cluster.id)
-    await sendK8sTerminalCommand(buildK8sResourceCommand(resource, action))
+    const terminalOutput = await sendK8sTerminalCommand(buildK8sResourceCommand(resource, action))
+    if (!terminalOutput) return
     setK8sNotice(`已发送到 ${cluster.name} 终端`)
   }
 

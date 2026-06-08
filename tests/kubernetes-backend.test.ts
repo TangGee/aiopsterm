@@ -69,6 +69,8 @@ describe('kubernetes backend boundary', () => {
     )
     expect(result.data?.output).toContain('default\tapi-gateway-6d8c9bb7f6-l6j2m')
     expect(result.data?.output).toContain('ops\tbilling-worker-7f9d6f9dd9-rx8mm')
+    expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods -A')
+    expect(result.data?.terminalOutput).toContain('ops\tbilling-worker-7f9d6f9dd9-rx8mm')
     expect(result.data?.durationMs).toBeGreaterThan(0)
   })
 
@@ -112,5 +114,6 @@ describe('kubernetes backend boundary', () => {
       error: 'Error from server (NotFound): pods "missing" not found'
     })
     expect(result.data?.output).toBe('Error from server (NotFound): pods "missing" not found')
+    expect(result.data?.terminalOutput).toBe('[aiopsterm kubectl] kubectl describe pod missing -n ops\nError from server (NotFound): pods "missing" not found')
   })
 })

@@ -3759,6 +3759,27 @@ describe('workspace store', () => {
     expect((store.k8sActiveTerminal?.output.match(/\[staging\]\$ /g) || [])).toHaveLength(1)
     expect(store.k8sActiveTerminal?.commandHistory[0]).toBe('kubectl get ns')
     expect(store.k8sActiveTerminal?.lastCommandOutput).toContain('staging')
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'k8s-run-terminal-output-boundary',
+        command: 'kubectl get pods -A',
+        output: 'renderer must not format this output',
+        terminalOutput: 'BACKEND TERMINAL TEXT\nkubectl output owned by preload/main',
+        success: true,
+        error: '',
+        durationMs: 1,
+        startedAt: '刚刚',
+        clusterId: 'k8s-2',
+        contextName: 'staging/devops',
+        namespace: 'staging',
+        source: 'terminal'
+      }
+    })
+    await store.sendK8sTerminalCommand('kubectl get pods -A')
+    expect(store.k8sActiveTerminal?.output).toContain('BACKEND TERMINAL TEXT\nkubectl output owned by preload/main')
+    expect(store.k8sActiveTerminal?.output).not.toContain('[aiopsterm kubectl] kubectl get pods -A\nrenderer must not format this output')
+    expect(store.k8sActiveTerminal?.lastCommandOutput).toBe('BACKEND TERMINAL TEXT\nkubectl output owned by preload/main')
 
     const reusedTerminalId = store.k8sActiveTerminal!.id
     await store.openK8sTerminal('k8s-2')
@@ -3795,6 +3816,7 @@ describe('workspace store', () => {
     expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
     expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-1', contextName: 'prod/admin' })
     const agentTest = await store.testK8sAgentConnection()
+    if (!agentTest) throw new Error('Expected Kubernetes Agent connection test to return a backend run record.')
     expect(agentTest.status).toBe('success')
     expect(agentTest.output).toContain('Server Version')
     await vi.advanceTimersByTimeAsync(160)
@@ -3804,6 +3826,7 @@ describe('workspace store', () => {
     expect(store.k8sResourceOutput).toContain('ingress-nginx')
     store.k8sAgentCommandDraft = 'kubectl get services -A'
     const agentRun = await store.runK8sAgentKubectl()
+    if (!agentRun) throw new Error('Expected Kubernetes Agent kubectl run to return a backend run record.')
     expect(agentRun.status).toBe('success')
     expect(agentRun.id).toMatch(/^k8s-run-test-/)
     expect(agentRun.id).not.toMatch(/^k8s-agent-run-/)
