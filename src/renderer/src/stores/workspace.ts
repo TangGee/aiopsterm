@@ -805,7 +805,6 @@ const k8sKindLabels: Record<K8sResourceKind, string> = {
   services: 'Services',
   nodes: 'Nodes'
 }
-const k8sTerminalPrompt = (namespace: string) => `[${namespace || 'default'}]$ `
 const k8sTerminalTabFromRecord = (record: KubernetesTerminalRecord): K8sTerminalTab => ({
   id: record.id,
   sessionId: record.sessionId,
@@ -7123,8 +7122,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       .filter((tab) => tab.clusterId === clusterId && tab.status === 'connecting')
       .forEach((tab) => {
         tab.status = 'connected'
-        appendK8sTerminalOutput(tab, `[session ${tab.sessionId}] connected (${tab.cols}x${tab.rows})`)
-        appendK8sTerminalOutput(tab, k8sTerminalPrompt(tab.namespace))
+        tab.updatedAt = '刚刚'
       })
   }
 
@@ -7270,7 +7268,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tab.lastCommandOutput = displayResult
     appendK8sTerminalOutput(tab, text)
     appendK8sTerminalOutput(tab, displayResult)
-    appendK8sTerminalOutput(tab, k8sTerminalPrompt(tab.namespace))
     if (tab.collectingAiOutput) {
       tab.collectingAiOutput = false
       const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)

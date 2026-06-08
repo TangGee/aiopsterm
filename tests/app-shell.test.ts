@@ -4031,6 +4031,8 @@ describe('AppShell', () => {
       expect(window.aiops.createKubernetesTerminal).toHaveBeenCalledWith({ clusterId: 'k8s-1', namespace: undefined, cols: undefined, rows: undefined })
       expect(workspace.find('.k8s-terminal-meta').text()).toContain('Session:')
       expect(workspace.find('.k8s-terminal-meta').text()).toContain('Status: connected')
+      expect(store.k8sActiveTerminal?.output).toContain('Connecting to cluster prod-renamed...')
+      expect(store.k8sActiveTerminal?.output).not.toContain(`[session ${store.k8sActiveTerminal?.sessionId}] connected`)
 
     await workspace.find('.k8s-command-line input').setValue('kubectl get pods -A')
     await workspace.find('.k8s-command-line').trigger('submit')
