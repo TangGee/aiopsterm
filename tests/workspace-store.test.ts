@@ -5292,6 +5292,12 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     await store.openSettingsExternalAction('反馈页面')
     expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/feedback')
     expect(store.settingsNotice).toBe('反馈页面已打开')
+    await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(true)
+    expect(window.aiops.getUserAccount).toHaveBeenCalled()
+    expect(store.activeModule).toBe('user')
+    expect(store.userAccountCenterOpen).toBe(true)
+    expect(store.settingsNotice).toBe('账号中心已打开')
+    store.closeAccountCenter()
 
     vi.mocked(window.aiops.checkUpdate).mockResolvedValueOnce({
       available: true,
@@ -5310,6 +5316,58 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(window.aiops.installAppUpdate).toHaveBeenCalledWith('0.1.1')
     expect(store.aboutSettings.updateStatus).toBe('latest')
     expect(store.aboutSettings.version).toBe('0.1.1')
+  })
+
+  it('does not fabricate Settings external action success when the preload bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    store.setActiveModule('settings')
+    const originalAiops = {
+      openExternalUrl: window.aiops.openExternalUrl,
+      openLogDir: window.aiops.openLogDir,
+      getUserAccount: window.aiops.getUserAccount
+    }
+
+    try {
+      ;(window.aiops as any).openExternalUrl = undefined
+      store.setActiveSettingsSection('docs')
+      expect(store.activeSettingsSection).toBe('general')
+      expect(store.settingsNotice).toBe('文档入口服务不可用')
+      await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('反馈页面服务不可用')
+
+      ;(window.aiops as any).openExternalUrl = originalAiops.openExternalUrl
+      vi.mocked(window.aiops.openExternalUrl).mockRejectedValueOnce(new Error('external offline'))
+      store.setActiveSettingsSection('docs')
+      await Promise.resolve()
+      expect(store.settingsNotice).toBe('文档入口打开失败')
+      vi.mocked(window.aiops.openExternalUrl).mockRejectedValueOnce(new Error('feedback offline'))
+      await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('反馈页面 打开失败')
+
+      ;(window.aiops as any).openLogDir = undefined
+      await expect(store.openSettingsExternalAction('日志目录')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('日志目录服务不可用')
+
+      ;(window.aiops as any).openLogDir = originalAiops.openLogDir
+      vi.mocked(window.aiops.openLogDir).mockRejectedValueOnce(new Error('log dir offline'))
+      await expect(store.openSettingsExternalAction('日志目录')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('日志目录 打开失败')
+
+      ;(window.aiops as any).getUserAccount = undefined
+      await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('账户中心服务不可用')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.activeModule).toBe('settings')
+
+      ;(window.aiops as any).getUserAccount = originalAiops.getUserAccount
+      vi.mocked(window.aiops.getUserAccount).mockRejectedValueOnce(new Error('account offline'))
+      await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('账户中心打开失败')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.activeModule).toBe('settings')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
   })
 
   it('does not fabricate user login or logout state when the preload bridge is unavailable', async () => {

@@ -2309,6 +2309,7 @@ const defaultAboutSettings: AboutSettings = {
 
 const settingsDocumentationUrl = 'https://aiopsterm.local/docs'
 const settingsFeedbackUrl = 'https://aiopsterm.local/feedback'
+const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<string, unknown> | undefined)?.[name] === 'function'
 
 const resolveUpdateVersion = (result?: AppUpdateCheckResult | null) =>
   result?.updateInfo?.version || result?.versionInfo?.version || (result?.isUpdateAvailable || result?.available ? '0.1.1' : '')
@@ -3874,8 +3875,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const openSettingsDocumentation = async () => {
     closeSettingsInlineEditors()
     activeSettingsSection.value = 'general'
+    if (!hasAiopsBridgeMethod('openExternalUrl')) {
+      setSettingsNotice('文档入口服务不可用')
+      return false
+    }
     try {
-      await window.aiops?.openExternalUrl?.(settingsDocumentationUrl)
+      await window.aiops.openExternalUrl(settingsDocumentationUrl)
       setSettingsNotice('已打开文档')
       return true
     } catch {
@@ -5070,13 +5075,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const openSettingsExternalAction = async (label: '日志目录' | '反馈页面' | '账户中心' | string) => {
     try {
       if (label === '日志目录') {
-        await window.aiops?.openLogDir?.()
+        if (!hasAiopsBridgeMethod('openLogDir')) {
+          setSettingsNotice('日志目录服务不可用')
+          return false
+        }
+        await window.aiops.openLogDir()
         setSettingsNotice('日志目录已打开')
         return true
       }
       if (label === '反馈页面') {
-        await window.aiops?.openExternalUrl?.(settingsFeedbackUrl)
+        if (!hasAiopsBridgeMethod('openExternalUrl')) {
+          setSettingsNotice('反馈页面服务不可用')
+          return false
+        }
+        await window.aiops.openExternalUrl(settingsFeedbackUrl)
         setSettingsNotice('反馈页面已打开')
+        return true
+      }
+      if (label === '账户中心') {
+        if (!window.aiops?.getUserAccount) {
+          setSettingsNotice('账户中心服务不可用')
+          return false
+        }
+        const refreshed = await refreshUserAccount()
+        if (!refreshed) {
+          setSettingsNotice('账户中心打开失败')
+          return false
+        }
+        openAccountCenter()
+        activeModule.value = 'user'
+        setSettingsNotice('账号中心已打开')
         return true
       }
       setSettingsNotice(`已打开 ${label}`)
