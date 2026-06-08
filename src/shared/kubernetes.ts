@@ -850,8 +850,8 @@ const renderDescribe = (command: string, clusterId: string, namespace: string) =
 const renderCommand = (input: KubernetesCommandInput) => {
   const command = normalize(input.command)
   const cluster = clusters.find((item) => item.id === input.clusterId) || {
-    id: input.clusterId,
-    name: input.clusterName || input.clusterId,
+    id: input.clusterId || '',
+    name: input.clusterName || input.clusterId || 'unknown-cluster',
     context_name: input.contextName || 'unknown-context',
     default_namespace: input.defaultNamespace || 'default'
   }
@@ -878,35 +878,61 @@ const renderTerminalCommandOutput = (command: string, output: string, error = ''
   return `[aiopsterm kubectl] ${command}${body ? `\n${body}` : ''}`
 }
 
+const createKubernetesCommandRun = (
+  input: KubernetesCommandInput,
+  command: string,
+  output: string,
+  success: boolean,
+  startedAt: number,
+  error = ''
+): NonNullable<KubernetesCommandResult['data']> => {
+  const cluster = input.clusterId ? clusters.find((item) => item.id === input.clusterId) : undefined
+  const namespace = input.namespace || cluster?.default_namespace || input.defaultNamespace || 'default'
+  return {
+    runId: `k8s-run-${randomUUID()}`,
+    command,
+    output,
+    terminalOutput: success ? renderTerminalCommandOutput(command, output) : '',
+    success,
+    error,
+    durationMs: Math.max(1, Date.now() - startedAt),
+    startedAt: nowLabel(),
+    clusterId: input.clusterId || '',
+    contextName: cluster?.context_name || input.contextName || 'unknown-context',
+    namespace,
+    source: input.source || 'terminal'
+  }
+}
+
 export async function executeKubernetesCommand(input: KubernetesCommandInput): Promise<KubernetesCommandResult> {
   const startedAt = Date.now()
   const command = normalize(input.command)
   if (!command) {
+    if (input.source === 'agent') {
+      return {
+        ok: true,
+        data: createKubernetesCommandRun(input, '<empty>', '', false, startedAt, 'Kubernetes command is required.')
+      }
+    }
     return { ok: false, errorCode: 'K8S_EMPTY_COMMAND', errorMessage: 'Kubernetes command is required.' }
   }
   if (!input.clusterId) {
+    if (input.source === 'agent') {
+      return {
+        ok: true,
+        data: createKubernetesCommandRun(input, command, '', false, startedAt, 'No cluster selected. Please select a cluster first.')
+      }
+    }
     return { ok: false, errorCode: 'K8S_CLUSTER_REQUIRED', errorMessage: 'Kubernetes cluster is required.' }
   }
 
   const output = renderCommand({ ...input, command })
   const success = !/^Error from server/.test(output)
-  const cluster = clusters.find((item) => item.id === input.clusterId)
-  const namespace = input.namespace || cluster?.default_namespace || input.defaultNamespace || 'default'
   return {
     ok: true,
     data: {
-      runId: `k8s-run-${randomUUID()}`,
-      command,
-      output,
-      terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output),
-      success,
-      error: success ? '' : output,
-      durationMs: Math.max(1, Date.now() - startedAt),
-      startedAt: nowLabel(),
-      clusterId: input.clusterId,
-      contextName: cluster?.context_name || input.contextName || 'unknown-context',
-      namespace,
-      source: input.source || 'terminal'
+      ...createKubernetesCommandRun(input, command, output, success, startedAt, success ? '' : output),
+      terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output)
     }
   }
 }

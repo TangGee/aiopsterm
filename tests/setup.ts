@@ -5202,9 +5202,47 @@ Object.defineProperty(window, 'aiops', {
           }, 120)
         })
     ),
-    executeKubernetesCommand: vi.fn(async (input: { command: string; clusterId: string; clusterName?: string; namespace?: string; contextName?: string; defaultNamespace?: string; source?: 'terminal' | 'agent' | 'resource' }) => {
+    executeKubernetesCommand: vi.fn(async (input: { command: string; clusterId?: string; clusterName?: string; namespace?: string; contextName?: string; defaultNamespace?: string; source?: 'terminal' | 'agent' | 'resource' }) => {
       const command = input.command.trim().replace(/\s+/g, ' ')
       const namespace = input.namespace || 'default'
+      if (!command && input.source === 'agent') {
+        return {
+          ok: true,
+          data: {
+            runId: 'k8s-run-test-validation-empty',
+            command: '<empty>',
+            output: '',
+            terminalOutput: '',
+            success: false,
+            error: 'Kubernetes command is required.',
+            durationMs: 1,
+            startedAt: '刚刚',
+            clusterId: input.clusterId || '',
+            contextName: input.contextName || 'unknown-context',
+            namespace,
+            source: 'agent' as const
+          }
+        }
+      }
+      if (!input.clusterId && input.source === 'agent') {
+        return {
+          ok: true,
+          data: {
+            runId: `k8s-run-test-validation-${command.length}`,
+            command,
+            output: '',
+            terminalOutput: '',
+            success: false,
+            error: 'No cluster selected. Please select a cluster first.',
+            durationMs: 1,
+            startedAt: '刚刚',
+            clusterId: '',
+            contextName: input.contextName || 'unknown-context',
+            namespace,
+            source: 'agent' as const
+          }
+        }
+      }
       let output = `command executed through aiopsterm Kubernetes backend: ${command}`
       if (/^kubectl\s+config\s+current-context\b/.test(command)) output = input.contextName || 'prod/admin'
       else if (/^kubectl\s+version\b/.test(command)) {
@@ -5257,7 +5295,7 @@ Object.defineProperty(window, 'aiops', {
           error: success ? '' : output,
           durationMs: 1,
           startedAt: '刚刚',
-          clusterId: input.clusterId,
+          clusterId: input.clusterId || '',
           contextName: input.contextName || 'prod/admin',
           namespace,
           source: input.source || 'terminal'

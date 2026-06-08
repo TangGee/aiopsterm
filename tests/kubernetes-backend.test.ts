@@ -156,6 +156,49 @@ describe('kubernetes backend boundary', () => {
     })
   })
 
+  it('returns backend-owned agent validation failure run records', async () => {
+    const noCluster = await executeKubernetesCommand({
+      command: 'kubectl version --request-timeout=10s',
+      source: 'agent',
+      namespace: 'all'
+    })
+
+    expect(noCluster.ok).toBe(true)
+    expect(noCluster.data).toEqual(
+      expect.objectContaining({
+        runId: expect.stringMatching(/^k8s-run-/),
+        command: 'kubectl version --request-timeout=10s',
+        success: false,
+        error: 'No cluster selected. Please select a cluster first.',
+        clusterId: '',
+        contextName: 'unknown-context',
+        namespace: 'all',
+        source: 'agent',
+        terminalOutput: ''
+      })
+    )
+
+    const empty = await executeKubernetesCommand({
+      command: '',
+      clusterId: 'k8s-1',
+      contextName: 'prod/admin',
+      source: 'agent'
+    })
+
+    expect(empty.ok).toBe(true)
+    expect(empty.data).toEqual(
+      expect.objectContaining({
+        runId: expect.stringMatching(/^k8s-run-/),
+        command: '<empty>',
+        success: false,
+        error: 'Kubernetes command is required.',
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        source: 'agent'
+      })
+    )
+  })
+
   it('returns command failure metadata when a described resource is missing', async () => {
     const result = await executeKubernetesCommand({
       command: 'kubectl describe pod missing -n ops',

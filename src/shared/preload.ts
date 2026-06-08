@@ -1887,7 +1887,7 @@ export type KubernetesTerminalCloseResult = AiopsMutationResult<KubernetesTermin
 
 export type KubernetesCommandInput = {
   command: string
-  clusterId: string
+  clusterId?: string
   clusterName?: string
   contextName?: string
   namespace?: string

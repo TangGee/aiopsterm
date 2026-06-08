@@ -3982,6 +3982,29 @@ describe('workspace store', () => {
     store.cleanupK8sAgent()
     expect(store.k8sAgentStatus).toBe('idle')
     expect(store.k8sAgentCurrentCluster.clusterId).toBeNull()
+    vi.mocked(window.aiops.executeKubernetesCommand).mockClear()
+    const validationRun = await store.testK8sAgentConnection()
+    expect(window.aiops.executeKubernetesCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'kubectl version --request-timeout=10s',
+        clusterId: '',
+        namespace: 'all',
+        source: 'agent'
+      })
+    )
+    expect(validationRun).toEqual(
+      expect.objectContaining({
+        command: 'kubectl version --request-timeout=10s',
+        status: 'error',
+        error: 'No cluster selected. Please select a cluster first.',
+        contextName: 'unknown-context',
+        namespace: 'all',
+        durationMs: 1
+      })
+    )
+    expect(validationRun?.id).toMatch(/^k8s-run-test-validation-/)
+    expect(validationRun?.id).not.toBe('k8s-run-local-validation')
+    expect(store.k8sAgentRuns[0].id).not.toBe('k8s-run-local-validation')
 
     const qaKubeconfigContent = [
       'apiVersion: v1',

@@ -7229,7 +7229,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesCommand']>>['data']>
-  type K8sAgentRunInput = Omit<K8sBackendCommandData, 'terminalOutput'> & Partial<Pick<K8sBackendCommandData, 'terminalOutput'>>
 
   const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData | null> => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
@@ -7341,7 +7340,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceNamespace.value = namespace
   }
 
-  const addK8sAgentRun = (result: K8sAgentRunInput, fallbackCluster?: K8sCluster | null) => {
+  const addK8sAgentRun = (result: K8sBackendCommandData, fallbackCluster?: K8sCluster | null) => {
     const cluster = fallbackCluster ?? k8sAgentCluster.value
     const record: K8sAgentRunRecord = {
       id: result.runId,
@@ -7360,26 +7359,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return record
   }
 
-  const addK8sAgentLocalFailure = (command: string, error: string) =>
-    addK8sAgentRun({
-      runId: 'k8s-run-local-validation',
-      command,
-      output: '',
-      success: false,
-      error,
-      durationMs: 0,
-      startedAt: '刚刚',
-      clusterId: '',
-      contextName: k8sAgentContextName.value || 'unknown-context',
-      namespace: k8sResourceNamespace.value === 'all' ? 'all' : k8sResourceNamespace.value,
-      source: 'agent'
-    })
-
   const runK8sAgentKubectl = async (command?: string) => {
     const cluster = k8sAgentCluster.value
     const text = (command ?? k8sAgentCommandDraft.value).trim()
     if (!cluster || !text) {
-      const failed = addK8sAgentLocalFailure(text || '<empty>', 'No cluster selected. Please select a cluster first.')
+      const result = await executeK8sBackendCommand(text, cluster?.id || '', k8sResourceNamespace.value === 'all' ? 'all' : k8sResourceNamespace.value, 'agent')
+      if (!result) {
+        k8sAgentStatus.value = 'error'
+        setK8sNotice('Kubernetes Agent 执行失败')
+        return null
+      }
+      const failed = addK8sAgentRun(result, cluster)
       k8sAgentStatus.value = 'error'
       setK8sNotice(failed.error || 'Kubernetes Agent 执行失败')
       return failed
@@ -7406,9 +7396,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const testK8sAgentConnection = async () => {
     const cluster = k8sAgentCluster.value
     k8sAgentTesting.value = true
-    const record = cluster
-      ? await runK8sAgentKubectl('kubectl version --request-timeout=10s')
-      : addK8sAgentLocalFailure('kubectl version --request-timeout=10s', 'No cluster selected')
+    const record = await runK8sAgentKubectl('kubectl version --request-timeout=10s')
     if (!record) {
       k8sAgentStatus.value = 'error'
       k8sResourceOutputTitle.value = 'Agent Test Connection'
