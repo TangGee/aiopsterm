@@ -1229,19 +1229,24 @@ const connectAsset = async (assetId: string) => {
       notice.value = error instanceof Error ? error.message : '本地终端启动失败'
     }
   } else {
+    if (!window.aiops?.createTerminal) {
+      notice.value = 'SSH 终端启动服务不可用'
+      return
+    }
     workspace.registerSshSession(panelId, asset)
     workspace.appendTerminalInput(panelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
     try {
-      const session = await window.aiops?.createTerminal?.({
+      const session = await window.aiops.createTerminal({
         kind: 'ssh',
         assetId: asset.id,
         title: asset.name,
         cols: 100,
         rows: 30
       })
-      workspace.applySshTerminalSession(panelId, session, asset)
+      const connected = Boolean(workspace.applySshTerminalSession(panelId, session, asset))
+      if (!connected) notice.value = 'SSH 终端启动失败'
     } catch (error) {
-      workspace.appendTerminalOutput(panelId, `[aiopsterm] SSH launch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+      notice.value = error instanceof Error ? error.message : 'SSH 终端启动失败'
     }
   }
   workspace.selectedContexts = [

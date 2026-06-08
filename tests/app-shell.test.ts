@@ -480,6 +480,14 @@ describe('AppShell', () => {
     expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.10.10.10:2222')
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
 
+    vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('unit ssh refused'))
+    await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.trigger('dblclick')
+    await flushPromises()
+    expect(store.activePanel.title).toBe('unit-host')
+    expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.10.10.10:2222')
+    expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
+    expect(assets.text()).toContain('unit ssh refused')
+
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.find('button[title="删除"]').trigger('click')
     expect(assets.find('.asset-confirm-modal').text()).toContain('删除主机')
     expect(assets.find('.asset-confirm-modal footer .danger').attributes('disabled')).toBeDefined()
@@ -913,6 +921,14 @@ describe('AppShell', () => {
       expect(store.activePanel.title).toBe('workspace-unit-edited')
       expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.44.0.9:2201')
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'workspace-unit-edited' }))
+
+      vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('workspace ssh refused'))
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
+      await flushPromises()
+      expect(store.activePanel.title).toBe('workspace-unit-edited')
+      expect(store.activePanel.output).toContain('aiopsterm ssh ops@10.44.0.9:2201')
+      expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
+      expect(wrapper.text()).toContain('workspace ssh refused')
 
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
