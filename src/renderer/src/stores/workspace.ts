@@ -6060,12 +6060,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshFileTransferTasks = async () => {
-    if (!window.aiops?.listFileTransferTasks) {
-      fileTransferTasks.value = []
+    const listFileTransferTasksBridge = window.aiops?.listFileTransferTasks
+    if (typeof listFileTransferTasksBridge !== 'function') {
+      setTopNotice('文件传输任务加载服务不可用')
       return false
     }
     try {
-      const tasks = await window.aiops.listFileTransferTasks()
+      const tasks = await listFileTransferTasksBridge()
       fileTransferTasks.value = Array.isArray(tasks) ? tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task) : []
       return true
     } catch {
@@ -6087,56 +6088,100 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshFileSessionCatalog = async () => {
-    if (!window.aiops?.listFileSessionCatalog) return null
-    const result = await window.aiops.listFileSessionCatalog()
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || '文件会话加载失败')
+    const listFileSessionCatalogBridge = window.aiops?.listFileSessionCatalog
+    if (typeof listFileSessionCatalogBridge !== 'function') {
+      setTopNotice('文件会话加载服务不可用')
       return null
     }
-    return applyFileSessionCatalog(result.data)
+    try {
+      const result = await listFileSessionCatalogBridge()
+      if (!result?.ok || !result.data) {
+        setTopNotice(result?.errorMessage || '文件会话加载失败')
+        return null
+      }
+      return applyFileSessionCatalog(result.data)
+    } catch {
+      setTopNotice('文件会话加载失败')
+      return null
+    }
   }
 
-  const applyFileSessionMutationResult = (result?: { ok?: boolean; data?: FileSessionCatalog; errorMessage?: string }) => {
+  const applyFileSessionMutationResult = (result?: { ok?: boolean; data?: FileSessionCatalog; errorMessage?: string }, fallbackNotice = '文件会话写入失败') => {
     if (!result?.ok || !result.data) {
-      if (result?.errorMessage) setTopNotice(result.errorMessage)
+      setTopNotice(result?.errorMessage || fallbackNotice)
       return null
     }
     return applyFileSessionCatalog(result.data)
   }
 
   const persistFileSession = async (session: FileSessionInfo) => {
-    if (!window.aiops?.saveFileSession) return null
-    return applyFileSessionMutationResult(await window.aiops.saveFileSession({ ...session }))
+    const saveFileSessionBridge = window.aiops?.saveFileSession
+    if (typeof saveFileSessionBridge !== 'function') {
+      setTopNotice('文件会话写入服务不可用')
+      return null
+    }
+    try {
+      return applyFileSessionMutationResult(await saveFileSessionBridge({ ...session }))
+    } catch {
+      setTopNotice('文件会话写入失败')
+      return null
+    }
   }
 
   const updateFileSession = async (id: string, patch: FileSessionPatch) => {
     const session = fileSessions.value.find((item) => item.id === id)
     if (!session) return null
-    if (!window.aiops?.updateFileSession) {
+    const updateFileSessionBridge = window.aiops?.updateFileSession
+    if (typeof updateFileSessionBridge !== 'function') {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
     const previous = { ...session }
     Object.assign(session, patch)
-    const result = await window.aiops.updateFileSession(id, patch)
-    const applied = applyFileSessionMutationResult(result)
-    if (!applied) Object.assign(session, previous)
-    return result?.ok ? result.data?.session || null : null
+    try {
+      const result = await updateFileSessionBridge(id, patch)
+      const applied = applyFileSessionMutationResult(result)
+      if (!applied) Object.assign(session, previous)
+      return result?.ok ? result.data?.session || null : null
+    } catch {
+      Object.assign(session, previous)
+      setTopNotice('文件会话写入失败')
+      return null
+    }
   }
 
   const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput) => {
     const normalized = { ...(folder.uuid ? { uuid: folder.uuid } : {}), name: folder.name.trim(), description: (folder.description || '').trim() }
-    if (!normalized.name || !window.aiops?.saveFileSessionFolder) return null
-    const result = await window.aiops.saveFileSessionFolder(normalized)
-    applyFileSessionMutationResult(result)
-    return result?.ok ? result.data?.folder || null : null
+    if (!normalized.name) return null
+    const saveFileSessionFolderBridge = window.aiops?.saveFileSessionFolder
+    if (typeof saveFileSessionFolderBridge !== 'function') {
+      setTopNotice('文件会话文件夹写入服务不可用')
+      return null
+    }
+    try {
+      const result = await saveFileSessionFolderBridge(normalized)
+      applyFileSessionMutationResult(result, '文件会话文件夹写入失败')
+      return result?.ok ? result.data?.folder || null : null
+    } catch {
+      setTopNotice('文件会话文件夹写入失败')
+      return null
+    }
   }
 
   const deleteFileSessionFolder = async (uuid: string) => {
-    if (!window.aiops?.deleteFileSessionFolder) return false
-    const result = await window.aiops.deleteFileSessionFolder(uuid)
-    applyFileSessionMutationResult(result)
-    return Boolean(result?.ok)
+    const deleteFileSessionFolderBridge = window.aiops?.deleteFileSessionFolder
+    if (typeof deleteFileSessionFolderBridge !== 'function') {
+      setTopNotice('文件会话文件夹删除服务不可用')
+      return false
+    }
+    try {
+      const result = await deleteFileSessionFolderBridge(uuid)
+      applyFileSessionMutationResult(result, '文件会话文件夹删除失败')
+      return Boolean(result?.ok)
+    } catch {
+      setTopNotice('文件会话文件夹删除失败')
+      return false
+    }
   }
 
   const scheduleFileTransferTaskRemoval = (id: string, delay = 800) => {
@@ -6198,11 +6243,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const ensureFileSessionForTerminalPanel = async (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
     if (!panel || panel.kind === 'knowledge') return null
-    if (!window.aiops?.saveFileSessionFromTerminalContext) {
+    const saveFileSessionFromTerminalContextBridge = window.aiops?.saveFileSessionFromTerminalContext
+    if (typeof saveFileSessionFromTerminalContextBridge !== 'function') {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
-    const result = await window.aiops.saveFileSessionFromTerminalContext(fileSessionTerminalContextForPanel(panel))
+    let result
+    try {
+      result = await saveFileSessionFromTerminalContextBridge(fileSessionTerminalContextForPanel(panel))
+    } catch {
+      setTopNotice('文件会话创建失败')
+      return null
+    }
     if (!result?.ok || !result.data?.session) {
       setTopNotice(result?.errorMessage || '文件会话创建失败')
       return null
@@ -6227,18 +6279,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openFileSession(assetId, side)
       return known
     }
-    if (!window.aiops?.saveFileSessionFromTerminalContext) {
+    const saveFileSessionFromTerminalContextBridge = window.aiops?.saveFileSessionFromTerminalContext
+    if (typeof saveFileSessionFromTerminalContextBridge !== 'function') {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
-    const result = await window.aiops.saveFileSessionFromTerminalContext({
-      kind: 'ssh',
-      panelTitle: assetId,
-      panelStatus: 'running',
-      ssh: {
-        assetId
-      }
-    })
+    let result
+    try {
+      result = await saveFileSessionFromTerminalContextBridge({
+        kind: 'ssh',
+        panelTitle: assetId,
+        panelStatus: 'running',
+        ssh: {
+          assetId
+        }
+      })
+    } catch {
+      setTopNotice('文件会话创建失败')
+      return null
+    }
     if (!result?.ok || !result.data?.session) {
       setTopNotice(result?.errorMessage || '文件会话创建失败')
       return null
@@ -6257,11 +6316,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openFileSession(known.id, side)
       return known
     }
-    if (!window.aiops?.saveFileSessionFromSftpPayload) {
+    const saveFileSessionFromSftpPayloadBridge = window.aiops?.saveFileSessionFromSftpPayload
+    if (typeof saveFileSessionFromSftpPayloadBridge !== 'function') {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
-    const result = await window.aiops.saveFileSessionFromSftpPayload({ ...payload })
+    let result
+    try {
+      result = await saveFileSessionFromSftpPayloadBridge({ ...payload })
+    } catch {
+      setTopNotice('文件会话创建失败')
+      return null
+    }
     if (!result?.ok || !result.data?.session) {
       setTopNotice(result?.errorMessage || '文件会话创建失败')
       return null
@@ -6284,10 +6350,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const recordFileTransferTask = async (input: FileTransferTaskRecordInput) => {
-    if (!window.aiops?.recordFileTransferTask) return null
-    const result = await window.aiops.recordFileTransferTask(input)
+    const recordFileTransferTaskBridge = window.aiops?.recordFileTransferTask
+    if (typeof recordFileTransferTaskBridge !== 'function') {
+      setTopNotice('文件传输任务记录服务不可用')
+      return null
+    }
+    let result
+    try {
+      result = await recordFileTransferTaskBridge(input)
+    } catch {
+      setTopNotice('文件传输任务记录失败')
+      return null
+    }
     if (!result?.ok || !result.data?.task) {
-      if (result?.errorMessage) setTopNotice(result.errorMessage)
+      setTopNotice(result?.errorMessage || '文件传输任务记录失败')
       return null
     }
     return pushFileTransferTask(result.data.task)
@@ -6324,8 +6400,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const cancelFileTransferTask = async (id: string) => {
-    if (!window.aiops?.cancelFileTransferTask) return false
-    const result = await window.aiops.cancelFileTransferTask({ id })
+    const cancelFileTransferTaskBridge = window.aiops?.cancelFileTransferTask
+    if (typeof cancelFileTransferTaskBridge !== 'function') {
+      setTopNotice('取消传输任务服务不可用')
+      return false
+    }
+    let result
+    try {
+      result = await cancelFileTransferTaskBridge({ id })
+    } catch {
+      setTopNotice('取消传输任务失败')
+      return false
+    }
     if (!result?.ok || !result.data) {
       setTopNotice(result?.errorMessage || '取消传输任务失败')
       return false

@@ -3055,6 +3055,227 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate Files folders or transfer-task state when bridges are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshFileSessionCatalog()
+    store.pushFileTransferTask({
+      id: 'files-bridge-transfer-1',
+      type: 'upload',
+      name: 'release.tar.gz',
+      source: '/tmp/release.tar.gz',
+      target: '/home/deploy/release.tar.gz',
+      progress: 35,
+      speed: '700 KB/s',
+      status: 'running',
+      children: [
+        {
+          id: 'files-bridge-transfer-child',
+          type: 'upload',
+          name: 'release.part',
+          source: '/tmp/release.part',
+          target: '/home/deploy/release.part',
+          progress: 20,
+          speed: '300 KB/s',
+          status: 'running'
+        }
+      ]
+    })
+
+    const originalAiops = {
+      listFileSessionCatalog: window.aiops.listFileSessionCatalog,
+      saveFileSession: window.aiops.saveFileSession,
+      updateFileSession: window.aiops.updateFileSession,
+      saveFileSessionFolder: window.aiops.saveFileSessionFolder,
+      deleteFileSessionFolder: window.aiops.deleteFileSessionFolder,
+      listFileTransferTasks: window.aiops.listFileTransferTasks,
+      recordFileTransferTask: window.aiops.recordFileTransferTask,
+      cancelFileTransferTask: window.aiops.cancelFileTransferTask
+    }
+    const foldersBefore = JSON.stringify(store.fileSessionFolders)
+    const sessionsBefore = JSON.stringify(store.fileSessions)
+    const transfersBefore = JSON.stringify(store.fileTransferTasks)
+    const originalComment = store.fileSessions.find((session) => session.id === 'asset-1')?.comment
+
+    try {
+      ;(window.aiops as any).listFileSessionCatalog = undefined
+      await expect(store.refreshFileSessionCatalog()).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件会话加载服务不可用')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+
+      ;(window.aiops as any).listFileSessionCatalog = originalAiops.listFileSessionCatalog
+      vi.mocked(window.aiops.listFileSessionCatalog!).mockRejectedValueOnce(new Error('catalog offline'))
+      await expect(store.refreshFileSessionCatalog()).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件会话加载失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+
+      ;(window.aiops as any).saveFileSession = undefined
+      await expect(
+        store.persistFileSession({
+          id: 'client-fake-session',
+          label: 'client fake',
+          host: '10.10.10.10',
+          group: '主机',
+          kind: 'remote',
+          rootPath: '/home/fake',
+          status: 'active'
+        })
+      ).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件会话写入服务不可用')
+      expect(store.fileSessions.some((session) => session.id === 'client-fake-session')).toBe(false)
+
+      ;(window.aiops as any).saveFileSession = originalAiops.saveFileSession
+      vi.mocked(window.aiops.saveFileSession!).mockRejectedValueOnce(new Error('save session offline'))
+      await expect(
+        store.persistFileSession({
+          id: 'client-fake-session',
+          label: 'client fake',
+          host: '10.10.10.10',
+          group: '主机',
+          kind: 'remote',
+          rootPath: '/home/fake',
+          status: 'active'
+        })
+      ).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件会话写入失败')
+      expect(store.fileSessions.some((session) => session.id === 'client-fake-session')).toBe(false)
+
+      ;(window.aiops as any).updateFileSession = originalAiops.updateFileSession
+      vi.mocked(window.aiops.updateFileSession!).mockRejectedValueOnce(new Error('update session offline'))
+      await expect(store.updateFileSession('asset-1', { comment: '客户端伪造更新' })).resolves.toBeNull()
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.comment).toBe(originalComment)
+      expect(store.topNotice).toBe('文件会话写入失败')
+
+      ;(window.aiops as any).saveFileSessionFolder = undefined
+      await expect(store.saveFileSessionFolder({ name: '客户端伪造文件夹', description: 'fake' })).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件会话文件夹写入服务不可用')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+
+      ;(window.aiops as any).saveFileSessionFolder = originalAiops.saveFileSessionFolder
+      vi.mocked(window.aiops.saveFileSessionFolder!).mockRejectedValueOnce(new Error('folder save offline'))
+      await expect(store.saveFileSessionFolder({ name: '客户端伪造文件夹', description: 'fake' })).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件会话文件夹写入失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      vi.mocked(window.aiops.saveFileSessionFolder!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'FILES_FOLDER_BACKEND_DOWN',
+        errorMessage: '文件夹后端写入失败'
+      })
+      await expect(store.saveFileSessionFolder({ name: '客户端伪造文件夹', description: 'fake' })).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件夹后端写入失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+
+      ;(window.aiops as any).deleteFileSessionFolder = undefined
+      await expect(store.deleteFileSessionFolder('files-folder-a')).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件会话文件夹删除服务不可用')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+
+      ;(window.aiops as any).deleteFileSessionFolder = originalAiops.deleteFileSessionFolder
+      vi.mocked(window.aiops.deleteFileSessionFolder!).mockRejectedValueOnce(new Error('folder delete offline'))
+      await expect(store.deleteFileSessionFolder('files-folder-a')).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件会话文件夹删除失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+      vi.mocked(window.aiops.deleteFileSessionFolder!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'FILES_FOLDER_DELETE_DOWN',
+        errorMessage: '文件夹后端删除失败'
+      })
+      await expect(store.deleteFileSessionFolder('files-folder-a')).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件夹后端删除失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+
+      ;(window.aiops as any).listFileTransferTasks = undefined
+      await expect(store.refreshFileTransferTasks()).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件传输任务加载服务不可用')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+
+      ;(window.aiops as any).listFileTransferTasks = originalAiops.listFileTransferTasks
+      vi.mocked(window.aiops.listFileTransferTasks!).mockRejectedValueOnce(new Error('transfer snapshot offline'))
+      await expect(store.refreshFileTransferTasks()).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件传输任务加载失败')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+
+      ;(window.aiops as any).recordFileTransferTask = undefined
+      await expect(
+        store.recordFileTransferTask({
+          type: 'download',
+          name: 'client-fake.log',
+          source: '/home/deploy/client-fake.log',
+          target: '/tmp/client-fake.log',
+          status: 'success'
+        })
+      ).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件传输任务记录服务不可用')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+
+      ;(window.aiops as any).recordFileTransferTask = originalAiops.recordFileTransferTask
+      vi.mocked(window.aiops.recordFileTransferTask!).mockRejectedValueOnce(new Error('record transfer offline'))
+      await expect(
+        store.recordFileTransferTask({
+          type: 'download',
+          name: 'client-fake.log',
+          source: '/home/deploy/client-fake.log',
+          target: '/tmp/client-fake.log',
+          status: 'success'
+        })
+      ).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件传输任务记录失败')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+      vi.mocked(window.aiops.recordFileTransferTask!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'FILES_TRANSFER_RECORD_DOWN',
+        errorMessage: '传输任务后端记录失败'
+      })
+      await expect(
+        store.recordFileTransferTask({
+          type: 'download',
+          name: 'client-fake.log',
+          source: '/home/deploy/client-fake.log',
+          target: '/tmp/client-fake.log',
+          status: 'success'
+        })
+      ).resolves.toBeNull()
+      expect(store.topNotice).toBe('传输任务后端记录失败')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+
+      ;(window.aiops as any).cancelFileTransferTask = undefined
+      await expect(store.cancelFileTransferTask('files-bridge-transfer-child')).resolves.toBe(false)
+      expect(store.topNotice).toBe('取消传输任务服务不可用')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+
+      ;(window.aiops as any).cancelFileTransferTask = originalAiops.cancelFileTransferTask
+      vi.mocked(window.aiops.cancelFileTransferTask!).mockRejectedValueOnce(new Error('cancel transfer offline'))
+      await expect(store.cancelFileTransferTask('files-bridge-transfer-child')).resolves.toBe(false)
+      expect(store.topNotice).toBe('取消传输任务失败')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+      vi.mocked(window.aiops.cancelFileTransferTask!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'FILES_TRANSFER_CANCEL_DOWN',
+        errorMessage: '传输任务后端取消失败'
+      })
+      await expect(store.cancelFileTransferTask('files-bridge-transfer-child')).resolves.toBe(false)
+      expect(store.topNotice).toBe('传输任务后端取消失败')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+      vi.mocked(window.aiops.cancelFileTransferTask!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          id: 'files-bridge-transfer-child',
+          taskIds: [],
+          status: 'not_found'
+        }
+      })
+      await expect(store.cancelFileTransferTask('files-bridge-transfer-child')).resolves.toBe(false)
+      expect(store.topNotice).toBe('传输任务已结束或不存在')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('manages External reference-style AI history conversation actions through backend snapshots', async () => {
     const store = useWorkspaceStore()
     await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
