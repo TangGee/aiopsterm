@@ -6171,13 +6171,26 @@ function closeConnectionModal() {
 }
 
 async function pickSqliteFile() {
-  const result = await window.aiops?.showOpenDialog?.({
-    properties: ['openFile'],
-    filters: [
-      { name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3'] },
-      { name: 'All Files', extensions: ['*'] }
-    ]
-  })
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    connectionFeedbackKind.value = 'error'
+    connectionFeedback.value = 'SQLite file picker service is unavailable.'
+    return
+  }
+  let result: Awaited<ReturnType<typeof showOpenDialog>>
+  try {
+    result = await showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+  } catch {
+    connectionFeedbackKind.value = 'error'
+    connectionFeedback.value = 'SQLite file picker failed.'
+    return
+  }
   const filePath = result && !result.canceled ? result.filePaths?.[0] : ''
   if (!filePath) return
   connectionDraft.filePath = filePath

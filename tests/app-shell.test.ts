@@ -4947,6 +4947,33 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
 
+    const originalShowOpenDialog = window.aiops.showOpenDialog
+    await wrapper.find('button[title="Add"]').trigger('click')
+    await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('SQLite'))!.trigger('click')
+    try {
+      ;(window.aiops as any).showOpenDialog = undefined
+      await wrapper.find('.db-connection-file button').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-modal-feedback').text()).toContain('SQLite file picker service is unavailable')
+      const missingPickerInputs = wrapper.findAll('.db-connection-modal input')
+      expect((missingPickerInputs.at(1)!.element as HTMLInputElement).value).toBe('')
+      expect((missingPickerInputs.at(3)!.element as HTMLInputElement).value).toBe('sqlite://')
+
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+      vi.mocked(window.aiops.showOpenDialog!).mockRejectedValueOnce(new Error('dialog crashed'))
+      await wrapper.find('.db-connection-file button').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-modal-feedback').text()).toContain('SQLite file picker failed')
+      const failedPickerInputs = wrapper.findAll('.db-connection-modal input')
+      expect((failedPickerInputs.at(1)!.element as HTMLInputElement).value).toBe('')
+      expect((failedPickerInputs.at(3)!.element as HTMLInputElement).value).toBe('sqlite://')
+    } finally {
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+      if (wrapper.find('.db-connection-modal').exists()) {
+        await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
+      }
+    }
+
     await wrapper.find('button[title="Add"]').trigger('click')
     await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('Oracle'))!.trigger('click')
     const oracleInputs = wrapper.findAll('.db-connection-modal input')
