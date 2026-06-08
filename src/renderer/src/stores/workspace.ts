@@ -5479,52 +5479,77 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const importSkillZip = async () => {
+    const importSkillZipBridge = window.aiops?.importSkillZip
+    if (typeof importSkillZipBridge !== 'function') {
+      setSettingsNotice('Skill ZIP 导入服务不可用')
+      return false
+    }
     try {
       if (pendingSkillImportOverwritePath) {
         const overwritePath = pendingSkillImportOverwritePath
-        pendingSkillImportOverwritePath = ''
-        const overwriteResult = await window.aiops?.importSkillZip?.(overwritePath, true)
+        const overwriteResult = await importSkillZipBridge(overwritePath, true)
         if (overwriteResult?.success) {
+          pendingSkillImportOverwritePath = ''
           await loadSkillsFromBridge()
           setSettingsNotice(`${overwriteResult.skillName || 'Skill'} 已覆盖导入`)
-          return
+          return true
         }
+        if (overwriteResult?.errorCode === 'DIR_EXISTS') {
+          setSettingsNotice('Skill 已存在，再次点击 Import 覆盖')
+          return false
+        }
+        pendingSkillImportOverwritePath = ''
         showSkillImportError(overwriteResult?.errorCode)
-        return
+        return false
       }
-      const result = await window.aiops?.showOpenDialog?.({
+      const showOpenDialog = window.aiops?.showOpenDialog
+      if (typeof showOpenDialog !== 'function') {
+        setSettingsNotice('Skill ZIP 选择服务不可用')
+        return false
+      }
+      const result = await showOpenDialog({
         properties: ['openFile'],
         filters: [{ name: 'ZIP Files', extensions: ['zip'] }]
       })
-      if (!result || result.canceled || !result.filePaths.length) return
-      const importResult = await window.aiops?.importSkillZip?.(result.filePaths[0])
+      if (!result || result.canceled || !result.filePaths.length) return false
+      const importResult = await importSkillZipBridge(result.filePaths[0])
       if (importResult?.success) {
         await loadSkillsFromBridge()
         setSettingsNotice(`${importResult.skillName || 'Skill'} 已导入`)
-        return
+        return true
       }
       if (importResult?.errorCode === 'DIR_EXISTS') {
         pendingSkillImportOverwritePath = result.filePaths[0]
         setSettingsNotice('Skill 已存在，再次点击 Import 覆盖')
-        return
+        return false
       }
       showSkillImportError(importResult?.errorCode)
+      return false
     } catch {
       pendingSkillImportOverwritePath = ''
       setSettingsNotice('Skill ZIP 导入失败')
+      return false
     }
   }
 
   const exportSkillZip = async (name: string) => {
+    const exportSkillZipBridge = window.aiops?.exportSkillZip
+    if (typeof exportSkillZipBridge !== 'function') {
+      setSettingsNotice(`${name} ZIP 导出服务不可用`)
+      return false
+    }
     try {
-      const result = await window.aiops?.exportSkillZip?.(name)
+      const result = await exportSkillZipBridge(name)
       if (result?.success) {
         setSettingsNotice(`${name} 已导出为 ZIP`)
+        return true
       } else if (result?.error !== 'cancelled') {
         setSettingsNotice(`${name} ZIP 导出失败`)
       }
+      return false
     } catch {
       setSettingsNotice(`${name} ZIP 导出失败`)
+      return false
     }
   }
 

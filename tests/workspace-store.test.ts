@@ -5612,6 +5612,93 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('does not fabricate Skill ZIP import or export when bridge operations are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshSkillsFromBridge()
+    const originalSkills = JSON.stringify(store.settingsSkills)
+
+    const originalAiops = {
+      showOpenDialog: window.aiops.showOpenDialog,
+      importSkillZip: window.aiops.importSkillZip,
+      exportSkillZip: window.aiops.exportSkillZip,
+      getSkills: window.aiops.getSkills
+    }
+
+    try {
+      vi.mocked(window.aiops.showOpenDialog).mockClear()
+      vi.mocked(window.aiops.importSkillZip).mockClear()
+      vi.mocked(window.aiops.getSkills).mockClear()
+      ;(window.aiops as any).showOpenDialog = undefined
+      await expect(store.importSkillZip()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skill ZIP 选择服务不可用')
+      expect(window.aiops.importSkillZip).not.toHaveBeenCalled()
+      expect(window.aiops.getSkills).not.toHaveBeenCalled()
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
+      vi.mocked(window.aiops.showOpenDialog!).mockClear()
+      ;(window.aiops as any).importSkillZip = undefined
+      await expect(store.importSkillZip()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skill ZIP 导入服务不可用')
+      expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
+      expect(window.aiops.getSkills).not.toHaveBeenCalled()
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      ;(window.aiops as any).importSkillZip = originalAiops.importSkillZip
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/bad-skill.zip'] })
+      vi.mocked(window.aiops.importSkillZip!).mockRejectedValueOnce(new Error('skill import offline'))
+      await expect(store.importSkillZip()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skill ZIP 导入失败')
+      expect(window.aiops.getSkills).not.toHaveBeenCalled()
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockClear()
+      vi.mocked(window.aiops.importSkillZip!).mockClear()
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/existing-skill.zip'] })
+      vi.mocked(window.aiops.importSkillZip!).mockResolvedValueOnce({
+        success: false,
+        errorCode: 'DIR_EXISTS',
+        skillName: 'existing-skill'
+      })
+      await expect(store.importSkillZip()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skill 已存在，再次点击 Import 覆盖')
+      ;(window.aiops as any).importSkillZip = undefined
+      await expect(store.importSkillZip()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skill ZIP 导入服务不可用')
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      ;(window.aiops as any).importSkillZip = originalAiops.importSkillZip
+      vi.mocked(window.aiops.showOpenDialog!).mockClear()
+      vi.mocked(window.aiops.importSkillZip!).mockClear()
+      vi.mocked(window.aiops.importSkillZip!).mockResolvedValueOnce({ success: true, skillName: 'existing-skill' })
+      vi.mocked(window.aiops.getSkills!).mockResolvedValueOnce([
+        {
+          name: 'existing-skill',
+          description: 'Existing skill',
+          enabled: true,
+          editable: true,
+          content: 'Existing content',
+          path: '/tmp/aiopsterm/skills/existing-skill/SKILL.md'
+        }
+      ])
+      await expect(store.importSkillZip()).resolves.toBe(true)
+      expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
+      expect(window.aiops.importSkillZip).toHaveBeenCalledWith('/tmp/existing-skill.zip', true)
+      expect(store.settingsSkills.some((skill) => skill.name === 'existing-skill')).toBe(true)
+
+      ;(window.aiops as any).exportSkillZip = undefined
+      await expect(store.exportSkillZip('incident-triage')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('incident-triage ZIP 导出服务不可用')
+
+      ;(window.aiops as any).exportSkillZip = originalAiops.exportSkillZip
+      vi.mocked(window.aiops.exportSkillZip!).mockRejectedValueOnce(new Error('skill export offline'))
+      await expect(store.exportSkillZip('incident-triage')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('incident-triage ZIP 导出失败')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not fabricate MCP writes when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshMcpServersFromBridge()
