@@ -6044,7 +6044,7 @@ describe('AppShell', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
-    store.updateEditorSettings({ tabSize: 4, lineHeight: 24, fontSize: 18, wordWrap: 'on' })
+    await expect(store.updateEditorSettings({ tabSize: 4, lineHeight: 24, fontSize: 18, wordWrap: 'on' })).resolves.toBe(true)
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
       global: { plugins: [pinia] }
@@ -6520,6 +6520,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Mouse Wheel Zoom')
     vi.mocked(window.aiops.saveConfig).mockClear()
     await workspace.findAll('input.settings-number')[0].setValue('18')
+    await flushPromises()
     expect(store.editorSettings.fontSize).toBe(18)
     expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('18px')
     expect(document.documentElement.style.getPropertyValue('--editor-line-height')).toBe('26px')
@@ -6537,12 +6538,15 @@ describe('AppShell', () => {
       })
     )
     await workspace.findAll('input[name="minimap"]')[1].setValue(true)
+    await flushPromises()
     await workspace.findAll('input[name="mouseWheelZoom"]')[1].setValue(true)
+    await flushPromises()
     expect(store.editorSettings.minimap).toBe(false)
     expect(store.editorSettings.mouseWheelZoom).toBe(false)
     expect(document.documentElement.dataset.editorMinimap).toBe('off')
     expect(document.documentElement.dataset.editorMouseWheelZoom).toBe('off')
     await workspace.findAll('input[name="wordWrap"]')[0].setValue(true)
+    await flushPromises()
     expect(store.editorSettings.wordWrap).toBe('on')
     expect(document.documentElement.dataset.editorWordWrap).toBe('on')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -6867,6 +6871,63 @@ describe('AppShell', () => {
 
     spotlight.unmount()
     target.remove()
+  })
+
+  it('does not leave editor setting controls visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('general')
+    await workspace.vm.$nextTick()
+    const savedEditorSettings = {
+      ...store.editorSettings
+    }
+    const initialFontSizeToken = document.documentElement.style.getPropertyValue('--editor-font-size')
+    const initialMinimapToken = document.documentElement.dataset.editorMinimap
+    const row = (label: string) => workspace.findAll('.settings-form-row').find((item) => item.find('label').text() === label)!
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      editorSettings: savedEditorSettings
+    })
+    const fontSizeInput = row('字体大小').find('input.settings-number')
+    expect((fontSizeInput.element as HTMLInputElement).value).toBe('14')
+    await fontSizeInput.setValue('18')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('编辑器设置保存失败')
+    expect(store.editorSettings.fontSize).toBe(14)
+    expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe(initialFontSizeToken)
+    expect((fontSizeInput.element as HTMLInputElement).value).toBe('14')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      editorSettings: savedEditorSettings
+    })
+    const fontSelect = row('字体').find('select.settings-select')
+    expect((fontSelect.element as HTMLSelectElement).value).toBe('cascadia-mono')
+    await fontSelect.setValue('jetbrains-mono')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('编辑器设置保存失败')
+    expect(store.editorSettings.fontFamily).toBe('cascadia-mono')
+    expect((fontSelect.element as HTMLSelectElement).value).toBe('cascadia-mono')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      editorSettings: savedEditorSettings
+    })
+    const minimapRadios = row('Minimap').findAll('input[name="minimap"]')
+    expect((minimapRadios[0].element as HTMLInputElement).checked).toBe(true)
+    expect((minimapRadios[1].element as HTMLInputElement).checked).toBe(false)
+    await minimapRadios[1].setValue(true)
+    await flushPromises()
+    expect(store.settingsNotice).toBe('编辑器设置保存失败')
+    expect(store.editorSettings.minimap).toBe(true)
+    expect(document.documentElement.dataset.editorMinimap).toBe(initialMinimapToken)
+    expect((minimapRadios[0].element as HTMLInputElement).checked).toBe(true)
+    expect((minimapRadios[1].element as HTMLInputElement).checked).toBe(false)
   })
 
   it('does not leave extension switches visually changed when the config bridge rejects the snapshot', async () => {

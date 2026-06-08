@@ -1108,6 +1108,23 @@ const normalizeEditorSettingsConfig = (source?: Partial<EditorUserConfig>) => {
   }
 }
 
+const isEditorSettingsSnapshot = (source: unknown): source is EditorUserConfig => {
+  if (!isRecord(source)) return false
+  return (
+    typeof source.fontSize === 'number' &&
+    Number.isFinite(source.fontSize) &&
+    typeof source.lineHeight === 'number' &&
+    Number.isFinite(source.lineHeight) &&
+    typeof source.fontFamily === 'string' &&
+    source.fontFamily.trim().length > 0 &&
+    typeof source.tabSize === 'number' &&
+    Number.isFinite(source.tabSize) &&
+    editorWordWrapValues.includes(source.wordWrap as EditorSettings['wordWrap']) &&
+    typeof source.minimap === 'boolean' &&
+    typeof source.mouseWheelZoom === 'boolean'
+  )
+}
+
 const normalizeSshProxyConfigs = (source?: unknown) => {
   const rawConfigs = Array.isArray(source) ? source : []
   const seenNames = new Set<string>()
@@ -4325,11 +4342,53 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveConfig({ watermark })
   }
 
-  const updateEditorSettings = (patch: Partial<EditorSettings>) => {
-    editorSettings.value = normalizeEditorSettingsConfig({ ...editorSettings.value, ...patch }).normalized
-    applyCurrentEditorSettings()
-    saveConfig({ editorSettings: { ...editorSettings.value } })
-    setSettingsNotice('编辑器设置已保存')
+  const getEditorSettingsSnapshot = (): EditorUserConfig => ({ ...editorSettings.value })
+
+  const cloneEditorSettingsSnapshot = (settings: EditorSettings): EditorUserConfig => ({ ...settings })
+
+  const editorSettingsSnapshotsMatch = (left: EditorSettings, right: EditorSettings) =>
+    JSON.stringify(cloneEditorSettingsSnapshot(left)) === JSON.stringify(cloneEditorSettingsSnapshot(right))
+
+  const persistEditorSettings = async (nextSettings: EditorSettings) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('编辑器设置保存服务不可用')
+      return false
+    }
+    const normalizedSettings = normalizeEditorSettingsConfig(nextSettings).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        editorSettings: cloneEditorSettingsSnapshot(normalizedSettings)
+      })
+      if (!isRecord(savedConfig) || !isEditorSettingsSnapshot(savedConfig.editorSettings)) {
+        setSettingsNotice('编辑器设置保存失败')
+        return false
+      }
+      const savedSettings = normalizeEditorSettingsConfig(savedConfig.editorSettings).normalized
+      if (!editorSettingsSnapshotsMatch(savedSettings, normalizedSettings)) {
+        setSettingsNotice('编辑器设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        editorSettings: cloneEditorSettingsSnapshot(savedSettings)
+      } as Partial<UserConfig>)
+      editorSettings.value = cloneEditorSettingsSnapshot(savedSettings)
+      applyCurrentEditorSettings()
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '编辑器设置保存失败')
+      return false
+    }
+  }
+
+  const updateEditorSettings = async (patch: Partial<EditorSettings>) => {
+    const nextSettings = normalizeEditorSettingsConfig({ ...getEditorSettingsSnapshot(), ...patch }).normalized
+    const saved = await persistEditorSettings(nextSettings)
+    if (saved) {
+      setSettingsNotice('编辑器设置已保存')
+    }
+    return saved
   }
 
   const getTerminalSettingsSnapshot = (): TerminalUserConfig => ({ ...terminalSettings.value })

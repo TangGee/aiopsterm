@@ -424,7 +424,8 @@ const GeneralSettings = defineComponent({
               {
                 class: 'settings-select',
                 value: workspace.editorSettings.fontFamily,
-                onChange: (event: Event) => workspace.updateEditorSettings({ fontFamily: (event.target as HTMLSelectElement).value })
+                onChange: (event: Event) =>
+                  restoreSelectOnFailedSave(event, workspace.editorSettings.fontFamily, (value) => workspace.updateEditorSettings({ fontFamily: value }))
               },
               [h('option', { value: 'cascadia-mono' }, 'Cascadia Mono'), h('option', { value: 'jetbrains-mono' }, 'JetBrains Mono'), h('option', { value: 'source-code-pro' }, 'Source Code Pro')]
             )
@@ -1645,19 +1646,32 @@ const SettingsCheckbox = defineComponent({
   }
 })
 
-const radioRow = (label: string, name: string, options: Array<{ label: string; checked: boolean; onChange: () => void }>) =>
+const radioRow = (label: string, name: string, options: Array<{ label: string; checked: boolean; onChange: () => PersistResult }>) =>
   h('div', { class: 'settings-form-row' }, [
     h('label', label),
     h(
       'div',
       { class: 'settings-radio-group' },
-      options.map((option) =>
+      options.map((option, index) =>
         h('label', [
           h('input', {
             type: 'radio',
             name,
             checked: option.checked,
-            onChange: option.onChange
+            onChange: async (event: Event) => {
+              const saved = await option.onChange()
+              if (saved === false) {
+                const input = event.target as HTMLInputElement
+                const radios = Array.from(input.closest('.settings-radio-group')?.querySelectorAll<HTMLInputElement>('input[type="radio"]') || [])
+                if (radios.length) {
+                  radios.forEach((radio, radioIndex) => {
+                    radio.checked = Boolean(options[radioIndex]?.checked)
+                  })
+                } else {
+                  input.checked = Boolean(options[index]?.checked)
+                }
+              }
+            }
           }),
           option.label
         ])

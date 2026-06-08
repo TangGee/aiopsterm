@@ -5078,7 +5078,7 @@ describe('workspace store', () => {
     )
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updateEditorSettings({ fontSize: 18, lineHeight: 24, wordWrap: 'on', minimap: false, mouseWheelZoom: false })
+    await expect(store.updateEditorSettings({ fontSize: 18, lineHeight: 24, wordWrap: 'on', minimap: false, mouseWheelZoom: false })).resolves.toBe(true)
     expect(store.editorSettings).toEqual({
       fontSize: 18,
       lineHeight: 24,
@@ -5107,7 +5107,7 @@ describe('workspace store', () => {
         }
       })
     )
-    store.updateEditorSettings({ tabSize: 6 })
+    await expect(store.updateEditorSettings({ tabSize: 6 })).resolves.toBe(true)
     expect(store.editorSettings.tabSize).toBe(6)
     expect(document.documentElement.style.getPropertyValue('--editor-tab-size')).toBe('6')
 
@@ -5565,6 +5565,83 @@ describe('workspace store', () => {
         secretRedaction: 'enabled',
         dataSync: 'enabled'
       })
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate editor setting writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialSnapshot = JSON.stringify({
+      config: store.config.editorSettings,
+      settings: store.editorSettings,
+      runtime: {
+        fontSize: document.documentElement.style.getPropertyValue('--editor-font-size'),
+        lineHeight: document.documentElement.style.getPropertyValue('--editor-line-height'),
+        tabSize: document.documentElement.style.getPropertyValue('--editor-tab-size'),
+        wordWrap: document.documentElement.dataset.editorWordWrap,
+        minimap: document.documentElement.dataset.editorMinimap,
+        mouseWheelZoom: document.documentElement.dataset.editorMouseWheelZoom
+      }
+    })
+    const assertEditorSettingsUnchanged = () => {
+      expect(
+        JSON.stringify({
+          config: store.config.editorSettings,
+          settings: store.editorSettings,
+          runtime: {
+            fontSize: document.documentElement.style.getPropertyValue('--editor-font-size'),
+            lineHeight: document.documentElement.style.getPropertyValue('--editor-line-height'),
+            tabSize: document.documentElement.style.getPropertyValue('--editor-tab-size'),
+            wordWrap: document.documentElement.dataset.editorWordWrap,
+            minimap: document.documentElement.dataset.editorMinimap,
+            mouseWheelZoom: document.documentElement.dataset.editorMouseWheelZoom
+          }
+        })
+      ).toBe(initialSnapshot)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateEditorSettings({ fontSize: 18 })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('编辑器设置保存服务不可用')
+      assertEditorSettingsUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateEditorSettings({ fontSize: 18 })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('编辑器设置保存失败')
+      assertEditorSettingsUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        editorSettings: {
+          ...defaultEditorSettings,
+          fontSize: 14
+        }
+      } as any)
+      await expect(store.updateEditorSettings({ fontSize: 18 })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('编辑器设置保存失败')
+      assertEditorSettingsUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('editor settings save offline'))
+      await expect(store.updateEditorSettings({ fontSize: 18 })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('editor settings save offline')
+      assertEditorSettingsUnchanged()
+
+      await expect(store.updateEditorSettings({ fontSize: 18, lineHeight: 24, wordWrap: 'on', minimap: false, mouseWheelZoom: false })).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('编辑器设置已保存')
+      expect(store.editorSettings.fontSize).toBe(18)
+      expect(store.editorSettings.lineHeight).toBe(24)
+      expect(store.editorSettings.wordWrap).toBe('on')
+      expect(store.editorSettings.minimap).toBe(false)
+      expect(store.editorSettings.mouseWheelZoom).toBe(false)
+      expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('18px')
+      expect(document.documentElement.style.getPropertyValue('--editor-line-height')).toBe('24px')
+      expect(document.documentElement.dataset.editorWordWrap).toBe('on')
+      expect(document.documentElement.dataset.editorMinimap).toBe('off')
+      expect(document.documentElement.dataset.editorMouseWheelZoom).toBe('off')
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }
