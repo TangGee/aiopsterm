@@ -5865,10 +5865,8 @@ function openContextSql() {
 async function openDdlModalFromContext() {
   const menu = contextMenu.value
   if (!menu || menu.type !== 'table') return
-  const table = findTable(menu.connectionId, menu.catalogName, menu.tableId, menu.schemaName)
-  if (!table) return
   ddlModal.open = true
-  ddlModal.tableName = table.name
+  ddlModal.tableName = menu.label
   ddlModal.ddl = ''
   ddlModal.connectionId = menu.connectionId
   ddlModal.catalogName = menu.catalogName
@@ -5883,7 +5881,7 @@ async function openDdlModalFromContext() {
     catalogName: menu.catalogName,
     schemaName: menu.schemaName,
     tableId: menu.tableId,
-    tableName: table.name
+    tableName: menu.label
   })
   ddlModal.loading = false
   if (result.ok) {
@@ -5902,20 +5900,18 @@ function fetchTableDdl(ctx: {
   tableId: string
   tableName: string
 }): Promise<TableDdlResult> {
-  const connection = findConnection(ctx.connectionId)
-  if (!connection || connection.status !== 'connected') {
-    return Promise.resolve({ ok: false, errorCode: 'other', errorMessage: 'not connected' })
+  const getTableDdl = window.aiops?.getDatabaseTableDdl
+  if (typeof getTableDdl !== 'function') {
+    return Promise.resolve({ ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database DDL API is unavailable.' })
   }
-  const table = findTable(ctx.connectionId, ctx.catalogName, ctx.tableId, ctx.schemaName)
-  if (!table) return Promise.resolve({ ok: false, errorCode: 'other', errorMessage: 'table not found' })
-  return window.aiops
-    .getDatabaseTableDdl({
-      connectionId: ctx.connectionId,
-      dbType: connection.dbType,
-      databaseName: ctx.catalogName,
-      schemaName: ctx.schemaName,
-      tableName: ctx.tableName
-    })
+  const connection = findConnection(ctx.connectionId)
+  return getTableDdl({
+    connectionId: ctx.connectionId,
+    dbType: connection?.dbType,
+    databaseName: ctx.catalogName,
+    schemaName: ctx.schemaName,
+    tableName: ctx.tableName
+  })
     .then(normalizeTableDdlResult)
     .catch((error) => ({ ok: false, errorCode: 'other', errorMessage: errorToMessage(error) }))
 }
@@ -5943,14 +5939,12 @@ function copySelectSql() {
 async function copyTableDdlFromContext() {
   const menu = contextMenu.value
   if (!menu || menu.type !== 'table') return
-  const table = findTable(menu.connectionId, menu.catalogName, menu.tableId, menu.schemaName)
-  if (!table) return
   const result = await fetchTableDdl({
     connectionId: menu.connectionId,
     catalogName: menu.catalogName,
     schemaName: menu.schemaName,
     tableId: menu.tableId,
-    tableName: table.name
+    tableName: menu.label
   })
   if (!result.ok) {
     showNotice(formatDdlError(result))

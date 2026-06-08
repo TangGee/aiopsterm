@@ -5341,6 +5341,34 @@ describe('AppShell', () => {
     expect(window.aiops.refreshDatabaseConnection).toHaveBeenCalledWith('conn-metrics-mysql')
     expect(wrapper.text()).toContain('Connection schema refreshed')
 
+    const idleMetricsConnection = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!
+    if (!wrapper.findAll('.db-tree-row.database').some((row) => row.text().includes('metrics'))) {
+      await idleMetricsConnection.find('button').trigger('click')
+    }
+    const idleMetricsCatalog = wrapper.findAll('.db-tree-row.database').find((row) => row.text().includes('metrics'))!
+    if (!wrapper.findAll('.db-tree-row.table').some((row) => row.text().includes('service_health'))) {
+      await idleMetricsCatalog.find('button').trigger('click')
+    }
+    const idleServiceHealthTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('service_health'))!
+    vi.mocked(window.aiops.getDatabaseTableDdl).mockClear()
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await idleServiceHealthTable.trigger('contextmenu')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Copy Table'))!.trigger('mouseenter')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Copy Table DDL'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.getDatabaseTableDdl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'conn-metrics-mysql',
+        dbType: 'mysql',
+        databaseName: 'metrics',
+        tableName: 'service_health'
+      })
+    )
+    expect(window.aiops.getDatabaseTableDdl).toHaveBeenCalledTimes(1)
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE `service_health`'))
+    expect(wrapper.text()).toContain('DDL copied')
+    expect(wrapper.text()).not.toContain('not connected')
+
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('metrics-mysql'))!.trigger('contextmenu')
     await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Open Connection'))!.trigger('click')
     await flushPromises()
