@@ -3255,8 +3255,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       type: option.type,
       apiProvider: option.apiProvider
     }))
-    const bridgeQuickCommands = window.aiops.getQuickCommands ? await window.aiops.getQuickCommands() : savedConfig.quickCommands
-    const { normalized: normalizedQuickCommands, changed: quickCommandsChanged } = normalizeQuickCommandsConfig(bridgeQuickCommands)
+    let normalizedQuickCommands = normalizeQuickCommandsConfig().normalized
+    let quickCommandsChanged = false
+    let quickCommandsLoadedFromBridge = false
+    if (window.aiops.getQuickCommands) {
+      try {
+        const bridgeQuickCommands = await window.aiops.getQuickCommands()
+        const snapshot = normalizeQuickCommandsConfig(bridgeQuickCommands)
+        normalizedQuickCommands = snapshot.normalized
+        quickCommandsChanged = snapshot.changed
+        quickCommandsLoadedFromBridge = true
+      } catch {
+        setTopNotice('快捷命令加载失败')
+      }
+    } else {
+      setTopNotice('快捷命令加载服务不可用')
+    }
     snippetGroups.value = normalizedQuickCommands.groups.map((group) => ({ ...group }))
     quickCommands.value = normalizedQuickCommands.snippets.map((snippet) => ({ ...snippet }))
     const {
@@ -3341,7 +3355,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       privacy: normalizedPrivacy,
       aiPreferences: normalizedAiPreferences,
       modelSettings: normalizedModelSettings,
-      quickCommands: normalizedQuickCommands,
+      ...(quickCommandsLoadedFromBridge ? { quickCommands: normalizedQuickCommands } : {}),
       knowledgeBase: normalizedKnowledgeBase,
       aliasCommands: normalizedAliasCommands,
       shortcuts: normalizedShortcuts,
@@ -3378,8 +3392,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       modelNameChanged ||
       modelSettingsChanged ||
       missingModelSettings ||
-      quickCommandsChanged ||
-      missingQuickCommands ||
+      (quickCommandsLoadedFromBridge && (quickCommandsChanged || missingQuickCommands)) ||
       knowledgeBaseChanged ||
       missingKnowledgeBase ||
       aliasCommandsChanged ||
@@ -3405,7 +3418,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           privacy: normalizedPrivacy,
           aiPreferences: normalizedAiPreferences,
           modelSettings: normalizedModelSettings,
-          quickCommands: normalizedQuickCommands,
+          ...(quickCommandsLoadedFromBridge ? { quickCommands: normalizedQuickCommands } : {}),
           knowledgeBase: normalizedKnowledgeBase,
           aliasCommands: normalizedAliasCommands,
           skills: normalizedSkills,
@@ -3467,21 +3480,38 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshQuickCommands = async () => {
-    const snapshot = window.aiops?.getQuickCommands ? await window.aiops.getQuickCommands() : config.value.quickCommands || defaultQuickCommands
-    return applyQuickCommandsSnapshot(snapshot)
+    if (!window.aiops?.getQuickCommands) {
+      setTopNotice('快捷命令加载服务不可用')
+      return false
+    }
+    try {
+      const snapshot = await window.aiops.getQuickCommands()
+      return applyQuickCommandsSnapshot(snapshot)
+    } catch {
+      setTopNotice('快捷命令加载失败')
+      return false
+    }
   }
 
   const persistQuickCommands = async () => {
     const snapshot = getQuickCommandsSnapshot()
-    if (window.aiops?.saveQuickCommands) {
+    if (!window.aiops?.saveQuickCommands) {
+      setTopNotice('快捷命令保存服务不可用')
+      return null
+    }
+    try {
       const result = await window.aiops.saveQuickCommands(snapshot)
-      if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '快捷命令保存失败')
+      if (!result?.ok || !result.data) {
+        setTopNotice(result?.errorMessage || '快捷命令保存失败')
+        return null
+      }
       applyQuickCommandsSnapshot(result.data)
       await saveConfig({ quickCommands: result.data })
       return result.data
+    } catch {
+      setTopNotice('快捷命令保存失败')
+      return null
     }
-    await saveConfig({ quickCommands: snapshot })
-    return snapshot
   }
 
   const getKnowledgeBaseSnapshot = (): KnowledgeBaseUserConfig => ({
@@ -6027,71 +6057,161 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const createSnippetGroup = async (groupName: string) => {
     const name = groupName.trim()
-    if (!name) return
-    const result = await window.aiops.saveQuickCommandGroup({ group_name: name })
-    if (!result.ok || !result.data) return
+    if (!name) return null
+    if (!window.aiops?.saveQuickCommandGroup) {
+      setTopNotice('快捷命令分组写入服务不可用')
+      return null
+    }
+    let result
+    try {
+      result = await window.aiops.saveQuickCommandGroup({ group_name: name })
+    } catch {
+      setTopNotice('快捷命令分组写入失败')
+      return null
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令分组写入失败')
+      return null
+    }
     applyQuickCommandsSnapshot(result.data)
     return result.data.group
   }
 
   const renameSnippetGroup = async (uuid: string, groupName: string) => {
     const name = groupName.trim()
-    if (!name) return
-    const result = await window.aiops.saveQuickCommandGroup({ uuid, group_name: name })
-    if (!result.ok || !result.data) return
+    if (!name) return false
+    if (!window.aiops?.saveQuickCommandGroup) {
+      setTopNotice('快捷命令分组写入服务不可用')
+      return false
+    }
+    let result
+    try {
+      result = await window.aiops.saveQuickCommandGroup({ uuid, group_name: name })
+    } catch {
+      setTopNotice('快捷命令分组写入失败')
+      return false
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令分组写入失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
+    return true
   }
 
   const deleteSnippetGroup = async (uuid: string) => {
-    const result = await window.aiops.deleteQuickCommandGroup(uuid)
-    if (!result.ok || !result.data) return
+    if (!window.aiops?.deleteQuickCommandGroup) {
+      setTopNotice('快捷命令分组删除服务不可用')
+      return false
+    }
+    let result
+    try {
+      result = await window.aiops.deleteQuickCommandGroup(uuid)
+    } catch {
+      setTopNotice('快捷命令分组删除失败')
+      return false
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令分组删除失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
     if (selectedSnippetGroupUuid.value === uuid) selectedSnippetGroupUuid.value = null
+    return true
   }
 
   const createQuickCommand = async (payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
     const snippetName = payload.snippet_name.trim()
-    if (!snippetName || !payload.snippet_content) return
+    if (!snippetName || !payload.snippet_content) return null
+    if (!window.aiops?.saveQuickCommandSnippet) {
+      setTopNotice('快捷命令写入服务不可用')
+      return null
+    }
     const result = await window.aiops.saveQuickCommandSnippet({
       snippet_name: snippetName,
       snippet_content: payload.snippet_content,
       group_uuid: payload.group_uuid ?? null
-    })
-    if (!result.ok || !result.data) return
+    }).catch(() => null)
+    if (!result) {
+      setTopNotice('快捷命令写入失败')
+      return null
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令写入失败')
+      return null
+    }
     applyQuickCommandsSnapshot(result.data)
     return result.data.snippet
   }
 
   const updateQuickCommand = async (id: number, payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
     const snippetName = payload.snippet_name.trim()
-    if (!snippetName || !payload.snippet_content) return
-    const result = await window.aiops.saveQuickCommandSnippet({
-      id,
-      snippet_name: snippetName,
-      snippet_content: payload.snippet_content,
-      group_uuid: payload.group_uuid ?? null
-    })
-    if (!result.ok || !result.data) return
+    if (!snippetName || !payload.snippet_content) return false
+    if (!window.aiops?.saveQuickCommandSnippet) {
+      setTopNotice('快捷命令写入服务不可用')
+      return false
+    }
+    const result = await window.aiops
+      .saveQuickCommandSnippet({
+        id,
+        snippet_name: snippetName,
+        snippet_content: payload.snippet_content,
+        group_uuid: payload.group_uuid ?? null
+      })
+      .catch(() => null)
+    if (!result) {
+      setTopNotice('快捷命令写入失败')
+      return false
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令写入失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
+    return true
   }
 
   const deleteQuickCommand = async (id: number) => {
-    const result = await window.aiops.deleteQuickCommandSnippet(id)
-    if (!result.ok || !result.data) return
+    if (!window.aiops?.deleteQuickCommandSnippet) {
+      setTopNotice('快捷命令删除服务不可用')
+      return false
+    }
+    const result = await window.aiops.deleteQuickCommandSnippet(id).catch(() => null)
+    if (!result) {
+      setTopNotice('快捷命令删除失败')
+      return false
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令删除失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
+    return true
   }
 
   const reorderQuickCommand = async (sourceId: number, targetId: number) => {
+    if (!window.aiops?.reorderQuickCommands) {
+      setTopNotice('快捷命令排序服务不可用')
+      return false
+    }
     const currentList = [...filteredQuickCommands.value]
     const sourceIndex = currentList.findIndex((command) => command.id === sourceId)
     const targetIndex = currentList.findIndex((command) => command.id === targetId)
-    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return false
     const [moved] = currentList.splice(sourceIndex, 1)
     currentList.splice(targetIndex, 0, moved)
     const otherCommandIds = quickCommands.value.filter((command) => !currentList.some((item) => item.id === command.id)).map((command) => command.id)
-    const result = await window.aiops.reorderQuickCommands({ orderedIds: [...otherCommandIds, ...currentList.map((command) => command.id)] })
-    if (!result.ok || !result.data) return
+    const result = await window.aiops.reorderQuickCommands({ orderedIds: [...otherCommandIds, ...currentList.map((command) => command.id)] }).catch(() => null)
+    if (!result) {
+      setTopNotice('快捷命令排序失败')
+      return false
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '快捷命令排序失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
+    return true
   }
 
   const serializeSnippetScript = (scriptContent: string, autoExecute: boolean) => {

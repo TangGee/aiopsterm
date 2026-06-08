@@ -1807,6 +1807,25 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
+  it('does not hydrate quick commands from renderer config when the backend bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    const originalGetQuickCommands = window.aiops.getQuickCommands
+
+    try {
+      ;(window.aiops as any).getQuickCommands = undefined
+
+      await store.hydrateConfig()
+
+      expect(store.snippetGroups).toEqual([])
+      expect(store.quickCommands).toEqual([])
+      expect(store.topNotice).toBe('快捷命令加载服务不可用')
+      const saveConfigPatches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch)
+      expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'quickCommands'))).toBe(true)
+    } finally {
+      ;(window.aiops as any).getQuickCommands = originalGetQuickCommands
+    }
+  })
+
   it('hydrates file transfer task snapshots from the backend boundary', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([
@@ -3333,6 +3352,117 @@ describe('workspace store', () => {
     await Promise.resolve()
     expect(store.isMacroRecording).toBe(false)
     expect(store.macroLimitReason).toBe('count')
+  })
+
+  it('does not mutate quick commands when required backend operations are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshQuickCommands()
+
+    const originalAiops = {
+      getQuickCommands: window.aiops.getQuickCommands,
+      saveQuickCommandGroup: window.aiops.saveQuickCommandGroup,
+      deleteQuickCommandGroup: window.aiops.deleteQuickCommandGroup,
+      saveQuickCommandSnippet: window.aiops.saveQuickCommandSnippet,
+      deleteQuickCommandSnippet: window.aiops.deleteQuickCommandSnippet,
+      reorderQuickCommands: window.aiops.reorderQuickCommands
+    }
+    const quickCommandsSnapshot = () =>
+      JSON.stringify({
+        groups: store.snippetGroups,
+        snippets: store.quickCommands
+      })
+
+    try {
+      const initialSnapshot = quickCommandsSnapshot()
+      ;(window.aiops as any).getQuickCommands = undefined
+      await expect(store.refreshQuickCommands()).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令加载服务不可用')
+      expect(quickCommandsSnapshot()).toBe(initialSnapshot)
+
+      ;(window.aiops as any).getQuickCommands = originalAiops.getQuickCommands
+      vi.mocked(window.aiops.getQuickCommands!).mockRejectedValueOnce(new Error('quick commands offline'))
+      await expect(store.refreshQuickCommands()).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令加载失败')
+      expect(quickCommandsSnapshot()).toBe(initialSnapshot)
+
+      ;(window.aiops as any).saveQuickCommandGroup = undefined
+      await expect(store.createSnippetGroup('No Bridge Group')).resolves.toBeNull()
+      expect(store.topNotice).toBe('快捷命令分组写入服务不可用')
+      expect(quickCommandsSnapshot()).toBe(initialSnapshot)
+
+      ;(window.aiops as any).saveQuickCommandGroup = originalAiops.saveQuickCommandGroup
+      const group = await store.createSnippetGroup('Bridge Group')
+      expect(group).toBeTruthy()
+      const afterGroupSnapshot = quickCommandsSnapshot()
+
+      ;(window.aiops as any).saveQuickCommandGroup = undefined
+      await expect(store.renameSnippetGroup(group!.uuid, 'Fake Rename')).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令分组写入服务不可用')
+      expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
+
+      ;(window.aiops as any).saveQuickCommandGroup = originalAiops.saveQuickCommandGroup
+      vi.mocked(window.aiops.saveQuickCommandGroup!).mockRejectedValueOnce(new Error('group write failed'))
+      await expect(store.renameSnippetGroup(group!.uuid, 'Fake Rename')).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令分组写入失败')
+      expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
+
+      ;(window.aiops as any).deleteQuickCommandGroup = undefined
+      await expect(store.deleteSnippetGroup(group!.uuid)).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令分组删除服务不可用')
+      expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
+
+      ;(window.aiops as any).deleteQuickCommandGroup = originalAiops.deleteQuickCommandGroup
+      vi.mocked(window.aiops.deleteQuickCommandGroup!).mockRejectedValueOnce(new Error('group delete failed'))
+      await expect(store.deleteSnippetGroup(group!.uuid)).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令分组删除失败')
+      expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
+
+      ;(window.aiops as any).saveQuickCommandSnippet = undefined
+      await expect(store.createQuickCommand({ snippet_name: 'No Bridge Command', snippet_content: 'echo no', group_uuid: null })).resolves.toBeNull()
+      expect(store.topNotice).toBe('快捷命令写入服务不可用')
+      expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
+
+      ;(window.aiops as any).saveQuickCommandSnippet = originalAiops.saveQuickCommandSnippet
+      const command = await store.createQuickCommand({ snippet_name: 'Bridge Command', snippet_content: 'echo bridge', group_uuid: group!.uuid })
+      expect(command).toBeTruthy()
+      const afterCommandSnapshot = quickCommandsSnapshot()
+
+      ;(window.aiops as any).saveQuickCommandSnippet = undefined
+      await expect(store.updateQuickCommand(command!.id, { snippet_name: 'Fake Update', snippet_content: 'echo fake', group_uuid: null })).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令写入服务不可用')
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
+      ;(window.aiops as any).saveQuickCommandSnippet = originalAiops.saveQuickCommandSnippet
+      vi.mocked(window.aiops.saveQuickCommandSnippet!).mockRejectedValueOnce(new Error('snippet write failed'))
+      await expect(store.updateQuickCommand(command!.id, { snippet_name: 'Fake Update', snippet_content: 'echo fake', group_uuid: null })).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令写入失败')
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
+      ;(window.aiops as any).deleteQuickCommandSnippet = undefined
+      await expect(store.deleteQuickCommand(command!.id)).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令删除服务不可用')
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
+      ;(window.aiops as any).deleteQuickCommandSnippet = originalAiops.deleteQuickCommandSnippet
+      vi.mocked(window.aiops.deleteQuickCommandSnippet!).mockRejectedValueOnce(new Error('snippet delete failed'))
+      await expect(store.deleteQuickCommand(command!.id)).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令删除失败')
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
+      store.selectedSnippetGroupUuid = 'group-monitor'
+      ;(window.aiops as any).reorderQuickCommands = undefined
+      await expect(store.reorderQuickCommand(1, 2)).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令排序服务不可用')
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
+      ;(window.aiops as any).reorderQuickCommands = originalAiops.reorderQuickCommands
+      vi.mocked(window.aiops.reorderQuickCommands!).mockRejectedValueOnce(new Error('reorder failed'))
+      await expect(store.reorderQuickCommand(1, 2)).resolves.toBe(false)
+      expect(store.topNotice).toBe('快捷命令排序失败')
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
   })
 
   it('loads knowledge tree from the backend bridge instead of renderer mock defaults', async () => {
