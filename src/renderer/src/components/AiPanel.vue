@@ -3304,10 +3304,7 @@ const bestVoiceMimeType = () => {
   return preferredVoiceMimeTypes.find((format) => MediaRecorder.isTypeSupported(format)) || ''
 }
 
-const shouldUseBrowserVoiceRecorder = () =>
-  localStorage.getItem('aiopsterm.voice.browserRecorder') === 'enabled' &&
-  typeof MediaRecorder !== 'undefined' &&
-  Boolean(navigator.mediaDevices?.getUserMedia)
+const canUseBrowserVoiceRecorder = () => typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia)
 
 const appendVoiceTranscriptionToInput = (text: string) => {
   restoreEditableSelection()
@@ -3331,7 +3328,19 @@ const handleVoiceTranscriptionComplete = async (text: string) => {
 }
 
 const audioBlobToBase64 = async (blob: Blob) => {
-  const arrayBuffer = await blob.arrayBuffer()
+  const blobWithArrayBuffer = blob as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> }
+  const arrayBuffer =
+    typeof blobWithArrayBuffer.arrayBuffer === 'function'
+      ? await blobWithArrayBuffer.arrayBuffer()
+      : await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            if (reader.result instanceof ArrayBuffer) resolve(reader.result)
+            else reject(new Error('Failed to read recorded audio data.'))
+          }
+          reader.onerror = () => reject(reader.error || new Error('Failed to read recorded audio data.'))
+          reader.readAsArrayBuffer(blob)
+        })
   const bytes = new Uint8Array(arrayBuffer)
   let binary = ''
   bytes.forEach((byte) => {
@@ -3368,31 +3377,28 @@ const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
 }
 
 const processVoiceRecording = async (elapsed: number, options: { reachedLimit?: boolean; audioBlob?: Blob } = {}) => {
+  if (!options.audioBlob) {
+    showInputPlaceholderNotice('未获取到录音音频，无法进行语音识别。')
+    return
+  }
   if (!options.reachedLimit && elapsed < voiceRecordingMinimumMs) {
     showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
     return
   }
-  if (options.audioBlob) {
-    if (options.audioBlob.size < 1024) {
-      showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
-      return
-    }
-    if (options.audioBlob.size > voiceMaxAudioBytes) {
-      showInputPlaceholderNotice('音频文件超过 50 MiB，无法识别。')
-      return
-    }
+  if (options.audioBlob.size < 1024) {
+    showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
+    return
   }
-  let transcriptionInput: VoiceTranscriptionInput = {
+  if (options.audioBlob.size > voiceMaxAudioBytes) {
+    showInputPlaceholderNotice('音频文件超过 50 MiB，无法识别。')
+    return
+  }
+  const transcriptionInput: VoiceTranscriptionInput = {
     durationMs: elapsed,
-    source: options.audioBlob ? 'browser' : 'local-dev'
-  }
-  if (options.audioBlob) {
-    transcriptionInput = {
-      ...transcriptionInput,
-      audioData: await audioBlobToBase64(options.audioBlob),
-      audioFormat: audioFormatFromMimeType(options.audioBlob.type),
-      audioSize: options.audioBlob.size
-    }
+    source: 'browser',
+    audioData: await audioBlobToBase64(options.audioBlob),
+    audioFormat: audioFormatFromMimeType(options.audioBlob.type),
+    audioSize: options.audioBlob.size
   }
   await transcribeVoiceInput(transcriptionInput)
 }
@@ -3408,6 +3414,9 @@ const scheduleVoiceRecordingLimit = () => {
 }
 
 const startBrowserVoiceRecorder = async () => {
+  if (!canUseBrowserVoiceRecorder()) {
+    throw new Error('Browser voice recording is unavailable.')
+  }
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: true,
@@ -3450,17 +3459,18 @@ const startVoiceRecording = async () => {
   if (streaming.value || voiceRecording.value || voiceTranscribing.value) return
   closePopups()
   restoreEditableSelection()
-  if (shouldUseBrowserVoiceRecorder()) {
-    try {
-      await startBrowserVoiceRecorder()
-      return
-    } catch (error) {
-      const message = error instanceof Error && error.name === 'NotAllowedError' ? '麦克风权限被拒绝，已切换为本地语音转写后端。' : '麦克风不可用，已切换为本地语音转写后端。'
-      showInputPlaceholderNotice(message)
-      clearVoiceMedia()
+  try {
+    await startBrowserVoiceRecorder()
+  } catch (error) {
+    let message = '麦克风不可用，无法开始语音输入。'
+    if (error instanceof Error) {
+      if (error.name === 'NotAllowedError') message = '麦克风权限被拒绝，请允许麦克风访问后重试。'
+      else if (error.name === 'NotFoundError') message = '未找到麦克风设备，无法开始语音输入。'
+      else if (error.name === 'NotReadableError') message = '麦克风正被其他应用占用，无法开始语音输入。'
     }
+    showInputPlaceholderNotice(message)
+    clearVoiceMedia()
   }
-  scheduleVoiceRecordingLimit()
 }
 
 const finishVoiceRecording = async (options: { reachedLimit?: boolean } = {}) => {

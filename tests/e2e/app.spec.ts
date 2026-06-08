@@ -1,4 +1,4 @@
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { mkdir } from 'fs/promises'
 import os from 'os'
 import path from 'path'
@@ -17,6 +17,53 @@ const launchApp = async (name: string) => {
   })
 }
 
+const installVoiceRecorderDouble = async (page: Page) => {
+  await page.evaluate(() => {
+    class MockMediaRecorder {
+      static isTypeSupported() {
+        return true
+      }
+
+      state: 'inactive' | 'recording' = 'inactive'
+      ondataavailable: ((event: { data: Blob }) => void) | null = null
+      onerror: ((event: { error: Error }) => void) | null = null
+      onstop: (() => void) | null = null
+      private readonly mimeType: string
+
+      constructor(_stream: unknown, options: { mimeType?: string } = {}) {
+        this.mimeType = options.mimeType || 'audio/webm'
+      }
+
+      start() {
+        this.state = 'recording'
+      }
+
+      stop() {
+        if (this.state === 'inactive') return
+        this.state = 'inactive'
+        this.ondataavailable?.({
+          data: new Blob([new Uint8Array(4096)], { type: this.mimeType })
+        })
+        this.onstop?.()
+      }
+    }
+
+    Object.defineProperty(window, 'MediaRecorder', {
+      configurable: true,
+      writable: true,
+      value: MockMediaRecorder
+    })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => ({
+          getTracks: () => [{ stop: () => undefined }]
+        })
+      }
+    })
+  })
+}
+
 test('aiopsterm primary desktop flows', async () => {
   await mkdir('test-results', { recursive: true })
   const app = await launchApp('primary')
@@ -24,6 +71,7 @@ test('aiopsterm primary desktop flows', async () => {
   try {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
+    await installVoiceRecorderDouble(page)
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
     await expect(page.locator('.terminal-tab').filter({ hasText: 'local shell' })).toBeVisible()

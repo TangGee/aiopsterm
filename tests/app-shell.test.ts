@@ -258,6 +258,15 @@ const waitForDatabaseTableData = async (wrapper?: TestWrapperLike) => {
   }
 }
 
+const waitForMockCall = async (mock: { mock: { calls: unknown[] } }, label: string) => {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await flushPromises()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    if (mock.mock.calls.length > 0) return
+  }
+  throw new Error(`${label} was not called`)
+}
+
 const dispatchShortcut = (key: string, init: Partial<KeyboardEventInit> = {}) => {
   const event = new KeyboardEvent('keydown', {
     key,
@@ -273,10 +282,65 @@ const dispatchShortcut = (key: string, init: Partial<KeyboardEventInit> = {}) =>
   return event.defaultPrevented
 }
 
+const installMockVoiceRecorder = () => {
+  const originalMediaRecorder = (globalThis as { MediaRecorder?: unknown }).MediaRecorder
+  const originalWindowMediaRecorder = (window as unknown as { MediaRecorder?: unknown }).MediaRecorder
+  const originalMediaDevices = navigator.mediaDevices
+  const stopTrack = vi.fn()
+  const getUserMedia = vi.fn(async () => ({
+    getTracks: () => [{ stop: stopTrack }]
+  }))
+
+  class MockMediaRecorder {
+    static isTypeSupported = vi.fn(() => true)
+
+    state: 'inactive' | 'recording' = 'inactive'
+    ondataavailable: ((event: { data: Blob }) => void) | null = null
+    onerror: ((event: { error: Error }) => void) | null = null
+    onstop: (() => void) | null = null
+
+    constructor(_stream: unknown, private readonly options: { mimeType?: string } = {}) {}
+
+    start = vi.fn(() => {
+      this.state = 'recording'
+    })
+
+    stop = vi.fn(() => {
+      if (this.state === 'inactive') return
+      this.state = 'inactive'
+      this.ondataavailable?.({
+        data: new Blob([new Uint8Array(4096)], { type: this.options.mimeType || 'audio/webm' })
+      })
+      this.onstop?.()
+    })
+  }
+
+  Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, writable: true, value: MockMediaRecorder })
+  Object.defineProperty(window, 'MediaRecorder', { configurable: true, writable: true, value: MockMediaRecorder })
+  Object.defineProperty(navigator, 'mediaDevices', {
+    configurable: true,
+    value: { getUserMedia }
+  })
+
+  return () => {
+    if (originalMediaRecorder === undefined) delete (globalThis as { MediaRecorder?: unknown }).MediaRecorder
+    else Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, writable: true, value: originalMediaRecorder })
+    if (originalWindowMediaRecorder === undefined) delete (window as unknown as { MediaRecorder?: unknown }).MediaRecorder
+    else Object.defineProperty(window, 'MediaRecorder', { configurable: true, writable: true, value: originalWindowMediaRecorder })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: originalMediaDevices
+    })
+  }
+}
+
+let restoreMockVoiceRecorder: (() => void) | undefined
+
 describe('AppShell', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    restoreMockVoiceRecorder = installMockVoiceRecorder()
     ;(globalThis as any).__resetAssetStoreMock?.()
     ;(globalThis as any).__resetKubernetesCatalogMock?.()
     ;(globalThis as any).__resetFileSessionCatalogMock?.()
@@ -292,6 +356,8 @@ describe('AppShell', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    restoreMockVoiceRecorder?.()
+    restoreMockVoiceRecorder = undefined
     shortcutRuntime.destroy()
   })
 
@@ -2111,6 +2177,50 @@ describe('AppShell', () => {
     }
   })
 
+  it('does not transcribe voice input when browser recording is unavailable', async () => {
+    restoreMockVoiceRecorder?.()
+    restoreMockVoiceRecorder = undefined
+
+    const originalMediaRecorder = (globalThis as { MediaRecorder?: unknown }).MediaRecorder
+    const originalWindowMediaRecorder = (window as unknown as { MediaRecorder?: unknown }).MediaRecorder
+    const originalMediaDevices = navigator.mediaDevices
+    delete (globalThis as { MediaRecorder?: unknown }).MediaRecorder
+    delete (window as unknown as { MediaRecorder?: unknown }).MediaRecorder
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: undefined
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+
+    try {
+      vi.mocked(window.aiops.transcribeVoiceInput).mockClear()
+      await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      expect(window.aiops.transcribeVoiceInput).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('麦克风不可用，无法开始语音输入')
+    } finally {
+      wrapper.unmount()
+      if (originalMediaRecorder === undefined) delete (globalThis as { MediaRecorder?: unknown }).MediaRecorder
+      else Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, writable: true, value: originalMediaRecorder })
+      if (originalWindowMediaRecorder === undefined) delete (window as unknown as { MediaRecorder?: unknown }).MediaRecorder
+      else Object.defineProperty(window, 'MediaRecorder', { configurable: true, writable: true, value: originalWindowMediaRecorder })
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: originalMediaDevices
+      })
+    }
+  })
+
   it('opens and resets the AI command popup with External reference-style keyboard focus behavior', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -2410,7 +2520,16 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(window.aiops.transcribeVoiceInput).toHaveBeenCalledWith(expect.objectContaining({ source: 'local-dev', durationMs: expect.any(Number) }))
+    await waitForMockCall(vi.mocked(window.aiops.transcribeVoiceInput), 'transcribeVoiceInput')
+    expect(window.aiops.transcribeVoiceInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'browser',
+        durationMs: expect.any(Number),
+        audioData: expect.any(String),
+        audioFormat: 'ogg-opus',
+        audioSize: 4096
+      })
+    )
     expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
     expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('开始语音输入')
     expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音转写完成')

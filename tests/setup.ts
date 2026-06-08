@@ -4854,13 +4854,22 @@ Object.defineProperty(window, 'aiops', {
           }, 700)
         })
     ),
-    transcribeVoiceInput: vi.fn(async () => ({
-      ok: true,
-      data: {
-        text: '语音输入：请检查当前主机状态',
-        provider: 'aiopsterm-local' as const
+    transcribeVoiceInput: vi.fn(async (input?: { audioData?: string; audioFormat?: string; audioSize?: number; durationMs?: number; source?: 'browser' }) => {
+      if (!input?.audioData || !input.audioSize) {
+        return {
+          ok: false,
+          errorCode: 'VOICE_AUDIO_REQUIRED',
+          errorMessage: 'Audio data is required for voice transcription.'
+        }
       }
-    })),
+      return {
+        ok: true,
+        data: {
+          text: `语音输入：请检查当前主机状态（${input.audioFormat || 'wav'}, ${Math.round(Number(input.durationMs || 0) / 1000)}s）`,
+          provider: 'aiopsterm-local' as const
+        }
+      }
+    }),
     listDatabaseCatalog: vi.fn(async () => ({ ok: true, data: databaseWorkspaceCatalogMock() })),
     testDatabaseConnection: vi.fn(testDatabaseConnectionMock),
     saveDatabaseConnection: vi.fn(saveDatabaseConnectionMock),

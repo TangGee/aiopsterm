@@ -1309,11 +1309,11 @@ export type TerminalCommandGenerationRecord = {
 export type TerminalCommandGenerationResult = AiopsMutationResult<TerminalCommandGenerationRecord>
 
 export type VoiceTranscriptionInput = {
-  audioData?: string
-  audioFormat?: string
-  audioSize?: number
+  audioData: string
+  audioFormat: string
+  audioSize: number
   durationMs?: number
-  source?: 'browser' | 'local-dev'
+  source?: 'browser'
 }
 
 export type VoiceTranscriptionResult = AiopsMutationResult<{
