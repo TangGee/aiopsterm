@@ -4480,6 +4480,51 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate custom background uploads when dialog or save bridges are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    const originalShowOpenDialog = window.aiops.showOpenDialog
+    const originalSaveCustomBackground = window.aiops.saveCustomBackground
+    const originalBackground = { ...store.config.background }
+
+    try {
+      ;(window.aiops as any).showOpenDialog = undefined
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('自定义背景选择服务不可用')
+      expect(window.aiops.saveCustomBackground).not.toHaveBeenCalled()
+      expect(store.config.background).toEqual(originalBackground)
+
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+      vi.mocked(window.aiops.showOpenDialog!).mockClear()
+      ;(window.aiops as any).saveCustomBackground = undefined
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('自定义背景保存服务不可用')
+      expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
+      expect(store.config.background).toEqual(originalBackground)
+
+      ;(window.aiops as any).saveCustomBackground = originalSaveCustomBackground
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/missing-bg.png'] })
+      vi.mocked(window.aiops.saveCustomBackground!).mockRejectedValueOnce(new Error('background save offline'))
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(window.aiops.saveCustomBackground).toHaveBeenCalledWith('/tmp/missing-bg.png')
+      expect(store.settingsNotice).toBe('自定义背景保存失败：background save offline')
+      expect(store.config.background).toEqual(originalBackground)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/empty-bg.png'] })
+      vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
+        filePath: '/tmp/aiopsterm/backgrounds/empty-bg.png',
+        url: '',
+        name: 'empty-bg.png',
+        size: 128
+      })
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('自定义背景保存失败')
+      expect(store.config.background).toEqual(originalBackground)
+    } finally {
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+      ;(window.aiops as any).saveCustomBackground = originalSaveCustomBackground
+    }
+  })
+
   it('manages External reference-style settings state for general, terminal, model, and AI preferences', async () => {
     const store = useWorkspaceStore()
 

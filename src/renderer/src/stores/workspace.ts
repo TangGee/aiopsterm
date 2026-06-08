@@ -4068,13 +4068,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const uploadCustomBackground = async () => {
+    const showOpenDialog = window.aiops?.showOpenDialog
+    if (typeof showOpenDialog !== 'function') {
+      setSettingsNotice('自定义背景选择服务不可用')
+      return false
+    }
+    const saveCustomBackground = window.aiops?.saveCustomBackground
+    if (typeof saveCustomBackground !== 'function') {
+      setSettingsNotice('自定义背景保存服务不可用')
+      return false
+    }
     try {
-      const result = await window.aiops?.showOpenDialog?.({
+      const result = await showOpenDialog({
         properties: ['openFile'],
         filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }]
       })
       if (!result || result.canceled || !result.filePaths.length) return false
-      const saved = await window.aiops?.saveCustomBackground?.(result.filePaths[0])
+      const saved = await saveCustomBackground(result.filePaths[0])
       if (!saved?.url) {
         setSettingsNotice('自定义背景保存失败')
         return false
