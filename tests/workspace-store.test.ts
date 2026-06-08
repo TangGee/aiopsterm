@@ -5047,7 +5047,7 @@ describe('workspace store', () => {
       username: 'ops',
       password: 'secret'
     })
-    expect(store.saveSshProxyForm()).toBe(true)
+    await expect(store.saveSshProxyForm()).resolves.toBe(true)
     expect(store.sshProxyAddModalOpen).toBe(false)
     expect(store.sshProxyConfigs).toEqual([
       {
@@ -5076,9 +5076,9 @@ describe('workspace store', () => {
       })
     )
     vi.mocked(window.aiops.saveConfig).mockClear()
-    expect(store.saveSshProxyForm()).toBe(false)
+    await expect(store.saveSshProxyForm()).resolves.toBe(false)
     expect(store.settingsNotice).toContain('请输入代理配置名称')
-    expect(store.removeSshProxyConfig('release-proxy')).toBe(true)
+    await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(true)
     expect(store.sshProxyConfigs).toEqual([])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5284,6 +5284,73 @@ describe('workspace store', () => {
     )
     store.updateAiPreferences({ autoApproval: true })
     expect(store.onboardingAutoApprovalEvent).toBe(1)
+  })
+
+  it('does not fabricate SSH proxy config writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const proxyConfigSnapshot = () => JSON.stringify(store.sshProxyConfigs)
+    const initialSnapshot = proxyConfigSnapshot()
+    const draftProxy = {
+      name: 'release-proxy',
+      type: 'SOCKS5' as const,
+      host: '10.0.0.8',
+      port: 1080,
+      enableProxyIdentity: true,
+      username: 'ops',
+      password: 'secret'
+    }
+
+    const openDraft = () => {
+      store.openAddSshProxyConfig()
+      store.updateSshProxyForm(draftProxy)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      openDraft()
+      await expect(store.saveSshProxyForm()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH 代理配置保存服务不可用')
+      expect(store.sshProxyAddModalOpen).toBe(true)
+      expect(proxyConfigSnapshot()).toBe(initialSnapshot)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.saveSshProxyForm()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH 代理配置保存失败')
+      expect(store.sshProxyAddModalOpen).toBe(true)
+      expect(proxyConfigSnapshot()).toBe(initialSnapshot)
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ssh proxy save offline'))
+      await expect(store.saveSshProxyForm()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('ssh proxy save offline')
+      expect(store.sshProxyAddModalOpen).toBe(true)
+      expect(proxyConfigSnapshot()).toBe(initialSnapshot)
+
+      await expect(store.saveSshProxyForm()).resolves.toBe(true)
+      const savedSnapshot = proxyConfigSnapshot()
+      expect(store.sshProxyAddModalOpen).toBe(false)
+      expect(store.sshProxyConfigs).toEqual([draftProxy])
+
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH 代理配置删除服务不可用')
+      expect(proxyConfigSnapshot()).toBe(savedSnapshot)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH 代理配置删除失败')
+      expect(proxyConfigSnapshot()).toBe(savedSnapshot)
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ssh proxy delete offline'))
+      await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('ssh proxy delete offline')
+      expect(proxyConfigSnapshot()).toBe(savedSnapshot)
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
   })
 
   it('manages remaining External reference-style settings lists and toggles', async () => {

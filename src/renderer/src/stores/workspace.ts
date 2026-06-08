@@ -4208,7 +4208,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const saveSshProxyForm = () => {
+  const persistSshProxyConfigs = async (nextConfigs: SshProxyConfig[], unavailableNotice: string, failureNotice: string) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice(unavailableNotice)
+      return false
+    }
+    const normalizedConfigs = normalizeSshProxyConfigs(nextConfigs).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        sshProxyConfigs: normalizedConfigs.map((config) => ({ ...config }))
+      })
+      if (!isRecord(savedConfig) || !Array.isArray(savedConfig.sshProxyConfigs)) {
+        setSettingsNotice(failureNotice)
+        return false
+      }
+      const savedProxyConfigs = normalizeSshProxyConfigs(savedConfig.sshProxyConfigs).normalized
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        sshProxyConfigs: savedProxyConfigs
+      } as Partial<UserConfig>)
+      sshProxyConfigs.value = savedProxyConfigs.map((config) => ({ ...config }))
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : failureNotice)
+      return false
+    }
+  }
+
+  const saveSshProxyForm = async () => {
     const rawName = sshProxyForm.value.name.trim()
     const rawHost = sshProxyForm.value.host.trim()
     if (!rawName) {
@@ -4225,18 +4253,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('代理配置名称已存在')
       return false
     }
-    sshProxyConfigs.value = [...sshProxyConfigs.value, proxyConfig]
-    saveConfig({ sshProxyConfigs: sshProxyConfigs.value.map((config) => ({ ...config })) })
+    const saved = await persistSshProxyConfigs([...sshProxyConfigs.value, proxyConfig], 'SSH 代理配置保存服务不可用', 'SSH 代理配置保存失败')
+    if (!saved) return false
     closeAddSshProxyConfig()
     setSettingsNotice('SSH 代理配置已添加')
     return true
   }
 
-  const removeSshProxyConfig = (name: string) => {
+  const removeSshProxyConfig = async (name: string) => {
     const nextConfigs = sshProxyConfigs.value.filter((config) => config.name !== name)
     if (nextConfigs.length === sshProxyConfigs.value.length) return false
-    sshProxyConfigs.value = nextConfigs
-    saveConfig({ sshProxyConfigs: sshProxyConfigs.value.map((config) => ({ ...config })) })
+    const saved = await persistSshProxyConfigs(nextConfigs, 'SSH 代理配置删除服务不可用', 'SSH 代理配置删除失败')
+    if (!saved) return false
     setSettingsNotice('SSH 代理配置已删除')
     return true
   }
