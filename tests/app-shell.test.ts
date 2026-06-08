@@ -6654,6 +6654,7 @@ describe('AppShell', () => {
     const providerInputs = workspace.findAll('.provider-card .settings-input')
     await providerInputs[0].setValue('http://litellm.internal')
     await workspace.findAll('.provider-card').at(0)!.findAll('button').find((button) => button.text() === 'Save')!.trigger('click')
+    await flushPromises()
     expect(store.config.modelProvider).toBe('litellm')
     expect(store.config.modelEndpoint).toBe('http://litellm.internal')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(

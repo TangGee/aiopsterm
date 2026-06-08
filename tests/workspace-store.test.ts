@@ -5211,7 +5211,7 @@ describe('workspace store', () => {
         })
       })
     )
-    store.saveModelProvider('openai')
+    await expect(store.saveModelProvider('openai')).resolves.toBe(true)
     expect(store.config.modelProvider).toBe('openai-compatible')
     expect(store.config.modelName).toBe('ops-model')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -5255,7 +5255,7 @@ describe('workspace store', () => {
         })
       })
     )
-    store.saveModelProvider('bedrock')
+    await expect(store.saveModelProvider('bedrock')).resolves.toBe(true)
     expect(store.config.modelProvider).toBe('bedrock')
     expect(store.config.modelName).toBe('anthropic.claude-3-haiku-20240307-v1:0')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -5411,6 +5411,77 @@ describe('workspace store', () => {
       await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('ssh proxy delete offline')
       expect(proxyConfigSnapshot()).toBe(savedSnapshot)
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate model provider Save success when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialProvider = store.config.modelProvider
+    const initialEndpoint = store.config.modelEndpoint
+    const initialModelName = store.config.modelName
+
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
+    await Promise.resolve()
+    const editedSettings = JSON.stringify(store.config.modelSettings)
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.saveModelProvider('openai')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('模型 Provider 保存服务不可用')
+      expect(store.config.modelProvider).toBe(initialProvider)
+      expect(store.config.modelEndpoint).toBe(initialEndpoint)
+      expect(store.config.modelName).toBe(initialModelName)
+      expect(JSON.stringify(store.config.modelSettings)).toBe(editedSettings)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.saveModelProvider('openai')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('模型 Provider 保存失败')
+      expect(store.config.modelProvider).toBe(initialProvider)
+      expect(store.config.modelEndpoint).toBe(initialEndpoint)
+      expect(store.config.modelName).toBe(initialModelName)
+      expect(JSON.stringify(store.config.modelSettings)).toBe(editedSettings)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        modelProvider: 'litellm',
+        modelEndpoint: 'https://gateway.local',
+        modelName: 'ops-model',
+        modelSettings: {
+          ...store.config.modelSettings,
+          providers: {
+            ...store.config.modelSettings?.providers,
+            openai: {
+              ...store.modelProviders.openai
+            }
+          }
+        }
+      } as any)
+      await expect(store.saveModelProvider('openai')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('模型 Provider 保存失败')
+      expect(store.config.modelProvider).toBe(initialProvider)
+      expect(store.config.modelEndpoint).toBe(initialEndpoint)
+      expect(store.config.modelName).toBe(initialModelName)
+      expect(JSON.stringify(store.config.modelSettings)).toBe(editedSettings)
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('model provider save offline'))
+      await expect(store.saveModelProvider('openai')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('model provider save offline')
+      expect(store.config.modelProvider).toBe(initialProvider)
+      expect(store.config.modelEndpoint).toBe(initialEndpoint)
+      expect(store.config.modelName).toBe(initialModelName)
+      expect(JSON.stringify(store.config.modelSettings)).toBe(editedSettings)
+
+      await expect(store.saveModelProvider('openai')).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('OpenAI Compatible Save 成功')
+      expect(store.config.modelProvider).toBe('openai-compatible')
+      expect(store.config.modelEndpoint).toBe('https://gateway.local')
+      expect(store.config.modelName).toBe('ops-model')
+      expect(store.config.modelSettings?.providers.openai).toEqual(expect.objectContaining({ modelId: 'ops-model' }))
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }

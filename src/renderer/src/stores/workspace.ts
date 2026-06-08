@@ -3239,23 +3239,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             options: modelCatalog.settingsModels
           }
         : savedConfig.modelSettings
-    const { normalized: normalizedModelSettings, changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource)
-    addModelSwitch.value = normalizedModelSettings.addModelSwitch
-    modelProviders.value = {
-      litellm: { ...normalizedModelSettings.providers.litellm },
-      openai: { ...normalizedModelSettings.providers.openai },
-      bedrock: { ...normalizedModelSettings.providers.bedrock },
-      deepseek: { ...normalizedModelSettings.providers.deepseek },
-      anthropic: { ...normalizedModelSettings.providers.anthropic },
-      ollama: { ...normalizedModelSettings.providers.ollama }
-    }
-    settingModelOptions.value = normalizedModelSettings.options.map((option) => ({
-      name: option.name,
-      locked: option.locked,
-      checked: option.checked,
-      type: option.type,
-      apiProvider: option.apiProvider
-    }))
+    const { changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource)
+    const normalizedModelSettings = applyModelSettingsSnapshot(modelSettingsSource)
     let normalizedQuickCommands = normalizeQuickCommandsConfig().normalized
     let quickCommandsChanged = false
     let quickCommandsLoadedFromBridge = false
@@ -3656,6 +3641,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       apiProvider: option.apiProvider || (option.locked ? 'default' : 'openai')
     }))
   })
+
+  const applyModelSettingsSnapshot = (source: unknown) => {
+    const { normalized } = normalizeModelSettingsConfig(source)
+    addModelSwitch.value = normalized.addModelSwitch
+    modelProviders.value = {
+      litellm: { ...normalized.providers.litellm },
+      openai: { ...normalized.providers.openai },
+      bedrock: { ...normalized.providers.bedrock },
+      deepseek: { ...normalized.providers.deepseek },
+      anthropic: { ...normalized.providers.anthropic },
+      ollama: { ...normalized.providers.ollama }
+    }
+    settingModelOptions.value = normalized.options.map((option) => ({
+      name: option.name,
+      locked: option.locked,
+      checked: option.checked,
+      type: option.type,
+      apiProvider: option.apiProvider
+    }))
+    return normalized
+  }
 
   const persistModelSettings = () => {
     saveConfig({ modelSettings: getModelSettingsSnapshot() })
@@ -4398,7 +4404,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const saveModelProvider = (provider: ModelProviderKey) => {
+  const saveModelProvider = async (provider: ModelProviderKey) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('模型 Provider 保存服务不可用')
+      return false
+    }
     const configPatch = modelProviders.value[provider]
     const providerName: Record<ModelProviderKey, UserConfig['modelProvider']> = {
       litellm: 'litellm',
@@ -4416,13 +4427,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       anthropic: 'Anthropic',
       ollama: 'Ollama'
     }
-    saveConfig({
-      modelProvider: providerName[provider],
-      modelEndpoint: configPatch.baseUrl,
-      modelName: configPatch.modelId,
-      modelSettings: getModelSettingsSnapshot()
-    })
-    setSettingsNotice(`${providerLabel[provider]} Save 成功`)
+    try {
+      const savedConfig = await saveConfigBridge({
+        modelProvider: providerName[provider],
+        modelEndpoint: configPatch.baseUrl,
+        modelName: configPatch.modelId,
+        modelSettings: getModelSettingsSnapshot()
+      })
+      if (!isRecord(savedConfig) || !isRecord(savedConfig.modelSettings) || !isRecord(savedConfig.modelSettings.providers) || !Array.isArray(savedConfig.modelSettings.options)) {
+        setSettingsNotice('模型 Provider 保存失败')
+        return false
+      }
+      const savedProviderSettings = normalizeModelProviderConfig(savedConfig.modelSettings.providers[provider], defaultModelProviders[provider])
+      if (savedProviderSettings.baseUrl !== configPatch.baseUrl || savedProviderSettings.modelId !== configPatch.modelId) {
+        setSettingsNotice('模型 Provider 保存失败')
+        return false
+      }
+      const savedProvider = normalizeUserModelProvider(savedConfig.modelProvider)
+      const savedModelName = normalizeUserModelName(savedConfig.modelName)
+      if (typeof savedConfig.modelEndpoint !== 'string') {
+        setSettingsNotice('模型 Provider 保存失败')
+        return false
+      }
+      const savedEndpoint = savedConfig.modelEndpoint
+      if (savedProvider !== providerName[provider] || savedModelName !== configPatch.modelId || savedEndpoint !== configPatch.baseUrl) {
+        setSettingsNotice('模型 Provider 保存失败')
+        return false
+      }
+      const savedModelSettings = applyModelSettingsSnapshot(savedConfig.modelSettings)
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        modelProvider: savedProvider,
+        modelEndpoint: savedEndpoint,
+        modelName: savedModelName,
+        modelSettings: savedModelSettings
+      } as Partial<UserConfig>)
+      setSettingsNotice(`${providerLabel[provider]} Save 成功`)
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '模型 Provider 保存失败')
+      return false
+    }
   }
 
   const updateAiPreferences = (patch: AiPreferencePatch) => {
