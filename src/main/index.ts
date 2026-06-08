@@ -152,6 +152,12 @@ import {
   parseAiopstermDeepLink,
   type AiopstermDeepLinkPayload
 } from '@shared/deepLink'
+import {
+  DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH,
+  DEFAULT_KNOWLEDGE_SEED_SIZES,
+  DEFAULT_KNOWLEDGE_USED_BYTES,
+  getDefaultKnowledgeSeedFile
+} from '@shared/knowledgeBaseSeed'
 import type {
   AliasCommandConfig,
   AliasCommandDeleteInput,
@@ -347,7 +353,7 @@ const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
           relPath: 'commands/rollback-plan.md',
           title: 'rollback-plan.md',
           type: 'file',
-          size: 16384
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/rollback-plan.md']
         },
         {
           id: 'kb-file-diagnose',
@@ -355,7 +361,7 @@ const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
           relPath: 'commands/diagnose.md',
           title: 'diagnose.md',
           type: 'file',
-          size: 12288
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/diagnose.md']
         },
         {
           id: 'kb-file-summary',
@@ -363,7 +369,7 @@ const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
           relPath: 'commands/Summary to Doc.md',
           title: 'Summary to Doc.md',
           type: 'file',
-          size: 24576
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/Summary to Doc.md']
         }
       ]
     },
@@ -380,7 +386,7 @@ const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
           relPath: 'images/interface.png',
           title: 'interface.png',
           type: 'file',
-          size: 303104
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['images/interface.png']
         }
       ]
     },
@@ -390,10 +396,10 @@ const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
       relPath: 'Markdown语法指南.md',
       title: 'Markdown语法指南.md',
       type: 'file',
-      size: 18432
+      size: DEFAULT_KNOWLEDGE_SEED_SIZES['Markdown语法指南.md']
     }
   ],
-  usedBytes: 374784,
+  usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
   totalBytes: 1024 * 1024 * 1024
 }
 
@@ -1471,25 +1477,6 @@ const searchKnowledgeIndex = async (query: string, options?: { maxResults?: numb
     .slice(0, maxResults)
 }
 
-const knowledgeSeedContent = (node: KnowledgeBaseNodeConfig) => {
-  if (node.relPath === 'commands/rollback-plan.md') {
-    return '# rollback-plan\n\nGenerate rollback steps, validation checks, and risk notes for the current service.\n'
-  }
-  if (node.relPath === 'commands/diagnose.md') {
-    return '# diagnose\n\nGenerate a read-only diagnosis plan from the current terminal, asset, and knowledge context.\n'
-  }
-  if (node.relPath === 'commands/Summary to Doc.md') {
-    return '# Summary to Doc\n\nUse this note to summarize terminal findings, remediation steps, and reusable operations knowledge.\n'
-  }
-  if (node.relPath === 'Markdown语法指南.md') {
-    return '# Markdown语法指南\n\n- 使用标题组织运维知识。\n- 使用代码块保存命令和输出。\n- 使用列表记录排查步骤和结论。\n'
-  }
-  if (node.relPath === 'images/interface.png') {
-    return 'aiopsterm knowledge image placeholder\n'
-  }
-  return ''
-}
-
 const ensureKnowledgeSeedNode = async (node: KnowledgeBaseNodeConfig, parentRelDir = '') => {
   const relPath = node.relPath || posix.join(parentRelDir, node.title)
   const { absPath } = resolveKnowledgePath(relPath)
@@ -1502,7 +1489,26 @@ const ensureKnowledgeSeedNode = async (node: KnowledgeBaseNodeConfig, parentRelD
   }
   if (!(await pathExists(absPath))) {
     await mkdir(dirname(absPath), { recursive: true })
-    await writeFile(absPath, knowledgeSeedContent(node), 'utf-8')
+    const seedFile = getDefaultKnowledgeSeedFile(relPath)
+    if (seedFile?.kind === 'base64') {
+      await writeFile(absPath, Buffer.from(seedFile.base64, 'base64'))
+    } else {
+      await writeFile(absPath, seedFile?.content || '', 'utf-8')
+    }
+  }
+}
+
+const migrateKnowledgeSeedPlaceholders = async () => {
+  const seedFile = getDefaultKnowledgeSeedFile(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH)
+  if (seedFile?.kind !== 'base64') return
+  try {
+    const { absPath } = resolveKnowledgePath(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH)
+    const current = await readFile(absPath)
+    if (current.toString('utf-8') === 'aiopsterm knowledge image placeholder\n') {
+      await writeFile(absPath, Buffer.from(seedFile.base64, 'base64'))
+    }
+  } catch {
+    // Missing user-edited default images are left untouched after initial seeding.
   }
 }
 
@@ -1517,6 +1523,7 @@ const ensureKnowledgeBaseDirectory = async () => {
     }
     await writeFile(getKnowledgeBaseInitMarkerPath(), 'initialized\n', 'utf-8')
   }
+  await migrateKnowledgeSeedPlaceholders()
   return knowledgePath
 }
 

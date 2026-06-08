@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64,
+  DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME,
+  DEFAULT_KNOWLEDGE_USED_BYTES
+} from '@shared/knowledgeBaseSeed'
 
 const defaultAiPreferences = {
   enableExtendedThinking: true,
@@ -591,7 +596,7 @@ describe('workspace store', () => {
         }),
         knowledgeBase: expect.objectContaining({
           tree: expect.arrayContaining([expect.objectContaining({ relPath: 'commands', type: 'dir' })]),
-          usedBytes: 374784,
+          usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
           totalBytes: 1073741824
         }),
         aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'll', command: 'ls -alF' })]),
@@ -685,7 +690,7 @@ describe('workspace store', () => {
         }),
         knowledgeBase: expect.objectContaining({
           tree: expect.arrayContaining([expect.objectContaining({ relPath: 'commands' })]),
-          usedBytes: 374784,
+          usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
           totalBytes: 1073741824
         }),
         aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'll' })]),
@@ -3838,7 +3843,7 @@ describe('workspace store', () => {
     expect(window.aiops.kbListDir).toHaveBeenCalledWith('')
     expect(store.findKnowledgeNode('Markdown语法指南.md')).toEqual(expect.objectContaining({ type: 'file' }))
     expect(store.findKnowledgeNode('commands/rollback-plan.md')).toEqual(expect.objectContaining({ type: 'file' }))
-    expect(store.kbUsedBytes).toBe(374784)
+    expect(store.kbUsedBytes).toBe(DEFAULT_KNOWLEDGE_USED_BYTES)
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
@@ -4234,8 +4239,8 @@ describe('workspace store', () => {
         kind: 'images',
         label: 'interface.png',
         relPath: 'images/interface.png',
-        mediaType: 'application/octet-stream',
-        data: Buffer.from('images/interface.png').toString('base64')
+        mediaType: DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME,
+        data: DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64
       })
     )
     expect(window.aiops.kbReadFile).toHaveBeenCalledWith('images/interface.png', 'base64')
@@ -4250,7 +4255,7 @@ describe('workspace store', () => {
     expect(userMessage?.role).toBe('user')
     expect(userMessage?.text).toContain('Knowledge Context:')
     expect(userMessage?.text).toContain('- doc: Markdown语法指南.md (Markdown语法指南.md)')
-    expect(userMessage?.text).toContain('- image: interface.png (images/interface.png, application/octet-stream)')
+    expect(userMessage?.text).toContain(`- image: interface.png (images/interface.png, ${DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME})`)
   })
 
   it('preserves ai rich input parts on user messages', async () => {

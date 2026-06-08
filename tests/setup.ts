@@ -20,6 +20,12 @@ import type {
   SshAgentKeychainOption
 } from '@shared/preload'
 import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
+import {
+  DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64,
+  DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME,
+  DEFAULT_KNOWLEDGE_SEED_SIZES,
+  DEFAULT_KNOWLEDGE_USED_BYTES
+} from '@shared/knowledgeBaseSeed'
 import { createHash } from 'crypto'
 import { vi } from 'vitest'
 
@@ -106,7 +112,7 @@ const defaultKnowledgeBase: { tree: TestKnowledgeNode[]; usedBytes: number; tota
           relPath: 'commands/rollback-plan.md',
           title: 'rollback-plan.md',
           type: 'file',
-          size: 16384
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/rollback-plan.md']
         },
         {
           id: 'kb-file-diagnose',
@@ -114,7 +120,7 @@ const defaultKnowledgeBase: { tree: TestKnowledgeNode[]; usedBytes: number; tota
           relPath: 'commands/diagnose.md',
           title: 'diagnose.md',
           type: 'file',
-          size: 12288
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/diagnose.md']
         },
         {
           id: 'kb-file-summary',
@@ -122,7 +128,7 @@ const defaultKnowledgeBase: { tree: TestKnowledgeNode[]; usedBytes: number; tota
           relPath: 'commands/Summary to Doc.md',
           title: 'Summary to Doc.md',
           type: 'file',
-          size: 24576
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/Summary to Doc.md']
         }
       ]
     },
@@ -139,7 +145,7 @@ const defaultKnowledgeBase: { tree: TestKnowledgeNode[]; usedBytes: number; tota
           relPath: 'images/interface.png',
           title: 'interface.png',
           type: 'file',
-          size: 303104
+          size: DEFAULT_KNOWLEDGE_SEED_SIZES['images/interface.png']
         }
       ]
     },
@@ -149,10 +155,10 @@ const defaultKnowledgeBase: { tree: TestKnowledgeNode[]; usedBytes: number; tota
       relPath: 'Markdown语法指南.md',
       title: 'Markdown语法指南.md',
       type: 'file',
-      size: 18432
+      size: DEFAULT_KNOWLEDGE_SEED_SIZES['Markdown语法指南.md']
     }
   ],
-  usedBytes: 374784,
+  usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
   totalBytes: 1073741824
 }
 
@@ -4344,11 +4350,14 @@ Object.defineProperty(window, 'aiops', {
     kbEnsureRoot: vi.fn(async () => ({ success: true })),
     kbGetRoot: vi.fn(async () => ({ root: '/tmp/aiopsterm/knowledgebase' })),
     kbListDir: vi.fn(async (relDir: string) => listKnowledgeDirMock(relDir)),
-    kbReadFile: vi.fn(async (relPath: string, encoding?: 'utf-8' | 'base64') => ({
-      content: encoding === 'base64' ? Buffer.from(relPath).toString('base64') : `content:${relPath}`,
-      mtimeMs: 1717200000000,
-      ...(encoding === 'base64' ? { mimeType: 'application/octet-stream', isImage: relPath.endsWith('.png') } : {})
-    })),
+    kbReadFile: vi.fn(async (relPath: string, encoding?: 'utf-8' | 'base64') => {
+      const isDefaultImage = relPath === 'images/interface.png'
+      return {
+        content: encoding === 'base64' ? (isDefaultImage ? DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 : Buffer.from(relPath).toString('base64')) : `content:${relPath}`,
+        mtimeMs: 1717200000000,
+        ...(encoding === 'base64' ? { mimeType: isDefaultImage ? DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME : 'application/octet-stream', isImage: relPath.endsWith('.png') } : {})
+      }
+    }),
     kbWriteFile: vi.fn(async () => ({ mtimeMs: 1717200000000 })),
     kbMkdir: vi.fn(async (relDir: string, name: string) => {
       const node = createKnowledgeNodeMock('dir', relDir, name)

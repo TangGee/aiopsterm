@@ -193,6 +193,7 @@ import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
 import type { FileSessionInfo, KeywordHighlightUserConfig } from '@shared/preload'
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
@@ -4456,7 +4457,7 @@ describe('AppShell', () => {
     expect(preview.find('pre code').text()).toContain('echo ok')
     expect(preview.find('pre code').classes()).toContain('hljs')
     expect(preview.find('.mermaid').attributes('data-processed')).toBe('true')
-    expect(preview.find('img').attributes('src')).toContain(Buffer.from('images/interface.png').toString('base64'))
+    expect(preview.find('img').attributes('src')).toContain(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64)
     expect(preview.html()).not.toContain('<script')
     expect(preview.html()).not.toContain('onerror')
     expect(preview.html()).not.toContain('onclick')
@@ -4516,7 +4517,7 @@ describe('AppShell', () => {
     await workspace.vm.$nextTick()
     expect(store.activePanel.knowledge).toEqual({ relPath: 'images/interface.png', isImage: true })
     expect(workspace.text()).toContain('interface.png')
-    expect(workspace.find('.kb-editor-image img').attributes('src')).toContain(Buffer.from('images/interface.png').toString('base64'))
+    expect(workspace.find('.kb-editor-image img').attributes('src')).toContain(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64)
     expect(workspace.find('.kb-editor-image-controls').text()).toContain('100%')
     await workspace.find('.kb-editor-image-controls button[title="放大"]').trigger('click')
     expect(workspace.find('.kb-editor-image-controls').text()).toContain('125%')
