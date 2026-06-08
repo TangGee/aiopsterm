@@ -5086,18 +5086,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeAppUpdateProgressListener = window.aiops.onAppUpdateProgress(handleAppUpdateProgress)
   }
 
+  const applyInstalledAppUpdate = (version: string) => {
+    aboutSettings.value = {
+      ...aboutSettings.value,
+      updateStatus: 'latest',
+      version,
+      newVersion: '',
+      progress: 100
+    }
+  }
+
   const startAboutDownload = async () => {
-    installAppUpdateProgressListener()
     const version = aboutSettings.value.newVersion || aboutSettings.value.version
+    const downloadAppUpdateBridge = window.aiops?.downloadAppUpdate
+    if (typeof downloadAppUpdateBridge !== 'function') {
+      aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
+      setSettingsNotice('更新下载服务不可用')
+      return false
+    }
+    installAppUpdateProgressListener()
     aboutSettings.value.updateStatus = 'downloading'
     aboutSettings.value.progress = 0
     setSettingsNotice('正在下载更新')
     try {
-      const result = await window.aiops?.downloadAppUpdate?.(version)
+      const result = await downloadAppUpdateBridge(version)
       if (!result?.ok || !result.data) {
         aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
         setSettingsNotice(result?.errorMessage || '更新下载失败')
-        return
+        return false
       }
       aboutSettings.value = {
         ...aboutSettings.value,
@@ -5106,35 +5122,53 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         progress: result.data.percent
       }
       setSettingsNotice('更新已下载，可执行安装')
+      return true
     } catch (error) {
       aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
       setSettingsNotice(error instanceof Error ? error.message : '更新下载失败')
+      return false
+    }
+  }
+
+  const requestAppUpdateInstall = async (version: string, setNotice: (message: string) => void) => {
+    const installAppUpdateBridge = window.aiops?.installAppUpdate
+    if (typeof installAppUpdateBridge !== 'function') {
+      setNotice('更新安装服务不可用')
+      return false
+    }
+    try {
+      const result = await installAppUpdateBridge(version)
+      if (!result?.ok || !result.data) {
+        setNotice(result?.errorMessage || '更新安装失败')
+        return false
+      }
+      applyInstalledAppUpdate(result.data.version)
+      setNotice('更新安装请求已提交')
+      return true
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '更新安装失败')
+      return false
     }
   }
 
   const checkAboutUpdate = async () => {
     if (aboutSettings.value.updateStatus === 'available') {
-      await startAboutDownload()
-      return
+      return startAboutDownload()
     }
     if (aboutSettings.value.updateStatus === 'downloaded') {
-      try {
-        const result = await window.aiops?.installAppUpdate?.(aboutSettings.value.newVersion || aboutSettings.value.version)
-        if (!result?.ok || !result.data) {
-          aboutSettings.value.updateStatus = 'error'
-          setSettingsNotice(result?.errorMessage || '更新安装失败')
-          return
-        }
-        aboutSettings.value.updateStatus = 'latest'
-        aboutSettings.value.progress = 100
-        aboutSettings.value.version = result.data.version
-        aboutSettings.value.newVersion = ''
-        setSettingsNotice('更新安装请求已提交')
-      } catch (error) {
-        aboutSettings.value.updateStatus = 'error'
-        setSettingsNotice(error instanceof Error ? error.message : '更新安装失败')
+      const installed = await requestAppUpdateInstall(aboutSettings.value.newVersion || aboutSettings.value.version, setSettingsNotice)
+      if (!installed) aboutSettings.value.updateStatus = 'error'
+      return installed
+    }
+    const checkUpdateBridge = window.aiops?.checkUpdate
+    if (typeof checkUpdateBridge !== 'function') {
+      aboutSettings.value = {
+        ...aboutSettings.value,
+        updateStatus: 'error',
+        progress: 0
       }
-      return
+      setSettingsNotice('更新检查服务不可用')
+      return false
     }
     aboutSettings.value = {
       ...aboutSettings.value,
@@ -5143,7 +5177,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setSettingsNotice('正在检查更新')
     try {
-      const result = await window.aiops?.checkUpdate()
+      const result = await checkUpdateBridge()
       const detectedVersion = resolveUpdateVersion(result)
       if (result?.available || result?.isUpdateAvailable || result?.updateInfo) {
         aboutSettings.value = {
@@ -5152,7 +5186,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           newVersion: detectedVersion || aboutSettings.value.version
         }
         setSettingsNotice(`检测到可用更新 ${aboutSettings.value.newVersion}`)
-        return
+        return true
       }
       aboutSettings.value = {
         ...aboutSettings.value,
@@ -5161,6 +5195,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         progress: 0
       }
       setSettingsNotice('当前已是最新版本')
+      return true
     } catch {
       aboutSettings.value = {
         ...aboutSettings.value,
@@ -5168,6 +5203,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         progress: 0
       }
       setSettingsNotice('更新检查失败')
+      return false
     }
   }
 
@@ -5180,18 +5216,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const checkTopUpdate = async () => {
+    const checkUpdateBridge = window.aiops?.checkUpdate
+    if (typeof checkUpdateBridge !== 'function') {
+      topUpdateState.value = 'local'
+      setTopNotice('更新检查服务不可用')
+      return false
+    }
     topUpdateState.value = 'checking'
     try {
-      const result = await window.aiops?.checkUpdate()
+      const result = await checkUpdateBridge()
       topUpdateState.value = result?.available ? 'available' : 'local'
       if (result?.available) {
         const detectedVersion = resolveUpdateVersion(result)
         if (detectedVersion) aboutSettings.value.newVersion = detectedVersion
         setTopNotice(detectedVersion ? `检测到可用更新 ${detectedVersion}` : '检测到可用更新')
       }
+      return true
     } catch {
       topUpdateState.value = 'local'
       setTopNotice('更新检查不可用')
+      return false
     }
   }
 
@@ -5199,32 +5243,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (topUpdateState.value === 'available') {
       const version = aboutSettings.value.newVersion || aboutSettings.value.version
       topUpdateState.value = 'checking'
-      await startAboutDownload()
-      if (aboutSettings.value.updateStatus !== 'downloaded') {
+      const downloaded = await startAboutDownload()
+      if (!downloaded || aboutSettings.value.updateStatus !== 'downloaded') {
         topUpdateState.value = 'available'
-        setTopNotice('更新下载失败')
+        setTopNotice(settingsNotice.value || '更新下载失败')
         return
       }
-      try {
-        const result = await window.aiops?.installAppUpdate?.(version)
-        if (!result?.ok || !result.data) {
-          topUpdateState.value = 'available'
-          setTopNotice(result?.errorMessage || '更新安装失败')
-          return
-        }
-        aboutSettings.value = {
-          ...aboutSettings.value,
-          updateStatus: 'latest',
-          version: result.data.version,
-          newVersion: '',
-          progress: 100
-        }
-        topUpdateState.value = 'local'
-        setTopNotice('更新安装请求已提交')
-      } catch (error) {
+      const installed = await requestAppUpdateInstall(version, setTopNotice)
+      if (!installed) {
         topUpdateState.value = 'available'
-        setTopNotice(error instanceof Error ? error.message : '更新安装失败')
+        return
       }
+      topUpdateState.value = 'local'
       return
     }
     await checkTopUpdate()

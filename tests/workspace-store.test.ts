@@ -5498,6 +5498,117 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('does not fabricate app update checks, downloads, or installs when bridges are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    const originalAiops = {
+      checkUpdate: window.aiops.checkUpdate,
+      downloadAppUpdate: window.aiops.downloadAppUpdate,
+      installAppUpdate: window.aiops.installAppUpdate
+    }
+
+    try {
+      ;(window.aiops as any).checkUpdate = undefined
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.settingsNotice).toBe('更新检查服务不可用')
+      await expect(store.checkTopUpdate()).resolves.toBe(false)
+      expect(store.topUpdateState).toBe('local')
+      expect(store.topNotice).toBe('更新检查服务不可用')
+
+      ;(window.aiops as any).checkUpdate = originalAiops.checkUpdate
+      vi.mocked(window.aiops.checkUpdate!).mockResolvedValueOnce({
+        available: true,
+        channel: 'manual',
+        isUpdateAvailable: true,
+        updateInfo: { version: '0.2.0', channel: 'manual' }
+      })
+      await expect(store.checkAboutUpdate()).resolves.toBe(true)
+      expect(store.aboutSettings.updateStatus).toBe('available')
+      expect(store.aboutSettings.newVersion).toBe('0.2.0')
+
+      ;(window.aiops as any).downloadAppUpdate = undefined
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.progress).toBe(0)
+      expect(store.settingsNotice).toBe('更新下载服务不可用')
+      expect(window.aiops.installAppUpdate).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).downloadAppUpdate = originalAiops.downloadAppUpdate
+      store.aboutSettings.updateStatus = 'available'
+      vi.mocked(window.aiops.downloadAppUpdate!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'APP_UPDATE_DOWNLOAD_OFFLINE',
+        errorMessage: '下载后端离线'
+      })
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.progress).toBe(0)
+      expect(store.settingsNotice).toBe('下载后端离线')
+
+      store.aboutSettings.updateStatus = 'available'
+      vi.mocked(window.aiops.downloadAppUpdate!).mockRejectedValueOnce(new Error('download bridge offline'))
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.progress).toBe(0)
+      expect(store.settingsNotice).toBe('download bridge offline')
+
+      store.aboutSettings.updateStatus = 'downloaded'
+      store.aboutSettings.newVersion = '0.2.0'
+      ;(window.aiops as any).installAppUpdate = undefined
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.version).toBe('0.1.0')
+      expect(store.aboutSettings.newVersion).toBe('0.2.0')
+      expect(store.settingsNotice).toBe('更新安装服务不可用')
+
+      ;(window.aiops as any).installAppUpdate = originalAiops.installAppUpdate
+      store.aboutSettings.updateStatus = 'downloaded'
+      vi.mocked(window.aiops.installAppUpdate!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'APP_UPDATE_INSTALL_OFFLINE',
+        errorMessage: '安装后端离线'
+      })
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.version).toBe('0.1.0')
+      expect(store.aboutSettings.newVersion).toBe('0.2.0')
+      expect(store.settingsNotice).toBe('安装后端离线')
+
+      store.aboutSettings.updateStatus = 'downloaded'
+      vi.mocked(window.aiops.installAppUpdate!).mockRejectedValueOnce(new Error('install bridge offline'))
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.version).toBe('0.1.0')
+      expect(store.aboutSettings.newVersion).toBe('0.2.0')
+      expect(store.settingsNotice).toBe('install bridge offline')
+
+      store.topUpdateState = 'available'
+      store.aboutSettings.updateStatus = 'available'
+      store.aboutSettings.newVersion = '0.2.0'
+      ;(window.aiops as any).downloadAppUpdate = undefined
+      vi.mocked(window.aiops.installAppUpdate!).mockClear()
+      await store.handleTopUpdateClick()
+      expect(store.topUpdateState).toBe('available')
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.topNotice).toBe('更新下载服务不可用')
+      expect(window.aiops.installAppUpdate).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).downloadAppUpdate = originalAiops.downloadAppUpdate
+      ;(window.aiops as any).installAppUpdate = undefined
+      vi.mocked(window.aiops.downloadAppUpdate!).mockClear()
+      store.topUpdateState = 'available'
+      store.aboutSettings.updateStatus = 'available'
+      await store.handleTopUpdateClick()
+      expect(window.aiops.downloadAppUpdate).toHaveBeenCalledWith('0.2.0')
+      expect(store.topUpdateState).toBe('available')
+      expect(store.aboutSettings.updateStatus).toBe('downloaded')
+      expect(store.aboutSettings.version).toBe('0.1.0')
+      expect(store.topNotice).toBe('更新安装服务不可用')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not fabricate user login or logout state when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshUserAccount()
