@@ -2597,7 +2597,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const kbSelectedKeys = ref<string[]>([])
   const kbSearchQuery = ref('')
   const kbContentSearchResults = ref<KnowledgeBaseSearchResult[]>([])
-  const kbSearchStatus = ref<KnowledgeBaseSearchStatus>({ totalFiles: 0, totalChunks: 0, provider: 'aiopsterm-local', model: 'lexical', updatedAt: 0 })
+  const kbSearchStatus = ref<KnowledgeBaseSearchStatus | null>(null)
   const kbSearchLoading = ref(false)
   const kbSearchError = ref('')
   const kbClipboard = ref<KbClipboard>(null)
@@ -6331,21 +6331,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshKnowledgeSearchStatus = async () => {
-    if (!window.aiops?.kbSearchStatus) return
+    if (!window.aiops?.kbSearchStatus) return false
     try {
       kbSearchStatus.value = await window.aiops.kbSearchStatus()
+      return true
     } catch {
-      kbSearchStatus.value = { totalFiles: 0, totalChunks: 0, provider: 'aiopsterm-local', model: 'lexical', updatedAt: 0 }
+      return false
     }
   }
 
   const searchKnowledgeContent = async (query = kbSearchQuery.value) => {
     const normalizedQuery = query.trim()
     const request = ++kbSearchRequest
-    if (normalizedQuery.length <= 1 || !window.aiops?.kbSearch) {
+    if (normalizedQuery.length <= 1) {
       kbContentSearchResults.value = []
       kbSearchLoading.value = false
       kbSearchError.value = ''
+      return []
+    }
+    if (!window.aiops?.kbSearch) {
+      kbContentSearchResults.value = []
+      kbSearchLoading.value = false
+      kbSearchError.value = '知识库搜索服务不可用'
       return []
     }
     kbSearchLoading.value = true
@@ -6367,11 +6374,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const reindexKnowledgeContent = async () => {
-    if (!window.aiops?.kbReindex) return { files: 0, chunks: 0 }
-    const result = await window.aiops.kbReindex()
-    await refreshKnowledgeSearchStatus()
-    if (kbSearchQuery.value.trim().length > 1) void searchKnowledgeContent()
-    return result
+    if (!window.aiops?.kbReindex) {
+      setTopNotice('知识库索引服务不可用')
+      return null
+    }
+    try {
+      const result = await window.aiops.kbReindex()
+      await refreshKnowledgeSearchStatus()
+      if (kbSearchQuery.value.trim().length > 1) void searchKnowledgeContent()
+      return result
+    } catch (indexError) {
+      const message = indexError instanceof Error ? indexError.message : String(indexError)
+      setTopNotice(message ? `知识库索引服务不可用：${message}` : '知识库索引服务不可用')
+      return null
+    }
   }
 
   const backendRelPathOrNotice = (result: { relPath?: string } | null | undefined, notice: string) => {

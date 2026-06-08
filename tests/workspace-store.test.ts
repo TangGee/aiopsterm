@@ -3351,6 +3351,48 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
+  it('does not fabricate knowledge search status or reindex results when the preload bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.kbSearchStatus).toBeNull()
+    await expect(store.refreshKnowledgeSearchStatus()).resolves.toBe(true)
+    expect(store.kbSearchStatus).toEqual({
+      totalFiles: 3,
+      totalChunks: 3,
+      provider: 'aiopsterm-local',
+      model: 'lexical',
+      updatedAt: 1717200000000
+    })
+
+    const backendStatus = store.kbSearchStatus
+    vi.mocked(window.aiops.kbSearchStatus).mockRejectedValueOnce(new Error('search status offline'))
+    await expect(store.refreshKnowledgeSearchStatus()).resolves.toBe(false)
+    expect(store.kbSearchStatus).toEqual(backendStatus)
+
+    const originalAiops = {
+      kbSearch: window.aiops.kbSearch,
+      kbSearchStatus: window.aiops.kbSearchStatus,
+      kbReindex: window.aiops.kbReindex
+    }
+
+    try {
+      ;(window.aiops as any).kbSearchStatus = undefined
+      await expect(store.refreshKnowledgeSearchStatus()).resolves.toBe(false)
+      expect(store.kbSearchStatus).toEqual(backendStatus)
+
+      ;(window.aiops as any).kbSearch = undefined
+      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual([])
+      expect(store.kbContentSearchResults).toEqual([])
+      expect(store.kbSearchError).toBe('知识库搜索服务不可用')
+
+      ;(window.aiops as any).kbReindex = undefined
+      await expect(store.reindexKnowledgeContent()).resolves.toBeNull()
+      expect(store.topNotice).toBe('知识库索引服务不可用')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('loads AI model options from the backend bridge instead of renderer mock defaults', async () => {
     const store = useWorkspaceStore()
 
