@@ -6724,6 +6724,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('OpenAI Reasoning Effort')
     expect(workspace.find('.settings-number.wide').attributes('max')).toBe('300')
     await workspace.find('.settings-budget input[type="range"]').setValue('5000')
+    await flushPromises()
     expect(store.aiPreferences.thinkingBudgetTokens).toBe(5000)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -6733,6 +6734,7 @@ describe('AppShell', () => {
       })
     )
     await workspace.findAll('.settings-check-line input').find((input) => (input.element as HTMLInputElement).checked === false)!.setValue(true)
+    await flushPromises()
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(true)
     await workspace.findAll('.security-config-row button').find((button) => button.text().includes('打开安全配置'))!.trigger('click')
     expect(store.securityConfigEditorOpen).toBe(true)
@@ -6858,7 +6860,7 @@ describe('AppShell', () => {
     store.onboardingActiveStepIndex = store.onboardingActiveSteps.length - 1
     await spotlight.vm.$nextTick()
     expect(store.onboardingActiveStep?.advanceOnEvent).toBe('onboarding:autoApprovalEnabled')
-    store.updateAiPreferences({ autoApproval: true })
+    await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(true)
     await spotlight.vm.$nextTick()
     expect(store.onboardingCompleted.systemSettings).toBe(true)
     expect(store.onboardingActiveTour).toBeNull()
@@ -6895,6 +6897,45 @@ describe('AppShell', () => {
     expect(store.settingsNotice).toBe('扩展设置保存失败')
     expect(store.extensionSettings.autoCompleteStatus).toBe(true)
     expect((autoCompleteSwitch.element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('does not leave AI preference controls visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('ai')
+    await workspace.vm.$nextTick()
+    const savedAiPreferences = {
+      ...store.aiPreferences,
+      proxy: { ...store.aiPreferences.proxy }
+    }
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      aiPreferences: savedAiPreferences
+    })
+    const budgetSlider = workspace.find('.settings-budget input[type="range"]')
+    expect((budgetSlider.element as HTMLInputElement).value).toBe('4096')
+    await budgetSlider.setValue('5000')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+    expect(store.aiPreferences.thinkingBudgetTokens).toBe(4096)
+    expect((budgetSlider.element as HTMLInputElement).value).toBe('4096')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      aiPreferences: savedAiPreferences
+    })
+    const autoExecuteCheckbox = workspace.findAll('.settings-checkbox-item').find((row) => row.text().includes('自动执行只读命令'))!.find('input')
+    expect((autoExecuteCheckbox.element as HTMLInputElement).checked).toBe(false)
+    await autoExecuteCheckbox.setValue(true)
+    await flushPromises()
+    expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+    expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(false)
+    expect((autoExecuteCheckbox.element as HTMLInputElement).checked).toBe(false)
   })
 
   it('matches External reference-style remaining settings pages for extensions, MCP, skills, rules, shortcuts, privacy, devices, billing, and about', async () => {

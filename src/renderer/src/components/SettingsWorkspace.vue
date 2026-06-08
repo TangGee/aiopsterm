@@ -219,6 +219,27 @@ const awsRegionOptions = [
   'us-gov-east-1',
   'us-gov-west-1'
 ]
+
+type PersistResult = void | boolean | Promise<void | boolean>
+
+const restoreCheckboxOnFailedSave = async (event: Event, checked: boolean, onChange: (checked: boolean) => PersistResult) => {
+  const input = event.target as HTMLInputElement
+  const saved = await onChange(input.checked)
+  if (saved === false) input.checked = checked
+}
+
+const restoreInputOnFailedSave = async (event: Event, value: string | number, onChange: (value: string) => PersistResult) => {
+  const input = event.target as HTMLInputElement
+  const nextValue = input.value
+  const saved = await onChange(nextValue)
+  if (saved === false) input.value = String(value)
+}
+
+const restoreSelectOnFailedSave = async (event: Event, value: string, onChange: (value: string) => PersistResult) => {
+  const select = event.target as HTMLSelectElement
+  const saved = await onChange(select.value)
+  if (saved === false) select.value = value
+}
 const themeGroups = computed(() => ({
   system: settingsThemeOptions.filter((item) => item.group === 'system'),
   default: settingsThemeOptions.filter((item) => item.group === 'default'),
@@ -762,7 +783,10 @@ const AiPreferenceSettings = defineComponent({
             h('input', {
               type: 'checkbox',
               checked: workspace.aiPreferences.enableExtendedThinking,
-              onChange: (event: Event) => workspace.updateAiPreferences({ enableExtendedThinking: (event.target as HTMLInputElement).checked })
+              onChange: (event: Event) =>
+                restoreCheckboxOnFailedSave(event, workspace.aiPreferences.enableExtendedThinking, (checked) =>
+                  workspace.updateAiPreferences({ enableExtendedThinking: checked })
+                )
             }),
             '启用 Extended Thinking'
           ]),
@@ -775,7 +799,10 @@ const AiPreferenceSettings = defineComponent({
                   min: 1024,
                   max: 6553,
                   step: 1,
-                  onInput: (event: Event) => workspace.updateAiPreferences({ thinkingBudgetTokens: Number((event.target as HTMLInputElement).value) })
+                  onInput: (event: Event) =>
+                    restoreInputOnFailedSave(event, workspace.aiPreferences.thinkingBudgetTokens, (value) =>
+                      workspace.updateAiPreferences({ thinkingBudgetTokens: Number(value) })
+                    )
                 }),
                 h('small', '为推理模型保留更多 token 预算。')
               ])
@@ -836,7 +863,8 @@ const AiPreferenceSettings = defineComponent({
             h('input', {
               type: 'checkbox',
               checked: workspace.aiPreferences.needProxy,
-              onChange: (event: Event) => workspace.updateAiPreferences({ needProxy: (event.target as HTMLInputElement).checked })
+              onChange: (event: Event) =>
+                restoreCheckboxOnFailedSave(event, workspace.aiPreferences.needProxy, (checked) => workspace.updateAiPreferences({ needProxy: checked }))
             }),
             '启用代理'
           ]),
@@ -850,7 +878,10 @@ const AiPreferenceSettings = defineComponent({
                       {
                         class: 'settings-select',
                         value: workspace.aiPreferences.proxy.type,
-                        onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { type: (event.target as HTMLSelectElement).value as any } })
+                        onChange: (event: Event) =>
+                          restoreSelectOnFailedSave(event, workspace.aiPreferences.proxy.type, (value) =>
+                            workspace.updateAiPreferences({ proxy: { type: value as any } })
+                          )
                       },
                       ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].map((item) => h('option', { value: item }, item))
                     )
@@ -860,7 +891,8 @@ const AiPreferenceSettings = defineComponent({
                     h('input', {
                       class: 'settings-input',
                       value: workspace.aiPreferences.proxy.host,
-                      onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { host: (event.target as HTMLInputElement).value } })
+                      onChange: (event: Event) =>
+                        restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.host, (value) => workspace.updateAiPreferences({ proxy: { host: value } }))
                     })
                   ]),
                   h('label', [
@@ -871,7 +903,10 @@ const AiPreferenceSettings = defineComponent({
                       min: 1,
                       max: 65535,
                       value: workspace.aiPreferences.proxy.port,
-                      onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { port: Number((event.target as HTMLInputElement).value) } })
+                      onChange: (event: Event) =>
+                        restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.port, (value) =>
+                          workspace.updateAiPreferences({ proxy: { port: Number(value) } })
+                        )
                     })
                   ])
                 ]),
@@ -879,7 +914,10 @@ const AiPreferenceSettings = defineComponent({
                   h('input', {
                     type: 'checkbox',
                     checked: workspace.aiPreferences.proxy.enableProxyIdentity,
-                    onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { enableProxyIdentity: (event.target as HTMLInputElement).checked } })
+                    onChange: (event: Event) =>
+                      restoreCheckboxOnFailedSave(event, workspace.aiPreferences.proxy.enableProxyIdentity, (checked) =>
+                        workspace.updateAiPreferences({ proxy: { enableProxyIdentity: checked } })
+                      )
                   }),
                   '启用代理身份'
                 ]),
@@ -890,7 +928,10 @@ const AiPreferenceSettings = defineComponent({
                         h('input', {
                           class: 'settings-input',
                           value: workspace.aiPreferences.proxy.username,
-                          onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { username: (event.target as HTMLInputElement).value } })
+                          onChange: (event: Event) =>
+                            restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.username, (value) =>
+                              workspace.updateAiPreferences({ proxy: { username: value } })
+                            )
                         })
                       ]),
                       h('label', [
@@ -899,7 +940,10 @@ const AiPreferenceSettings = defineComponent({
                           class: 'settings-input',
                           type: 'password',
                           value: workspace.aiPreferences.proxy.password,
-                          onChange: (event: Event) => workspace.updateAiPreferences({ proxy: { password: (event.target as HTMLInputElement).value } })
+                          onChange: (event: Event) =>
+                            restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.password, (value) =>
+                              workspace.updateAiPreferences({ proxy: { password: value } })
+                            )
                         })
                       ])
                     ])
@@ -1576,17 +1620,17 @@ const SettingsCheckbox = defineComponent({
     label: { type: String, required: true },
     description: { type: String, required: true },
     checked: { type: Boolean, required: true },
-    onboardingId: { type: String, default: '' }
+    onboardingId: { type: String, default: '' },
+    onChange: { type: Function, required: true }
   },
-  emits: ['change'],
-  setup(props, { emit }) {
+  setup(props) {
     return () =>
       h('div', { class: 'settings-checkbox-item', 'data-onboarding-id': props.onboardingId || undefined }, [
         h('label', { class: 'settings-check-line' }, [
           h('input', {
             type: 'checkbox',
             checked: props.checked,
-            onChange: (event: Event) => emit('change', (event.target as HTMLInputElement).checked)
+            onChange: (event: Event) => restoreCheckboxOnFailedSave(event, props.checked, props.onChange as (checked: boolean) => PersistResult)
           }),
           props.label
         ]),
@@ -1636,7 +1680,7 @@ const switchRow = (label: string, checked: boolean, onChange: (checked: boolean)
     ])
   ])
 
-const numberRow = (label: string, value: number, min: number, max: number | undefined, onChange: (value: number) => void, step = 1, fullLabel = false) =>
+const numberRow = (label: string, value: number, min: number, max: number | undefined, onChange: (value: number) => PersistResult, step = 1, fullLabel = false) =>
   h('div', { class: ['settings-form-row', { 'full-label': fullLabel }] }, [
     h('label', label),
     h('input', {
@@ -1646,7 +1690,11 @@ const numberRow = (label: string, value: number, min: number, max: number | unde
       max,
       step,
       value,
-      onChange: (event: Event) => onChange(Number((event.target as HTMLInputElement).value))
+      onChange: async (event: Event) => {
+        const input = event.target as HTMLInputElement
+        const saved = await onChange(Number(input.value))
+        if (saved === false) input.value = String(value)
+      }
     })
   ])
 
@@ -1654,7 +1702,7 @@ const selectRow = (
   label: string,
   value: string,
   options: Array<{ value: string; label: string }>,
-  onChange: (value: string) => void,
+  onChange: (value: string) => PersistResult,
   fullLabel = false
 ) =>
   h('div', { class: ['settings-form-row', { 'full-label': fullLabel }] }, [
@@ -1664,7 +1712,7 @@ const selectRow = (
       {
         class: 'settings-select',
         value,
-        onChange: (event: Event) => onChange((event.target as HTMLSelectElement).value)
+        onChange: (event: Event) => restoreSelectOnFailedSave(event, value, onChange)
       },
       options.map((option) => h('option', { value: option.value }, option.label))
     )

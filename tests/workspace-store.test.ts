@@ -5304,7 +5304,7 @@ describe('workspace store', () => {
     expect(store.modelCheckState.litellm).toBe('success')
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updateAiPreferences({ needProxy: true, proxy: { host: '10.0.0.2', port: 8080 } })
+    await expect(store.updateAiPreferences({ needProxy: true, proxy: { host: '10.0.0.2', port: 8080 } })).resolves.toBe(true)
     expect(store.aiPreferences.needProxy).toBe(true)
     expect(store.aiPreferences.proxy.host).toBe('10.0.0.2')
     expect(store.aiPreferences.proxy.port).toBe(8080)
@@ -5320,7 +5320,7 @@ describe('workspace store', () => {
       })
     )
 
-    store.updateAiPreferences({ thinkingBudgetTokens: 5000, reasoningEffort: 'high', shellIntegrationTimeout: 120 })
+    await expect(store.updateAiPreferences({ thinkingBudgetTokens: 5000, reasoningEffort: 'high', shellIntegrationTimeout: 120 })).resolves.toBe(true)
     expect(store.aiPreferences.thinkingBudgetTokens).toBe(5000)
     expect(store.aiPreferences.reasoningEffort).toBe('high')
     expect(store.aiPreferences.shellIntegrationTimeout).toBe(120)
@@ -5335,7 +5335,7 @@ describe('workspace store', () => {
     )
 
     expect(store.onboardingAutoApprovalEvent).toBe(0)
-    store.updateAiPreferences({ autoApproval: true })
+    await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(true)
     expect(store.aiPreferences.autoApproval).toBe(true)
     expect(store.onboardingAutoApprovalEvent).toBe(1)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -5345,7 +5345,7 @@ describe('workspace store', () => {
         })
       })
     )
-    store.updateAiPreferences({ autoApproval: true })
+    await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(true)
     expect(store.onboardingAutoApprovalEvent).toBe(1)
   })
 
@@ -5550,6 +5550,75 @@ describe('workspace store', () => {
         secretRedaction: 'enabled',
         dataSync: 'enabled'
       })
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate AI preference writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialSnapshot = JSON.stringify({
+      config: store.config.aiPreferences,
+      settings: store.aiPreferences,
+      onboardingAutoApprovalEvent: store.onboardingAutoApprovalEvent
+    })
+    const assertAiPreferencesUnchanged = () => {
+      expect(
+        JSON.stringify({
+          config: store.config.aiPreferences,
+          settings: store.aiPreferences,
+          onboardingAutoApprovalEvent: store.onboardingAutoApprovalEvent
+        })
+      ).toBe(initialSnapshot)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('AI 偏好设置保存服务不可用')
+      assertAiPreferencesUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+      assertAiPreferencesUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        aiPreferences: {
+          ...defaultAiPreferences,
+          proxy: { ...defaultAiPreferences.proxy },
+          autoApproval: false
+        }
+      } as any)
+      await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+      assertAiPreferencesUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ai preferences save offline'))
+      await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('ai preferences save offline')
+      assertAiPreferencesUnchanged()
+
+      await expect(store.updateAiPreferences({ autoApproval: true, needProxy: true, proxy: { host: '10.0.0.3', port: 18080 } })).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('AI 偏好设置已保存')
+      expect(store.aiPreferences.autoApproval).toBe(true)
+      expect(store.aiPreferences.needProxy).toBe(true)
+      expect(store.aiPreferences.proxy.host).toBe('10.0.0.3')
+      expect(store.aiPreferences.proxy.port).toBe(18080)
+      expect(store.onboardingAutoApprovalEvent).toBe(1)
+      expect(store.config.aiPreferences).toEqual(
+        expect.objectContaining({
+          autoApproval: true,
+          needProxy: true,
+          proxy: expect.objectContaining({
+            host: '10.0.0.3',
+            port: 18080
+          })
+        })
+      )
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }

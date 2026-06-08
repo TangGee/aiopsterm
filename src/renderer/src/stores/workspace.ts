@@ -1487,6 +1487,31 @@ const reasoningEffortValues = ['low', 'medium', 'high'] as const
 const proxyTypeValues: AiPreferenceSettings['proxy']['type'][] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 const defaultAiPreferencesConfig = defaultConfig.aiPreferences!
 
+const isAiPreferencesSnapshot = (source: unknown): source is AiPreferencesUserConfig => {
+  if (!isRecord(source) || !isRecord(source.proxy)) return false
+  return (
+    typeof source.enableExtendedThinking === 'boolean' &&
+    typeof source.thinkingBudgetTokens === 'number' &&
+    Number.isFinite(source.thinkingBudgetTokens) &&
+    typeof source.autoExecuteReadOnlyCommands === 'boolean' &&
+    typeof source.commandOutputFilteringEnabled === 'boolean' &&
+    typeof source.kbSearchEnabled === 'boolean' &&
+    typeof source.experienceExtractionEnabled === 'boolean' &&
+    typeof source.autoApproval === 'boolean' &&
+    reasoningEffortValues.includes(source.reasoningEffort as AiPreferenceSettings['reasoningEffort']) &&
+    typeof source.needProxy === 'boolean' &&
+    proxyTypeValues.includes(source.proxy.type as AiPreferenceSettings['proxy']['type']) &&
+    typeof source.proxy.host === 'string' &&
+    typeof source.proxy.port === 'number' &&
+    Number.isFinite(source.proxy.port) &&
+    typeof source.proxy.enableProxyIdentity === 'boolean' &&
+    typeof source.proxy.username === 'string' &&
+    typeof source.proxy.password === 'string' &&
+    typeof source.shellIntegrationTimeout === 'number' &&
+    Number.isFinite(source.shellIntegrationTimeout)
+  )
+}
+
 const normalizeThinkingBudget = (value: unknown, fallback: number) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   if (value === 0) return 0
@@ -3699,6 +3724,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     proxy: { ...aiPreferences.value.proxy }
   })
 
+  const cloneAiPreferencesSnapshot = (preferences: AiPreferenceSettings): AiPreferencesUserConfig => ({
+    ...preferences,
+    proxy: { ...preferences.proxy }
+  })
+
+  const aiPreferencesSnapshotsMatch = (left: AiPreferenceSettings, right: AiPreferenceSettings) =>
+    JSON.stringify(cloneAiPreferencesSnapshot(left)) === JSON.stringify(cloneAiPreferencesSnapshot(right))
+
+  const persistAiPreferences = async (nextPreferences: AiPreferenceSettings) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('AI 偏好设置保存服务不可用')
+      return false
+    }
+    const normalizedPreferences = normalizeAiPreferencesConfig(nextPreferences).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        aiPreferences: cloneAiPreferencesSnapshot(normalizedPreferences)
+      })
+      if (!isRecord(savedConfig) || !isAiPreferencesSnapshot(savedConfig.aiPreferences)) {
+        setSettingsNotice('AI 偏好设置保存失败')
+        return false
+      }
+      const savedPreferences = normalizeAiPreferencesConfig(savedConfig.aiPreferences).normalized
+      if (!aiPreferencesSnapshotsMatch(savedPreferences, normalizedPreferences)) {
+        setSettingsNotice('AI 偏好设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        aiPreferences: cloneAiPreferencesSnapshot(savedPreferences)
+      } as Partial<UserConfig>)
+      aiPreferences.value = cloneAiPreferencesSnapshot(savedPreferences)
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : 'AI 偏好设置保存失败')
+      return false
+    }
+  }
+
   const getModelSettingsSnapshot = (): ModelSettingsUserConfig => ({
     addModelSwitch: addModelSwitch.value,
     providers: {
@@ -4546,18 +4611,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const updateAiPreferences = (patch: AiPreferencePatch) => {
-    const enablesAutoApproval = patch.autoApproval === true && !aiPreferences.value.autoApproval
-    aiPreferences.value = normalizeAiPreferencesConfig({
+  const updateAiPreferences = async (patch: AiPreferencePatch) => {
+    const previousPreferences = getAiPreferencesSnapshot()
+    const nextPreferences = normalizeAiPreferencesConfig({
       ...getAiPreferencesSnapshot(),
       ...patch,
       proxy: patch.proxy ? { ...aiPreferences.value.proxy, ...patch.proxy } : aiPreferences.value.proxy
     }).normalized
+    const saved = await persistAiPreferences(nextPreferences)
+    if (!saved) return false
+    const enablesAutoApproval = nextPreferences.autoApproval && !previousPreferences.autoApproval
     if (enablesAutoApproval) {
       onboardingAutoApprovalEvent.value += 1
     }
-    saveConfig({ aiPreferences: getAiPreferencesSnapshot() })
     setSettingsNotice('AI 偏好设置已保存')
+    return true
   }
 
   const updateExtensionSettings = async (patch: Partial<ExtensionSettings>) => {
