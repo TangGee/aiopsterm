@@ -5541,6 +5541,129 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('does not fabricate user account writes when bridge operations are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshUserAccount()
+
+    const originalAiops = {
+      openUserLogin: window.aiops.openUserLogin,
+      loginUserAccount: window.aiops.loginUserAccount,
+      logoutUserAccount: window.aiops.logoutUserAccount,
+      skipUserLogin: window.aiops.skipUserLogin,
+      sendUserLoginCode: window.aiops.sendUserLoginCode,
+      updateUserProfile: window.aiops.updateUserProfile,
+      resetUserPassword: window.aiops.resetUserPassword,
+      sendUserContactCode: window.aiops.sendUserContactCode,
+      bindUserContact: window.aiops.bindUserContact
+    }
+    const profileBefore = JSON.stringify(store.userProfile)
+    const billingBefore = JSON.stringify(store.billingSettings)
+
+    try {
+      ;(window.aiops as any).openUserLogin = originalAiops.openUserLogin
+      vi.mocked(window.aiops.openUserLogin!).mockRejectedValueOnce(new Error('login window offline'))
+      await expect(store.openUserLogin()).resolves.toBe(false)
+      expect(store.userNotice).toBe('登录服务打开失败')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      expect(JSON.stringify(store.billingSettings)).toBe(billingBefore)
+
+      ;(window.aiops as any).loginUserAccount = undefined
+      await expect(store.loginUser()).resolves.toBe(false)
+      expect(store.userNotice).toBe('账号登录服务不可用')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      await expect(store.loginWithAccount('ops_login', 'secret')).resolves.toBe(false)
+      expect(store.userNotice).toBe('账号登录服务不可用')
+      expect(store.userLoginLoading).toBe(false)
+      await expect(store.loginWithEmail('login@example.local', '246810')).resolves.toBe(false)
+      expect(store.userNotice).toBe('邮箱登录服务不可用')
+      expect(store.userLoginLoading).toBe(false)
+      await expect(store.loginWithMobile('13800000001', '135790')).resolves.toBe(false)
+      expect(store.userNotice).toBe('手机号登录服务不可用')
+      expect(store.userLoginLoading).toBe(false)
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+
+      ;(window.aiops as any).loginUserAccount = originalAiops.loginUserAccount
+      vi.mocked(window.aiops.loginUserAccount!).mockRejectedValueOnce(new Error('account auth offline'))
+      await expect(store.loginWithAccount('ops_login', 'secret')).resolves.toBe(false)
+      expect(store.userNotice).toBe('账号登录失败')
+      expect(store.userLoginLoading).toBe(false)
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+
+      ;(window.aiops as any).logoutUserAccount = originalAiops.logoutUserAccount
+      vi.mocked(window.aiops.logoutUserAccount!).mockRejectedValueOnce(new Error('logout offline'))
+      await expect(store.logoutUser()).resolves.toBe(false)
+      expect(store.userNotice).toBe('登出失败')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      expect(JSON.stringify(store.billingSettings)).toBe(billingBefore)
+
+      ;(window.aiops as any).skipUserLogin = undefined
+      await expect(store.skipUserLogin()).resolves.toBe(false)
+      expect(store.userNotice).toBe('跳过登录服务不可用')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      ;(window.aiops as any).skipUserLogin = originalAiops.skipUserLogin
+      vi.mocked(window.aiops.skipUserLogin!).mockRejectedValueOnce(new Error('skip login offline'))
+      await expect(store.skipUserLogin()).resolves.toBe(false)
+      expect(store.userNotice).toBe('跳过登录失败')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+
+      ;(window.aiops as any).sendUserLoginCode = undefined
+      await expect(store.sendUserLoginCode('email', 'login@example.local')).resolves.toBe(false)
+      expect(store.userNotice).toBe('登录验证码发送服务不可用')
+      expect(store.userLoginCodeSending.email).toBe(false)
+      expect(store.userLoginCodeCountdown.email).toBe(0)
+      ;(window.aiops as any).sendUserLoginCode = originalAiops.sendUserLoginCode
+      vi.mocked(window.aiops.sendUserLoginCode!).mockRejectedValueOnce(new Error('login code offline'))
+      await expect(store.sendUserLoginCode('email', 'login@example.local')).resolves.toBe(false)
+      expect(store.userNotice).toBe('登录验证码发送失败')
+      expect(store.userLoginCodeSending.email).toBe(false)
+      expect(store.userLoginCodeCountdown.email).toBe(0)
+
+      ;(window.aiops as any).updateUserProfile = undefined
+      await expect(store.updateUserProfile({ name: 'Local Fake', username: 'local_fake' })).resolves.toBe(false)
+      expect(store.userNotice).toBe('用户资料保存服务不可用')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      ;(window.aiops as any).updateUserProfile = originalAiops.updateUserProfile
+      vi.mocked(window.aiops.updateUserProfile!).mockRejectedValueOnce(new Error('profile offline'))
+      await expect(store.updateUserProfile({ name: 'Local Fake', username: 'local_fake' })).resolves.toBe(false)
+      expect(store.userNotice).toBe('用户资料保存失败')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+
+      ;(window.aiops as any).resetUserPassword = undefined
+      await expect(store.resetUserPassword('Aa123456!')).resolves.toBe(false)
+      expect(store.userNotice).toBe('密码重置服务不可用')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      ;(window.aiops as any).resetUserPassword = originalAiops.resetUserPassword
+      vi.mocked(window.aiops.resetUserPassword!).mockRejectedValueOnce(new Error('password offline'))
+      await expect(store.resetUserPassword('Aa123456!')).resolves.toBe(false)
+      expect(store.userNotice).toBe('密码重置失败')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+
+      ;(window.aiops as any).sendUserContactCode = undefined
+      await expect(store.sendUserContactCode('email', 'ops@example.local')).resolves.toBe(false)
+      expect(store.userNotice).toBe('联系方式验证码发送服务不可用')
+      expect(store.userContactCodeSending.email).toBe(false)
+      expect(store.userContactCodeCountdown.email).toBe(0)
+      ;(window.aiops as any).sendUserContactCode = originalAiops.sendUserContactCode
+      vi.mocked(window.aiops.sendUserContactCode!).mockRejectedValueOnce(new Error('contact code offline'))
+      await expect(store.sendUserContactCode('email', 'ops@example.local')).resolves.toBe(false)
+      expect(store.userNotice).toBe('联系方式验证码发送失败')
+      expect(store.userContactCodeSending.email).toBe(false)
+      expect(store.userContactCodeCountdown.email).toBe(0)
+
+      ;(window.aiops as any).bindUserContact = undefined
+      await expect(store.bindUserContact('email', 'ops@example.local', '123456')).resolves.toBe(false)
+      expect(store.userNotice).toBe('联系方式绑定服务不可用')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      ;(window.aiops as any).bindUserContact = originalAiops.bindUserContact
+      vi.mocked(window.aiops.bindUserContact!).mockRejectedValueOnce(new Error('bind contact offline'))
+      await expect(store.bindUserContact('email', 'ops@example.local', '123456')).resolves.toBe(false)
+      expect(store.userNotice).toBe('联系方式绑定失败')
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not fabricate Settings rules, shortcuts, or trusted-device writes when bridges are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.hydrateConfig()

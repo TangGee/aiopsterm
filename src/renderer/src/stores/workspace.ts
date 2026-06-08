@@ -4857,11 +4857,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeModule.value = 'user'
     userLoginTab.value = 'account'
     resetUserCodeState('login')
-    if (!window.aiops?.openUserLogin) {
+    const openUserLoginBridge = window.aiops?.openUserLogin
+    if (typeof openUserLoginBridge !== 'function') {
       setUserNotice('登录服务不可用')
       return false
     }
-    return applyUserMutationResult(await window.aiops.openUserLogin())
+    try {
+      return applyUserMutationResult(await openUserLoginBridge())
+    } catch {
+      setUserNotice('登录服务打开失败')
+      return false
+    }
   }
 
   const setUserLoginTab = (tab: UserLoginTab) => {
@@ -4869,91 +4875,197 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loginUser = async (username = '', password = '') => {
-    const result = await window.aiops?.loginUserAccount?.({ method: 'account', username, password })
-    return applyUserMutationResult(result || { ok: false, errorMessage: '用户登录 API 不可用' })
+    const loginUserAccountBridge = window.aiops?.loginUserAccount
+    if (typeof loginUserAccountBridge !== 'function') {
+      setUserNotice('账号登录服务不可用')
+      return false
+    }
+    try {
+      return applyUserMutationResult(await loginUserAccountBridge({ method: 'account', username, password }))
+    } catch {
+      setUserNotice('账号登录失败')
+      return false
+    }
   }
 
   const logoutUser = async () => {
     userAccountCenterOpen.value = false
     resetUserCodeState('login')
     resetUserCodeState('contact')
-    if (!window.aiops?.logoutUserAccount) {
+    const logoutUserAccountBridge = window.aiops?.logoutUserAccount
+    if (typeof logoutUserAccountBridge !== 'function') {
       setUserNotice('登出服务不可用')
       return false
     }
-    return applyUserMutationResult(await window.aiops.logoutUserAccount())
+    try {
+      return applyUserMutationResult(await logoutUserAccountBridge())
+    } catch {
+      setUserNotice('登出失败')
+      return false
+    }
   }
 
   const skipUserLogin = async () => {
-    const result = await window.aiops?.skipUserLogin?.()
-    return applyUserMutationResult(result || { ok: false, errorMessage: '跳过登录 API 不可用' })
+    const skipUserLoginBridge = window.aiops?.skipUserLogin
+    if (typeof skipUserLoginBridge !== 'function') {
+      setUserNotice('跳过登录服务不可用')
+      return false
+    }
+    try {
+      return applyUserMutationResult(await skipUserLoginBridge())
+    } catch {
+      setUserNotice('跳过登录失败')
+      return false
+    }
   }
 
   const sendUserLoginCode = async (kind: 'email' | 'mobile', value: string) => {
     if (userLoginCodeCountdown.value[kind] > 0 || userLoginCodeSending.value[kind]) return false
-    userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: true }
-    const result = await window.aiops?.sendUserLoginCode?.({ kind, value })
-    if (!result?.ok || !result.data) {
-      userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: false }
-      setUserNotice(result?.errorMessage || '验证码发送失败')
+    const sendUserLoginCodeBridge = window.aiops?.sendUserLoginCode
+    if (typeof sendUserLoginCodeBridge !== 'function') {
+      setUserNotice('登录验证码发送服务不可用')
       return false
     }
-    startUserCountdown('login', kind, result.data.countdownSeconds, result.data.message)
-    return true
+    userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: true }
+    try {
+      const result = await sendUserLoginCodeBridge({ kind, value })
+      if (!result?.ok || !result.data) {
+        userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: false }
+        setUserNotice(result?.errorMessage || '验证码发送失败')
+        return false
+      }
+      startUserCountdown('login', kind, result.data.countdownSeconds, result.data.message)
+      return true
+    } catch {
+      userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: false }
+      setUserNotice('登录验证码发送失败')
+      return false
+    }
   }
 
   const loginWithAccount = async (username: string, password: string) => {
+    const loginUserAccountBridge = window.aiops?.loginUserAccount
+    if (typeof loginUserAccountBridge !== 'function') {
+      userLoginLoading.value = false
+      setUserNotice('账号登录服务不可用')
+      return false
+    }
     userLoginLoading.value = true
-    const result = await window.aiops?.loginUserAccount?.({ method: 'account', username, password })
-    return applyUserMutationResult(result || { ok: false, errorMessage: '账号登录 API 不可用' })
+    try {
+      return applyUserMutationResult(await loginUserAccountBridge({ method: 'account', username, password }))
+    } catch {
+      userLoginLoading.value = false
+      setUserNotice('账号登录失败')
+      return false
+    }
   }
 
   const loginWithEmail = async (email: string, code: string) => {
+    const loginUserAccountBridge = window.aiops?.loginUserAccount
+    if (typeof loginUserAccountBridge !== 'function') {
+      userLoginLoading.value = false
+      setUserNotice('邮箱登录服务不可用')
+      return false
+    }
     userLoginLoading.value = true
-    const result = await window.aiops?.loginUserAccount?.({ method: 'email', email, code })
-    const ok = applyUserMutationResult(result || { ok: false, errorMessage: '邮箱登录 API 不可用' })
-    if (ok) resetUserCodeState('login', 'email')
-    return ok
+    try {
+      const ok = applyUserMutationResult(await loginUserAccountBridge({ method: 'email', email, code }))
+      if (ok) resetUserCodeState('login', 'email')
+      return ok
+    } catch {
+      userLoginLoading.value = false
+      setUserNotice('邮箱登录失败')
+      return false
+    }
   }
 
   const loginWithMobile = async (mobile: string, code: string) => {
+    const loginUserAccountBridge = window.aiops?.loginUserAccount
+    if (typeof loginUserAccountBridge !== 'function') {
+      userLoginLoading.value = false
+      setUserNotice('手机号登录服务不可用')
+      return false
+    }
     userLoginLoading.value = true
-    const result = await window.aiops?.loginUserAccount?.({ method: 'mobile', mobile, code })
-    const ok = applyUserMutationResult(result || { ok: false, errorMessage: '手机号登录 API 不可用' })
-    if (ok) resetUserCodeState('login', 'mobile')
-    return ok
+    try {
+      const ok = applyUserMutationResult(await loginUserAccountBridge({ method: 'mobile', mobile, code }))
+      if (ok) resetUserCodeState('login', 'mobile')
+      return ok
+    } catch {
+      userLoginLoading.value = false
+      setUserNotice('手机号登录失败')
+      return false
+    }
   }
 
   const updateUserProfile = async (
     patch: Partial<Pick<AiopsUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl' | 'avatarUpdatedAt'>>
   ) => {
-    const result = await window.aiops?.updateUserProfile?.(patch)
-    return applyUserMutationResult(result || { ok: false, errorMessage: '用户资料保存 API 不可用' })
+    const updateUserProfileBridge = window.aiops?.updateUserProfile
+    if (typeof updateUserProfileBridge !== 'function') {
+      setUserNotice('用户资料保存服务不可用')
+      return false
+    }
+    try {
+      return applyUserMutationResult(await updateUserProfileBridge(patch))
+    } catch {
+      setUserNotice('用户资料保存失败')
+      return false
+    }
   }
 
   const resetUserPassword = async (password = '') => {
-    const result = await window.aiops?.resetUserPassword?.({ password })
-    return applyUserMutationResult(result || { ok: false, errorMessage: '密码重置 API 不可用' })
+    const resetUserPasswordBridge = window.aiops?.resetUserPassword
+    if (typeof resetUserPasswordBridge !== 'function') {
+      setUserNotice('密码重置服务不可用')
+      return false
+    }
+    try {
+      return applyUserMutationResult(await resetUserPasswordBridge({ password }))
+    } catch {
+      setUserNotice('密码重置失败')
+      return false
+    }
   }
 
   const sendUserContactCode = async (kind: 'email' | 'mobile', value: string) => {
     if (userContactCodeCountdown.value[kind] > 0 || userContactCodeSending.value[kind]) return false
-    userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: true }
-    const result = await window.aiops?.sendUserContactCode?.({ kind, value })
-    if (!result?.ok || !result.data) {
-      userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: false }
-      setUserNotice(result?.errorMessage || '验证码发送失败')
+    const sendUserContactCodeBridge = window.aiops?.sendUserContactCode
+    if (typeof sendUserContactCodeBridge !== 'function') {
+      setUserNotice('联系方式验证码发送服务不可用')
       return false
     }
-    startUserCountdown('contact', kind, result.data.countdownSeconds, result.data.message)
-    return true
+    userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: true }
+    try {
+      const result = await sendUserContactCodeBridge({ kind, value })
+      if (!result?.ok || !result.data) {
+        userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: false }
+        setUserNotice(result?.errorMessage || '验证码发送失败')
+        return false
+      }
+      startUserCountdown('contact', kind, result.data.countdownSeconds, result.data.message)
+      return true
+    } catch {
+      userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: false }
+      setUserNotice('联系方式验证码发送失败')
+      return false
+    }
   }
 
   const bindUserContact = async (kind: 'email' | 'mobile', value: string, code = '') => {
-    const result = await window.aiops?.bindUserContact?.({ kind, value, code })
-    const ok = applyUserMutationResult(result || { ok: false, errorMessage: '联系方式绑定 API 不可用' })
-    if (ok) resetUserCodeState('contact', kind)
-    return ok
+    const bindUserContactBridge = window.aiops?.bindUserContact
+    if (typeof bindUserContactBridge !== 'function') {
+      setUserNotice('联系方式绑定服务不可用')
+      return false
+    }
+    try {
+      const ok = applyUserMutationResult(await bindUserContactBridge({ kind, value, code }))
+      if (ok) resetUserCodeState('contact', kind)
+      return ok
+    } catch {
+      setUserNotice('联系方式绑定失败')
+      return false
+    }
   }
 
   let removeAppUpdateProgressListener: (() => void) | null = null
