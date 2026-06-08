@@ -6484,8 +6484,10 @@ describe('AppShell', () => {
     await workspace.vm.$nextTick()
 
     await workspace.findAll('.settings-bg-tile.preset').at(0)!.trigger('click')
+    await flushPromises()
     expect(store.config.background.mode).toBe('preset')
     await workspace.find('.settings-sliders input[type="range"]').setValue('0.5')
+    await flushPromises()
     expect(store.config.background.opacity).toBe(0.5)
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/settings-custom-bg.webp'] })
     vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
@@ -6872,6 +6874,74 @@ describe('AppShell', () => {
 
     spotlight.unmount()
     target.remove()
+  })
+
+  it('does not leave background controls visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('general')
+    await workspace.vm.$nextTick()
+    const savedConfig = {
+      ...store.config,
+      background: { ...store.config.background }
+    }
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
+    const firstPreset = workspace.findAll('.settings-bg-tile.preset').at(0)!
+    await firstPreset.trigger('click')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('背景设置保存失败')
+    expect(store.config.background.mode).toBe('none')
+    expect(firstPreset.classes()).not.toContain('active')
+    expect(workspace.find('.settings-sliders').exists()).toBe(false)
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      background: {
+        ...store.config.background,
+        mode: 'preset',
+        image: 'mist-lake'
+      }
+    })
+    await firstPreset.trigger('click')
+    await flushPromises()
+    expect(store.config.background.mode).toBe('preset')
+    expect(store.config.background.image).toBe('mist-lake')
+    await workspace.vm.$nextTick()
+    const opacityInput = workspace.find('.settings-sliders input[type="range"]')
+    expect((opacityInput.element as HTMLInputElement).value).toBe('0.15')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      background: { ...store.config.background }
+    })
+    await opacityInput.setValue('0.5')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('背景设置保存失败')
+    expect(store.config.background.opacity).toBe(0.15)
+    expect((opacityInput.element as HTMLInputElement).value).toBe('0.15')
+
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/rejected-bg.webp'] })
+    vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
+      filePath: '/tmp/aiopsterm/backgrounds/rejected-bg.webp',
+      url: 'file:///tmp/aiopsterm/backgrounds/rejected-bg.webp',
+      name: 'rejected-bg.webp',
+      size: 256
+    })
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      background: { ...store.config.background }
+    })
+    await workspace.find('.settings-bg-tile.upload').trigger('click')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('背景设置保存失败')
+    expect(store.config.background.mode).toBe('preset')
+    expect(store.config.background.lastCustomImage).toBe('')
+    expect(workspace.find('.settings-bg-tile.custom-preview').exists()).toBe(false)
   })
 
   it('does not leave General base setting controls visually changed when the config bridge rejects the snapshot', async () => {

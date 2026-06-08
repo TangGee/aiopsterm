@@ -2173,6 +2173,7 @@ const normalizeUserModelName = (value: unknown) => {
 }
 
 type GeneralBaseSettingsPatch = Partial<Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'>>
+type BackgroundUserConfig = UserConfig['background']
 
 const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
 
@@ -2209,15 +2210,58 @@ const generalBaseSettingsPatchMatches = (patch: GeneralBaseSettingsPatch, savedC
 const isGeneralBaseSettingsSnapshot = (source: unknown): source is Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'> =>
   isRecord(source) && isDefaultModeValue(source.defaultMode) && isSettingsLanguageValue(source.language) && isWatermarkValue(source.watermark)
 
+const backgroundModeValues = ['none', 'preset', 'custom'] as const
+
+const normalizeBackgroundConfig = (source?: Partial<BackgroundUserConfig>) => {
+  const incoming = isRecord(source) ? source : {}
+  const mode = stringFromOptions(incoming.mode, backgroundModeValues, defaultConfig.background.mode)
+  const normalized: BackgroundUserConfig = {
+    mode,
+    image: typeof incoming.image === 'string' ? incoming.image : defaultConfig.background.image,
+    opacity: numberInRange(incoming.opacity, defaultConfig.background.opacity, 0, 1),
+    brightness: numberInRange(incoming.brightness, defaultConfig.background.brightness, 0, 1),
+    lastCustomImage: typeof incoming.lastCustomImage === 'string' ? incoming.lastCustomImage : defaultConfig.background.lastCustomImage
+  }
+  if (normalized.mode === 'none') {
+    normalized.image = ''
+  }
+  const changed =
+    !isRecord(source) ||
+    (Object.keys(normalized) as Array<keyof BackgroundUserConfig>).some((key) => incoming[key] !== normalized[key])
+  return { normalized, changed }
+}
+
+const isBackgroundSnapshot = (source: unknown): source is BackgroundUserConfig => {
+  if (!isRecord(source)) return false
+  return (
+    backgroundModeValues.includes(source.mode as BackgroundUserConfig['mode']) &&
+    typeof source.image === 'string' &&
+    typeof source.opacity === 'number' &&
+    Number.isFinite(source.opacity) &&
+    source.opacity >= 0 &&
+    source.opacity <= 1 &&
+    typeof source.brightness === 'number' &&
+    Number.isFinite(source.brightness) &&
+    source.brightness >= 0 &&
+    source.brightness <= 1 &&
+    (source.lastCustomImage === undefined || typeof source.lastCustomImage === 'string')
+  )
+}
+
+const cloneBackgroundSnapshot = (background: BackgroundUserConfig): BackgroundUserConfig => ({ ...background })
+
+const backgroundSnapshotsMatch = (left: BackgroundUserConfig, right: BackgroundUserConfig) =>
+  JSON.stringify(cloneBackgroundSnapshot(left)) === JSON.stringify(cloneBackgroundSnapshot(right))
+
 const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
   modelProvider: normalizeUserModelProvider(patch.modelProvider || base.modelProvider),
   modelName: normalizeUserModelName(patch.modelName || base.modelName),
-  background: {
+  background: normalizeBackgroundConfig({
     ...base.background,
     ...(patch.background || {})
-  },
+  }).normalized,
   terminal: {
     ...(base.terminal || defaultTerminalSettings),
     ...(patch.terminal || {})
@@ -4280,14 +4324,50 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveConfig({ theme: normalizeThemeId(theme) })
   }
 
-  const selectBackground = (mode: UserConfig['background']['mode'], image = '') => {
-    saveConfig({
-      background: {
-        ...config.value.background,
-        mode,
-        image
+  const getBackgroundSnapshot = (): BackgroundUserConfig => cloneBackgroundSnapshot(config.value.background)
+
+  const persistBackground = async (nextBackground: BackgroundUserConfig) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('背景设置保存服务不可用')
+      return false
+    }
+    const normalizedBackground = normalizeBackgroundConfig(nextBackground).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        background: cloneBackgroundSnapshot(normalizedBackground)
+      })
+      if (!isRecord(savedConfig) || !isBackgroundSnapshot(savedConfig.background)) {
+        setSettingsNotice('背景设置保存失败')
+        return false
       }
-    })
+      const savedBackground = normalizeBackgroundConfig(savedConfig.background).normalized
+      if (!backgroundSnapshotsMatch(savedBackground, normalizedBackground)) {
+        setSettingsNotice('背景设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        background: cloneBackgroundSnapshot(savedBackground)
+      } as Partial<UserConfig>)
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '背景设置保存失败')
+      return false
+    }
+  }
+
+  const selectBackground = async (mode: UserConfig['background']['mode'], image = '') => {
+    const nextBackground = normalizeBackgroundConfig({
+      ...getBackgroundSnapshot(),
+      mode,
+      image
+    }).normalized
+    const saved = await persistBackground(nextBackground)
+    if (saved) {
+      setSettingsNotice('背景设置已保存')
+    }
+    return saved
   }
 
   const uploadCustomBackground = async () => {
@@ -4312,14 +4392,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('自定义背景保存失败')
         return false
       }
-      await saveConfig({
-        background: {
-          ...config.value.background,
-          mode: 'custom',
-          image: saved.url,
-          lastCustomImage: saved.url
-        }
+      const persisted = await persistBackground({
+        ...getBackgroundSnapshot(),
+        mode: 'custom',
+        image: saved.url,
+        lastCustomImage: saved.url
       })
+      if (!persisted) return false
       setSettingsNotice(`自定义背景已保存：${saved.name}`)
       return true
     } catch (error) {
@@ -4328,43 +4407,49 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const selectCustomBackground = () => {
+  const selectCustomBackground = async () => {
     const customImage = config.value.background.lastCustomImage || (config.value.background.mode === 'custom' ? config.value.background.image : '')
     if (!customImage) {
       setSettingsNotice('请先上传自定义背景')
       return false
     }
-    saveConfig({
-      background: {
-        ...config.value.background,
-        mode: 'custom',
-        image: customImage,
-        lastCustomImage: customImage
-      }
+    const saved = await persistBackground({
+      ...getBackgroundSnapshot(),
+      mode: 'custom',
+      image: customImage,
+      lastCustomImage: customImage
     })
-    return true
+    if (saved) {
+      setSettingsNotice('背景设置已保存')
+    }
+    return saved
   }
 
-  const clearCustomBackground = () => {
+  const clearCustomBackground = async () => {
     const wasSelected = config.value.background.mode === 'custom'
-    saveConfig({
-      background: {
-        ...config.value.background,
-        mode: wasSelected ? 'none' : config.value.background.mode,
-        image: wasSelected ? '' : config.value.background.image,
-        lastCustomImage: ''
-      }
+    const saved = await persistBackground({
+      ...getBackgroundSnapshot(),
+      mode: wasSelected ? 'none' : config.value.background.mode,
+      image: wasSelected ? '' : config.value.background.image,
+      lastCustomImage: ''
     })
-    setSettingsNotice('自定义背景已清除')
+    if (saved) {
+      setSettingsNotice('自定义背景已清除')
+    }
+    return saved
   }
 
-  const updateBackgroundTuning = (patch: Partial<Pick<UserConfig['background'], 'opacity' | 'brightness'>>) => {
-    saveConfig({
-      background: {
-        ...config.value.background,
+  const updateBackgroundTuning = async (patch: Partial<Pick<UserConfig['background'], 'opacity' | 'brightness'>>) => {
+    const saved = await persistBackground(
+      normalizeBackgroundConfig({
+        ...getBackgroundSnapshot(),
         ...patch
-      }
-    })
+      }).normalized
+    )
+    if (saved) {
+      setSettingsNotice('背景设置已保存')
+    }
+    return saved
   }
 
   const saveGeneralBaseSettings = async (patch: GeneralBaseSettingsPatch) => {

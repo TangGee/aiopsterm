@@ -4968,6 +4968,7 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     const originalShowOpenDialog = window.aiops.showOpenDialog
     const originalSaveCustomBackground = window.aiops.saveCustomBackground
+    const originalSaveConfig = window.aiops.saveConfig
     const originalBackground = { ...store.config.background }
 
     try {
@@ -5003,9 +5004,81 @@ describe('workspace store', () => {
       await expect(store.uploadCustomBackground()).resolves.toBe(false)
       expect(store.settingsNotice).toBe('自定义背景保存失败')
       expect(store.config.background).toEqual(originalBackground)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/offline-config-bg.png'] })
+      vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
+        filePath: '/tmp/aiopsterm/backgrounds/offline-config-bg.png',
+        url: 'file:///tmp/aiopsterm/backgrounds/offline-config-bg.png',
+        name: 'offline-config-bg.png',
+        size: 128
+      })
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('背景设置保存服务不可用')
+      expect(store.config.background).toEqual(originalBackground)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/malformed-config-bg.png'] })
+      vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
+        filePath: '/tmp/aiopsterm/backgrounds/malformed-config-bg.png',
+        url: 'file:///tmp/aiopsterm/backgrounds/malformed-config-bg.png',
+        name: 'malformed-config-bg.png',
+        size: 128
+      })
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('背景设置保存失败')
+      expect(store.config.background).toEqual(originalBackground)
     } finally {
       ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
       ;(window.aiops as any).saveCustomBackground = originalSaveCustomBackground
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate background setting writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    const originalSaveConfig = window.aiops.saveConfig
+    const originalBackground = { ...store.config.background }
+    const assertBackgroundUnchanged = () => {
+      expect(store.config.background).toEqual(originalBackground)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('背景设置保存服务不可用')
+      assertBackgroundUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('背景设置保存失败')
+      assertBackgroundUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        background: originalBackground
+      })
+      await expect(store.updateBackgroundTuning({ opacity: 0.35 })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('背景设置保存失败')
+      assertBackgroundUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('background config offline'))
+      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('background config offline')
+      assertBackgroundUnchanged()
+
+      await expect(store.selectCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('请先上传自定义背景')
+      assertBackgroundUnchanged()
+
+      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('背景设置已保存')
+      expect(store.config.background.mode).toBe('preset')
+      expect(store.config.background.image).toBe('star-field')
+    } finally {
+      ;(window.aiops as any).saveConfig = originalSaveConfig
     }
   })
 
@@ -5015,10 +5088,10 @@ describe('workspace store', () => {
     store.setActiveSettingsSection('terminal')
     expect(store.activeSettingsSection).toBe('terminal')
 
-    store.selectBackground('preset', 'star-field')
+    await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(true)
     expect(store.config.background.mode).toBe('preset')
     expect(store.config.background.image).toBe('star-field')
-    store.updateBackgroundTuning({ opacity: 0.35, brightness: 0.8 })
+    await expect(store.updateBackgroundTuning({ opacity: 0.35, brightness: 0.8 })).resolves.toBe(true)
     expect(store.config.background.opacity).toBe(0.35)
     expect(store.config.background.brightness).toBe(0.8)
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/settings-bg.png'] })
@@ -5041,10 +5114,10 @@ describe('workspace store', () => {
         lastCustomImage: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png'
       })
     )
-    store.selectBackground('preset', 'dark-grid')
-    expect(store.selectCustomBackground()).toBe(true)
+    await expect(store.selectBackground('preset', 'dark-grid')).resolves.toBe(true)
+    await expect(store.selectCustomBackground()).resolves.toBe(true)
     expect(store.config.background.mode).toBe('custom')
-    store.clearCustomBackground()
+    await expect(store.clearCustomBackground()).resolves.toBe(true)
     expect(store.config.background.lastCustomImage).toBe('')
     expect(store.config.background.mode).toBe('none')
 

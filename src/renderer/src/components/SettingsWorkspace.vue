@@ -363,7 +363,10 @@ const GeneralSettings = defineComponent({
                         max: 1,
                         step: 0.05,
                         type: 'range',
-                        onInput: (event: Event) => workspace.updateBackgroundTuning({ opacity: Number((event.target as HTMLInputElement).value) })
+                        onChange: (event: Event) =>
+                          restoreInputOnFailedSave(event, workspace.config.background.opacity, (value) =>
+                            workspace.updateBackgroundTuning({ opacity: Number(value) })
+                          )
                       })
                     ]),
                     h('label', [
@@ -374,7 +377,10 @@ const GeneralSettings = defineComponent({
                         max: 1,
                         step: 0.05,
                         type: 'range',
-                        onInput: (event: Event) => workspace.updateBackgroundTuning({ brightness: Number((event.target as HTMLInputElement).value) })
+                        onChange: (event: Event) =>
+                          restoreInputOnFailedSave(event, workspace.config.background.brightness, (value) =>
+                            workspace.updateBackgroundTuning({ brightness: Number(value) })
+                          )
                       })
                     ])
                   ])
