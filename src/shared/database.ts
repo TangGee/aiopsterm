@@ -556,6 +556,111 @@ const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTable
   }
 }
 
+const sqliteDecodePrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
+  if (!primaryKey.length) return null
+  try {
+    const parsed = JSON.parse(rowKey)
+    return Array.isArray(parsed) && parsed.length === primaryKey.length ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const sqliteKnownColumnSet = (db: SqliteDatabase, schemaName: string, tableName: string) =>
+  new Set(sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name.toLowerCase()))
+
+const sqlitePrimaryKeyWhere = (mutation: Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>) => {
+  const primaryKey = mutation.primaryKey.map(trim).filter(Boolean)
+  const values = sqliteDecodePrimaryKeyRowKey(mutation.rowKey, primaryKey)
+  if (!values) {
+    throw Object.assign(new Error('Primary-key row identity is required for SQLite row mutations.'), { code: 'DB_SQLITE_PRIMARY_KEY_REQUIRED' })
+  }
+  return {
+    sql: primaryKey.map((column) => `${sqliteIdentifier(column)} IS ?`).join(' AND '),
+    params: values
+  }
+}
+
+const sqliteApplyMutation = (db: SqliteDatabase, tableRef: string, knownColumns: Set<string>, mutation: DatabaseTableMutationInput['mutations'][number]) => {
+  if (mutation.kind === 'drop') {
+    db.prepare(`DROP TABLE ${tableRef}`).run()
+    return 0
+  }
+  if (mutation.kind === 'truncate') {
+    const result = db.prepare(`DELETE FROM ${tableRef}`).run()
+    return Number(result.changes ?? 0)
+  }
+  if (mutation.kind === 'insert') {
+    const columns = Object.keys(mutation.values).filter((column) => knownColumns.has(column.toLowerCase()))
+    if (!columns.length) return 0
+    const sql = `INSERT INTO ${tableRef} (${columns.map(sqliteIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
+    const result = db.prepare(sql).run(...columns.map((column) => mutation.values[column]))
+    return Number(result.changes ?? 0)
+  }
+  if (mutation.kind === 'delete') {
+    const where = sqlitePrimaryKeyWhere(mutation)
+    const result = db.prepare(`DELETE FROM ${tableRef} WHERE ${where.sql}`).run(...where.params)
+    return Number(result.changes ?? 0)
+  }
+
+  const columns = Object.keys(mutation.patch).filter((column) => knownColumns.has(column.toLowerCase()))
+  if (!columns.length) return 0
+  const where = sqlitePrimaryKeyWhere(mutation)
+  const sql = `UPDATE ${tableRef} SET ${columns.map((column) => `${sqliteIdentifier(column)} = ?`).join(', ')} WHERE ${where.sql}`
+  const result = db.prepare(sql).run(...columns.map((column) => mutation.patch[column]), ...where.params)
+  return Number(result.changes ?? 0)
+}
+
+const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTableMutationInput, startedAt: number): DatabaseTableMutationResult => {
+  if (connection.readonly) {
+    return { ok: false, errorCode: 'DB_SQLITE_READONLY', errorMessage: 'SQLite connection is read-only.' }
+  }
+
+  let db: SqliteDatabase | null = null
+  try {
+    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), false)
+    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+    const tableName = trim(input.tableName)
+    const knownColumns = sqliteKnownColumnSet(db, schemaName, tableName)
+    if (!knownColumns.size) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
+    let affected = 0
+    db.prepare('BEGIN').run()
+    try {
+      input.mutations.forEach((mutation) => {
+        affected += sqliteApplyMutation(db!, tableRef, knownColumns, mutation)
+      })
+      db.prepare('COMMIT').run()
+    } catch (error) {
+      db.prepare('ROLLBACK').run()
+      throw error
+    }
+    const catalogs = sqliteCatalogsForConnection(connection)
+    if (catalogs) {
+      const index = databaseConnections.findIndex((item) => item.id === connection.id)
+      if (index >= 0) databaseConnections[index] = { ...databaseConnections[index], catalogs }
+    }
+    return {
+      ok: true,
+      data: {
+        affected,
+        durationMs: Math.max(1, Date.now() - startedAt),
+        catalog: databaseWorkspaceCatalogFor(input.connectionId)
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: sqliteErrorCode(error, 'DB_SQLITE_MUTATION_FAILED'),
+      errorMessage: sqliteErrorMessage(error, 'SQLite table mutation failed.')
+    }
+  } finally {
+    db?.close()
+  }
+}
+
 const endpointFor = (input: DatabaseConnectionTestInput) => {
   if (input.dbType === 'sqlite') return trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
   if (input.dbType === 'oracle' && trim(input.url)) return trim(input.url)
@@ -2018,6 +2123,11 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
 
 export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> {
   const startedAt = Date.now()
+  const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
+  if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    return sqliteMutateTable(connection, input, startedAt)
+  }
+
   const key = tableKeyForContext(input)
   if (!key) {
     return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }

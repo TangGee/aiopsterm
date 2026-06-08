@@ -476,6 +476,167 @@ describe('database backend boundary', () => {
     })
   })
 
+  it('applies real SQLite table mutations in a backend transaction', async () => {
+    const sqliteFilePath = await createTempSqliteFile()
+    const sqlite = new Database(sqliteFilePath)
+    sqlite.exec(`
+      CREATE TABLE cache_entries (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        ttl_seconds INTEGER,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE audit_events (
+        id INTEGER PRIMARY KEY,
+        service TEXT NOT NULL
+      );
+      INSERT INTO cache_entries (key, value, ttl_seconds, updated_at) VALUES
+        ('feature:checkout', 'enabled', 120, '2026-06-03 10:00:00'),
+        ('feature:search', 'disabled', 60, '2026-06-03 10:05:00');
+    `)
+    sqlite.close()
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'sqlite',
+        name: 'mutating-sqlite',
+        filePath: sqliteFilePath,
+        readonly: false,
+        env: 'Development',
+        groupId: 'group-local',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+
+    const update = await mutateDatabaseTable({
+      connectionId: 'conn-mutating-sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify(['feature:checkout']), primaryKey: ['key'], patch: { value: 'rolled-out', ttl_seconds: 300 } },
+        { kind: 'insert', values: { key: 'feature:billing', value: 'enabled', ttl_seconds: 45, updated_at: '2026-06-03 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify(['feature:search']), primaryKey: ['key'] }
+      ]
+    })
+    expect(update.ok).toBe(true)
+    expect(update.data?.affected).toBe(3)
+
+    const rows = await executeDatabaseSql({
+      connectionId: 'conn-mutating-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      sql: 'SELECT key, value, ttl_seconds FROM cache_entries ORDER BY key'
+    })
+    expect(rows.ok).toBe(true)
+    expect(rows.data?.rows).toEqual([
+      { key: 'feature:billing', value: 'enabled', ttl_seconds: 45 },
+      { key: 'feature:checkout', value: 'rolled-out', ttl_seconds: 300 }
+    ])
+
+    const failed = await mutateDatabaseTable({
+      connectionId: 'conn-mutating-sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      mutations: [
+        { kind: 'insert', values: { key: 'feature:rollback', value: 'pending', ttl_seconds: 1, updated_at: '2026-06-03 12:00:00' } },
+        { kind: 'insert', values: { key: 'feature:billing', value: 'duplicate', ttl_seconds: 1, updated_at: '2026-06-03 12:01:00' } }
+      ]
+    })
+    expect(failed.ok).toBe(false)
+    expect(failed.errorCode).toBe('DB_SQLITE_MUTATION_FAILED')
+
+    const rolledBack = await executeDatabaseSql({
+      connectionId: 'conn-mutating-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      sql: "SELECT key FROM cache_entries WHERE key = 'feature:rollback'"
+    })
+    expect(rolledBack.ok).toBe(true)
+    expect(rolledBack.data?.rows).toEqual([])
+
+    const truncate = await mutateDatabaseTable({
+      connectionId: 'conn-mutating-sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      mutations: [{ kind: 'truncate' }]
+    })
+    expect(truncate.ok).toBe(true)
+    expect(truncate.data?.affected).toBe(2)
+
+    const empty = await queryDatabaseTable({
+      connectionId: 'conn-mutating-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      filters: [],
+      sort: null,
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 100,
+      withTotal: true
+    })
+    expect(empty.ok).toBe(true)
+    expect(empty.data?.rows).toEqual([])
+    expect(empty.data?.total).toBe(0)
+
+    const drop = await mutateDatabaseTable({
+      connectionId: 'conn-mutating-sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      mutations: [{ kind: 'drop' }]
+    })
+    expect(drop.ok).toBe(true)
+    expect(drop.data?.catalog?.connections.find((connection) => connection.id === 'conn-mutating-sqlite')?.catalogs[0]?.tables?.map((table) => table.name)).toEqual([
+      'audit_events'
+    ])
+
+    const dropped = await getDatabaseTableDdl({
+      connectionId: 'conn-mutating-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries'
+    })
+    expect(dropped.ok).toBe(false)
+    expect(dropped.errorCode).toBe('DB_TABLE_NOT_FOUND')
+  })
+
+  it('rejects real SQLite mutations for readonly connections', async () => {
+    const sqliteFilePath = await createTempSqliteFile()
+    const sqlite = new Database(sqliteFilePath)
+    sqlite.exec("CREATE TABLE cache_entries (key TEXT PRIMARY KEY, value TEXT); INSERT INTO cache_entries (key, value) VALUES ('feature:checkout', 'enabled');")
+    sqlite.close()
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'sqlite',
+        name: 'readonly-sqlite',
+        filePath: sqliteFilePath,
+        readonly: true,
+        env: 'Development',
+        groupId: 'group-local',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+
+    const result = await mutateDatabaseTable({
+      connectionId: 'conn-readonly-sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      mutations: [{ kind: 'update', rowKey: JSON.stringify(['feature:checkout']), primaryKey: ['key'], patch: { value: 'disabled' } }]
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'DB_SQLITE_READONLY',
+      errorMessage: 'SQLite connection is read-only.'
+    })
+  })
+
   it('generates DB AI pane responses behind the database backend boundary', async () => {
     const created = await createDatabaseAiPaneRequest({
       prompt: 'Summarize schema and generate a SELECT',
