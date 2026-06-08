@@ -5627,6 +5627,112 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('does not persist Settings JSON editor state when config file write bridges are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.openKeywordHighlightEditor()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    const originalAiops = {
+      writeKeywordHighlightConfig: window.aiops.writeKeywordHighlightConfig,
+      writeSecurityConfig: window.aiops.writeSecurityConfig
+    }
+    const originalKeywordSettings = JSON.stringify(store.keywordHighlightSettings)
+    const keywordConfig = {
+      'keyword-highlight': {
+        enabled: true,
+        applyTo: { output: false, input: true },
+        rules: [
+          {
+            name: 'fatal',
+            enabled: true,
+            scope: 'output' as const,
+            matchType: 'wildcard' as const,
+            pattern: '*fatal*',
+            style: { foreground: '#F87171', fontStyle: 'bold' as const }
+          }
+        ]
+      }
+    }
+    const securityConfig = {
+      security: {
+        enableCommandSecurity: true,
+        enableStrictMode: true,
+        blacklistPatterns: ['curl metadata-service'],
+        whitelistPatterns: ['ls'],
+        dangerousCommands: ['shutdown'],
+        maxCommandLength: 2048,
+        securityPolicy: {
+          blockCritical: true,
+          askForMedium: false,
+          askForHigh: true,
+          askForBlacklist: false
+        }
+      }
+    }
+
+    try {
+      store.updateKeywordHighlightEditorContent(JSON.stringify(keywordConfig, null, 2))
+      ;(window.aiops as any).writeKeywordHighlightConfig = undefined
+      await expect(store.saveKeywordHighlightEditor()).resolves.toBe(false)
+      expect(store.keywordHighlightEditorError).toBe('Save failed: keyword highlight config service unavailable')
+      expect(store.keywordHighlightEditorLastSaved).toBe(false)
+      expect(JSON.stringify(store.keywordHighlightSettings)).toBe(originalKeywordSettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).writeKeywordHighlightConfig = originalAiops.writeKeywordHighlightConfig
+      vi.mocked(window.aiops.writeKeywordHighlightConfig!).mockRejectedValueOnce(new Error('keyword file offline'))
+      await expect(store.saveKeywordHighlightEditor()).resolves.toBe(false)
+      expect(store.keywordHighlightEditorError).toBe('Save failed: keyword file offline')
+      expect(JSON.stringify(store.keywordHighlightSettings)).toBe(originalKeywordSettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).writeKeywordHighlightConfig = undefined
+      await expect(store.resetKeywordHighlightEditor()).resolves.toBe(false)
+      expect(store.keywordHighlightEditorError).toBe('Reset failed: keyword highlight config service unavailable')
+      expect(JSON.stringify(store.keywordHighlightSettings)).toBe(originalKeywordSettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).writeKeywordHighlightConfig = originalAiops.writeKeywordHighlightConfig
+      vi.mocked(window.aiops.writeKeywordHighlightConfig!).mockRejectedValueOnce(new Error('keyword reset offline'))
+      await expect(store.resetKeywordHighlightEditor()).resolves.toBe(false)
+      expect(store.keywordHighlightEditorError).toBe('Reset failed: keyword reset offline')
+      expect(JSON.stringify(store.keywordHighlightSettings)).toBe(originalKeywordSettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      await store.openSecurityConfigEditor()
+      const originalSecuritySettings = JSON.stringify(store.securitySettings)
+      store.updateSecurityConfigEditorContent(JSON.stringify(securityConfig, null, 2))
+      ;(window.aiops as any).writeSecurityConfig = undefined
+      await expect(store.saveSecurityConfigEditor()).resolves.toBe(false)
+      expect(store.securityConfigEditorError).toBe('Save failed: security config service unavailable')
+      expect(store.securityConfigEditorLastSaved).toBe(false)
+      expect(JSON.stringify(store.securitySettings)).toBe(originalSecuritySettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).writeSecurityConfig = originalAiops.writeSecurityConfig
+      vi.mocked(window.aiops.writeSecurityConfig!).mockRejectedValueOnce(new Error('security file offline'))
+      await expect(store.saveSecurityConfigEditor()).resolves.toBe(false)
+      expect(store.securityConfigEditorError).toBe('Save failed: security file offline')
+      expect(JSON.stringify(store.securitySettings)).toBe(originalSecuritySettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).writeSecurityConfig = undefined
+      await expect(store.resetSecurityConfigEditor()).resolves.toBe(false)
+      expect(store.securityConfigEditorError).toBe('Reset failed: security config service unavailable')
+      expect(JSON.stringify(store.securitySettings)).toBe(originalSecuritySettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).writeSecurityConfig = originalAiops.writeSecurityConfig
+      vi.mocked(window.aiops.writeSecurityConfig!).mockRejectedValueOnce(new Error('security reset offline'))
+      await expect(store.resetSecurityConfigEditor()).resolves.toBe(false)
+      expect(store.securityConfigEditorError).toBe('Reset failed: security reset offline')
+      expect(JSON.stringify(store.securitySettings)).toBe(originalSecuritySettings)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('manages External reference-style onboarding guide, tour preparation, and completion state', () => {
     const store = useWorkspaceStore()
 

@@ -4485,11 +4485,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const { normalized } = normalizeKeywordHighlightConfig(parsed)
-    keywordHighlightSettings.value = normalized
-    keywordHighlightEditorContent.value = JSON.stringify(normalized, null, 2)
-    keywordHighlightEditorError.value = ''
+    const normalizedContent = JSON.stringify(normalized, null, 2)
+    const writeKeywordHighlightConfig = window.aiops?.writeKeywordHighlightConfig
+    if (typeof writeKeywordHighlightConfig !== 'function') {
+      keywordHighlightEditorError.value = 'Save failed: keyword highlight config service unavailable'
+      keywordHighlightEditorLastSaved.value = false
+      return false
+    }
     try {
-      await window.aiops?.writeKeywordHighlightConfig(keywordHighlightEditorContent.value)
+      await writeKeywordHighlightConfig(normalizedContent)
+      keywordHighlightSettings.value = normalized
+      keywordHighlightEditorContent.value = normalizedContent
+      keywordHighlightEditorError.value = ''
       keywordHighlightEditorLastSaved.value = true
       persistKeywordHighlightSettings()
       setSettingsNotice('关键词高亮配置已保存')
@@ -4507,17 +4514,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       window.clearTimeout(keywordHighlightSaveTimer)
       keywordHighlightSaveTimer = null
     }
-    keywordHighlightSettings.value = normalizeKeywordHighlightConfig(defaultKeywordHighlightSettings).normalized
-    keywordHighlightEditorContent.value = JSON.stringify(keywordHighlightSettings.value, null, 2)
-    keywordHighlightEditorError.value = ''
-    keywordHighlightEditorLastSaved.value = false
+    const normalized = normalizeKeywordHighlightConfig(defaultKeywordHighlightSettings).normalized
+    const normalizedContent = JSON.stringify(normalized, null, 2)
+    const writeKeywordHighlightConfig = window.aiops?.writeKeywordHighlightConfig
+    if (typeof writeKeywordHighlightConfig !== 'function') {
+      keywordHighlightEditorError.value = 'Reset failed: keyword highlight config service unavailable'
+      keywordHighlightEditorLastSaved.value = false
+      return false
+    }
     try {
-      await window.aiops?.writeKeywordHighlightConfig(keywordHighlightEditorContent.value)
+      await writeKeywordHighlightConfig(normalizedContent)
+      keywordHighlightSettings.value = normalized
+      keywordHighlightEditorContent.value = normalizedContent
+      keywordHighlightEditorError.value = ''
+      keywordHighlightEditorLastSaved.value = true
       persistKeywordHighlightSettings()
       setSettingsNotice('关键词高亮配置已重置')
+      return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       keywordHighlightEditorError.value = `Reset failed: ${message}`
+      keywordHighlightEditorLastSaved.value = false
+      return false
     }
   }
 
@@ -4624,11 +4642,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const { normalized } = normalizeSecurityConfig(parsed)
-    securitySettings.value = normalized
-    securityConfigEditorContent.value = JSON.stringify(normalized, null, 2)
-    securityConfigEditorError.value = ''
+    const normalizedContent = JSON.stringify(normalized, null, 2)
+    const writeSecurityConfig = window.aiops?.writeSecurityConfig
+    if (typeof writeSecurityConfig !== 'function') {
+      securityConfigEditorError.value = 'Save failed: security config service unavailable'
+      securityConfigEditorLastSaved.value = false
+      return false
+    }
     try {
-      await window.aiops?.writeSecurityConfig(securityConfigEditorContent.value)
+      await writeSecurityConfig(normalizedContent)
+      securitySettings.value = normalized
+      securityConfigEditorContent.value = normalizedContent
+      securityConfigEditorError.value = ''
       securityConfigEditorLastSaved.value = true
       persistSecuritySettings()
       setSettingsNotice('安全配置已保存')
@@ -4646,17 +4671,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       window.clearTimeout(securityConfigSaveTimer)
       securityConfigSaveTimer = null
     }
-    securitySettings.value = normalizeSecurityConfig(defaultSecuritySettings).normalized
-    securityConfigEditorContent.value = JSON.stringify(securitySettings.value, null, 2)
-    securityConfigEditorError.value = ''
-    securityConfigEditorLastSaved.value = false
+    const normalized = normalizeSecurityConfig(defaultSecuritySettings).normalized
+    const normalizedContent = JSON.stringify(normalized, null, 2)
+    const writeSecurityConfig = window.aiops?.writeSecurityConfig
+    if (typeof writeSecurityConfig !== 'function') {
+      securityConfigEditorError.value = 'Reset failed: security config service unavailable'
+      securityConfigEditorLastSaved.value = false
+      return false
+    }
     try {
-      await window.aiops?.writeSecurityConfig(securityConfigEditorContent.value)
+      await writeSecurityConfig(normalizedContent)
+      securitySettings.value = normalized
+      securityConfigEditorContent.value = normalizedContent
+      securityConfigEditorError.value = ''
+      securityConfigEditorLastSaved.value = true
       persistSecuritySettings()
       setSettingsNotice('安全配置已重置')
+      return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       securityConfigEditorError.value = `Reset failed: ${message}`
+      securityConfigEditorLastSaved.value = false
+      return false
     }
   }
 
