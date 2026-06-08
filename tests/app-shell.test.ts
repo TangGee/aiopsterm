@@ -858,6 +858,17 @@ describe('AppShell', () => {
       expect(wrapper.text()).toContain('prod-bastion')
       expect(wrapper.text()).not.toContain('10.24.8.12')
 
+      vi.mocked(window.aiops.createTerminal).mockClear()
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('127.0.0.1'))!.trigger('dblclick')
+      await flushPromises()
+      expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', title: '127.0.0.1' }))
+      expect(store.activePanel.sessionId).toBe('test-session-local')
+      expect(store.activePanel.title).toBe('127.0.0.1')
+      expect(store.activePanel.status).toBe('running')
+      expect(store.activePanel.sshSession).toBeUndefined()
+      expect(store.activePanel.output).not.toContain('[aiopsterm] open local shell from Workspace')
+      expect(wrapper.text()).toContain('已打开本地 shell 127.0.0.1')
+
       await wrapper.find('.workspace-button[title="主机"]').trigger('click')
       expect(wrapper.find('.workspace-host-modal').text()).toContain('新建主机')
       await wrapper.find('.workspace-host-form').trigger('submit')
@@ -2772,12 +2783,19 @@ describe('AppShell', () => {
     expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
     expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('uptime')
 
-    store.activePanel.sessionId = 'terminal-live-component'
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.findAll('.terminal-toolbar button').find((button) => button.text().includes('打开本地 shell'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
+    expect(store.activePanel.sessionId).toBe('test-session-local')
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.output).not.toContain('[aiopsterm] shell started')
+
     vi.mocked(window.aiops.writeTerminal).mockClear()
     await wrapper.find('.command-line input').setValue('whoami')
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-live-component', 'whoami\n')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'whoami\n')
     expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'whoami\n', scope: 'input' })
     expect((wrapper.find('.command-line input').element as HTMLInputElement).value).toBe('')
 

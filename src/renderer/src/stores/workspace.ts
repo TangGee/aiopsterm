@@ -2553,6 +2553,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.sshSession = session
     return session
   }
+
+  const terminalShellTitle = (shell: string) => shell.replace(/\\/g, '/').split('/').filter(Boolean).pop() || shell || 'local shell'
+
+  const applyLocalTerminalSession = (panelId: string, terminalSession?: TerminalSessionInfo | null) => {
+    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    if (!panel || !terminalSession?.id) return null
+    panel.sessionId = terminalSession.id
+    panel.cwd = terminalSession.cwd || panel.cwd
+    panel.title = terminalShellTitle(terminalSession.shell)
+    panel.kind = 'terminal'
+    panel.status = 'running'
+    panel.sshSession = undefined
+    return panel
+  }
+
   const aiSkillContextOptions = computed<AiContextOption[]>(() =>
     settingsSkills.value
       .filter((skill) => skill.enabled)
@@ -9040,6 +9055,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     createPanel,
     registerSshSession,
     applySshTerminalSession,
+    applyLocalTerminalSession,
     canForkSshPanel,
     forkSshPanel,
     closePanel,

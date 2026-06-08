@@ -2933,7 +2933,7 @@ const registerIpc = () => {
       })
     }
 
-    return { id, shell: terminalShell, cwd }
+    return { id, shell: terminalShell, cwd, kind: 'local' as const }
   })
 
   ipcMain.handle('terminal:write', (_event, id: string, data: string) => {

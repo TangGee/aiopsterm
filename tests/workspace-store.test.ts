@@ -2818,6 +2818,16 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     await store.refreshAiModelCatalog()
 
+    const localPanel = store.applyLocalTerminalSession(store.activePanelId, {
+      id: 'terminal-local-unit',
+      shell: '/bin/zsh',
+      cwd: '/home/unit',
+      kind: 'local'
+    })
+    expect(localPanel).toEqual(expect.objectContaining({ sessionId: 'terminal-local-unit', title: 'zsh', cwd: '/home/unit', status: 'running' }))
+    expect(store.activePanel.sshSession).toBeUndefined()
+    expect(store.activePanel.output).not.toContain('[aiopsterm] shell started')
+
     expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
     expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
     const localSession = store.ensureFileSessionForTerminalPanel(store.activePanelId, 'left')

@@ -1205,10 +1205,30 @@ const connectAsset = async (assetId: string) => {
   workspace.createPanel()
   workspace.renamePanel(workspace.activePanelId, asset.name)
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
+  const panelId = workspace.activePanelId
   if (asset.isLocalShell) {
-    workspace.appendTerminalOutput(workspace.activePanelId, '[aiopsterm] open local shell from Workspace. Use "打开本地 shell" to attach a live shell.\n')
+    if (!window.aiops?.createTerminal) {
+      notice.value = '本地终端启动服务不可用'
+      return
+    }
+    try {
+      const session = await window.aiops.createTerminal({
+        kind: 'local',
+        title: asset.name,
+        cols: 100,
+        rows: 30
+      })
+      const panel = workspace.applyLocalTerminalSession(panelId, session)
+      if (!panel) {
+        notice.value = '本地终端启动失败'
+        return
+      }
+      workspace.renamePanel(panelId, asset.name)
+      notice.value = `已打开本地 shell ${asset.host}`
+    } catch (error) {
+      notice.value = error instanceof Error ? error.message : '本地终端启动失败'
+    }
   } else {
-    const panelId = workspace.activePanelId
     workspace.registerSshSession(panelId, asset)
     workspace.appendTerminalInput(panelId, `aiopsterm ssh ${asset.username}@${asset.host}:${asset.port}\n`)
     try {

@@ -1240,19 +1240,26 @@ const chatSelectionToAi = (panelId: string) => {
 }
 
 const startRealShell = async () => {
-  if (!window.aiops) return
+  if (!window.aiops?.createTerminal) {
+    workspace.setTopNotice('本地终端启动服务不可用')
+    return
+  }
   const panel = workspace.activePanel
   if (panel.kind === 'knowledge') return
   const view = terminalViews.get(panel.id)
   view?.fit.fit()
-  const session = await window.aiops.createTerminal({
-    cols: view?.terminal.cols,
-    rows: view?.terminal.rows
-  })
-  panel.sessionId = session.id
-  panel.cwd = session.cwd
-  panel.title = session.shell.split('/').pop() || session.shell
-  workspace.appendTerminalOutput(panel.id, `\n[aiopsterm] shell started: ${session.shell}\n`)
+  try {
+    const session = await window.aiops.createTerminal({
+      kind: 'local',
+      cols: view?.terminal.cols,
+      rows: view?.terminal.rows
+    })
+    if (!workspace.applyLocalTerminalSession(panel.id, session)) {
+      workspace.setTopNotice('本地终端启动失败')
+    }
+  } catch (error) {
+    workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+  }
 }
 
 onMounted(() => {
