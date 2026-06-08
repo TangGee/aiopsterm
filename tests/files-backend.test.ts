@@ -1,7 +1,37 @@
 import { mkdir, mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => '/tmp/aiopsterm-files-test'
+  }
+}))
+
+vi.mock('electron-store', () => {
+  class MockStore<T extends Record<string, unknown>> {
+    store: T
+
+    constructor(options?: { defaults?: T }) {
+      this.store = JSON.parse(JSON.stringify(options?.defaults || {}))
+    }
+
+    get<K extends keyof T>(key: K): T[K] {
+      return this.store[key]
+    }
+
+    set<K extends keyof T>(key: K, value: T[K]) {
+      this.store[key] = value
+    }
+  }
+
+  return { default: MockStore }
+})
+
+vi.mock('better-sqlite3', () => {
+  throw new Error('force electron-store files backend in tests')
+})
 
 let readFileContent: (filePath: string, options?: Record<string, unknown>) => Promise<any>
 let writeFileContent: (filePath: string, content: string, options?: Record<string, unknown>) => Promise<any>
@@ -14,6 +44,7 @@ let cancelFileTransferTask: (input: Record<string, unknown>) => Promise<any>
 let listFileSessionCatalog: () => Promise<any>
 let saveFileSession: (session: Record<string, unknown>) => Promise<any>
 let saveFileSessionFromSftpPayload: (payload: Record<string, unknown>) => Promise<any>
+let saveFileSessionFromTerminalContext: (context: Record<string, unknown>) => Promise<any>
 let updateFileSession: (id: string, patch: Record<string, unknown>) => Promise<any>
 let deleteFileSession: (id: string) => Promise<any>
 let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
@@ -34,6 +65,7 @@ beforeAll(async () => {
   listFileSessionCatalog = backend.listFileSessionCatalog
   saveFileSession = backend.saveFileSession
   saveFileSessionFromSftpPayload = backend.saveFileSessionFromSftpPayload
+  saveFileSessionFromTerminalContext = backend.saveFileSessionFromTerminalContext
   updateFileSession = backend.updateFileSession
   deleteFileSession = backend.deleteFileSession
   saveFileSessionFolder = backend.saveFileSessionFolder
@@ -104,6 +136,77 @@ describe('files backend content boundary', () => {
     await expect(saveFileSessionFromSftpPayload({ title: 'missing-host' })).resolves.toMatchObject({
       ok: false,
       errorCode: 'FILES_SESSION_PAYLOAD_INVALID'
+    })
+
+    const localTerminalSession = await saveFileSessionFromTerminalContext({
+      kind: 'local',
+      panelTitle: 'zsh',
+      panelStatus: 'running',
+      sessionId: 'terminal-local-backend',
+      cwd: '/home/unit'
+    })
+    expect(localTerminalSession.ok).toBe(true)
+    expect(localTerminalSession.data.session).toEqual(expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/home/unit', status: 'active' }))
+
+    const assetTerminalSession = await saveFileSessionFromTerminalContext({
+      kind: 'ssh',
+      panelTitle: 'client-title',
+      panelStatus: 'closed',
+      sessionId: 'terminal-asset-backend',
+      cwd: '/tmp/current',
+      ssh: {
+        connectionId: 'ssh-terminal-asset-backend',
+        assetId: 'asset-1',
+        host: '10.8.0.9',
+        username: 'client-user',
+        assetName: 'client-label'
+      }
+    })
+    expect(assetTerminalSession.ok).toBe(true)
+    expect(assetTerminalSession.data.session).toEqual(
+      expect.objectContaining({
+        id: 'asset-1',
+        label: 'prod-bastion',
+        host: '10.24.8.12',
+        group: '生产',
+        rootPath: '/tmp/current',
+        status: 'idle',
+        favorite: true,
+        assetType: 'person',
+        folderUuid: 'custom-folder-a',
+        comment: '生产入口'
+      })
+    )
+
+    const ephemeralTerminalSession = await saveFileSessionFromTerminalContext({
+      kind: 'ssh',
+      panelTitle: 'ssh temp',
+      panelStatus: 'running',
+      sessionId: 'terminal-ephemeral-backend',
+      cwd: '/home/temp',
+      ssh: {
+        connectionId: 'ssh-terminal-ephemeral-backend',
+        host: '10.66.0.7',
+        username: 'temp',
+        assetName: 'temp-host',
+        assetType: 'organization'
+      }
+    })
+    expect(ephemeralTerminalSession.ok).toBe(true)
+    expect(ephemeralTerminalSession.data.session).toEqual(
+      expect.objectContaining({
+        id: 'ssh-ssh-terminal-ephemeral-backend',
+        label: 'temp-host',
+        host: '10.66.0.7',
+        group: '终端连接',
+        rootPath: '/home/temp',
+        assetType: 'organization',
+        comment: 'Opened from ssh temp'
+      })
+    )
+    await expect(saveFileSessionFromTerminalContext({ kind: 'ssh', panelTitle: 'missing-host' })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'FILES_SESSION_TERMINAL_INVALID'
     })
 
     const movedSession = await updateFileSession('asset-release', { folderUuid: savedFolder.data.folder.uuid, group: '主机', comment: '发布入口' })

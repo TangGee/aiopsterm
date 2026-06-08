@@ -228,6 +228,27 @@ export type FileSessionCatalog = {
 
 export type FileSessionPatch = Partial<Omit<FileSessionInfo, 'id'>>
 export type FileSessionSftpPayload = Record<string, unknown>
+export type FileSessionTerminalContext = {
+  kind: 'local' | 'ssh'
+  panelId?: string
+  panelTitle?: string
+  panelStatus?: 'ready' | 'running' | 'closed'
+  sessionId?: string
+  cwd?: string
+  ssh?: {
+    connectionId?: string
+    host?: string
+    port?: number
+    username?: string
+    assetId?: string
+    assetName?: string
+    assetType?: string
+    organizationId?: string
+    authType?: string
+    createdAt?: number
+    forkFromConnectionId?: string
+  }
+}
 
 export type FileSessionCatalogResult = AiopsMutationResult<FileSessionCatalog>
 export type FileSessionMutationResult = AiopsMutationResult<FileSessionCatalog & { session: FileSessionInfo }>
@@ -2074,6 +2095,7 @@ export type AiopsPreloadApi = {
   listFileSessionCatalog: () => Promise<FileSessionCatalogResult>
   saveFileSession: (session: FileSessionInfo) => Promise<FileSessionMutationResult>
   saveFileSessionFromSftpPayload: (payload: FileSessionSftpPayload) => Promise<FileSessionMutationResult>
+  saveFileSessionFromTerminalContext: (context: FileSessionTerminalContext) => Promise<FileSessionMutationResult>
   updateFileSession: (id: string, patch: FileSessionPatch) => Promise<FileSessionMutationResult>
   deleteFileSession: (id: string) => Promise<FileSessionCatalogResult>
   saveFileSessionFolder: (folder: FileSessionFolderSaveInput) => Promise<FileSessionFolderMutationResult>

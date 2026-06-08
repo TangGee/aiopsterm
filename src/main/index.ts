@@ -90,6 +90,7 @@ import {
   saveFileSession,
   saveFileSessionFolder,
   saveFileSessionFromSftpPayload,
+  saveFileSessionFromTerminalContext,
   transferFileEntry,
   updateFileSession,
   writeFileContent
@@ -193,6 +194,7 @@ import type {
   FileSessionFolderSaveInput,
   FileSessionInfo,
   FileSessionPatch,
+  FileSessionTerminalContext,
   FileTransferTaskCancelInput,
   FileTransferTaskRecordInput,
   FileTransferOperation,
@@ -3065,6 +3067,9 @@ const registerIpc = () => {
   ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())
   ipcMain.handle('files:sessions:save', (_event, session: FileSessionInfo) => saveFileSession(session))
   ipcMain.handle('files:sessions:save-from-sftp-payload', (_event, payload: Record<string, unknown>) => saveFileSessionFromSftpPayload(payload))
+  ipcMain.handle('files:sessions:save-from-terminal-context', (_event, context: FileSessionTerminalContext) =>
+    saveFileSessionFromTerminalContext(context)
+  )
   ipcMain.handle('files:sessions:update', (_event, id: string, patch: FileSessionPatch) => updateFileSession(id, patch))
   ipcMain.handle('files:sessions:delete', (_event, id: string) => deleteFileSession(id))
   ipcMain.handle('files:sessions:folder:save', (_event, folder: FileSessionFolderSaveInput) => saveFileSessionFolder(folder))

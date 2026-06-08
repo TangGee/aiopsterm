@@ -12,6 +12,7 @@ import type {
   FileSessionMutationResult,
   FileSessionPatch,
   FileSessionSftpPayload,
+  FileSessionTerminalContext,
   FileContentOptions,
   FileEntryMutation,
   FileEntryMutationResult,
@@ -27,6 +28,7 @@ import type {
   FileTransferTaskRecordResult,
   FileWriteContentResult
 } from '@shared/preload'
+import { getAsset } from './assets'
 
 type BackendFileEntry = FileListEntry & { mode: string }
 
@@ -276,6 +278,15 @@ const payloadString = (payload: FileSessionSftpPayload, keys: string[]) => {
   return ''
 }
 
+const terminalContextString = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const terminalContextStatus = (status: FileSessionTerminalContext['panelStatus']) => (status === 'closed' ? 'idle' : 'active')
+
+const terminalContextAssetType = (assetType?: string): FileSessionInfo['assetType'] => {
+  const normalized = terminalContextString(assetType).toLowerCase()
+  return normalized.includes('organization') ? 'organization' : 'person'
+}
+
 export const saveFileSessionFromSftpPayload = async (payload: FileSessionSftpPayload): Promise<FileSessionMutationResult> => {
   const id = payloadString(payload, ['uuid', 'id', 'assetId', 'host', 'ip'])
   const host = payloadString(payload, ['host', 'ip']) || id
@@ -298,6 +309,49 @@ export const saveFileSessionFromSftpPayload = async (payload: FileSessionSftpPay
     ...(payloadString(payload, ['comment', 'description']) ? { comment: payloadString(payload, ['comment', 'description']) } : {})
   }
   return saveFileSession(session)
+}
+
+export const saveFileSessionFromTerminalContext = async (context: FileSessionTerminalContext): Promise<FileSessionMutationResult> => {
+  if (context?.kind !== 'ssh') {
+    return saveFileSession({
+      id: 'local',
+      label: 'Local',
+      host: '127.0.0.1',
+      group: '本地连接',
+      kind: 'local',
+      rootPath: terminalContextString(context?.cwd) || '/',
+      status: terminalContextStatus(context?.panelStatus),
+      assetType: 'local'
+    })
+  }
+
+  const ssh = context.ssh || {}
+  const assetId = terminalContextString(ssh.assetId)
+  const asset = assetId ? getAsset(assetId) : null
+  const connectionId = terminalContextString(ssh.connectionId || context.sessionId)
+  const host = asset?.host || terminalContextString(ssh.host)
+  const id = asset?.id || assetId || (connectionId ? `ssh-${connectionId}` : host)
+  if (!id || !host) {
+    return { ok: false, errorCode: 'FILES_SESSION_TERMINAL_INVALID', errorMessage: 'Terminal file session requires an SSH asset, connection id, or host.' }
+  }
+
+  const username = asset?.username || terminalContextString(ssh.username) || 'deploy'
+  const title = asset?.title || asset?.name || terminalContextString(ssh.assetName) || terminalContextString(context.panelTitle) || host
+  const group = asset?.group_name || asset?.group || terminalContextString(ssh.organizationId) || '终端连接'
+  const rootPath = terminalContextString(context.cwd) || (username ? `/home/${username}` : '/home/deploy')
+  return saveFileSession({
+    id,
+    label: title,
+    host,
+    group,
+    kind: 'remote',
+    rootPath,
+    status: terminalContextStatus(context.panelStatus),
+    favorite: typeof asset?.favorite === 'boolean' ? asset.favorite : false,
+    assetType: terminalContextAssetType(asset?.asset_type || ssh.assetType),
+    ...(asset?.folderUuid ? { folderUuid: asset.folderUuid } : {}),
+    ...(asset?.comment ? { comment: asset.comment } : terminalContextString(context.panelTitle) ? { comment: `Opened from ${context.panelTitle}` } : {})
+  })
 }
 
 const ensureLocalFileSession = () => {

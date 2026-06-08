@@ -239,6 +239,7 @@ const api: AiopsPreloadApi = {
   listFileSessionCatalog: () => ipcRenderer.invoke('files:sessions:catalog'),
   saveFileSession: (session) => ipcRenderer.invoke('files:sessions:save', session),
   saveFileSessionFromSftpPayload: (payload) => ipcRenderer.invoke('files:sessions:save-from-sftp-payload', payload),
+  saveFileSessionFromTerminalContext: (context) => ipcRenderer.invoke('files:sessions:save-from-terminal-context', context),
   updateFileSession: (id: string, patch) => ipcRenderer.invoke('files:sessions:update', id, patch),
   deleteFileSession: (id: string) => ipcRenderer.invoke('files:sessions:delete', id),
   saveFileSessionFolder: (folder) => ipcRenderer.invoke('files:sessions:folder:save', folder),

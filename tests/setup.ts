@@ -3075,6 +3075,27 @@ type TestFileSessionCatalog = {
   sessions: TestFileSessionInfo[]
   folders: TestFileSessionFolderRecord[]
 }
+type TestFileSessionTerminalContext = {
+  kind: 'local' | 'ssh'
+  panelId?: string
+  panelTitle?: string
+  panelStatus?: 'ready' | 'running' | 'closed'
+  sessionId?: string
+  cwd?: string
+  ssh?: {
+    connectionId?: string
+    host?: string
+    port?: number
+    username?: string
+    assetId?: string
+    assetName?: string
+    assetType?: string
+    organizationId?: string
+    authType?: string
+    createdAt?: number
+    forkFromConnectionId?: string
+  }
+}
 type TestFileEntry = {
   name: string
   path: string
@@ -3197,6 +3218,11 @@ const stringFromSftpPayloadMock = (payload: Record<string, unknown>, keys: strin
   }
   return ''
 }
+
+const terminalContextStringMock = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+const terminalContextStatusMock = (status: TestFileSessionTerminalContext['panelStatus']) => (status === 'closed' ? 'idle' : 'active')
+const terminalContextAssetTypeMock = (assetType?: string): TestFileSessionInfo['assetType'] =>
+  terminalContextStringMock(assetType).toLowerCase().includes('organization') ? 'organization' : 'person'
 
 const normalizeFileDirMock = (path: string) => String(path || '/').replace(/\/+/g, '/').replace(/\/$/, '') || '/'
 const dirnameFileMock = (path: string) => {
@@ -5264,6 +5290,51 @@ Object.defineProperty(window, 'aiops', {
         favorite: false,
         assetType: rawAssetType.includes('organization') ? 'organization' : 'person',
         comment: stringFromSftpPayloadMock(payload, ['comment', 'description']) || undefined
+      })
+      if (!session) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
+      fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === session.id)
+        ? fileSessionCatalogMock.sessions.map((item) => (item.id === session.id ? session : item))
+        : [...fileSessionCatalogMock.sessions, session]
+      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...session } })
+    }),
+    saveFileSessionFromTerminalContext: vi.fn(async (context: TestFileSessionTerminalContext) => {
+      if (context?.kind !== 'ssh') {
+        const session = normalizeFileSessionMock({
+          id: 'local',
+          label: 'Local',
+          host: '127.0.0.1',
+          group: '本地连接',
+          kind: 'local',
+          rootPath: terminalContextStringMock(context?.cwd) || '/',
+          status: terminalContextStatusMock(context?.panelStatus),
+          assetType: 'local'
+        })
+        if (!session) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
+        fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === session.id)
+          ? fileSessionCatalogMock.sessions.map((item) => (item.id === session.id ? session : item))
+          : [...fileSessionCatalogMock.sessions, session]
+        return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...session } })
+      }
+      const ssh = context.ssh || {}
+      const assetId = terminalContextStringMock(ssh.assetId)
+      const asset = assetId ? assetStoreMock.find((item) => item.id === assetId) : undefined
+      const connectionId = terminalContextStringMock(ssh.connectionId || context.sessionId)
+      const host = asset?.host || terminalContextStringMock(ssh.host)
+      const id = asset?.id || assetId || (connectionId ? `ssh-${connectionId}` : host)
+      if (!id || !host) return { ok: false, errorCode: 'FILES_SESSION_TERMINAL_INVALID', errorMessage: 'Terminal file session requires an SSH asset, connection id, or host.' }
+      const username = asset?.username || terminalContextStringMock(ssh.username) || 'deploy'
+      const session = normalizeFileSessionMock({
+        id,
+        label: asset?.title || asset?.name || terminalContextStringMock(ssh.assetName) || terminalContextStringMock(context.panelTitle) || host,
+        host,
+        group: asset?.group_name || asset?.group || terminalContextStringMock(ssh.organizationId) || '终端连接',
+        kind: 'remote',
+        rootPath: terminalContextStringMock(context.cwd) || (username ? `/home/${username}` : '/home/deploy'),
+        status: terminalContextStatusMock(context.panelStatus),
+        favorite: typeof asset?.favorite === 'boolean' ? asset.favorite : false,
+        assetType: terminalContextAssetTypeMock(asset?.asset_type || ssh.assetType),
+        folderUuid: asset?.folderUuid,
+        comment: asset?.comment || (terminalContextStringMock(context.panelTitle) ? `Opened from ${context.panelTitle}` : undefined)
       })
       if (!session) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === session.id)

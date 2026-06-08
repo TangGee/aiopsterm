@@ -41,6 +41,7 @@ import type {
   FileSessionFolderSaveInput,
   FileSessionInfo,
   FileSessionPatch,
+  FileSessionTerminalContext,
   FileTransferTask,
   FileTransferTaskRecordInput,
   KeywordHighlightRuleConfig,
@@ -5841,48 +5842,51 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return 'left'
   }
 
-  const ensureFileSessionForTerminalPanel = (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
+  const fileSessionTerminalContextForPanel = (panel: TerminalPanel): FileSessionTerminalContext => {
+    const ssh = panel.sshSession
+    const hasSshBackendConnection = Boolean(ssh?.connectionId)
+    return {
+      kind: ssh ? 'ssh' : 'local',
+      panelId: panel.id,
+      panelTitle: panel.title,
+      panelStatus: panel.status,
+      sessionId: ssh && !hasSshBackendConnection ? undefined : panel.sessionId,
+      cwd: ssh && !hasSshBackendConnection ? undefined : panel.cwd,
+      ...(ssh
+        ? {
+            ssh: {
+              connectionId: ssh.connectionId,
+              host: ssh.host,
+              port: ssh.port,
+              username: ssh.username,
+              assetId: ssh.assetId,
+              assetName: ssh.assetName,
+              assetType: ssh.assetType,
+              organizationId: ssh.organizationId,
+              authType: ssh.authType,
+              createdAt: ssh.createdAt,
+              forkFromConnectionId: ssh.forkFromConnectionId
+            }
+          }
+        : {})
+    }
+  }
+
+  const ensureFileSessionForTerminalPanel = async (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
     if (!panel || panel.kind === 'knowledge') return null
-    const ssh = panel.sshSession
-    const sessionId = ssh?.assetId || (ssh ? `ssh-${ssh.connectionId}` : 'local')
-    let session = fileSessions.value.find((item) => item.id === sessionId)
-
-    if (!session) {
-      session = ssh
-        ? {
-            id: sessionId,
-            label: ssh.assetName || ssh.host,
-            host: ssh.host,
-            group: ssh.organizationId || '终端连接',
-            kind: 'remote',
-            rootPath: ssh.username ? `/home/${ssh.username}` : '/home/deploy',
-            status: panel.status === 'closed' ? 'idle' : 'active',
-            favorite: false,
-            assetType: ssh.assetType === 'organization' ? 'organization' : 'person',
-            comment: `Opened from ${panel.title}`
-          }
-        : {
-            id: 'local',
-            label: 'Local',
-            host: '127.0.0.1',
-            group: '本地连接',
-            kind: 'local',
-            rootPath: panel.cwd || '/',
-            status: 'active',
-            assetType: 'local'
-          }
-      fileSessions.value.push(session)
-      void persistFileSession(session)
-    } else {
-      session.status = panel.status === 'closed' ? 'idle' : 'active'
-      if (!ssh && panel.cwd) session.rootPath = panel.cwd
-      void updateFileSession(session.id, {
-        status: session.status,
-        rootPath: session.rootPath
-      })
+    if (!window.aiops?.saveFileSessionFromTerminalContext) {
+      setTopNotice('文件会话写入服务不可用')
+      return null
+    }
+    const result = await window.aiops.saveFileSessionFromTerminalContext(fileSessionTerminalContextForPanel(panel))
+    if (!result?.ok || !result.data?.session) {
+      setTopNotice(result?.errorMessage || '文件会话创建失败')
+      return null
     }
 
+    applyFileSessionCatalog(result.data)
+    const session = result.data.session
     setFilesUiMode('transfer')
     openFileSession(session.id, side)
     setActiveModule('files')
@@ -5894,24 +5898,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectFileSession(side, null)
   }
 
-  const addRemoteFileSession = (assetId: string, side: 'left' | 'right' = 'left') => {
+  const addRemoteFileSession = async (assetId: string, side: 'left' | 'right' = 'left') => {
     const known = fileSessions.value.find((item) => item.id === assetId)
     if (known) {
       openFileSession(assetId, side)
       return known
     }
-    const session: FileSessionInfo = {
-      id: assetId,
-      label: assetId,
-      host: assetId,
-      group: '资产',
-      kind: 'remote',
-      rootPath: '/home/deploy',
-      status: 'active'
+    if (!window.aiops?.saveFileSessionFromTerminalContext) {
+      setTopNotice('文件会话写入服务不可用')
+      return null
     }
-    fileSessions.value.push(session)
-    void persistFileSession(session)
-    openFileSession(assetId, side)
+    const result = await window.aiops.saveFileSessionFromTerminalContext({
+      kind: 'ssh',
+      panelTitle: assetId,
+      panelStatus: 'running',
+      ssh: {
+        assetId
+      }
+    })
+    if (!result?.ok || !result.data?.session) {
+      setTopNotice(result?.errorMessage || '文件会话创建失败')
+      return null
+    }
+    applyFileSessionCatalog(result.data)
+    const session = result.data.session
+    openFileSession(session.id, side)
     return session
   }
 

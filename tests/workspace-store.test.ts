@@ -2865,8 +2865,19 @@ describe('workspace store', () => {
 
     expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
     expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
-    const localSession = store.ensureFileSessionForTerminalPanel(store.activePanelId, 'left')
+    vi.mocked(window.aiops.saveFileSession).mockClear()
+    vi.mocked(window.aiops.saveFileSessionFromTerminalContext).mockClear()
+    const localSession = await store.ensureFileSessionForTerminalPanel(store.activePanelId, 'left')
     expect(localSession).toEqual(expect.objectContaining({ id: 'local', kind: 'local' }))
+    expect(window.aiops.saveFileSessionFromTerminalContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'local',
+        panelId: store.activePanelId,
+        sessionId: 'terminal-local-unit',
+        cwd: '/home/unit'
+      })
+    )
+    expect(window.aiops.saveFileSession).not.toHaveBeenCalled()
     expect(store.activeModule).toBe('files')
     expect(store.selectedLeftFileSessionId).toBe('local')
     expect(store.activePanel.output).toContain('[file manager] opened Local on left transfer pane')
@@ -2901,13 +2912,28 @@ describe('workspace store', () => {
       }
     })
     expect(appliedSshSession).toEqual(expect.objectContaining({ connectionId: 'ssh-test-session-asset-terminal-file', createdAt: 1717200001000 }))
-    const remoteSession = store.ensureFileSessionForTerminalPanel(store.activePanelId, 'right')
+    vi.mocked(window.aiops.saveFileSessionFromTerminalContext).mockClear()
+    const remoteSession = await store.ensureFileSessionForTerminalPanel(store.activePanelId, 'right')
     expect(remoteSession).toEqual(
       expect.objectContaining({
         id: 'asset-terminal-file',
         label: 'terminal-file-host',
         host: '10.8.0.9',
         rootPath: '/home/deploy'
+      })
+    )
+    expect(window.aiops.saveFileSessionFromTerminalContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'ssh',
+        panelId: store.activePanelId,
+        sessionId: 'test-session-asset-terminal-file',
+        cwd: '/home/deploy',
+        ssh: expect.objectContaining({
+          connectionId: 'ssh-test-session-asset-terminal-file',
+          assetId: 'asset-terminal-file',
+          host: '10.8.0.9',
+          username: 'deploy'
+        })
       })
     )
     expect(store.selectedRightFileSessionId).toBe('asset-terminal-file')
@@ -2937,6 +2963,7 @@ describe('workspace store', () => {
     await store.refreshFileSessionCatalog()
 
     const originalSaveFromPayload = window.aiops.saveFileSessionFromSftpPayload
+    const originalSaveFromTerminalContext = window.aiops.saveFileSessionFromTerminalContext
     const originalUpdateFileSession = window.aiops.updateFileSession
     const originalAsset = store.fileSessions.find((session) => session.id === 'asset-1')
     expect(originalAsset).toBeTruthy()
@@ -2961,12 +2988,32 @@ describe('workspace store', () => {
       expect(store.selectedRightFileSessionId).not.toBe('asset-client-fake')
       expect(store.topNotice).toBe('文件会话写入服务不可用')
 
+      store.applyLocalTerminalSession(store.activePanelId, {
+        id: 'terminal-no-files-bridge',
+        shell: '/bin/bash',
+        cwd: '/home/no-bridge',
+        kind: 'local'
+      })
+      ;(window.aiops as any).saveFileSessionFromTerminalContext = undefined
+      await expect(store.ensureFileSessionForTerminalPanel(store.activePanelId, 'left')).resolves.toBeNull()
+      expect(store.fileSessions).toHaveLength(originalSessionCount)
+      expect(store.fileSessions.find((session) => session.id === 'local')?.rootPath).toBe('/')
+      expect(store.selectedLeftFileSessionId).not.toBe('local')
+      expect(store.topNotice).toBe('文件会话写入服务不可用')
+
+      await expect(store.addRemoteFileSession('asset-client-fake', 'left')).resolves.toBeNull()
+      expect(store.fileSessions).toHaveLength(originalSessionCount)
+      expect(store.fileSessions.some((session) => session.id === 'asset-client-fake')).toBe(false)
+      expect(store.selectedLeftFileSessionId).not.toBe('asset-client-fake')
+      expect(store.topNotice).toBe('文件会话写入服务不可用')
+
       ;(window.aiops as any).updateFileSession = undefined
       await expect(store.updateFileSession('asset-1', { comment: '客户端伪造备注' })).resolves.toBeNull()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.comment).toBe(originalComment)
       expect(store.topNotice).toBe('文件会话写入服务不可用')
     } finally {
       ;(window.aiops as any).saveFileSessionFromSftpPayload = originalSaveFromPayload
+      ;(window.aiops as any).saveFileSessionFromTerminalContext = originalSaveFromTerminalContext
       ;(window.aiops as any).updateFileSession = originalUpdateFileSession
     }
   })

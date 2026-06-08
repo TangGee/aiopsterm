@@ -1282,7 +1282,7 @@ const splitFromTermMenu = (direction: 'right' | 'below') => {
 }
 
 const openFileManagerFromMenu = () => {
-  workspace.ensureFileSessionForTerminalPanel(termMenu.panelId || workspace.activePanelId)
+  void workspace.ensureFileSessionForTerminalPanel(termMenu.panelId || workspace.activePanelId)
   termMenu.visible = false
 }
 
@@ -1393,7 +1393,7 @@ const handleShortcut = async (event: KeyboardEvent) => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'm') {
     event.preventDefault()
-    workspace.ensureFileSessionForTerminalPanel(workspace.activePanelId)
+    await workspace.ensureFileSessionForTerminalPanel(workspace.activePanelId)
   }
 }
 
