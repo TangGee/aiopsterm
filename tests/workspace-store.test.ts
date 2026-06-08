@@ -402,6 +402,50 @@ describe('workspace store', () => {
     expect(document.documentElement.dataset.themeId).toBe('dark')
   })
 
+  it('does not fabricate theme setting writes when the config bridge is unavailable or rejects the snapshot', async () => {
+    const store = useWorkspaceStore()
+    const originalSaveConfig = window.aiops.saveConfig
+
+    try {
+      await expect(store.selectTheme('light')).resolves.toBe(true)
+      expect(store.config.theme).toBe('light')
+      expect(document.documentElement.dataset.theme).toBe('light')
+      expect(document.documentElement.dataset.themeId).toBe('light')
+
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.selectTheme('kanagawa-wave')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('主题设置保存服务不可用')
+      expect(store.config.theme).toBe('light')
+      expect(document.documentElement.dataset.theme).toBe('light')
+      expect(document.documentElement.dataset.themeId).toBe('light')
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        theme: 'light'
+      })
+      await expect(store.selectTheme('kanagawa-wave')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('主题设置保存失败')
+      expect(store.config.theme).toBe('light')
+      expect(document.documentElement.dataset.theme).toBe('light')
+      expect(document.documentElement.dataset.themeId).toBe('light')
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.selectTheme('catppuccin-latte')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('主题设置保存失败')
+      expect(store.config.theme).toBe('light')
+      expect(document.documentElement.dataset.themeId).toBe('light')
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('theme config offline'))
+      await expect(store.selectTheme('dark')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('theme config offline')
+      expect(store.config.theme).toBe('light')
+      expect(document.documentElement.dataset.themeId).toBe('light')
+    } finally {
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+    }
+  })
+
   it('normalizes legacy mock AI model configuration to the local backend provider', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({

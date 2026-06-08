@@ -6944,6 +6944,43 @@ describe('AppShell', () => {
     expect(workspace.find('.settings-bg-tile.custom-preview').exists()).toBe(false)
   })
 
+  it('does not leave theme controls visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('general')
+    await workspace.vm.$nextTick()
+    const themeSelect = workspace.find('.theme-select')
+    const savedConfig = {
+      ...store.config,
+      theme: store.config.theme
+    }
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
+    await themeSelect.setValue('catppuccin-latte')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('主题设置保存失败')
+    expect(store.config.theme).toBe('dark')
+    expect((themeSelect.element as HTMLSelectElement).value).toBe('dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.dataset.themeId).toBe('dark')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      theme: 'catppuccin-latte'
+    })
+    await themeSelect.setValue('catppuccin-latte')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('主题设置已保存')
+    expect(store.config.theme).toBe('catppuccin-latte')
+    expect((themeSelect.element as HTMLSelectElement).value).toBe('catppuccin-latte')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.dataset.themeId).toBe('catppuccin-latte')
+  })
+
   it('does not leave General base setting controls visually changed when the config bridge rejects the snapshot', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

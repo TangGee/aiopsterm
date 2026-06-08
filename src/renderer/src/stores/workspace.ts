@@ -2177,6 +2177,8 @@ type BackgroundUserConfig = UserConfig['background']
 
 const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
 
+const isThemeSnapshot = (value: unknown): value is ThemeId => typeof value === 'string' && isThemeId(value)
+
 const isDefaultModeValue = (value: unknown): value is UserConfig['defaultMode'] => value === 'terminal' || value === 'agents'
 
 const isWatermarkValue = (value: unknown): value is UserConfig['watermark'] => value === 'open' || value === 'close'
@@ -4320,8 +4322,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setSettingsNotice('入门引导进度已重置')
   }
 
-  const selectTheme = (theme: string) => {
-    saveConfig({ theme: normalizeThemeId(theme) })
+  const selectTheme = async (theme: string) => {
+    const nextTheme = normalizeThemeId(theme)
+    const previousTheme = config.value.theme
+    applyThemeToDocument(nextTheme)
+    setupThemeBridge()
+
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      applyThemeToDocument(previousTheme)
+      setSettingsNotice('主题设置保存服务不可用')
+      return false
+    }
+
+    try {
+      const savedConfig = await saveConfigBridge({ theme: nextTheme })
+      if (!isRecord(savedConfig) || !isThemeSnapshot(savedConfig.theme) || savedConfig.theme !== nextTheme) {
+        applyThemeToDocument(previousTheme)
+        setSettingsNotice('主题设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        theme: savedConfig.theme
+      } as Partial<UserConfig>)
+      config.value.theme = normalizeThemeId(config.value.theme)
+      editorSettings.value = normalizeEditorSettingsConfig(config.value.editorSettings).normalized
+      applyCurrentTheme()
+      applyCurrentEditorSettings()
+      refreshShortcutRuntime()
+      setupThemeBridge()
+      setSettingsNotice('主题设置已保存')
+      return true
+    } catch (error) {
+      applyThemeToDocument(previousTheme)
+      setSettingsNotice(error instanceof Error ? error.message : '主题设置保存失败')
+      return false
+    }
   }
 
   const getBackgroundSnapshot = (): BackgroundUserConfig => cloneBackgroundSnapshot(config.value.background)

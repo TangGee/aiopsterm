@@ -282,7 +282,7 @@ const GeneralSettings = defineComponent({
               {
                 class: 'settings-select theme-select',
                 value: workspace.config.theme,
-                onChange: (event: Event) => workspace.selectTheme((event.target as HTMLSelectElement).value)
+                onChange: (event: Event) => restoreSelectOnFailedSave(event, workspace.config.theme, (value) => workspace.selectTheme(value))
               },
               [
                 h('optgroup', { label: '系统' }, themeGroups.value.system.map((option) => h('option', { value: option.value }, option.label))),
