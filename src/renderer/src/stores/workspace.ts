@@ -4779,8 +4779,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userLoginTab.value = tab
   }
 
-  const loginUser = async () => {
-    const result = await window.aiops?.loginUserAccount?.({ method: 'account', username: userProfile.value.username || 'local_ops', password: 'local' })
+  const loginUser = async (username = '', password = '') => {
+    const result = await window.aiops?.loginUserAccount?.({ method: 'account', username, password })
     return applyUserMutationResult(result || { ok: false, errorMessage: '用户登录 API 不可用' })
   }
 

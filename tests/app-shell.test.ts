@@ -1430,6 +1430,8 @@ describe('AppShell', () => {
       expect(panel.find('.user-login-tabs').text()).toContain('账号登录')
 
       await panel.findAll('.user-login-tabs button').find((button) => button.text().includes('账号登录'))!.trigger('click')
+      expect((panel.findAll('.user-login-form input').at(0)!.element as HTMLInputElement).value).toBe('')
+      expect((panel.findAll('.user-login-form input').at(1)!.element as HTMLInputElement).value).toBe('')
       await panel.findAll('.user-login-form input').at(0)!.setValue('verify-device')
       await panel.findAll('.user-login-form input').at(1)!.setValue('secret')
       await panel.find('.user-login-form .primary').trigger('click')

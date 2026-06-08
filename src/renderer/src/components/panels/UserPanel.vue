@@ -713,7 +713,7 @@ const avatarInput = ref<HTMLInputElement | null>(null)
 const avatarOffset = reactive({ x: 0, y: 0 })
 const avatarDrag = reactive({ active: false, startX: 0, startY: 0 })
 const loginDraft = reactive({
-  username: workspace.userProfile.username || 'local_ops',
+  username: '',
   password: '',
   email: workspace.userProfile.email || '',
   emailCode: '',
