@@ -333,6 +333,12 @@
             >
               保存
             </button>
+            <small
+              v-if="assetFormError"
+              class="asset-form-error"
+            >
+              {{ assetFormError }}
+            </small>
           </template>
         </aside>
       </div>
@@ -505,6 +511,12 @@
             >
               保存资产
             </button>
+            <small
+              v-if="managedFormError"
+              class="asset-form-error"
+            >
+              {{ managedFormError }}
+            </small>
           </template>
         </aside>
       </div>
@@ -880,6 +892,8 @@ const selectedAssetId = ref<string | null>(null)
 const assetContextMenuId = ref<string | null>(null)
 const contextPosition = reactive({ x: 0, y: 0 })
 const importNotice = ref('')
+const assetFormError = ref('')
+const managedFormError = ref('')
 const assetImportInput = ref<HTMLInputElement | null>(null)
 const exportModalOpen = ref(false)
 const exportCheckedIds = ref<string[]>([])
@@ -981,23 +995,6 @@ const managedForm = reactive({
   host: '',
   comment: ''
 })
-
-const onboardingHostDraft = {
-  id: '',
-  title: 'onboarding-demo',
-  host: '127.0.0.1',
-  username: 'local',
-  group: '',
-  port: 22,
-  asset_type: 'person' as AiopsAssetType,
-  auth_type: 'password' as AiopsAssetAuthType,
-  password: '',
-  keyId: '',
-  proxyName: '',
-  jumpHostId: '',
-  bastionType: 'jumpserver',
-  switchBrand: 'cisco'
-}
 
 const filteredManagementEntries = computed(() => {
   const keyword = managementQuery.value.trim().toLowerCase()
@@ -1138,6 +1135,7 @@ const filteredKeychains = computed(() => {
 })
 
 const resetForm = () => {
+  assetFormError.value = ''
   Object.assign(form, {
     id: '',
     title: '',
@@ -1178,8 +1176,7 @@ const openOnboardingCreatePanel = () => {
   activeAssetView.value = 'assetConfig'
   assetQuery.value = ''
   editMode.value = false
-  Object.assign(form, onboardingHostDraft)
-  form.group = firstAssetGroupName.value
+  resetForm()
   editorOpen.value = true
 }
 
@@ -1189,6 +1186,7 @@ const editAsset = (assetId: string | null) => {
   if (!asset) return
   activeAssetView.value = 'assetConfig'
   editMode.value = true
+  assetFormError.value = ''
   Object.assign(form, {
     id: asset.id,
     title: asset.title,
@@ -1215,6 +1213,7 @@ const cloneAsset = (assetId: string | null) => {
   if (!asset) return
   activeAssetView.value = 'assetConfig'
   editMode.value = false
+  assetFormError.value = ''
   Object.assign(form, {
     id: '',
     title: `${asset.title}_Clone`,
@@ -1329,8 +1328,19 @@ const openAssetContextMenu = (event: MouseEvent, assetId: string) => {
 }
 
 const submitForm = async () => {
-  const title = form.title.trim() || form.host.trim() || '未命名主机'
-  const host = form.host.trim() || '127.0.0.1'
+  assetFormError.value = ''
+  const host = form.host.trim()
+  const username = form.username.trim()
+  const port = Number(form.port)
+  if (!host || !username || !Number.isFinite(port) || port <= 0) {
+    assetFormError.value = '请填写地址、用户名和有效端口。'
+    return
+  }
+  if (form.auth_type === 'keyBased' && !form.keyId) {
+    assetFormError.value = '请选择密钥链。'
+    return
+  }
+  const title = form.title.trim() || host
   const group = form.group.trim()
   const baseAsset: AiopsAssetInput = {
     ...(form.id ? { id: form.id } : {}),
@@ -1341,8 +1351,8 @@ const submitForm = async () => {
     ...(group ? { group, group_name: group } : {}),
     status: 'online',
     tags: [form.auth_type === 'keyBased' ? 'key' : 'ssh'],
-    username: form.username.trim() || 'root',
-    port: Number(form.port) || 22,
+    username,
+    port,
     asset_type: form.asset_type,
     auth_type: form.auth_type,
     comment: editMode.value ? '本地编辑' : '本地创建',
@@ -1390,6 +1400,7 @@ const openOrganizationManagement = () => {
 const openManagedAssetAdd = () => {
   managedEditMode.value = false
   managedCommentOnly.value = false
+  managedFormError.value = ''
   Object.assign(managedForm, { id: '', title: '', host: '', comment: '' })
   managedEditorOpen.value = true
 }
@@ -1399,6 +1410,7 @@ const openManagedAssetEdit = (assetId: string) => {
   if (!asset) return
   managedEditMode.value = true
   managedCommentOnly.value = asset.data_source !== 'manual'
+  managedFormError.value = ''
   Object.assign(managedForm, {
     id: asset.id,
     title: asset.title,
@@ -1409,8 +1421,13 @@ const openManagedAssetEdit = (assetId: string) => {
 }
 
 const submitManagedForm = async () => {
-  const title = managedForm.title.trim() || managedForm.host.trim() || 'managed-host'
-  const host = managedForm.host.trim() || '127.0.0.1'
+  managedFormError.value = ''
+  const host = managedForm.host.trim()
+  if (!managedCommentOnly.value && !host) {
+    managedFormError.value = '请填写主机 IP。'
+    return
+  }
+  const title = managedForm.title.trim() || host
   if (managedEditMode.value && managedForm.id) {
     const asset = assets.value.find((item) => item.id === managedForm.id)
     if (!asset) return
@@ -1434,8 +1451,6 @@ const submitManagedForm = async () => {
       group_name: managedOrganization.value?.group_name || '企业',
       status: 'online',
       tags: ['managed'],
-      username: 'ops',
-      port: 22,
       asset_type: 'person',
       auth_type: 'password',
       comment: managedForm.comment,

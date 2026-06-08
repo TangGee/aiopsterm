@@ -101,6 +101,23 @@ describe('assets backend boundary', () => {
     expect(backend.listAssets().assets.some((asset: { id: string }) => asset.id === saved.data?.id)).toBe(true)
   })
 
+  it('normalizes optional asset username behind the backend boundary', async () => {
+    const backend = await loadBackend()
+    const saved = backend.saveAsset({
+      name: 'backend-default-user-host',
+      title: 'backend-default-user-host',
+      host: '10.77.1.6',
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['manual']
+    })
+
+    expect(saved.ok).toBe(true)
+    expect(saved.data).toEqual(expect.objectContaining({ username: 'root', port: 22 }))
+  })
+
   it('owns custom folder uuid generation and only updates existing folders by uuid', async () => {
     const backend = await loadBackend()
     const created = backend.saveAssetFolder({ name: '后端文件夹', description: 'backend-owned folder' })

@@ -84,7 +84,7 @@ export const onboardingTourSteps: Record<OnboardingModuleId, OnboardingStep[]> =
     { id: 'new-host', targetId: 'asset-new-host-button', title: '新建主机', description: '点击新建主机打开右侧表单。', advanceOnTargetClick: true },
     { id: 'form-fields', targetId: 'asset-form-fields', title: '主机表单', description: '表单收集主机名、地址、用户名、分组和端口。' },
     { id: 'form-submit', targetId: 'asset-form-submit', title: '保存主机', description: '保存后新主机会出现在资产列表中。' },
-    { id: 'connect-asset', targetId: 'asset-card', title: '连接资产', description: '双击资产卡片会创建终端连接占位。' }
+    { id: 'connect-asset', targetId: 'asset-card', title: '连接资产', description: '双击资产卡片会通过本地终端服务创建 SSH 会话。' }
   ],
   aiChat: [
     { id: 'ai-sidebar-entry', targetId: 'right-ai-toggle', title: '打开 AI 侧栏', description: '从顶部右侧按钮打开 AI 助手。', highlightTargetIds: ['left-ai-toggle'], advanceOnTargetClick: true },
@@ -145,7 +145,7 @@ export const onboardingTourSteps: Record<OnboardingModuleId, OnboardingStep[]> =
       requiresTargetClick: true,
       allowNextWithoutTargetClick: true
     },
-    { id: 'ai-send', targetId: 'ai-send-button', title: '发送目标', description: '发送后 AI 面板会请求 aiopsterm 本地后端响应，占位保留真实 LLM 接入点。', advanceOnTargetClick: true, requiresTargetClick: true }
+    { id: 'ai-send', targetId: 'ai-send-button', title: '发送目标', description: '发送后 AI 面板会请求 aiopsterm 本地后端并显示返回结果。', advanceOnTargetClick: true, requiresTargetClick: true }
   ]
 }
 

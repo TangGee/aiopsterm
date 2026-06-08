@@ -2543,7 +2543,7 @@ type TestAssetRecord = {
 type TestAssetInput = Partial<TestAssetRecord> & {
   name: string
   host: string
-  username: string
+  username?: string
   password?: string
   privateKey?: string
 }

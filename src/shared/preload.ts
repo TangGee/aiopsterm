@@ -123,7 +123,7 @@ export type AiopsAssetInput = {
   group?: string
   group_name?: string
   status?: 'online' | 'offline' | 'unknown'
-  username: string
+  username?: string
   port?: number
   asset_type?: AiopsAssetType
   auth_type?: AiopsAssetAuthType

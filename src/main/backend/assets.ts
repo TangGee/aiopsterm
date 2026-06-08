@@ -267,7 +267,7 @@ const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAssetRecord
     group_name: (input.group_name || input.group || existing?.group_name || group).trim(),
     status: input.status || existing?.status || 'online',
     tags,
-    username: input.username.trim(),
+    username: (input.username || existing?.username || 'root').trim(),
     port: Number(input.port || existing?.port || 22),
     asset_type: input.asset_type || existing?.asset_type || 'person',
     auth_type: input.auth_type || existing?.auth_type || 'password',
