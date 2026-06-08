@@ -1396,45 +1396,23 @@ const removeContextAssetFromFolder = () => {
   if (contextMenuAssetId.value) removeAssetFromFolder(contextMenuAssetId.value)
 }
 
-const createSyncedAssetForOrganization = (organization: WorkspaceAsset) => {
-  const baseId = `synced-${organization.uuid}`
-  if (workspaceAssets.value.some((asset) => asset.id === baseId)) return
-  const syncedAsset: WorkspaceAsset = {
-    id: baseId,
-    uuid: baseId,
-    name: `${organization.name}-synced-asset`,
-    title: `${organization.name}-synced-asset`,
-    host: organization.host === 'bastion.internal' ? '10.90.0.18' : organization.host,
-    ip: organization.host === 'bastion.internal' ? '10.90.0.18' : organization.ip,
-    group: '企业',
-    group_name: '企业',
-    status: 'online',
-    tags: ['sync'],
-    username: 'ops',
-    port: 22,
-    asset_type: 'person',
-    auth_type: 'keyBased',
-    comment: '刷新同步资产',
-    data_source: 'refresh',
-    favorite: false,
-    organizationId: organization.uuid
-  }
-  workspaceAssets.value = [...workspaceAssets.value, syncedAsset]
-}
-
-const refreshGroup = (groupKey: string) => {
+const refreshGroup = async (groupKey: string) => {
   refreshingGroupKey.value = groupKey
   notice.value = '正在刷新堡垒机资源'
   const organization = organizationAssets.value.find((asset) => asset.uuid === groupKey)
-  window.setTimeout(() => {
-    if (organization) {
-      createSyncedAssetForOrganization(organization)
-      expandGroup(organization.uuid)
-    }
-    refreshingGroupKey.value = ''
+  try {
+    const result = await window.aiops?.refreshOrganizationAssets?.(organization ? { organizationId: organization.id } : undefined)
+    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
+    applyWorkspaceAssetSnapshot(result.data)
+    await refreshDirectGroupOptions()
+    if (organization) expandGroup(organization.uuid)
     notice.value = organization ? `${organization.name} 资源已刷新` : '堡垒机资源已刷新'
-  }, 300)
-  closeContextMenu()
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败'
+  } finally {
+    refreshingGroupKey.value = ''
+    closeContextMenu()
+  }
 }
 
 const refreshContextOrganization = () => {

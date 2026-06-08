@@ -52,7 +52,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.workspace-tabs button').filter({ hasText: '堡垒机资源' }).click()
     await expect(page.locator('.workspace-folder-row').filter({ hasText: 'jumpserver-org' })).toBeVisible()
     await page.locator('.workspace-row-action.refresh').click()
-    await expect(page.getByText('正在刷新堡垒机资源')).toBeVisible()
+    await expect(page.locator('.workspace-host-row').filter({ hasText: '10.90.0.15' })).toBeVisible()
     await page.locator('.workspace-host-row').filter({ hasText: '10.24.8.12' }).first().click({ button: 'right' })
     await expect(page.locator('.workspace-node-menu')).toBeVisible()
     await page.locator('.workspace-node-menu button').filter({ hasText: '编辑备注' }).click()
