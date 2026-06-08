@@ -1,3 +1,4 @@
+import { createHash, createHmac } from 'crypto'
 import type {
   AiModelCatalog,
   AiopsMutationResult,
@@ -6,10 +7,6 @@ import type {
   ModelProviderCheckResult,
   ModelProviderUserConfig
 } from '@shared/preload'
-
-export const MODEL_PROVIDER_CHECK_MIN_DELAY_MS = 220
-
-const wait = (durationMs: number) => new Promise((resolve) => setTimeout(resolve, durationMs))
 
 const defaultAiModelCatalog: AiModelCatalog = {
   chatModels: [
@@ -78,6 +75,38 @@ const normalizeOpenAiEndpoint = (baseUrl: string, apiFormat: ModelProviderUserCo
   return `${normalized}${normalized.endsWith('/') ? '' : '/'}${path}`
 }
 
+const appendEndpointPath = (baseUrl: string, path: string) => {
+  try {
+    const parsed = new URL(baseUrl)
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    const pathSegments = path.split('/').filter(Boolean)
+    const hasTrailingPath = pathSegments.length > 0 && pathSegments.every((segment, index) => segments[segments.length - pathSegments.length + index] === segment)
+    if (!hasTrailingPath) {
+      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/${pathSegments.join('/')}`
+    }
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return baseUrl
+  }
+}
+
+const normalizeOpenAiBaseUrl = (baseUrl: string) => {
+  if (!baseUrl) return ''
+  if (baseUrl.endsWith('#')) return baseUrl.slice(0, -1)
+  try {
+    const parsed = new URL(baseUrl)
+    const hasV1 = parsed.pathname.split('/').filter(Boolean).includes('v1')
+    if (!hasV1) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return baseUrl
+  }
+}
+
 const validateUrl = (value: string, field: string): string | null => {
   if (!value) return `${field} is required.`
   try {
@@ -90,7 +119,7 @@ const validateUrl = (value: string, field: string): string | null => {
 }
 
 const missingSecretMessage = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
-  if (provider === 'ollama' || provider === 'litellm') return ''
+  if (provider === 'ollama') return ''
   if (!normalizeText(config.apiKey) && provider !== 'bedrock') return 'API key is required.'
   if (provider === 'bedrock' && (!normalizeText(config.awsAccessKey) || !normalizeText(config.awsSecretKey))) {
     return 'AWS access key and secret key are required.'
@@ -101,12 +130,18 @@ const missingSecretMessage = (provider: ModelProviderCheckKey, config: ModelProv
 const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
   const baseUrl = normalizeText(config.baseUrl)
   if (provider === 'openai') return normalizeOpenAiEndpoint(baseUrl || defaultEndpoints.openai, config.apiFormat)
+  if (provider === 'litellm') return appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || defaultEndpoints.litellm), 'chat/completions')
   if (provider === 'bedrock') {
-    if (config.awsEndpointSelected && normalizeText(config.awsBedrockEndpoint)) return normalizeText(config.awsBedrockEndpoint)
-    return `${defaultEndpoints.bedrock}:${normalizeText(config.awsRegion) || 'us-east-1'}`
+    const region = normalizeText(config.awsRegion) || 'us-east-1'
+    const baseEndpoint =
+      config.awsEndpointSelected && normalizeText(config.awsBedrockEndpoint)
+        ? normalizeText(config.awsBedrockEndpoint)
+        : `https://bedrock-runtime.${region}.amazonaws.com`
+    return appendEndpointPath(baseEndpoint, `model/${encodeURIComponent(normalizeText(config.modelId))}/invoke`)
   }
-  if (provider === 'deepseek') return baseUrl || defaultEndpoints.deepseek
-  if (provider === 'anthropic') return baseUrl || defaultEndpoints.anthropic
+  if (provider === 'deepseek') return appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || defaultEndpoints.deepseek), 'chat/completions')
+  if (provider === 'anthropic') return appendEndpointPath(baseUrl || defaultEndpoints.anthropic, 'v1/messages')
+  if (provider === 'ollama') return appendEndpointPath(baseUrl || defaultEndpoints.ollama, 'api/tags')
   return baseUrl || defaultEndpoints[provider]
 }
 
@@ -156,6 +191,221 @@ const validateProviderConfig = (
   return null
 }
 
+const jsonStringify = (value: unknown) => JSON.stringify(value)
+
+const sha256Hex = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
+
+const hmac = (key: Buffer | string, value: string) => createHmac('sha256', key).update(value, 'utf8').digest()
+
+const hmacHex = (key: Buffer | string, value: string) => createHmac('sha256', key).update(value, 'utf8').digest('hex')
+
+const toAmzDate = (date: Date) => date.toISOString().replace(/[:-]|\.\d{3}/g, '')
+
+const toDateStamp = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, '')
+
+const clampTimeoutMs = (value: unknown) => {
+  const parsed = Math.round(Number(value) || 0)
+  if (!parsed) return 20_000
+  return Math.max(500, Math.min(60_000, parsed))
+}
+
+const parseErrorMessage = async (response: Response) => {
+  const text = await response.text().catch(() => '')
+  if (!text) return `${response.status} ${response.statusText}`.trim()
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>
+      const error = record.error && typeof record.error === 'object' ? (record.error as Record<string, unknown>) : null
+      const message = error?.message || record.message || record.error || record.detail
+      if (message) return String(message)
+    }
+  } catch {
+    // Plain-text provider errors are useful as-is.
+  }
+  return text.slice(0, 500)
+}
+
+const failureResult = (
+  provider: ModelProviderCheckKey,
+  label: string,
+  endpoint: string,
+  modelId: string,
+  startedAt: number,
+  message: string,
+  errorCode = 'MODEL_PROVIDER_CHECK_FAILED'
+): ModelProviderCheckResult => ({
+  ok: false,
+  errorCode,
+  errorMessage: `${label} validation failed: ${message}`,
+  data: {
+    provider,
+    label,
+    modelId,
+    endpoint,
+    message,
+    durationMs: Math.max(1, Date.now() - startedAt)
+  }
+})
+
+const successResult = (
+  provider: ModelProviderCheckKey,
+  label: string,
+  endpoint: string,
+  modelId: string,
+  startedAt: number
+): ModelProviderCheckResult => ({
+  ok: true,
+  data: {
+    provider,
+    label,
+    modelId,
+    endpoint,
+    message: `${label} configuration validated against the live provider endpoint.`,
+    durationMs: Math.max(1, Date.now() - startedAt)
+  }
+})
+
+const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: number) => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+const createOpenAiCompatibleRequest = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
+  const model = normalizeText(config.modelId)
+  const apiKey = normalizeText(config.apiKey)
+  const useResponses = provider === 'openai' && config.apiFormat === 'responses'
+  return {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey || 'noop'}`
+    },
+    body: jsonStringify(
+      useResponses
+        ? {
+            model,
+            input: 'test',
+            max_output_tokens: 16
+          }
+        : {
+            model,
+            messages: [{ role: 'user', content: 'test' }],
+            max_tokens: 1
+          }
+    )
+  }
+}
+
+const createAnthropicRequest = (config: ModelProviderUserConfig) => ({
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': normalizeText(config.apiKey),
+    'anthropic-version': '2023-06-01'
+  },
+  body: jsonStringify({
+    model: normalizeText(config.modelId),
+    max_tokens: 1,
+    system: "This is a connection test. Respond with only the word 'OK'.",
+    messages: [{ role: 'user', content: 'Connection test' }]
+  })
+})
+
+const createBedrockPayload = (config: ModelProviderUserConfig) =>
+  jsonStringify({
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: 1,
+    messages: [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'Connection test' }]
+      }
+    ]
+  })
+
+const signBedrockRequest = (endpoint: string, config: ModelProviderUserConfig, body: string) => {
+  const url = new URL(endpoint)
+  const region = normalizeText(config.awsRegion) || 'us-east-1'
+  const accessKey = normalizeText(config.awsAccessKey)
+  const secretKey = normalizeText(config.awsSecretKey)
+  const sessionToken = normalizeText(config.awsSessionToken)
+  const now = new Date()
+  const amzDate = toAmzDate(now)
+  const dateStamp = toDateStamp(now)
+  const payloadHash = sha256Hex(body)
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    host: url.host,
+    'x-amz-content-sha256': payloadHash,
+    'x-amz-date': amzDate
+  }
+  if (sessionToken) headers['x-amz-security-token'] = sessionToken
+
+  const signedHeaders = Object.keys(headers).sort().join(';')
+  const canonicalHeaders = Object.keys(headers)
+    .sort()
+    .map((key) => `${key}:${headers[key]}\n`)
+    .join('')
+  const canonicalRequest = ['POST', url.pathname, '', canonicalHeaders, signedHeaders, payloadHash].join('\n')
+  const credentialScope = `${dateStamp}/${region}/bedrock/aws4_request`
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n')
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secretKey}`, dateStamp), region), 'bedrock'), 'aws4_request')
+  const signature = hmacHex(signingKey, stringToSign)
+
+  return {
+    ...headers,
+    Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+  }
+}
+
+const performProviderCheck = async (
+  provider: ModelProviderCheckKey,
+  config: ModelProviderUserConfig,
+  endpoint: string,
+  timeoutMs: number
+) => {
+  if (provider === 'ollama') {
+    const response = await fetchWithTimeout(endpoint, { method: 'GET' }, timeoutMs)
+    if (!response.ok) return { ok: false as const, message: await parseErrorMessage(response) }
+    const payload = (await response.json().catch(() => null)) as { models?: Array<{ name?: string; model?: string }> } | null
+    const models = Array.isArray(payload?.models) ? payload.models : []
+    const modelId = normalizeText(config.modelId)
+    const exists = models.some((model) => model.name === modelId || model.model === modelId)
+    if (!exists) {
+      const available = models.map((model) => model.name || model.model).filter(Boolean).join(', ')
+      return { ok: false as const, message: `Model '${modelId}' not found.${available ? ` Available models: ${available}` : ''}` }
+    }
+    return { ok: true as const }
+  }
+
+  const request =
+    provider === 'anthropic'
+      ? createAnthropicRequest(config)
+      : provider === 'bedrock'
+        ? {
+            headers: signBedrockRequest(endpoint, config, createBedrockPayload(config)),
+            body: createBedrockPayload(config)
+          }
+        : createOpenAiCompatibleRequest(provider, config)
+
+  const response = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: request.headers,
+      body: request.body
+    },
+    timeoutMs
+  )
+  if (!response.ok) return { ok: false as const, message: await parseErrorMessage(response) }
+  await response.text().catch(() => '')
+  return { ok: true as const }
+}
+
 export const checkModelProvider = async (input: ModelProviderCheckInput): Promise<ModelProviderCheckResult> => {
   const startedAt = Date.now()
   const provider = input.provider
@@ -172,22 +422,16 @@ export const checkModelProvider = async (input: ModelProviderCheckInput): Promis
   const validation = validateProviderConfig(provider, config)
   if (validation) return validation
 
-  const elapsedMs = Date.now() - startedAt
-  if (elapsedMs < MODEL_PROVIDER_CHECK_MIN_DELAY_MS) {
-    await wait(MODEL_PROVIDER_CHECK_MIN_DELAY_MS - elapsedMs)
-  }
-
   const endpoint = endpointFor(provider, config)
   const modelId = normalizeText(config.modelId)
-  return {
-    ok: true,
-    data: {
-      provider,
-      label,
-      modelId,
-      endpoint,
-      message: `${label} configuration validated by aiopsterm backend.`,
-      durationMs: Math.max(1, Date.now() - startedAt)
+  try {
+    const check = await performProviderCheck(provider, config, endpoint, clampTimeoutMs(input.timeoutMs))
+    if (!check.ok) return failureResult(provider, label, endpoint, modelId, startedAt, check.message)
+    return successResult(provider, label, endpoint, modelId, startedAt)
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return failureResult(provider, label, endpoint, modelId, startedAt, `Timed out after ${clampTimeoutMs(input.timeoutMs)}ms.`, 'MODEL_PROVIDER_TIMEOUT')
     }
+    return failureResult(provider, label, endpoint, modelId, startedAt, error instanceof Error ? error.message : String(error))
   }
 }

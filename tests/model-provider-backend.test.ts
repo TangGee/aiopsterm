@@ -1,19 +1,77 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
 
 let checkModelProvider: (input: {
   provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
   config: Record<string, unknown>
+  timeoutMs?: number
 }) => Promise<any>
 let listAiModels: () => Promise<any>
-let minDelayMs: number
+
+type RequestRecord = {
+  method: string
+  url: string
+  headers: IncomingMessage['headers']
+  body: string
+}
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/modelProviders'
   const backend = await import(modulePath)
   checkModelProvider = backend.checkModelProvider as typeof checkModelProvider
   listAiModels = backend.listAiModels as typeof listAiModels
-  minDelayMs = backend.MODEL_PROVIDER_CHECK_MIN_DELAY_MS
 })
+
+const servers: Server[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    servers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()))
+        })
+    )
+  )
+})
+
+const readRequestBody = (request: IncomingMessage) =>
+  new Promise<string>((resolve) => {
+    let body = ''
+    request.on('data', (chunk) => {
+      body += String(chunk)
+    })
+    request.on('end', () => resolve(body))
+  })
+
+const startProviderServer = async (
+  handler: (request: IncomingMessage, response: ServerResponse, body: string) => void | Promise<void>
+): Promise<{ baseUrl: string; requests: RequestRecord[] }> => {
+  const requests: RequestRecord[] = []
+  const server = createServer(async (request, response) => {
+    const body = await readRequestBody(request)
+    requests.push({
+      method: request.method || '',
+      url: request.url || '',
+      headers: request.headers,
+      body
+    })
+    await handler(request, response, body)
+  })
+  servers.push(server)
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Test server did not bind to a TCP port.')
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests
+  }
+}
+
+const sendJson = (response: ServerResponse, statusCode: number, payload: unknown) => {
+  response.writeHead(statusCode, { 'Content-Type': 'application/json' })
+  response.end(JSON.stringify(payload))
+}
 
 describe('model provider backend boundary', () => {
   it('returns a cloned AI model catalog for the renderer model selectors', async () => {
@@ -45,45 +103,183 @@ describe('model provider backend boundary', () => {
     expect(secondCatalog.settingsModels.some((model: { name: string }) => model.name === 'mutated-model')).toBe(false)
   })
 
-  it('validates OpenAI-compatible configuration and normalizes the Responses endpoint', async () => {
-    const startedAt = Date.now()
+  it('validates OpenAI-compatible configuration against the live Responses endpoint', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { id: 'resp-test' })
+    })
     const result = await checkModelProvider({
       provider: 'openai',
       config: {
-        baseUrl: 'https://models.example.test',
+        baseUrl: server.baseUrl,
         apiKey: 'sk-test',
         modelId: 'gpt-5',
         apiFormat: 'responses'
-      }
+      },
+      timeoutMs: 1000
     })
-    const elapsedMs = Date.now() - startedAt
 
     expect(result.ok).toBe(true)
     expect(result.data).toMatchObject({
       provider: 'openai',
       label: 'OpenAI Compatible',
       modelId: 'gpt-5',
-      endpoint: 'https://models.example.test/v1/responses'
+      endpoint: `${server.baseUrl}/v1/responses`
     })
-    expect(result.data?.message).toContain('validated by aiopsterm backend')
-    expect(elapsedMs).toBeGreaterThanOrEqual(minDelayMs - 25)
+    expect(result.data?.message).toContain('validated against the live provider endpoint')
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toEqual(expect.objectContaining({ method: 'POST', url: '/v1/responses' }))
+    expect(server.requests[0].headers.authorization).toBe('Bearer sk-test')
+    expect(JSON.parse(server.requests[0].body)).toEqual({
+      model: 'gpt-5',
+      input: 'test',
+      max_output_tokens: 16
+    })
   })
 
-  it('accepts local Ollama checks without requiring an API key', async () => {
+  it('validates Ollama by listing live models instead of accepting configuration only', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { models: [{ name: 'llama3.1' }] })
+    })
     const result = await checkModelProvider({
       provider: 'ollama',
       config: {
-        baseUrl: 'http://localhost:11434',
+        baseUrl: server.baseUrl,
         apiKey: '',
         modelId: 'llama3.1'
-      }
+      },
+      timeoutMs: 1000
     })
 
     expect(result.ok).toBe(true)
     expect(result.data).toMatchObject({
       provider: 'ollama',
-      endpoint: 'http://localhost:11434'
+      endpoint: `${server.baseUrl}/api/tags`
     })
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toMatchObject({ method: 'GET', url: '/api/tags' })
+  })
+
+  it('validates LiteLLM and DeepSeek through OpenAI-compatible chat completions probes', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { id: 'chat-test', choices: [{ message: { content: 'OK' } }] })
+    })
+
+    await expect(
+      checkModelProvider({
+        provider: 'litellm',
+        config: {
+          baseUrl: server.baseUrl,
+          apiKey: 'litellm-key',
+          modelId: 'gpt-5'
+        },
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        provider: 'litellm',
+        endpoint: `${server.baseUrl}/v1/chat/completions`
+      }
+    })
+    await expect(
+      checkModelProvider({
+        provider: 'deepseek',
+        config: {
+          baseUrl: server.baseUrl,
+          apiKey: 'deepseek-key',
+          modelId: 'deepseek-chat'
+        },
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        provider: 'deepseek',
+        endpoint: `${server.baseUrl}/v1/chat/completions`
+      }
+    })
+
+    expect(server.requests.map((request) => request.url)).toEqual(['/v1/chat/completions', '/v1/chat/completions'])
+    expect(server.requests.map((request) => request.headers.authorization)).toEqual(['Bearer litellm-key', 'Bearer deepseek-key'])
+  })
+
+  it('returns backend failure metadata when Ollama does not list the requested model', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { models: [{ name: 'mistral' }] })
+    })
+    const result = await checkModelProvider({
+      provider: 'ollama',
+      config: {
+        baseUrl: server.baseUrl,
+        apiKey: '',
+        modelId: 'llama3.1'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('MODEL_PROVIDER_CHECK_FAILED')
+    expect(result.errorMessage).toContain("Model 'llama3.1' not found")
+    expect(result.data).toMatchObject({
+      provider: 'ollama',
+      endpoint: `${server.baseUrl}/api/tags`,
+      modelId: 'llama3.1'
+    })
+  })
+
+  it('validates Anthropic through the live messages endpoint with provider headers', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { id: 'msg-test', content: [{ type: 'text', text: 'OK' }] })
+    })
+    const result = await checkModelProvider({
+      provider: 'anthropic',
+      config: {
+        baseUrl: server.baseUrl,
+        apiKey: 'anthropic-key',
+        modelId: 'claude-3-5-sonnet-latest'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.endpoint).toBe(`${server.baseUrl}/v1/messages`)
+    expect(server.requests[0]).toMatchObject({ method: 'POST', url: '/v1/messages' })
+    expect(server.requests[0].headers['x-api-key']).toBe('anthropic-key')
+    expect(server.requests[0].headers['anthropic-version']).toBe('2023-06-01')
+    expect(JSON.parse(server.requests[0].body)).toMatchObject({
+      model: 'claude-3-5-sonnet-latest',
+      max_tokens: 1
+    })
+  })
+
+  it('signs and validates Bedrock invoke requests behind the backend boundary', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { content: [{ type: 'text', text: 'OK' }] })
+    })
+    const result = await checkModelProvider({
+      provider: 'bedrock',
+      config: {
+        baseUrl: '',
+        apiKey: '',
+        modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+        awsAccessKey: 'AKIATEST',
+        awsSecretKey: 'secret-test',
+        awsSessionToken: 'session-test',
+        awsRegion: 'us-east-1',
+        awsEndpointSelected: true,
+        awsBedrockEndpoint: server.baseUrl
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.endpoint).toBe(`${server.baseUrl}/model/anthropic.claude-3-haiku-20240307-v1%3A0/invoke`)
+    expect(server.requests[0]).toMatchObject({
+      method: 'POST',
+      url: '/model/anthropic.claude-3-haiku-20240307-v1%3A0/invoke'
+    })
+    expect(server.requests[0].headers.authorization).toEqual(expect.stringContaining('AWS4-HMAC-SHA256 Credential=AKIATEST/'))
+    expect(server.requests[0].headers['x-amz-security-token']).toBe('session-test')
   })
 
   it('rejects missing cloud API keys behind the preload/main boundary', async () => {
@@ -103,8 +299,7 @@ describe('model provider backend boundary', () => {
     })
   })
 
-  it('rejects invalid provider endpoints before the local validation delay', async () => {
-    const startedAt = Date.now()
+  it('rejects invalid provider endpoints before network validation', async () => {
     const result = await checkModelProvider({
       provider: 'litellm',
       config: {
@@ -113,13 +308,36 @@ describe('model provider backend boundary', () => {
         modelId: 'gpt-5'
       }
     })
-    const elapsedMs = Date.now() - startedAt
 
     expect(result).toEqual({
       ok: false,
       errorCode: 'MODEL_PROVIDER_ENDPOINT_INVALID',
       errorMessage: 'LiteLLM endpoint must use http or https.'
     })
-    expect(elapsedMs).toBeLessThan(minDelayMs)
+  })
+
+  it('returns provider error responses instead of fabricating successful checks', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 401, { error: { message: 'invalid api key' } })
+    })
+    const result = await checkModelProvider({
+      provider: 'openai',
+      config: {
+        baseUrl: server.baseUrl,
+        apiKey: 'bad-key',
+        modelId: 'gpt-5',
+        apiFormat: 'chat-completions'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('MODEL_PROVIDER_CHECK_FAILED')
+    expect(result.errorMessage).toContain('invalid api key')
+    expect(result.data).toMatchObject({
+      provider: 'openai',
+      endpoint: `${server.baseUrl}/v1/chat/completions`,
+      message: 'invalid api key'
+    })
   })
 })
