@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto'
+import { app } from 'electron'
+import Store from 'electron-store'
 import { basename as getLocalBasename, dirname as getLocalDirname, join } from 'path'
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
 import type {
@@ -33,6 +35,15 @@ import { getAsset, getAssetSecret, getKeychainSecret } from './assets'
 import { loadSsh2 } from './ssh2Runtime'
 
 type BackendFileEntry = FileListEntry & { mode: string }
+type FileSessionCatalogStoreShape = FileSessionCatalog
+type SqliteDatabase = {
+  exec(sql: string): void
+  prepare(sql: string): {
+    all(...args: unknown[]): unknown[]
+    get(...args: unknown[]): unknown
+    run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
+  }
+}
 type RemoteSftpTarget = {
   assetId: string
   host: string
@@ -587,17 +598,21 @@ const defaultFileSessions: FileSessionInfo[] = [
   }
 ]
 
-let fileSessionCatalog: FileSessionCatalog = {
+const defaultFileSessionCatalog = (): FileSessionCatalog => ({
   sessions: defaultFileSessions.map((session) => ({ ...session })),
   folders: defaultFileSessionFolders.map((folder) => ({ ...folder }))
-}
+})
+
+let fileSessionCatalog: FileSessionCatalog | null = null
 
 const cloneSession = (session: FileSessionInfo): FileSessionInfo => ({ ...session })
 const cloneFolder = (folder: FileSessionFolderRecord): FileSessionFolderRecord => ({ ...folder })
-const cloneFileSessionCatalog = (): FileSessionCatalog => ({
-  sessions: fileSessionCatalog.sessions.map(cloneSession),
-  folders: fileSessionCatalog.folders.map(cloneFolder)
+const cloneFileSessionCatalog = (catalog: FileSessionCatalog): FileSessionCatalog => ({
+  sessions: catalog.sessions.map(cloneSession),
+  folders: catalog.folders.map(cloneFolder)
 })
+
+const fileSessionLocalEntry = () => cloneSession(defaultFileSessions[0])
 
 const fileSessionResult = <T>(data: T) => ({ ok: true, data })
 
@@ -830,6 +845,120 @@ const terminalContextAssetType = (assetType?: string): FileSessionInfo['assetTyp
   return normalized.includes('organization') ? 'organization' : 'person'
 }
 
+const normalizeFileSessionFolderInput = (folder: FileSessionFolderSaveInput, existing?: FileSessionFolderRecord): FileSessionFolderRecord | null => {
+  const name = String(folder.name || '').trim()
+  if (!name) return null
+  return {
+    uuid: existing?.uuid || `files-folder-${randomUUID()}`,
+    name,
+    description: String(folder.description ?? existing?.description ?? '').trim()
+  }
+}
+
+const normalizeStoredFileSessionFolder = (folder: Partial<FileSessionFolderRecord>): FileSessionFolderRecord | null => {
+  const uuid = String(folder.uuid || '').trim()
+  const name = String(folder.name || '').trim()
+  if (!uuid || !name) return null
+  return {
+    uuid,
+    name,
+    description: String(folder.description || '').trim()
+  }
+}
+
+const normalizeFileSessionCatalog = (catalog?: Partial<FileSessionCatalog> | null): FileSessionCatalog => {
+  const fallback = defaultFileSessionCatalog()
+  const hasSessionRows = Array.isArray(catalog?.sessions)
+  const hasFolderRows = Array.isArray(catalog?.folders)
+  const sessions = (hasSessionRows ? catalog?.sessions || [] : fallback.sessions)
+    .map((session) => normalizeSession(session as FileSessionInfo))
+    .filter((session): session is FileSessionInfo => Boolean(session))
+  const folders = (hasFolderRows ? catalog?.folders || [] : fallback.folders)
+    .map((folder) => normalizeStoredFileSessionFolder(folder as Partial<FileSessionFolderRecord>))
+    .filter((folder): folder is FileSessionFolderRecord => Boolean(folder))
+  if (!sessions.some((session) => session.id === 'local')) sessions.unshift(fileSessionLocalEntry())
+  return { sessions, folders }
+}
+
+class FallbackFileSessionCatalogStore {
+  private store = new Store<FileSessionCatalogStoreShape>({
+    name: 'aiopsterm-file-sessions',
+    defaults: defaultFileSessionCatalog()
+  })
+
+  load(): FileSessionCatalog {
+    return normalizeFileSessionCatalog({
+      sessions: this.store.get('sessions') || [],
+      folders: this.store.get('folders') || []
+    })
+  }
+
+  save(catalog: FileSessionCatalog): FileSessionCatalog {
+    const normalized = normalizeFileSessionCatalog(catalog)
+    this.store.set('sessions', normalized.sessions)
+    this.store.set('folders', normalized.folders)
+    return cloneFileSessionCatalog(normalized)
+  }
+
+  reset(): FileSessionCatalog {
+    return this.save(defaultFileSessionCatalog())
+  }
+}
+
+class SqliteFileSessionCatalogStore {
+  constructor(private db: SqliteDatabase) {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS file_session_catalog (
+        key TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      );
+    `)
+  }
+
+  load(): FileSessionCatalog {
+    const row = this.db.prepare('SELECT data FROM file_session_catalog WHERE key = ?').get('catalog') as { data: string } | undefined
+    if (!row?.data) return this.reset()
+    return this.save(JSON.parse(row.data) as FileSessionCatalog)
+  }
+
+  save(catalog: FileSessionCatalog): FileSessionCatalog {
+    const normalized = normalizeFileSessionCatalog(catalog)
+    this.db.prepare('INSERT OR REPLACE INTO file_session_catalog (key, data) VALUES (?, ?)').run('catalog', JSON.stringify(normalized))
+    return cloneFileSessionCatalog(normalized)
+  }
+
+  reset(): FileSessionCatalog {
+    return this.save(defaultFileSessionCatalog())
+  }
+}
+
+let fileSessionCatalogStore: FallbackFileSessionCatalogStore | SqliteFileSessionCatalogStore | null = null
+
+const createFileSessionCatalogStore = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
+    return new SqliteFileSessionCatalogStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+  } catch {
+    return new FallbackFileSessionCatalogStore()
+  }
+}
+
+const getFileSessionCatalogStore = () => {
+  if (!fileSessionCatalogStore) fileSessionCatalogStore = createFileSessionCatalogStore()
+  return fileSessionCatalogStore
+}
+
+const loadFileSessionCatalog = () => {
+  if (!fileSessionCatalog) fileSessionCatalog = getFileSessionCatalogStore().load()
+  return fileSessionCatalog
+}
+
+const saveFileSessionCatalog = (catalog: FileSessionCatalog) => {
+  fileSessionCatalog = getFileSessionCatalogStore().save(catalog)
+  return fileSessionCatalog
+}
+
 export const saveFileSessionFromSftpPayload = async (payload: FileSessionSftpPayload): Promise<FileSessionMutationResult> => {
   const id = payloadString(payload, ['uuid', 'id', 'assetId', 'host', 'ip'])
   const host = payloadString(payload, ['host', 'ip']) || id
@@ -897,14 +1026,9 @@ export const saveFileSessionFromTerminalContext = async (context: FileSessionTer
   })
 }
 
-const ensureLocalFileSession = () => {
-  if (fileSessionCatalog.sessions.some((session) => session.id === 'local')) return
-  fileSessionCatalog.sessions.unshift(cloneSession(defaultFileSessions[0]))
-}
-
 export const listFileSessionCatalog = async (): Promise<FileSessionCatalogResult> => {
-  ensureLocalFileSession()
-  return fileSessionResult(cloneFileSessionCatalog())
+  const catalog = loadFileSessionCatalog()
+  return fileSessionResult(cloneFileSessionCatalog(catalog))
 }
 
 export const saveFileSession = async (session: FileSessionInfo): Promise<FileSessionMutationResult> => {
@@ -912,62 +1036,73 @@ export const saveFileSession = async (session: FileSessionInfo): Promise<FileSes
   if (!normalized) {
     return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
   }
-  fileSessionCatalog.sessions = fileSessionCatalog.sessions.some((item) => item.id === normalized.id)
-    ? fileSessionCatalog.sessions.map((item) => (item.id === normalized.id ? normalized : item))
-    : [...fileSessionCatalog.sessions, normalized]
-  return fileSessionResult({ ...cloneFileSessionCatalog(), session: cloneSession(normalized) })
+  const catalog = loadFileSessionCatalog()
+  const saved = saveFileSessionCatalog({
+    ...catalog,
+    sessions: catalog.sessions.some((item) => item.id === normalized.id)
+      ? catalog.sessions.map((item) => (item.id === normalized.id ? normalized : item))
+      : [...catalog.sessions, normalized]
+  })
+  return fileSessionResult({ ...cloneFileSessionCatalog(saved), session: cloneSession(normalized) })
 }
 
 export const updateFileSession = async (id: string, patch: FileSessionPatch): Promise<FileSessionMutationResult> => {
-  const session = fileSessionCatalog.sessions.find((item) => item.id === id)
+  const catalog = loadFileSessionCatalog()
+  const session = catalog.sessions.find((item) => item.id === id)
   if (!session) return { ok: false, errorCode: 'FILES_SESSION_NOT_FOUND', errorMessage: 'File session not found.' }
   const normalized = normalizeSession({ ...session, ...patch, id })
   if (!normalized) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
-  fileSessionCatalog.sessions = fileSessionCatalog.sessions.map((item) => (item.id === id ? normalized : item))
-  return fileSessionResult({ ...cloneFileSessionCatalog(), session: cloneSession(normalized) })
+  const saved = saveFileSessionCatalog({
+    ...catalog,
+    sessions: catalog.sessions.map((item) => (item.id === id ? normalized : item))
+  })
+  return fileSessionResult({ ...cloneFileSessionCatalog(saved), session: cloneSession(normalized) })
 }
 
 export const deleteFileSession = async (id: string): Promise<FileSessionCatalogResult> => {
   if (id === 'local') return { ok: false, errorCode: 'FILES_SESSION_LOCAL_REQUIRED', errorMessage: 'Local file session cannot be deleted.' }
-  fileSessionCatalog.sessions = fileSessionCatalog.sessions.filter((session) => session.id !== id)
-  return fileSessionResult(cloneFileSessionCatalog())
-}
-
-const normalizeFileSessionFolderInput = (folder: FileSessionFolderSaveInput, existing?: FileSessionFolderRecord): FileSessionFolderRecord | null => {
-  const name = String(folder.name || '').trim()
-  if (!name) return null
-  return {
-    uuid: existing?.uuid || `files-folder-${randomUUID()}`,
-    name,
-    description: String(folder.description ?? existing?.description ?? '').trim()
-  }
+  const catalog = loadFileSessionCatalog()
+  return fileSessionResult(
+    cloneFileSessionCatalog(
+      saveFileSessionCatalog({
+        ...catalog,
+        sessions: catalog.sessions.filter((session) => session.id !== id)
+      })
+    )
+  )
 }
 
 export const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput): Promise<FileSessionFolderMutationResult> => {
-  const existing = folder.uuid ? fileSessionCatalog.folders.find((item) => item.uuid === folder.uuid) : undefined
+  const catalog = loadFileSessionCatalog()
+  const existing = folder.uuid ? catalog.folders.find((item) => item.uuid === folder.uuid) : undefined
   const normalized = normalizeFileSessionFolderInput(folder, existing)
   if (!normalized) return { ok: false, errorCode: 'FILES_FOLDER_NAME_REQUIRED', errorMessage: 'Folder name is required.' }
-  fileSessionCatalog.folders = fileSessionCatalog.folders.some((item) => item.uuid === normalized.uuid)
-    ? fileSessionCatalog.folders.map((item) => (item.uuid === normalized.uuid ? normalized : item))
-    : [...fileSessionCatalog.folders, normalized]
-  return fileSessionResult({ ...cloneFileSessionCatalog(), folder: cloneFolder(normalized) })
+  const saved = saveFileSessionCatalog({
+    ...catalog,
+    folders: catalog.folders.some((item) => item.uuid === normalized.uuid)
+      ? catalog.folders.map((item) => (item.uuid === normalized.uuid ? normalized : item))
+      : [...catalog.folders, normalized]
+  })
+  return fileSessionResult({ ...cloneFileSessionCatalog(saved), folder: cloneFolder(normalized) })
 }
 
 export const deleteFileSessionFolder = async (uuid: string): Promise<FileSessionFolderDeleteResult> => {
   const folderUuid = String(uuid || '').trim()
   if (!folderUuid) return { ok: false, errorCode: 'FILES_FOLDER_UUID_REQUIRED', errorMessage: 'Folder uuid is required.' }
-  fileSessionCatalog.folders = fileSessionCatalog.folders.filter((folder) => folder.uuid !== folderUuid)
-  fileSessionCatalog.sessions = fileSessionCatalog.sessions.map((session) =>
-    session.folderUuid === folderUuid ? { ...session, folderUuid: undefined, group: '最近连接' } : session
-  )
-  return fileSessionResult({ ...cloneFileSessionCatalog(), folderUuid })
+  const catalog = loadFileSessionCatalog()
+  const saved = saveFileSessionCatalog({
+    folders: catalog.folders.filter((folder) => folder.uuid !== folderUuid),
+    sessions: catalog.sessions.map((session) => (session.folderUuid === folderUuid ? { ...session, folderUuid: undefined, group: '最近连接' } : session))
+  })
+  return fileSessionResult({ ...cloneFileSessionCatalog(saved), folderUuid })
+}
+
+export const __dropFileSessionCatalogCacheForTests = () => {
+  fileSessionCatalog = null
 }
 
 export const __resetFileSessionCatalogForTests = () => {
-  fileSessionCatalog = {
-    sessions: defaultFileSessions.map(cloneSession),
-    folders: defaultFileSessionFolders.map(cloneFolder)
-  }
+  fileSessionCatalog = getFileSessionCatalogStore().reset()
   activeFileTransferTasks.clear()
 }
 

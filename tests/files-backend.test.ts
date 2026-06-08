@@ -241,11 +241,15 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('electron-store', () => {
+  const stores = new Map<string, Record<string, unknown>>()
+
   class MockStore<T extends Record<string, unknown>> {
     store: T
 
-    constructor(options?: { defaults?: T }) {
-      this.store = JSON.parse(JSON.stringify(options?.defaults || {}))
+    constructor(options?: { name?: string; defaults?: T }) {
+      const name = options?.name || 'default'
+      if (!stores.has(name)) stores.set(name, JSON.parse(JSON.stringify(options?.defaults || {})))
+      this.store = stores.get(name) as T
     }
 
     get<K extends keyof T>(key: K): T[K] {
@@ -285,6 +289,7 @@ let deleteFileSession: (id: string) => Promise<any>
 let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
 let deleteFileSessionFolder: (uuid: string) => Promise<any>
 let resetFileSessionCatalog: () => void
+let dropFileSessionCatalogCache: () => void
 let saveAsset: (asset: any) => any
 
 beforeAll(async () => {
@@ -307,6 +312,7 @@ beforeAll(async () => {
   saveFileSessionFolder = backend.saveFileSessionFolder
   deleteFileSessionFolder = backend.deleteFileSessionFolder
   resetFileSessionCatalog = backend.__resetFileSessionCatalogForTests
+  dropFileSessionCatalogCache = backend.__dropFileSessionCatalogCacheForTests
   const assetsModulePath = '../src/main/backend/assets'
   saveAsset = (await import(assetsModulePath)).saveAsset
 })
@@ -489,6 +495,49 @@ describe('files backend content boundary', () => {
     const deletedSession = await deleteFileSession('asset-release')
     expect(deletedSession.ok).toBe(true)
     expect(deletedSession.data.sessions.some((session: any) => session.id === 'asset-release')).toBe(false)
+  })
+
+  it('persists file session catalog mutations behind the backend store', async () => {
+    const savedFolder = await saveFileSessionFolder({ name: '持久化窗口', description: 'reload boundary' })
+    expect(savedFolder.ok).toBe(true)
+
+    const savedSession = await saveFileSession({
+      id: 'asset-persisted',
+      label: 'persisted-host',
+      host: '10.24.20.31',
+      group: '资产',
+      kind: 'remote',
+      rootPath: '/srv/persisted',
+      status: 'active',
+      favorite: true,
+      assetType: 'person',
+      folderUuid: savedFolder.data.folder.uuid,
+      comment: 'stored outside process cache'
+    })
+    expect(savedSession.ok).toBe(true)
+
+    dropFileSessionCatalogCache()
+    const reloaded = await listFileSessionCatalog()
+    expect(reloaded.ok).toBe(true)
+    expect(reloaded.data.folders).toContainEqual(
+      expect.objectContaining({ uuid: savedFolder.data.folder.uuid, name: '持久化窗口', description: 'reload boundary' })
+    )
+    expect(reloaded.data.sessions).toContainEqual(
+      expect.objectContaining({
+        id: 'asset-persisted',
+        label: 'persisted-host',
+        host: '10.24.20.31',
+        rootPath: '/srv/persisted',
+        folderUuid: savedFolder.data.folder.uuid,
+        comment: 'stored outside process cache'
+      })
+    )
+
+    const deleted = await deleteFileSession('asset-persisted')
+    expect(deleted.ok).toBe(true)
+    dropFileSessionCatalogCache()
+    const afterDelete = await listFileSessionCatalog()
+    expect(afterDelete.data.sessions.some((session: any) => session.id === 'asset-persisted')).toBe(false)
   })
 
   it('starts with an empty transfer task snapshot until runtime transfers report progress', async () => {
