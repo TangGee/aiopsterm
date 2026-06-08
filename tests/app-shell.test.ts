@@ -6513,6 +6513,7 @@ describe('AppShell', () => {
 
     const layoutRadios = workspace.findAll('input[name="defaultLayout"]')
     await layoutRadios[1].setValue(true)
+    await flushPromises()
     expect(store.config.defaultMode).toBe('agents')
 
     expect(workspace.text()).toContain('编辑器设置')
@@ -6871,6 +6872,53 @@ describe('AppShell', () => {
 
     spotlight.unmount()
     target.remove()
+  })
+
+  it('does not leave General base setting controls visually changed when the config bridge rejects the snapshot', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('general')
+    await workspace.vm.$nextTick()
+    const savedConfig = {
+      ...store.config
+    }
+    const row = (label: string) => workspace.findAll('.settings-form-row').find((item) => item.find('label').text() === label)!
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
+    const layoutRadios = row('默认布局').findAll('input[name="defaultLayout"]')
+    expect((layoutRadios[0].element as HTMLInputElement).checked).toBe(true)
+    expect((layoutRadios[1].element as HTMLInputElement).checked).toBe(false)
+    await layoutRadios[1].setValue(true)
+    await flushPromises()
+    expect(store.settingsNotice).toBe('基础设置保存失败')
+    expect(store.config.defaultMode).toBe('terminal')
+    expect(store.mode).toBe('terminal')
+    expect((layoutRadios[0].element as HTMLInputElement).checked).toBe(true)
+    expect((layoutRadios[1].element as HTMLInputElement).checked).toBe(false)
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
+    const languageSelect = row('语言').find('select.settings-select')
+    expect((languageSelect.element as HTMLSelectElement).value).toBe('zh-CN')
+    await languageSelect.setValue('en-US')
+    await flushPromises()
+    expect(store.settingsNotice).toBe('基础设置保存失败')
+    expect(store.config.language).toBe('zh-CN')
+    expect((languageSelect.element as HTMLSelectElement).value).toBe('zh-CN')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce(savedConfig)
+    const watermarkRadios = row('水印').findAll('input[name="watermark"]')
+    expect((watermarkRadios[0].element as HTMLInputElement).checked).toBe(true)
+    expect((watermarkRadios[1].element as HTMLInputElement).checked).toBe(false)
+    await watermarkRadios[1].setValue(true)
+    await flushPromises()
+    expect(store.settingsNotice).toBe('基础设置保存失败')
+    expect(store.config.watermark).toBe('open')
+    expect((watermarkRadios[0].element as HTMLInputElement).checked).toBe(true)
+    expect((watermarkRadios[1].element as HTMLInputElement).checked).toBe(false)
   })
 
   it('does not leave editor setting controls visually changed when the config bridge rejects the snapshot', async () => {

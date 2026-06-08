@@ -392,7 +392,7 @@ const GeneralSettings = defineComponent({
               {
                 class: 'settings-select',
                 value: workspace.config.language,
-                onChange: (event: Event) => workspace.updateLanguage((event.target as HTMLSelectElement).value)
+                onChange: (event: Event) => restoreSelectOnFailedSave(event, workspace.config.language, (value) => workspace.updateLanguage(value))
               },
               settingsLanguageOptions.map((language) => h('option', { value: language.value }, language.label))
             )

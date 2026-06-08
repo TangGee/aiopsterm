@@ -9,7 +9,7 @@ import type { AiopstermDeepLinkPayload } from '@shared/deepLink'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
-import type { SettingSectionKey } from '@/config/settings'
+import { settingsLanguageOptions, type SettingSectionKey } from '@/config/settings'
 import type {
   AppUpdateCheckResult,
   AppUpdateProgressEvent,
@@ -2172,6 +2172,43 @@ const normalizeUserModelName = (value: unknown) => {
   return modelName
 }
 
+type GeneralBaseSettingsPatch = Partial<Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'>>
+
+const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
+
+const isDefaultModeValue = (value: unknown): value is UserConfig['defaultMode'] => value === 'terminal' || value === 'agents'
+
+const isWatermarkValue = (value: unknown): value is UserConfig['watermark'] => value === 'open' || value === 'close'
+
+const isSettingsLanguageValue = (value: unknown): value is string => typeof value === 'string' && settingsLanguageValues.includes(value)
+
+const normalizeGeneralBaseSettingsPatch = (patch: GeneralBaseSettingsPatch) => {
+  const normalized: GeneralBaseSettingsPatch = {}
+  if (patch.defaultMode !== undefined) {
+    if (!isDefaultModeValue(patch.defaultMode)) return null
+    normalized.defaultMode = patch.defaultMode
+  }
+  if (patch.language !== undefined) {
+    if (!isSettingsLanguageValue(patch.language)) return null
+    normalized.language = patch.language
+  }
+  if (patch.watermark !== undefined) {
+    if (!isWatermarkValue(patch.watermark)) return null
+    normalized.watermark = patch.watermark
+  }
+  return normalized
+}
+
+const generalBaseSettingsPatchMatches = (patch: GeneralBaseSettingsPatch, savedConfig: Record<string, unknown>) => {
+  if (patch.defaultMode !== undefined && savedConfig.defaultMode !== patch.defaultMode) return false
+  if (patch.language !== undefined && savedConfig.language !== patch.language) return false
+  if (patch.watermark !== undefined && savedConfig.watermark !== patch.watermark) return false
+  return true
+}
+
+const isGeneralBaseSettingsSnapshot = (source: unknown): source is Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'> =>
+  isRecord(source) && isDefaultModeValue(source.defaultMode) && isSettingsLanguageValue(source.language) && isWatermarkValue(source.watermark)
+
 const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
@@ -4330,17 +4367,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
-  const updateDefaultLayout = (mode: 'terminal' | 'agents') => {
-    saveConfig({ defaultMode: mode })
+  const saveGeneralBaseSettings = async (patch: GeneralBaseSettingsPatch) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('基础设置保存服务不可用')
+      return false
+    }
+    const normalizedPatch = normalizeGeneralBaseSettingsPatch(patch)
+    if (!normalizedPatch || !Object.keys(normalizedPatch).length) {
+      setSettingsNotice('基础设置保存失败')
+      return false
+    }
+    try {
+      const savedConfig = await saveConfigBridge(normalizedPatch)
+      if (!isGeneralBaseSettingsSnapshot(savedConfig) || !generalBaseSettingsPatchMatches(normalizedPatch, savedConfig)) {
+        setSettingsNotice('基础设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, savedConfig)
+      setSettingsNotice('基础设置已保存')
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '基础设置保存失败')
+      return false
+    }
   }
 
-  const updateLanguage = (language: string) => {
-    saveConfig({ language })
-  }
+  const updateDefaultLayout = (mode: 'terminal' | 'agents') => saveGeneralBaseSettings({ defaultMode: mode })
 
-  const updateWatermark = (watermark: 'open' | 'close') => {
-    saveConfig({ watermark })
-  }
+  const updateLanguage = (language: string) => saveGeneralBaseSettings({ language })
+
+  const updateWatermark = (watermark: 'open' | 'close') => saveGeneralBaseSettings({ watermark })
 
   const getEditorSettingsSnapshot = (): EditorUserConfig => ({ ...editorSettings.value })
 
@@ -6350,14 +6407,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const toggleMode = () => {
+  const toggleMode = async () => {
     const nextMode = mode.value === 'terminal' ? 'agents' : 'terminal'
     mode.value = nextMode
     if (nextMode === 'terminal' && activeModule.value !== 'database' && activeModule.value !== 'user') {
       rightPanelOpen.value = config.value.rightPanelOpen
     }
-    saveConfig({ defaultMode: mode.value })
-    setTopNotice(`已切换到 ${mode.value === 'agents' ? 'Agents' : 'Terminal'} 模式`)
+    const saved = await saveGeneralBaseSettings({ defaultMode: nextMode })
+    setTopNotice(`已切换到 ${mode.value === 'agents' ? 'Agents' : 'Terminal'} 模式${saved ? '' : '；默认布局保存失败'}`)
   }
 
   const setActiveModule = (key: ModuleKey) => {

@@ -308,13 +308,13 @@ describe('workspace store', () => {
     await store.hydrateConfig()
     vi.mocked(window.aiops.saveConfig).mockClear()
 
-    store.toggleMode()
+    await store.toggleMode()
     expect(store.mode).toBe('agents')
     expect(store.config.defaultMode).toBe('agents')
     expect(store.topNotice).toContain('Agents')
     store.toggleLeft()
     expect(store.agentsLeftOpen).toBe(false)
-    store.toggleMode()
+    await store.toggleMode()
     expect(store.mode).toBe('terminal')
     store.toggleRight()
     expect(store.rightPanelOpen).toBe(false)
@@ -5642,6 +5642,79 @@ describe('workspace store', () => {
       expect(document.documentElement.dataset.editorWordWrap).toBe('on')
       expect(document.documentElement.dataset.editorMinimap).toBe('off')
       expect(document.documentElement.dataset.editorMouseWheelZoom).toBe('off')
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate General base setting writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialSnapshot = JSON.stringify({
+      config: {
+        defaultMode: store.config.defaultMode,
+        language: store.config.language,
+        watermark: store.config.watermark
+      },
+      mode: store.mode
+    })
+    const assertGeneralBaseUnchanged = () => {
+      expect(
+        JSON.stringify({
+          config: {
+            defaultMode: store.config.defaultMode,
+            language: store.config.language,
+            watermark: store.config.watermark
+          },
+          mode: store.mode
+        })
+      ).toBe(initialSnapshot)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateDefaultLayout('agents')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('基础设置保存服务不可用')
+      assertGeneralBaseUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateLanguage('en-US')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('基础设置保存失败')
+      assertGeneralBaseUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        watermark: 'open'
+      })
+      await expect(store.updateWatermark('close')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('基础设置保存失败')
+      assertGeneralBaseUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('general base save offline'))
+      await expect(store.updateDefaultLayout('agents')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('general base save offline')
+      assertGeneralBaseUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        defaultMode: 'terminal'
+      })
+      await store.toggleMode()
+      expect(store.mode).toBe('agents')
+      expect(store.config.defaultMode).toBe('terminal')
+      expect(store.topNotice).toContain('默认布局保存失败')
+      expect(store.settingsNotice).toBe('基础设置保存失败')
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        language: 'en-US'
+      })
+      await expect(store.updateLanguage('en-US')).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('基础设置已保存')
+      expect(store.config.language).toBe('en-US')
+      expect(store.config.defaultMode).toBe('terminal')
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }
