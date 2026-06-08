@@ -206,6 +206,26 @@ const sftpWriteFile = (sftp: SFTPWrapper, path: string, content: Buffer) =>
     sftp.writeFile(path, content, (error) => (error ? reject(error) : resolve()))
   })
 
+const sftpRename = (sftp: SFTPWrapper, oldPath: string, newPath: string) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.rename(oldPath, newPath, (error) => (error ? reject(error) : resolve()))
+  })
+
+const sftpUnlink = (sftp: SFTPWrapper, path: string) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.unlink(path, (error) => (error ? reject(error) : resolve()))
+  })
+
+const sftpRmdir = (sftp: SFTPWrapper, path: string) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.rmdir(path, (error) => (error ? reject(error) : resolve()))
+  })
+
+const sftpChmod = (sftp: SFTPWrapper, path: string, mode: number) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.chmod(path, mode, (error) => (error ? reject(error) : resolve()))
+  })
+
 const sftpMkdir = (sftp: SFTPWrapper, path: string) =>
   new Promise<void>((resolve, reject) => {
     sftp.mkdir(path, (error) => (error ? reject(error) : resolve()))
@@ -262,6 +282,63 @@ const ensureRemoteParentDirs = async (sftp: SFTPWrapper, remoteDir: string) => {
         throw mkdirError
       }
     }
+  }
+}
+
+const sftpStatOrNull = async (sftp: SFTPWrapper, path: string) => {
+  try {
+    return await sftpStat(sftp, path)
+  } catch (error) {
+    if (isNotFoundError(error)) return null
+    throw error
+  }
+}
+
+const removeRemotePathViaSftp = async (sftp: SFTPWrapper, path: string, recursive = false) => {
+  const stats = await sftpStat(sftp, path)
+  const type = sftpEntryType(stats)
+  if (type !== 'directory') {
+    await sftpUnlink(sftp, path)
+    return
+  }
+  if (recursive) {
+    const children = await sftpReaddir(sftp, path)
+    for (const child of children) {
+      if (child.filename === '.' || child.filename === '..') continue
+      await removeRemotePathViaSftp(sftp, normalizeRemotePath(`${path}/${child.filename}`), true)
+    }
+  }
+  await sftpRmdir(sftp, path)
+}
+
+const chmodRemotePathViaSftp = async (sftp: SFTPWrapper, path: string, mode: number, recursive = false) => {
+  const stats = await sftpStat(sftp, path)
+  await sftpChmod(sftp, path, mode)
+  if (!recursive || sftpEntryType(stats) !== 'directory') return
+  const children = await sftpReaddir(sftp, path)
+  for (const child of children) {
+    if (child.filename === '.' || child.filename === '..') continue
+    await chmodRemotePathViaSftp(sftp, normalizeRemotePath(`${path}/${child.filename}`), mode, true)
+  }
+}
+
+const copyRemotePathViaSftp = async (sftp: SFTPWrapper, sourcePath: string, targetPath: string) => {
+  const sourceStats = await sftpStat(sftp, sourcePath)
+  const sourceType = sftpEntryType(sourceStats)
+  if (sourceType !== 'directory') {
+    await ensureRemoteParentDirs(sftp, dirname(targetPath))
+    await sftpWriteFile(sftp, targetPath, await sftpReadFile(sftp, sourcePath))
+    return
+  }
+  await ensureRemoteParentDirs(sftp, dirname(targetPath))
+  await sftpMkdir(sftp, targetPath).catch(async (error) => {
+    const existing = await sftpStatOrNull(sftp, targetPath)
+    if (!existing || sftpEntryType(existing) !== 'directory') throw error
+  })
+  const children = await sftpReaddir(sftp, sourcePath)
+  for (const child of children) {
+    if (child.filename === '.' || child.filename === '..') continue
+    await copyRemotePathViaSftp(sftp, normalizeRemotePath(`${sourcePath}/${child.filename}`), normalizeRemotePath(`${targetPath}/${child.filename}`))
   }
 }
 
@@ -331,6 +408,65 @@ const writeRemoteFileViaSftp = async (filePath: string, content: Buffer, options
     })
   } catch (error) {
     return fileError(error, 'write_failed')
+  }
+}
+
+const mutateRemoteFileEntryViaSftp = async (mutation: FileEntryMutation, options: FileListOptions): Promise<FileEntryMutationResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const modifiedAt = Date.now()
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      if (mutation.kind === 'rename') {
+        const oldPath = normalizeRemotePath(mutation.oldPath)
+        const newPath = normalizeRemotePath(mutation.newPath)
+        if (oldPath === newPath) return { ok: true, data: { affected: 0, path: newPath, mtimeMs: modifiedAt } }
+        if (await sftpStatOrNull(sftp, newPath)) return { ok: false, errorCode: 'target_exists', errorMessage: 'Target already exists' }
+        await ensureRemoteParentDirs(sftp, dirname(newPath))
+        await sftpRename(sftp, oldPath, newPath)
+        const stats = await sftpStat(sftp, newPath)
+        return { ok: true, data: { affected: 1, path: newPath, mtimeMs: Number(stats.mtime || 0) ? Number(stats.mtime) * 1000 : modifiedAt } }
+      }
+      if (mutation.kind === 'delete') {
+        const path = normalizeRemotePath(mutation.path)
+        await removeRemotePathViaSftp(sftp, path, Boolean(mutation.recursive))
+        return { ok: true, data: { affected: 1, path, mtimeMs: modifiedAt } }
+      }
+      if (mutation.kind === 'copy' || mutation.kind === 'move') {
+        const srcPath = normalizeRemotePath(mutation.srcPath)
+        const targetPath = normalizeRemotePath(mutation.targetPath)
+        if (srcPath === targetPath) return { ok: true, data: { affected: 0, path: targetPath, mtimeMs: modifiedAt } }
+        const existingTarget = await sftpStatOrNull(sftp, targetPath)
+        if (existingTarget) {
+          if (!mutation.overwrite) return { ok: false, errorCode: 'target_exists', errorMessage: 'Target already exists' }
+          await removeRemotePathViaSftp(sftp, targetPath, true)
+        }
+        await ensureRemoteParentDirs(sftp, dirname(targetPath))
+        if (mutation.kind === 'move') {
+          await sftpRename(sftp, srcPath, targetPath)
+        } else {
+          await copyRemotePathViaSftp(sftp, srcPath, targetPath)
+        }
+        const stats = await sftpStat(sftp, targetPath)
+        return { ok: true, data: { affected: 1, path: targetPath, mtimeMs: Number(stats.mtime || 0) ? Number(stats.mtime) * 1000 : modifiedAt } }
+      }
+      const path = normalizeRemotePath(mutation.path)
+      if (!/^[0-7]{3,4}$/.test(mutation.mode)) return { ok: false, errorCode: 'invalid_mode', errorMessage: 'Permission mode must be octal' }
+      const mode = Number.parseInt(mutation.mode, 8)
+      await chmodRemotePathViaSftp(sftp, path, mode, Boolean(mutation.recursive))
+      const stats = await sftpStat(sftp, path)
+      return {
+        ok: true,
+        data: {
+          affected: 1,
+          path,
+          mode: mutation.mode.slice(-3),
+          mtimeMs: Number(stats.mtime || 0) ? Number(stats.mtime) * 1000 : modifiedAt
+        }
+      }
+    })
+  } catch (error) {
+    return fileError(error, 'mutation_failed')
   }
 }
 
@@ -1051,7 +1187,7 @@ const mutateRemoteFileEntry = async (mutation: FileEntryMutation): Promise<FileE
 }
 
 export const mutateFileEntry = async (mutation: FileEntryMutation, options: FileListOptions = {}): Promise<FileEntryMutationResult> => {
-  const result = options.kind === 'remote' ? await mutateRemoteFileEntry(mutation) : await mutateLocalFileEntry(mutation)
+  const result = options.kind === 'remote' ? (await mutateRemoteFileEntryViaSftp(mutation, options)) || (await mutateRemoteFileEntry(mutation)) : await mutateLocalFileEntry(mutation)
   if (!result.ok || !result.data?.path) return result
   const task = mutationTask(mutation, result.data.path, options)
   return task ? { ...result, data: { ...result.data, task } } : result
@@ -1063,21 +1199,24 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
     if (operation.kind === 'copy-remote') {
       const source = normalizeRemotePath(operation.remotePath)
       const target = normalizeRemotePath(operation.targetPath)
-      const result = await mutateRemoteFileEntry({ kind: 'copy', srcPath: source, targetPath: target, overwrite: operation.overwrite })
+      const result =
+        (await mutateRemoteFileEntryViaSftp({ kind: 'copy', srcPath: source, targetPath: target, overwrite: operation.overwrite }, options)) ||
+        (await mutateRemoteFileEntry({ kind: 'copy', srcPath: source, targetPath: target, overwrite: operation.overwrite }))
       if (!result.ok) return { ok: false, errorCode: result.errorCode, errorMessage: result.errorMessage }
-      const content = remoteFileContents[target]?.content || ''
+      const readResult = await readFileContent(result.data?.path || target, { ...options, kind: 'remote' })
+      const bytes = readResult.ok ? Buffer.byteLength(readResult.data?.content || '', 'utf-8') : 0
       const task = createFileTransferTaskRecord({
         type: 'r2r',
         name: basename(source),
         source,
-        target,
+        target: result.data?.path || target,
         progress: 100,
         speed: '完成',
         status: 'success',
         fromHost: transferFromHost(options),
         toHost: transferToHost(options)
       })
-      return { ok: true, data: { status: 'success', source, target, bytes: Buffer.byteLength(content, 'utf-8'), files: 1, mtimeMs, task } }
+      return { ok: true, data: { status: 'success', source, target: result.data?.path || target, bytes, files: 1, mtimeMs, task } }
     }
     if (operation.kind === 'download-file') {
       const source = normalizeRemotePath(operation.remotePath)

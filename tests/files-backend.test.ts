@@ -107,6 +107,74 @@ const ssh2Mock = vi.hoisted(() => {
       nodes.set(normalized, { type: 'file', content: Buffer.from(content), mode: 0o100644, mtime: 1_717_200_200 })
       callback(null)
     },
+    rename(oldPath: string, newPath: string, callback: (error?: Error | null) => void) {
+      const normalizedOld = normalize(oldPath)
+      const normalizedNew = normalize(newPath)
+      calls.push({ method: 'rename', oldPath: normalizedOld, newPath: normalizedNew })
+      const node = nodes.get(normalizedOld)
+      if (!node) {
+        callback(missingError(normalizedOld))
+        return
+      }
+      if (!nodes.has(dirname(normalizedNew))) {
+        callback(missingError(dirname(normalizedNew)))
+        return
+      }
+      nodes.set(normalizedNew, { ...node, mtime: 1_717_200_300 })
+      nodes.delete(normalizedOld)
+      for (const [entryPath, entryNode] of [...nodes.entries()]) {
+        if (!entryPath.startsWith(`${normalizedOld}/`)) continue
+        nodes.set(entryPath.replace(normalizedOld, normalizedNew), { ...entryNode, mtime: 1_717_200_300 })
+        nodes.delete(entryPath)
+      }
+      callback(null)
+    },
+    unlink(path: string, callback: (error?: Error | null) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'unlink', path: normalized })
+      const node = nodes.get(normalized)
+      if (!node) {
+        callback(missingError(normalized))
+        return
+      }
+      if (node.type === 'directory') {
+        callback(Object.assign(new Error(`${normalized} is a directory`), { code: 'EISDIR' }))
+        return
+      }
+      nodes.delete(normalized)
+      callback(null)
+    },
+    rmdir(path: string, callback: (error?: Error | null) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'rmdir', path: normalized })
+      const node = nodes.get(normalized)
+      if (!node) {
+        callback(missingError(normalized))
+        return
+      }
+      if (node.type !== 'directory') {
+        callback(Object.assign(new Error(`${normalized} is not a directory`), { code: 'ENOTDIR' }))
+        return
+      }
+      if ([...nodes.keys()].some((entryPath) => dirname(entryPath) === normalized && entryPath !== normalized)) {
+        callback(Object.assign(new Error(`${normalized} is not empty`), { code: 'ENOTEMPTY' }))
+        return
+      }
+      if (normalized !== '/') nodes.delete(normalized)
+      callback(null)
+    },
+    chmod(path: string, mode: number, callback: (error?: Error | null) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'chmod', path: normalized, mode })
+      const node = nodes.get(normalized)
+      if (!node) {
+        callback(missingError(normalized))
+        return
+      }
+      const typeMode = node.type === 'directory' ? 0o040000 : node.type === 'link' ? 0o120000 : 0o100000
+      nodes.set(normalized, { ...node, mode: typeMode | (mode & 0o777), mtime: 1_717_200_300 })
+      callback(null)
+    },
     mkdir(path: string, callback: (error?: Error | null) => void) {
       const normalized = normalize(path)
       calls.push({ method: 'mkdir', path: normalized })
@@ -150,6 +218,7 @@ const ssh2Mock = vi.hoisted(() => {
     ensureDirectory('/')
     ensureDirectory('/srv')
     ensureDirectory('/srv/logs')
+    ensureDirectory('/srv/archive')
     putFile('/srv/note.txt', 'remote note from sftp\n')
     putFile('/srv/logs/app.log', 'hello log\n', 0o100600)
   }
@@ -532,11 +601,12 @@ describe('files backend content boundary', () => {
     const sessionId = saveSftpAsset()
 
     const rows = await listFiles('/srv', { kind: 'remote', sessionId, host: 'client-host-ignored' })
-    expect(rows).toEqual([
+    expect(rows).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: '..', path: '/', type: 'directory' }),
+      expect.objectContaining({ name: 'archive', path: '/srv/archive', type: 'directory', mode: 'd755' }),
       expect.objectContaining({ name: 'logs', path: '/srv/logs', type: 'directory', mode: 'd755' }),
       expect.objectContaining({ name: 'note.txt', path: '/srv/note.txt', type: 'file', size: 22, mode: '-644' })
-    ])
+    ]))
 
     const read = await readFileContent('/srv/note.txt', { kind: 'remote', sessionId })
     expect(read).toEqual({
@@ -596,6 +666,100 @@ describe('files backend content boundary', () => {
     const read = await readFileContent('/srv/unknown.txt', { kind: 'remote', sessionId })
     expect(read).toMatchObject({ ok: true, data: { action: 'create', content: '' } })
     expect(ssh2Mock.calls).toEqual(expect.arrayContaining([{ method: 'stat', path: '/srv/unknown.txt' }]))
+  })
+
+  it('mutates remote entries through asset-backed SFTP operations', async () => {
+    const sessionId = saveSftpAsset()
+
+    const renamed = await mutateFileEntry({ kind: 'rename', oldPath: '/srv/note.txt', newPath: '/srv/renamed.txt' }, { kind: 'remote', sessionId })
+    expect(renamed.ok).toBe(true)
+    expect(ssh2Mock.nodes.has('/srv/note.txt')).toBe(false)
+    expect(ssh2Mock.nodes.get('/srv/renamed.txt')?.content?.toString('utf-8')).toBe('remote note from sftp\n')
+
+    const chmodded = await mutateFileEntry({ kind: 'chmod', path: '/srv/renamed.txt', mode: '600' }, { kind: 'remote', sessionId, host: 'sftp-ui' })
+    expect(chmodded.ok).toBe(true)
+    expect(chmodded.data).toEqual(
+      expect.objectContaining({
+        mode: '600',
+        task: expect.objectContaining({
+          type: 'r2r',
+          name: 'chmod renamed.txt',
+          source: '/srv/renamed.txt',
+          target: 'permissions',
+          fromHost: 'sftp-ui',
+          toHost: 'sftp-ui',
+          status: 'success'
+        })
+      })
+    )
+    expect(ssh2Mock.nodes.get('/srv/renamed.txt')?.mode).toBe(0o100600)
+
+    const copied = await mutateFileEntry({ kind: 'copy', srcPath: '/srv/renamed.txt', targetPath: '/srv/archive/copied.txt' }, { kind: 'remote', sessionId })
+    expect(copied.ok).toBe(true)
+    expect(ssh2Mock.nodes.get('/srv/archive/copied.txt')?.content?.toString('utf-8')).toBe('remote note from sftp\n')
+
+    const moved = await mutateFileEntry({ kind: 'move', srcPath: '/srv/renamed.txt', targetPath: '/srv/archive/moved.txt' }, { kind: 'remote', sessionId })
+    expect(moved.ok).toBe(true)
+    expect(ssh2Mock.nodes.has('/srv/renamed.txt')).toBe(false)
+    expect(ssh2Mock.nodes.get('/srv/archive/moved.txt')?.content?.toString('utf-8')).toBe('remote note from sftp\n')
+
+    const deleted = await mutateFileEntry({ kind: 'delete', path: '/srv/archive/copied.txt' }, { kind: 'remote', sessionId })
+    expect(deleted.ok).toBe(true)
+    expect(deleted.data.task).toEqual(
+      expect.objectContaining({
+        type: 'r2r',
+        name: 'delete copied.txt',
+        source: '/srv/archive/copied.txt',
+        target: '/srv/archive',
+        status: 'success'
+      })
+    )
+    expect(ssh2Mock.nodes.has('/srv/archive/copied.txt')).toBe(false)
+    expect(ssh2Mock.calls).toEqual(
+      expect.arrayContaining([
+        { method: 'rename', oldPath: '/srv/note.txt', newPath: '/srv/renamed.txt' },
+        { method: 'chmod', path: '/srv/renamed.txt', mode: 0o600 },
+        { method: 'readFile', path: '/srv/renamed.txt' },
+        { method: 'writeFile', path: '/srv/archive/copied.txt', content: 'remote note from sftp\n' },
+        { method: 'rename', oldPath: '/srv/renamed.txt', newPath: '/srv/archive/moved.txt' },
+        { method: 'unlink', path: '/srv/archive/copied.txt' }
+      ])
+    )
+  })
+
+  it('copies remote transfer entries through asset-backed SFTP operations', async () => {
+    const sessionId = saveSftpAsset()
+
+    const copied = await transferFileEntry(
+      { kind: 'copy-remote', remotePath: '/srv/logs/app.log', targetPath: '/srv/archive/app-copy.log' },
+      { kind: 'remote', sessionId, fromHost: 'sftp-source', toHost: 'sftp-target' }
+    )
+    expect(copied.ok).toBe(true)
+    expect(copied.data).toEqual(
+      expect.objectContaining({
+        status: 'success',
+        source: '/srv/logs/app.log',
+        target: '/srv/archive/app-copy.log',
+        bytes: 10,
+        files: 1,
+        task: expect.objectContaining({
+          type: 'r2r',
+          name: 'app.log',
+          source: '/srv/logs/app.log',
+          target: '/srv/archive/app-copy.log',
+          fromHost: 'sftp-source',
+          toHost: 'sftp-target',
+          status: 'success'
+        })
+      })
+    )
+    expect(ssh2Mock.nodes.get('/srv/archive/app-copy.log')?.content?.toString('utf-8')).toBe('hello log\n')
+    expect(ssh2Mock.calls).toEqual(
+      expect.arrayContaining([
+        { method: 'readFile', path: '/srv/logs/app.log' },
+        { method: 'writeFile', path: '/srv/archive/app-copy.log', content: 'hello log\n' }
+      ])
+    )
   })
 
   it('returns create mode for missing remote files and persists writes', async () => {
