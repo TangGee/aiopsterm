@@ -635,26 +635,36 @@ const handlePaste = async (event: ClipboardEvent) => {
   const items = event.clipboardData?.items ? Array.from(event.clipboardData.items) : []
   const item = items.find((entry) => entry.type.startsWith('image/'))
   const file = item?.getAsFile()
-  if (!file || !window.aiops?.kbWriteFile) return
+  if (!file) return
   event.preventDefault()
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('Failed to read pasted image'))
-    reader.readAsDataURL(file)
-  })
-  const base64 = dataUrl.split(',')[1] || ''
-  if (!base64) return
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const fileName = `pasted-image-${timestamp}.${imageExtensionFromMime(file.type)}`
-  const imageRelPath = createRelPath(getParentRelDir(relPath.value), fileName)
-  await window.aiops.kbWriteFile(imageRelPath, base64, 'base64')
-  imageCache.set(imageRelPath, dataUrl)
-  insertAtCursor(`![](${fileName})`)
-  dirty.value = true
-  scheduleSave()
-  void renderMarkdownPreview()
-  void workspace.refreshKnowledgeTree()
+  error.value = ''
+  const writeFile = window.aiops?.kbWriteFile
+  if (typeof writeFile !== 'function') {
+    error.value = 'Knowledge image paste service unavailable'
+    return
+  }
+  try {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('Failed to read pasted image'))
+      reader.readAsDataURL(file)
+    })
+    const base64 = dataUrl.split(',')[1] || ''
+    if (!base64) throw new Error('Pasted image data is empty')
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const fileName = `pasted-image-${timestamp}.${imageExtensionFromMime(file.type)}`
+    const imageRelPath = createRelPath(getParentRelDir(relPath.value), fileName)
+    await writeFile(imageRelPath, base64, 'base64')
+    imageCache.set(imageRelPath, dataUrl)
+    insertAtCursor(`![](${fileName})`)
+    dirty.value = true
+    scheduleSave()
+    void renderMarkdownPreview()
+    void workspace.refreshKnowledgeTree()
+  } catch (pasteError) {
+    error.value = pasteError instanceof Error ? pasteError.message : 'Failed to paste image'
+  }
 }
 
 watch(() => [props.relPath, props.isImage] as const, loadFile)

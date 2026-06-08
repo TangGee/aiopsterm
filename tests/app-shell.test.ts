@@ -184,6 +184,7 @@ import WorkspacePanel from '@/components/panels/WorkspacePanel.vue'
 import FilesPanel from '@/components/panels/FilesPanel.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import KnowledgePanel from '@/components/panels/KnowledgePanel.vue'
+import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import ExtensionsPanel from '@/components/panels/ExtensionsPanel.vue'
 import KubernetesPanel from '@/components/panels/KubernetesPanel.vue'
 import SettingsPanel from '@/components/panels/SettingsPanel.vue'
@@ -4354,6 +4355,95 @@ describe('AppShell', () => {
     aiPanel.unmount()
     workspace.unmount()
     panel.unmount()
+  })
+
+  it('prevents markdown image paste when the knowledge image write bridge is unavailable or fails', async () => {
+    const originalKbWriteFile = window.aiops.kbWriteFile
+    const originalFileReader = window.FileReader
+    const originalGlobalFileReader = globalThis.FileReader
+
+    class MockFileReader {
+      result = 'data:image/png;base64,cGFzdGVkLWltYWdl'
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      readAsDataURL() {
+        this.onload?.()
+      }
+    }
+
+    const mountEditor = async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(KnowledgeCenterEditor, {
+        attachTo: document.body,
+        props: { relPath: 'runbooks/paste.md' },
+        global: {
+          plugins: [pinia],
+          stubs: {
+            KnowledgeMonacoEditor: {
+              props: ['modelValue'],
+              template: '<textarea class="kb-editor-textarea" :value="modelValue" />'
+            }
+          }
+        }
+      })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      return wrapper
+    }
+
+    const createImagePasteEvent = () => {
+      const pastedFile = new File(['image-bytes'], 'clip.png', { type: 'image/png' })
+      const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+      Object.defineProperty(event, 'clipboardData', {
+        configurable: true,
+        value: {
+          items: [
+            {
+              type: 'image/png',
+              getAsFile: () => pastedFile
+            }
+          ]
+        }
+      })
+      return event
+    }
+
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockFileReader })
+
+    try {
+      vi.mocked(originalKbWriteFile).mockClear()
+      ;(window.aiops as any).kbWriteFile = undefined
+      const missingBridgeWrapper = await mountEditor()
+      const missingBridgeEvent = createImagePasteEvent()
+      missingBridgeWrapper.find('.kb-editor-root').element.dispatchEvent(missingBridgeEvent)
+      await flushPromises()
+      await missingBridgeWrapper.vm.$nextTick()
+      expect(missingBridgeEvent.defaultPrevented).toBe(true)
+      expect(missingBridgeWrapper.text()).toContain('Knowledge image paste service unavailable')
+      expect(missingBridgeWrapper.text()).not.toContain('![](pasted-image-')
+      expect(originalKbWriteFile).not.toHaveBeenCalled()
+      missingBridgeWrapper.unmount()
+
+      ;(window.aiops as any).kbWriteFile = originalKbWriteFile
+      vi.mocked(originalKbWriteFile).mockClear()
+      vi.mocked(originalKbWriteFile).mockRejectedValueOnce(new Error('image write failed'))
+      const failedWriteWrapper = await mountEditor()
+      const failedWriteEvent = createImagePasteEvent()
+      failedWriteWrapper.find('.kb-editor-root').element.dispatchEvent(failedWriteEvent)
+      await flushPromises()
+      await failedWriteWrapper.vm.$nextTick()
+      expect(failedWriteEvent.defaultPrevented).toBe(true)
+      expect(originalKbWriteFile).toHaveBeenCalledWith(expect.stringMatching(/^runbooks\/pasted-image-.*\.png$/), 'cGFzdGVkLWltYWdl', 'base64')
+      expect(failedWriteWrapper.text()).toContain('image write failed')
+      expect(failedWriteWrapper.text()).not.toContain('![](pasted-image-')
+      failedWriteWrapper.unmount()
+    } finally {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+      ;(window.aiops as any).kbWriteFile = originalKbWriteFile
+    }
   })
 
   it('matches External reference-style extension list, plugin details, built-ins, and Alias CRUD', async () => {
