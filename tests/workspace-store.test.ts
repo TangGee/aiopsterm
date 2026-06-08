@@ -5487,6 +5487,74 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate privacy setting writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialSnapshot = JSON.stringify({
+      privacy: store.config.privacy,
+      settings: {
+        telemetry: store.privacySettings.telemetry,
+        secretRedaction: store.privacySettings.secretRedaction,
+        dataSync: store.privacySettings.dataSync
+      }
+    })
+    const assertPrivacyUnchanged = () => {
+      expect(
+        JSON.stringify({
+          privacy: store.config.privacy,
+          settings: {
+            telemetry: store.privacySettings.telemetry,
+            secretRedaction: store.privacySettings.secretRedaction,
+            dataSync: store.privacySettings.dataSync
+          }
+        })
+      ).toBe(initialSnapshot)
+    }
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('隐私设置保存服务不可用')
+      assertPrivacyUnchanged()
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('隐私设置保存失败')
+      assertPrivacyUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        privacy: {
+          telemetry: 'enabled',
+          secretRedaction: 'disabled',
+          dataSync: 'disabled'
+        }
+      } as any)
+      await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('隐私设置保存失败')
+      assertPrivacyUnchanged()
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('privacy save offline'))
+      await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('privacy save offline')
+      assertPrivacyUnchanged()
+
+      await expect(store.updatePrivacySettings({ telemetry: 'disabled', secretRedaction: 'enabled', dataSync: 'enabled' })).resolves.toBe(true)
+      expect(store.settingsNotice).toBe('隐私设置已保存')
+      expect(store.privacySettings.telemetry).toBe('disabled')
+      expect(store.privacySettings.secretRedaction).toBe('enabled')
+      expect(store.privacySettings.dataSync).toBe('enabled')
+      expect(store.config.privacy).toEqual({
+        telemetry: 'disabled',
+        secretRedaction: 'enabled',
+        dataSync: 'enabled'
+      })
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
   it('manages remaining External reference-style settings lists and toggles', async () => {
     const store = useWorkspaceStore()
 
@@ -5992,7 +6060,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.userProfile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updatePrivacySettings({ telemetry: 'disabled', secretRedaction: 'enabled' })
+    await expect(store.updatePrivacySettings({ telemetry: 'disabled', secretRedaction: 'enabled' })).resolves.toBe(true)
     expect(store.privacySettings.telemetry).toBe('disabled')
     expect(store.privacySettings.secretRedaction).toBe('enabled')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -6005,7 +6073,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       })
     )
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updatePrivacySettings({ deactivateModalOpen: true })
+    await expect(store.updatePrivacySettings({ deactivateModalOpen: true })).resolves.toBe(true)
     expect(store.privacySettings.deactivateModalOpen).toBe(true)
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
 

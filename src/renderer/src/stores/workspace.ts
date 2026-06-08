@@ -3618,6 +3618,44 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     dataSync: privacySettings.value.dataSync
   })
 
+  const persistPrivacySettings = async (nextPrivacy: PrivacyUserConfig) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('隐私设置保存服务不可用')
+      return false
+    }
+    try {
+      const savedConfig = await saveConfigBridge({
+        privacy: { ...nextPrivacy }
+      })
+      if (!isRecord(savedConfig) || !isRecord(savedConfig.privacy)) {
+        setSettingsNotice('隐私设置保存失败')
+        return false
+      }
+      const savedPrivacy = normalizePrivacyConfig(savedConfig.privacy).normalized
+      if (
+        savedPrivacy.telemetry !== nextPrivacy.telemetry ||
+        savedPrivacy.secretRedaction !== nextPrivacy.secretRedaction ||
+        savedPrivacy.dataSync !== nextPrivacy.dataSync
+      ) {
+        setSettingsNotice('隐私设置保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        privacy: savedPrivacy
+      } as Partial<UserConfig>)
+      privacySettings.value = {
+        ...privacySettings.value,
+        ...savedPrivacy
+      }
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '隐私设置保存失败')
+      return false
+    }
+  }
+
   const getAiPreferencesSnapshot = (): AiPreferencesUserConfig => ({
     ...aiPreferences.value,
     proxy: { ...aiPreferences.value.proxy }
@@ -4805,17 +4843,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const updatePrivacySettings = (patch: Partial<PrivacySettings>) => {
+  const updatePrivacySettings = async (patch: Partial<PrivacySettings>) => {
+    const hasPersistentPatch = 'telemetry' in patch || 'secretRedaction' in patch || 'dataSync' in patch
+    const localPatch = {
+      ...(('deactivateModalOpen' in patch) ? { deactivateModalOpen: patch.deactivateModalOpen } : {}),
+      ...(('deactivateConfirmationInput' in patch) ? { deactivateConfirmationInput: patch.deactivateConfirmationInput } : {})
+    }
+    if (Object.keys(localPatch).length) {
+      privacySettings.value = {
+        ...privacySettings.value,
+        ...localPatch
+      }
+    }
+    if (!hasPersistentPatch) {
+      return true
+    }
     const nextPersistent = normalizePrivacyConfig({ ...getPrivacySnapshot(), ...patch }).normalized
-    privacySettings.value = {
-      ...privacySettings.value,
-      ...patch,
-      ...nextPersistent
-    }
-    if ('telemetry' in patch || 'secretRedaction' in patch || 'dataSync' in patch) {
-      saveConfig({ privacy: getPrivacySnapshot() })
-    }
+    const saved = await persistPrivacySettings(nextPersistent)
+    if (!saved) return false
     setSettingsNotice('隐私设置已保存')
+    return true
   }
 
   const updateBillingSettings = (patch: Partial<BillingSettings>) => {

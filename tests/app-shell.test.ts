@@ -7054,6 +7054,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Secret Redaction')
     const secretRadios = workspace.findAll('input[name="secretRedaction"]')
     await secretRadios[0].setValue(true)
+    await flushPromises()
     expect(store.privacySettings.secretRedaction).toBe('enabled')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
