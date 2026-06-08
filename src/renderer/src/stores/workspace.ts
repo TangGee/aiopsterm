@@ -6092,23 +6092,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       .join('')
   }
 
-  const runQuickCommand = (id: number, autoExecute = true, allTabs = false) => {
+  const resolveQuickCommandPanelIds = (allTabs: boolean) => {
+    const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
+    if (allTabs) {
+      const writablePanelIds = terminalPanels.filter((panel) => panel.sessionId).map((panel) => panel.id)
+      return writablePanelIds.length ? writablePanelIds : terminalPanels.map((panel) => panel.id)
+    }
+    const targetPanel = activePanel.value.kind === 'knowledge' ? terminalPanels[0] || activePanel.value : activePanel.value
+    return [targetPanel.id]
+  }
+
+  const runQuickCommand = async (id: number, autoExecute = true, allTabs = false) => {
     const command = quickCommands.value.find((item) => item.id === id)
     if (!command) return
     const payload = serializeSnippetScript(command.snippet_content, autoExecute)
     const securityCommand = parseSnippetScript(command.snippet_content).find((item) => item.type === 'COMMAND')?.payload || command.snippet_name
-    const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
-    const targetPanelIds = allTabs ? terminalPanels.map((panel) => panel.id) : [activePanel.value.kind === 'knowledge' ? terminalPanels[0]?.id || activePanel.value.id : activePanel.value.id]
+    const targetPanelIds = resolveQuickCommandPanelIds(allTabs)
     const decision = prepareTerminalSecurityExecution({
       command: securityCommand,
       panelIds: targetPanelIds,
-      inputText: `\n${payload}`,
-      outputText: `[snippet] ${command.snippet_name}\n$ `,
+      inputText: payload,
       shellText: payload,
-      writeToShell: false,
+      writeToShell: true,
       source: 'snippet'
     })
-    return decision
+    if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
+    return writeTerminalExecution(decision.execution)
   }
 
   const clearMacroAutoStopTimer = () => {

@@ -254,7 +254,7 @@
             'drag-over-up': dragOverIndex === index && dragDirection === 'up' && !workspace.snippetSearchQuery,
             'drag-over-down': dragOverIndex === index && dragDirection === 'down' && !workspace.snippetSearchQuery
           }"
-          @click="workspace.runQuickCommand(command.id, true)"
+          @click="runCommand(command.id, true)"
           @contextmenu.prevent="openCommandMenu($event, command.id)"
           @dragstart="handleDragStart(command.id, index)"
           @dragover.prevent="handleDragOver(index)"
@@ -275,13 +275,13 @@
           >
             <button
               title="运行"
-              @click="workspace.runQuickCommand(command.id, true)"
+              @click="runCommand(command.id, true)"
             >
               <PlayCircle />
             </button>
             <button
               title="粘贴"
-              @click="workspace.runQuickCommand(command.id, false)"
+              @click="runCommand(command.id, false)"
             >
               <Copy />
             </button>
@@ -505,6 +505,10 @@ const toggleMacroRecording = async () => {
 
 const groupCount = (uuid: string) => workspace.quickCommands.filter((command) => command.group_uuid === uuid).length
 
+const runCommand = (id: number, autoExecute: boolean, allTabs = false) => {
+  void workspace.runQuickCommand(id, autoExecute, allTabs)
+}
+
 const openCommandMenu = (event: MouseEvent, commandId: number) => {
   groupMenu.visible = false
   commandMenu.visible = true
@@ -522,7 +526,7 @@ const openGroupMenu = (event: MouseEvent, groupUuid: string) => {
 }
 
 const runCommandInAllTabs = () => {
-  workspace.runQuickCommand(commandMenu.commandId, true, true)
+  runCommand(commandMenu.commandId, true, true)
   commandMenu.visible = false
 }
 

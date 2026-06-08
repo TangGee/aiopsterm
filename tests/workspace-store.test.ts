@@ -3194,20 +3194,40 @@ describe('workspace store', () => {
     store.selectedSnippetGroupUuid = 'group-monitor'
     expect(store.filteredQuickCommands.every((command) => command.group_uuid === 'group-monitor')).toBe(true)
 
-    store.runQuickCommand(1, false)
+    store.activePanel.sessionId = 'quick-command-session'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const quickCommandDecision = await store.runQuickCommand(1, false)
+    expect(quickCommandDecision?.status).toBe('allow')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'df -h\ndu -sh * | sort -h')
     expect(store.activePanel.output).toContain('df -h')
     expect(store.activePanel.output).toContain('du -sh * | sort -h')
+    expect(store.activePanel.output).not.toContain('[snippet]')
+
+    store.activePanel.sessionId = undefined
+    const outputBeforeUnavailableSnippet = store.activePanel.output
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const unavailableSnippetDecision = await store.runQuickCommand(1, false)
+    expect(unavailableSnippetDecision?.status).toBe('unavailable')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.activePanel.output).toBe(outputBeforeUnavailableSnippet)
 
     const dangerousSnippet = await store.createQuickCommand({ snippet_name: '危险删除', snippet_content: 'rm /tmp/file', group_uuid: null })
     expect(dangerousSnippet).toBeTruthy()
     expect(dangerousSnippet?.uuid).toMatch(/^quick-snippet-test-/)
     vi.mocked(window.aiops.saveQuickCommandSnippet).mockClear()
-    const decision = store.runQuickCommand(dangerousSnippet!.id, true)
+    store.activePanel.sessionId = 'quick-command-session'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const decision = await store.runQuickCommand(dangerousSnippet!.id, true)
     expect(decision?.status).toBe('needs-approval')
     expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/file')
     expect(store.activePanel.output).not.toContain('[snippet] 危险删除')
-    store.approveTerminalSecurityPrompt()
-    expect(store.activePanel.output).toContain('[snippet] 危险删除')
+    const approvedSnippetExecution = store.approveTerminalSecurityPrompt()
+    expect(approvedSnippetExecution?.writeToShell).toBe(true)
+    const approvedSnippetDecision = await store.writeTerminalExecution(approvedSnippetExecution!)
+    expect(approvedSnippetDecision?.status).toBe('allow')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'rm /tmp/file\n')
+    expect(store.activePanel.output).toContain('rm /tmp/file')
+    expect(store.activePanel.output).not.toContain('[snippet] 危险删除')
 
     await store.createSnippetGroup('发布命令')
     const group = store.snippetGroups.find((item) => item.group_name === '发布命令')

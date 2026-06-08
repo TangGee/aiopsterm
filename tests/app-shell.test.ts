@@ -3511,10 +3511,16 @@ describe('AppShell', () => {
     expect(store.quickCommands.some((command) => command.snippet_name === '新片段')).toBe(true)
 
     const commandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('磁盘巡检'))!
+    store.panels[0].sessionId = 'snippet-panel-main'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
     await commandCard.trigger('contextmenu')
     expect(wrapper.find('.snippet-context-menu').exists()).toBe(true)
     await wrapper.find('.snippet-context-menu').findAll('button').find((button) => button.text().includes('全部窗口执行'))!.trigger('click')
-    expect(store.panels[0].output).toContain('[snippet] 磁盘巡检')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('snippet-panel-main', 'df -h\ndu -sh * | sort -h\n')
+    expect(store.panels[0].output).toContain('df -h')
+    expect(store.panels[0].output).toContain('du -sh * | sort -h')
+    expect(store.panels[0].output).not.toContain('[snippet] 磁盘巡检')
 
     await wrapper.find('button[title="宏录制"]').trigger('click')
     expect(store.isMacroRecording).toBe(true)
@@ -3579,7 +3585,10 @@ describe('AppShell', () => {
       group_uuid: null
     }))!
 
-    store.runQuickCommand(command.id, false)
+    store.activePanel.sessionId = 'snippet-paste-session'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    await store.runQuickCommand(command.id, false)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('snippet-paste-session', 'echo first\necho second')
     expect(store.activePanel.output).toContain('echo first')
     expect(store.activePanel.output).toContain('echo second')
     expect(store.activePanel.output).not.toContain('echo second\n[snippet]')
