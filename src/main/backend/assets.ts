@@ -79,7 +79,30 @@ const defaultKeychainSecrets: Record<string, AssetSecret> = {
   }
 }
 
+const LOCAL_SHELL_ASSET_ID = 'local-127-1'
+
+const localShellAsset: AiopsAssetRecord = {
+  id: LOCAL_SHELL_ASSET_ID,
+  uuid: LOCAL_SHELL_ASSET_ID,
+  name: '127.0.0.1',
+  title: '127.0.0.1',
+  host: '127.0.0.1',
+  ip: '127.0.0.1',
+  group: '本地连接',
+  group_name: '本地连接',
+  status: 'online',
+  tags: ['local'],
+  username: 'local',
+  port: 22,
+  asset_type: 'person',
+  auth_type: 'password',
+  comment: '',
+  data_source: 'manual',
+  isLocalShell: true
+}
+
 const defaultAssets: AiopsAssetRecord[] = [
+  localShellAsset,
   {
     id: 'asset-1',
     uuid: 'asset-1',
@@ -187,6 +210,11 @@ const cloneAsset = (asset: AiopsAssetRecord): AiopsAssetRecord => ({
   ...asset,
   tags: [...asset.tags]
 })
+
+const withLocalShellAsset = (assets: AiopsAssetRecord[]): AiopsAssetRecord[] => [
+  cloneAsset(localShellAsset),
+  ...assets.filter((asset) => asset.id !== LOCAL_SHELL_ASSET_ID && asset.uuid !== LOCAL_SHELL_ASSET_ID && !asset.isLocalShell).map(cloneAsset)
+]
 
 const cloneFolder = (folder: AiopsCustomFolderRecord): AiopsCustomFolderRecord => ({ ...folder })
 
@@ -316,8 +344,9 @@ class FallbackAssetStore {
 
   list(): AiopsAssetSnapshot {
     const secrets = this.store.get('secrets') || {}
+    const assets = withLocalShellAsset(this.store.get('assets') || [])
     return {
-      assets: (this.store.get('assets') || []).map((asset) => sanitizeAsset(asset, secrets[asset.id])),
+      assets: assets.map((asset) => sanitizeAsset(asset, secrets[asset.id])),
       folders: (this.store.get('folders') || []).map(cloneFolder)
     }
   }
@@ -480,8 +509,11 @@ class SqliteAssetStore {
   }
 
   list(): AiopsAssetSnapshot {
+    const rows = this.rawAssets()
+    const rawAssets = withLocalShellAsset(rows.map(({ asset }) => asset))
+    const secrets = new Map(rows.map(({ asset, secret }) => [asset.id, secret]))
     return {
-      assets: this.rawAssets().map(({ asset, secret }) => sanitizeAsset(asset, secret)),
+      assets: rawAssets.map((asset) => sanitizeAsset(asset, secrets.get(asset.id))),
       folders: this.db
         .prepare('SELECT data FROM asset_folders ORDER BY json_extract(data, "$.name") ASC')
         .all()
@@ -630,6 +662,10 @@ const asResult = <T>(fn: () => T): AiopsMutationResult<T> => {
   }
 }
 
+const assertUserEditableAsset = (id?: string) => {
+  if (id === LOCAL_SHELL_ASSET_ID) throw new Error('本地连接是系统资产，不能编辑或删除')
+}
+
 const refreshedAssetForOrganization = (organization: AiopsAssetRecord, index: number): AiopsAssetInput => {
   const baseName = organization.title || organization.name || organization.host || 'organization'
   const hostOctet = 15 + index
@@ -658,9 +694,14 @@ export const listAssets = (): AiopsAssetSnapshot => getStore().list()
 export const getAsset = (id: string): AiopsAssetRecord | null => getStore().getAsset(id)
 export const getAssetSecret = (id: string): AssetSecret => getStore().getSecret(id)
 export const getKeychainSecret = (id: string): AssetSecret => getStore().getKeychainSecret(id)
-export const saveAsset = (input: AiopsAssetInput): AiopsMutationResult<AiopsAssetRecord> => asResult(() => getStore().save(input))
+export const saveAsset = (input: AiopsAssetInput): AiopsMutationResult<AiopsAssetRecord> =>
+  asResult(() => {
+    assertUserEditableAsset(input.id)
+    return getStore().save(input)
+  })
 export const deleteAsset = (id: string): AiopsMutationResult<{ id: string }> =>
   asResult(() => {
+    assertUserEditableAsset(id)
     getStore().delete(id)
     return { id }
   })

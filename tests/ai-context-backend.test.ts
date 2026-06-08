@@ -59,6 +59,9 @@ describe('AI context catalog backend boundary', () => {
         expect.objectContaining({ id: 'asset-3', label: '10.32.6.9' })
       ])
     )
+    expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'hosts')?.options).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'local-127-1' })])
+    )
     expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'chats')?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'chat:conv-1', label: '生产巡检' }),

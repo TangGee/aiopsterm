@@ -183,7 +183,7 @@
         从文件夹移除
       </button>
       <button
-        v-if="contextAsset.asset_type === 'person'"
+        v-if="contextAsset.asset_type === 'person' && !contextAsset.isLocalShell"
         @click="toggleTunnel"
       >
         <Network />
@@ -196,12 +196,15 @@
         <PlugZap />
         连接
       </button>
-      <button @click="editContextAsset">
+      <button
+        v-if="!contextAsset.isLocalShell"
+        @click="editContextAsset"
+      >
         <Pencil />
         编辑
       </button>
       <button
-        v-if="contextAsset.asset_type !== 'organization'"
+        v-if="contextAsset.asset_type !== 'organization' && !contextAsset.isLocalShell"
         @click="cloneContextAsset"
       >
         <Copy />
@@ -222,6 +225,7 @@
         管理资产
       </button>
       <button
+        v-if="!contextAsset.isLocalShell"
         class="delete"
         @click="openDeleteContextAsset"
       >
@@ -744,34 +748,16 @@ const hostFormError = ref('')
 const deleteAssetModal = reactive({ visible: false, assetId: '' })
 const managementModal = reactive({ visible: false, organizationId: '', query: '' })
 
-const directAssets = computed(() => workspaceAssets.value.filter((asset) => asset.asset_type === 'person' || asset.asset_type === 'switch'))
-const organizationAssets = computed(() => workspaceAssets.value.filter((asset) => asset.asset_type === 'organization'))
-const bastionResourceAssets = computed(() => workspaceAssets.value.filter((asset) => asset.asset_type !== 'organization' && (asset.organizationId || asset.folderUuid)))
+const localShellAssets = computed(() => workspaceAssets.value.filter((asset) => asset.isLocalShell))
+const directAssets = computed(() => workspaceAssets.value.filter((asset) => !asset.isLocalShell && (asset.asset_type === 'person' || asset.asset_type === 'switch')))
+const organizationAssets = computed(() => workspaceAssets.value.filter((asset) => !asset.isLocalShell && asset.asset_type === 'organization'))
+const bastionResourceAssets = computed(() => workspaceAssets.value.filter((asset) => !asset.isLocalShell && asset.asset_type !== 'organization' && (asset.organizationId || asset.folderUuid)))
 const showIpMode = computed(() => workspace.workspacePreferences.showIpMode)
 const expandedGroups = computed(() => workspace.workspacePreferences.expandedGroups)
 
-const createLocalShellAsset = (): WorkspaceAsset => ({
-  id: 'local-127-1',
-  uuid: 'local-127-1',
-  name: '127.0.0.1',
-  title: '127.0.0.1',
-  host: '127.0.0.1',
-  ip: '127.0.0.1',
-  group: '本地连接',
-  group_name: '本地连接',
-  status: 'online',
-  tags: ['local'],
-  username: 'local',
-  port: 22,
-  asset_type: 'person',
-  auth_type: 'password',
-  data_source: 'manual',
-  comment: '',
-  isLocalShell: true
-})
-
 const buildDirectGroups = (): WorkspaceGroup[] => {
   const source = directAssets.value
+  const localAssets = localShellAssets.value
   const recentIds = new Set(['asset-1', 'asset-2'])
   const groupNames = [...new Set([...defaultDirectGroups, ...source.map((asset) => asset.group).filter(Boolean)])]
   const groups: WorkspaceGroup[] = [
@@ -798,13 +784,13 @@ const buildDirectGroups = (): WorkspaceGroup[] => {
     {
       key: 'local_connections',
       title: '本地连接',
-      children: [createLocalShellAsset()],
-      originalCount: 1,
+      children: localAssets,
+      originalCount: localAssets.length,
       type: 'system',
       menu: false
     }
   ]
-  return groups.filter((group) => group.children.length > 0 || group.key === 'local_connections')
+  return groups.filter((group) => group.children.length > 0)
 }
 
 const buildBastionGroups = (): WorkspaceGroup[] => {
@@ -867,8 +853,10 @@ const allAssets = computed(() => sourceGroups.value.flatMap((group) => group.chi
 const contextAsset = computed(() => allAssets.value.find((asset) => asset.id === contextMenuAssetId.value) || null)
 const contextGroup = computed(() => sourceGroups.value.find((group) => group.key === contextMenuGroupKey.value) || null)
 const canCommentContextAsset = computed(() => activeWorkspace.value === 'bastion' && !!contextAsset.value && !contextAsset.value.isLocalShell)
-const canMoveContextAsset = computed(() => activeWorkspace.value === 'bastion' && !!contextAsset.value && contextAsset.value.asset_type !== 'organization' && !contextAsset.value.folderUuid)
-const canRemoveContextAssetFromFolder = computed(() => activeWorkspace.value === 'bastion' && !!contextAsset.value?.folderUuid)
+const canMoveContextAsset = computed(
+  () => activeWorkspace.value === 'bastion' && !!contextAsset.value && !contextAsset.value.isLocalShell && contextAsset.value.asset_type !== 'organization' && !contextAsset.value.folderUuid
+)
+const canRemoveContextAssetFromFolder = computed(() => activeWorkspace.value === 'bastion' && !!contextAsset.value?.folderUuid && !contextAsset.value.isLocalShell)
 const canConnectContextAsset = computed(() => !!contextAsset.value && contextAsset.value.asset_type !== 'organization')
 const hostModalTitle = computed(() => {
   if (hostModal.mode === 'edit') return '编辑主机'
@@ -1021,12 +1009,12 @@ const countAssetMenuItems = (asset: WorkspaceAsset) => {
   const items = [
     asset.favorite !== undefined,
     activeWorkspace.value === 'bastion' && !asset.isLocalShell,
-    activeWorkspace.value === 'bastion' && asset.asset_type !== 'organization' && !asset.folderUuid,
-    activeWorkspace.value === 'bastion' && !!asset.folderUuid,
-    asset.asset_type === 'person',
-    asset.asset_type !== 'organization',
+    activeWorkspace.value === 'bastion' && !asset.isLocalShell && asset.asset_type !== 'organization' && !asset.folderUuid,
+    activeWorkspace.value === 'bastion' && !asset.isLocalShell && !!asset.folderUuid,
+    asset.asset_type === 'person' && !asset.isLocalShell,
     true,
-    asset.asset_type !== 'organization',
+    !asset.isLocalShell,
+    asset.asset_type !== 'organization' && !asset.isLocalShell,
     asset.asset_type === 'organization',
     asset.asset_type === 'organization',
     !asset.isLocalShell

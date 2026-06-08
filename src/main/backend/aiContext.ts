@@ -41,7 +41,7 @@ const sortAssetsForContext = (assets: AiopsAssetRecord[]) =>
   })
 
 const buildHostOptions = () => {
-  const assets = sortAssetsForContext(listAssets().assets.filter((asset) => asset.host || asset.ip || asset.name))
+  const assets = sortAssetsForContext(listAssets().assets.filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name)))
   const hosts = [localHostContext(), ...assets.map(assetToHostContext)]
   const deduped = new Map<string, AiContextOption>()
   hosts.forEach((host) => {

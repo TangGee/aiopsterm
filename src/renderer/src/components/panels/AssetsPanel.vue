@@ -1028,7 +1028,7 @@ const saveAssetRecord = async (input: AiopsAssetInput) => {
 }
 
 const applyAssetSnapshot = (snapshot?: { assets: AiopsAssetRecord[] }) => {
-  assets.value = (snapshot?.assets || []).map((asset) => ({ ...asset, tags: [...asset.tags] }))
+  assets.value = (snapshot?.assets || []).filter((asset) => !asset.isLocalShell).map((asset) => ({ ...asset, tags: [...asset.tags] }))
 }
 
 const deleteAssetRecords = async (assetIds: string[]) => {

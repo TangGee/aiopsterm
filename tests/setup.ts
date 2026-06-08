@@ -2391,6 +2391,7 @@ type TestAssetRecord = {
   keychainId?: string
   hasPassword?: boolean
   hasPrivateKey?: boolean
+  isLocalShell?: boolean
 }
 
 type TestAssetInput = Partial<TestAssetRecord> & {
@@ -2654,7 +2655,30 @@ const defaultKeychains: TestKeychainRecord[] = [
   }
 ]
 
+const LOCAL_SHELL_ASSET_ID = 'local-127-1'
+
+const localShellAsset: TestAssetRecord = {
+  id: LOCAL_SHELL_ASSET_ID,
+  uuid: LOCAL_SHELL_ASSET_ID,
+  name: '127.0.0.1',
+  title: '127.0.0.1',
+  host: '127.0.0.1',
+  ip: '127.0.0.1',
+  group: '本地连接',
+  group_name: '本地连接',
+  status: 'online',
+  tags: ['local'],
+  username: 'local',
+  port: 22,
+  asset_type: 'person',
+  auth_type: 'password',
+  comment: '',
+  data_source: 'manual',
+  isLocalShell: true
+}
+
 const defaultAssets: TestAssetRecord[] = [
+  localShellAsset,
   {
     id: 'asset-1',
     uuid: 'asset-1',
@@ -2817,7 +2841,7 @@ const aiContextCatalogResultMock = () => {
   const hosts = [
     { id: 'opened-local', kind: 'hosts' as const, label: '127.0.0.1', detail: 'local shell' },
     ...sortAssetsForAiContextMock(assetStoreMock)
-      .filter((asset) => asset.host || asset.ip || asset.name)
+      .filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name))
       .map((asset) => ({
         id: asset.id,
         kind: 'hosts' as const,
@@ -3993,12 +4017,18 @@ Object.defineProperty(window, 'aiops', {
       folders: assetFolderStoreMock.map(cloneAssetFolder)
     })),
     saveAsset: vi.fn(async (input: TestAssetInput) => {
+      if (input.id === LOCAL_SHELL_ASSET_ID) {
+        return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: '本地连接是系统资产，不能编辑或删除' }
+      }
       const index = assetStoreMock.findIndex((asset) => asset.id === input.id)
       const asset = normalizeAssetInputMock(input, index >= 0 ? assetStoreMock[index] : undefined)
       assetStoreMock = index >= 0 ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
       return { ok: true, data: cloneAsset(asset) }
     }),
     deleteAsset: vi.fn(async (id: string) => {
+      if (id === LOCAL_SHELL_ASSET_ID) {
+        return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: '本地连接是系统资产，不能编辑或删除' }
+      }
       assetStoreMock = assetStoreMock.filter((asset) => asset.id !== id)
       return { ok: true, data: { id } }
     }),

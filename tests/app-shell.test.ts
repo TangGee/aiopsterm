@@ -736,6 +736,7 @@ describe('AppShell', () => {
     await managed.findAll('.asset-management-item').find((button) => button.text().includes('组织资产管理'))!.trigger('click')
     expect(managed.text()).toContain('全部组织资产')
     expect(managed.find('.asset-table-footer').text()).toContain('共 6 条')
+    expect(managed.text()).not.toContain('127.0.0.1')
     vi.mocked(window.aiops.refreshOrganizationAssets).mockClear()
     await managed.find('.asset-table-toolbar button[title="刷新"]').trigger('click')
     await flushPromises()
@@ -787,6 +788,23 @@ describe('AppShell', () => {
     await organization.find('.managed-asset-form textarea').setValue('刷新备注')
     await organization.find('.managed-asset-form .asset-submit-button').trigger('click')
     expect(organization.text()).toContain('刷新备注')
+  })
+
+  it('does not fabricate the Workspace local shell row when the backend snapshot omits it', async () => {
+    const snapshot = await window.aiops.listAssets()
+    vi.mocked(window.aiops.listAssets).mockResolvedValueOnce({
+      assets: snapshot.assets.filter((asset) => !asset.isLocalShell),
+      folders: snapshot.folders
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('本地连接')
+    expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
   })
 
   it('matches External reference-style SSH resource tree tabs, display toggle, refresh, and context actions', async () => {
@@ -869,8 +887,19 @@ describe('AppShell', () => {
       expect(wrapper.text()).toContain('prod-bastion')
       expect(wrapper.text()).not.toContain('10.24.8.12')
 
+      const localRow = wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('127.0.0.1'))!
+      await localRow.trigger('contextmenu', {
+        clientX: 260,
+        clientY: 180
+      })
+      const localMenuText = wrapper.find('.workspace-node-menu').text()
+      expect(localMenuText).toContain('连接')
+      expect(localMenuText).not.toContain('编辑')
+      expect(localMenuText).not.toContain('克隆')
+      expect(localMenuText).not.toContain('删除')
+
       vi.mocked(window.aiops.createTerminal).mockClear()
-      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('127.0.0.1'))!.trigger('dblclick')
+      await localRow.trigger('dblclick')
       await flushPromises()
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', title: '127.0.0.1' }))
       expect(store.activePanel.sessionId).toBe('test-session-local')

@@ -91,6 +91,7 @@ export type AiopsAssetRecord = {
   keychainId?: string
   hasPassword?: boolean
   hasPrivateKey?: boolean
+  isLocalShell?: boolean
 }
 
 export type AiopsAssetInput = {

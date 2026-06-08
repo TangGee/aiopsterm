@@ -41,6 +41,45 @@ describe('assets backend boundary', () => {
     vi.resetModules()
   })
 
+  it('owns the local shell system asset and protects it from asset mutations', async () => {
+    const backend = await loadBackend()
+    const snapshot = backend.listAssets()
+
+    expect(snapshot.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'local-127-1',
+          host: '127.0.0.1',
+          group_name: '本地连接',
+          isLocalShell: true
+        })
+      ])
+    )
+
+    const saved = backend.saveAsset({
+      id: 'local-127-1',
+      name: 'client-local-overwrite',
+      title: 'client-local-overwrite',
+      host: '127.0.0.1',
+      username: 'local',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '本地连接',
+      group_name: '本地连接',
+      tags: ['local']
+    })
+    const deleted = backend.deleteAsset('local-127-1')
+
+    expect(saved.ok).toBe(false)
+    expect(saved.errorMessage).toContain('系统资产')
+    expect(deleted.ok).toBe(false)
+    expect(deleted.errorMessage).toContain('系统资产')
+    expect(backend.listAssets().assets.find((asset: { id: string }) => asset.id === 'local-127-1')).toEqual(
+      expect.objectContaining({ name: '127.0.0.1', isLocalShell: true })
+    )
+  })
+
   it('owns asset id generation when saving new assets', async () => {
     const backend = await loadBackend()
     const saved = backend.saveAsset({
