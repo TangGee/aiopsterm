@@ -2030,6 +2030,24 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
+  it('does not hydrate aliases from renderer config when the backend bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    const originalListAliasCommands = window.aiops.listAliasCommands
+
+    try {
+      ;(window.aiops as any).listAliasCommands = undefined
+
+      await store.hydrateConfig()
+
+      expect(store.aliasCommands).toEqual([])
+      expect(store.extensionNotice).toBe('Alias 服务不可用')
+      const saveConfigPatches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch)
+      expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'aliasCommands'))).toBe(true)
+    } finally {
+      ;(window.aiops as any).listAliasCommands = originalListAliasCommands
+    }
+  })
+
   it('hydrates External reference-referenced extension switches and hides Alias when disabled', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
@@ -4085,6 +4103,75 @@ describe('workspace store', () => {
         aliasCommands: expect.not.arrayContaining([expect.objectContaining({ alias: 'hostsfile' })])
       })
     )
+  })
+
+  it('does not mutate persisted aliases when required backend operations are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshAliasCommands()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    const originalAiops = {
+      listAliasCommands: window.aiops.listAliasCommands,
+      saveAliasCommand: window.aiops.saveAliasCommand,
+      deleteAliasCommand: window.aiops.deleteAliasCommand
+    }
+    const persistedAliasSnapshot = () => JSON.stringify(store.aliasCommands.filter((alias) => alias.id !== 'new').map(({ edit, ...alias }) => alias))
+    const initialSnapshot = persistedAliasSnapshot()
+
+    try {
+      ;(window.aiops as any).listAliasCommands = undefined
+      await expect(store.refreshAliasCommands()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('Alias 服务不可用')
+      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).listAliasCommands = originalAiops.listAliasCommands
+      vi.mocked(window.aiops.listAliasCommands!).mockRejectedValueOnce(new Error('aliases offline'))
+      await expect(store.refreshAliasCommands()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('aliases offline')
+      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      store.createAliasCommand()
+      store.updateAliasDraft('new', { alias: 'no-bridge-alias', command: 'echo no bridge' })
+
+      ;(window.aiops as any).saveAliasCommand = undefined
+      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: false, reason: 'backend' })
+      expect(store.extensionNotice).toBe('Alias 保存服务不可用')
+      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
+      expect(store.aliasCommands.some((alias) => alias.id !== 'new' && alias.alias === 'no-bridge-alias')).toBe(false)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).saveAliasCommand = originalAiops.saveAliasCommand
+      vi.mocked(window.aiops.saveAliasCommand!).mockRejectedValueOnce(new Error('alias write failed'))
+      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: false, reason: 'backend' })
+      expect(store.extensionNotice).toBe('alias write failed')
+      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
+      expect(store.aliasCommands.some((alias) => alias.id !== 'new' && alias.alias === 'no-bridge-alias')).toBe(false)
+
+      store.updateAliasDraft('new', { alias: 'bridge-alias', command: 'echo bridge' })
+      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: true, reason: 'saved' })
+      const bridgeAlias = store.aliasCommands.find((alias) => alias.alias === 'bridge-alias')!
+      expect(bridgeAlias).toBeTruthy()
+      const afterSavedSnapshot = persistedAliasSnapshot()
+      vi.mocked(window.aiops.saveConfig).mockClear()
+
+      ;(window.aiops as any).deleteAliasCommand = undefined
+      await expect(store.deleteAliasCommand(bridgeAlias.id)).resolves.toEqual({ ok: false, reason: 'backend' })
+      expect(store.extensionNotice).toBe('Alias 删除服务不可用')
+      expect(persistedAliasSnapshot()).toBe(afterSavedSnapshot)
+      expect(store.aliasCommands.some((alias) => alias.alias === 'bridge-alias')).toBe(true)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).deleteAliasCommand = originalAiops.deleteAliasCommand
+      vi.mocked(window.aiops.deleteAliasCommand!).mockRejectedValueOnce(new Error('alias delete failed'))
+      await expect(store.deleteAliasCommand(bridgeAlias.id)).resolves.toEqual({ ok: false, reason: 'backend' })
+      expect(store.extensionNotice).toBe('alias delete failed')
+      expect(persistedAliasSnapshot()).toBe(afterSavedSnapshot)
+      expect(store.aliasCommands.some((alias) => alias.alias === 'bridge-alias')).toBe(true)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
   })
 
   it('manages External reference-style Kubernetes contexts, clusters, terminals, and bastion sync', async () => {

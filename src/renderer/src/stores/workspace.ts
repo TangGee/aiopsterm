@@ -3297,13 +3297,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     knowledgeTree.value = cloneKnowledgeNodes(normalizedKnowledgeBase.tree)
     kbUsedBytes.value = normalizedKnowledgeBase.usedBytes
     kbTotalBytes.value = normalizedKnowledgeBase.totalBytes
-    let bridgeAliasCommands = savedConfig.aliasCommands || defaultAliasCommands
+    let normalizedAliasCommands = normalizeAliasCommandsConfig().normalized
+    let aliasCommandsChanged = false
+    let aliasCommandsLoadedFromBridge = false
     try {
-      bridgeAliasCommands = await loadAliasCommandsFromBackend(bridgeAliasCommands)
+      const bridgeAliasCommands = await loadAliasCommandsFromBackend()
+      const snapshot = normalizeAliasCommandsConfig(bridgeAliasCommands)
+      normalizedAliasCommands = snapshot.normalized
+      aliasCommandsChanged = snapshot.changed
+      aliasCommandsLoadedFromBridge = true
     } catch {
-      setExtensionNotice('Alias 加载失败')
+      setExtensionNotice(hasAliasListBridge() ? 'Alias 加载失败' : 'Alias 服务不可用')
     }
-    const { normalized: normalizedAliasCommands, changed: aliasCommandsChanged } = normalizeAliasCommandsConfig(bridgeAliasCommands)
     aliasCommands.value = normalizedAliasCommands.map((alias) => ({ ...alias, edit: false }))
     let bridgeSettingsPreferences: SettingsPreferencesSnapshot = {
       shortcuts: normalizeShortcutsConfig(savedConfig.shortcuts).normalized,
@@ -3357,7 +3362,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       modelSettings: normalizedModelSettings,
       ...(quickCommandsLoadedFromBridge ? { quickCommands: normalizedQuickCommands } : {}),
       knowledgeBase: normalizedKnowledgeBase,
-      aliasCommands: normalizedAliasCommands,
+      ...(aliasCommandsLoadedFromBridge ? { aliasCommands: normalizedAliasCommands } : {}),
       shortcuts: normalizedShortcuts,
       rules: normalizedRules,
       skills: normalizedSkills,
@@ -3395,8 +3400,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       (quickCommandsLoadedFromBridge && (quickCommandsChanged || missingQuickCommands)) ||
       knowledgeBaseChanged ||
       missingKnowledgeBase ||
-      aliasCommandsChanged ||
-      missingAliasCommands ||
+      (aliasCommandsLoadedFromBridge && (aliasCommandsChanged || missingAliasCommands)) ||
       skillsChanged ||
       missingSkills ||
       savedMcpSnapshot.changed ||
@@ -3420,7 +3424,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           modelSettings: normalizedModelSettings,
           ...(quickCommandsLoadedFromBridge ? { quickCommands: normalizedQuickCommands } : {}),
           knowledgeBase: normalizedKnowledgeBase,
-          aliasCommands: normalizedAliasCommands,
+          ...(aliasCommandsLoadedFromBridge ? { aliasCommands: normalizedAliasCommands } : {}),
           skills: normalizedSkills,
           customInstructions: '',
           mcpServers: savedMcpSnapshot.normalized,
@@ -3587,9 +3591,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         createdAt: alias.createdAt
       }))
 
-  const persistAliasCommands = () => {
-    saveConfig({ aliasCommands: getAliasCommandsSnapshot() })
-  }
+  const hasAliasListBridge = () => typeof (window.aiops as { listAliasCommands?: unknown } | undefined)?.listAliasCommands === 'function'
 
   const applyAliasCommandsFromBackend = (commands: AliasCommandConfig[]) => {
     const { normalized } = normalizeAliasCommandsConfig(commands)
@@ -3598,8 +3600,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return normalized
   }
 
-  const loadAliasCommandsFromBackend = async (fallback: AliasCommandConfig[]) => {
-    if (!window.aiops?.listAliasCommands) return fallback
+  const loadAliasCommandsFromBackend = async () => {
+    if (!hasAliasListBridge()) throw new Error('Alias 服务不可用')
     const result = await window.aiops.listAliasCommands()
     if (!result?.ok || !result.data) throw new Error(result?.errorMessage || 'Alias 加载失败')
     return result.data
@@ -3607,12 +3609,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const refreshAliasCommands = async () => {
     try {
-      const commands = await loadAliasCommandsFromBackend(defaultAliasCommands)
+      const commands = await loadAliasCommandsFromBackend()
       const normalized = applyAliasCommandsFromBackend(commands)
       await saveConfig({ aliasCommands: normalized })
       return true
-    } catch {
-      setExtensionNotice('Alias 加载失败')
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : 'Alias 加载失败')
       return false
     }
   }
@@ -7005,8 +7007,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       command,
       createdAt: target.createdAt
     }
+    if (!window.aiops?.saveAliasCommand) {
+      setExtensionNotice('Alias 保存服务不可用')
+      return { ok: false, reason: 'backend' as const }
+    }
     try {
-      const result = await window.aiops?.saveAliasCommand?.(payload)
+      const result = await window.aiops.saveAliasCommand(payload)
       if (!result?.ok || !result.data) {
         if (result?.errorCode === 'ALIAS_DUPLICATE') {
           setExtensionNotice('Alias 已存在')
@@ -7045,8 +7051,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const deleteAliasCommand = async (id: string) => {
     const target = aliasCommands.value.find((item) => item.id === id)
     if (!target) return { ok: false, reason: 'not-found' as const }
+    if (!window.aiops?.deleteAliasCommand) {
+      setExtensionNotice('Alias 删除服务不可用')
+      return { ok: false, reason: 'backend' as const }
+    }
     try {
-      const result = await window.aiops?.deleteAliasCommand?.({ id: target.id, alias: target.alias })
+      const result = await window.aiops.deleteAliasCommand({ id: target.id, alias: target.alias })
       if (!result?.ok || !result.data) {
         setExtensionNotice(result?.errorMessage || 'Alias 删除失败')
         return { ok: false, reason: 'backend' as const }
