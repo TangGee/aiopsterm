@@ -6374,6 +6374,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return result
   }
 
+  const backendRelPathOrNotice = (result: { relPath?: string } | null | undefined, notice: string) => {
+    const relPath = typeof result?.relPath === 'string' && result.relPath.trim() ? result.relPath.trim() : ''
+    if (!relPath) {
+      setTopNotice(notice)
+      return ''
+    }
+    return relPath
+  }
+
   const createKnowledgeNode = async (kind: KnowledgeNodeType, parentRelDir: string, title: string) => {
     const name = title.trim()
     if (!name) return null
@@ -6386,10 +6395,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         ? await window.aiops.kbMkdir(parentRelDir, name)
         : await window.aiops.kbCreateFile(parentRelDir, name, '')
     await refreshKnowledgeTree()
-    const created = findKnowledgeNode(result.relPath)
-    kbSelectedKeys.value = [result.relPath]
-    if (kind === 'dir' && !kbExpandedKeys.value.includes(result.relPath)) {
-      kbExpandedKeys.value.push(result.relPath)
+    const relPath = backendRelPathOrNotice(result, '知识库写入服务不可用')
+    if (!relPath) return null
+    const created = findKnowledgeNode(relPath)
+    kbSelectedKeys.value = [relPath]
+    if (kind === 'dir' && !kbExpandedKeys.value.includes(relPath)) {
+      kbExpandedKeys.value.push(relPath)
     }
     return created
   }
@@ -6403,10 +6414,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     const result = await window.aiops.kbRename(relPath, name)
-    kbSelectedKeys.value = [result.relPath]
-    kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, result.relPath) : key))
     await refreshKnowledgeTree()
-    syncKnowledgePanelsAfterRename(relPath, result.relPath)
+    const nextRelPath = backendRelPathOrNotice(result, '知识库重命名服务不可用')
+    if (!nextRelPath) return
+    kbSelectedKeys.value = [nextRelPath]
+    kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, nextRelPath) : key))
+    syncKnowledgePanelsAfterRename(relPath, nextRelPath)
   }
 
   const deleteKnowledgeNodes = async (relPaths: string[]) => {

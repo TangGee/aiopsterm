@@ -3625,6 +3625,36 @@ describe('workspace store', () => {
     }
   })
 
+  it('requires backend-returned Knowledge relPath before applying create or rename results', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.openKnowledgeFile('Markdown语法指南.md')
+    const originalKbCreateFile = window.aiops.kbCreateFile
+    const originalKbRename = window.aiops.kbRename
+    const originalSelectedKeys = [...store.kbSelectedKeys]
+    const originalPanelIds = store.panels.map((panel) => panel.id)
+
+    try {
+      vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({} as Awaited<ReturnType<typeof window.aiops.kbCreateFile>>)
+      const created = await store.createKnowledgeNode('file', '', 'NoRelPath.md')
+      expect(created).toBeNull()
+      expect(store.topNotice).toBe('知识库写入服务不可用')
+      expect(store.kbSelectedKeys).toEqual(originalSelectedKeys)
+      expect(store.findKnowledgeNode('NoRelPath.md')).toBeNull()
+
+      vi.mocked(window.aiops.kbRename).mockResolvedValueOnce({} as Awaited<ReturnType<typeof window.aiops.kbRename>>)
+      await store.renameKnowledgeNode('Markdown语法指南.md', 'Markdown-no-relpath.md')
+      expect(store.topNotice).toBe('知识库重命名服务不可用')
+      expect(store.kbSelectedKeys).toEqual(originalSelectedKeys)
+      expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('Markdown-no-relpath.md')).toBeNull()
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanelIds)
+    } finally {
+      window.aiops.kbCreateFile = originalKbCreateFile
+      window.aiops.kbRename = originalKbRename
+    }
+  })
+
   it('requires a backend-returned Knowledge relPath before writing AI message summaries', async () => {
     const store = useWorkspaceStore()
     await store.refreshKnowledgeTree({ persist: false })
