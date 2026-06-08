@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { existsSync } from 'fs'
 import type {
   DatabaseColumnFilter,
   DatabaseColumnSort,
@@ -258,6 +259,303 @@ const sqlitePathFromUrl = (url: string) => {
   return trimmed.replace(/^sqlite:\/\//i, '')
 }
 
+type SqliteRunResult = { changes?: number }
+type SqliteColumnDefinition = { name?: string }
+type SqliteStatement = {
+  reader: boolean
+  all: (...params: unknown[]) => Array<Record<string, unknown>>
+  run: (...params: unknown[]) => SqliteRunResult
+  columns: () => SqliteColumnDefinition[]
+}
+type SqliteDatabase = {
+  prepare: (source: string) => SqliteStatement
+  close: () => unknown
+}
+type SqliteDatabaseConstructor = new (
+  filePath: string,
+  options?: { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
+) => SqliteDatabase
+type SqliteSchemaTableRow = { name?: string; type?: string }
+type SqliteTableColumnRow = { cid?: number; name?: string; type?: string; notnull?: number; pk?: number; hidden?: number }
+
+const SQLITE_MAIN_SCHEMA = 'main'
+const SQLITE_TIMEOUT_MS = 5000
+let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
+
+const loadSqliteRuntime = () => {
+  if (sqliteRuntime !== undefined) return sqliteRuntime
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loaded = require('better-sqlite3') as SqliteDatabaseConstructor | { default?: SqliteDatabaseConstructor }
+    sqliteRuntime = typeof loaded === 'function' ? loaded : loaded.default && typeof loaded.default === 'function' ? loaded.default : null
+  } catch {
+    sqliteRuntime = null
+  }
+  return sqliteRuntime
+}
+
+const sqliteFilePathFromConnection = (connection: Pick<DatabaseConnectionInfo, 'filePath' | 'url'>) =>
+  trim(connection.filePath) || sqlitePathFromUrl(trim(connection.url))
+
+const sqliteFilePathFromTestInput = (input: Pick<DatabaseConnectionTestInput, 'filePath' | 'url'>) =>
+  trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
+
+const isSqliteFileExtension = (filePath: string) => /\.(db|sqlite|sqlite3)$/i.test(filePath)
+
+const openSqliteDatabase = (filePath: string, readonly: boolean) => {
+  const Database = loadSqliteRuntime()
+  if (!Database) {
+    throw Object.assign(new Error('SQLite runtime is unavailable. Rebuild better-sqlite3 for the Electron runtime.'), {
+      code: 'DB_SQLITE_DRIVER_UNAVAILABLE'
+    })
+  }
+  return new Database(filePath, { readonly, fileMustExist: true, timeout: SQLITE_TIMEOUT_MS })
+}
+
+const sqliteErrorCode = (error: unknown, fallback: string) => {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+  return code.startsWith('DB_') ? code : fallback
+}
+
+const sqliteErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
+
+const isRealSqliteConnection = (connection: DatabaseConnectionInfo | null | undefined) => {
+  if (!connection || connection.dbType !== 'sqlite') return false
+  const filePath = sqliteFilePathFromConnection(connection)
+  return !!filePath && existsSync(filePath)
+}
+
+const sqliteSchemaNameFor = (connection: DatabaseConnectionInfo, databaseName?: string) => {
+  const requested = trim(databaseName)
+  if (!requested || requested === connection.database) return SQLITE_MAIN_SCHEMA
+  return requested
+}
+
+const sqliteIdentifier = (value: string) => `"${String(value || '').replace(/"/g, '""')}"`
+
+const sqliteTableReference = (connection: DatabaseConnectionInfo, databaseName: string | undefined, tableName: string) =>
+  `${sqliteIdentifier(sqliteSchemaNameFor(connection, databaseName))}.${sqliteIdentifier(tableName)}`
+
+const sqliteCall = (stmt: SqliteStatement, params: unknown[], mode: 'all' | 'run') => (params.length ? stmt[mode](...params) : stmt[mode]())
+
+const sqliteColumnNamesFromStatement = (stmt: SqliteStatement, rows: Array<Record<string, unknown>>) => {
+  const columns = stmt
+    .columns()
+    .map((column) => trim(column.name))
+    .filter(Boolean)
+  return columns.length ? columns : columnsForRows(rows)
+}
+
+const sqliteColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string): DatabaseColumnInfo[] => {
+  const rows = db.prepare(`PRAGMA ${sqliteIdentifier(schemaName)}.table_xinfo(${sqliteIdentifier(tableName)})`).all() as SqliteTableColumnRow[]
+  return rows
+    .filter((row) => trim(row.name) && Number(row.hidden ?? 0) !== 1)
+    .sort((first, second) => Number(first.cid ?? 0) - Number(second.cid ?? 0))
+    .map((row) => {
+      const primaryKeyRank = Number(row.pk ?? 0)
+      return {
+        name: trim(row.name),
+        type: trim(row.type).toUpperCase() || 'TEXT',
+        nullable: primaryKeyRank <= 0 && Number(row.notnull ?? 0) === 0,
+        ...(primaryKeyRank > 0 ? { key: 'PK' as const } : {})
+      }
+    })
+}
+
+const sqlitePrimaryKeyForColumns = (columns: DatabaseColumnInfo[]) =>
+  columns.filter((column) => column.key === 'PK').map((column) => column.name)
+
+const sqliteCatalogsForConnection = (connection: DatabaseConnectionInfo): DatabaseCatalogInfo[] | null => {
+  if (!isRealSqliteConnection(connection)) return null
+  const filePath = sqliteFilePathFromConnection(connection)
+  let db: SqliteDatabase | null = null
+  try {
+    db = openSqliteDatabase(filePath, true)
+    const rows = db
+      .prepare(
+        `SELECT name, type FROM ${sqliteIdentifier(SQLITE_MAIN_SCHEMA)}.sqlite_schema WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`
+      )
+      .all() as SqliteSchemaTableRow[]
+    const tables = rows
+      .filter((row) => row.type === 'table' && trim(row.name))
+      .map((row) => {
+        const name = trim(row.name)
+        const columns = sqliteColumnsForTable(db!, SQLITE_MAIN_SCHEMA, name)
+        return {
+          id: `tbl-${connection.id}-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`,
+          name,
+          columns,
+          primaryKey: sqlitePrimaryKeyForColumns(columns)
+        }
+      })
+    return [{ name: SQLITE_MAIN_SCHEMA, tables }]
+  } catch {
+    return null
+  } finally {
+    db?.close()
+  }
+}
+
+const sqliteExecute = (connection: DatabaseConnectionInfo, sql: string, startedAt: number): DatabaseSqlExecuteResult => {
+  let db: SqliteDatabase | null = null
+  try {
+    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), !!connection.readonly)
+    const stmt = db.prepare(sql)
+    if (stmt.reader) {
+      const rows = sqliteCall(stmt, [], 'all') as Array<Record<string, unknown>>
+      return {
+        ok: true,
+        data: {
+          columns: sqliteColumnNamesFromStatement(stmt, rows),
+          rows,
+          rowCount: rows.length,
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    }
+    const result = sqliteCall(stmt, [], 'run') as SqliteRunResult
+    return {
+      ok: true,
+      data: {
+        columns: [],
+        rows: [],
+        rowCount: Number(result.changes ?? 0),
+        durationMs: Math.max(1, Date.now() - startedAt)
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: sqliteErrorCode(error, 'DB_SQLITE_QUERY_FAILED'),
+      errorMessage: sqliteErrorMessage(error, 'SQLite query failed.')
+    }
+  } finally {
+    db?.close()
+  }
+}
+
+const sqliteWhereForFilters = (filters: DatabaseColumnFilter[], knownColumns: string[]) => {
+  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
+  const clauses: string[] = []
+  const params: unknown[] = []
+  filters.forEach((filter) => {
+    const column = known.get(trim(filter.column).toLowerCase())
+    if (!column) return
+    const quoted = sqliteIdentifier(column)
+    if (filter.operator === 'isnull') {
+      clauses.push(`${quoted} IS NULL`)
+      return
+    }
+    if (filter.operator === 'notnull') {
+      clauses.push(`${quoted} IS NOT NULL`)
+      return
+    }
+    if (filter.operator === 'like') {
+      clauses.push(`${quoted} LIKE ?`)
+      params.push(`%${String(filter.value ?? '')}%`)
+      return
+    }
+    if (filter.operator === 'eq') {
+      clauses.push(`${quoted} = ?`)
+      params.push(String(filter.value ?? ''))
+      return
+    }
+    if (filter.operator === 'neq') {
+      clauses.push(`${quoted} <> ?`)
+      params.push(String(filter.value ?? ''))
+      return
+    }
+    const values = (filter.values ?? []).map(String)
+    if (!values.length) {
+      clauses.push('0 = 1')
+      return
+    }
+    clauses.push(`${quoted} IN (${values.map(() => '?').join(', ')})`)
+    params.push(...values)
+  })
+  return {
+    sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '',
+    params
+  }
+}
+
+const sqliteOrderByFor = (sort: DatabaseColumnSort | null | undefined, knownColumns: string[]) => {
+  if (!sort) return ''
+  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
+  const column = known.get(trim(sort.column).toLowerCase())
+  if (!column) return ''
+  return ` ORDER BY ${sqliteIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+}
+
+const sqliteQueryTable = (connection: DatabaseConnectionInfo, input: DatabaseTableQueryInput, startedAt: number): DatabaseTableQueryResult => {
+  let db: SqliteDatabase | null = null
+  try {
+    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
+    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+    const tableName = trim(input.tableName)
+    const columns = sqliteColumnsForTable(db, schemaName, tableName)
+    if (!columns.length) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const knownColumns = columns.map((column) => column.name)
+    const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
+    const where = sqliteWhereForFilters(filters, knownColumns)
+    const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
+    const orderBy = sqliteOrderByFor(sort, knownColumns)
+    const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(input.pageSize) || 100)))
+    const page = Math.max(1, Math.floor(Number(input.page) || 1))
+    const offset = (page - 1) * pageSize
+    const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
+    const rows = db.prepare(`SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ? OFFSET ?`).all(...where.params, pageSize, offset)
+    const total = input.withTotal
+      ? Number((db.prepare(`SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`).all(...where.params)[0]?.total as number | undefined) ?? 0)
+      : null
+    return {
+      ok: true,
+      data: {
+        columns: knownColumns,
+        rows,
+        rowCount: rows.length,
+        durationMs: Math.max(1, Date.now() - startedAt),
+        total,
+        knownColumns
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: sqliteErrorCode(error, 'DB_SQLITE_QUERY_FAILED'),
+      errorMessage: sqliteErrorMessage(error, 'SQLite table query failed.')
+    }
+  } finally {
+    db?.close()
+  }
+}
+
+const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): DatabaseTableDdlResult => {
+  let db: SqliteDatabase | null = null
+  try {
+    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
+    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+    const rows = db
+      .prepare(
+        `SELECT sql FROM ${sqliteIdentifier(schemaName)}.sqlite_schema WHERE type IN ('table', 'view') AND name = ? ORDER BY type LIMIT 1`
+      )
+      .all(trim(input.tableName))
+    const ddl = typeof rows[0]?.sql === 'string' ? rows[0].sql : ''
+    if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    return { ok: true, data: { ddl } }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: sqliteErrorCode(error, 'DB_SQLITE_DDL_FAILED'),
+      errorMessage: sqliteErrorMessage(error, 'SQLite DDL lookup failed.')
+    }
+  } finally {
+    db?.close()
+  }
+}
+
 const endpointFor = (input: DatabaseConnectionTestInput) => {
   if (input.dbType === 'sqlite') return trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
   if (input.dbType === 'oracle' && trim(input.url)) return trim(input.url)
@@ -371,6 +669,22 @@ const cloneDatabaseTable = (table: DatabaseTableInfo): DatabaseTableInfo => ({
   primaryKey: table.primaryKey.slice()
 })
 
+const cloneDatabaseCatalogRaw = (catalog: DatabaseCatalogInfo): DatabaseCatalogInfo => ({
+  name: catalog.name,
+  ...(catalog.tables ? { tables: catalog.tables.map(cloneDatabaseTable) } : {}),
+  ...(catalog.schemas
+    ? {
+        schemas: catalog.schemas.map((schema) => ({
+          name: schema.name,
+          tables: schema.tables.map(cloneDatabaseTable),
+          views: schema.views?.map(cloneDatabaseTable),
+          functions: schema.functions?.slice(),
+          procedures: schema.procedures?.slice()
+        }))
+      }
+    : {})
+})
+
 const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo): DatabaseCatalogInfo => ({
   name: catalog.name,
   ...(catalog.tables
@@ -399,7 +713,10 @@ const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo
 
 const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseConnectionInfo => ({
   ...connection,
-  catalogs: connection.catalogs.map((catalog) => cloneDatabaseCatalog(connection.id, catalog))
+  catalogs:
+    connection.dbType === 'sqlite' && isRealSqliteConnection(connection)
+      ? connection.catalogs.map(cloneDatabaseCatalogRaw)
+      : connection.catalogs.map((catalog) => cloneDatabaseCatalog(connection.id, catalog))
 })
 
 let databaseGroups: DatabaseGroupInfo[] = databaseGroupSeed.map((group) => ({ ...group }))
@@ -553,6 +870,10 @@ const buildSavedConnectionUrl = (
 const defaultCatalogsForSavedConnection = (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): DatabaseCatalogInfo[] => {
   const catalogName = trim(connection.database)
   if (!catalogName) return []
+  if (connection.dbType === 'sqlite') {
+    const sqliteCatalogs = sqliteCatalogsForConnection({ ...connection, catalogs: [] })
+    return sqliteCatalogs ?? [{ name: catalogName, tables: [] }]
+  }
   if (connection.dbType === 'postgresql') {
     return [{ name: catalogName, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }]
   }
@@ -795,7 +1116,11 @@ export async function disconnectDatabaseConnection(connectionId: string): Promis
 }
 
 export async function refreshDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
-  return databaseConnectionMutation(connectionId, 'Connection schema refreshed', (connection) => ({ ...connection }))
+  return databaseConnectionMutation(connectionId, 'Connection schema refreshed', (connection) => {
+    if (connection.dbType !== 'sqlite') return { ...connection }
+    const catalogs = sqliteCatalogsForConnection(connection)
+    return catalogs ? { ...connection, catalogs } : { ...connection }
+  })
 }
 
 const normalizeSql = (sql: string) => sql.trim().replace(/\s+/g, ' ')
@@ -1337,7 +1662,7 @@ const matchesFilter = (value: unknown, filter: DatabaseColumnFilter) => {
   return true
 }
 
-const parseWhereRaw = (whereRaw: string | null | undefined): DatabaseColumnFilter[] => {
+function parseWhereRaw(whereRaw: string | null | undefined): DatabaseColumnFilter[] {
   const raw = trim(whereRaw)
   if (!raw) return []
   const match = raw.match(/(\w+)\s*(=|<>|!=|like)\s*['"]?([^'"]+)['"]?/i)
@@ -1376,7 +1701,7 @@ const normalizeOrderByIdentifier = (value: string) => {
   return segment
 }
 
-const parseOrderByRaw = (orderByRaw: string | null | undefined, knownColumns: string[]): DatabaseColumnSort | null => {
+function parseOrderByRaw(orderByRaw: string | null | undefined, knownColumns: string[]): DatabaseColumnSort | null {
   const raw = trim(orderByRaw).replace(/^order\s+by\s+/i, '')
   if (!raw) return null
   const knownColumnMap = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
@@ -1407,12 +1732,38 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
   }
 
   if (input.dbType === 'sqlite') {
-    const filePath = trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
+    const filePath = sqliteFilePathFromTestInput(input)
     if (!filePath) {
       return { ok: false, errorCode: 'DB_SQLITE_FILE_REQUIRED', errorMessage: 'SQLite file path is required.' }
     }
-    if (!/\.(db|sqlite|sqlite3)$/i.test(filePath)) {
+    if (!isSqliteFileExtension(filePath)) {
       return { ok: false, errorCode: 'DB_SQLITE_EXTENSION', errorMessage: 'SQLite file should end with .db, .sqlite, or .sqlite3.' }
+    }
+    if (!existsSync(filePath)) {
+      return { ok: false, errorCode: 'DB_SQLITE_FILE_NOT_FOUND', errorMessage: 'SQLite file does not exist.' }
+    }
+    let db: SqliteDatabase | null = null
+    try {
+      db = openSqliteDatabase(filePath, input.readonly !== false)
+      const rows = db.prepare('SELECT sqlite_version() AS version').all()
+      const version = String(rows[0]?.version ?? '').trim()
+      return {
+        ok: true,
+        data: {
+          dbType: input.dbType,
+          serverVersion: version ? `SQLite ${version}` : engineVersions.sqlite,
+          endpoint: endpointFor(input),
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: sqliteErrorCode(error, 'DB_SQLITE_OPEN_FAILED'),
+        errorMessage: sqliteErrorMessage(error, 'SQLite connection test failed.')
+      }
+    } finally {
+      db?.close()
     }
   } else {
     const hasOracleConnectString = input.dbType === 'oracle' && !!trim(input.url)
@@ -1553,15 +1904,21 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
 
 export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promise<DatabaseSqlExecuteResult> {
   const startedAt = Date.now()
+  const rawSql = trim(input.sql)
   const sql = normalizeSql(input.sql || '')
   if (!trim(input.connectionId)) {
     return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
   }
-  if (!sql) {
+  if (!rawSql) {
     return { ok: false, errorCode: 'DB_SQL_EMPTY', errorMessage: 'SQL is required.' }
   }
   if (/drop\s+database|syntax_error/i.test(sql)) {
     return { ok: false, errorCode: 'DB_SQL_REJECTED', errorMessage: 'Backend SQL executor rejected this statement.' }
+  }
+
+  const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
+  if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    return sqliteExecute(connection, rawSql, startedAt)
   }
 
   const explained = /^explain\b/i.test(sql)
@@ -1594,6 +1951,11 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
     return { ok: false, errorCode: 'DB_TABLE_REQUIRED', errorMessage: 'Table name is required.' }
   }
 
+  const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
+  if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    return sqliteTableDdl(connection, input)
+  }
+
   const key = tableKeyForContext(input)
   if (!key) {
     return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
@@ -1618,6 +1980,11 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
   }
   if (!trim(input.tableName)) {
     return { ok: false, errorCode: 'DB_TABLE_REQUIRED', errorMessage: 'Table name is required.' }
+  }
+
+  const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
+  if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    return sqliteQueryTable(connection, input, startedAt)
   }
 
   const tableKey = tableKeyForContext(input)

@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import Database from 'better-sqlite3'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -29,8 +33,22 @@ import {
 } from '@shared/database'
 
 describe('database backend boundary', () => {
+  let tempDirs: string[] = []
+
+  const createTempSqliteFile = async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-sqlite-'))
+    tempDirs.push(dir)
+    return join(dir, 'ops-cache.sqlite3')
+  }
+
   beforeEach(() => {
     resetDatabaseBackendSeed()
+    tempDirs = []
+  })
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
+    tempDirs = []
   })
 
   it('validates PostgreSQL drafts and returns backend probe metadata', async () => {
@@ -165,12 +183,17 @@ describe('database backend boundary', () => {
   })
 
   it('saves database connections through the backend catalog boundary', async () => {
+    const sqliteFilePath = await createTempSqliteFile()
+    const sqlite = new Database(sqliteFilePath)
+    sqlite.exec('CREATE TABLE cache_entries (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL);')
+    sqlite.close()
+
     const createResult = await saveDatabaseConnection({
       mode: 'create',
       connection: {
         dbType: 'sqlite',
         name: 'unit-sqlite',
-        filePath: '/tmp/aiopsterm/unit-cache.sqlite3',
+        filePath: sqliteFilePath,
         readonly: true,
         env: 'Development',
         groupId: 'group-local',
@@ -184,11 +207,27 @@ describe('database backend boundary', () => {
       name: 'unit-sqlite',
       dbType: 'sqlite',
       host: 'local',
-      database: 'unit-cache.sqlite3',
-      filePath: '/tmp/aiopsterm/unit-cache.sqlite3',
+      database: 'ops-cache.sqlite3',
+      filePath: sqliteFilePath,
       status: 'idle'
     })
-    expect(createResult.data?.connection.catalogs).toEqual([{ name: 'unit-cache.sqlite3', tables: [] }])
+    expect(createResult.data?.connection.catalogs).toEqual([
+      {
+        name: 'main',
+        tables: [
+          {
+            id: 'tbl-conn-unit-sqlite-cache_entries',
+            name: 'cache_entries',
+            columns: [
+              { name: 'key', type: 'TEXT', nullable: false, key: 'PK' },
+              { name: 'value', type: 'TEXT', nullable: true },
+              { name: 'updated_at', type: 'TEXT', nullable: false }
+            ],
+            primaryKey: ['key']
+          }
+        ]
+      }
+    ])
     expect(createResult.data?.connections.some((connection) => connection.id === 'conn-unit-sqlite')).toBe(true)
     expect(createResult.data?.defaults.selectedNodeId).toBe('conn-unit-sqlite')
 
@@ -322,6 +361,119 @@ describe('database backend boundary', () => {
 
     expect(result.ok).toBe(true)
     expect(result.data?.ddl).toContain('CREATE TABLE public.orders')
+  })
+
+  it('executes real SQLite files and refreshes their table catalog through the backend boundary', async () => {
+    const sqliteFilePath = await createTempSqliteFile()
+    const sqlite = new Database(sqliteFilePath)
+    sqlite.exec(`
+      CREATE TABLE cache_entries (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        ttl_seconds INTEGER,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE audit_events (
+        id INTEGER PRIMARY KEY,
+        service TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO cache_entries (key, value, ttl_seconds, updated_at) VALUES
+        ('feature:checkout', 'enabled', 120, '2026-06-03 10:00:00'),
+        ('feature:search', 'disabled', 60, '2026-06-03 10:05:00');
+      INSERT INTO audit_events (id, service, severity, created_at) VALUES
+        (1, 'checkout', 'warning', '2026-06-03 10:10:00'),
+        (2, 'search', 'info', '2026-06-03 10:15:00');
+    `)
+    sqlite.close()
+
+    const probe = await testDatabaseConnection({
+      dbType: 'sqlite',
+      name: 'real-sqlite',
+      filePath: sqliteFilePath,
+      readonly: true
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data?.serverVersion).toMatch(/^SQLite /)
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'sqlite',
+        name: 'real-sqlite',
+        filePath: sqliteFilePath,
+        readonly: true,
+        env: 'Development',
+        groupId: 'group-local',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-real-sqlite',
+      dbType: 'sqlite',
+      database: 'ops-cache.sqlite3',
+      filePath: sqliteFilePath
+    })
+    expect(saved.data?.connection.catalogs[0]).toMatchObject({
+      name: 'main',
+      tables: expect.arrayContaining([
+        expect.objectContaining({ name: 'audit_events', primaryKey: ['id'] }),
+        expect.objectContaining({ name: 'cache_entries', primaryKey: ['key'] })
+      ])
+    })
+
+    const refreshed = await refreshDatabaseConnection('conn-real-sqlite')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.tables?.map((table) => table.name)).toEqual(['audit_events', 'cache_entries'])
+
+    const result = await executeDatabaseSql({
+      connectionId: 'conn-real-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      sql: 'SELECT key, value FROM cache_entries ORDER BY key'
+    })
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      columns: ['key', 'value'],
+      rowCount: 2,
+      rows: [
+        { key: 'feature:checkout', value: 'enabled' },
+        { key: 'feature:search', value: 'disabled' }
+      ]
+    })
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-real-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE cache_entries')
+
+    const page = await queryDatabaseTable({
+      connectionId: 'conn-real-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      filters: [{ column: 'value', operator: 'like', value: 'abled' }],
+      sort: { column: 'key', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 1,
+      withTotal: true
+    })
+    expect(page.ok).toBe(true)
+    expect(page.data).toMatchObject({
+      columns: ['key', 'value', 'ttl_seconds', 'updated_at'],
+      knownColumns: ['key', 'value', 'ttl_seconds', 'updated_at'],
+      rowCount: 1,
+      total: 2,
+      rows: [expect.objectContaining({ key: 'feature:search', value: 'disabled' })]
+    })
   })
 
   it('generates DB AI pane responses behind the database backend boundary', async () => {
