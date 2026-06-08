@@ -7148,9 +7148,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshExtensionPlugins = async () => {
-    if (!window.aiops?.listExtensionPlugins) return false
+    const listExtensionPluginsBridge = window.aiops?.listExtensionPlugins
+    if (typeof listExtensionPluginsBridge !== 'function') {
+      setExtensionNotice('插件列表加载服务不可用')
+      ensureSelectedExtensionVisible()
+      return false
+    }
     try {
-      const result = await window.aiops.listExtensionPlugins()
+      const result = await listExtensionPluginsBridge()
       if (!result?.ok || !Array.isArray(result.data)) {
         setExtensionNotice(result?.errorMessage || '插件列表加载失败')
         return false
@@ -7173,17 +7178,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installExtensionPlugin = async (pluginId: string) => {
-    installExtensionInstallProgressListener()
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin) return
     if (plugin.installable === false) {
       setExtensionNotice('该插件需要订阅后安装')
       return
     }
+    const installExtensionPluginBridge = window.aiops?.installExtensionPlugin
+    if (typeof installExtensionPluginBridge !== 'function') {
+      setExtensionNotice(`${plugin.name} 安装服务不可用`)
+      return
+    }
+    installExtensionInstallProgressListener()
     setExtensionInstallLoading(pluginId, true)
     setExtensionNotice(`正在安装 ${plugin.name}`)
     try {
-      const result = await window.aiops?.installExtensionPlugin?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      const result = await installExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
       if (!result?.ok || !result.data) {
         const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
         setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
@@ -7205,13 +7215,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const updateExtensionPlugin = async (pluginId: string) => {
-    installExtensionInstallProgressListener()
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || !plugin.installed || !plugin.hasUpdate) return
+    const updateExtensionPluginBridge = window.aiops?.updateExtensionPlugin
+    if (typeof updateExtensionPluginBridge !== 'function') {
+      setExtensionNotice(`${plugin.name} 更新服务不可用`)
+      return
+    }
+    installExtensionInstallProgressListener()
     setExtensionUpdateLoading(pluginId, true)
     setExtensionNotice(`正在更新 ${plugin.name}`)
     try {
-      const result = await window.aiops?.updateExtensionPlugin?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      const result = await updateExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
       if (!result?.ok || !result.data) {
         const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
         setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
@@ -7235,8 +7250,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const uninstallExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || plugin.required) return
+    const uninstallExtensionPluginBridge = window.aiops?.uninstallExtensionPlugin
+    if (typeof uninstallExtensionPluginBridge !== 'function') {
+      setExtensionNotice(`${plugin.name} 卸载服务不可用`)
+      return
+    }
     try {
-      const result = await window.aiops?.uninstallExtensionPlugin?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      const result = await uninstallExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
       if (!result?.ok || !result.data) {
         setExtensionNotice(result?.errorMessage || `${plugin.name} 卸载失败`)
         return
@@ -7251,8 +7271,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const subscribeExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin) return
+    const openExtensionSubscriptionBridge = window.aiops?.openExtensionSubscription
+    if (typeof openExtensionSubscriptionBridge !== 'function') {
+      setExtensionNotice(`${plugin.name} 订阅服务不可用`)
+      return
+    }
     try {
-      const result = await window.aiops?.openExtensionSubscription?.({ plugin: cloneExtensionPluginForBackend(plugin) })
+      const result = await openExtensionSubscriptionBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
       if (!result?.ok || !result.data) {
         setExtensionNotice(result?.errorMessage || `${plugin.name} 订阅入口打开失败`)
         return
@@ -7266,8 +7291,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const cancelExtensionInstall = async (pluginId: string) => {
     if (!extensionInstallLoadingMap.value[pluginId] && !extensionUpdateLoadingMap.value[pluginId]) return
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
+    const cancelExtensionInstallBridge = window.aiops?.cancelExtensionInstall
+    if (typeof cancelExtensionInstallBridge !== 'function') {
+      setExtensionNotice(`${plugin?.name || '插件'} 取消服务不可用`)
+      return
+    }
     try {
-      const result = await window.aiops?.cancelExtensionInstall?.(pluginId)
+      const result = await cancelExtensionInstallBridge(pluginId)
       if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || `${plugin?.name || '插件'} 取消失败`)
         return
@@ -7283,7 +7313,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const dropExtensionPackage = async (file: string | { name?: string; path?: string; size?: number }) => {
-    installExtensionInstallProgressListener()
     extensionDragActive.value = false
     const fileName = typeof file === 'string' ? file : file?.name || ''
     const filePath = typeof file === 'string' ? '' : file?.path || ''
@@ -7293,11 +7322,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const packageName = fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
+    const installExtensionPackageBridge = window.aiops?.installExtensionPackage
+    if (typeof installExtensionPackageBridge !== 'function') {
+      setExtensionNotice(`${packageName} 安装服务不可用`)
+      return false
+    }
+    installExtensionInstallProgressListener()
     extensionInstallingPackageName.value = packageName
     setExtensionNotice(`正在安装 ${packageName}`)
     let pendingPluginId = ''
     try {
-      const result = await window.aiops?.installExtensionPackage?.({
+      const result = await installExtensionPackageBridge({
         fileName,
         filePath,
         size,

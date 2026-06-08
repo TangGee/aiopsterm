@@ -4326,6 +4326,191 @@ describe('workspace store', () => {
     )
   })
 
+  it('does not fabricate extension plugin writes when bridges are unavailable or fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshExtensionPlugins()
+
+    const originalAiops = {
+      listExtensionPlugins: window.aiops.listExtensionPlugins,
+      installExtensionPlugin: window.aiops.installExtensionPlugin,
+      updateExtensionPlugin: window.aiops.updateExtensionPlugin,
+      installExtensionPackage: window.aiops.installExtensionPackage,
+      uninstallExtensionPlugin: window.aiops.uninstallExtensionPlugin,
+      openExtensionSubscription: window.aiops.openExtensionSubscription,
+      cancelExtensionInstall: window.aiops.cancelExtensionInstall
+    }
+    const catalogSnapshot = () => JSON.stringify(store.extensionPlugins)
+    const initialCatalogSnapshot = catalogSnapshot()
+    const plugin = (pluginId: string) => store.extensionPlugins.find((item) => item.pluginId === pluginId)
+    const expectCatalogUnchanged = () => expect(catalogSnapshot()).toBe(initialCatalogSnapshot)
+
+    const cancelPendingUpdate = async (pendingUpdate: Promise<void>) => {
+      ;(window.aiops as any).cancelExtensionInstall = originalAiops.cancelExtensionInstall
+      await store.cancelExtensionInstall('ops-runbook')
+      await vi.runOnlyPendingTimersAsync()
+      await pendingUpdate
+      expect(plugin('ops-runbook')?.hasUpdate).toBe(true)
+      expect(store.extensionInstallLoadingMap['ops-runbook']).toBeUndefined()
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
+      expectCatalogUnchanged()
+    }
+
+    try {
+      ;(window.aiops as any).listExtensionPlugins = undefined
+      await expect(store.refreshExtensionPlugins()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('插件列表加载服务不可用')
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).listExtensionPlugins = originalAiops.listExtensionPlugins
+      vi.mocked(window.aiops.listExtensionPlugins!).mockRejectedValueOnce(new Error('extension list offline'))
+      await expect(store.refreshExtensionPlugins()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('extension list offline')
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.listExtensionPlugins!).mockResolvedValueOnce({ ok: false, errorMessage: 'extension list rejected' } as any)
+      await expect(store.refreshExtensionPlugins()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('extension list rejected')
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).installExtensionPlugin = undefined
+      await store.installExtensionPlugin('cloud-assets')
+      expect(store.extensionNotice).toBe('Cloud Assets 安装服务不可用')
+      expect(plugin('cloud-assets')?.installed).toBe(false)
+      expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['cloud-assets']).toBeUndefined()
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).installExtensionPlugin = originalAiops.installExtensionPlugin
+      vi.mocked(window.aiops.installExtensionPlugin!).mockRejectedValueOnce(new Error('install offline'))
+      await store.installExtensionPlugin('cloud-assets')
+      expect(store.extensionNotice).toBe('install offline')
+      expect(plugin('cloud-assets')?.installed).toBe(false)
+      expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.installExtensionPlugin!).mockResolvedValueOnce({ ok: false, errorMessage: 'install rejected by backend' } as any)
+      await store.installExtensionPlugin('cloud-assets')
+      expect(store.extensionNotice).toBe('install rejected by backend')
+      expect(plugin('cloud-assets')?.installed).toBe(false)
+      expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).updateExtensionPlugin = undefined
+      await store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionNotice).toBe('Ops Runbook 更新服务不可用')
+      expect(plugin('ops-runbook')?.hasUpdate).toBe(true)
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['ops-runbook']).toBeUndefined()
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).updateExtensionPlugin = originalAiops.updateExtensionPlugin
+      vi.mocked(window.aiops.updateExtensionPlugin!).mockRejectedValueOnce(new Error('update offline'))
+      await store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionNotice).toBe('update offline')
+      expect(plugin('ops-runbook')?.hasUpdate).toBe(true)
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['ops-runbook']?.stage).toBe('error')
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.updateExtensionPlugin!).mockResolvedValueOnce({ ok: false, errorMessage: 'update rejected by backend' } as any)
+      await store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionNotice).toBe('update rejected by backend')
+      expect(plugin('ops-runbook')?.hasUpdate).toBe(true)
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['ops-runbook']?.stage).toBe('error')
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).uninstallExtensionPlugin = undefined
+      await store.uninstallExtensionPlugin('local-shell-tools')
+      expect(store.extensionNotice).toBe('Local Shell Tools 卸载服务不可用')
+      expect(plugin('local-shell-tools')?.installed).toBe(true)
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).uninstallExtensionPlugin = originalAiops.uninstallExtensionPlugin
+      vi.mocked(window.aiops.uninstallExtensionPlugin!).mockRejectedValueOnce(new Error('uninstall offline'))
+      await store.uninstallExtensionPlugin('local-shell-tools')
+      expect(store.extensionNotice).toBe('uninstall offline')
+      expect(plugin('local-shell-tools')?.installed).toBe(true)
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.uninstallExtensionPlugin!).mockResolvedValueOnce({ ok: false, errorMessage: 'uninstall rejected by backend' } as any)
+      await store.uninstallExtensionPlugin('local-shell-tools')
+      expect(store.extensionNotice).toBe('uninstall rejected by backend')
+      expect(plugin('local-shell-tools')?.installed).toBe(true)
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).openExtensionSubscription = undefined
+      await store.subscribeExtensionPlugin('private-automation-pack')
+      expect(store.extensionNotice).toBe('Private Automation Pack 订阅服务不可用')
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).openExtensionSubscription = originalAiops.openExtensionSubscription
+      vi.mocked(window.aiops.openExtensionSubscription!).mockRejectedValueOnce(new Error('subscribe offline'))
+      await store.subscribeExtensionPlugin('private-automation-pack')
+      expect(store.extensionNotice).toBe('subscribe offline')
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.openExtensionSubscription!).mockResolvedValueOnce({ ok: false, errorMessage: 'subscribe rejected by backend' } as any)
+      await store.subscribeExtensionPlugin('private-automation-pack')
+      expect(store.extensionNotice).toBe('subscribe rejected by backend')
+      expectCatalogUnchanged()
+
+      const missingCancelUpdate = store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      ;(window.aiops as any).cancelExtensionInstall = undefined
+      await store.cancelExtensionInstall('ops-runbook')
+      expect(store.extensionNotice).toBe('Ops Runbook 取消服务不可用')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      await cancelPendingUpdate(missingCancelUpdate)
+
+      const rejectedCancelUpdate = store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      vi.mocked(window.aiops.cancelExtensionInstall!).mockRejectedValueOnce(new Error('cancel offline'))
+      await store.cancelExtensionInstall('ops-runbook')
+      expect(store.extensionNotice).toBe('cancel offline')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      await cancelPendingUpdate(rejectedCancelUpdate)
+
+      const backendRejectedCancelUpdate = store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      vi.mocked(window.aiops.cancelExtensionInstall!).mockResolvedValueOnce({ ok: false, errorMessage: 'cancel rejected by backend' } as any)
+      await store.cancelExtensionInstall('ops-runbook')
+      expect(store.extensionNotice).toBe('cancel rejected by backend')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      await cancelPendingUpdate(backendRejectedCancelUpdate)
+
+      const selectedBeforePackage = store.selectedExtensionId
+      ;(window.aiops as any).installExtensionPackage = undefined
+      await expect(store.dropExtensionPackage('client-local.external-reference')).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('client local 安装服务不可用')
+      expect(store.extensionInstallingPackageName).toBe('')
+      expect(store.selectedExtensionId).toBe(selectedBeforePackage)
+      expect(plugin('local-client-local')).toBeUndefined()
+      expectCatalogUnchanged()
+
+      ;(window.aiops as any).installExtensionPackage = originalAiops.installExtensionPackage
+      vi.mocked(window.aiops.installExtensionPackage!).mockRejectedValueOnce(new Error('package offline'))
+      await expect(store.dropExtensionPackage('client-local.external-reference')).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('package offline')
+      expect(store.extensionInstallingPackageName).toBe('')
+      expect(store.selectedExtensionId).toBe(selectedBeforePackage)
+      expect(plugin('local-client-local')).toBeUndefined()
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.installExtensionPackage!).mockResolvedValueOnce({ ok: false, errorMessage: 'package rejected by backend' } as any)
+      await expect(store.dropExtensionPackage('client-local.external-reference')).resolves.toBe(false)
+      expect(store.extensionNotice).toBe('package rejected by backend')
+      expect(store.extensionInstallingPackageName).toBe('')
+      expect(store.selectedExtensionId).toBe(selectedBeforePackage)
+      expect(plugin('local-client-local')).toBeUndefined()
+      expectCatalogUnchanged()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not mutate persisted aliases when required backend operations are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshAliasCommands()
