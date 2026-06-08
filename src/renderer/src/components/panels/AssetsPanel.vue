@@ -551,6 +551,7 @@
                 新建密钥
               </button>
             </div>
+            <small v-if="keyServiceNotice">{{ keyServiceNotice }}</small>
           </div>
 
           <div class="keychain-list-container">
@@ -938,6 +939,7 @@ const selectedKeyId = ref<string | null>(null)
 const keyContextMenuId = ref<string | null>(null)
 const keyContextPosition = reactive({ x: 0, y: 0 })
 const keyDragOver = ref(false)
+const keyServiceNotice = ref('')
 const keyImportNotice = ref('')
 const keyFormError = ref('')
 const keyImportInput = ref<HTMLInputElement | null>(null)
@@ -1018,7 +1020,22 @@ const refreshAssetGroupOptions = async () => {
 }
 
 const refreshKeychains = async () => {
-  keychains.value = (await window.aiops?.listKeychains?.()) || []
+  const listKeychains = window.aiops?.listKeychains
+  if (typeof listKeychains !== 'function') {
+    keyServiceNotice.value = '密钥列表服务不可用。'
+    throw new Error(keyServiceNotice.value)
+  }
+  try {
+    const nextKeychains = await listKeychains()
+    if (!Array.isArray(nextKeychains)) {
+      throw new Error('密钥列表响应无效。')
+    }
+    keychains.value = nextKeychains
+    keyServiceNotice.value = ''
+  } catch (error) {
+    keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
+    throw new Error(keyServiceNotice.value)
+  }
 }
 
 const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}): AiopsAssetInput => ({
@@ -1652,10 +1669,28 @@ const openNewKeyPanel = () => {
 
 const editKey = async (keyId: string | null) => {
   if (!keyId) return
-  const key = await window.aiops?.getKeychain?.(keyId)
-  if (!key) return
+  const getKeychain = window.aiops?.getKeychain
+  if (typeof getKeychain !== 'function') {
+    keyServiceNotice.value = '密钥详情服务不可用。'
+    keyContextMenuId.value = null
+    return
+  }
+  let key: AiopsKeychainRecord | null = null
+  try {
+    key = await getKeychain(keyId)
+  } catch (error) {
+    keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
+    keyContextMenuId.value = null
+    return
+  }
+  if (!key) {
+    keyServiceNotice.value = '密钥不存在或已被删除。'
+    keyContextMenuId.value = null
+    return
+  }
   keyEditMode.value = true
   keyFormError.value = ''
+  keyServiceNotice.value = ''
   keyImportNotice.value = ''
   Object.assign(keyForm, { id: key.id, name: key.name, privateKey: key.privateKey || '', publicKey: key.publicKey, passphrase: key.passphrase || '' })
   keyEditorOpen.value = true
@@ -1702,7 +1737,11 @@ const validateKeyForm = () => {
 }
 
 const saveKeychainRecord = async (input: AiopsKeychainInput) => {
-  const result = await window.aiops?.saveKeychain?.(input)
+  const saveKeychain = window.aiops?.saveKeychain
+  if (typeof saveKeychain !== 'function') {
+    throw new Error('密钥保存服务不可用。')
+  }
+  const result = await saveKeychain(input)
   if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '密钥保存失败')
   await refreshKeychains()
   return result.data
@@ -1744,14 +1783,28 @@ const removeKey = (keyId: string | null) => {
   confirmState.message = `确定删除密钥 ${key.name}？`
   confirmState.expectedText = key.name
   confirmState.action = async () => {
-    const result = await window.aiops?.deleteKeychain?.(keyId)
+    const deleteKeychain = window.aiops?.deleteKeychain
+    if (typeof deleteKeychain !== 'function') {
+      keyServiceNotice.value = '密钥删除服务不可用。'
+      keyImportNotice.value = '密钥删除服务不可用。'
+      return
+    }
+    const result = await deleteKeychain(keyId)
     if (!result?.ok) {
+      keyServiceNotice.value = result?.errorMessage || '密钥删除失败。'
       keyImportNotice.value = result?.errorMessage || '密钥删除失败。'
       return
     }
-    await refreshKeychains()
+    try {
+      await refreshKeychains()
+    } catch (error) {
+      keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
+      keyImportNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
+      return
+    }
     selectedKeyId.value = selectedKeyId.value === keyId ? null : selectedKeyId.value
     form.keyId = form.keyId === keyId ? '' : form.keyId
+    keyServiceNotice.value = ''
     keyImportNotice.value = `已删除密钥 ${key.name}。`
   }
   confirmInput.value = ''
@@ -1870,7 +1923,7 @@ onMounted(() => {
     importNotice.value = error instanceof Error ? error.message : '资产加载失败。'
   })
   refreshKeychains().catch((error) => {
-    keyImportNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
+    keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
   })
 })
 </script>

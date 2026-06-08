@@ -709,6 +709,69 @@ describe('AppShell', () => {
     expect(knowledge.text()).not.toContain('interface.png')
   })
 
+  it('does not fabricate Key Management state when keychain bridges are unavailable', async () => {
+    const originalAiops = {
+      listKeychains: window.aiops.listKeychains,
+      getKeychain: window.aiops.getKeychain,
+      saveKeychain: window.aiops.saveKeychain,
+      deleteKeychain: window.aiops.deleteKeychain
+    }
+    const mountKeysPanel = async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(AssetsPanel, {
+        props: { query: '' },
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+      await wrapper.findAll('.asset-management-item').find((button) => button.text().includes('密钥管理'))!.trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+
+    try {
+      ;(window.aiops as any).listKeychains = undefined
+      const listMissing = await mountKeysPanel()
+      expect(listMissing.text()).toContain('密钥列表服务不可用')
+      expect(listMissing.text()).not.toContain('prod-ed25519')
+      listMissing.unmount()
+
+      ;(window.aiops as any).listKeychains = originalAiops.listKeychains
+      ;(window.aiops as any).getKeychain = undefined
+      const detailMissing = await mountKeysPanel()
+      await detailMissing.findAll('.keychain-card').find((button) => button.text().includes('prod-ed25519'))!.find('button[title="编辑"]').trigger('click')
+      await flushPromises()
+      expect(detailMissing.text()).toContain('密钥详情服务不可用')
+      expect(detailMissing.find('.key-form-panel').exists()).toBe(false)
+      detailMissing.unmount()
+
+      ;(window.aiops as any).getKeychain = originalAiops.getKeychain
+      ;(window.aiops as any).saveKeychain = undefined
+      const saveMissing = await mountKeysPanel()
+      await saveMissing.find('[data-testid="key-new-button"]').trigger('click')
+      await saveMissing.find('.key-form-panel input').setValue('bridge-missing-key')
+      await saveMissing.find('.key-form-panel textarea').setValue('-----BEGIN RSA PRIVATE KEY-----')
+      await saveMissing.find('.key-form-panel .asset-submit-button').trigger('click')
+      await flushPromises()
+      expect(saveMissing.text()).toContain('密钥保存服务不可用')
+      expect(saveMissing.findAll('.keychain-card').some((button) => button.text().includes('bridge-missing-key'))).toBe(false)
+      saveMissing.unmount()
+
+      ;(window.aiops as any).saveKeychain = originalAiops.saveKeychain
+      ;(window.aiops as any).deleteKeychain = undefined
+      const deleteMissing = await mountKeysPanel()
+      await deleteMissing.findAll('.keychain-card').find((button) => button.text().includes('prod-ed25519'))!.find('button[title="删除"]').trigger('click')
+      await deleteMissing.find('.asset-confirm-modal input').setValue('prod-ed25519')
+      await deleteMissing.find('.asset-confirm-modal footer .danger').trigger('click')
+      await flushPromises()
+      expect(deleteMissing.text()).toContain('密钥删除服务不可用')
+      expect(deleteMissing.findAll('.keychain-card').some((button) => button.text().includes('prod-ed25519'))).toBe(true)
+      deleteMissing.unmount()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('supports External reference-style asset import/export and organization asset table management', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
