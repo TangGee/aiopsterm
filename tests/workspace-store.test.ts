@@ -1046,6 +1046,69 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate SSH Agent key writes when the config bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    await store.refreshSshAgentKeychainOptions()
+    const originalSaveConfig = window.aiops.saveConfig
+    const agentKeySnapshot = () => JSON.stringify(store.sshAgentKeys)
+    const initialSnapshot = agentKeySnapshot()
+
+    try {
+      store.openSshAgentConfig()
+      store.setSshAgentSelectedKey('key-1')
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.addSshAgentKey()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH Agent 密钥保存服务不可用')
+      expect(store.sshAgentSelectedKey).toBe('key-1')
+      expect(agentKeySnapshot()).toBe(initialSnapshot)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.addSshAgentKey()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH Agent 密钥保存失败')
+      expect(store.sshAgentSelectedKey).toBe('key-1')
+      expect(agentKeySnapshot()).toBe(initialSnapshot)
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ssh agent save offline'))
+      await expect(store.addSshAgentKey()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('ssh agent save offline')
+      expect(store.sshAgentSelectedKey).toBe('key-1')
+      expect(agentKeySnapshot()).toBe(initialSnapshot)
+
+      await expect(store.addSshAgentKey()).resolves.toBe(true)
+      const savedSnapshot = agentKeySnapshot()
+      expect(store.sshAgentSelectedKey).toBe('')
+      expect(store.sshAgentKeys).toEqual([
+        {
+          id: 'key-1',
+          fingerprint: prodKeychainSshAgentFingerprint,
+          comment: 'prod-ed25519',
+          keyType: 'ED25519',
+          keyChainId: 'key-1'
+        }
+      ])
+
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.removeSshAgentKey('key-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH Agent 密钥移除服务不可用')
+      expect(agentKeySnapshot()).toBe(savedSnapshot)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.removeSshAgentKey('key-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH Agent 密钥移除失败')
+      expect(agentKeySnapshot()).toBe(savedSnapshot)
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ssh agent remove offline'))
+      await expect(store.removeSshAgentKey('key-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('ssh agent remove offline')
+      expect(agentKeySnapshot()).toBe(savedSnapshot)
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
   it('hydrates and migrates External reference-style user rules and legacy custom instructions', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
@@ -5096,7 +5159,7 @@ describe('workspace store', () => {
     store.openSshAgentConfig()
     expect(store.sshAgentConfigModalOpen).toBe(true)
     store.setSshAgentSelectedKey('key-1')
-    expect(store.addSshAgentKey()).toBe(true)
+    await expect(store.addSshAgentKey()).resolves.toBe(true)
     expect(store.sshAgentKeys).toEqual([
       {
         id: 'key-1',
@@ -5119,10 +5182,10 @@ describe('workspace store', () => {
         ]
       })
     )
-    expect(store.addSshAgentKey()).toBe(false)
+    await expect(store.addSshAgentKey()).resolves.toBe(false)
     expect(store.settingsNotice).toContain('请选择密钥')
     vi.mocked(window.aiops.saveConfig).mockClear()
-    expect(store.removeSshAgentKey('key-1')).toBe(true)
+    await expect(store.removeSshAgentKey('key-1')).resolves.toBe(true)
     expect(store.sshAgentKeys).toEqual([])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({

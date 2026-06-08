@@ -6576,6 +6576,7 @@ describe('AppShell', () => {
     expect(window.aiops.listSshAgentKeychainOptions).toHaveBeenCalled()
     await workspace.find('.agent-config-modal .settings-select').setValue('key-1')
     await workspace.find('.agent-key-form .settings-button.primary').trigger('click')
+    await flushPromises()
     expect(store.sshAgentKeys.some((key) => key.id === 'key-1')).toBe(true)
     expect(workspace.text()).toContain('prod-ed25519')
     expect(workspace.text()).toContain('ED25519')
@@ -6594,6 +6595,7 @@ describe('AppShell', () => {
     )
     vi.mocked(window.aiops.saveConfig).mockClear()
     await workspace.find('.agent-config-table .settings-link-button.danger').trigger('click')
+    await flushPromises()
     expect(store.sshAgentKeys).toEqual([])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({

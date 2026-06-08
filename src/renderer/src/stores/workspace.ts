@@ -4269,7 +4269,33 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const getSshAgentKeysSnapshot = (): SshAgentKeyConfig[] => sshAgentKeys.value.map((key) => ({ ...key }))
+  const persistSshAgentKeys = async (nextKeys: SshAgentKeyConfig[], unavailableNotice: string, failureNotice: string) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice(unavailableNotice)
+      return false
+    }
+    const normalizedKeys = normalizeSshAgentKeys(nextKeys).normalized
+    try {
+      const savedConfig = await saveConfigBridge({
+        sshAgentKeys: normalizedKeys.map((key) => ({ ...key }))
+      })
+      if (!isRecord(savedConfig) || !Array.isArray(savedConfig.sshAgentKeys)) {
+        setSettingsNotice(failureNotice)
+        return false
+      }
+      const savedKeys = normalizeSshAgentKeys(savedConfig.sshAgentKeys).normalized
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        sshAgentKeys: savedKeys
+      } as Partial<UserConfig>)
+      sshAgentKeys.value = savedKeys.map((key) => ({ ...key }))
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : failureNotice)
+      return false
+    }
+  }
 
   const openSshAgentConfig = () => {
     sshAgentConfigModalOpen.value = true
@@ -4284,7 +4310,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sshAgentSelectedKey.value = key
   }
 
-  const addSshAgentKey = () => {
+  const addSshAgentKey = async () => {
     const selectedKey = sshAgentSelectedKey.value
     if (!selectedKey) {
       setSettingsNotice('请选择密钥')
@@ -4307,18 +4333,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       keyType: option.keyType,
       keyChainId: option.key
     }
-    sshAgentKeys.value = [...sshAgentKeys.value, agentKey]
+    const saved = await persistSshAgentKeys([...sshAgentKeys.value, agentKey], 'SSH Agent 密钥保存服务不可用', 'SSH Agent 密钥保存失败')
+    if (!saved) return false
     sshAgentSelectedKey.value = ''
-    saveConfig({ sshAgentKeys: getSshAgentKeysSnapshot() })
     setSettingsNotice('SSH Agent 密钥已添加')
     return true
   }
 
-  const removeSshAgentKey = (id: string) => {
+  const removeSshAgentKey = async (id: string) => {
     const nextKeys = sshAgentKeys.value.filter((key) => key.id !== id)
     if (nextKeys.length === sshAgentKeys.value.length) return false
-    sshAgentKeys.value = nextKeys
-    saveConfig({ sshAgentKeys: getSshAgentKeysSnapshot() })
+    const saved = await persistSshAgentKeys(nextKeys, 'SSH Agent 密钥移除服务不可用', 'SSH Agent 密钥移除失败')
+    if (!saved) return false
     setSettingsNotice('SSH Agent 密钥已移除')
     return true
   }
