@@ -119,6 +119,33 @@ describe('assets backend boundary', () => {
     expect(ignoredClientUuid.data?.uuid).not.toBe('custom-folder-client-draft')
   })
 
+  it('owns asset group listing, renaming, and deletion from backend asset rows', async () => {
+    const backend = await loadBackend()
+
+    expect(backend.listAssetGroups({ assetTypes: ['person'] })).toEqual(
+      expect.arrayContaining([
+        { key: 'group-生产', name: '生产', count: 1 },
+        { key: 'group-预发', name: '预发', count: 1 }
+      ])
+    )
+
+    const renamed = backend.renameAssetGroup({ oldName: '生产', newName: '生产归档', assetTypes: ['person'] })
+    expect(renamed.ok).toBe(true)
+    expect(renamed.data?.assets.find((asset: { id: string }) => asset.id === 'asset-1')).toMatchObject({
+      group: '生产归档',
+      group_name: '生产归档'
+    })
+    expect(backend.listAssetGroups({ assetTypes: ['person'] })).toContainEqual({ key: 'group-生产归档', name: '生产归档', count: 1 })
+
+    const deleted = backend.deleteAssetGroup({ name: '生产归档', fallbackName: '未分组', assetTypes: ['person'] })
+    expect(deleted.ok).toBe(true)
+    expect(deleted.data?.assets.find((asset: { id: string }) => asset.id === 'asset-1')).toMatchObject({
+      group: '未分组',
+      group_name: '未分组'
+    })
+    expect(backend.listAssetGroups({ assetTypes: ['person'] })).toContainEqual({ key: 'group-未分组', name: '未分组', count: 1 })
+  })
+
   it('derives SSH Agent keychain options from backend-owned keychains', async () => {
     const backend = await loadBackend()
     const options = backend.listSshAgentKeychainOptions()

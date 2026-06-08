@@ -639,9 +639,11 @@ describe('AppShell', () => {
       props: { query: '' },
       global: { plugins: [pinia] }
     })
+    await flushPromises()
 
     expect(assets.text()).toContain('组织资产管理')
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    expect(window.aiops.listAssetGroups).toHaveBeenCalledWith({ assetTypes: ['person', 'switch'] })
 
     await assets.findAll('.asset-action-button').find((button) => button.text().includes('导出'))!.trigger('click')
     await assets.findAll('.export-assets-modal .export-leaf-row').find((row) => row.text().includes('prod-bastion'))!.find('input').setValue(true)
@@ -703,6 +705,7 @@ describe('AppShell', () => {
     expect(assets.find('.import-assets-modal').text()).toContain('imported-json')
     vi.mocked(window.aiops.saveAsset).mockClear()
     await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('跳过重复'))!.trigger('click')
+    await flushPromises()
     expect(vi.mocked(window.aiops.saveAsset).mock.calls).toEqual([
       [expect.objectContaining({ host: '10.55.0.9' })]
     ])
@@ -715,11 +718,12 @@ describe('AppShell', () => {
       'moba-prod=#109#0%10.88.1.5%22%mobauser%%-1%10.88.1.1%2200%jumpuser%-1%2224%-1%_ProfileDir_/keys/moba.pem'
     ].join('\n')
     assetImportPayload = mobaPayload
-    Object.defineProperty(input.element, 'files', {
+    const mobaInput = assets.find('input.asset-hidden-file-input')
+    Object.defineProperty(mobaInput.element, 'files', {
       configurable: true,
       value: [new File([mobaPayload], 'MobaXterm.mxtsessions', { type: 'text/plain' })]
     })
-    await input.trigger('change')
+    await mobaInput.trigger('change')
     await flushPromises()
     expect(assets.find('.import-assets-modal').text()).toContain('moba-prod')
     expect(assets.find('.import-assets-modal').text()).toContain('10.88.1.5')
@@ -820,6 +824,7 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
 
     try {
+      expect(window.aiops.listAssetGroups).toHaveBeenCalledWith({ assetTypes: ['person', 'switch'] })
       expect(wrapper.text()).toContain('直接连接')
       expect(wrapper.text()).toContain('堡垒机资源')
       expect(wrapper.text()).toContain('最近连接')
@@ -922,9 +927,11 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('Workspace')
       await wrapper.findAll('.workspace-host-form input').at(5)!.setValue('2201')
       await wrapper.find('.workspace-host-form textarea').setValue('工作区新增主机')
+      vi.mocked(window.aiops.saveAsset).mockClear()
       await wrapper.find('.workspace-host-form').trigger('submit')
       await flushPromises()
       expect(wrapper.find('.workspace-host-modal').exists()).toBe(false)
+      expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
       expect(wrapper.text()).toContain('workspace-unit')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit'))!.trigger('contextmenu', {
         clientX: 300,
@@ -940,8 +947,10 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('contextmenu')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('克隆'))!.trigger('click')
       expect((wrapper.findAll('.workspace-host-form input').at(0)!.element as HTMLInputElement).value).toBe('workspace-unit-edited_Clone')
+      vi.mocked(window.aiops.saveAsset).mockClear()
       await wrapper.find('.workspace-host-form').trigger('submit')
       await flushPromises()
+      expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
       expect(wrapper.text()).toContain('workspace-unit-edited_Clone')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited_Clone'))!.trigger('contextmenu')
       await wrapper.find('.workspace-node-menu .delete').trigger('click')
@@ -965,6 +974,27 @@ describe('AppShell', () => {
       expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.44.0.9:2201')
       expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
       expect(wrapper.text()).toContain('workspace ssh refused')
+
+      await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('生产'))!.trigger('contextmenu', {
+        clientX: 260,
+        clientY: 180
+      })
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑文件夹'))!.trigger('click')
+      await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('生产归档')
+      vi.mocked(window.aiops.renameAssetGroup).mockClear()
+      await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      await flushPromises()
+      expect(window.aiops.renameAssetGroup).toHaveBeenCalledWith({ oldName: '生产', newName: '生产归档', assetTypes: ['person', 'switch'] })
+      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产归档'))).toBe(true)
+      await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('生产归档'))!.trigger('contextmenu')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
+      expect(wrapper.find('.files-folder-confirm').text()).toContain('删除分组')
+      vi.mocked(window.aiops.deleteAssetGroup).mockClear()
+      await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(window.aiops.deleteAssetGroup).toHaveBeenCalledWith({ name: '生产归档', fallbackName: '未分组', assetTypes: ['person', 'switch'] })
+      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产归档'))).toBe(false)
+      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('未分组'))).toBe(true)
 
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)

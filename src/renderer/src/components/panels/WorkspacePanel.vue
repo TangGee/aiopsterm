@@ -494,8 +494,16 @@
             <span>分组</span>
             <input
               v-model="hostForm.group"
+              list="workspace-host-group-options"
               placeholder="请输入分组"
             />
+            <datalist id="workspace-host-group-options">
+              <option
+                v-for="group in hostGroupOptions"
+                :key="group.key"
+                :value="group.name"
+              />
+            </datalist>
           </label>
           <label>
             <span>端口 *</span>
@@ -673,7 +681,16 @@ import {
   Trash2,
   X
 } from 'lucide-vue-next'
-import type { AiopsAssetAuthType, AiopsAssetInput, AiopsAssetRecord, AiopsAssetType, AiopsCustomFolderRecord, AiopsCustomFolderSaveInput } from '@shared/preload'
+import type {
+  AiopsAssetAuthType,
+  AiopsAssetGroupRecord,
+  AiopsAssetInput,
+  AiopsAssetRecord,
+  AiopsAssetSnapshot,
+  AiopsAssetType,
+  AiopsCustomFolderRecord,
+  AiopsCustomFolderSaveInput
+} from '@shared/preload'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
@@ -706,7 +723,6 @@ type WorkspaceGroup = {
 
 type CustomFolder = AiopsCustomFolderRecord
 
-const defaultDirectGroups = ['生产', '预发', '数据库', '维护']
 const activeWorkspace = ref<WorkspaceTabKey>('direct')
 const searchValue = ref('')
 const addMenuOpen = ref(false)
@@ -719,11 +735,11 @@ const notice = ref('')
 const commentAssetId = ref('')
 const editingComment = ref('')
 const assetBackendReady = ref(false)
-let hostCreateCounter = 6
 
 const workspaceAssets = ref<WorkspaceAsset[]>([])
 
 const customFolders = ref<CustomFolder[]>([])
+const directGroupOptions = ref<AiopsAssetGroupRecord[]>([])
 
 const folderModal = reactive({ visible: false, mode: 'create' as FolderModalMode, targetKey: '', fromMove: false })
 const folderForm = reactive({ name: '', description: '' })
@@ -754,12 +770,16 @@ const organizationAssets = computed(() => workspaceAssets.value.filter((asset) =
 const bastionResourceAssets = computed(() => workspaceAssets.value.filter((asset) => !asset.isLocalShell && asset.asset_type !== 'organization' && (asset.organizationId || asset.folderUuid)))
 const showIpMode = computed(() => workspace.workspacePreferences.showIpMode)
 const expandedGroups = computed(() => workspace.workspacePreferences.expandedGroups)
+const firstDirectGroupName = computed(() => directGroupOptions.value[0]?.name || '')
+const hostGroupOptions = computed(() =>
+  activeWorkspace.value === 'direct' ? directGroupOptions.value : [{ key: 'group-enterprise', name: '企业', count: organizationAssets.value.length }]
+)
 
 const buildDirectGroups = (): WorkspaceGroup[] => {
   const source = directAssets.value
   const localAssets = localShellAssets.value
   const recentIds = new Set(['asset-1', 'asset-2'])
-  const groupNames = [...new Set([...defaultDirectGroups, ...source.map((asset) => asset.group).filter(Boolean)])]
+  const groupNames = [...new Set(source.map((asset) => asset.group || asset.group_name).filter(Boolean))]
   const groups: WorkspaceGroup[] = [
     {
       key: 'recent_connections',
@@ -770,7 +790,7 @@ const buildDirectGroups = (): WorkspaceGroup[] => {
       menu: false
     },
     ...groupNames.map((group) => {
-      const children = source.filter((asset) => asset.group === group)
+      const children = source.filter((asset) => (asset.group || asset.group_name) === group)
       return {
         key: `group-${group}`,
         title: group,
@@ -912,12 +932,25 @@ const toAssetInput = (asset: WorkspaceAsset, patch: Partial<AiopsAssetInput> = {
   ...patch
 })
 
-const refreshAssets = async () => {
-  if (!window.aiops?.listAssets) return
-  const snapshot = await window.aiops.listAssets()
+const applyWorkspaceAssetSnapshot = (snapshot?: AiopsAssetSnapshot) => {
+  if (!snapshot) return
   workspaceAssets.value = snapshot.assets.map((asset) => ({ ...asset, tags: [...asset.tags] }))
   customFolders.value = snapshot.folders.map((folder) => ({ ...folder }))
   assetBackendReady.value = true
+}
+
+const refreshDirectGroupOptions = async () => {
+  directGroupOptions.value =
+    (await window.aiops?.listAssetGroups?.({
+      assetTypes: ['person', 'switch']
+    })) || []
+}
+
+const refreshAssets = async () => {
+  if (!window.aiops?.listAssets) return
+  const snapshot = await window.aiops.listAssets()
+  applyWorkspaceAssetSnapshot(snapshot)
+  await refreshDirectGroupOptions()
 }
 
 const saveAssetRecord = async (input: AiopsAssetInput) => {
@@ -1065,7 +1098,7 @@ const openCreateHost = () => {
   hostForm.title = ''
   hostForm.host = ''
   hostForm.username = activeWorkspace.value === 'bastion' ? 'sync' : 'root'
-  hostForm.group = activeWorkspace.value === 'bastion' ? '企业' : '生产'
+  hostForm.group = activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value
   hostForm.port = '22'
   hostForm.authType = activeWorkspace.value === 'bastion' ? 'keyBased' : 'password'
   hostForm.comment = ''
@@ -1160,15 +1193,21 @@ const saveFolderForm = async () => {
   const oldGroupName = folderModal.targetKey.replace(/^group-/, '')
   const oldKey = `group-${oldGroupName}`
   const newKey = `group-${name}`
-  workspaceAssets.value.forEach((asset) => {
-    if (asset.group === oldGroupName) {
-      asset.group = name
-      asset.group_name = name
-    }
-  })
-  replaceExpandedGroup(oldKey, newKey)
-  notice.value = `已更新分组 ${name}`
-  closeFolderModal()
+  try {
+    const result = await window.aiops?.renameAssetGroup?.({
+      oldName: oldGroupName,
+      newName: name,
+      assetTypes: ['person', 'switch']
+    })
+    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '分组保存失败')
+    applyWorkspaceAssetSnapshot(result.data)
+    await refreshDirectGroupOptions()
+    replaceExpandedGroup(oldKey, newKey)
+    notice.value = `已更新分组 ${name}`
+    closeFolderModal()
+  } catch (error) {
+    folderFormError.value = error instanceof Error ? error.message : '分组保存失败'
+  }
 }
 
 const displayAsset = (asset: WorkspaceAsset) => (showIpMode.value ? asset.ip || asset.host : asset.name || asset.title)
@@ -1460,14 +1499,24 @@ const confirmDeleteGroup = () => {
     return
   }
   if (group.type === 'direct-group' && group.groupName) {
-    workspaceAssets.value.forEach((asset) => {
-      if (asset.group === group.groupName) {
-        asset.group = '未分组'
-        asset.group_name = '未分组'
-      }
-    })
-    removeExpandedGroup(group.key)
-    notice.value = `已删除分组 ${group.title}`
+    window.aiops
+      ?.deleteAssetGroup?.({
+        name: group.groupName,
+        fallbackName: '未分组',
+        assetTypes: ['person', 'switch']
+      })
+      .then(async (result) => {
+        if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '删除分组失败')
+        applyWorkspaceAssetSnapshot(result.data)
+        await refreshDirectGroupOptions()
+        removeExpandedGroup(group.key)
+        notice.value = `已删除分组 ${group.title}`
+        closeDeleteGroupModal()
+      })
+      .catch((error) => {
+        notice.value = error instanceof Error ? error.message : '删除分组失败'
+      })
+    return
   }
   closeDeleteGroupModal()
 }
@@ -1480,7 +1529,7 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostForm.title = mode === 'clone' ? `${asset?.name || ''}_Clone` : asset?.name || ''
   hostForm.host = asset?.host || asset?.ip || ''
   hostForm.username = asset?.username || (activeWorkspace.value === 'bastion' ? 'sync' : 'root')
-  hostForm.group = asset?.group || (activeWorkspace.value === 'bastion' ? '企业' : '生产')
+  hostForm.group = asset?.group || (activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value)
   hostForm.port = String(asset?.port || 22)
   hostForm.authType = asset?.auth_type || (activeWorkspace.value === 'bastion' ? 'keyBased' : 'password')
   hostForm.comment = asset?.comment || ''
@@ -1510,27 +1559,17 @@ const parseHostPort = () => {
   return port
 }
 
-const createHostId = () => {
-  let id = `workspace-asset-${hostCreateCounter}`
-  while (workspaceAssets.value.some((asset) => asset.id === id)) {
-    hostCreateCounter += 1
-    id = `workspace-asset-${hostCreateCounter}`
-  }
-  hostCreateCounter += 1
-  return id
-}
-
 const buildHostInput = (id: string | undefined, port: number, sourceAsset?: WorkspaceAsset): AiopsAssetInput => {
   const shouldAttachOrganization = activeWorkspace.value === 'bastion' && hostForm.assetType !== 'organization'
+  const group = hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : undefined)
   return {
-    id,
+    ...(id ? { id } : {}),
     name: hostForm.title.trim(),
     title: hostForm.title.trim(),
     host: hostForm.host.trim(),
     ip: hostForm.host.trim(),
     username: hostForm.username.trim(),
-    group: hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : '未分组'),
-    group_name: hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : '未分组'),
+    ...(group ? { group, group_name: group } : {}),
     port,
     asset_type: hostForm.assetType,
     auth_type: hostForm.authType,
@@ -1581,10 +1620,9 @@ const saveHostForm = async () => {
     return
   }
 
-  const id = createHostId()
   const sourceAsset = hostModal.mode === 'clone' ? findEditableAsset(hostModal.assetId) : null
   try {
-    const saved = await saveAssetRecord(buildHostInput(id, port, sourceAsset || undefined))
+    const saved = await saveAssetRecord(buildHostInput(undefined, port, sourceAsset || undefined))
     expandGroup(saved.asset_type === 'organization' ? saved.uuid : saved.folderUuid || `group-${saved.group}`)
     notice.value = `${hostModal.mode === 'clone' ? '已克隆主机' : '已创建主机'} ${saved.name}`
     closeHostModal()

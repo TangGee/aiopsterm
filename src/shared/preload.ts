@@ -94,6 +94,26 @@ export type AiopsAssetRecord = {
   isLocalShell?: boolean
 }
 
+export type AiopsAssetGroupRecord = {
+  key: string
+  name: string
+  count: number
+}
+
+export type AiopsAssetGroupListInput = {
+  assetTypes?: AiopsAssetType[]
+}
+
+export type AiopsAssetGroupRenameInput = AiopsAssetGroupListInput & {
+  oldName: string
+  newName: string
+}
+
+export type AiopsAssetGroupDeleteInput = AiopsAssetGroupListInput & {
+  name: string
+  fallbackName?: string
+}
+
 export type AiopsAssetInput = {
   id?: string
   name: string
@@ -1912,6 +1932,9 @@ export type AiopsPreloadApi = {
   kbReindex: () => Promise<{ files: number; chunks: number }>
   onKbTransferProgress: (listener: (event: KnowledgeBaseTransferProgress) => void) => () => void
   listAssets: () => Promise<AiopsAssetSnapshot>
+  listAssetGroups: (input?: AiopsAssetGroupListInput) => Promise<AiopsAssetGroupRecord[]>
+  renameAssetGroup: (input: AiopsAssetGroupRenameInput) => Promise<AiopsMutationResult<AiopsAssetSnapshot>>
+  deleteAssetGroup: (input: AiopsAssetGroupDeleteInput) => Promise<AiopsMutationResult<AiopsAssetSnapshot>>
   saveAsset: (asset: AiopsAssetInput) => Promise<AiopsMutationResult<AiopsAssetRecord>>
   deleteAsset: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
   refreshOrganizationAssets: (input?: AiopsOrganizationAssetRefreshInput) => Promise<AiopsOrganizationAssetRefreshResult>

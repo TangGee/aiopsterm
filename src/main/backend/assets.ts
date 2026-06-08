@@ -4,6 +4,10 @@ import { createHash, randomUUID } from 'crypto'
 import { join } from 'path'
 import type {
   AiopsAssetInput,
+  AiopsAssetGroupDeleteInput,
+  AiopsAssetGroupListInput,
+  AiopsAssetGroupRecord,
+  AiopsAssetGroupRenameInput,
   AiopsAssetRecord,
   AiopsAssetSnapshot,
   AiopsCustomFolderRecord,
@@ -337,6 +341,26 @@ const keychainToSshAgentOption = (keychain: AiopsKeychainRecord): SshAgentKeycha
   fingerprint: keychainFingerprint(keychain),
   keyType: keychain.type.toUpperCase()
 })
+
+const shouldIncludeAssetGroup = (asset: AiopsAssetRecord, input: AiopsAssetGroupListInput = {}) =>
+  !asset.isLocalShell && (!input.assetTypes?.length || input.assetTypes.includes(asset.asset_type))
+
+const assetGroupName = (asset: AiopsAssetRecord) => (asset.group || asset.group_name || 'Hosts').trim() || 'Hosts'
+
+const listAssetGroupsFromAssets = (assets: AiopsAssetRecord[], input: AiopsAssetGroupListInput = {}): AiopsAssetGroupRecord[] => {
+  const groupCounts = new Map<string, number>()
+  assets.filter((asset) => shouldIncludeAssetGroup(asset, input)).forEach((asset) => {
+    const group = assetGroupName(asset)
+    groupCounts.set(group, (groupCounts.get(group) || 0) + 1)
+  })
+  return [...groupCounts.entries()]
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([name, count]) => ({
+      key: `group-${name}`,
+      name,
+      count
+    }))
+}
 
 class FallbackAssetStore {
   private store = new Store<AssetStoreShape>({
@@ -704,6 +728,7 @@ const refreshedAssetForOrganization = (organization: AiopsAssetRecord, index: nu
 }
 
 export const listAssets = (): AiopsAssetSnapshot => getStore().list()
+export const listAssetGroups = (input: AiopsAssetGroupListInput = {}): AiopsAssetGroupRecord[] => listAssetGroupsFromAssets(getStore().list().assets, input)
 export const getAsset = (id: string): AiopsAssetRecord | null => getStore().getAsset(id)
 export const getAssetSecret = (id: string): AssetSecret => getStore().getSecret(id)
 export const getKeychainSecret = (id: string): AssetSecret => getStore().getKeychainSecret(id)
@@ -717,6 +742,42 @@ export const deleteAsset = (id: string): AiopsMutationResult<{ id: string }> =>
     assertUserEditableAsset(id)
     getStore().delete(id)
     return { id }
+  })
+export const renameAssetGroup = (input: AiopsAssetGroupRenameInput): AiopsMutationResult<AiopsAssetSnapshot> =>
+  asResult(() => {
+    const oldName = input.oldName.trim()
+    const newName = input.newName.trim()
+    if (!oldName || !newName) throw new Error('Asset group name is required')
+    const store = getStore()
+    const snapshot = store.list()
+    let updated = 0
+    snapshot.assets
+      .filter((asset) => shouldIncludeAssetGroup(asset, input) && assetGroupName(asset) === oldName)
+      .forEach((asset) => {
+        assertUserEditableAsset(asset.id)
+        store.save({ ...asset, group: newName, group_name: newName })
+        updated += 1
+      })
+    if (!updated) throw new Error(`Asset group not found: ${oldName}`)
+    return store.list()
+  })
+export const deleteAssetGroup = (input: AiopsAssetGroupDeleteInput): AiopsMutationResult<AiopsAssetSnapshot> =>
+  asResult(() => {
+    const name = input.name.trim()
+    const fallbackName = (input.fallbackName || '未分组').trim() || '未分组'
+    if (!name) throw new Error('Asset group name is required')
+    const store = getStore()
+    const snapshot = store.list()
+    let updated = 0
+    snapshot.assets
+      .filter((asset) => shouldIncludeAssetGroup(asset, input) && assetGroupName(asset) === name)
+      .forEach((asset) => {
+        assertUserEditableAsset(asset.id)
+        store.save({ ...asset, group: fallbackName, group_name: fallbackName })
+        updated += 1
+      })
+    if (!updated) throw new Error(`Asset group not found: ${name}`)
+    return store.list()
   })
 export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshInput = {}): AiopsOrganizationAssetRefreshResult =>
   asResult(() => {

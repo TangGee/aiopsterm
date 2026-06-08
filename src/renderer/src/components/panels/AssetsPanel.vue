@@ -286,7 +286,17 @@
             </label>
             <label>
               <span>分组</span>
-              <input v-model="form.group" />
+              <input
+                v-model="form.group"
+                list="asset-host-group-options"
+              />
+              <datalist id="asset-host-group-options">
+                <option
+                  v-for="group in assetGroupOptions"
+                  :key="group.key"
+                  :value="group.name"
+                />
+              </datalist>
             </label>
             <label>
               <span>端口</span>
@@ -845,7 +855,16 @@ import {
   X
 } from 'lucide-vue-next'
 import { assetManagementEntries } from '@/config/assets'
-import type { AiopsAssetAuthType, AiopsAssetInput, AiopsAssetRecord, AiopsAssetType, AiopsKeychainInput, AiopsKeychainRecord, AiopsKeychainType } from '@shared/preload'
+import type {
+  AiopsAssetAuthType,
+  AiopsAssetGroupRecord,
+  AiopsAssetInput,
+  AiopsAssetRecord,
+  AiopsAssetType,
+  AiopsKeychainInput,
+  AiopsKeychainRecord,
+  AiopsKeychainType
+} from '@shared/preload'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@/services/assetImportRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -884,7 +903,7 @@ const form = reactive({
   title: '',
   host: '',
   username: '',
-  group: '生产',
+  group: '',
   port: 22,
   asset_type: 'person' as AiopsAssetType,
   auth_type: 'password' as AiopsAssetAuthType,
@@ -897,6 +916,7 @@ const form = reactive({
 })
 
 const keychains = ref<AiopsKeychainRecord[]>([])
+const assetGroupOptions = ref<AiopsAssetGroupRecord[]>([])
 const keyQuery = ref('')
 const keyEditorOpen = ref(false)
 const keyEditMode = ref(false)
@@ -967,7 +987,7 @@ const onboardingHostDraft = {
   title: 'onboarding-demo',
   host: '127.0.0.1',
   username: 'local',
-  group: '生产',
+  group: '',
   port: 22,
   asset_type: 'person' as AiopsAssetType,
   auth_type: 'password' as AiopsAssetAuthType,
@@ -985,9 +1005,19 @@ const filteredManagementEntries = computed(() => {
   return assetManagementEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(keyword))
 })
 
+const firstAssetGroupName = computed(() => assetGroupOptions.value[0]?.name || '')
+
 const refreshAssets = async () => {
   const snapshot = await window.aiops?.listAssets?.()
   applyAssetSnapshot(snapshot)
+  await refreshAssetGroupOptions()
+}
+
+const refreshAssetGroupOptions = async () => {
+  assetGroupOptions.value =
+    (await window.aiops?.listAssetGroups?.({
+      assetTypes: ['person', 'switch']
+    })) || []
 }
 
 const refreshKeychains = async () => {
@@ -1113,7 +1143,7 @@ const resetForm = () => {
     title: '',
     host: '',
     username: '',
-    group: '生产',
+    group: firstAssetGroupName.value,
     port: 22,
     asset_type: 'person',
     auth_type: 'password',
@@ -1149,6 +1179,7 @@ const openOnboardingCreatePanel = () => {
   assetQuery.value = ''
   editMode.value = false
   Object.assign(form, onboardingHostDraft)
+  form.group = firstAssetGroupName.value
   editorOpen.value = true
 }
 
@@ -1300,15 +1331,14 @@ const openAssetContextMenu = (event: MouseEvent, assetId: string) => {
 const submitForm = async () => {
   const title = form.title.trim() || form.host.trim() || '未命名主机'
   const host = form.host.trim() || '127.0.0.1'
-  const group = form.group.trim() || 'Hosts'
+  const group = form.group.trim()
   const baseAsset: AiopsAssetInput = {
     ...(form.id ? { id: form.id } : {}),
     name: title,
     title,
     host,
     ip: host,
-    group,
-    group_name: group,
+    ...(group ? { group, group_name: group } : {}),
     status: 'online',
     tags: [form.auth_type === 'keyBased' ? 'key' : 'ssh'],
     username: form.username.trim() || 'root',

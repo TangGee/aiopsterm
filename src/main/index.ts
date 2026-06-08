@@ -10,6 +10,7 @@ import Store from 'electron-store'
 import AdmZip from 'adm-zip'
 import {
   deleteAsset,
+  deleteAssetGroup,
   deleteAssetFolder,
   deleteKeychain,
   getAsset,
@@ -17,9 +18,11 @@ import {
   getKeychain,
   getKeychainSecret,
   listAssets,
+  listAssetGroups,
   listKeychains,
   listSshAgentKeychainOptions,
   refreshOrganizationAssets,
+  renameAssetGroup,
   saveAsset,
   saveAssetFolder,
   saveKeychain
@@ -217,7 +220,10 @@ import type {
   TerminalCreateOptions,
   UserConfig,
   VoiceTranscriptionInput,
-  UserRuleConfig
+  UserRuleConfig,
+  AiopsAssetGroupDeleteInput,
+  AiopsAssetGroupListInput,
+  AiopsAssetGroupRenameInput
 } from '@shared/preload'
 import type { ClientChannel } from 'ssh2'
 
@@ -2493,6 +2499,9 @@ const registerIpc = () => {
     return { success: true, filePath: result.filePath }
   })
   ipcMain.handle('assets:list', () => listAssets())
+  ipcMain.handle('assets:groups:list', (_event, input?: AiopsAssetGroupListInput) => listAssetGroups(input))
+  ipcMain.handle('assets:groups:rename', (_event, input: AiopsAssetGroupRenameInput) => renameAssetGroup(input))
+  ipcMain.handle('assets:groups:delete', (_event, input: AiopsAssetGroupDeleteInput) => deleteAssetGroup(input))
   ipcMain.handle('assets:save', (_event, asset: AiopsAssetInput) => saveAsset(asset))
   ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
   ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))

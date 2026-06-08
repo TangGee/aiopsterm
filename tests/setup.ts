@@ -2808,6 +2808,18 @@ const sanitizeKeychain = (keychain: TestKeychainRecord): TestKeychainRecord => (
   passphrase: undefined,
   hasPrivateKey: Boolean(keychain.privateKey || keychain.hasPrivateKey)
 })
+const listAssetGroupsMock = (input?: { assetTypes?: TestAssetRecord['asset_type'][] }) => {
+  const groups = new Map<string, number>()
+  assetStoreMock
+    .filter((asset) => !asset.isLocalShell && (!input?.assetTypes?.length || input.assetTypes.includes(asset.asset_type)))
+    .forEach((asset) => {
+      const name = String(asset.group || asset.group_name || 'Hosts').trim() || 'Hosts'
+      groups.set(name, (groups.get(name) || 0) + 1)
+    })
+  return [...groups.entries()]
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([name, count]) => ({ key: `group-${name}`, name, count }))
+}
 const keychainFingerprintMock = (keychain: TestKeychainRecord) => {
   const source = keychain.publicKey || keychain.name || keychain.id
   return `SHA256:${createHash('sha256').update(source).digest('base64').replace(/=+$/, '')}`
@@ -4028,6 +4040,33 @@ Object.defineProperty(window, 'aiops', {
       assets: assetStoreMock.map(cloneAsset),
       folders: assetFolderStoreMock.map(cloneAssetFolder)
     })),
+    listAssetGroups: vi.fn(async (input?: { assetTypes?: TestAssetRecord['asset_type'][] }) => listAssetGroupsMock(input)),
+    renameAssetGroup: vi.fn(async (input: { oldName: string; newName: string; assetTypes?: TestAssetRecord['asset_type'][] }) => {
+      const oldName = String(input.oldName || '').trim()
+      const newName = String(input.newName || '').trim()
+      if (!oldName || !newName) return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: 'Asset group name is required' }
+      let updated = 0
+      assetStoreMock = assetStoreMock.map((asset) => {
+        if (asset.isLocalShell || (input.assetTypes?.length && !input.assetTypes.includes(asset.asset_type)) || (asset.group || asset.group_name) !== oldName) return asset
+        updated += 1
+        return { ...asset, group: newName, group_name: newName }
+      })
+      if (!updated) return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: `Asset group not found: ${oldName}` }
+      return { ok: true, data: { assets: assetStoreMock.map(cloneAsset), folders: assetFolderStoreMock.map(cloneAssetFolder) } }
+    }),
+    deleteAssetGroup: vi.fn(async (input: { name: string; fallbackName?: string; assetTypes?: TestAssetRecord['asset_type'][] }) => {
+      const name = String(input.name || '').trim()
+      const fallbackName = String(input.fallbackName || '未分组').trim() || '未分组'
+      if (!name) return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: 'Asset group name is required' }
+      let updated = 0
+      assetStoreMock = assetStoreMock.map((asset) => {
+        if (asset.isLocalShell || (input.assetTypes?.length && !input.assetTypes.includes(asset.asset_type)) || (asset.group || asset.group_name) !== name) return asset
+        updated += 1
+        return { ...asset, group: fallbackName, group_name: fallbackName }
+      })
+      if (!updated) return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: `Asset group not found: ${name}` }
+      return { ok: true, data: { assets: assetStoreMock.map(cloneAsset), folders: assetFolderStoreMock.map(cloneAssetFolder) } }
+    }),
     saveAsset: vi.fn(async (input: TestAssetInput) => {
       if (input.id === LOCAL_SHELL_ASSET_ID) {
         return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: '本地连接是系统资产，不能编辑或删除' }
