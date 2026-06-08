@@ -3236,19 +3236,32 @@ const ensureAttachmentConversationId = async () => {
 
 const handleFileUpload = async () => {
   if (streaming.value) return
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    showInputPlaceholderNotice('文件上传失败：文件选择服务不可用')
+    return
+  }
+  const stageAttachment = window.aiops?.stageChatAttachment
+  if (typeof stageAttachment !== 'function') {
+    showInputPlaceholderNotice('文件上传失败：文件暂存服务不可用')
+    return
+  }
   const taskId = await ensureAttachmentConversationId()
   if (!taskId) {
     showInputPlaceholderNotice('请先创建会话后再上传文件。')
     return
   }
   try {
-    const result = await window.aiops?.showOpenDialog?.({
+    const result = await showOpenDialog({
       properties: ['openFile'],
       filters: chatAttachmentFilters
     })
     if (!result || result.canceled || !result.filePaths?.length) return
     const srcAbsPath = result.filePaths[0]
-    const staged = await window.aiops.stageChatAttachment({ taskId, srcAbsPath })
+    const staged = await stageAttachment({ taskId, srcAbsPath })
+    if (!staged?.refPath) {
+      throw new Error('File staging result is missing refPath')
+    }
     const displayName = staged.name || srcAbsPath.split(/[/\\]/).pop() || 'file'
     const part: AiDocChipContentPart = {
       type: 'chip',

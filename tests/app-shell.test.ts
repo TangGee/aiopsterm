@@ -2351,6 +2351,71 @@ describe('AppShell', () => {
     }
   })
 
+  it('does not fabricate AI file attachments when dialog or staging bridges are unavailable or fail', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    const originalShowOpenDialog = window.aiops.showOpenDialog
+    const originalStageChatAttachment = window.aiops.stageChatAttachment
+
+    try {
+      vi.mocked(window.aiops.createChatConversation).mockClear()
+      ;(window.aiops as any).showOpenDialog = undefined
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：文件选择服务不可用')
+      expect(window.aiops.createChatConversation).not.toHaveBeenCalled()
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+      vi.mocked(window.aiops.showOpenDialog!).mockClear()
+      ;(window.aiops as any).stageChatAttachment = undefined
+      vi.mocked(window.aiops.createChatConversation).mockClear()
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：文件暂存服务不可用')
+      expect(window.aiops.createChatConversation).not.toHaveBeenCalled()
+      expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
+      store.selectedConversationId = 'conv-attachment-boundary'
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/stage-fail.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockRejectedValueOnce(new Error('stage offline'))
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(window.aiops.stageChatAttachment).toHaveBeenCalledWith({ taskId: 'conv-attachment-boundary', srcAbsPath: '/tmp/stage-fail.log' })
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：stage offline')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/empty-ref.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
+        mode: 'local',
+        refPath: '',
+        name: 'empty-ref.log',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/conv-attachment-boundary/empty-ref.log'
+      })
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('File staging result is missing refPath')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+    } finally {
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+      ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
+      wrapper.unmount()
+    }
+  })
+
   it('does not transcribe voice input when browser recording is unavailable', async () => {
     restoreMockVoiceRecorder?.()
     restoreMockVoiceRecorder = undefined
