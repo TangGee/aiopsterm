@@ -584,7 +584,11 @@ const normalizeTransferProgress = (progress: unknown, status: FileTransferTask['
   return status === 'success' ? 100 : 0
 }
 
-const createFileTransferTaskRecord = (input: FileTransferTaskRecordInput): FileTransferTask => {
+type FileTransferTaskRecordPayload = Omit<FileTransferTaskRecordInput, 'children'> & {
+  children?: FileTransferTaskRecordPayload[]
+}
+
+const createFileTransferTaskRecord = (input: FileTransferTaskRecordPayload): FileTransferTask => {
   const type = input.type === 'download' || input.type === 'upload' || input.type === 'r2r' ? input.type : 'r2r'
   const name = String(input.name || '').trim()
   const source = String(input.source || '').trim()
@@ -612,6 +616,11 @@ const createFileTransferTaskRecord = (input: FileTransferTaskRecordInput): FileT
   }
 }
 
+const taskRecordPayload = (input: FileTransferTaskRecordInput): FileTransferTaskRecordPayload => ({
+  ...input,
+  ...(input.children?.length ? { children: input.children.map((child) => taskRecordPayload(child)) } : {})
+})
+
 const transferFromHost = (options: FileListOptions) => options.fromHost || options.host
 const transferToHost = (options: FileListOptions) => options.toHost || options.host
 
@@ -620,7 +629,7 @@ const registerActiveFileTransferTask = (task: FileTransferTask) => {
   activeFileTransferTasks.set(task.id, cloneFileTransferTask(task))
 }
 
-const createCompletedFileTransferTask = (input: FileTransferTaskRecordInput) => cloneFileTransferTask(createFileTransferTaskRecord({ progress: 100, status: 'success', speed: '完成', ...input }))
+const createCompletedFileTransferTask = (input: FileTransferTaskRecordPayload) => cloneFileTransferTask(createFileTransferTaskRecord({ progress: 100, status: 'success', speed: '完成', ...input }))
 
 const fileTransferTaskHosts = (options: FileListOptions) => ({
   ...(transferFromHost(options) ? { fromHost: transferFromHost(options) } : {}),
@@ -672,7 +681,7 @@ const mutationTask = (mutation: FileEntryMutation, resultPath: string, options: 
 
 export const recordFileTransferTask = async (input: FileTransferTaskRecordInput): Promise<FileTransferTaskRecordResult> => {
   try {
-    const task = createFileTransferTaskRecord(input)
+    const task = createFileTransferTaskRecord(taskRecordPayload(input))
     registerActiveFileTransferTask(task)
     return { ok: true, data: { task: cloneFileTransferTask(task) } }
   } catch (error) {
@@ -1259,6 +1268,85 @@ const uploadRemoteFileViaSftp = async (
   }
 }
 
+const ensureRemoteDirectoryViaSftp = async (sftp: SFTPWrapper, path: string) => {
+  const normalized = normalizeRemotePath(path)
+  await ensureRemoteParentDirs(sftp, dirname(normalized))
+  await sftpMkdir(sftp, normalized).catch(async (error) => {
+    const existing = await sftpStatOrNull(sftp, normalized)
+    if (existing && sftpEntryType(existing) === 'directory') return
+    throw error
+  })
+}
+
+const uploadRemoteDirectoryViaSftp = async (
+  localPath: string,
+  remoteDirectory: string,
+  name: string,
+  options: FileListOptions
+): Promise<FileTransferOperationResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const source = String(localPath || '').trim()
+  const destination = normalizeRemotePath(`${remoteDirectory}/${name}`)
+  const mtimeMs = Date.now()
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      let bytes = 0
+      let fileCount = 0
+      const children: FileTransferTaskRecordPayload[] = []
+      const uploadDirectory = async (localDir: string, remoteDir: string) => {
+        await ensureRemoteDirectoryViaSftp(sftp, remoteDir)
+        const rows = (await readdir(localDir, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))
+        for (const row of rows) {
+          const localChild = join(localDir, row.name)
+          const remoteChild = normalizeRemotePath(`${remoteDir}/${row.name}`)
+          if (row.isDirectory()) {
+            await uploadDirectory(localChild, remoteChild)
+            continue
+          }
+          if (!row.isFile()) continue
+          const content = await readFile(localChild)
+          await sftpWriteFile(sftp, remoteChild, content)
+          bytes += content.length
+          fileCount += 1
+          children.push({
+            type: 'upload',
+            name: row.name,
+            source: localChild,
+            target: remoteChild,
+            progress: 100,
+            speed: '完成',
+            status: 'success',
+            ...(options.fromHost ? { fromHost: options.fromHost } : {}),
+            toHost: transferToHost(options),
+            stage: 'pending'
+          })
+        }
+      }
+      await uploadDirectory(source, destination)
+      const task = createFileTransferTaskRecord({
+        type: 'upload',
+        name,
+        source,
+        target: destination,
+        progress: 100,
+        speed: '完成',
+        status: 'success',
+        ...(options.fromHost ? { fromHost: options.fromHost } : {}),
+        toHost: transferToHost(options),
+        stage: 'scanning',
+        isGroup: true,
+        totalFiles: fileCount,
+        finishedFiles: fileCount,
+        ...(children.length ? { children } : {})
+      })
+      return { ok: true, data: { status: 'success', source, target: destination, bytes, files: Math.max(fileCount, 1), mtimeMs, itemKind: 'directory', task } }
+    })
+  } catch (error) {
+    return fileError(error, 'transfer_failed')
+  }
+}
+
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {
   const mtimeMs = Date.now()
   try {
@@ -1318,6 +1406,8 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
     const uploadKind = operation.kind === 'upload-path' ? (metadata.isDirectory() ? 'upload-directory' : 'upload-file') : operation.kind
     if (uploadKind === 'upload-directory') {
       if (!metadata.isDirectory()) return { ok: false, errorCode: 'not_directory', errorMessage: 'Source must be a directory' }
+      const sftpResult = await uploadRemoteDirectoryViaSftp(localPath, remoteDirectory, name, { ...options, kind: 'remote' })
+      if (sftpResult) return sftpResult
       if (!remoteSeedTree[remoteDirectory]) remoteSeedTree[remoteDirectory] = []
       if (!findRemoteEntry(target)) remoteSeedTree[remoteDirectory].push(entry(name, target, 'directory', 0, 'drwxr-xr-x', mtimeMs))
       if (!remoteSeedTree[target]) remoteSeedTree[target] = []

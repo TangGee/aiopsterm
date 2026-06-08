@@ -836,6 +836,82 @@ describe('files backend content boundary', () => {
     }
   })
 
+  it('uploads local directories recursively through asset-backed SFTP operations', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-dir-transfer-'))
+    const localDirectory = join(dir, 'release-dir')
+    const nestedDirectory = join(localDirectory, 'nested')
+    const droppedDirectory = join(dir, 'dropped-dir')
+    try {
+      await mkdir(nestedDirectory, { recursive: true })
+      await mkdir(droppedDirectory, { recursive: true })
+      await writeFile(join(localDirectory, 'README.txt'), Buffer.from('release notes\n', 'utf-8'))
+      await writeFile(join(nestedDirectory, 'payload.bin'), Buffer.from([0, 1, 2, 255]))
+      await writeFile(join(droppedDirectory, 'drop.txt'), Buffer.from('dropped directory file\n', 'utf-8'))
+
+      const uploadedDirectory = await transferFileEntry(
+        { kind: 'upload-directory', localPath: localDirectory, remoteDirectory: '/srv/archive' },
+        { kind: 'remote', sessionId, fromHost: '127.0.0.1', toHost: 'sftp.example.test' }
+      )
+      expect(uploadedDirectory.ok).toBe(true)
+      expect(uploadedDirectory.data).toEqual(
+        expect.objectContaining({
+          status: 'success',
+          source: localDirectory,
+          target: '/srv/archive/release-dir',
+          bytes: 18,
+          files: 2,
+          itemKind: 'directory',
+          task: expect.objectContaining({
+            type: 'upload',
+            name: 'release-dir',
+            source: localDirectory,
+            target: '/srv/archive/release-dir',
+            stage: 'scanning',
+            isGroup: true,
+            totalFiles: 2,
+            finishedFiles: 2,
+            fromHost: '127.0.0.1',
+            toHost: 'sftp.example.test',
+            status: 'success',
+            children: expect.arrayContaining([
+              expect.objectContaining({ type: 'upload', name: 'README.txt', target: '/srv/archive/release-dir/README.txt', stage: 'pending' }),
+              expect.objectContaining({ type: 'upload', name: 'payload.bin', target: '/srv/archive/release-dir/nested/payload.bin', stage: 'pending' })
+            ])
+          })
+        })
+      )
+      expect(ssh2Mock.nodes.get('/srv/archive/release-dir')?.type).toBe('directory')
+      expect(ssh2Mock.nodes.get('/srv/archive/release-dir/nested')?.type).toBe('directory')
+      expect(ssh2Mock.nodes.get('/srv/archive/release-dir/README.txt')?.content?.toString('utf-8')).toBe('release notes\n')
+      expect(ssh2Mock.nodes.get('/srv/archive/release-dir/nested/payload.bin')?.content).toEqual(Buffer.from([0, 1, 2, 255]))
+      expect(ssh2Mock.calls).toEqual(
+        expect.arrayContaining([
+          { method: 'mkdir', path: '/srv/archive/release-dir' },
+          { method: 'mkdir', path: '/srv/archive/release-dir/nested' },
+          { method: 'writeFile', path: '/srv/archive/release-dir/README.txt', content: 'release notes\n' },
+          { method: 'writeFile', path: '/srv/archive/release-dir/nested/payload.bin', content: Buffer.from([0, 1, 2, 255]).toString('utf-8') }
+        ])
+      )
+
+      const droppedUpload = await transferFileEntry(
+        { kind: 'upload-path', localPath: droppedDirectory, remoteDirectory: '/srv/archive' },
+        { kind: 'remote', sessionId, fromHost: '127.0.0.1', toHost: 'sftp.example.test' }
+      )
+      expect(droppedUpload.ok).toBe(true)
+      expect(droppedUpload.data).toMatchObject({
+        source: droppedDirectory,
+        target: '/srv/archive/dropped-dir',
+        bytes: 23,
+        files: 1,
+        itemKind: 'directory'
+      })
+      expect(ssh2Mock.nodes.get('/srv/archive/dropped-dir/drop.txt')?.content?.toString('utf-8')).toBe('dropped directory file\n')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('returns create mode for missing remote files and persists writes', async () => {
     const path = `/home/staging/new-${Date.now()}.txt`
     const missing = await readFileContent(path, { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
