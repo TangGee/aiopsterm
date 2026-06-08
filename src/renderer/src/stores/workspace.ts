@@ -8545,13 +8545,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const summaryDir = await ensureLocalKnowledgeDir('summary')
     if (!summaryDir) return null
     const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
-    const fallbackRelPath = createKbRelPath('summary', fileName)
     if (!window.aiops?.kbCreateFile || !window.aiops?.kbWriteFile) {
       setTopNotice('知识库写入服务不可用')
       return null
     }
     const result = await window.aiops.kbCreateFile('summary', fileName, content)
-    const relPath = result?.relPath || fallbackRelPath
+    const relPath = typeof result?.relPath === 'string' && result.relPath.trim() ? result.relPath.trim() : ''
+    if (!relPath) {
+      setTopNotice('知识库写入服务不可用')
+      return null
+    }
     await window.aiops.kbWriteFile(relPath, content)
     await refreshKnowledgeTree()
 

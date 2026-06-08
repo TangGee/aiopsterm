@@ -3625,6 +3625,32 @@ describe('workspace store', () => {
     }
   })
 
+  it('requires a backend-returned Knowledge relPath before writing AI message summaries', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.chatMessages.push({
+      id: 'assistant-empty-kb-relpath',
+      role: 'assistant',
+      text: 'Persist this only if the backend returns the created file path.',
+      state: 'done'
+    })
+    const originalKbCreateFile = window.aiops.kbCreateFile
+
+    try {
+      vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({} as Awaited<ReturnType<typeof window.aiops.kbCreateFile>>)
+      vi.mocked(window.aiops.kbWriteFile).mockClear()
+      const result = await store.summarizeMessageToKnowledge('assistant-empty-kb-relpath')
+
+      expect(result).toBeNull()
+      expect(store.topNotice).toBe('知识库写入服务不可用')
+      expect(window.aiops.kbWriteFile).not.toHaveBeenCalled()
+      expect(store.findKnowledgeNode('summary/ai-message-assistant-empty-kb-relpath.md')).toBeNull()
+      expect(store.activePanel.kind).not.toBe('knowledge')
+    } finally {
+      window.aiops.kbCreateFile = originalKbCreateFile
+    }
+  })
+
   it('adds External reference-style knowledge docs and images to AI context and includes them in chat payloads', async () => {
     const store = useWorkspaceStore()
     await store.refreshKnowledgeTree({ persist: false })
