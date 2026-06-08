@@ -3732,6 +3732,44 @@ describe('AppShell', () => {
         })
       )
 
+      const remoteDirectoryDragPayload = new Map<string, string>()
+      await rightDirectoryRow.trigger('dragstart', {
+        dataTransfer: {
+          effectAllowed: '',
+          setData: vi.fn((type: string, value: string) => remoteDirectoryDragPayload.set(type, value))
+        }
+      })
+      expect(JSON.parse(remoteDirectoryDragPayload.get('application/x-synchro-fs-item') || '{}')).toEqual(
+        expect.objectContaining({
+          kind: 'fs-item',
+          fromUuid: 'folder_asset-2',
+          fromSide: 'right',
+          srcPath: '/home/staging/boot',
+          name: 'boot',
+          isDir: true
+        })
+      )
+      await leftBrowser.find('.file-drop-zone').trigger('drop', {
+        dataTransfer: {
+          getData: vi.fn((type: string) => remoteDirectoryDragPayload.get(type) || '')
+        }
+      })
+      await flushPromises()
+      expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+        { kind: 'download-directory', remotePath: '/home/staging/boot', localDirectory: '/' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2', host: '10.24.9.20', fromHost: '10.24.9.20', toHost: '127.0.0.1' })
+      )
+      expect(store.fileTransferTasks.find((task) => task.source === '/home/staging/boot' && task.target === '/boot')).toEqual(
+        expect.objectContaining({
+          type: 'download',
+          name: 'boot',
+          isGroup: true,
+          fromHost: '10.24.9.20',
+          toHost: '127.0.0.1',
+          status: 'success'
+        })
+      )
+
       await rightBrowser.find('.file-drop-zone').trigger('drop', {
         dataTransfer: {
           files: [{ path: '/tmp/os-drop.log' }],

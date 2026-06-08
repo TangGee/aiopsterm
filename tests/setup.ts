@@ -5965,6 +5965,53 @@ Object.defineProperty(window, 'aiops', {
           }
         }
       }
+      if (operation.kind === 'download-directory') {
+        const sourcePath = normalizeFileDirMock(operation.remotePath)
+        const target = `${normalizeFileDirMock(operation.localDirectory)}/${basenameFileMock(sourcePath)}`.replace(/\/+/g, '/')
+        const mtimeMs = Date.now()
+        const task = createFileTransferTaskMock({
+          type: 'download',
+          name: basenameFileMock(sourcePath),
+          source: operation.remotePath,
+          target,
+          progress: 100,
+          speed: '完成',
+          status: 'success',
+          fromHost: options?.fromHost || options?.host,
+          ...(options?.toHost ? { toHost: options.toHost } : {}),
+          stage: 'scanning',
+          isGroup: true,
+          totalFiles: 1,
+          finishedFiles: 1,
+          children: [
+            createFileTransferTaskMock({
+              type: 'download',
+              name: 'downloaded-file',
+              source: `${sourcePath}/downloaded-file`.replace(/\/+/g, '/'),
+              target: `${target}/downloaded-file`.replace(/\/+/g, '/'),
+              progress: 100,
+              speed: '完成',
+              status: 'success',
+              fromHost: options?.fromHost || options?.host,
+              ...(options?.toHost ? { toHost: options.toHost } : {}),
+              stage: 'pending'
+            })
+          ]
+        })
+        return {
+          ok: true,
+          data: {
+            status: 'success' as const,
+            source: operation.remotePath,
+            target,
+            bytes: 128,
+            files: 1,
+            mtimeMs,
+            itemKind: 'directory' as const,
+            task
+          }
+        }
+      }
       const localPath = normalizeFileDirMock(operation.localPath)
       const remoteDirectory = normalizeFileDirMock(operation.remoteDirectory)
       const name = basenameFileMock(localPath)

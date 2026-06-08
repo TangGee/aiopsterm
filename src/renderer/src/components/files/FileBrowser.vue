@@ -591,6 +591,17 @@ const getListOptions = (overrides: Partial<FileListOptions> = {}): FileListOptio
   ...overrides
 })
 
+const getSessionListOptions = (session: FileSessionInfo | undefined, overrides: Partial<FileListOptions> = {}): FileListOptions =>
+  session
+    ? {
+        sessionId: session.id,
+        kind: session.kind,
+        host: session.host,
+        rootPath: session.rootPath,
+        ...overrides
+      }
+    : getListOptions(overrides)
+
 const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
   name: entry.name,
   path: entry.path,
@@ -850,14 +861,20 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
     const operation = sourceIsLocal
       ? { kind: payload.isDir ? ('upload-directory' as const) : ('upload-file' as const), localPath: payload.srcPath, remoteDirectory: targetDir }
       : targetIsLocal
-        ? { kind: 'download-file' as const, remotePath: payload.srcPath, localPath: targetPath }
+        ? payload.isDir
+          ? { kind: 'download-directory' as const, remotePath: payload.srcPath, localDirectory: targetDir }
+          : { kind: 'download-file' as const, remotePath: payload.srcPath, localPath: targetPath }
         : { kind: 'copy-remote' as const, remotePath: payload.srcPath, targetPath }
+    const transferOptions =
+      targetIsLocal && !sourceIsLocal
+        ? getSessionListOptions(sourceSession, { fromHost: sourceSession?.host, toHost: props.session.host })
+        : getListOptions({
+            fromHost: sourceSession?.host,
+            toHost: props.session.host
+          })
     const transfer = await window.aiops.transferFileEntry(
       operation,
-      getListOptions({
-        fromHost: sourceSession?.host,
-        toHost: props.session.host
-      })
+      transferOptions
     )
     if (!transfer.ok) throw new Error(transfer.errorMessage || '传输失败')
     if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)

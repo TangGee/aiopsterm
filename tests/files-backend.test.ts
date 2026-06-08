@@ -912,6 +912,67 @@ describe('files backend content boundary', () => {
     }
   })
 
+  it('downloads remote directories recursively through asset-backed SFTP operations', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-dir-download-'))
+    const nestedBytes = Buffer.from([0, 1, 2, 255])
+    try {
+      ssh2Mock.nodes.set('/srv/logs/nested', { type: 'directory', mode: 0o040755, mtime: 1_717_200_400 })
+      ssh2Mock.nodes.set('/srv/logs/nested/trace.bin', { type: 'file', content: nestedBytes, mode: 0o100600, mtime: 1_717_200_400 })
+
+      const downloadedDirectory = await transferFileEntry(
+        { kind: 'download-directory', remotePath: '/srv/logs', localDirectory: dir },
+        { kind: 'remote', sessionId, fromHost: 'sftp.example.test', toHost: '127.0.0.1' }
+      )
+      expect(downloadedDirectory.ok).toBe(true)
+      expect(downloadedDirectory.data).toEqual(
+        expect.objectContaining({
+          status: 'success',
+          source: '/srv/logs',
+          target: join(dir, 'logs'),
+          bytes: 14,
+          files: 2,
+          itemKind: 'directory',
+          task: expect.objectContaining({
+            type: 'download',
+            name: 'logs',
+            source: '/srv/logs',
+            target: join(dir, 'logs'),
+            stage: 'scanning',
+            isGroup: true,
+            totalFiles: 2,
+            finishedFiles: 2,
+            fromHost: 'sftp.example.test',
+            toHost: '127.0.0.1',
+            status: 'success',
+            children: expect.arrayContaining([
+              expect.objectContaining({ type: 'download', name: 'app.log', source: '/srv/logs/app.log', target: join(dir, 'logs', 'app.log') }),
+              expect.objectContaining({
+                type: 'download',
+                name: 'trace.bin',
+                source: '/srv/logs/nested/trace.bin',
+                target: join(dir, 'logs', 'nested', 'trace.bin')
+              })
+            ])
+          })
+        })
+      )
+      expect(await readFile(join(dir, 'logs', 'app.log'))).toEqual(Buffer.from('hello log\n', 'utf-8'))
+      expect(await readFile(join(dir, 'logs', 'nested', 'trace.bin'))).toEqual(nestedBytes)
+      expect(ssh2Mock.calls).toEqual(
+        expect.arrayContaining([
+          { method: 'stat', path: '/srv/logs' },
+          { method: 'readdir', path: '/srv/logs' },
+          { method: 'readdir', path: '/srv/logs/nested' },
+          { method: 'readFile', path: '/srv/logs/app.log' },
+          { method: 'readFile', path: '/srv/logs/nested/trace.bin' }
+        ])
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('returns create mode for missing remote files and persists writes', async () => {
     const path = `/home/staging/new-${Date.now()}.txt`
     const missing = await readFileContent(path, { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
@@ -1068,6 +1129,44 @@ describe('files backend content boundary', () => {
         })
       )
       expect((await readFileContent(localDownload, { kind: 'local', sessionId: 'local' })).data?.content).toBe('uploaded through transfer boundary\n')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('downloads remote seed directories locally through the transfer boundary', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-seed-dir-download-'))
+    try {
+      const downloadedDirectory = await transferFileEntry(
+        { kind: 'download-directory', remotePath: '/home/staging/boot', localDirectory: dir },
+        { kind: 'remote', sessionId: 'ssh-staging', fromHost: 'staging-app', toHost: '127.0.0.1' }
+      )
+      const content = '[app]\nenv=staging\nport=8080\n'
+      expect(downloadedDirectory.ok).toBe(true)
+      expect(downloadedDirectory.data).toEqual(
+        expect.objectContaining({
+          status: 'success',
+          source: '/home/staging/boot',
+          target: join(dir, 'boot'),
+          bytes: Buffer.byteLength(content, 'utf-8'),
+          files: 1,
+          itemKind: 'directory',
+          task: expect.objectContaining({
+            type: 'download',
+            name: 'boot',
+            source: '/home/staging/boot',
+            target: join(dir, 'boot'),
+            stage: 'scanning',
+            isGroup: true,
+            totalFiles: 1,
+            finishedFiles: 1,
+            fromHost: 'staging-app',
+            toHost: '127.0.0.1',
+            status: 'success'
+          })
+        })
+      )
+      expect(await readFile(join(dir, 'boot', 'app.ini'), 'utf-8')).toBe(content)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

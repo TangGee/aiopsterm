@@ -1233,6 +1233,83 @@ const downloadRemoteFileViaSftp = async (remotePath: string, localPath: string, 
   }
 }
 
+const remoteDirectoryDownloadName = (path: string) => {
+  const normalized = normalizeRemotePath(path)
+  return normalized === '/' ? 'root' : basename(normalized)
+}
+
+const downloadRemoteDirectoryViaSftp = async (
+  remotePath: string,
+  localDirectory: string,
+  options: FileListOptions
+): Promise<FileTransferOperationResult | null> => {
+  const target = resolveRemoteSftpTarget(options)
+  if (!target) return null
+  const source = normalizeRemotePath(remotePath)
+  const destination = join(String(localDirectory || '').trim(), remoteDirectoryDownloadName(source))
+  const mtimeMs = Date.now()
+  try {
+    return await withRemoteSftp(target, async (sftp) => {
+      const stats = await sftpStat(sftp, source)
+      if (sftpEntryType(stats) !== 'directory') return { ok: false, errorCode: 'not_directory', errorMessage: 'Source must be a directory' }
+      let bytes = 0
+      let fileCount = 0
+      const children: FileTransferTaskRecordPayload[] = []
+      const downloadDirectory = async (remoteDir: string, localDir: string) => {
+        await mkdir(localDir, { recursive: true })
+        const rows = (await sftpReaddir(sftp, remoteDir))
+          .filter((row) => row.filename !== '.' && row.filename !== '..')
+          .sort((left, right) => left.filename.localeCompare(right.filename))
+        for (const row of rows) {
+          const remoteChild = normalizeRemotePath(`${remoteDir}/${row.filename}`)
+          const localChild = join(localDir, row.filename)
+          if (sftpEntryType(row.attrs as Partial<SftpStats>) === 'directory') {
+            await downloadDirectory(remoteChild, localChild)
+            continue
+          }
+          const content = await sftpReadFile(sftp, remoteChild)
+          await mkdir(getLocalDirname(localChild), { recursive: true })
+          await writeFile(localChild, content)
+          bytes += content.length
+          fileCount += 1
+          children.push({
+            type: 'download',
+            name: row.filename,
+            source: remoteChild,
+            target: localChild,
+            progress: 100,
+            speed: '完成',
+            status: 'success',
+            fromHost: transferFromHost(options),
+            ...(options.toHost ? { toHost: options.toHost } : {}),
+            stage: 'pending'
+          })
+        }
+      }
+      await downloadDirectory(source, destination)
+      const task = createFileTransferTaskRecord({
+        type: 'download',
+        name: remoteDirectoryDownloadName(source),
+        source,
+        target: destination,
+        progress: 100,
+        speed: '完成',
+        status: 'success',
+        fromHost: transferFromHost(options),
+        ...(options.toHost ? { toHost: options.toHost } : {}),
+        stage: 'scanning',
+        isGroup: true,
+        totalFiles: fileCount,
+        finishedFiles: fileCount,
+        ...(children.length ? { children } : {})
+      })
+      return { ok: true, data: { status: 'success', source, target: destination, bytes, files: Math.max(fileCount, 1), mtimeMs, itemKind: 'directory', task } }
+    })
+  } catch (error) {
+    return fileError(error, 'transfer_failed')
+  }
+}
+
 const uploadRemoteFileViaSftp = async (
   localPath: string,
   remoteDirectory: string,
@@ -1347,6 +1424,64 @@ const uploadRemoteDirectoryViaSftp = async (
   }
 }
 
+const downloadRemoteDirectoryFromSeed = async (remotePath: string, localDirectory: string, options: FileListOptions): Promise<FileTransferOperationResult> => {
+  const source = normalizeRemotePath(remotePath)
+  const entry = findRemoteEntry(source)
+  if (entry && entry.type !== 'directory') return { ok: false, errorCode: 'not_directory', errorMessage: 'Source must be a directory' }
+  if (!entry && !(source in remoteSeedTree)) return { ok: false, errorCode: 'not_found', errorMessage: 'File entry not found' }
+  const destination = join(String(localDirectory || '').trim(), remoteDirectoryDownloadName(source))
+  const mtimeMs = Date.now()
+  let bytes = 0
+  let fileCount = 0
+  const children: FileTransferTaskRecordPayload[] = []
+  const downloadDirectory = async (remoteDir: string, localDir: string) => {
+    await mkdir(localDir, { recursive: true })
+    for (const row of sortEntries((remoteSeedTree[remoteDir] || []).map((item) => ({ ...item })))) {
+      const localChild = join(localDir, row.name)
+      if (row.type === 'directory') {
+        await downloadDirectory(row.path, localChild)
+        continue
+      }
+      if (row.type !== 'file') continue
+      const content = Buffer.from(remoteFileContents[row.path]?.content || '', 'utf-8')
+      await mkdir(getLocalDirname(localChild), { recursive: true })
+      await writeFile(localChild, content)
+      bytes += content.length
+      fileCount += 1
+      children.push({
+        type: 'download',
+        name: row.name,
+        source: row.path,
+        target: localChild,
+        progress: 100,
+        speed: '完成',
+        status: 'success',
+        fromHost: transferFromHost(options),
+        ...(options.toHost ? { toHost: options.toHost } : {}),
+        stage: 'pending'
+      })
+    }
+  }
+  await downloadDirectory(source, destination)
+  const task = createFileTransferTaskRecord({
+    type: 'download',
+    name: remoteDirectoryDownloadName(source),
+    source,
+    target: destination,
+    progress: 100,
+    speed: '完成',
+    status: 'success',
+    fromHost: transferFromHost(options),
+    ...(options.toHost ? { toHost: options.toHost } : {}),
+    stage: 'scanning',
+    isGroup: true,
+    totalFiles: fileCount,
+    finishedFiles: fileCount,
+    ...(children.length ? { children } : {})
+  })
+  return { ok: true, data: { status: 'success', source, target: destination, bytes, files: Math.max(fileCount, 1), mtimeMs, itemKind: 'directory', task } }
+}
+
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {
   const mtimeMs = Date.now()
   try {
@@ -1395,6 +1530,14 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
         ...(options.toHost ? { toHost: options.toHost } : {})
       })
       return { ok: true, data: { status: 'success', source, target, bytes: Buffer.byteLength(content, 'utf-8'), files: 1, mtimeMs, task } }
+    }
+    if (operation.kind === 'download-directory') {
+      const source = normalizeRemotePath(operation.remotePath)
+      const target = String(operation.localDirectory || '').trim()
+      if (!source || !target) return { ok: false, errorCode: 'invalid_path', errorMessage: 'File path is required' }
+      const sftpResult = await downloadRemoteDirectoryViaSftp(source, target, { ...options, kind: 'remote' })
+      if (sftpResult) return sftpResult
+      return downloadRemoteDirectoryFromSeed(source, target, { ...options, kind: 'remote' })
     }
 
     const localPath = String(operation.localPath || '').trim()
