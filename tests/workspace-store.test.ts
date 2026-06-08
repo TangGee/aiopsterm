@@ -5132,7 +5132,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
-  it('does not fabricate Skill writes when the preload bridge is unavailable', async () => {
+  it('does not fabricate Skill operations when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshSkillsFromBridge()
 
@@ -5144,10 +5144,28 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       createSkill: window.aiops.createSkill,
       updateSkill: window.aiops.updateSkill,
       setSkillEnabled: window.aiops.setSkillEnabled,
-      deleteSkill: window.aiops.deleteSkill
+      deleteSkill: window.aiops.deleteSkill,
+      readSkillContent: window.aiops.readSkillContent,
+      reloadSkills: window.aiops.reloadSkills,
+      openSkillsFolder: window.aiops.openSkillsFolder
     }
 
     try {
+      ;(window.aiops as any).reloadSkills = undefined
+      await expect(store.reloadSkills()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skills 重新加载服务不可用')
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      ;(window.aiops as any).openSkillsFolder = undefined
+      await expect(store.openSkillsFolder()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skills 文件夹打开服务不可用')
+
+      ;(window.aiops as any).readSkillContent = undefined
+      await store.openSkillModal('edit', 'incident-triage')
+      expect(store.skillModal.mode).toBeNull()
+      expect(store.settingsNotice).toBe('Skill 内容读取服务不可用')
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
       ;(window.aiops as any).createSkill = undefined
       await store.openSkillModal('create')
       store.skillModal.name = 'no-bridge-skill'
@@ -5168,6 +5186,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.settingsNotice).toBe('Skill 创建服务不可用')
 
       ;(window.aiops as any).updateSkill = undefined
+      ;(window.aiops as any).readSkillContent = originalAiops.readSkillContent
       await store.openSkillModal('edit', 'incident-triage')
       store.skillModal.description = 'local fake edit'
       store.skillModal.content = 'local fake content'

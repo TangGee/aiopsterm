@@ -3695,8 +3695,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshSkillsFromBridge = () => loadSkillsFromBridge()
 
   const reloadSkills = async () => {
+    if (!window.aiops?.reloadSkills) {
+      setSettingsNotice('Skills 重新加载服务不可用')
+      return false
+    }
     try {
-      const skills = window.aiops?.reloadSkills ? await window.aiops.reloadSkills() : getSkillsSnapshot()
+      const skills = await window.aiops.reloadSkills()
       applySkillsList(skills)
       setSettingsNotice('Skills 已重新加载')
       return true
@@ -3707,10 +3711,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openSkillsFolder = async () => {
+    if (!window.aiops?.openSkillsFolder) {
+      setSettingsNotice('Skills 文件夹打开服务不可用')
+      return false
+    }
     try {
-      if (window.aiops?.openSkillsFolder) {
-        await window.aiops.openSkillsFolder()
-      }
+      await window.aiops.openSkillsFolder()
       setSettingsNotice('Skills 文件夹已打开')
       return true
     } catch {
@@ -5237,8 +5243,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('只能编辑用户创建的 Skill')
         return
       }
+      if (!window.aiops?.readSkillContent) {
+        setSettingsNotice('Skill 内容读取服务不可用')
+        return
+      }
       try {
-        const result = window.aiops?.readSkillContent ? await window.aiops.readSkillContent(skill.name) : { metadata: { description: skill.description }, content: skill.content }
+        const result = await window.aiops.readSkillContent(skill.name)
         skillModal.value = {
           mode,
           name: skill.name,
