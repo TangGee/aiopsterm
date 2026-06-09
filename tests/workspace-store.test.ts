@@ -7697,6 +7697,64 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('does not fabricate MCP config editor writes when the write result is malformed or mismatched', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+    const originalServers = JSON.stringify(store.mcpServers)
+    const originalConfigServers = JSON.stringify(store.config.mcpServers)
+    const nextMcpConfig = {
+      mcpServers: {
+        filesystem: {
+          type: 'stdio' as const,
+          disabled: true,
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+          timeout: 60
+        }
+      }
+    }
+
+    await store.openMcpConfigEditor()
+    store.updateMcpConfigEditorContent(JSON.stringify(nextMcpConfig, null, 2))
+    vi.mocked(window.aiops.writeMcpConfig).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await expect(store.saveMcpConfigEditor(true)).resolves.toBe(false)
+    expect(store.mcpConfigEditorError).toBe('Save failed: MCP config write did not return saved settings')
+    expect(store.mcpConfigEditorLastSaved).toBe(false)
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+    expect(JSON.stringify(store.config.mcpServers)).toBe(originalConfigServers)
+
+    vi.mocked(window.aiops.writeMcpConfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        mcpConfig: {
+          mcpServers: {
+            filesystem: {
+              type: 'stdio',
+              disabled: false,
+              command: 'npx',
+              args: ['-y', '@modelcontextprotocol/server-filesystem', '~'],
+              timeout: 60
+            }
+          }
+        },
+        mcpServers: [
+          {
+            name: 'filesystem',
+            status: 'connected',
+            disabled: false,
+            tools: [],
+            resources: []
+          }
+        ],
+        mcpToolStates: {}
+      }
+    } as any)
+    await expect(store.saveMcpConfigEditor(true)).resolves.toBe(false)
+    expect(store.mcpConfigEditorError).toBe('Save failed: MCP config write returned different settings')
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+    expect(JSON.stringify(store.config.mcpServers)).toBe(originalConfigServers)
+  })
+
   it('does not persist Settings JSON editor state when config file write bridges are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.openKeywordHighlightEditor()

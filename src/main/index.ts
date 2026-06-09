@@ -2009,9 +2009,7 @@ const ensureMcpConfigFile = async () => {
   return configPath
 }
 
-const syncMcpConfigFromContent = (content: string) => {
-  if (!content.trim()) return
-  const parsed = normalizeMcpConfigFile(JSON.parse(content))
+const applyMcpConfigFileSnapshot = (parsed: McpConfigFile) => {
   const serverEntries = Object.entries(parsed.mcpServers)
   const current = getConfig()
   const byName = new Map((current.mcpServers || []).map((server) => [server.name, server]))
@@ -2032,7 +2030,18 @@ const syncMcpConfigFromContent = (content: string) => {
       nextToolStates[`${server.name}:${tool.name}`] = tool.enabled
     })
   })
-  store.set('config', mergeConfig(current, { mcpServers: nextServers, mcpToolStates: nextToolStates }))
+  const next = mergeConfig(current, { mcpServers: nextServers, mcpToolStates: nextToolStates })
+  store.set('config', next)
+  return {
+    mcpConfig: parsed,
+    mcpServers: cloneMcpServers(next.mcpServers) || [],
+    mcpToolStates: cloneMcpToolStates(next.mcpToolStates) || {}
+  }
+}
+
+const syncMcpConfigFromContent = (content: string) => {
+  if (!content.trim()) return
+  return applyMcpConfigFileSnapshot(normalizeMcpConfigFile(JSON.parse(content)))
 }
 
 const setMcpToolState = (serverName: string, toolName: string, enabled: boolean) => {
@@ -2499,8 +2508,9 @@ const registerIpc = () => {
     const normalized = normalizeMcpConfigFile(JSON.parse(content))
     const nextContent = JSON.stringify(normalized, null, 2)
     await writeFile(configPath, nextContent, 'utf-8')
-    syncMcpConfigFromContent(nextContent)
+    const snapshot = applyMcpConfigFileSnapshot(normalized)
     broadcastMcpConfigChanged(nextContent)
+    return { ok: true, data: snapshot }
   })
   ipcMain.handle('mcp-config:toggle-server', async (_event, serverName: string, disabled: boolean) => {
     const configPath = await ensureMcpConfigFile()

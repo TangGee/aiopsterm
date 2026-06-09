@@ -917,6 +917,12 @@ export type McpConfigFile = {
   mcpServers: Record<string, McpConfigFileServer>
 }
 
+export type McpConfigWriteResult = AiopsMutationResult<{
+  mcpConfig: McpConfigFile
+  mcpServers: McpServerUserConfig[]
+  mcpToolStates: McpToolStatesUserConfig
+}>
+
 export type QuickCommandGroupConfig = {
   id: number
   uuid: string
@@ -2164,7 +2170,7 @@ export type AiopsPreloadApi = {
   getMcpConfigPath: () => Promise<string>
   getMcpServers: () => Promise<McpServerUserConfig[]>
   readMcpConfig: () => Promise<string>
-  writeMcpConfig: (content: string) => Promise<void>
+  writeMcpConfig: (content: string) => Promise<McpConfigWriteResult>
   toggleMcpServer: (serverName: string, disabled: boolean) => Promise<void>
   deleteMcpServer: (serverName: string) => Promise<void>
   setMcpToolState: (serverName: string, toolName: string, enabled: boolean) => Promise<void>

@@ -10,6 +10,7 @@ import type {
   KnowledgeBaseTransferProgress,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
+  McpConfigWriteResult,
   SecurityConfigWriteResult,
   UserConfig,
   SkillUserConfig
@@ -98,7 +99,7 @@ const api: AiopsPreloadApi = {
   getMcpConfigPath: () => ipcRenderer.invoke('mcp-config:path') as Promise<string>,
   getMcpServers: () => ipcRenderer.invoke('mcp:get-servers'),
   readMcpConfig: () => ipcRenderer.invoke('mcp-config:read') as Promise<string>,
-  writeMcpConfig: (content: string) => ipcRenderer.invoke('mcp-config:write', content) as Promise<void>,
+  writeMcpConfig: (content: string) => ipcRenderer.invoke('mcp-config:write', content) as Promise<McpConfigWriteResult>,
   toggleMcpServer: (serverName: string, disabled: boolean) => ipcRenderer.invoke('mcp-config:toggle-server', serverName, disabled),
   deleteMcpServer: (serverName: string) => ipcRenderer.invoke('mcp-config:delete-server', serverName),
   setMcpToolState: (serverName: string, toolName: string, enabled: boolean) => ipcRenderer.invoke('mcp:set-tool-state', serverName, toolName, enabled),

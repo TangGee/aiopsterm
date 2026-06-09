@@ -1320,6 +1320,9 @@ const normalizeMcpConfigFile = (source?: unknown): McpConfigFile => {
   return { mcpServers }
 }
 
+const mcpConfigFilesMatch = (left: McpConfigFile, right: McpConfigFile) =>
+  JSON.stringify(normalizeMcpConfigFile(left)) === JSON.stringify(normalizeMcpConfigFile(right))
+
 const mcpConfigFileToServers = (file: McpConfigFile, existingServers: SettingsMcpServer[]): SettingsMcpServer[] => {
   const existingByName = new Map(existingServers.map((server) => [server.name, server]))
   return Object.entries(file.mcpServers).map(([name, serverConfig]) => {
@@ -4163,6 +4166,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
+  const applySavedMcpConfig = (
+    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeMcpConfig']>>>,
+    expected: McpConfigFile
+  ) => {
+    if (!result?.ok || !result.data || !isRecord(result.data.mcpConfig) || !Array.isArray(result.data.mcpServers) || !isRecord(result.data.mcpToolStates)) {
+      mcpConfigEditorError.value = `Save failed: ${result?.errorMessage || 'MCP config write did not return saved settings'}`
+      mcpConfigEditorLastSaved.value = false
+      return false
+    }
+    const savedConfig = normalizeMcpConfigFile(result.data.mcpConfig)
+    if (!mcpConfigFilesMatch(savedConfig, expected)) {
+      mcpConfigEditorError.value = 'Save failed: MCP config write returned different settings'
+      mcpConfigEditorLastSaved.value = false
+      return false
+    }
+    applyMcpServersSnapshot(normalizeMcpServersConfig(result.data.mcpServers, result.data.mcpToolStates))
+    mcpConfigEditorContent.value = JSON.stringify(savedConfig, null, 2)
+    mcpConfigEditorError.value = ''
+    mcpConfigEditorLastSaved.value = true
+    return true
+  }
+
   const refreshMcpServersFromBridge = async () => {
     const { servers, toolStates } = getMcpSnapshot()
     const snapshot = await readMcpServersSnapshotFromBridge(servers, toolStates)
@@ -4181,7 +4206,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const { toolStates } = getMcpSnapshot()
       mcpConfigEditorError.value = ''
       mcpConfigEditorLastSaved.value = markSaved
-      saveConfig({ mcpServers: cloneMcpServerConfig(mcpServers.value), mcpToolStates: toolStates })
+      config.value = mergeUserConfig(config.value, { mcpServers: cloneMcpServerConfig(mcpServers.value), mcpToolStates: toolStates })
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -6157,16 +6182,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     try {
-      await window.aiops.writeMcpConfig(content)
-      mcpConfigEditorContent.value = JSON.stringify(normalized, null, 2)
-      const refreshed = await refreshMcpServersFromBridge()
-      if (!refreshed) {
-        mcpServers.value = mcpConfigFileToServers(normalized, mcpServers.value)
-        const { servers, toolStates } = getMcpSnapshot()
-        config.value = mergeUserConfig(config.value, { mcpServers: servers, mcpToolStates: toolStates })
-      }
-      mcpConfigEditorError.value = ''
-      mcpConfigEditorLastSaved.value = true
+      const result = await window.aiops.writeMcpConfig(content)
+      if (!applySavedMcpConfig(result, normalized)) return false
       setSettingsNotice('MCP 配置已保存')
       return true
     } catch (error) {

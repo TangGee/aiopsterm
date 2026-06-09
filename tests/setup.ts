@@ -3692,6 +3692,11 @@ const applyMcpConfigContentMock = (content: string) => {
     }
   })
   mcpConfigContentMock = JSON.stringify(parsed, null, 2)
+  return {
+    mcpConfig: parsed,
+    mcpServers: mcpServersMock.map(cloneMcpServerMock),
+    mcpToolStates: getMcpToolStatesMock(mcpServersMock)
+  }
 }
 
 let systemTheme: 'dark' | 'light' = 'light'
@@ -4347,7 +4352,7 @@ Object.defineProperty(window, 'aiops', {
     getMcpServers: vi.fn(async () => mcpServersMock.map(cloneMcpServerMock)),
     readMcpConfig: vi.fn(async () => mcpConfigContentMock),
     writeMcpConfig: vi.fn(async (content: string) => {
-      applyMcpConfigContentMock(content)
+      return { ok: true, data: applyMcpConfigContentMock(content) }
     }),
     toggleMcpServer: vi.fn(async (serverName: string, disabled: boolean) => {
       const server = mcpServersMock.find((item) => item.name === serverName)
