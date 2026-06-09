@@ -3247,6 +3247,79 @@ const cloneAiTodoItem = (todo: AiTodoItem): AiTodoItem => ({
 
 let aiTodoItemsMock = defaultAiTodoItems.map(cloneAiTodoItem)
 
+const setAiTodoItemsMock = (todos: AiTodoItem[]) => {
+  aiTodoItemsMock = todos.map(cloneAiTodoItem)
+}
+
+const promptSummaryMock = (value: unknown) => {
+  const text = String(value || '').trim()
+  if (!text) return '根据当前请求生成运维步骤'
+  return text.length > 48 ? `${text.slice(0, 48)}...` : text
+}
+
+const recordAiTodoRequestMock = (input: { text: string; hosts?: TestChatHistoryHostContext[] }, requestId: string, assistantMessageId: string) => {
+  setAiTodoItemsMock([
+    {
+      id: 'todo-1',
+      content: '收集上下文',
+      description: input.hosts?.length ? `已绑定 ${input.hosts.length} 个主机上下文` : '已接收本次对话输入',
+      status: 'completed'
+    },
+    {
+      id: 'todo-2',
+      content: '生成命令建议',
+      description: `正在为「${promptSummaryMock(input.text)}」生成只读诊断步骤`,
+      status: 'in_progress',
+      isFocused: true,
+      subtasks: [
+        { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+        { id: 'todo-2-2', content: `关联响应 ${assistantMessageId || requestId}` }
+      ]
+    },
+    { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
+  ])
+}
+
+type TestAiTodoResponseInput = {
+  requestId?: string
+  assistantMessageId?: string
+  prompt?: string
+  contexts?: Array<{ id: string; kind: string; label: string }>
+  skills?: Array<{ name: string }>
+  command?: { label?: string; command?: string } | null
+}
+
+const recordAiTodoResponseMock = (input: TestAiTodoResponseInput, status: 'done' | 'cancelled' | 'error') => {
+  const cancelled = status === 'cancelled'
+  const failed = status === 'error'
+  setAiTodoItemsMock([
+    {
+      id: 'todo-1',
+      content: '收集上下文',
+      description: input.contexts?.length ? `已整理 ${input.contexts.length} 个上下文` : '已整理会话输入',
+      status: 'completed'
+    },
+    {
+      id: 'todo-2',
+      content: '生成命令建议',
+      description: cancelled ? '生成已停止，可调整上下文后重试' : failed ? 'AI 响应生成失败' : '只读诊断步骤已生成',
+      status: failed || cancelled ? 'in_progress' : 'completed',
+      isFocused: failed || cancelled ? true : undefined,
+      subtasks: [
+        { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+        { id: 'todo-2-2', content: input.command?.label || input.command?.command ? `参考命令 ${input.command.label || input.command.command}` : '生成回滚步骤' }
+      ]
+    },
+    {
+      id: 'todo-3',
+      content: '等待确认',
+      description: cancelled ? '当前响应已取消' : failed ? '修复模型或网络问题后重试' : '等待用户确认是否执行后续命令',
+      status: failed || cancelled ? 'pending' : 'in_progress',
+      isFocused: failed || cancelled ? undefined : true
+    }
+  ])
+}
+
 const aiTodoSnapshotResultMock = (): AiTodoSnapshotResult => {
   const todos = aiTodoItemsMock.map(cloneAiTodoItem)
   const focusedTodo = todos.find((todo) => todo.isFocused) || todos.find((todo) => todo.status === 'in_progress') || null
@@ -3264,12 +3337,12 @@ const aiTodoSnapshotResultMock = (): AiTodoSnapshotResult => {
 }
 
 const resetAiTodoSnapshotMock = () => {
-  aiTodoItemsMock = defaultAiTodoItems.map(cloneAiTodoItem)
+  setAiTodoItemsMock(defaultAiTodoItems)
   vi.mocked(window.aiops.listAiTodoSnapshot).mockImplementation(async () => aiTodoSnapshotResultMock())
 }
 
 const setAiTodoSnapshotMock = (todos: AiTodoItem[]) => {
-  aiTodoItemsMock = todos.map(cloneAiTodoItem)
+  setAiTodoItemsMock(todos)
   vi.mocked(window.aiops.listAiTodoSnapshot).mockImplementation(async () => aiTodoSnapshotResultMock())
 }
 
@@ -4299,6 +4372,8 @@ Object.defineProperty(window, 'aiops', {
       const text = String(input.text || '').trim()
       if (!text) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
       const requestId = `aichat-request-test-${aiChatExchangeRequestSequenceMock++}`
+      const assistantMessageId = `${requestId}-assistant`
+      recordAiTodoRequestMock(input, requestId, assistantMessageId)
       return {
         ok: true,
         data: {
@@ -4310,7 +4385,7 @@ Object.defineProperty(window, 'aiops', {
             hosts: input.hosts?.map((host) => ({ ...host }))
           },
           assistantMessage: {
-            id: `${requestId}-assistant`,
+            id: assistantMessageId,
             role: 'assistant' as const,
             text: '正在请求 aiopsterm AI 后端...',
             state: 'streaming' as const
@@ -5745,11 +5820,12 @@ Object.defineProperty(window, 'aiops', {
       }
     }),
     generateAiChatResponse: vi.fn(
-      (input: { requestId?: string; assistantMessageId?: string; prompt: string; skills?: Array<{ name: string }> }) =>
+      (input: TestAiTodoResponseInput & { prompt: string }) =>
         new Promise((resolve) => {
           window.setTimeout(() => {
             const cancelled = aiChatResponseKeysMock(input).some((key) => cancelledAiChatResponseKeysMock.has(key))
             if (cancelled) {
+              recordAiTodoResponseMock(input, 'cancelled')
               resolve({
                 ok: true,
                 data: {
@@ -5764,6 +5840,7 @@ Object.defineProperty(window, 'aiops', {
               })
               return
             }
+            recordAiTodoResponseMock(input, 'done')
             resolve({
               ok: true,
               data: {
@@ -5802,6 +5879,7 @@ Object.defineProperty(window, 'aiops', {
       keys.forEach((key) => cancelledAiChatResponseKeysMock.add(key))
       const assistantMessageId = String(input.assistantMessageId || '').trim() || undefined
       const requestId = String(input.requestId || '').trim() || aiChatRequestIdFromAssistantMessageIdMock(assistantMessageId) || undefined
+      recordAiTodoResponseMock({}, 'cancelled')
       return {
         ok: true,
         data: {

@@ -3347,7 +3347,7 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="todo-progress-ratio"]').text()).toBe('1/3')
     expect(wrapper.find('.focus-chain-badge').text()).toContain('Focus Chain')
     expect(wrapper.find('.focus-chain-highlight').text()).toContain('当前焦点')
-    expect(wrapper.find('.focus-chain-highlight').text()).toContain('只生成需要确认的只读命令')
+    expect(wrapper.find('.focus-chain-highlight').text()).toContain('生成只读诊断步骤')
     expect(wrapper.findAll('.todo-compact-list .todo-item')).toHaveLength(3)
     expect(wrapper.find('.todo-compact-list .todo-item.completed .status-icon').exists()).toBe(true)
     expect(wrapper.find('.todo-compact-list .todo-item.in-progress.is-focused .todo-focus-badge').exists()).toBe(true)

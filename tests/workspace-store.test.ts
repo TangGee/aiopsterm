@@ -3776,7 +3776,13 @@ describe('workspace store', () => {
     expect(store.activePanel.output).toContain('echo ai-message')
     expect(store.activePanel.output).toContain('backend output')
 
-    expect(store.todoProgress.total).toBe(0)
+    expect(store.todoProgress.total).toBe(3)
+    expect(store.todoItems.find((todo) => todo.id === 'todo-2')).toMatchObject({
+      content: '生成命令建议',
+      status: 'in_progress',
+      isFocused: true,
+      description: expect.stringContaining('重新执行发布检查')
+    })
     await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
     expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
     expect(store.todoItems.map((todo) => todo.content)).toEqual(['收集上下文', '生成命令建议', '等待确认'])

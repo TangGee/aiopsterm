@@ -1,9 +1,15 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import type { UserConfig } from '../src/shared/preload'
 
 let generateAiChatResponse: (input: Record<string, unknown>) => Promise<any>
 let createAiChatExchangeRequest: (input: Record<string, unknown>) => any
 let cancelAiChatResponse: (input: Record<string, unknown>) => any
+let configureAiTodoBackendRuntime: (config?: { stateFilePath?: string; useSeedData?: boolean }) => void
+let resetAiTodosForTests: () => void
+let listAiTodoSnapshot: () => any
 let configureAiChatRuntime: (config?: {
   getConfig?: () => UserConfig
   fetch?: typeof fetch
@@ -12,6 +18,7 @@ let configureAiChatRuntime: (config?: {
   timeoutMs?: number
 }) => void
 let localAiChatResponseMinDelayMs: number
+const tempDirs: string[] = []
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/aiChat'
@@ -21,10 +28,23 @@ beforeAll(async () => {
   cancelAiChatResponse = backend.cancelAiChatResponse
   configureAiChatRuntime = backend.configureAiChatRuntime
   localAiChatResponseMinDelayMs = backend.LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS
+  const aiTodoModulePath = '../src/main/backend/aiTodos'
+  const aiTodos = await import(aiTodoModulePath)
+  configureAiTodoBackendRuntime = aiTodos.configureAiTodoBackendRuntime
+  resetAiTodosForTests = aiTodos.resetAiTodosForTests
+  listAiTodoSnapshot = aiTodos.listAiTodoSnapshot
 })
 
-afterEach(() => {
+beforeEach(async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-ai-chat-todos-'))
+  tempDirs.push(dir)
+  configureAiTodoBackendRuntime({ stateFilePath: join(dir, 'ai-todos.json'), useSeedData: false })
+  resetAiTodosForTests()
+})
+
+afterEach(async () => {
   configureAiChatRuntime()
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
 describe('ai chat backend response boundary', () => {
@@ -47,6 +67,20 @@ describe('ai chat backend response boundary', () => {
       role: 'assistant',
       text: '正在请求 aiopsterm AI 后端...',
       state: 'streaming'
+    })
+
+    const todoSnapshot = listAiTodoSnapshot()
+    expect(todoSnapshot.ok).toBe(true)
+    expect(todoSnapshot.data).toMatchObject({
+      focusedTodoId: 'todo-2',
+      totalTodos: 3,
+      completedTodos: 1
+    })
+    expect(todoSnapshot.data?.todos[1]).toMatchObject({
+      content: '生成命令建议',
+      status: 'in_progress',
+      isFocused: true,
+      description: expect.stringContaining('检查生产磁盘')
     })
   })
 
@@ -77,6 +111,19 @@ describe('ai chat backend response boundary', () => {
     expect(result.data?.text).toContain('hosts:prod-1')
     expect(result.data?.text).toContain('当前响应由 aiopsterm 本地后端生成')
     expect(wait).toHaveBeenCalledWith(localAiChatResponseMinDelayMs)
+
+    const todoSnapshot = listAiTodoSnapshot()
+    expect(todoSnapshot.ok).toBe(true)
+    expect(todoSnapshot.data).toMatchObject({
+      focusedTodoId: 'todo-3',
+      completedTodos: 2,
+      totalTodos: 3
+    })
+    expect(todoSnapshot.data?.todos[2]).toMatchObject({
+      content: '等待确认',
+      status: 'in_progress',
+      isFocused: true
+    })
   })
 
   it('calls the configured model provider for non-local AI chat responses', async () => {
@@ -212,6 +259,15 @@ describe('ai chat backend response boundary', () => {
       }
     })
 
+    let todoSnapshot = listAiTodoSnapshot()
+    expect(todoSnapshot.ok).toBe(true)
+    expect(todoSnapshot.data?.todos[1]).toMatchObject({
+      content: '生成命令建议',
+      status: 'in_progress',
+      isFocused: true,
+      description: '生成已停止，可调整上下文后重试'
+    })
+
     waits[0].resolve()
     await expect(response).resolves.toMatchObject({
       ok: true,
@@ -223,6 +279,12 @@ describe('ai chat backend response boundary', () => {
         requestId: 'aichat-request-cancel-1',
         assistantMessageId: 'aichat-request-cancel-1-assistant'
       }
+    })
+    todoSnapshot = listAiTodoSnapshot()
+    expect(todoSnapshot.data).toMatchObject({
+      focusedTodoId: 'todo-2',
+      completedTodos: 1,
+      totalTodos: 3
     })
   })
 

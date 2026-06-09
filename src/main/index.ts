@@ -31,7 +31,7 @@ import {
 } from './backend/assets'
 import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
 import { listAiContextCatalog } from './backend/aiContext'
-import { listAiTodoSnapshot } from './backend/aiTodos'
+import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
@@ -1228,6 +1228,7 @@ configureSshTunnelBackendRuntime({ getConfig })
 configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
 configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
+configureAiTodoBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'ai-todos.json') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

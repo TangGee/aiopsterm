@@ -9756,7 +9756,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
     const result = await window.aiops.generateAiChatResponse(input)
     const message = chatMessages.value.find((item) => item.id === assistantId)
-    if (!message || message.state !== 'streaming') return
+    if (!message || message.state !== 'streaming') {
+      void refreshAiTodoSnapshot()
+      return
+    }
     if (result.ok && result.data?.status === 'cancelled') {
       message.state = 'cancelled'
       message.text = result.data.text || '已停止生成。'
@@ -9767,6 +9770,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       message.state = 'error'
       message.text = result.errorMessage || 'AI 响应生成失败'
     }
+    void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
   }
 
@@ -9790,6 +9794,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (message.state !== 'streaming') return true
     message.state = 'cancelled'
     message.text = result.data.text
+    void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
     return true
   }
@@ -9845,6 +9850,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const assistantMessage = chatHistoryMessageToChatMessage(request.data.assistantMessage)
     chatMessages.value.push(userMessage)
     chatMessages.value.push(assistantMessage)
+    void refreshAiTodoSnapshot()
     void generateAiResponseForMessage(assistantMessage.id, {
       requestId: request.data.requestId,
       assistantMessageId: assistantMessage.id,

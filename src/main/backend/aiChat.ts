@@ -12,6 +12,7 @@ import type {
   UserConfig
 } from '@shared/preload'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
+import { recordAiTodoCancelResult, recordAiTodoExchangeRequest, recordAiTodoResponseResult } from './aiTodos'
 
 const normalizeText = (value: unknown) => String(value || '').trim()
 export const LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS = 600
@@ -138,7 +139,7 @@ export const cancelAiChatResponse = (input: AiChatCancelInput): AiChatCancelResu
   }
   keys.forEach((key) => pendingCancelledAiChatResponses.add(key))
 
-  return {
+  const result: AiChatCancelResult = {
     ok: true,
     data: {
       status: 'cancelled',
@@ -148,6 +149,8 @@ export const cancelAiChatResponse = (input: AiChatCancelInput): AiChatCancelResu
       active
     }
   }
+  recordAiTodoCancelResult(input, result)
+  return result
 }
 
 const normalizeHostContexts = (hosts?: AiChatExchangeRequestInput['hosts']): AiChatHistoryHostContext[] | undefined => {
@@ -170,6 +173,13 @@ export const createAiChatExchangeRequest = (input: AiChatExchangeRequestInput): 
   const text = normalizeText(input.text)
   if (!text) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
   const requestId = `aichat-request-${randomUUID()}`
+  const assistantMessage = {
+    id: `${requestId}-assistant`,
+    role: 'assistant' as const,
+    text: '正在请求 aiopsterm AI 后端...',
+    state: 'streaming' as const
+  }
+  recordAiTodoExchangeRequest(input, requestId, assistantMessage.id)
   return {
     ok: true,
     data: {
@@ -180,12 +190,7 @@ export const createAiChatExchangeRequest = (input: AiChatExchangeRequestInput): 
         text,
         hosts: normalizeHostContexts(input.hosts)
       },
-      assistantMessage: {
-        id: `${requestId}-assistant`,
-        role: 'assistant',
-        text: '正在请求 aiopsterm AI 后端...',
-        state: 'streaming'
-      }
+      assistantMessage
     }
   }
 }
@@ -295,25 +300,29 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
   const startedAt = now()
   const control = registerAiChatResponseControl(input)
   const prompt = normalizeText(input.prompt)
+  const complete = (result: AiChatResponseResult) => {
+    recordAiTodoResponseResult(input, result)
+    return result
+  }
   try {
     if (!prompt && !(input.skills || []).length && !input.command) {
-      return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
+      return complete({ ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' })
     }
 
     const modelName = normalizeText(input.model) || normalizeText(runtimeConfig.getConfig?.().modelName) || 'aiopsterm-local-agent'
-    if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(control, modelName, startedAt)
+    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(control, modelName, startedAt))
     const config = runtimeConfig.getConfig?.()
     if (config) {
       const providerResponse = await generateProviderAiChatResponse(input, config, modelName, startedAt, control)
-      if (providerResponse) return providerResponse
+      if (providerResponse) return complete(providerResponse)
     }
-    if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(control, modelName, startedAt)
+    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(control, modelName, startedAt))
     if (modelName !== 'aiopsterm-local-agent') {
-      return {
+      return complete({
         ok: false,
         errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE',
         errorMessage: 'AI chat provider is unavailable'
-      }
+      })
     }
 
     const skillLines = (input.skills || [])
@@ -337,9 +346,9 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
     if (elapsedMs < LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS) {
       await wait(LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS - elapsedMs)
     }
-    if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(control, modelName, startedAt)
+    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(control, modelName, startedAt))
 
-    return {
+    return complete({
       ok: true,
       data: {
         text: lines.join('\n'),
@@ -350,7 +359,7 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
         requestId: control.requestId,
         assistantMessageId: control.assistantMessageId
       }
-    }
+    })
   } finally {
     unregisterAiChatResponseControl(control)
   }
