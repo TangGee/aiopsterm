@@ -1068,7 +1068,7 @@ const BillingSettingsPage = defineComponent({
             ? [
                 h('div', { class: 'settings-empty-state' }, [
                   h('p', '登录后可查看账户订阅、预算和用量比例。'),
-                  h('button', { class: 'settings-button primary', onClick: () => workspace.updateBillingSettings({ skippedLogin: false }) }, '登录')
+                  h('button', { class: 'settings-button primary', onClick: () => workspace.openUserLogin() }, '登录')
                 ])
               ]
             : [

@@ -2506,12 +2506,12 @@ const defaultPrivacySettings: PrivacySettings = {
 }
 
 const defaultBillingSettings: BillingSettings = {
-  skippedLogin: false,
-  email: 'guest@example.local',
-  subscription: 'pro',
-  subscriptionExpiresAt: '2026-12-31',
-  budgetResetAt: '2026-07-01',
-  ratio: 0.42
+  skippedLogin: true,
+  email: '',
+  subscription: 'free',
+  subscriptionExpiresAt: '',
+  budgetResetAt: '',
+  ratio: 0
 }
 
 const defaultAboutSettings: AboutSettings = {
@@ -5437,11 +5437,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const updateBillingSettings = (patch: Partial<BillingSettings>) => {
-    billingSettings.value = { ...billingSettings.value, ...patch }
-    setSettingsNotice(patch.skippedLogin ? '已切换为登录提示状态' : '计费概览已刷新')
-  }
-
   const setUserNotice = (message: string) => {
     userNotice.value = message
   }
@@ -5505,7 +5500,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     billingSettings.value = {
       ...billingSettings.value,
       skippedLogin: snapshot.profile.skippedLogin || snapshot.profile.lastLoginMethod === 'skip',
-      email: snapshot.profile.email || billingSettings.value.email,
+      email: snapshot.profile.email,
       subscription: snapshot.profile.subscription,
       subscriptionExpiresAt: snapshot.profile.subscriptionExpiresAt
     }
@@ -5574,9 +5569,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setUserNotice('验证码冷却状态无效')
   }
 
-  const openAccountCenter = () => {
+  const openAccountCenter = async (options: { activateUserModule?: boolean; notifySettings?: boolean } = {}) => {
+    if (!window.aiops?.getUserAccount) {
+      setUserNotice('账号中心服务不可用')
+      if (options.notifySettings) setSettingsNotice('账户中心服务不可用')
+      return false
+    }
+    const refreshed = await refreshUserAccount()
+    if (!refreshed) {
+      if (options.notifySettings) setSettingsNotice('账户中心打开失败')
+      return false
+    }
     userAccountCenterOpen.value = true
+    if (options.activateUserModule) activeModule.value = 'user'
     setUserNotice('账号中心已打开')
+    if (options.notifySettings) setSettingsNotice('账号中心已打开')
+    return true
   }
 
   const closeAccountCenter = () => {
@@ -6022,19 +6030,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return true
       }
       if (label === '账户中心') {
-        if (!window.aiops?.getUserAccount) {
-          setSettingsNotice('账户中心服务不可用')
-          return false
-        }
-        const refreshed = await refreshUserAccount()
-        if (!refreshed) {
-          setSettingsNotice('账户中心打开失败')
-          return false
-        }
-        openAccountCenter()
-        activeModule.value = 'user'
-        setSettingsNotice('账号中心已打开')
-        return true
+        return openAccountCenter({ activateUserModule: true, notifySettings: true })
       }
       setSettingsNotice(`已打开 ${label}`)
       return true
@@ -10411,7 +10407,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveMcpConfigEditor,
     refreshMcpServersFromBridge,
     updatePrivacySettings,
-    updateBillingSettings,
     setUserNotice,
     openAccountCenter,
     closeAccountCenter,

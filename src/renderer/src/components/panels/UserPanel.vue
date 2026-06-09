@@ -339,7 +339,7 @@
         <footer class="user-info-footer">
           <button
             class="settings-button"
-            @click="workspace.openAccountCenter"
+            @click="workspace.openAccountCenter()"
           >
             <Gauge />
             账号中心

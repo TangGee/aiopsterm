@@ -6802,7 +6802,9 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.trustedDevices.some((device) => device.id === 2)).toBe(false)
     expect(store.userNotice).toBe('可信设备已移除')
 
-    store.openAccountCenter()
+    vi.mocked(window.aiops.getUserAccount).mockClear()
+    await expect(store.openAccountCenter()).resolves.toBe(true)
+    expect(window.aiops.getUserAccount).toHaveBeenCalled()
     expect(store.userAccountCenterOpen).toBe(true)
     store.closeAccountCenter()
     expect(store.userAccountCenterOpen).toBe(false)
@@ -7129,11 +7131,27 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     const profileBefore = { ...store.userProfile }
     const billingBefore = { ...store.billingSettings }
     const trustedDevicesBefore = store.trustedDevices.map((device) => ({ ...device }))
+    const originalGetUserAccount = window.aiops.getUserAccount
     const originalOpenLogin = window.aiops.openUserLogin
     const originalLogout = window.aiops.logoutUserAccount
     const originalRevokeTrustedDevice = window.aiops.revokeTrustedDevice
 
     try {
+      ;(window.aiops as any).getUserAccount = undefined
+      await expect(store.openAccountCenter({ activateUserModule: true })).resolves.toBe(false)
+      expect(store.userNotice).toBe('账号中心服务不可用')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.userProfile).toEqual(profileBefore)
+      expect(store.billingSettings).toEqual(billingBefore)
+
+      ;(window.aiops as any).getUserAccount = originalGetUserAccount
+      vi.mocked(window.aiops.getUserAccount).mockRejectedValueOnce(new Error('account center offline'))
+      await expect(store.openAccountCenter({ activateUserModule: true })).resolves.toBe(false)
+      expect(store.userNotice).toBe('account center offline')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.userProfile).toEqual(profileBefore)
+      expect(store.billingSettings).toEqual(billingBefore)
+
       ;(window.aiops as any).openUserLogin = undefined
       await expect(store.openUserLogin()).resolves.toBe(false)
       expect(store.activeModule).toBe('user')
@@ -7160,6 +7178,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.userNotice).toBe('可信设备移除失败')
       expect(store.trustedDevices).toEqual(trustedDevicesBefore)
     } finally {
+      ;(window.aiops as any).getUserAccount = originalGetUserAccount
       ;(window.aiops as any).openUserLogin = originalOpenLogin
       ;(window.aiops as any).logoutUserAccount = originalLogout
       ;(window.aiops as any).revokeTrustedDevice = originalRevokeTrustedDevice

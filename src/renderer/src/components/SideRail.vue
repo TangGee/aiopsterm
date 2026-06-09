@@ -113,10 +113,9 @@ const login = () => {
   userMenuOpen.value = false
 }
 
-const accountCenter = () => {
-  workspace.openAccountCenter()
+const accountCenter = async () => {
   userMenuOpen.value = false
-  workspace.setActiveModule('user')
+  await workspace.openAccountCenter({ activateUserModule: true })
 }
 
 const openUserInfo = () => {
