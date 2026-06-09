@@ -3634,12 +3634,12 @@ const selectChatMode = (mode: AiChatMode) => {
   modeMenuOpen.value = false
 }
 
-const selectModel = (modelId: string) => {
-  workspace.saveConfig({ modelName: modelId })
-  closeModelMenu()
+const selectModel = async (modelId: string) => {
+  const saved = await workspace.selectAiModel(modelId)
+  if (saved) closeModelMenu()
 }
 
-const handleModelKeydown = (event: KeyboardEvent) => {
+const handleModelKeydown = async (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -3649,7 +3649,7 @@ const handleModelKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Enter') return
   event.preventDefault()
   const model = filteredModelOptions.value[0]
-  if (model) selectModel(model.id)
+  if (model) await selectModel(model.id)
 }
 
 const resetDocsContextNavigation = () => {

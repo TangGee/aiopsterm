@@ -4058,6 +4058,51 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
+  it('does not fabricate AI model selection when config persistence is unavailable or malformed', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshAiModelCatalog()
+    const originalSaveConfig = window.aiops.saveConfig
+    const initialModelName = store.config.modelName
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.selectAiModel('qwen2.5-coder')).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 模型保存服务不可用')
+      expect(store.config.modelName).toBe(initialModelName)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        modelName: initialModelName
+      })
+      await expect(store.selectAiModel('qwen2.5-coder')).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 模型保存失败')
+      expect(store.config.modelName).toBe(initialModelName)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        modelName: 'qwen2.5-coder',
+        modelProvider: 'local'
+      })
+      await expect(store.selectAiModel('qwen2.5-coder')).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 模型保存失败')
+      expect(store.config.modelName).toBe(initialModelName)
+      expect(store.config.modelProvider).toBe('local')
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('model save offline'))
+      await expect(store.selectAiModel('qwen2.5-coder')).resolves.toBe(false)
+      expect(store.topNotice).toBe('model save offline')
+      expect(store.config.modelName).toBe(initialModelName)
+
+      await expect(store.selectAiModel('qwen2.5-coder')).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenCalledWith({ modelName: 'qwen2.5-coder', modelProvider: 'ollama' })
+      expect(store.config.modelName).toBe('qwen2.5-coder')
+      expect(store.config.modelProvider).toBe('ollama')
+    } finally {
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+    }
+  })
+
   it('loads AI @ context candidates from the backend bridge instead of renderer mock defaults', async () => {
     const store = useWorkspaceStore()
 

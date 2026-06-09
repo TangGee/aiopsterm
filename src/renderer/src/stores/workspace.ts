@@ -2183,6 +2183,13 @@ const normalizeUserModelName = (value: unknown) => {
   return modelName
 }
 
+const normalizeCatalogModelProvider = (value: unknown): UserConfig['modelProvider'] => {
+  const provider = String(value || '').trim()
+  if (!provider || provider === 'default' || provider === 'local') return 'local'
+  if (provider === 'openai') return 'openai-compatible'
+  return normalizeUserModelProvider(provider)
+}
+
 type GeneralBaseSettingsPatch = Partial<Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'>>
 type BackgroundUserConfig = UserConfig['background']
 
@@ -4842,6 +4849,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return true
     } catch (error) {
       setTopNotice(error instanceof Error ? error.message : '资源树偏好保存失败')
+      return false
+    }
+  }
+
+  const selectAiModel = async (modelId: string) => {
+    const nextModelName = normalizeUserModelName(modelId)
+    if (!nextModelName) return false
+    const modelOption = aiModelOptions.value.find((option) => normalizeUserModelName(option.id) === nextModelName)
+    if (!modelOption && lockedAiModelOptions.value.some((option) => normalizeUserModelName(option.id) === nextModelName)) {
+      setTopNotice('AI 模型不可用')
+      return false
+    }
+    const nextModelProvider = normalizeCatalogModelProvider(modelOption?.apiProvider || config.value.modelProvider)
+    if (nextModelName === config.value.modelName && nextModelProvider === config.value.modelProvider) return true
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setTopNotice('AI 模型保存服务不可用')
+      return false
+    }
+    try {
+      const savedConfig = await saveConfigBridge({ modelName: nextModelName, modelProvider: nextModelProvider })
+      if (
+        !isRecord(savedConfig) ||
+        normalizeUserModelName(savedConfig.modelName) !== nextModelName ||
+        normalizeUserModelProvider(savedConfig.modelProvider) !== nextModelProvider
+      ) {
+        setTopNotice('AI 模型保存失败')
+        return false
+      }
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        modelName: nextModelName,
+        modelProvider: nextModelProvider
+      } as Partial<UserConfig>)
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'AI 模型保存失败')
       return false
     }
   }
@@ -10274,6 +10318,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeSshAgentKey,
     updateWorkspacePreferences,
     refreshAiModelCatalog,
+    selectAiModel,
     updateModelOption,
     removeModelOption,
     toggleAddModelSwitch,
