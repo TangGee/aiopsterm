@@ -620,6 +620,8 @@ export type ExtensionPluginRuntimeConfig = {
   source?: ExtensionPluginSource
   isPrivate?: boolean
   lastUpdated?: string
+  installedAt?: string
+  packagePath?: string
   size?: number
   readme?: string
   categories?: string[]

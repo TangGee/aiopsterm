@@ -7628,7 +7628,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
     }
     const index = extensionPlugins.value.findIndex((item) => item.pluginId === nextPlugin.pluginId)
-    if (nextPlugin.show === false && nextPlugin.source === 'local' && !nextPlugin.latestVersion) {
+    if (nextPlugin.show === false && nextPlugin.source === 'local') {
       if (index >= 0) extensionPlugins.value = extensionPlugins.value.filter((item) => item.pluginId !== nextPlugin.pluginId)
       ensureSelectedExtensionVisible()
       return
@@ -7807,14 +7807,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const dropExtensionPackage = async (file: string | { name?: string; path?: string; size?: number }) => {
     extensionDragActive.value = false
-    const fileName = typeof file === 'string' ? file : file?.name || ''
-    const filePath = typeof file === 'string' ? '' : file?.path || ''
+    const rawPath = typeof file === 'string' ? file : file?.path || ''
+    const pathLooksLocal = rawPath.includes('/') || rawPath.includes('\\')
+    const filePath = typeof file === 'string' ? (pathLooksLocal ? rawPath : '') : rawPath
+    const pathFileName = rawPath.split(/[\\/]/).pop() || ''
+    const fileName = typeof file === 'string' ? pathFileName || file : file?.name || pathFileName
     const size = typeof file === 'string' ? undefined : file?.size
     if (!fileName.endsWith('.external-reference')) {
       setExtensionNotice('插件包格式错误，请拖入 .external-reference 文件')
       return false
     }
     const packageName = fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
+    if (!filePath) {
+      setExtensionNotice(`${packageName} 安装需要真实本地路径，请从桌面客户端拖入 .external-reference 文件`)
+      return false
+    }
     const installExtensionPackageBridge = window.aiops?.installExtensionPackage
     if (typeof installExtensionPackageBridge !== 'function') {
       setExtensionNotice(`${packageName} 安装服务不可用`)

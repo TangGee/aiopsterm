@@ -77,6 +77,7 @@ import {
 } from './backend/database'
 import {
   cancelExtensionInstall,
+  configureExtensionBackendRuntime,
   installExtensionPackage,
   installExtensionPlugin,
   listExtensionPlugins,
@@ -1156,6 +1157,7 @@ configureTerminalSuggestionsRuntime({ getConfig })
 configureAiChatRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig })
 configureVoiceBackendRuntime({ getConfig })
+configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

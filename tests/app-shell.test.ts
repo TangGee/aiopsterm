@@ -4805,14 +4805,14 @@ describe('AppShell', () => {
     expect(store.extensionDragActive).toBe(true)
 
     const validDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
-    Object.defineProperty(validDrop, 'dataTransfer', { configurable: true, value: { files: [{ name: 'local-tools.external-reference' }] } })
+    Object.defineProperty(validDrop, 'dataTransfer', { configurable: true, value: { files: [{ name: 'local-tools.external-reference', path: '/tmp/local-tools.external-reference', size: 4096 }] } })
     panel.element.dispatchEvent(validDrop)
     await panel.vm.$nextTick()
     expect(store.extensionDragActive).toBe(false)
     expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({
       fileName: 'local-tools.external-reference',
-      filePath: '',
-      size: undefined,
+      filePath: '/tmp/local-tools.external-reference',
+      size: 4096,
       existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'cloud-assets'])
     })
     expect(store.extensionInstallLoadingMap['local-local-tools']).toBe(true)

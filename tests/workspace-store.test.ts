@@ -4397,14 +4397,17 @@ describe('workspace store', () => {
 
     await expect(store.dropExtensionPackage('bad.zip')).resolves.toBe(false)
     expect(store.extensionNotice).toContain('.external-reference')
-    const dropPromise = store.dropExtensionPackage('local-pack.external-reference')
+    await expect(store.dropExtensionPackage('local-pack.external-reference')).resolves.toBe(false)
+    expect(store.extensionNotice).toContain('真实本地路径')
+    expect(window.aiops.installExtensionPackage).not.toHaveBeenCalledWith(expect.objectContaining({ fileName: 'local-pack.external-reference' }))
+    const dropPromise = store.dropExtensionPackage({ name: 'local-pack.external-reference', path: '/tmp/local-pack.external-reference', size: 4096 })
     expect(store.extensionInstallingPackageName).toBe('local pack')
     await vi.runOnlyPendingTimersAsync()
     await expect(dropPromise).resolves.toBe(true)
     expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({
       fileName: 'local-pack.external-reference',
-      filePath: '',
-      size: undefined,
+      filePath: '/tmp/local-pack.external-reference',
+      size: 4096,
       existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook'])
     })
     expect(store.selectedExtensionId).toContain('local-local-pack')
@@ -4612,8 +4615,9 @@ describe('workspace store', () => {
       await cancelPendingUpdate(backendRejectedCancelUpdate)
 
       const selectedBeforePackage = store.selectedExtensionId
+      const clientLocalPackage = { name: 'client-local.external-reference', path: '/tmp/client-local.external-reference', size: 2048 }
       ;(window.aiops as any).installExtensionPackage = undefined
-      await expect(store.dropExtensionPackage('client-local.external-reference')).resolves.toBe(false)
+      await expect(store.dropExtensionPackage(clientLocalPackage)).resolves.toBe(false)
       expect(store.extensionNotice).toBe('client local 安装服务不可用')
       expect(store.extensionInstallingPackageName).toBe('')
       expect(store.selectedExtensionId).toBe(selectedBeforePackage)
@@ -4622,7 +4626,7 @@ describe('workspace store', () => {
 
       ;(window.aiops as any).installExtensionPackage = originalAiops.installExtensionPackage
       vi.mocked(window.aiops.installExtensionPackage!).mockRejectedValueOnce(new Error('package offline'))
-      await expect(store.dropExtensionPackage('client-local.external-reference')).resolves.toBe(false)
+      await expect(store.dropExtensionPackage(clientLocalPackage)).resolves.toBe(false)
       expect(store.extensionNotice).toBe('package offline')
       expect(store.extensionInstallingPackageName).toBe('')
       expect(store.selectedExtensionId).toBe(selectedBeforePackage)
@@ -4630,7 +4634,7 @@ describe('workspace store', () => {
       expectCatalogUnchanged()
 
       vi.mocked(window.aiops.installExtensionPackage!).mockResolvedValueOnce({ ok: false, errorMessage: 'package rejected by backend' } as any)
-      await expect(store.dropExtensionPackage('client-local.external-reference')).resolves.toBe(false)
+      await expect(store.dropExtensionPackage(clientLocalPackage)).resolves.toBe(false)
       expect(store.extensionNotice).toBe('package rejected by backend')
       expect(store.extensionInstallingPackageName).toBe('')
       expect(store.selectedExtensionId).toBe(selectedBeforePackage)

@@ -713,7 +713,7 @@ const finishExtensionOperationMock = (
     }, delayMs)
   })
 
-const createPackagePluginMock = (input: { fileName: string; size?: number; existingPluginIds?: string[] }): TestExtensionPlugin => {
+const createPackagePluginMock = (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[] }): TestExtensionPlugin => {
   const pluginName = input.fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
   const slug = pluginName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'plugin'
   const existing = input.existingPluginIds || []
@@ -5186,9 +5186,12 @@ Object.defineProperty(window, 'aiops', {
     })),
     installExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => finishExtensionOperationMock('install', input.plugin)),
     updateExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => finishExtensionOperationMock('update', input.plugin)),
-    installExtensionPackage: vi.fn(async (input: { fileName: string; size?: number; existingPluginIds?: string[] }) => {
+    installExtensionPackage: vi.fn(async (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[] }) => {
       if (!input.fileName.toLowerCase().endsWith('.external-reference')) {
         return { ok: false, errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID', errorMessage: 'Plugin package must use the .external-reference extension.' }
+      }
+      if (!input.filePath) {
+        return { ok: false, errorCode: 'EXTENSION_PACKAGE_PATH_REQUIRED', errorMessage: 'Plugin package file path is required.' }
       }
       const plugin = createPackagePluginMock(input)
       return finishExtensionOperationMock('package', plugin)
