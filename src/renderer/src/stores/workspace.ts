@@ -2379,6 +2379,20 @@ const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): Use
       : undefined
 })
 
+const stripBusinessDataConfig = (source: Partial<UserConfig>): Partial<UserConfig> => {
+  const { quickCommands, knowledgeBase, aliasCommands, ...rest } = source
+  void quickCommands
+  void knowledgeBase
+  void aliasCommands
+  return rest
+}
+
+const mergeGenericSavedConfig = (base: UserConfig, savedConfig: Partial<UserConfig>, patch: Partial<UserConfig> = {}) =>
+  mergeUserConfig(base, {
+    ...stripBusinessDataConfig(savedConfig),
+    ...patch
+  })
+
 const normalizeOnboardingConfig = (source?: UserConfig['onboarding']) => {
   const completed = createDefaultOnboardingCompleted()
   const incomingCompleted = source?.completedModules || {}
@@ -3396,9 +3410,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const missingModelOptions = !Array.isArray(savedModelSettings.options)
     const modelProviderChanged = normalizeUserModelProvider(savedConfig.modelProvider) !== savedConfig.modelProvider
     const modelNameChanged = normalizeUserModelName(savedConfig.modelName) !== savedConfig.modelName
-    const missingQuickCommands = !isRecord(savedConfig.quickCommands)
-    const missingKnowledgeBase = !isRecord(savedConfig.knowledgeBase)
-    const missingAliasCommands = !Array.isArray(savedConfig.aliasCommands)
     const missingSkills = !Array.isArray(savedConfig.skills)
     const missingMcpServers = !Array.isArray(savedConfig.mcpServers)
     config.value = mergeUserConfig(defaultConfig, savedConfig)
@@ -3443,14 +3454,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const { changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource)
     const normalizedModelSettings = applyModelSettingsSnapshot(modelSettingsSource)
     let normalizedQuickCommands = normalizeQuickCommandsConfig().normalized
-    let quickCommandsChanged = false
     let quickCommandsLoadedFromBridge = false
     if (window.aiops.getQuickCommands) {
       try {
         const bridgeQuickCommands = await window.aiops.getQuickCommands()
         const snapshot = normalizeQuickCommandsConfig(bridgeQuickCommands)
         normalizedQuickCommands = snapshot.normalized
-        quickCommandsChanged = snapshot.changed
         quickCommandsLoadedFromBridge = true
       } catch {
         setTopNotice('快捷命令加载失败')
@@ -3461,11 +3470,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     snippetGroups.value = normalizedQuickCommands.groups.map((group) => ({ ...group }))
     quickCommands.value = normalizedQuickCommands.snippets.map((snippet) => ({ ...snippet }))
     const {
-      normalized: savedKnowledgeBaseSnapshot,
-      changed: savedKnowledgeBaseChanged
+      normalized: savedKnowledgeBaseSnapshot
     } = normalizeKnowledgeBaseConfig(savedConfig.knowledgeBase)
     let normalizedKnowledgeBase = savedKnowledgeBaseSnapshot
-    let knowledgeBaseChanged = savedKnowledgeBaseChanged
     const knowledgeBridge = getKnowledgeBridge()
     if (knowledgeBridge) {
       try {
@@ -3485,13 +3492,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     kbUsedBytes.value = normalizedKnowledgeBase.usedBytes
     kbTotalBytes.value = normalizedKnowledgeBase.totalBytes
     let normalizedAliasCommands = normalizeAliasCommandsConfig().normalized
-    let aliasCommandsChanged = false
     let aliasCommandsLoadedFromBridge = false
     try {
       const bridgeAliasCommands = await loadAliasCommandsFromBackend()
       const snapshot = normalizeAliasCommandsConfig(bridgeAliasCommands)
       normalizedAliasCommands = snapshot.normalized
-      aliasCommandsChanged = snapshot.changed
       aliasCommandsLoadedFromBridge = true
     } catch {
       setExtensionNotice(hasAliasListBridge() ? 'Alias 加载失败' : 'Alias 服务不可用')
@@ -3584,16 +3589,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       modelNameChanged ||
       modelSettingsChanged ||
       missingModelSettings ||
-      (quickCommandsLoadedFromBridge && (quickCommandsChanged || missingQuickCommands)) ||
-      knowledgeBaseChanged ||
-      missingKnowledgeBase ||
-      (aliasCommandsLoadedFromBridge && (aliasCommandsChanged || missingAliasCommands)) ||
       skillsChanged ||
       missingSkills ||
       savedMcpSnapshot.changed ||
       missingMcpServers
     ) {
-      config.value = mergeUserConfig(
+      config.value = mergeGenericSavedConfig(
         config.value,
         await window.aiops.saveConfig({
           modelProvider: config.value.modelProvider,
@@ -3609,9 +3610,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           privacy: normalizedPrivacy,
           aiPreferences: normalizedAiPreferences,
           modelSettings: normalizedModelSettings,
-          ...(quickCommandsLoadedFromBridge ? { quickCommands: normalizedQuickCommands } : {}),
-          knowledgeBase: normalizedKnowledgeBase,
-          ...(aliasCommandsLoadedFromBridge ? { aliasCommands: normalizedAliasCommands } : {}),
           skills: normalizedSkills,
           customInstructions: '',
           mcpServers: savedMcpSnapshot.normalized,
@@ -3641,13 +3639,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const saveConfig = async (patch: Partial<UserConfig>) => {
-    const normalizedPatch = patch.theme ? { ...patch, theme: normalizeThemeId(patch.theme) } : patch
+    const normalizedPatch = stripBusinessDataConfig(patch.theme ? { ...patch, theme: normalizeThemeId(patch.theme) } : patch)
     config.value = mergeUserConfig(config.value, normalizedPatch)
     config.value.theme = normalizeThemeId(config.value.theme)
     applyCurrentTheme()
     setupThemeBridge()
     if (window.aiops) {
-      config.value = mergeUserConfig(config.value, await window.aiops.saveConfig(normalizedPatch))
+      config.value = mergeGenericSavedConfig(config.value, await window.aiops.saveConfig(normalizedPatch))
     }
     config.value.theme = normalizeThemeId(config.value.theme)
     editorSettings.value = normalizeEditorSettingsConfig(config.value.editorSettings).normalized
@@ -3656,11 +3654,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     refreshShortcutRuntime()
     setupThemeBridge()
   }
-
-  const getQuickCommandsSnapshot = (): QuickCommandsUserConfig => ({
-    groups: snippetGroups.value.map((group) => ({ ...group })),
-    snippets: quickCommands.value.map((snippet) => ({ ...snippet }))
-  })
 
   const applyQuickCommandsSnapshot = (snapshot: QuickCommandsUserConfig) => {
     const normalized = normalizeQuickCommandsConfig(snapshot).normalized
@@ -3684,37 +3677,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const persistQuickCommands = async () => {
-    const snapshot = getQuickCommandsSnapshot()
-    if (!window.aiops?.saveQuickCommands) {
-      setTopNotice('快捷命令保存服务不可用')
-      return null
-    }
-    try {
-      const result = await window.aiops.saveQuickCommands(snapshot)
-      if (!result?.ok || !result.data) {
-        setTopNotice(result?.errorMessage || '快捷命令保存失败')
-        return null
-      }
-      applyQuickCommandsSnapshot(result.data)
-      await saveConfig({ quickCommands: result.data })
-      return result.data
-    } catch {
-      setTopNotice('快捷命令保存失败')
-      return null
-    }
-  }
-
-  const getKnowledgeBaseSnapshot = (): KnowledgeBaseUserConfig => ({
-    tree: cloneKnowledgeNodes(knowledgeTree.value),
-    usedBytes: kbUsedBytes.value,
-    totalBytes: kbTotalBytes.value
-  })
-
-  const persistKnowledgeBase = () => {
-    saveConfig({ knowledgeBase: getKnowledgeBaseSnapshot() })
-  }
-
   const loadKnowledgeTreeFromBridge = async (relDir = ''): Promise<KnowledgeNode[]> => {
     const knowledgeBridge = getKnowledgeBridge()
     if (!knowledgeBridge) return cloneKnowledgeNodes(knowledgeTree.value)
@@ -3731,6 +3693,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshKnowledgeTree = async (options: { persist?: boolean } = {}) => {
+    void options
     const knowledgeBridge = getKnowledgeBridge()
     if (!knowledgeBridge) return
     await knowledgeBridge.kbEnsureRoot()
@@ -3740,10 +3703,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       usedBytes: knowledgeTreeSize(nextTree),
       totalBytes: kbTotalBytes.value
     }
-    const changed = JSON.stringify(getKnowledgeBaseSnapshot()) !== JSON.stringify(nextSnapshot)
     knowledgeTree.value = nextTree
     kbUsedBytes.value = nextSnapshot.usedBytes
-    if (changed && options.persist !== false) persistKnowledgeBase()
   }
 
   const handleKnowledgeTransferProgress = (event: KnowledgeBaseTransferProgress) => {
@@ -3797,8 +3758,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshAliasCommands = async () => {
     try {
       const commands = await loadAliasCommandsFromBackend()
-      const normalized = applyAliasCommandsFromBackend(commands)
-      await saveConfig({ aliasCommands: normalized })
+      applyAliasCommandsFromBackend(commands)
       return true
     } catch (error) {
       setExtensionNotice(error instanceof Error ? error.message : 'Alias 加载失败')
@@ -3806,9 +3766,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const syncAliasConfigFromBackend = async (commands: AliasCommandConfig[]) => {
+  const syncAliasConfigFromBackend = (commands: AliasCommandConfig[]) => {
     applyAliasCommandsFromBackend(commands)
-    await saveConfig({ aliasCommands: getAliasCommandsSnapshot() })
   }
 
   const getExtensionSettingsSnapshot = (): ExtensionUserConfig => ({ ...extensionSettings.value })
@@ -3838,10 +3797,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('扩展设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         extensionSettings: savedSettings
-      } as Partial<UserConfig>)
+      })
       extensionSettings.value = { ...savedSettings }
       ensureSelectedExtensionVisible()
       return true
@@ -3880,10 +3838,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('隐私设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         privacy: savedPrivacy
-      } as Partial<UserConfig>)
+      })
       privacySettings.value = {
         ...privacySettings.value,
         ...savedPrivacy
@@ -3928,10 +3885,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('AI 偏好设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         aiPreferences: cloneAiPreferencesSnapshot(savedPreferences)
-      } as Partial<UserConfig>)
+      })
       aiPreferences.value = cloneAiPreferencesSnapshot(savedPreferences)
       return true
     } catch (error) {
@@ -4008,10 +3964,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       applyModelOptionSettingsSnapshot(savedModelSettings)
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         modelSettings: savedModelSettings
-      } as Partial<UserConfig>)
+      })
       return true
     } catch (error) {
       setSettingsNotice(error instanceof Error ? error.message : failureMessage)
@@ -4457,10 +4412,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('主题设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         theme: savedConfig.theme
-      } as Partial<UserConfig>)
+      })
       config.value.theme = normalizeThemeId(config.value.theme)
       editorSettings.value = normalizeEditorSettingsConfig(config.value.editorSettings).normalized
       applyCurrentTheme()
@@ -4498,10 +4452,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('背景设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         background: cloneBackgroundSnapshot(savedBackground)
-      } as Partial<UserConfig>)
+      })
       return true
     } catch (error) {
       setSettingsNotice(error instanceof Error ? error.message : '背景设置保存失败')
@@ -4621,7 +4574,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('基础设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, savedConfig)
+      config.value = mergeGenericSavedConfig(config.value, savedConfig)
       setSettingsNotice('基础设置已保存')
       return true
     } catch (error) {
@@ -4663,10 +4616,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('编辑器设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         editorSettings: cloneEditorSettingsSnapshot(savedSettings)
-      } as Partial<UserConfig>)
+      })
       editorSettings.value = cloneEditorSettingsSnapshot(savedSettings)
       applyCurrentEditorSettings()
       return true
@@ -4712,10 +4664,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('终端设置保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         terminal: cloneTerminalSettingsSnapshot(savedSettings)
-      } as Partial<UserConfig>)
+      })
       terminalSettings.value = cloneTerminalSettingsSnapshot(savedSettings)
       return true
     } catch (error) {
@@ -4788,10 +4739,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       const savedProxyConfigs = normalizeSshProxyConfigs(savedConfig.sshProxyConfigs).normalized
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         sshProxyConfigs: savedProxyConfigs
-      } as Partial<UserConfig>)
+      })
       sshProxyConfigs.value = savedProxyConfigs.map((config) => ({ ...config }))
       return true
     } catch (error) {
@@ -4849,10 +4799,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       const savedKeys = normalizeSshAgentKeys(savedConfig.sshAgentKeys).normalized
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         sshAgentKeys: savedKeys
-      } as Partial<UserConfig>)
+      })
       sshAgentKeys.value = savedKeys.map((key) => ({ ...key }))
       return true
     } catch (error) {
@@ -4933,10 +4882,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setTopNotice('资源树偏好保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         workspacePreferences: cloneWorkspacePreferencesSnapshot(savedPreferences)
-      } as Partial<UserConfig>)
+      })
       workspacePreferences.value = cloneWorkspacePreferencesSnapshot(savedPreferences)
       return true
     } catch (error) {
@@ -4970,11 +4918,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setTopNotice('AI 模型保存失败')
         return false
       }
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         modelName: nextModelName,
         modelProvider: nextModelProvider
-      } as Partial<UserConfig>)
+      })
       return true
     } catch (error) {
       setTopNotice(error instanceof Error ? error.message : 'AI 模型保存失败')
@@ -5083,13 +5030,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       const savedModelSettings = applyModelSettingsSnapshot(savedConfig.modelSettings)
-      config.value = mergeUserConfig(config.value, {
-        ...savedConfig,
+      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         modelProvider: savedProvider,
         modelEndpoint: savedEndpoint,
         modelName: savedModelName,
         modelSettings: savedModelSettings
-      } as Partial<UserConfig>)
+      })
       setSettingsNotice(`${providerLabel[provider]} Save 成功`)
       return true
     } catch (error) {

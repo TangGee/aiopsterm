@@ -214,6 +214,17 @@ const defaultMcpToolStates = {
   'ops-inventory:lookup_asset': false
 }
 
+const businessDataConfigKeys = ['quickCommands', 'knowledgeBase', 'aliasCommands'] as const
+
+const expectNoBusinessDataConfigWrites = (keys: readonly string[] = businessDataConfigKeys) => {
+  const patches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch as Record<string, unknown>)
+  for (const patch of patches) {
+    for (const key of keys) {
+      expect(Object.prototype.hasOwnProperty.call(patch, key)).toBe(false)
+    }
+  }
+}
+
 describe('workspace store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -593,16 +604,6 @@ describe('workspace store', () => {
         },
         aiPreferences: defaultAiPreferences,
         modelSettings: defaultModelSettings,
-        quickCommands: expect.objectContaining({
-          groups: expect.arrayContaining([expect.objectContaining({ uuid: 'group-monitor', group_name: '巡检命令' })]),
-          snippets: expect.arrayContaining([expect.objectContaining({ uuid: 'snippet-root', snippet_name: '当前目录' })])
-        }),
-        knowledgeBase: expect.objectContaining({
-          tree: expect.arrayContaining([expect.objectContaining({ relPath: 'commands', type: 'dir' })]),
-          usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
-          totalBytes: 1073741824
-        }),
-        aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'll', command: 'ls -alF' })]),
         skills: defaultSkills,
         onboarding: {
           version: 2,
@@ -616,6 +617,7 @@ describe('workspace store', () => {
         }
       })
     )
+    expectNoBusinessDataConfigWrites()
     expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith({
       shortcuts: undefined,
       rules: undefined,
@@ -687,19 +689,10 @@ describe('workspace store', () => {
         },
         aiPreferences: defaultAiPreferences,
         modelSettings: defaultModelSettings,
-        quickCommands: expect.objectContaining({
-          groups: expect.arrayContaining([expect.objectContaining({ uuid: 'group-monitor' })]),
-          snippets: expect.arrayContaining([expect.objectContaining({ uuid: 'snippet-root' })])
-        }),
-        knowledgeBase: expect.objectContaining({
-          tree: expect.arrayContaining([expect.objectContaining({ relPath: 'commands' })]),
-          usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
-          totalBytes: 1073741824
-        }),
-        aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'll' })]),
         skills: defaultSkills
       })
     )
+    expectNoBusinessDataConfigWrites()
     expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith({
       shortcuts: undefined,
       rules: undefined,
@@ -4174,49 +4167,39 @@ describe('workspace store', () => {
 
   it('persists External reference-style knowledge base create, rename, paste, delete, and import completion state', async () => {
     const store = useWorkspaceStore()
+    vi.mocked(window.aiops.saveConfig).mockClear()
 
     const folder = await store.createKnowledgeNode('dir', '', 'Runbooks')
     expect(folder?.relPath).toBe('Runbooks')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        knowledgeBase: expect.objectContaining({
-          tree: expect.arrayContaining([expect.objectContaining({ relPath: 'Runbooks', type: 'dir' })])
-        })
-      })
-    )
+    expect(window.aiops.kbMkdir).toHaveBeenCalledWith('', 'Runbooks')
+    expectNoBusinessDataConfigWrites(['knowledgeBase'])
     const knowledgeBytesAfterFolder = store.kbUsedBytes
 
     const file = (await store.createKnowledgeNode('file', 'Runbooks', 'Deploy.md'))!
     expect(store.findKnowledgeNode('Runbooks/Deploy.md')).toBeTruthy()
     expect(store.kbUsedBytes).toBeGreaterThan(knowledgeBytesAfterFolder)
+    expect(window.aiops.kbCreateFile).toHaveBeenCalledWith('Runbooks', 'Deploy.md', '')
 
     await store.renameKnowledgeNode(file.relPath, 'Deploy-v2.md')
     expect(store.findKnowledgeNode('Runbooks/Deploy.md')).toBeNull()
     expect(store.findKnowledgeNode('Runbooks/Deploy-v2.md')).toBeTruthy()
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        knowledgeBase: expect.objectContaining({
-          tree: expect.arrayContaining([
-            expect.objectContaining({
-              relPath: 'Runbooks',
-              children: expect.arrayContaining([expect.objectContaining({ relPath: 'Runbooks/Deploy-v2.md' })])
-            })
-          ])
-        })
-      })
-    )
+    expect(window.aiops.kbRename).toHaveBeenCalledWith('Runbooks/Deploy.md', 'Deploy-v2.md')
+    expectNoBusinessDataConfigWrites(['knowledgeBase'])
 
     store.copyKnowledgeNodes(['Runbooks/Deploy-v2.md'], 'copy')
     await store.pasteKnowledgeNodes('commands')
     expect(store.findKnowledgeNode('commands/Deploy-v2.md')).toBeTruthy()
+    expect(window.aiops.kbCopy).toHaveBeenCalledWith('Runbooks/Deploy-v2.md', 'commands')
 
     store.copyKnowledgeNodes(['commands/Deploy-v2.md'], 'cut')
     await store.pasteKnowledgeNodes('')
     expect(store.findKnowledgeNode('commands/Deploy-v2.md')).toBeNull()
     expect(store.findKnowledgeNode('Deploy-v2.md')).toBeTruthy()
+    expect(window.aiops.kbMove).toHaveBeenCalledWith('commands/Deploy-v2.md', '')
 
     await store.deleteKnowledgeNodes(['Deploy-v2.md'])
     expect(store.findKnowledgeNode('Deploy-v2.md')).toBeNull()
+    expect(window.aiops.kbDelete).toHaveBeenCalledWith('Deploy-v2.md', false)
 
     await expect(store.addKnowledgeImportJob('Runbooks/fake-import.md')).resolves.toBe(false)
     expect(store.findKnowledgeNode('Runbooks/fake-import.md')).toBeNull()
@@ -4226,18 +4209,7 @@ describe('workspace store', () => {
     await expect(store.addKnowledgeImportJob('Runbooks/imported-note.md', '/tmp/imported-note.md', 'file')).resolves.toBe(true)
     expect(window.aiops.kbImportFile).toHaveBeenCalledWith('/tmp/imported-note.md', 'Runbooks')
     expect(store.findKnowledgeNode('Runbooks/imported-note.md')).toBeTruthy()
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        knowledgeBase: expect.objectContaining({
-          tree: expect.arrayContaining([
-            expect.objectContaining({
-              relPath: 'Runbooks',
-              children: expect.arrayContaining([expect.objectContaining({ relPath: 'Runbooks/imported-note.md' })])
-            })
-          ])
-        })
-      })
-    )
+    expectNoBusinessDataConfigWrites(['knowledgeBase'])
   })
 
   it('opens External reference-style knowledge editor panels and synchronizes rename, delete, and cut moves', async () => {
@@ -4592,6 +4564,7 @@ describe('workspace store', () => {
     })
     expect(store.selectedExtensionId).toContain('local-local-pack')
 
+    vi.mocked(window.aiops.saveConfig).mockClear()
     store.createAliasCommand()
     store.updateAliasDraft('new', { alias: 'll', command: 'ls' })
     expect((await store.saveAliasCommand('new')).reason).toBe('duplicate')
@@ -4605,11 +4578,7 @@ describe('workspace store', () => {
       createdAt: undefined
     })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hosts')).toBe(true)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'hosts', command: 'cat /etc/hosts' })])
-      })
-    )
+    expectNoBusinessDataConfigWrites(['aliasCommands'])
 
     const hosts = store.aliasCommands.find((alias) => alias.alias === 'hosts')!
     store.startAliasEdit(hosts.id)
@@ -4623,20 +4592,12 @@ describe('workspace store', () => {
       createdAt: expect.any(Number)
     })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile' && alias.command === 'cat /etc/hosts | head')).toBe(true)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        aliasCommands: expect.arrayContaining([expect.objectContaining({ alias: 'hostsfile', command: 'cat /etc/hosts | head' })])
-      })
-    )
+    expectNoBusinessDataConfigWrites(['aliasCommands'])
 
     expect((await store.deleteAliasCommand(hosts.id)).ok).toBe(true)
     expect(window.aiops.deleteAliasCommand).toHaveBeenCalledWith({ id: hosts.id, alias: 'hostsfile' })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile')).toBe(false)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        aliasCommands: expect.not.arrayContaining([expect.objectContaining({ alias: 'hostsfile' })])
-      })
-    )
+    expectNoBusinessDataConfigWrites(['aliasCommands'])
   })
 
   it('does not fabricate extension plugin writes when bridges are unavailable or fail', async () => {
@@ -6174,6 +6135,58 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('基础设置已保存')
       expect(store.config.language).toBe('en-US')
       expect(store.config.defaultMode).toBe('terminal')
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not let generic config saves overwrite backend-owned business snapshots', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    const businessSnapshot = () =>
+      JSON.stringify({
+        quickCommands: {
+          groups: store.snippetGroups,
+          snippets: store.quickCommands,
+          config: store.config.quickCommands
+        },
+        knowledgeBase: {
+          tree: store.knowledgeTree,
+          usedBytes: store.kbUsedBytes,
+          totalBytes: store.kbTotalBytes,
+          config: store.config.knowledgeBase
+        },
+        aliasCommands: {
+          rows: store.aliasCommands.filter((alias) => alias.id !== 'new').map(({ edit, ...alias }) => alias),
+          config: store.config.aliasCommands
+        }
+      })
+    const initialBusinessSnapshot = businessSnapshot()
+
+    try {
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        language: 'en-US',
+        quickCommands: {
+          groups: [{ id: 999, uuid: 'stale-group', group_name: 'stale quick commands' }],
+          snippets: []
+        },
+        knowledgeBase: {
+          tree: [{ id: 'stale-kb', key: 'stale.md', relPath: 'stale.md', title: 'stale.md', type: 'file', size: 1 }],
+          usedBytes: 1,
+          totalBytes: 1
+        },
+        aliasCommands: [{ id: 'stale-alias', alias: 'stale', command: 'echo stale', createdAt: 1 }]
+      } as any)
+
+      await expect(store.updateLanguage('en-US')).resolves.toBe(true)
+
+      expect(store.config.language).toBe('en-US')
+      expect(businessSnapshot()).toBe(initialBusinessSnapshot)
+      expectNoBusinessDataConfigWrites()
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }
