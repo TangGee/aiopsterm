@@ -105,8 +105,6 @@ type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type KnowledgeBridgeApi = Pick<AiopsPreloadApi, 'kbEnsureRoot' | 'kbListDir'>
 type ModelProviderKey = ModelProviderCheckKey
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
-type UserCodeCooldownSnapshot = Pick<UserCodeResultData, 'countdownSeconds' | 'message'> &
-  Partial<Pick<UserCodeResultData, 'expiresAt' | 'remainingSeconds'>>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 type AiChatHistoryHost = NonNullable<AiChatHistoryMessage['hosts']>[number]
 type OnboardingAiRequest =
@@ -5336,13 +5334,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const userCooldownRemainingSeconds = (expiresAt: number) => Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
 
-  const startUserCountdown = (target: 'login' | 'contact', kind: 'email' | 'mobile', cooldown: UserCodeCooldownSnapshot) => {
+  const isValidUserCodeCooldown = (cooldown: UserCodeResultData | undefined): cooldown is UserCodeResultData =>
+    Boolean(cooldown && typeof cooldown.expiresAt === 'number' && Number.isFinite(cooldown.expiresAt) && typeof cooldown.message === 'string')
+
+  const startUserCountdown = (target: 'login' | 'contact', kind: 'email' | 'mobile', cooldown: UserCodeResultData) => {
     const sendingRef = target === 'login' ? userLoginCodeSending : userContactCodeSending
     const countdownRef = target === 'login' ? userLoginCodeCountdown : userContactCodeCountdown
     const timers = target === 'login' ? userLoginCodeTimers : userContactCodeTimers
-    const fallbackExpiresAt = Date.now() + Math.max(0, cooldown.countdownSeconds) * 1000
-    const expiresAt =
-      typeof cooldown.expiresAt === 'number' && Number.isFinite(cooldown.expiresAt) ? cooldown.expiresAt : fallbackExpiresAt
+    const expiresAt = cooldown.expiresAt
     const applyCountdown = () => {
       const next = userCooldownRemainingSeconds(expiresAt)
       countdownRef.value = { ...countdownRef.value, [kind]: next }
@@ -5356,6 +5355,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       timers[kind] = window.setInterval(applyCountdown, 1000)
     }
     setUserNotice(cooldown.message)
+  }
+
+  const rejectInvalidUserCodeCooldown = (target: 'login' | 'contact', kind: 'email' | 'mobile') => {
+    const sendingRef = target === 'login' ? userLoginCodeSending : userContactCodeSending
+    const countdownRef = target === 'login' ? userLoginCodeCountdown : userContactCodeCountdown
+    const timers = target === 'login' ? userLoginCodeTimers : userContactCodeTimers
+    sendingRef.value = { ...sendingRef.value, [kind]: false }
+    countdownRef.value = { ...countdownRef.value, [kind]: 0 }
+    clearUserCodeTimer(timers, kind)
+    setUserNotice('验证码冷却状态无效')
   }
 
   const openAccountCenter = () => {
@@ -5446,6 +5455,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!result?.ok || !result.data) {
         userLoginCodeSending.value = { ...userLoginCodeSending.value, [kind]: false }
         setUserNotice(result?.errorMessage || '验证码发送失败')
+        return false
+      }
+      if (!isValidUserCodeCooldown(result.data)) {
+        rejectInvalidUserCodeCooldown('login', kind)
         return false
       }
       startUserCountdown('login', kind, result.data)
@@ -5555,6 +5568,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!result?.ok || !result.data) {
         userContactCodeSending.value = { ...userContactCodeSending.value, [kind]: false }
         setUserNotice(result?.errorMessage || '验证码发送失败')
+        return false
+      }
+      if (!isValidUserCodeCooldown(result.data)) {
+        rejectInvalidUserCodeCooldown('contact', kind)
         return false
       }
       startUserCountdown('contact', kind, result.data)

@@ -7026,6 +7026,46 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.userContactCodeCountdown.mobile).toBe(0)
   })
 
+  it('does not fabricate user code countdown expiry when backend cooldown snapshots are malformed', async () => {
+    vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'email',
+        target: 'login@example.local',
+        countdownSeconds: 300,
+        remainingSeconds: 300,
+        message: '邮箱登录验证码已发送'
+      } as any
+    })
+    await expect(store.sendUserLoginCode('email', 'login@example.local')).resolves.toBe(false)
+    expect(store.userLoginCodeSending.email).toBe(false)
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+    expect(store.userNotice).toBe('验证码冷却状态无效')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+
+    vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'mobile',
+        target: '13800000002',
+        countdownSeconds: 300,
+        remainingSeconds: 300,
+        expiresAt: Number.NaN,
+        message: '手机验证码已发送'
+      }
+    })
+    await expect(store.sendUserContactCode('mobile', '13800000002')).resolves.toBe(false)
+    expect(store.userContactCodeSending.mobile).toBe(false)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+    expect(store.userNotice).toBe('验证码冷却状态无效')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+  })
+
   it('does not fabricate user account writes when bridge operations are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshUserAccount()
