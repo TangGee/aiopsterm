@@ -127,9 +127,14 @@ const rightToggleTitle = computed(() => {
 const updateLabel = computed(() => {
   if (workspace.topUpdateState === 'checking') return 'Checking'
   if (workspace.topUpdateState === 'available') return '点击更新'
+  if (workspace.topUpdateState === 'install-requested') return '待安装'
   return '本地版本'
 })
-const updateTitle = computed(() => (workspace.topUpdateState === 'available' ? '安装可用更新' : '检查更新'))
+const updateTitle = computed(() => {
+  if (workspace.topUpdateState === 'available') return '安装可用更新'
+  if (workspace.topUpdateState === 'install-requested') return '安装请求已提交'
+  return '检查更新'
+})
 
 const minimizeWindow = () => {
   window.aiops?.minimizeWindow()

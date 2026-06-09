@@ -102,7 +102,7 @@ type QuickCommandSnippet = QuickCommandSnippetConfig
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type KnowledgeBridgeApi = Pick<AiopsPreloadApi, 'kbEnsureRoot' | 'kbListDir'>
 type ModelProviderKey = ModelProviderCheckKey
-type TopUpdateState = 'idle' | 'checking' | 'local' | 'available'
+type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 type AiChatHistoryHost = NonNullable<AiChatHistoryMessage['hosts']>[number]
 type OnboardingAiRequest =
   | 'none'
@@ -469,7 +469,7 @@ export type UserLoginTab = 'account' | 'email' | 'mobile'
 
 export type AboutSettings = {
   version: string
-  updateStatus: 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'downloaded' | 'error'
+  updateStatus: 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'downloaded' | 'install-requested' | 'error'
   newVersion: string
   progress: number
 }
@@ -5580,12 +5580,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeAppUpdateProgressListener = window.aiops.onAppUpdateProgress(handleAppUpdateProgress)
   }
 
-  const applyInstalledAppUpdate = (version: string) => {
+  const applyRequestedAppUpdateInstall = (version: string) => {
     aboutSettings.value = {
       ...aboutSettings.value,
-      updateStatus: 'latest',
-      version,
-      newVersion: '',
+      updateStatus: 'install-requested',
+      newVersion: version,
       progress: 100
     }
   }
@@ -5636,7 +5635,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setNotice(result?.errorMessage || '更新安装失败')
         return false
       }
-      applyInstalledAppUpdate(result.data.version)
+      applyRequestedAppUpdateInstall(result.data.version)
       setNotice('更新安装请求已提交')
       return true
     } catch (error) {
@@ -5748,7 +5747,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         topUpdateState.value = 'available'
         return
       }
-      topUpdateState.value = 'local'
+      topUpdateState.value = 'install-requested'
       return
     }
     await checkTopUpdate()

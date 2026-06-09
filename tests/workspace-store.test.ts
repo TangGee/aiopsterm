@@ -340,7 +340,10 @@ describe('workspace store', () => {
     await store.handleTopUpdateClick()
     expect(window.aiops.downloadAppUpdate).toHaveBeenCalledWith('0.1.2')
     expect(window.aiops.installAppUpdate).toHaveBeenCalledWith('0.1.2')
-    expect(store.topUpdateState).toBe('local')
+    expect(store.topUpdateState).toBe('install-requested')
+    expect(store.aboutSettings.updateStatus).toBe('install-requested')
+    expect(store.aboutSettings.version).toBe('0.1.0')
+    expect(store.aboutSettings.newVersion).toBe('0.1.2')
     expect(store.topNotice).toBe('更新安装请求已提交')
 
     store.toggleContext({ id: 'skill:incident-triage', kind: 'skills', label: 'incident-triage', detail: 'Collect symptoms' })
@@ -6682,8 +6685,9 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(window.aiops.downloadAppUpdate).toHaveBeenCalledWith('0.1.1')
     await store.checkAboutUpdate()
     expect(window.aiops.installAppUpdate).toHaveBeenCalledWith('0.1.1')
-    expect(store.aboutSettings.updateStatus).toBe('latest')
-    expect(store.aboutSettings.version).toBe('0.1.1')
+    expect(store.aboutSettings.updateStatus).toBe('install-requested')
+    expect(store.aboutSettings.version).toBe('0.1.0')
+    expect(store.aboutSettings.newVersion).toBe('0.1.1')
   })
 
   it('does not fabricate Settings external action success when the preload bridge is unavailable or fails', async () => {

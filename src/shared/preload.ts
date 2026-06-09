@@ -1151,6 +1151,10 @@ export type AppUpdateCheckResult = {
   updateInfo?: {
     version: string
     channel?: string
+    fileName?: string
+    size?: number
+    sha256?: string
+    notes?: string
   } | null
 }
 
@@ -1165,12 +1169,19 @@ export type AppUpdateDownloadResult = AiopsMutationResult<{
   version: string
   status: 'downloaded'
   percent: 100
+  filePath: string
+  size: number
+  sha256?: string
   message: string
 }>
 
 export type AppUpdateInstallResult = AiopsMutationResult<{
   version: string
   status: 'install-requested'
+  filePath: string
+  size: number
+  sha256?: string
+  requestedAt: string
   message: string
 }>
 

@@ -1437,6 +1437,8 @@ const AboutSettingsPage = defineComponent({
           return 'Downloading'
         case 'downloaded':
           return 'Install'
+        case 'install-requested':
+          return 'Install Requested'
         case 'error':
           return 'Check Update Error'
         default:
@@ -1446,6 +1448,7 @@ const AboutSettingsPage = defineComponent({
     const updateDescription = computed(() => {
       if (workspace.aboutSettings.updateStatus === 'available') return `New Version ${workspace.aboutSettings.newVersion || workspace.aboutSettings.version}`
       if (workspace.aboutSettings.updateStatus === 'downloaded') return 'Download complete. Install can be requested through the update bridge.'
+      if (workspace.aboutSettings.updateStatus === 'install-requested') return `Install request submitted for ${workspace.aboutSettings.newVersion || workspace.aboutSettings.version}.`
       if (workspace.aboutSettings.updateStatus === 'error') return 'Update check failed. Try again when the local update bridge is available.'
       return `Version ${workspace.aboutSettings.version}`
     })
@@ -1469,7 +1472,10 @@ const AboutSettingsPage = defineComponent({
             'button',
             {
               class: 'settings-button',
-              disabled: workspace.aboutSettings.updateStatus === 'checking' || workspace.aboutSettings.updateStatus === 'downloading',
+              disabled:
+                workspace.aboutSettings.updateStatus === 'checking' ||
+                workspace.aboutSettings.updateStatus === 'downloading' ||
+                workspace.aboutSettings.updateStatus === 'install-requested',
               onClick: () => workspace.checkAboutUpdate()
             },
             updateButtonText.value

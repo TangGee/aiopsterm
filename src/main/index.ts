@@ -2299,7 +2299,7 @@ const registerIpc = () => {
   ipcMain.handle('app:check-update', () => checkAppUpdate(app.getVersion()))
   ipcMain.handle('app:download-update', (event, version: string) => {
     const emit = (progress: AppUpdateProgressEvent) => event.sender.send('app:update-progress', progress)
-    return downloadAppUpdate({ version }, emit)
+    return downloadAppUpdate({ version }, emit, { cacheDir: join(app.getPath('userData'), 'updates') })
   })
   ipcMain.handle('app:install-update', (_event, version?: string) => installAppUpdate({ version }))
   ipcMain.handle('chat-history:list', () => listChatConversations())

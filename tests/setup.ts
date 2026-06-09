@@ -3703,6 +3703,9 @@ Object.defineProperty(window, 'aiops', {
           version,
           status: 'downloaded' as const,
           percent: 100 as const,
+          filePath: `/tmp/aiopsterm-test-updates/${version}.bin`,
+          size: 1024,
+          sha256: createHash('sha256').update(version).digest('hex'),
           message: `Update ${version} downloaded by test backend.`
         }
       }
@@ -3712,6 +3715,10 @@ Object.defineProperty(window, 'aiops', {
       data: {
         version: version || '0.1.1',
         status: 'install-requested' as const,
+        filePath: `/tmp/aiopsterm-test-updates/${version || '0.1.1'}.bin`,
+        size: 1024,
+        sha256: createHash('sha256').update(version || '0.1.1').digest('hex'),
+        requestedAt: '2026-06-09T10:00:00.000Z',
         message: `Update ${version || '0.1.1'} install requested by test backend.`
       }
     })),
