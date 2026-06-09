@@ -4485,36 +4485,38 @@ describe('AppShell', () => {
 
     const originalFileReader = window.FileReader
     const originalGlobalFileReader = globalThis.FileReader
-    class MockFileReader {
-      result = 'data:image/png;base64,cGFzdGVkLWltYWdl'
-      onload: null | (() => void) = null
-      onerror: null | (() => void) = null
-      readAsDataURL() {
-        this.onload?.()
+    class ForbiddenFileReader {
+      constructor() {
+        throw new Error('renderer FileReader must not read pasted knowledge images')
       }
     }
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockFileReader })
-    const pastedFile = new File(['image-bytes'], 'clip.png', { type: 'image/png' })
-    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
-    Object.defineProperty(pasteEvent, 'clipboardData', {
-      configurable: true,
-      value: {
-        items: [
-          {
-            type: 'image/png',
-            getAsFile: () => pastedFile
-          }
-        ]
-      }
-    })
-    workspace.find('.kb-editor-root').element.dispatchEvent(pasteEvent)
-    await flushPromises()
-    expect(pasteEvent.defaultPrevented).toBe(true)
-    expect(window.aiops.kbWriteFile).toHaveBeenCalledWith(expect.stringMatching(/^pasted-image-.*\.png$/), 'cGFzdGVkLWltYWdl', 'base64')
-    expect((workspace.find('.kb-editor-textarea').element as HTMLTextAreaElement).value).toContain('![](pasted-image-')
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+    try {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: ForbiddenFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: ForbiddenFileReader })
+      vi.mocked(window.aiops.kbWriteFile).mockClear()
+      vi.mocked(window.aiops.kbPasteImageFromClipboard).mockClear()
+      const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+      Object.defineProperty(pasteEvent, 'clipboardData', {
+        configurable: true,
+        value: {
+          items: [
+            {
+              type: 'image/png',
+              getAsFile: () => new File(['image-bytes'], 'clip.png', { type: 'image/png' })
+            }
+          ]
+        }
+      })
+      workspace.find('.kb-editor-root').element.dispatchEvent(pasteEvent)
+      await flushPromises()
+      expect(pasteEvent.defaultPrevented).toBe(true)
+      expect(window.aiops.kbPasteImageFromClipboard).toHaveBeenCalledWith('')
+      expect(vi.mocked(window.aiops.kbWriteFile).mock.calls.some((call) => call[2] === 'base64')).toBe(false)
+      expect((workspace.find('.kb-editor-textarea').element as HTMLTextAreaElement).value).toContain('![](pasted-image-')
+    } finally {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+    }
 
     await markdownNode.trigger('contextmenu')
     await panel.find('.kb-context-menu').findAll('button').find((button) => button.text().includes('添加到聊天'))!.trigger('click')
@@ -4586,17 +4588,7 @@ describe('AppShell', () => {
 
   it('prevents markdown image paste when the knowledge image write bridge is unavailable or fails', async () => {
     const originalKbWriteFile = window.aiops.kbWriteFile
-    const originalFileReader = window.FileReader
-    const originalGlobalFileReader = globalThis.FileReader
-
-    class MockFileReader {
-      result = 'data:image/png;base64,cGFzdGVkLWltYWdl'
-      onload: null | (() => void) = null
-      onerror: null | (() => void) = null
-      readAsDataURL() {
-        this.onload?.()
-      }
-    }
+    const originalPasteImageFromClipboard = window.aiops.kbPasteImageFromClipboard
 
     const mountEditor = async () => {
       const pinia = createPinia()
@@ -4636,12 +4628,10 @@ describe('AppShell', () => {
       return event
     }
 
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockFileReader })
-
     try {
       vi.mocked(originalKbWriteFile).mockClear()
-      ;(window.aiops as any).kbWriteFile = undefined
+      vi.mocked(originalPasteImageFromClipboard).mockClear()
+      ;(window.aiops as any).kbPasteImageFromClipboard = undefined
       const missingBridgeWrapper = await mountEditor()
       const missingBridgeEvent = createImagePasteEvent()
       missingBridgeWrapper.find('.kb-editor-root').element.dispatchEvent(missingBridgeEvent)
@@ -4650,26 +4640,28 @@ describe('AppShell', () => {
       expect(missingBridgeEvent.defaultPrevented).toBe(true)
       expect(missingBridgeWrapper.text()).toContain('Knowledge image paste service unavailable')
       expect(missingBridgeWrapper.text()).not.toContain('![](pasted-image-')
+      expect(originalPasteImageFromClipboard).not.toHaveBeenCalled()
       expect(originalKbWriteFile).not.toHaveBeenCalled()
       missingBridgeWrapper.unmount()
 
-      ;(window.aiops as any).kbWriteFile = originalKbWriteFile
+      ;(window.aiops as any).kbPasteImageFromClipboard = originalPasteImageFromClipboard
       vi.mocked(originalKbWriteFile).mockClear()
-      vi.mocked(originalKbWriteFile).mockRejectedValueOnce(new Error('image write failed'))
+      vi.mocked(originalPasteImageFromClipboard).mockClear()
+      vi.mocked(originalPasteImageFromClipboard).mockRejectedValueOnce(new Error('image paste failed'))
       const failedWriteWrapper = await mountEditor()
       const failedWriteEvent = createImagePasteEvent()
       failedWriteWrapper.find('.kb-editor-root').element.dispatchEvent(failedWriteEvent)
       await flushPromises()
       await failedWriteWrapper.vm.$nextTick()
       expect(failedWriteEvent.defaultPrevented).toBe(true)
-      expect(originalKbWriteFile).toHaveBeenCalledWith(expect.stringMatching(/^runbooks\/pasted-image-.*\.png$/), 'cGFzdGVkLWltYWdl', 'base64')
-      expect(failedWriteWrapper.text()).toContain('image write failed')
+      expect(originalPasteImageFromClipboard).toHaveBeenCalledWith('runbooks')
+      expect(originalKbWriteFile).not.toHaveBeenCalled()
+      expect(failedWriteWrapper.text()).toContain('image paste failed')
       expect(failedWriteWrapper.text()).not.toContain('![](pasted-image-')
       failedWriteWrapper.unmount()
     } finally {
-      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
-      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
       ;(window.aiops as any).kbWriteFile = originalKbWriteFile
+      ;(window.aiops as any).kbPasteImageFromClipboard = originalPasteImageFromClipboard
     }
   })
 

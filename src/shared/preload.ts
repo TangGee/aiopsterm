@@ -977,6 +977,20 @@ export type KnowledgeBaseReadResult = {
   isImage?: boolean
 }
 
+export type KnowledgeBasePastedImageInput = {
+  relDir?: string
+  name?: string
+}
+
+export type KnowledgeBasePastedImageResult = {
+  relPath: string
+  fileName: string
+  mimeType: string
+  dataUrl: string
+  size: number
+  mtimeMs: number
+}
+
 export type KnowledgeBaseTransferProgress = {
   jobId: string
   transferred: number
@@ -2116,6 +2130,7 @@ export type AiopsPreloadApi = {
   kbListDir: (relDir: string) => Promise<KnowledgeBaseEntry[]>
   kbReadFile: (relPath: string, encoding?: 'utf-8' | 'base64') => Promise<KnowledgeBaseReadResult>
   kbWriteFile: (relPath: string, content: string, encoding?: 'utf-8' | 'base64') => Promise<{ mtimeMs: number }>
+  kbPasteImageFromClipboard: (relDir?: string, name?: string) => Promise<KnowledgeBasePastedImageResult>
   kbMkdir: (relDir: string, name: string) => Promise<{ success: boolean; relPath: string }>
   kbCreateFile: (relDir: string, name: string, content?: string) => Promise<{ relPath: string }>
   kbRename: (relPath: string, newName: string) => Promise<{ relPath: string }>

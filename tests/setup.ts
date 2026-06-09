@@ -4423,6 +4423,18 @@ Object.defineProperty(window, 'aiops', {
       }
     }),
     kbWriteFile: vi.fn(async () => ({ mtimeMs: 1717200000000 })),
+    kbPasteImageFromClipboard: vi.fn(async (relDir?: string, name?: string) => {
+      const fileName = name || 'pasted-image-2026-06-09T12-34-56.png'
+      const node = createKnowledgeNodeMock('file', relDir || '', fileName)
+      return {
+        relPath: node.relPath,
+        fileName,
+        mimeType: 'image/png',
+        dataUrl: 'data:image/png;base64,cGFzdGVkLWltYWdl',
+        size: 12,
+        mtimeMs: 1717200000000
+      }
+    }),
     kbMkdir: vi.fn(async (relDir: string, name: string) => {
       const node = createKnowledgeNodeMock('dir', relDir, name)
       return { success: true, relPath: node.relPath }

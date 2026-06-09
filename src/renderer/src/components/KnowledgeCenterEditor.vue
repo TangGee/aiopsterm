@@ -611,19 +611,8 @@ const renderMarkdownPreview = async () => {
   }
 }
 
-const imageExtensionFromMime = (mimeType: string) => {
-  const normalized = mimeType.toLowerCase()
-  if (normalized === 'image/jpeg') return 'jpg'
-  if (normalized === 'image/png') return 'png'
-  if (normalized === 'image/gif') return 'gif'
-  if (normalized === 'image/webp') return 'webp'
-  if (normalized === 'image/bmp') return 'bmp'
-  if (normalized === 'image/svg+xml') return 'svg'
-  return 'png'
-}
-
 const insertAtCursor = (value: string) => {
-  if (editorRef.value) {
+  if (editorRef.value?.insertAtCursor) {
     editorRef.value.insertAtCursor(value)
     return
   }
@@ -633,31 +622,22 @@ const insertAtCursor = (value: string) => {
 const handlePaste = async (event: ClipboardEvent) => {
   if (!isMarkdown.value || isImage.value || mode.value !== 'editor') return
   const items = event.clipboardData?.items ? Array.from(event.clipboardData.items) : []
-  const item = items.find((entry) => entry.type.startsWith('image/'))
-  const file = item?.getAsFile()
-  if (!file) return
+  const hasImage = items.some((entry) => entry.type.startsWith('image/'))
+  if (!hasImage) return
   event.preventDefault()
   error.value = ''
-  const writeFile = window.aiops?.kbWriteFile
-  if (typeof writeFile !== 'function') {
+  const pasteImage = window.aiops?.kbPasteImageFromClipboard
+  if (typeof pasteImage !== 'function') {
     error.value = 'Knowledge image paste service unavailable'
     return
   }
   try {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => reject(new Error('Failed to read pasted image'))
-      reader.readAsDataURL(file)
-    })
-    const base64 = dataUrl.split(',')[1] || ''
-    if (!base64) throw new Error('Pasted image data is empty')
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const fileName = `pasted-image-${timestamp}.${imageExtensionFromMime(file.type)}`
-    const imageRelPath = createRelPath(getParentRelDir(relPath.value), fileName)
-    await writeFile(imageRelPath, base64, 'base64')
-    imageCache.set(imageRelPath, dataUrl)
-    insertAtCursor(`![](${fileName})`)
+    const result = await pasteImage(getParentRelDir(relPath.value))
+    if (!result?.relPath || !result.fileName || !result.dataUrl) {
+      throw new Error('Knowledge image paste returned invalid result')
+    }
+    imageCache.set(result.relPath, result.dataUrl)
+    insertAtCursor(`![](${result.fileName})`)
     dirty.value = true
     scheduleSave()
     void renderMarkdownPreview()

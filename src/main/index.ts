@@ -46,6 +46,7 @@ import {
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
 } from './backend/chatImageAttachment'
+import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -258,6 +259,7 @@ import type {
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,
   ChatImageAttachmentValidateInput,
+  KnowledgeBasePastedImageInput,
   UserConfig,
   VoiceTranscriptionInput,
   UserRuleConfig,
@@ -2777,6 +2779,13 @@ const registerIpc = () => {
     await syncKnowledgeBaseConfigFromDisk()
     return { mtimeMs: metadata.mtimeMs }
   })
+  ipcMain.handle('kb:paste-image-from-clipboard', async (_event, payload?: KnowledgeBasePastedImageInput) =>
+    writeKnowledgePastedImageFromClipboard(payload || {}, {
+      resolveKnowledgePath,
+      ensureUniqueKnowledgeName,
+      syncKnowledgeBaseConfigFromDisk
+    })
+  )
   ipcMain.handle('kb:mkdir', async (_event, payload: { relDir: string; name: string }) => {
     const relDir = payload?.relDir || ''
     const name = typeof payload?.name === 'string' ? payload.name.trim() : ''
