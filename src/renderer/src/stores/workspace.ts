@@ -9507,6 +9507,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
+  const recordTerminalExecutionInput = (execution: TerminalSecurityExecution) => {
+    if (execution.source === 'snippet') return
+    execution.panelIds.forEach((panelId) => {
+      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+      if (panel) recordMacroTerminalInput(panel.id, execution.shellText || execution.inputText)
+    })
+  }
+
   const reportTerminalExecutionUnavailable = (command: string, panelIds: string[] = [], reason = '终端会话不可用，请先打开本地 shell 或连接 SSH') => {
     setTopNotice(reason)
     terminalSecurityPrompt.value = null
@@ -9572,16 +9580,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           if (result?.ok === false) {
             return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, terminalWriteFailureReason(result))
           }
-          appendTerminalSegment(panel, segment.text, 'input')
         }
-      }
-      if (execution.outputText) {
-        execution.panelIds.forEach((panelId) => {
-          const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-          if (!panel) return
-          appendTerminalSegment(panel, execution.outputText!, 'output')
-          panel.status = 'running'
-        })
       }
       return { status: 'allow', execution }
     }
@@ -9593,7 +9592,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, terminalWriteFailureReason(result))
       }
     }
-    applyTerminalExecution(execution)
+    recordTerminalExecutionInput(execution)
     return { status: 'allow', execution }
   }
 

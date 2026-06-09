@@ -3720,7 +3720,7 @@ describe('AppShell', () => {
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'whoami\n')
-    expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'whoami\n', scope: 'input' })
+    expect(store.activePanel.output).not.toContain('whoami')
     expect((wrapper.find('.command-line input').element as HTMLInputElement).value).toBe('')
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))
@@ -3781,7 +3781,8 @@ describe('AppShell', () => {
     store.setActiveModule('workspace')
     await expect(store.updateTerminalSettings({ rightMouseEvent: 'paste' })).resolves.toBe(true)
     await wrapper.find('.xterm-host').trigger('contextmenu')
-    expect(store.activePanel.output).toContain('clipboard-command')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'clipboard-command')
+    expect(store.activePanel.output).not.toContain('clipboard-command')
     expect(wrapper.find('.terminal-context-menu').exists()).toBe(false)
 
     await expect(store.updateTerminalSettings({ middleMouseEvent: 'contextMenu' })).resolves.toBe(true)
@@ -4431,12 +4432,12 @@ describe('AppShell', () => {
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
     expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'snippet-panel-main', 'df -h\n')
-    expect(store.panels[0].output).toContain('df -h')
+    expect(store.panels[0].output).not.toContain('df -h')
     expect(store.panels[0].output).not.toContain('du -sh * | sort -h')
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(2, 'snippet-panel-main', 'du -sh * | sort -h\n')
-    expect(store.panels[0].output).toContain('du -sh * | sort -h')
+    expect(store.panels[0].output).not.toContain('du -sh * | sort -h')
     expect(store.panels[0].output).not.toContain('[snippet] 磁盘巡检')
 
     await wrapper.find('button[title="宏录制"]').trigger('click')
@@ -4508,12 +4509,12 @@ describe('AppShell', () => {
     const run = store.runQuickCommand(command.id, false)
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'snippet-paste-session', 'echo first\n')
-    expect(store.activePanel.output).toContain('echo first')
+    expect(store.activePanel.output).not.toContain('echo first')
     expect(store.activePanel.output).not.toContain('echo second')
     await vi.advanceTimersByTimeAsync(500)
     await run
     expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(2, 'snippet-paste-session', 'echo second')
-    expect(store.activePanel.output).toContain('echo second')
+    expect(store.activePanel.output).not.toContain('echo second')
     expect(store.activePanel.output).not.toContain('echo second\n[snippet]')
   })
 
