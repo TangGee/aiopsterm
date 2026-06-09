@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
+import { dirname } from 'path'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type {
   DatabaseColumnFilter,
   DatabaseColumnSort,
@@ -62,6 +63,9 @@ import type {
 
 const supportedEngines = new Set(['mysql', 'postgresql', 'sqlite', 'oracle'])
 const DEFAULT_DATABASE_GROUP_ID = 'group-default'
+const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
+const databaseStatusValues = new Set<DatabaseConnectionInfo['status']>(['idle', 'testing', 'connected', 'failed'])
+const postgresSslModeValues = new Set(['', 'disable', 'require', 'verify-ca', 'verify-full'])
 
 const engineVersions: Record<DatabaseConnectionTestInput['dbType'], string> = {
   mysql: 'MySQL 8 local backend validation',
@@ -262,6 +266,8 @@ const databaseConnectionSeedIds = new Set(databaseConnectionSeed.map((connection
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
 const sqlitePathFromUrl = (url: string) => {
   const trimmed = trim(url)
   if (!trimmed.toLowerCase().startsWith('sqlite://')) return ''
@@ -308,6 +314,7 @@ export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
   mysqlDriver?: MySqlDriver
   postgresDriver?: PostgresDriver
+  stateFilePath?: string
 }
 type SqliteSchemaTableRow = { name?: string; type?: string }
 type SqliteTableColumnRow = { cid?: number; name?: string; type?: string; notnull?: number; pk?: number; hidden?: number }
@@ -324,6 +331,7 @@ const databaseVerifiedConnections = new Set<string>()
 
 export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
   databaseRuntimeConfig = config ? { ...config } : {}
+  databaseLoadedStateFilePath = ''
 }
 
 const loadSqliteRuntime = () => {
@@ -1838,6 +1846,213 @@ const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseCo
 let databaseGroups: DatabaseGroupInfo[] = databaseGroupSeed.map((group) => ({ ...group }))
 let databaseGroupParents: Record<string, string | null> = { ...databaseGroupParentSeed }
 let databaseConnections: DatabaseConnectionInfo[] = databaseConnectionSeed.map(cloneDatabaseConnection)
+let databaseLoadedStateFilePath = ''
+
+type DatabasePersistedState = {
+  version: 1
+  groups: DatabaseGroupInfo[]
+  groupParents: Record<string, string | null>
+  connections: DatabaseConnectionInfo[]
+  secrets: Record<string, { password?: string }>
+  aiPaneState?: DatabaseAiPaneStateSnapshot
+}
+
+const normalizePersistedString = (value: unknown, fallback = '') => {
+  const text = trim(value)
+  return text || fallback
+}
+
+const normalizePersistedColumn = (value: unknown): DatabaseColumnInfo | null => {
+  if (!isRecord(value)) return null
+  const name = normalizePersistedString(value.name)
+  if (!name) return null
+  const key = value.key === 'PK' || value.key === 'FK' ? value.key : undefined
+  return {
+    name,
+    type: normalizePersistedString(value.type, 'unknown'),
+    nullable: value.nullable !== false,
+    ...(key ? { key } : {})
+  }
+}
+
+const normalizePersistedTable = (value: unknown): DatabaseTableInfo | null => {
+  if (!isRecord(value)) return null
+  const name = normalizePersistedString(value.name)
+  if (!name) return null
+  const columns = Array.isArray(value.columns)
+    ? value.columns.map(normalizePersistedColumn).filter((column): column is DatabaseColumnInfo => Boolean(column))
+    : []
+  return {
+    id: normalizePersistedString(value.id, `tbl-persisted-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`),
+    name,
+    columns,
+    primaryKey: Array.isArray(value.primaryKey) ? value.primaryKey.map(trim).filter(Boolean) : sqlitePrimaryKeyForColumns(columns)
+  }
+}
+
+const normalizePersistedSchema = (value: unknown): DatabaseSchemaInfo | null => {
+  if (!isRecord(value)) return null
+  const name = normalizePersistedString(value.name)
+  if (!name) return null
+  const tables = Array.isArray(value.tables)
+    ? value.tables.map(normalizePersistedTable).filter((table): table is DatabaseTableInfo => Boolean(table))
+    : []
+  const views = Array.isArray(value.views)
+    ? value.views.map(normalizePersistedTable).filter((table): table is DatabaseTableInfo => Boolean(table))
+    : []
+  return {
+    name,
+    tables,
+    views,
+    functions: Array.isArray(value.functions) ? value.functions.map(trim).filter(Boolean) : [],
+    procedures: Array.isArray(value.procedures) ? value.procedures.map(trim).filter(Boolean) : []
+  }
+}
+
+const normalizePersistedCatalog = (value: unknown): DatabaseCatalogInfo | null => {
+  if (!isRecord(value)) return null
+  const name = normalizePersistedString(value.name)
+  if (!name) return null
+  const tables = Array.isArray(value.tables)
+    ? value.tables.map(normalizePersistedTable).filter((table): table is DatabaseTableInfo => Boolean(table))
+    : undefined
+  const schemas = Array.isArray(value.schemas)
+    ? value.schemas.map(normalizePersistedSchema).filter((schema): schema is DatabaseSchemaInfo => Boolean(schema))
+    : undefined
+  return {
+    name,
+    ...(schemas ? { schemas } : {}),
+    ...(tables ? { tables } : {})
+  }
+}
+
+const normalizePersistedGroup = (value: unknown): DatabaseGroupInfo | null => {
+  if (!isRecord(value)) return null
+  const id = normalizePersistedString(value.id)
+  const name = normalizePersistedString(value.name)
+  if (!id || !name) return null
+  return { id, name }
+}
+
+const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>): DatabaseConnectionInfo | null => {
+  if (!isRecord(value)) return null
+  const id = normalizePersistedString(value.id)
+  const name = normalizePersistedString(value.name)
+  const dbType = typeof value.dbType === 'string' && supportedEngines.has(value.dbType) ? (value.dbType as DatabaseEngineCode) : null
+  if (!id || !name || !dbType) return null
+  const port = normalizedDatabasePort(typeof value.port === 'number' ? value.port : Number(value.port))
+  const sslMode = postgresSslModeValues.has(String(value.sslMode ?? '')) ? (String(value.sslMode ?? '') as DatabaseConnectionInfo['sslMode']) : ''
+  return {
+    id,
+    name,
+    dbType,
+    env: typeof value.env === 'string' && databaseEnvValues.has(value.env as DatabaseConnectionInfo['env']) ? (value.env as DatabaseConnectionInfo['env']) : 'Development',
+    groupId: knownGroupIds.has(trim(value.groupId)) ? trim(value.groupId) : DEFAULT_DATABASE_GROUP_ID,
+    host: normalizePersistedString(value.host, dbType === 'sqlite' ? 'local' : ''),
+    port: dbType === 'sqlite' ? null : port,
+    authentication: 'UserAndPassword',
+    user: dbType === 'sqlite' ? '' : normalizePersistedString(value.user),
+    hasPassword: value.hasPassword === true,
+    database: normalizePersistedString(value.database),
+    filePath: dbType === 'sqlite' ? normalizePersistedString(value.filePath) || undefined : undefined,
+    readonly: dbType === 'sqlite' ? value.readonly !== false : undefined,
+    sslMode: dbType === 'postgresql' ? sslMode : '',
+    url: normalizePersistedString(value.url) || undefined,
+    status:
+      typeof value.status === 'string' && databaseStatusValues.has(value.status as DatabaseConnectionInfo['status'])
+        ? (value.status as DatabaseConnectionInfo['status'])
+        : 'idle',
+    catalogs: Array.isArray(value.catalogs)
+      ? value.catalogs.map(normalizePersistedCatalog).filter((catalog): catalog is DatabaseCatalogInfo => Boolean(catalog))
+      : []
+  }
+}
+
+const normalizePersistedState = (value: unknown): DatabasePersistedState | null => {
+  if (!isRecord(value)) return null
+  const groups = Array.isArray(value.groups)
+    ? value.groups.map(normalizePersistedGroup).filter((group): group is DatabaseGroupInfo => Boolean(group))
+    : []
+  if (!groups.some((group) => group.id === DEFAULT_DATABASE_GROUP_ID)) {
+    groups.unshift({ id: DEFAULT_DATABASE_GROUP_ID, name: 'Default Group' })
+  }
+  const knownGroupIds = new Set(groups.map((group) => group.id))
+  const groupParents: Record<string, string | null> = {}
+  const rawParents = isRecord(value.groupParents) ? value.groupParents : {}
+  groups.forEach((group) => {
+    const parentId = trim(rawParents[group.id])
+    groupParents[group.id] = parentId && parentId !== group.id && knownGroupIds.has(parentId) ? parentId : null
+  })
+  const connections = Array.isArray(value.connections)
+    ? value.connections.map((connection) => normalizePersistedConnection(connection, knownGroupIds)).filter((connection): connection is DatabaseConnectionInfo => Boolean(connection))
+    : []
+  const secrets: DatabasePersistedState['secrets'] = {}
+  const rawSecrets = isRecord(value.secrets) ? value.secrets : {}
+  connections.forEach((connection) => {
+    const secret = rawSecrets[connection.id]
+    if (isRecord(secret) && typeof secret.password === 'string' && secret.password) {
+      secrets[connection.id] = { password: secret.password }
+      connection.hasPassword = true
+    }
+  })
+  return {
+    version: 1,
+    groups,
+    groupParents,
+    connections,
+    secrets,
+    aiPaneState: isRecord(value.aiPaneState) ? normalizeDatabaseAiPaneState(value.aiPaneState) : undefined
+  }
+}
+
+const databaseStateFilePath = () => trim(databaseRuntimeConfig.stateFilePath)
+
+const applyPersistedDatabaseState = (state: DatabasePersistedState) => {
+  databaseGroups = state.groups.map((group) => ({ ...group }))
+  databaseGroupParents = { ...state.groupParents }
+  databaseConnections = state.connections.map(cloneDatabaseConnection)
+  databaseConnectionSecrets.clear()
+  Object.entries(state.secrets).forEach(([connectionId, secret]) => {
+    if (secret.password) databaseConnectionSecrets.set(connectionId, secret.password)
+  })
+  if (state.aiPaneState) replaceDatabaseAiPaneState(state.aiPaneState)
+}
+
+const ensureDatabaseStateLoaded = () => {
+  const filePath = databaseStateFilePath()
+  if (!filePath || databaseLoadedStateFilePath === filePath) return
+  databaseLoadedStateFilePath = filePath
+  if (!existsSync(filePath)) return
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
+    const state = normalizePersistedState(parsed)
+    if (state) applyPersistedDatabaseState(state)
+  } catch {
+    /* Ignore corrupt local state and keep the backend fallback catalog. */
+  }
+}
+
+const persistDatabaseState = () => {
+  const filePath = databaseStateFilePath()
+  if (!filePath) return
+  const state: DatabasePersistedState = {
+    version: 1,
+    groups: databaseGroups.map((group) => ({ ...group })),
+    groupParents: { ...databaseGroupParents },
+    connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
+    secrets: Object.fromEntries(Array.from(databaseConnectionSecrets.entries()).map(([connectionId, password]) => [connectionId, { password }])),
+    aiPaneState: cloneDatabaseAiPaneState(databaseAiPaneState)
+  }
+  try {
+    mkdirSync(dirname(filePath), { recursive: true })
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+    writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')
+    renameSync(tempPath, filePath)
+    databaseLoadedStateFilePath = filePath
+  } catch {
+    /* Persistence must not turn a successful database action into a UI failure. */
+  }
+}
 
 const visibleDatabaseConnections = () =>
   shouldUseDatabaseSeedData()
@@ -1913,9 +2128,6 @@ const databaseWorkspaceCatalogFor = (selectedConnectionId = 'conn-prod-pg'): Dat
   connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
   defaults: databaseCatalogDefaultsFor(selectedConnectionId)
 })
-
-const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
-const postgresSslModeValues = new Set(['', 'disable', 'require', 'verify-ca', 'verify-full'])
 
 const basenameFromPath = (value: string) => {
   const normalized = value.replace(/\\/g, '/')
@@ -2066,6 +2278,7 @@ const normalizeDatabaseConnectionSaveDraft = (
 
 export function resetDatabaseBackendSeed() {
   databaseRuntimeConfig = {}
+  databaseLoadedStateFilePath = ''
   databaseConnectionSecrets.clear()
   databaseVerifiedConnections.clear()
   Object.keys(tableRows).forEach((key) => {
@@ -2089,6 +2302,7 @@ export function resetDatabaseBackendSeed() {
 }
 
 export async function listDatabaseCatalog(): Promise<DatabaseCatalogResult> {
+  ensureDatabaseStateLoaded()
   return {
     ok: true,
     data: databaseWorkspaceCatalogFor()
@@ -2096,6 +2310,7 @@ export async function listDatabaseCatalog(): Promise<DatabaseCatalogResult> {
 }
 
 export function getDatabaseAiPaneState(): DatabaseAiPaneStateResult {
+  ensureDatabaseStateLoaded()
   return {
     ok: true,
     data: cloneDatabaseAiPaneState(databaseAiPaneState)
@@ -2103,7 +2318,9 @@ export function getDatabaseAiPaneState(): DatabaseAiPaneStateResult {
 }
 
 export function saveDatabaseAiPaneState(input: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateResult {
-  databaseAiPaneState = normalizeDatabaseAiPaneState(input)
+  ensureDatabaseStateLoaded()
+  replaceDatabaseAiPaneState(input)
+  persistDatabaseState()
   return {
     ok: true,
     data: cloneDatabaseAiPaneState(databaseAiPaneState)
@@ -2111,6 +2328,7 @@ export function saveDatabaseAiPaneState(input: DatabaseAiPaneStateSnapshot): Dat
 }
 
 export async function createDatabaseGroup(input: DatabaseGroupCreateInput): Promise<DatabaseGroupMutationResult> {
+  ensureDatabaseStateLoaded()
   const name = trim(input.name) || 'New Group'
   const parentId = normalizedDatabaseGroupParentId(input.parentId)
   const group: DatabaseGroupInfo = {
@@ -2119,6 +2337,7 @@ export async function createDatabaseGroup(input: DatabaseGroupCreateInput): Prom
   }
   databaseGroups.push(group)
   databaseGroupParents[group.id] = parentId
+  persistDatabaseState()
 
   return {
     ok: true,
@@ -2131,6 +2350,7 @@ export async function createDatabaseGroup(input: DatabaseGroupCreateInput): Prom
 }
 
 export async function renameDatabaseGroup(input: DatabaseGroupUpdateInput): Promise<DatabaseGroupMutationResult> {
+  ensureDatabaseStateLoaded()
   const group = databaseGroups.find((item) => item.id === trim(input.id))
   if (!group) {
     return { ok: false, errorCode: 'DB_GROUP_NOT_FOUND', errorMessage: 'Database group was not found.' }
@@ -2141,6 +2361,7 @@ export async function renameDatabaseGroup(input: DatabaseGroupUpdateInput): Prom
   }
 
   group.name = name
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -2152,6 +2373,7 @@ export async function renameDatabaseGroup(input: DatabaseGroupUpdateInput): Prom
 }
 
 export async function moveDatabaseGroup(input: DatabaseGroupUpdateInput): Promise<DatabaseGroupMutationResult> {
+  ensureDatabaseStateLoaded()
   const groupId = trim(input.id)
   const group = databaseGroups.find((item) => item.id === groupId)
   if (!group) {
@@ -2167,6 +2389,7 @@ export async function moveDatabaseGroup(input: DatabaseGroupUpdateInput): Promis
   }
 
   databaseGroupParents[groupId] = parentId
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -2178,6 +2401,7 @@ export async function moveDatabaseGroup(input: DatabaseGroupUpdateInput): Promis
 }
 
 export async function deleteDatabaseGroup(id: string): Promise<DatabaseGroupDeleteResult> {
+  ensureDatabaseStateLoaded()
   const groupId = trim(id)
   const group = databaseGroups.find((item) => item.id === groupId)
   if (!group) {
@@ -2195,6 +2419,7 @@ export async function deleteDatabaseGroup(id: string): Promise<DatabaseGroupDele
   databaseConnections = databaseConnections.map((connection) =>
     connection.groupId === groupId ? { ...connection, groupId: DEFAULT_DATABASE_GROUP_ID } : connection
   )
+  persistDatabaseState()
 
   return {
     ok: true,
@@ -2211,6 +2436,7 @@ const databaseConnectionMutation = (
   message: string,
   mutate: (connection: DatabaseConnectionInfo) => DatabaseConnectionInfo
 ): DatabaseConnectionMutationResult => {
+  ensureDatabaseStateLoaded()
   const id = trim(connectionId)
   const index = databaseConnections.findIndex((connection) => connection.id === id)
   if (index === -1) {
@@ -2218,6 +2444,7 @@ const databaseConnectionMutation = (
   }
   const saved = mutate(databaseConnections[index])
   databaseConnections[index] = saved
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -2229,6 +2456,7 @@ const databaseConnectionMutation = (
 }
 
 export async function moveDatabaseConnection(input: DatabaseConnectionMoveInput): Promise<DatabaseConnectionMutationResult> {
+  ensureDatabaseStateLoaded()
   const groupId = normalizedDatabaseGroupId(input.groupId)
   return databaseConnectionMutation(input.connectionId, groupId === DEFAULT_DATABASE_GROUP_ID ? 'Connection moved to root group' : 'Connection moved', (connection) => ({
     ...connection,
@@ -2237,6 +2465,7 @@ export async function moveDatabaseConnection(input: DatabaseConnectionMoveInput)
 }
 
 export async function removeDatabaseConnection(connectionId: string): Promise<DatabaseConnectionDeleteResult> {
+  ensureDatabaseStateLoaded()
   const id = trim(connectionId)
   const index = databaseConnections.findIndex((connection) => connection.id === id)
   if (index === -1) {
@@ -2244,6 +2473,8 @@ export async function removeDatabaseConnection(connectionId: string): Promise<Da
   }
   databaseConnections = databaseConnections.filter((connection) => connection.id !== id)
   databaseConnectionSecrets.delete(id)
+  databaseVerifiedConnections.delete(id)
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -2255,6 +2486,7 @@ export async function removeDatabaseConnection(connectionId: string): Promise<Da
 }
 
 export async function connectDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  ensureDatabaseStateLoaded()
   const id = trim(connectionId)
   const connection = databaseConnections.find((item) => item.id === id)
   if (!connection) {
@@ -2281,6 +2513,7 @@ export async function connectDatabaseConnection(connectionId: string): Promise<D
 }
 
 export async function disconnectDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  ensureDatabaseStateLoaded()
   databaseVerifiedConnections.delete(trim(connectionId))
   return databaseConnectionMutation(connectionId, 'Connection closed', (connection) => ({
     ...connection,
@@ -2289,6 +2522,7 @@ export async function disconnectDatabaseConnection(connectionId: string): Promis
 }
 
 export async function refreshDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  ensureDatabaseStateLoaded()
   const id = trim(connectionId)
   const connection = databaseConnections.find((item) => item.id === id)
   if (!connection) {
@@ -2464,8 +2698,31 @@ const cloneDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot): DatabaseA
   messages: state.messages.map(cloneDatabaseAiPaneMessageRecord)
 })
 
+const sortedDatabaseAiPaneMessages = () =>
+  Array.from(databaseAiPaneMessages.values())
+    .sort((first, second) => first.createdAt - second.createdAt)
+    .slice(-DATABASE_AI_PANE_MAX_MESSAGES)
+    .map(cloneDatabaseAiPaneMessageRecord)
+
+const syncDatabaseAiPaneStateMessages = () => {
+  databaseAiPaneState = {
+    ...databaseAiPaneState,
+    messages: sortedDatabaseAiPaneMessages()
+  }
+}
+
+const replaceDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot) => {
+  databaseAiPaneState = normalizeDatabaseAiPaneState(state)
+  databaseAiPaneMessages.clear()
+  databaseAiPaneState.messages.forEach((message) => {
+    databaseAiPaneMessages.set(message.id, cloneDatabaseAiPaneMessageRecord(message))
+  })
+  syncDatabaseAiPaneStateMessages()
+}
+
 const storeDatabaseAiPaneMessage = (message: DatabaseAiPaneMessageRecord) => {
   databaseAiPaneMessages.set(message.id, cloneDatabaseAiPaneMessageRecord(message))
+  syncDatabaseAiPaneStateMessages()
   return message
 }
 
@@ -2496,6 +2753,7 @@ const updateDatabaseAiPaneAssistantMessage = (
     updatedAt: patch.updatedAt ?? databaseAiNow()
   }
   databaseAiPaneMessages.set(updated.id, cloneDatabaseAiPaneMessageRecord(updated))
+  syncDatabaseAiPaneStateMessages()
   return updated
 }
 
@@ -2567,6 +2825,7 @@ const databaseAiPaneErrorResponse = (
       )
   }
 
+  persistDatabaseState()
   return {
     ok: false,
     errorCode,
@@ -3048,6 +3307,7 @@ const storeDatabaseAiPaneDoneResponse = (
   )
   assistantMessage.updatedAt = databaseAiNow()
   databaseAiPaneMessages.set(assistantMessage.id, cloneDatabaseAiPaneMessageRecord(assistantMessage))
+  syncDatabaseAiPaneStateMessages()
   return assistantMessage
 }
 
@@ -3118,6 +3378,7 @@ async function generateProviderDatabaseAiPaneResponse(
     return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROVIDER_EMPTY', 'Database AI provider returned an empty response.', providerResponse.provider)
   }
   const assistantMessage = storeDatabaseAiPaneDoneResponse(input, startedAt, requestId, text, contextLine)
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -3376,6 +3637,7 @@ const rowKeyFor = (row: Record<string, unknown>, primaryKey: string[], index: nu
 }
 
 export async function testDatabaseConnection(input: DatabaseConnectionTestInput): Promise<DatabaseConnectionTestResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = Date.now()
   if (!supportedEngines.has(input.dbType)) {
     return { ok: false, errorCode: 'DB_UNSUPPORTED_ENGINE', errorMessage: `Unsupported database engine: ${input.dbType}` }
@@ -3462,6 +3724,7 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
 }
 
 export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput): Promise<DatabaseConnectionSaveResult> {
+  ensureDatabaseStateLoaded()
   const existingIndex = input.mode === 'edit' ? databaseConnections.findIndex((connection) => connection.id === trim(input.id)) : -1
   if (input.mode === 'edit' && existingIndex === -1) {
     return {
@@ -3508,6 +3771,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
     if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
     if (!connectionSecret && !saved.hasPassword) databaseConnectionSecrets.delete(saved.id)
     databaseVerifiedConnections.delete(saved.id)
+    persistDatabaseState()
     return {
       ok: true,
       data: {
@@ -3528,6 +3792,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
   saved.catalogs = defaultCatalogsForSavedConnection(saved)
   databaseConnections.push(saved)
   if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
+  persistDatabaseState()
 
   return {
     ok: true,
@@ -3540,6 +3805,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
 }
 
 export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput): Promise<DatabaseCreateDatabaseResult> {
+  ensureDatabaseStateLoaded()
   const connectionIndex = databaseConnections.findIndex((connection) => connection.id === trim(input.connectionId))
   const connection = connectionIndex >= 0 ? databaseConnections[connectionIndex] : null
   if (!connection) {
@@ -3586,6 +3852,7 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
     catalogs: [...connection.catalogs.map((item) => (shouldUseDatabaseSeedData() ? cloneDatabaseCatalog(connection.id, item) : cloneDatabaseCatalogRaw(item))), catalog]
   }
   databaseConnections[connectionIndex] = saved
+  persistDatabaseState()
 
   return {
     ok: true,
@@ -3599,6 +3866,7 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
 }
 
 export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promise<DatabaseSqlExecuteResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = Date.now()
   const rawSql = trim(input.sql)
   const sql = normalizeSql(input.sql || '')
@@ -3644,6 +3912,7 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
 }
 
 export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> {
+  ensureDatabaseStateLoaded()
   if (!trim(input.connectionId)) {
     return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
   }
@@ -3681,6 +3950,7 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
 }
 
 export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promise<DatabaseTableQueryResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = Date.now()
   if (!trim(input.connectionId)) {
     return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
@@ -3734,6 +4004,7 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
 }
 
 export async function planDatabaseTableMutation(input: DatabaseTableMutationPlanInput): Promise<DatabaseTableMutationPlanResult> {
+  ensureDatabaseStateLoaded()
   if (!trim(input.connectionId)) {
     return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
   }
@@ -3809,6 +4080,7 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
 }
 
 export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = Date.now()
   const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
@@ -3860,6 +4132,7 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
     rows[index] = { ...rows[index], ...mutation.patch }
     affected += 1
   })
+  persistDatabaseState()
 
   return {
     ok: true,
@@ -3872,6 +4145,7 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
 }
 
 export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestInput): Promise<DatabaseAiPaneRequestResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = Date.now()
   const prompt = trim(input.prompt)
   if (!prompt) return { ok: false, errorCode: 'DB_AI_PROMPT_REQUIRED', errorMessage: 'Prompt is required.' }
@@ -3906,6 +4180,7 @@ export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestIn
       createdAt: userCreatedAt + 1
     })
   )
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -3917,14 +4192,17 @@ export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestIn
 }
 
 export function startDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput): DatabaseAiPaneLifecycleResult {
+  ensureDatabaseStateLoaded()
   const existing = findDatabaseAiPaneAssistantMessage(input)
   if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
   if (existing.status === 'cancelled' || existing.status === 'done') return { ok: true, data: { assistantMessage: existing } }
   const assistantMessage = updateDatabaseAiPaneAssistantMessage(input, { status: 'streaming' })
+  if (assistantMessage) persistDatabaseState()
   return assistantMessage ? { ok: true, data: { assistantMessage } } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
 }
 
 export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput): DatabaseAiPaneLifecycleResult {
+  ensureDatabaseStateLoaded()
   const existing = findDatabaseAiPaneAssistantMessage(input)
   if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
   if (existing.status === 'done') return { ok: true, data: { assistantMessage: existing } }
@@ -3932,10 +4210,12 @@ export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput
     status: 'cancelled',
     content: existing.content || 'Response cancelled before the first chunk.'
   })
+  if (assistantMessage) persistDatabaseState()
   return assistantMessage ? { ok: true, data: { assistantMessage } } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
 }
 
 export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneResponseInput): Promise<DatabaseAiPaneResponseResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = databaseAiNow()
   const prompt = trim(input.prompt)
   if (!prompt) return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROMPT_REQUIRED', 'Prompt is required.')
@@ -4027,6 +4307,8 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
   )
   assistantMessage.updatedAt = databaseAiNow()
   databaseAiPaneMessages.set(assistantMessage.id, cloneDatabaseAiPaneMessageRecord(assistantMessage))
+  syncDatabaseAiPaneStateMessages()
+  persistDatabaseState()
   return {
     ok: true,
     data: {
@@ -4040,6 +4322,7 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
 }
 
 export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerRequestInput): Promise<DatabaseAiDrawerRequestResult> {
+  ensureDatabaseStateLoaded()
   const now = Date.now()
   const action = input.action
   const validActions: DatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
@@ -4077,6 +4360,7 @@ export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerReque
 }
 
 export function startDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleInput): DatabaseAiDrawerLifecycleResult {
+  ensureDatabaseStateLoaded()
   const existing = findDatabaseAiDrawerRequest(input)
   if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
   if (existing.status === 'cancelled') return { ok: true, data: existing }
@@ -4085,6 +4369,7 @@ export function startDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleIn
 }
 
 export function cancelDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleInput): DatabaseAiDrawerLifecycleResult {
+  ensureDatabaseStateLoaded()
   const existing = findDatabaseAiDrawerRequest(input)
   if (!existing) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
   if (existing.status === 'done' || existing.status === 'error') return { ok: true, data: existing }
@@ -4093,6 +4378,7 @@ export function cancelDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleI
 }
 
 export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerResponseInput): Promise<DatabaseAiDrawerResponseResult> {
+  ensureDatabaseStateLoaded()
   const startedAt = databaseAiNow()
   const action = input.action
   const validActions: DatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']

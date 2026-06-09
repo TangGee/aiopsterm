@@ -1220,7 +1220,7 @@ const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config
 configureTerminalSuggestionsRuntime({ getConfig })
 configureAiChatRuntime({ getConfig })
 configureAssetConnectionRuntime({ getConfig })
-configureDatabaseBackendRuntime({ getConfig })
+configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('userData'), 'database-workspace.json') })
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
 configureSshTunnelBackendRuntime({ getConfig })

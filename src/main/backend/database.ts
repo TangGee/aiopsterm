@@ -1,5 +1,6 @@
 import {
   configureDatabaseAiRuntime,
+  configureDatabaseRuntime,
   type DatabaseAiProviderTextInput,
   type DatabaseAiProviderTextResult
 } from '@shared/database'
@@ -12,6 +13,7 @@ type DatabaseBackendRuntimeConfig = {
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
   timeoutMs?: number
+  stateFilePath?: string
 }
 
 const normalizeText = (value: unknown) => String(value || '').trim()
@@ -77,6 +79,7 @@ async function generateDatabaseProviderText(
 }
 
 export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeConfig) {
+  configureDatabaseRuntime(config?.stateFilePath ? { stateFilePath: config.stateFilePath } : undefined)
   configureDatabaseAiRuntime(
     config
       ? {

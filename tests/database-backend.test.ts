@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
@@ -2034,6 +2034,119 @@ WHERE status = ''open'';
     expect(disconnected.data?.connection.status).toBe('idle')
     expect(state.connected).toBeGreaterThan(0)
     expect(state.closed).toBeGreaterThan(0)
+  })
+
+  it('persists live database workspace state and restores it through the backend store', async () => {
+    const { driver, state } = createPostgresDriverDouble()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-state-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-workspace.json')
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath })
+
+    const group = await createDatabaseGroup({ name: 'Persisted DB Ops', parentId: null })
+    expect(group.ok).toBe(true)
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'postgresql',
+        name: 'persisted-postgres',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'ops',
+        password: 'secret',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-persisted-db-ops',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+
+    const connected = await connectDatabaseConnection('conn-persisted-postgres')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.catalogs[0]?.schemas?.[0]?.tables[0]?.name).toBe('orders')
+
+    const paneState = saveDatabaseAiPaneState({
+      open: true,
+      width: 512,
+      context: {
+        connectionId: 'conn-persisted-postgres',
+        catalogName: 'orders',
+        schemaName: 'public',
+        dbType: 'postgresql'
+      },
+      draft: 'persist this database context',
+      messages: []
+    })
+    expect(paneState.ok).toBe(true)
+    const paneRequest = await createDatabaseAiPaneRequest({
+      prompt: 'Remember this DB question',
+      context: {
+        connectionId: 'conn-persisted-postgres',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        contextSummary: 'persisted-postgres · orders · public'
+      }
+    })
+    expect(paneRequest.ok).toBe(true)
+    expect(startDatabaseAiPaneResponse({ requestId: paneRequest.data!.requestId, assistantMessageId: paneRequest.data!.assistantMessage.id }).ok).toBe(true)
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
+      groups: Array<{ id: string; name: string }>
+      connections: Array<{ id: string; status: string; catalogs: unknown[] }>
+      secrets: Record<string, { password?: string }>
+      aiPaneState: { open: boolean; draft: string; messages: Array<{ status: string; content: string }> }
+    }
+    expect(persisted.groups.map((item) => item.id)).toContain('group-persisted-db-ops')
+    expect(persisted.connections.map((item) => item.id)).toEqual(['conn-persisted-postgres'])
+    expect(persisted.connections[0]).toMatchObject({ status: 'connected' })
+    expect(persisted.connections[0].catalogs).toHaveLength(1)
+    expect(persisted.secrets['conn-persisted-postgres']).toEqual({ password: 'secret' })
+    expect(persisted.aiPaneState).toMatchObject({ open: true, draft: 'persist this database context' })
+    expect(persisted.aiPaneState.messages.map((message) => message.content)).toContain('Remember this DB question')
+
+    resetDatabaseBackendSeed()
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath })
+
+    const restoredCatalog = await listDatabaseCatalog()
+    expect(restoredCatalog.data?.groups.find((item) => item.id === 'group-persisted-db-ops')?.name).toBe('Persisted DB Ops')
+    const restoredConnection = restoredCatalog.data?.connections.find((item) => item.id === 'conn-persisted-postgres')
+    expect(restoredCatalog.data?.connections.map((item) => item.id)).toEqual(['conn-persisted-postgres'])
+    expect(restoredConnection).toMatchObject({ name: 'persisted-postgres', status: 'idle', hasPassword: true })
+    expect(restoredConnection?.catalogs[0]?.schemas?.[0]?.tables[0]).toMatchObject({ name: 'orders', primaryKey: ['id'] })
+
+    const restoredPaneState = getDatabaseAiPaneState()
+    expect(restoredPaneState.data).toMatchObject({
+      open: true,
+      width: 512,
+      context: { connectionId: 'conn-persisted-postgres', catalogName: 'orders', schemaName: 'public', dbType: 'postgresql' },
+      draft: 'persist this database context'
+    })
+    expect(restoredPaneState.data?.messages.find((message) => message.role === 'assistant')).toMatchObject({
+      status: 'cancelled',
+      content: ''
+    })
+
+    const edited = await saveDatabaseConnection({
+      mode: 'edit',
+      id: 'conn-persisted-postgres',
+      connection: {
+        dbType: 'postgresql',
+        name: 'persisted-postgres-renamed',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'ops',
+        password: '',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-persisted-db-ops',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(edited.ok).toBe(true)
+    expect(state.configs.at(-1)).toMatchObject({ password: 'secret' })
   })
 
   it('uses the injected MySQL driver and reports unsupported engines without seed success in non-seed runtime', async () => {
