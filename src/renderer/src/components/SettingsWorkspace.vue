@@ -734,6 +734,18 @@ const TerminalSettings = defineComponent({
 const ModelSettings = defineComponent({
   name: 'ModelSettings',
   setup() {
+    const handleModelOptionChange = async (event: Event, name: string) => {
+      const input = event.target as HTMLInputElement
+      const saved = await workspace.updateModelOption(name, input.checked)
+      if (!saved) {
+        input.checked = Boolean(workspace.settingModelOptions.find((model) => model.name === name)?.checked)
+      }
+    }
+    const handleAddModelSwitchChange = async (event: Event) => {
+      const input = event.target as HTMLInputElement
+      const saved = await workspace.toggleAddModelSwitch(input.checked)
+      if (!saved) input.checked = workspace.addModelSwitch
+    }
     return () =>
       h('div', [
         h('h3', '模型名称'),
@@ -746,7 +758,7 @@ const ModelSettings = defineComponent({
                 type: 'checkbox',
                 checked: model.checked,
                 disabled: model.locked,
-                onChange: (event: Event) => workspace.updateModelOption(model.name, (event.target as HTMLInputElement).checked)
+                onChange: (event: Event) => handleModelOptionChange(event, model.name)
               }),
               model.locked ? h(LockKeyhole) : null,
               h('span', model.name.replace(/-Thinking$/, '')),
@@ -758,7 +770,7 @@ const ModelSettings = defineComponent({
                       title: '移除',
                       onClick: (event: Event) => {
                         event.preventDefault()
-                        workspace.removeModelOption(model.name)
+                        void workspace.removeModelOption(model.name)
                       }
                     },
                     [h(X)]
@@ -773,7 +785,7 @@ const ModelSettings = defineComponent({
             h('input', {
               type: 'checkbox',
               checked: workspace.addModelSwitch,
-              onChange: (event: Event) => workspace.toggleAddModelSwitch((event.target as HTMLInputElement).checked)
+              onChange: handleAddModelSwitchChange
             }),
             h('span')
           ])

@@ -5631,21 +5631,10 @@ describe('workspace store', () => {
     expect(store.sshAgentConfigModalOpen).toBe(false)
 
     await store.refreshAiModelCatalog()
+    vi.mocked(window.aiops.saveConfig).mockClear()
     store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
     expect(store.modelProviders.openai.baseUrl).toBe('https://gateway.local')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelSettings: expect.objectContaining({
-          providers: expect.objectContaining({
-            openai: expect.objectContaining({
-              baseUrl: 'https://gateway.local',
-              modelId: 'ops-model',
-              apiFormat: 'chat-completions'
-            })
-          })
-        })
-      })
-    )
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
     await expect(store.saveModelProvider('openai')).resolves.toBe(true)
     expect(store.config.modelProvider).toBe('openai-compatible')
     expect(store.config.modelName).toBe('ops-model')
@@ -5674,22 +5663,7 @@ describe('workspace store', () => {
       awsUseCrossRegionInference: true
     })
     expect(store.modelProviders.bedrock.awsRegion).toBe('eu-west-1')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelSettings: expect.objectContaining({
-          providers: expect.objectContaining({
-            bedrock: expect.objectContaining({
-              modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
-              awsAccessKey: 'AKIA-LOCAL',
-              awsRegion: 'eu-west-1',
-              awsEndpointSelected: true,
-              awsBedrockEndpoint: 'https://bedrock-runtime.eu-west-1.amazonaws.com',
-              awsUseCrossRegionInference: true
-            })
-          })
-        })
-      })
-    )
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
     await expect(store.saveModelProvider('bedrock')).resolves.toBe(true)
     expect(store.config.modelProvider).toBe('bedrock')
     expect(store.config.modelName).toBe('anthropic.claude-3-haiku-20240307-v1:0')
@@ -5701,7 +5675,7 @@ describe('workspace store', () => {
     )
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updateModelOption('aiopsterm-local-agent', false)
+    await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(true)
     expect(store.settingModelOptions.find((model) => model.name === 'aiopsterm-local-agent')?.checked).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5712,7 +5686,7 @@ describe('workspace store', () => {
     )
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.removeModelOption('custom-maintenance')
+    await expect(store.removeModelOption('custom-maintenance')).resolves.toBe(true)
     expect(store.settingModelOptions.some((model) => model.name === 'custom-maintenance')).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5723,7 +5697,7 @@ describe('workspace store', () => {
     )
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.toggleAddModelSwitch(false)
+    await expect(store.toggleAddModelSwitch(false)).resolves.toBe(true)
     expect(store.addModelSwitch).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5917,6 +5891,71 @@ describe('workspace store', () => {
       expect(store.config.modelEndpoint).toBe('https://gateway.local')
       expect(store.config.modelName).toBe('ops-model')
       expect(store.config.modelSettings?.providers.openai).toEqual(expect.objectContaining({ modelId: 'ops-model' }))
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate Settings Models option writes when config persistence is unavailable or malformed', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    const localAgent = () => store.settingModelOptions.find((model) => model.name === 'aiopsterm-local-agent')
+    const customModelExists = () => store.settingModelOptions.some((model) => model.name === 'custom-maintenance')
+
+    expect(localAgent()?.checked).toBe(true)
+    expect(customModelExists()).toBe(true)
+    expect(store.addModelSwitch).toBe(true)
+
+    try {
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('模型设置保存服务不可用')
+      expect(localAgent()?.checked).toBe(true)
+
+      await expect(store.removeModelOption('custom-maintenance')).resolves.toBe(false)
+      expect(customModelExists()).toBe(true)
+
+      await expect(store.toggleAddModelSwitch(false)).resolves.toBe(false)
+      expect(store.addModelSwitch).toBe(true)
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('模型设置保存失败')
+      expect(localAgent()?.checked).toBe(true)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        modelSettings: {
+          ...store.config.modelSettings,
+          addModelSwitch: true
+        }
+      } as any)
+      await expect(store.toggleAddModelSwitch(false)).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('模型设置保存失败')
+      expect(store.addModelSwitch).toBe(true)
+
+      vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('model settings offline'))
+      await expect(store.removeModelOption('custom-maintenance')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('model settings offline')
+      expect(customModelExists()).toBe(true)
+
+      await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(true)
+      expect(localAgent()?.checked).toBe(false)
+      expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelSettings: expect.objectContaining({
+            options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent', checked: false })])
+          })
+        })
+      )
+
+      await expect(store.removeModelOption('custom-maintenance')).resolves.toBe(true)
+      expect(customModelExists()).toBe(false)
+
+      await expect(store.toggleAddModelSwitch(false)).resolves.toBe(true)
+      expect(store.addModelSwitch).toBe(false)
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }

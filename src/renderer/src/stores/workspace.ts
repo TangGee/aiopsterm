@@ -1615,6 +1615,32 @@ const normalizeModelSettingsConfig = (source?: unknown) => {
   }
 }
 
+const modelProviderSettingsMatch = (left: ModelProviderSettings, right: ModelProviderSettings) => JSON.stringify(left) === JSON.stringify(right)
+
+const modelOptionsSnapshotsMatch = (left: ModelOptionUserConfig[], right: ModelOptionUserConfig[]) =>
+  left.length === right.length &&
+  left.every((item, index) => {
+    const other = right[index]
+    return (
+      Boolean(other) &&
+      item.name === other.name &&
+      item.locked === other.locked &&
+      item.checked === other.checked &&
+      item.type === other.type &&
+      item.apiProvider === other.apiProvider
+    )
+  })
+
+const modelSettingsSnapshotsMatch = (left: ModelSettingsUserConfig, right: ModelSettingsUserConfig) =>
+  left.addModelSwitch === right.addModelSwitch &&
+  modelProviderSettingsMatch(left.providers.litellm, right.providers.litellm) &&
+  modelProviderSettingsMatch(left.providers.openai, right.providers.openai) &&
+  modelProviderSettingsMatch(left.providers.bedrock, right.providers.bedrock) &&
+  modelProviderSettingsMatch(left.providers.deepseek, right.providers.deepseek) &&
+  modelProviderSettingsMatch(left.providers.anthropic, right.providers.anthropic) &&
+  modelProviderSettingsMatch(left.providers.ollama, right.providers.ollama) &&
+  modelOptionsSnapshotsMatch(left.options, right.options)
+
 const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
   const rawGroups = Array.isArray(incoming.groups) ? incoming.groups : defaultQuickCommands.groups
@@ -3924,9 +3950,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }))
   })
 
+  const getPersistedModelSettingsSnapshot = (): ModelSettingsUserConfig => normalizeModelSettingsConfig(config.value.modelSettings).normalized
+
+  const applyModelOptionSettingsSnapshot = (settings: ModelSettingsUserConfig) => {
+    addModelSwitch.value = settings.addModelSwitch
+    settingModelOptions.value = settings.options.map((option) => ({
+      name: option.name,
+      locked: option.locked,
+      checked: option.checked,
+      type: option.type,
+      apiProvider: option.apiProvider
+    }))
+  }
+
   const applyModelSettingsSnapshot = (source: unknown) => {
     const { normalized } = normalizeModelSettingsConfig(source)
-    addModelSwitch.value = normalized.addModelSwitch
     modelProviders.value = {
       litellm: { ...normalized.providers.litellm },
       openai: { ...normalized.providers.openai },
@@ -3935,18 +3973,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       anthropic: { ...normalized.providers.anthropic },
       ollama: { ...normalized.providers.ollama }
     }
-    settingModelOptions.value = normalized.options.map((option) => ({
-      name: option.name,
-      locked: option.locked,
-      checked: option.checked,
-      type: option.type,
-      apiProvider: option.apiProvider
-    }))
+    applyModelOptionSettingsSnapshot(normalized)
     return normalized
   }
 
-  const persistModelSettings = () => {
-    saveConfig({ modelSettings: getModelSettingsSnapshot() })
+  const persistModelSettings = async (
+    nextSettings: ModelSettingsUserConfig,
+    unavailableMessage = '模型设置保存服务不可用',
+    failureMessage = '模型设置保存失败'
+  ) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice(unavailableMessage)
+      return false
+    }
+    try {
+      const savedConfig = await saveConfigBridge({ modelSettings: nextSettings })
+      if (!isRecord(savedConfig) || !isRecord(savedConfig.modelSettings)) {
+        setSettingsNotice(failureMessage)
+        return false
+      }
+      const savedModelSettings = normalizeModelSettingsConfig(savedConfig.modelSettings).normalized
+      if (!modelSettingsSnapshotsMatch(savedModelSettings, nextSettings)) {
+        setSettingsNotice(failureMessage)
+        return false
+      }
+      applyModelOptionSettingsSnapshot(savedModelSettings)
+      config.value = mergeUserConfig(config.value, {
+        ...savedConfig,
+        modelSettings: savedModelSettings
+      } as Partial<UserConfig>)
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : failureMessage)
+      return false
+    }
   }
 
   const getShortcutsSnapshot = (): ShortcutUserConfig[] => cloneShortcutConfig(settingsShortcuts.value)
@@ -4890,26 +4951,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const updateModelOption = (name: string, checked: boolean) => {
+  const updateModelOption = async (name: string, checked: boolean) => {
     const model = settingModelOptions.value.find((item) => item.name === name)
-    if (!model || model.locked) return
-    model.checked = checked
-    persistModelSettings()
+    if (!model || model.locked) return false
+    const nextSettings = getPersistedModelSettingsSnapshot()
+    nextSettings.options = getModelSettingsSnapshot().options.map((item) => (item.name === name ? { ...item, checked } : item))
+    return persistModelSettings(nextSettings)
   }
 
-  const removeModelOption = (name: string) => {
-    settingModelOptions.value = settingModelOptions.value.filter((item) => item.name !== name || item.locked)
-    persistModelSettings()
+  const removeModelOption = async (name: string) => {
+    const model = settingModelOptions.value.find((item) => item.name === name)
+    if (!model || model.locked || model.type !== 'custom') return false
+    const nextSettings = getPersistedModelSettingsSnapshot()
+    nextSettings.options = getModelSettingsSnapshot().options.filter((item) => item.name !== name || item.locked)
+    return persistModelSettings(nextSettings)
   }
 
-  const toggleAddModelSwitch = (checked: boolean) => {
-    addModelSwitch.value = checked
-    persistModelSettings()
+  const toggleAddModelSwitch = async (checked: boolean) => {
+    const nextSettings = {
+      ...getPersistedModelSettingsSnapshot(),
+      addModelSwitch: checked
+    }
+    return persistModelSettings(nextSettings)
   }
 
   const updateModelProviderConfig = (provider: ModelProviderKey, patch: Partial<ModelProviderSettings>) => {
     modelProviders.value[provider] = { ...modelProviders.value[provider], ...patch }
-    persistModelSettings()
   }
 
   const checkModelProvider = async (provider: ModelProviderKey) => {
