@@ -4383,7 +4383,7 @@ Object.defineProperty(window, 'aiops', {
       path: `/tmp/aiopsterm/skills/${metadata.name}/SKILL.md`
     })),
     deleteSkill: vi.fn(async () => undefined),
-    openSkillsFolder: vi.fn(async () => undefined),
+    openSkillsFolder: vi.fn(async () => ({ path: '/tmp/aiopsterm/skills' })),
     importSkillZip: vi.fn(async () => ({ success: true, skillName: 'imported-skill' })),
     readSkillContent: vi.fn(async (skillName: string) => {
       const skill = defaultSkills.find((item) => item.name === skillName)

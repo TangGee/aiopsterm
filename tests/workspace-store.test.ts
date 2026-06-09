@@ -7334,6 +7334,14 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       await expect(store.openSkillsFolder()).resolves.toBe(false)
       expect(store.settingsNotice).toBe('Skills 文件夹打开服务不可用')
 
+      ;(window.aiops as any).openSkillsFolder = originalAiops.openSkillsFolder
+      vi.mocked(window.aiops.openSkillsFolder!).mockResolvedValueOnce(undefined as any)
+      await expect(store.openSkillsFolder()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skills 文件夹打开失败')
+      vi.mocked(window.aiops.openSkillsFolder!).mockResolvedValueOnce({ path: '   ' })
+      await expect(store.openSkillsFolder()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('Skills 文件夹打开失败')
+
       ;(window.aiops as any).readSkillContent = undefined
       await store.openSkillModal('edit', 'incident-triage')
       expect(store.skillModal.mode).toBeNull()

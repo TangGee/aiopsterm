@@ -3947,7 +3947,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     try {
-      await window.aiops.openSkillsFolder()
+      const result = await window.aiops.openSkillsFolder()
+      if (!result || typeof result.path !== 'string' || !result.path.trim()) {
+        setSettingsNotice('Skills 文件夹打开失败')
+        return false
+      }
       setSettingsNotice('Skills 文件夹已打开')
       return true
     } catch {

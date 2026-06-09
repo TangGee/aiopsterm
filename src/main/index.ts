@@ -2569,6 +2569,7 @@ const registerIpc = () => {
     const skillsPath = await ensureSkillsDirectory()
     const result = await shell.openPath(skillsPath)
     if (result) throw new Error(result)
+    return { path: skillsPath }
   })
   ipcMain.handle('skills:import-zip', async (_event, zipPath: string, overwrite?: boolean) => importSkillZip(zipPath, Boolean(overwrite)))
   ipcMain.handle('skills:read-content', async (_event, skillName: string) => {
