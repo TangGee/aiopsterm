@@ -142,7 +142,7 @@ import {
   saveSettingsRule,
   saveSettingsShortcut
 } from './backend/settingsPreferences'
-import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
+import { configureSshTunnelBackendRuntime, startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { applyConfiguredSshAgentAuth } from './backend/sshAgent'
 import { createSshProxySocketForAsset } from './backend/sshProxy'
 import type { SshProxySocket } from './backend/sshProxy'
@@ -1166,6 +1166,7 @@ configureAiChatRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig })
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
+configureSshTunnelBackendRuntime({ getConfig })
 configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
 
