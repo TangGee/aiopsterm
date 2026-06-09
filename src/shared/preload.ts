@@ -1345,7 +1345,7 @@ export type TerminalCommandGenerationRecord = {
   context: TerminalCommandGenerationContext
   status: 'done'
   createdAt: number
-  provider: 'aiopsterm-local'
+  provider: 'aiopsterm-local' | ModelProviderCheckKey
 }
 
 export type TerminalCommandGenerationResult = AiopsMutationResult<TerminalCommandGenerationRecord>

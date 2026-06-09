@@ -14,7 +14,7 @@ type TerminalSuggestionsBackend = {
     fetch?: typeof fetch
     getConfig?: () => UserConfig
   }) => void
-  generateTerminalCommand: (input: TerminalCommandGenerationInput) => TerminalCommandGenerationResult
+  generateTerminalCommand: (input: TerminalCommandGenerationInput) => Promise<TerminalCommandGenerationResult>
   getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => Promise<TerminalCommandSuggestion[]>
   recordTerminalCommandHistory: (command: string, context?: Pick<TerminalCommandSuggestionContext, 'host'>) => void
 }
@@ -39,8 +39,8 @@ afterEach(() => {
 })
 
 describe('terminal command backend boundary', () => {
-  it('generates command records behind the main-process boundary', () => {
-    const result = backend.generateTerminalCommand({
+  it('generates local command records behind the main-process boundary', async () => {
+    const result = await backend.generateTerminalCommand({
       panelId: 'panel-ssh',
       instruction: '检查磁盘空间',
       modelName: 'aiopsterm-local-agent',
@@ -63,6 +63,133 @@ describe('terminal command backend boundary', () => {
         modelName: 'aiopsterm-local-agent',
         provider: 'aiopsterm-local',
         context: expect.objectContaining({ host: '10.8.0.9', username: 'deploy', connectionType: 'ssh' })
+      })
+    )
+  })
+
+  it('calls the configured live model provider for terminal command generation', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: '```bash\njournalctl -u nginx --since "30 minutes ago"\n```'
+            }
+          }
+        ]
+      })
+    })) as unknown as typeof fetch
+
+    backend.configureTerminalSuggestionsRuntime({
+      databasePath: ':memory:',
+      now: () => 1_780_488_000_000,
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'ops-terminal',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-terminal', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-terminal',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as UserConfig
+    })
+
+    const result = await backend.generateTerminalCommand({
+      panelId: 'panel-ssh',
+      instruction: '查看 nginx 最近日志',
+      modelName: 'ops-terminal',
+      context: {
+        host: '10.8.0.9',
+        username: 'deploy',
+        cwd: '/srv/app',
+        shell: 'bash',
+        connectionType: 'ssh'
+      }
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          command: 'journalctl -u nginx --since "30 minutes ago"',
+          modelName: 'ops-terminal',
+          provider: 'openai'
+        })
+      })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:4010/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer sk-test' }),
+        body: expect.stringContaining('查看 nginx 最近日志')
+      })
+    )
+  })
+
+  it('rejects unsafe commands returned by the command generation provider', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: 'rm -rf /'
+            }
+          }
+        ]
+      })
+    })) as unknown as typeof fetch
+
+    backend.configureTerminalSuggestionsRuntime({
+      databasePath: ':memory:',
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'ops-terminal',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-terminal', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-terminal',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as UserConfig
+    })
+
+    await expect(
+      backend.generateTerminalCommand({
+        panelId: 'panel-ssh',
+        instruction: '清理系统',
+        modelName: 'ops-terminal',
+        context: {
+          host: '10.8.0.9',
+          username: 'deploy',
+          cwd: '/srv/app',
+          shell: 'bash',
+          connectionType: 'ssh'
+        }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_UNSAFE'
       })
     )
   })

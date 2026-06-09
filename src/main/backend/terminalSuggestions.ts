@@ -90,6 +90,7 @@ type AiSuggestRequest = {
 const maxSuggestionRows = 6
 const maxStoredCommandLength = 255
 const defaultAiSuggestTimeoutMs = 2000
+const defaultCommandGenerationTimeoutMs = 8000
 const specCache = new Map<string, FigSpec | null>()
 let availableSpecNames: Set<string> | null = null
 let storeInstance: TerminalSuggestionStore | null = null
@@ -602,11 +603,10 @@ function createAiSuggestPrompt(partialCommand: string, context?: TerminalCommand
     .join('\n')
 }
 
-function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: string, context?: TerminalCommandSuggestionContext): AiSuggestRequest | null {
+function createProviderTextRequest(input: AiSuggestProviderConfig, systemPrompt: string, userPrompt: string, maxTokens: number): AiSuggestRequest | null {
   const model = normalizeText(input.config.modelId)
   const apiKey = normalizeText(input.config.apiKey)
   const baseUrl = normalizeText(input.config.baseUrl)
-  const prompt = createAiSuggestPrompt(partialCommand, context)
   if (!model) return null
 
   if (input.provider === 'ollama') {
@@ -620,10 +620,10 @@ function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: 
         model,
         stream: false,
         messages: [
-          { role: 'system', content: 'You are a terminal autocomplete engine.' },
-          { role: 'user', content: prompt }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
         ],
-        options: { num_predict: 80 }
+        options: { num_predict: maxTokens }
       }),
       parseText: (payload) => {
         if (!isRecord(payload)) return ''
@@ -646,9 +646,9 @@ function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: 
       },
       body: JSON.stringify({
         model,
-        max_tokens: 80,
-        system: 'You are a terminal autocomplete engine.',
-        messages: [{ role: 'user', content: prompt }]
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }]
       }),
       parseText: (payload) => {
         if (!isRecord(payload) || !Array.isArray(payload.content)) return ''
@@ -680,21 +680,21 @@ function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: 
     },
     body: JSON.stringify(
       useResponses
-        ? {
+          ? {
             model,
             input: [
-              { role: 'system', content: 'You are a terminal autocomplete engine.' },
-              { role: 'user', content: prompt }
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
             ],
-            max_output_tokens: 80
+            max_output_tokens: maxTokens
           }
         : {
             model,
             messages: [
-              { role: 'system', content: 'You are a terminal autocomplete engine.' },
-              { role: 'user', content: prompt }
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
             ],
-            max_tokens: 80
+            max_tokens: maxTokens
           }
     ),
     parseText: (payload) => {
@@ -714,6 +714,10 @@ function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: 
       return ''
     }
   }
+}
+
+function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: string, context?: TerminalCommandSuggestionContext): AiSuggestRequest | null {
+  return createProviderTextRequest(input, 'You are a terminal autocomplete engine.', createAiSuggestPrompt(partialCommand, context), 80)
 }
 
 function parseAiSuggestResponse(response: string, partialCommand: string): TerminalCommandSuggestion | null {
@@ -749,6 +753,102 @@ async function fetchAiSuggestion(query: string, context?: TerminalCommandSuggest
     return parsed ? [parsed] : []
   } catch {
     return []
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function createCommandGenerationPrompt(instruction: string, context: TerminalCommandGenerationInput['context']): string {
+  return [
+    `Instruction: ${instruction}`,
+    'Context:',
+    `Host: ${context.host || 'local'}`,
+    `Username: ${context.username || 'local'}`,
+    `Working directory: ${context.cwd || '~'}`,
+    `Shell: ${context.shell || 'bash'}`,
+    `Connection: ${context.connectionType}`,
+    '',
+    'Generate exactly one executable terminal command.',
+    'Return only the command text. Do not include markdown, labels, commentary, or explanations.',
+    'Prefer safe, commonly used commands. Return NONE if a safe command cannot be generated.'
+  ].join('\n')
+}
+
+function createCommandGenerationRequest(input: AiSuggestProviderConfig, instruction: string, context: TerminalCommandGenerationInput['context']) {
+  return createProviderTextRequest(
+    input,
+    'You generate precise terminal commands from operator instructions.',
+    createCommandGenerationPrompt(instruction, context),
+    160
+  )
+}
+
+function extractGeneratedCommand(response: string): string {
+  let command = normalizeText(response)
+  if (!command || command.toUpperCase() === 'NONE') return ''
+  const cmdMatch = command.match(/^CMD:\s*(.+)$/im)
+  if (cmdMatch) command = normalizeText(cmdMatch[1])
+  command = command.replace(/^```(?:bash|sh|shell|zsh|fish)?\s*\n?/i, '')
+  command = command.replace(/\n?```\s*$/i, '')
+  command = command.replace(/^(?:Command|Output|Result):\s*/i, '')
+  const firstLine = command
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !/^EXP:\s*/i.test(line))
+  const normalized = normalizeText(firstLine || '')
+  if ((normalized.startsWith('"') && normalized.endsWith('"')) || (normalized.startsWith("'") && normalized.endsWith("'"))) {
+    return normalized.slice(1, -1).trim()
+  }
+  return normalized
+}
+
+async function fetchGeneratedCommand(request: AiSuggestRequest): Promise<{ ok: true; command: string } | { ok: false; errorCode: string; errorMessage: string }> {
+  const fetchImpl = runtimeConfig.fetch || fetch
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), defaultCommandGenerationTimeoutMs)
+  try {
+    const response = await fetchImpl(request.endpoint, {
+      method: 'POST',
+      headers: request.headers,
+      body: request.body,
+      signal: controller.signal
+    })
+    if (!response.ok) {
+      const body = typeof response.text === 'function' ? await response.text().catch(() => '') : ''
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_PROVIDER_ERROR',
+        errorMessage: body || `Command generation provider returned HTTP ${response.status || 'error'}`
+      }
+    }
+    const payload = await response.json().catch(() => null)
+    const command = extractGeneratedCommand(request.parseText(payload))
+    if (!command) {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_GENERATION_FAILED',
+        errorMessage: 'Command generation failed'
+      }
+    }
+    if (!isValidTerminalCommandForHistory(command)) {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_UNSAFE',
+        errorMessage: 'Generated command did not pass terminal safety validation'
+      }
+    }
+    return { ok: true, command }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: error instanceof Error && error.name === 'AbortError' ? 'TERMINAL_COMMAND_PROVIDER_TIMEOUT' : 'TERMINAL_COMMAND_PROVIDER_ERROR',
+      errorMessage:
+        error instanceof Error && error.name === 'AbortError'
+          ? `Command generation timed out after ${defaultCommandGenerationTimeoutMs}ms`
+          : error instanceof Error
+            ? error.message
+            : String(error)
+    }
   } finally {
     clearTimeout(timeout)
   }
@@ -803,7 +903,7 @@ export const getTerminalCommandSuggestions = async (
   }
 }
 
-export const generateTerminalCommand = (input: TerminalCommandGenerationInput): TerminalCommandGenerationResult => {
+export const generateTerminalCommand = async (input: TerminalCommandGenerationInput): Promise<TerminalCommandGenerationResult> => {
   try {
     const instruction = normalizeText(input.instruction)
     if (!instruction) {
@@ -814,7 +914,40 @@ export const generateTerminalCommand = (input: TerminalCommandGenerationInput): 
       }
     }
 
-    const command = inferGeneratedCommand(instruction, input.context.cwd)
+    let command = ''
+    let provider: 'aiopsterm-local' | ModelProviderCheckKey = 'aiopsterm-local'
+    const modelName = normalizeText(input.modelName) || 'aiopsterm-local-agent'
+    const config = runtimeConfig.getConfig?.()
+    const providerConfig = config ? providerForModel(config, modelName) : null
+    if (providerConfig) {
+      const request = createCommandGenerationRequest(providerConfig, instruction, input.context)
+      if (!request) {
+        return {
+          ok: false,
+          errorCode: 'TERMINAL_COMMAND_PROVIDER_UNAVAILABLE',
+          errorMessage: 'Command generation provider is unavailable'
+        }
+      }
+      const generated = await fetchGeneratedCommand(request)
+      if (!generated.ok) {
+        return {
+          ok: false,
+          errorCode: generated.errorCode,
+          errorMessage: generated.errorMessage
+        }
+      }
+      command = generated.command
+      provider = providerConfig.provider
+    } else if (modelName !== 'aiopsterm-local-agent') {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_PROVIDER_UNAVAILABLE',
+        errorMessage: 'Command generation provider is unavailable'
+      }
+    } else {
+      command = inferGeneratedCommand(instruction, input.context.cwd)
+    }
+
     if (!command) {
       return {
         ok: false,
@@ -830,11 +963,11 @@ export const generateTerminalCommand = (input: TerminalCommandGenerationInput): 
         panelId: input.panelId,
         instruction,
         command,
-        modelName: input.modelName || 'aiopsterm-local-agent',
+        modelName,
         context: input.context,
         status: 'done',
         createdAt: Date.now(),
-        provider: 'aiopsterm-local'
+        provider
       }
     }
   } catch (error) {
