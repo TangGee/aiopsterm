@@ -1687,6 +1687,89 @@ const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>)
   }
 }
 
+const isQuickCommandsSnapshot = (source: unknown): source is QuickCommandsUserConfig & Record<string, unknown> =>
+  isRecord(source) && Array.isArray(source.groups) && Array.isArray(source.snippets) && !normalizeQuickCommandsConfig(source).changed
+
+const isQuickCommandGroupSnapshot = (source: unknown): source is SnippetGroup => {
+  if (!isRecord(source)) return false
+  const id = source.id
+  return typeof id === 'number' && Number.isInteger(id) && id > 0 && typeof source.uuid === 'string' && source.uuid.trim() !== '' && typeof source.group_name === 'string' && source.group_name.trim() !== ''
+}
+
+const quickCommandGroupsMatch = (left: SnippetGroup, right: SnippetGroup) => left.id === right.id && left.uuid === right.uuid && left.group_name === right.group_name
+
+const snapshotContainsQuickCommandGroup = (snapshot: QuickCommandsUserConfig, group: SnippetGroup) =>
+  snapshot.groups.some((item) => quickCommandGroupsMatch(item, group))
+
+const isQuickCommandSnippetSnapshot = (source: unknown): source is QuickCommandSnippet => {
+  if (!isRecord(source)) return false
+  const id = source.id
+  const groupUuid = source.group_uuid
+  return (
+    typeof id === 'number' &&
+    Number.isInteger(id) &&
+    id > 0 &&
+    typeof source.uuid === 'string' &&
+    source.uuid.trim() !== '' &&
+    typeof source.snippet_name === 'string' &&
+    source.snippet_name.trim() !== '' &&
+    typeof source.snippet_content === 'string' &&
+    source.snippet_content !== '' &&
+    (groupUuid === undefined || groupUuid === null || typeof groupUuid === 'string')
+  )
+}
+
+const quickCommandSnippetGroupUuid = (snippet: Pick<QuickCommandSnippet, 'group_uuid'>) => snippet.group_uuid ?? null
+
+const quickCommandSnippetsMatch = (left: QuickCommandSnippet, right: QuickCommandSnippet) =>
+  left.id === right.id &&
+  left.uuid === right.uuid &&
+  left.snippet_name === right.snippet_name &&
+  left.snippet_content === right.snippet_content &&
+  quickCommandSnippetGroupUuid(left) === quickCommandSnippetGroupUuid(right) &&
+  (left.create_at || '') === (right.create_at || '') &&
+  (left.update_at || '') === (right.update_at || '')
+
+const snapshotContainsQuickCommandSnippet = (snapshot: QuickCommandsUserConfig, snippet: QuickCommandSnippet) =>
+  snapshot.snippets.some((item) => quickCommandSnippetsMatch(item, snippet))
+
+const isQuickCommandGroupSaveData = (source: unknown, expected: { uuid?: string; groupName: string }) => {
+  if (!isRecord(source)) return false
+  const record = source
+  if (!isQuickCommandsSnapshot(record)) return false
+  const group = record.group
+  if (!isQuickCommandGroupSnapshot(group)) return false
+  if (expected.uuid && group.uuid !== expected.uuid) return false
+  return group.group_name === expected.groupName && snapshotContainsQuickCommandGroup(record, group)
+}
+
+const isQuickCommandGroupDeleteData = (source: unknown, uuid: string) => {
+  if (!isRecord(source)) return false
+  const record = source
+  if (!isQuickCommandsSnapshot(record)) return false
+  return record.groupUuid === uuid && !record.groups.some((group) => group.uuid === uuid) && !record.snippets.some((snippet) => snippet.group_uuid === uuid)
+}
+
+const isQuickCommandSnippetSaveData = (source: unknown, expected: { id?: number; snippetName: string; snippetContent: string }) => {
+  if (!isRecord(source)) return false
+  const record = source
+  if (!isQuickCommandsSnapshot(record)) return false
+  const snippet = record.snippet
+  if (!isQuickCommandSnippetSnapshot(snippet)) return false
+  if (expected.id !== undefined && snippet.id !== expected.id) return false
+  return snippet.snippet_name === expected.snippetName && snippet.snippet_content === expected.snippetContent && snapshotContainsQuickCommandSnippet(record, snippet)
+}
+
+const isQuickCommandSnippetDeleteData = (source: unknown, id: number) => {
+  if (!isRecord(source)) return false
+  const record = source
+  if (!isQuickCommandsSnapshot(record)) return false
+  return record.id === id && !record.snippets.some((snippet) => snippet.id === id)
+}
+
+const isQuickCommandReorderData = (source: unknown, expectedOrder: number[]) =>
+  isQuickCommandsSnapshot(source) && source.snippets.map((snippet) => snippet.id).join(',') === expectedOrder.join(',')
+
 const normalizeKnowledgeNodes = (source: unknown, parentRelDir = '', seen = new Set<string>()): KnowledgeNode[] => {
   const rawNodes = Array.isArray(source) ? source : []
   const nodes: KnowledgeNode[] = []
@@ -6982,6 +7065,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令分组写入失败')
       return null
     }
+    if (!isQuickCommandGroupSaveData(result.data, { groupName: name })) {
+      setTopNotice('快捷命令分组写入失败')
+      return null
+    }
     applyQuickCommandsSnapshot(result.data)
     return result.data.group
   }
@@ -7004,6 +7091,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令分组写入失败')
       return false
     }
+    if (!isQuickCommandGroupSaveData(result.data, { uuid, groupName: name })) {
+      setTopNotice('快捷命令分组写入失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
     return true
   }
@@ -7022,6 +7113,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     if (!result.ok || !result.data) {
       setTopNotice(result.errorMessage || '快捷命令分组删除失败')
+      return false
+    }
+    if (!isQuickCommandGroupDeleteData(result.data, uuid)) {
+      setTopNotice('快捷命令分组删除失败')
       return false
     }
     applyQuickCommandsSnapshot(result.data)
@@ -7047,6 +7142,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     if (!result.ok || !result.data) {
       setTopNotice(result.errorMessage || '快捷命令写入失败')
+      return null
+    }
+    if (!isQuickCommandSnippetSaveData(result.data, { snippetName, snippetContent: payload.snippet_content })) {
+      setTopNotice('快捷命令写入失败')
       return null
     }
     applyQuickCommandsSnapshot(result.data)
@@ -7076,6 +7175,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令写入失败')
       return false
     }
+    if (!isQuickCommandSnippetSaveData(result.data, { id, snippetName, snippetContent: payload.snippet_content })) {
+      setTopNotice('快捷命令写入失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
     return true
   }
@@ -7094,6 +7197,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令删除失败')
       return false
     }
+    if (!isQuickCommandSnippetDeleteData(result.data, id)) {
+      setTopNotice('快捷命令删除失败')
+      return false
+    }
     applyQuickCommandsSnapshot(result.data)
     return true
   }
@@ -7110,13 +7217,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const [moved] = currentList.splice(sourceIndex, 1)
     currentList.splice(targetIndex, 0, moved)
     const otherCommandIds = quickCommands.value.filter((command) => !currentList.some((item) => item.id === command.id)).map((command) => command.id)
-    const result = await window.aiops.reorderQuickCommands({ orderedIds: [...otherCommandIds, ...currentList.map((command) => command.id)] }).catch(() => null)
+    const orderedIds = [...otherCommandIds, ...currentList.map((command) => command.id)]
+    const result = await window.aiops.reorderQuickCommands({ orderedIds }).catch(() => null)
     if (!result) {
       setTopNotice('快捷命令排序失败')
       return false
     }
     if (!result.ok || !result.data) {
       setTopNotice(result.errorMessage || '快捷命令排序失败')
+      return false
+    }
+    if (!isQuickCommandReorderData(result.data, orderedIds)) {
+      setTopNotice('快捷命令排序失败')
       return false
     }
     applyQuickCommandsSnapshot(result.data)
