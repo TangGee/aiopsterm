@@ -89,6 +89,8 @@ import type {
   SshProxyType,
   TerminalCommandGenerationContext,
   TerminalCommandGenerationRecord,
+  TerminalExitEvent,
+  TerminalLifecycleEvent,
   TerminalSessionInfo,
   TerminalMouseEventAction,
   TerminalUserConfig,
@@ -231,7 +233,7 @@ export type TerminalPanel = {
   cwd: string
   output: string
   outputSegments: TerminalOutputSegment[]
-  status: 'ready' | 'running' | 'closed'
+  status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
   kind?: 'terminal' | 'knowledge'
   split?: PanelDirection
   sessionId?: string
@@ -243,6 +245,8 @@ export type TerminalPanel = {
     jumpToken?: number
   }
   sshSession?: TerminalSshSession
+  terminalLifecycle?: TerminalLifecycleEvent
+  terminalExit?: TerminalExitEvent
 }
 
 export type TerminalSshSession = {
@@ -2711,7 +2715,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.sessionId = terminalSession.id
     panel.cwd = terminalSession.cwd || panel.cwd
     panel.kind = 'terminal'
-    panel.status = 'running'
+    panel.status = 'connecting'
     if (terminalSession.kind !== 'ssh' || !terminalSession.connection) return null
     const connection = terminalSession.connection
     const previous = panel.sshSession
@@ -2732,6 +2736,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       createdAt: connection.createdAt
     }
     panel.sshSession = session
+    if (terminalSession.lifecycle) applyTerminalLifecycle(terminalSession.lifecycle)
     return session
   }
 
@@ -2746,6 +2751,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.kind = 'terminal'
     panel.status = 'running'
     panel.sshSession = undefined
+    if (terminalSession.lifecycle) applyTerminalLifecycle(terminalSession.lifecycle)
     return panel
   }
 
@@ -6907,6 +6913,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return 'left'
   }
 
+  const fileSessionPanelStatus = (status: TerminalPanel['status']): FileSessionTerminalContext['panelStatus'] => {
+    if (status === 'error') return 'closed'
+    if (status === 'connecting') return 'running'
+    return status
+  }
+
   const fileSessionTerminalContextForPanel = (panel: TerminalPanel): FileSessionTerminalContext => {
     const ssh = panel.sshSession
     const hasSshBackendConnection = Boolean(ssh?.connectionId)
@@ -6914,7 +6926,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       kind: ssh ? 'ssh' : 'local',
       panelId: panel.id,
       panelTitle: panel.title,
-      panelStatus: panel.status,
+      panelStatus: fileSessionPanelStatus(panel.status),
       sessionId: ssh && !hasSshBackendConnection ? undefined : panel.sessionId,
       cwd: ssh && !hasSshBackendConnection ? undefined : panel.cwd,
       ...(ssh
@@ -9408,6 +9420,67 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.status = 'running'
   }
 
+  const applyTerminalLifecycle = (event: TerminalLifecycleEvent) => {
+    const panel = panels.value.find((item) => item.sessionId === event.id || item.id === event.id || item.terminalLifecycle?.id === event.id)
+    if (!panel) return null
+    panel.terminalLifecycle = event
+    panel.kind = 'terminal'
+    if (event.cwd) panel.cwd = event.cwd
+    if (event.kind === 'ssh') {
+      const previous = panel.sshSession
+      panel.sshSession = {
+        connectionId: event.connectionId || previous?.connectionId,
+        sourcePanelId: previous?.sourcePanelId,
+        forkFromConnectionId: previous?.forkFromConnectionId,
+        host: event.host || previous?.host || '',
+        port: Number(event.port || previous?.port || 22),
+        username: event.username || previous?.username || 'root',
+        assetId: previous?.assetId,
+        assetName: previous?.assetName || event.host || 'ssh',
+        assetType: previous?.assetType,
+        organizationId: previous?.organizationId,
+        authType: previous?.authType,
+        needProxy: Boolean(previous?.needProxy),
+        proxyName: event.proxyName || previous?.proxyName || '',
+        createdAt: previous?.createdAt
+      }
+    }
+    if (event.stage === 'starting' || event.stage === 'connecting' || event.stage === 'proxy-opening') {
+      panel.status = 'connecting'
+      return panel
+    }
+    if (event.stage === 'connected' || event.stage === 'shell-ready') {
+      panel.status = 'running'
+      return panel
+    }
+    panel.status = event.stage === 'error' ? 'error' : 'closed'
+    panel.terminalExit = {
+      id: event.id,
+      code: event.code ?? null,
+      kind: event.kind,
+      reason: event.reason,
+      isNetworkDisconnect: event.isNetworkDisconnect,
+      errorCode: event.errorCode,
+      errorMessage: event.errorMessage
+    }
+    if (panel.sessionId === event.id) {
+      panel.sessionId = undefined
+    }
+    return panel
+  }
+
+  const applyTerminalExit = (event: TerminalExitEvent) => {
+    const panel = panels.value.find((item) => item.sessionId === event.id || item.id === event.id || item.terminalLifecycle?.id === event.id)
+    if (!panel) return null
+    panel.terminalExit = event
+    if (panel.sessionId === event.id) {
+      panel.sessionId = undefined
+    }
+    panel.status = event.reason === 'error' || event.reason === 'network' || event.errorMessage ? 'error' : 'closed'
+    appendTerminalSegment(panel, `\n[process exited: ${event.code ?? 'unknown'}]\n`, 'output')
+    return panel
+  }
+
   const appendTerminalInput = (id: string, data: string) => {
     const panel = panels.value.find((item) => item.sessionId === id || item.id === id)
     if (!panel) return
@@ -10518,6 +10591,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closePanels,
     renamePanel,
     appendTerminalOutput,
+    applyTerminalLifecycle,
+    applyTerminalExit,
     appendTerminalInput,
     replaceTerminalOutput,
     getHighlightedTerminalOutput,

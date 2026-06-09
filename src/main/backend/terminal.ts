@@ -1,4 +1,12 @@
-import type { AiopsAssetRecord, TerminalCreateOptions, TerminalKillResult, TerminalSshConnectionInfo, TerminalWriteResult } from '@shared/preload'
+import type {
+  AiopsAssetRecord,
+  TerminalCreateOptions,
+  TerminalDisconnectReason,
+  TerminalKillResult,
+  TerminalLifecycleEvent,
+  TerminalWriteResult,
+  TerminalSshConnectionInfo
+} from '@shared/preload'
 
 export type SshTerminalConnectionTarget = {
   asset?: Partial<
@@ -13,6 +21,85 @@ export type SshTerminalConnectionTarget = {
 const cleanOptional = (value: unknown): string | undefined => {
   const text = typeof value === 'string' ? value.trim() : ''
   return text || undefined
+}
+
+const terminalNetworkErrorCodes = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ECONNABORTED'
+])
+
+const cleanTerminalErrorCode = (value: unknown): string | undefined => {
+  const text = cleanOptional(value)
+  return text ? text.toUpperCase() : undefined
+}
+
+export const isLikelyTerminalNetworkError = (error: unknown): boolean => {
+  const record = typeof error === 'object' && error ? (error as Record<string, unknown>) : {}
+  const code = cleanTerminalErrorCode(record.code || record.errno)
+  if (code && terminalNetworkErrorCodes.has(code)) return true
+  const message = cleanOptional(error instanceof Error ? error.message : record.message || error)
+  return Boolean(message && /(connection|network|timeout|timed out|reset|refused|unreachable|broken pipe|socket)/i.test(message))
+}
+
+export const createTerminalLifecycleEvent = (
+  id: string,
+  event: Omit<TerminalLifecycleEvent, 'id' | 'at'> & { at?: number },
+  at = Date.now()
+): TerminalLifecycleEvent => {
+  const sessionId = cleanOptional(id) || ''
+  const errorCode = cleanTerminalErrorCode(event.errorCode)
+  const reason = cleanOptional(event.reason) as TerminalDisconnectReason | undefined
+  return {
+    id: sessionId,
+    kind: event.kind,
+    stage: event.stage,
+    at: Number.isFinite(event.at) ? Number(event.at) : at,
+    ...(cleanOptional(event.shell) ? { shell: cleanOptional(event.shell) } : {}),
+    ...(cleanOptional(event.cwd) ? { cwd: cleanOptional(event.cwd) } : {}),
+    ...(cleanOptional(event.host) ? { host: cleanOptional(event.host) } : {}),
+    ...(Number.isFinite(event.port) ? { port: Math.max(1, Math.min(65535, Math.round(Number(event.port)))) } : {}),
+    ...(cleanOptional(event.username) ? { username: cleanOptional(event.username) } : {}),
+    ...(cleanOptional(event.connectionId) ? { connectionId: cleanOptional(event.connectionId) } : {}),
+    ...(cleanOptional(event.proxyName) ? { proxyName: cleanOptional(event.proxyName) } : {}),
+    ...(cleanOptional(event.message) ? { message: cleanOptional(event.message) } : {}),
+    ...(event.code === null || Number.isFinite(event.code) ? { code: event.code === null ? null : Number(event.code) } : {}),
+    ...(reason ? { reason } : {}),
+    ...(event.isNetworkDisconnect === undefined ? {} : { isNetworkDisconnect: Boolean(event.isNetworkDisconnect) }),
+    ...(errorCode ? { errorCode } : {}),
+    ...(cleanOptional(event.errorMessage) ? { errorMessage: cleanOptional(event.errorMessage) } : {})
+  }
+}
+
+export const createTerminalErrorLifecycleEvent = (
+  id: string,
+  kind: TerminalLifecycleEvent['kind'],
+  error: unknown,
+  event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>> = {},
+  at = Date.now()
+): TerminalLifecycleEvent => {
+  const record = typeof error === 'object' && error ? (error as Record<string, unknown>) : {}
+  const errorCode = cleanTerminalErrorCode(record.code || record.errno)
+  const errorMessage = cleanOptional(error instanceof Error ? error.message : record.message || error) || 'Terminal session failed.'
+  const isNetworkDisconnect = isLikelyTerminalNetworkError(error)
+  return createTerminalLifecycleEvent(
+    id,
+    {
+      ...event,
+      kind,
+      stage: 'error',
+      reason: isNetworkDisconnect ? 'network' : 'error',
+      isNetworkDisconnect,
+      ...(errorCode ? { errorCode } : {}),
+      errorMessage
+    },
+    at
+  )
 }
 
 export const createSshTerminalConnectionInfo = (

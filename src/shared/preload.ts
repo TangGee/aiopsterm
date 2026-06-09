@@ -44,6 +44,7 @@ export type TerminalSessionInfo = {
   cwd: string
   kind?: 'local' | 'ssh'
   connection?: TerminalSshConnectionInfo
+  lifecycle?: TerminalLifecycleEvent
 }
 
 export type TerminalWriteResult = AiopsMutationResult<{
@@ -60,9 +61,38 @@ export type TerminalDataEvent = {
   data: string
 }
 
+export type TerminalLifecycleStage = 'starting' | 'connecting' | 'proxy-opening' | 'connected' | 'shell-ready' | 'error' | 'closed'
+
+export type TerminalDisconnectReason = 'manual' | 'network' | 'process' | 'error' | 'unknown'
+
+export type TerminalLifecycleEvent = {
+  id: string
+  kind: 'local' | 'ssh'
+  stage: TerminalLifecycleStage
+  at: number
+  shell?: string
+  cwd?: string
+  host?: string
+  port?: number
+  username?: string
+  connectionId?: string
+  proxyName?: string
+  message?: string
+  code?: number | null
+  reason?: TerminalDisconnectReason
+  isNetworkDisconnect?: boolean
+  errorCode?: string
+  errorMessage?: string
+}
+
 export type TerminalExitEvent = {
   id: string
   code: number | null
+  kind?: 'local' | 'ssh'
+  reason?: TerminalDisconnectReason
+  isNetworkDisconnect?: boolean
+  errorCode?: string
+  errorMessage?: string
 }
 
 export type AiopsAssetType = 'person' | 'organization' | 'switch'
@@ -2418,5 +2448,6 @@ export type AiopsPreloadApi = {
   cancelFileTransferTask: (input: FileTransferTaskCancelInput) => Promise<FileTransferTaskCancelResult>
   listFileTransferTasks: () => Promise<FileTransferTask[]>
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
+  onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
 }

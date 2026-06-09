@@ -5276,10 +5276,12 @@ Object.defineProperty(window, 'aiops', {
       const host = options?.ssh?.host || asset?.host || '127.0.0.1'
       const port = options?.ssh?.port || asset?.port || 22
       const username = options?.ssh?.username || asset?.username || 'local'
+      const shell = options?.kind === 'ssh' ? 'ssh' : '/bin/bash'
+      const cwd = options?.kind === 'ssh' ? `/home/${username}` : '/'
       return {
         id,
-        shell: options?.kind === 'ssh' ? 'ssh' : '/bin/bash',
-        cwd: options?.kind === 'ssh' ? `/home/${username}` : '/',
+        shell,
+        cwd,
         kind: options?.kind || 'local',
         connection:
           options?.kind === 'ssh'
@@ -5297,7 +5299,24 @@ Object.defineProperty(window, 'aiops', {
                 createdAt: 1717200001000,
                 ...(options.ssh?.forkFromConnectionId ? { forkFromConnectionId: options.ssh.forkFromConnectionId } : {})
               }
-            : undefined
+            : undefined,
+        lifecycle: {
+          id,
+          kind: options?.kind === 'ssh' ? 'ssh' : 'local',
+          stage: 'shell-ready',
+          shell,
+          cwd,
+          at: 1717200001000,
+          ...(options?.kind === 'ssh'
+            ? {
+                host,
+                port,
+                username,
+                connectionId: `ssh-${id}`,
+                message: `SSH shell ready ${username}@${host}:${port}`
+              }
+            : { message: `Local shell ready ${shell}` })
+        }
       }
     }),
     writeTerminal: vi.fn(async (id: string, data: string) => ({
@@ -6756,6 +6775,7 @@ Object.defineProperty(window, 'aiops', {
     }),
     listFileTransferTasks: vi.fn(async () => fileTransferTasksMock.map((task) => ({ ...task, children: task.children?.map((child: any) => ({ ...child })) }))),
     onTerminalData: vi.fn(() => () => undefined),
+    onTerminalLifecycle: vi.fn(() => () => undefined),
     onTerminalExit: vi.fn(() => () => undefined)
   }
 })

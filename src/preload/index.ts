@@ -6,6 +6,7 @@ import type {
   TerminalCreateOptions,
   TerminalDataEvent,
   TerminalExitEvent,
+  TerminalLifecycleEvent,
   TerminalSessionInfo,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseSearchResult,
@@ -278,6 +279,11 @@ const api: AiopsPreloadApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalDataEvent) => listener(payload)
     ipcRenderer.on('terminal:data', wrapped)
     return () => ipcRenderer.off('terminal:data', wrapped)
+  },
+  onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalLifecycleEvent) => listener(payload)
+    ipcRenderer.on('terminal:lifecycle', wrapped)
+    return () => ipcRenderer.off('terminal:lifecycle', wrapped)
   },
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalExitEvent) => listener(payload)

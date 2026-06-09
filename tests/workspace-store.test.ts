@@ -3150,6 +3150,115 @@ describe('workspace store', () => {
     )
   })
 
+  it('applies backend terminal lifecycle events without renderer-side connection fabrication', () => {
+    const store = useWorkspaceStore()
+
+    store.applyLocalTerminalSession(store.activePanelId, {
+      id: 'terminal-life-local',
+      shell: '/bin/bash',
+      cwd: '/home/unit',
+      kind: 'local',
+      lifecycle: {
+        id: 'terminal-life-local',
+        kind: 'local',
+        stage: 'starting',
+        shell: '/bin/bash',
+        cwd: '/home/unit',
+        at: 1717200003000
+      }
+    })
+    expect(store.activePanel.status).toBe('connecting')
+    expect(store.activePanel.output).not.toContain('[aiopsterm] shell started')
+
+    store.applyTerminalLifecycle({
+      id: 'terminal-life-local',
+      kind: 'local',
+      stage: 'shell-ready',
+      shell: '/bin/bash',
+      cwd: '/home/unit',
+      at: 1717200003010
+    })
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.sessionId).toBe('terminal-life-local')
+
+    store.applyTerminalLifecycle({
+      id: 'terminal-life-local',
+      kind: 'local',
+      stage: 'closed',
+      code: 0,
+      reason: 'manual',
+      isNetworkDisconnect: false,
+      at: 1717200003020
+    })
+    expect(store.activePanel.status).toBe('closed')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.terminalExit).toEqual(expect.objectContaining({ id: 'terminal-life-local', code: 0, reason: 'manual' }))
+
+    store.applySshTerminalSession(store.activePanelId, {
+      id: 'terminal-life-ssh',
+      shell: 'ssh',
+      cwd: '/home/deploy',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-terminal-life-ssh',
+        host: '10.8.0.9',
+        port: 22,
+        username: 'deploy',
+        assetId: 'asset-terminal-file',
+        assetName: 'terminal-file-host',
+        createdAt: 1717200003100
+      }
+    })
+    store.applyTerminalLifecycle({
+      id: 'terminal-life-ssh',
+      kind: 'ssh',
+      stage: 'error',
+      host: '10.8.0.9',
+      port: 22,
+      username: 'deploy',
+      connectionId: 'ssh-terminal-life-ssh',
+      code: 1,
+      reason: 'network',
+      isNetworkDisconnect: true,
+      errorCode: 'ECONNRESET',
+      errorMessage: 'read ECONNRESET',
+      at: 1717200003110
+    })
+
+    expect(store.activePanel.status).toBe('error')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.sshSession).toEqual(
+      expect.objectContaining({
+        connectionId: 'ssh-terminal-life-ssh',
+        assetId: 'asset-terminal-file',
+        host: '10.8.0.9',
+        username: 'deploy'
+      })
+    )
+    expect(store.activePanel.terminalExit).toEqual(
+      expect.objectContaining({
+        id: 'terminal-life-ssh',
+        kind: 'ssh',
+        reason: 'network',
+        isNetworkDisconnect: true,
+        errorCode: 'ECONNRESET'
+      })
+    )
+    expect(store.activePanel.output).not.toContain('[connection disconnected]')
+
+    store.applyTerminalExit({
+      id: 'terminal-life-ssh',
+      code: 1,
+      kind: 'ssh',
+      reason: 'network',
+      isNetworkDisconnect: true,
+      errorCode: 'ECONNRESET',
+      errorMessage: 'read ECONNRESET'
+    })
+    expect(store.activePanel.status).toBe('error')
+    expect(store.activePanel.output).toContain('[process exited: 1]')
+  })
+
   it('does not fabricate Files SFTP sessions or file-session updates when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshFileSessionCatalog()

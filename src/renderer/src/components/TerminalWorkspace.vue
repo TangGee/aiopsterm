@@ -67,7 +67,7 @@
       <button @click="pasteClipboard(termMenu.panelId)"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
       <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+F</kbd></button>
       <i />
-      <button @click="togglePanelConnection(termMenu.panelId)">{{ panelById(termMenu.panelId)?.status === 'closed' ? '重新连接' : '断开连接' }}<kbd>{{ panelById(termMenu.panelId)?.status === 'closed' ? 'Enter' : 'Ctrl+D' }}</kbd></button>
+      <button @click="togglePanelConnection(termMenu.panelId)">{{ isReconnectablePanel(panelById(termMenu.panelId)) ? '重新连接' : '断开连接' }}<kbd>{{ isReconnectablePanel(panelById(termMenu.panelId)) ? 'Enter' : 'Ctrl+D' }}</kbd></button>
       <i />
       <button @click="createTerminalFromMenu"><span>新建终端</span><kbd>Ctrl+N</kbd></button>
       <button @click="closeTerminalFromMenu"><span>关闭终端</span><kbd>Ctrl+W</kbd></button>
@@ -446,6 +446,7 @@ const suggestionSelectionMode = ref(false)
 const activeSuggestion = ref(-1)
 const aiSuggestLoading = ref(false)
 let offData: (() => void) | null = null
+let offLifecycle: (() => void) | null = null
 let offExit: (() => void) | null = null
 const fontSize = ref(12)
 const terminalElements = new Map<string, HTMLElement>()
@@ -468,6 +469,7 @@ type TerminalSuggestion = TerminalCommandSuggestion
 const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
 const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
+const isReconnectablePanel = (panel?: TerminalPanel | null) => panel?.status === 'closed' || panel?.status === 'error'
 let suggestionRequestId = 0
 let commandGenerationRequestId = 0
 
@@ -1254,7 +1256,7 @@ const disconnectTerminalPanel = async (panel: TerminalPanel) => {
 const togglePanelConnection = async (panelId: string) => {
   const panel = panelById(panelId)
   if (!panel || panel.kind === 'knowledge') return
-  if (panel.status === 'closed') {
+  if (isReconnectablePanel(panel)) {
     const connected = await reconnectTerminalPanel(panel)
     if (connected) workspace.setTopNotice('终端已重新连接')
   } else {
@@ -1329,9 +1331,8 @@ const startRealShell = async () => {
 
 onMounted(() => {
   offData = window.aiops?.onTerminalData((event) => workspace.appendTerminalOutput(event.id, event.data)) || null
-  offExit = window.aiops?.onTerminalExit((event) => {
-    workspace.appendTerminalOutput(event.id, `\n[process exited: ${event.code ?? 'unknown'}]\n`)
-  }) || null
+  offLifecycle = window.aiops?.onTerminalLifecycle((event) => workspace.applyTerminalLifecycle(event)) || null
+  offExit = window.aiops?.onTerminalExit((event) => workspace.applyTerminalExit(event)) || null
   document.addEventListener('click', () => {
     menu.visible = false
     termMenu.visible = false
@@ -1341,6 +1342,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   offData?.()
+  offLifecycle?.()
   offExit?.()
   terminalViews.forEach((view) => view.terminal.dispose())
   terminalViews.clear()

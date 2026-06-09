@@ -160,7 +160,13 @@ import {
   getTerminalCommandSuggestions,
   recordTerminalCommandHistory
 } from './backend/terminalSuggestions'
-import { createSshTerminalConnectionInfo, createTerminalKillResult, createTerminalWriteResult } from './backend/terminal'
+import {
+  createSshTerminalConnectionInfo,
+  createTerminalErrorLifecycleEvent,
+  createTerminalKillResult,
+  createTerminalLifecycleEvent,
+  createTerminalWriteResult
+} from './backend/terminal'
 import {
   bindUserContact,
   getUserAccount,
@@ -276,6 +282,8 @@ import type {
   TerminalCommandGenerationInput,
   TerminalCommandSuggestionContext,
   TerminalCreateOptions,
+  TerminalDisconnectReason,
+  TerminalLifecycleEvent,
   ChatImageAttachmentPrepareInput,
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,
@@ -312,12 +320,13 @@ type TerminalSession = {
   window: BrowserWindow
   kind: 'pty' | 'process' | 'ssh'
   host?: string
+  manualCloseRequested?: boolean
 }
 
 type SshShellSession = {
   write(data: string): void
   resize(cols: number, rows: number): void
-  kill(): void
+  kill(reason?: TerminalDisconnectReason): void
 }
 
 type Ssh2Client = {
@@ -675,6 +684,40 @@ let keywordHighlightConfigWatcher: FSWatcher | null = null
 let mcpConfigWatcher: FSWatcher | null = null
 let skillsWatchers: FSWatcher[] = []
 let skillsWatcherDebounce: NodeJS.Timeout | null = null
+
+const sendTerminalLifecycle = (
+  owner: BrowserWindow,
+  id: string,
+  event: Omit<TerminalLifecycleEvent, 'id' | 'at'> & { at?: number }
+): TerminalLifecycleEvent => {
+  const payload = createTerminalLifecycleEvent(id, event)
+  owner.webContents.send('terminal:lifecycle', payload)
+  return payload
+}
+
+const sendTerminalErrorLifecycle = (
+  owner: BrowserWindow,
+  id: string,
+  kind: TerminalLifecycleEvent['kind'],
+  error: unknown,
+  event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>> = {}
+): TerminalLifecycleEvent => {
+  const payload = createTerminalErrorLifecycleEvent(id, kind, error, event)
+  owner.webContents.send('terminal:lifecycle', payload)
+  return payload
+}
+
+const sendTerminalExit = (owner: BrowserWindow, lifecycle: TerminalLifecycleEvent, code = lifecycle.code ?? null) => {
+  owner.webContents.send('terminal:exit', {
+    id: lifecycle.id,
+    code,
+    kind: lifecycle.kind,
+    reason: lifecycle.reason,
+    isNetworkDisconnect: lifecycle.isNetworkDisconnect,
+    errorCode: lifecycle.errorCode,
+    errorMessage: lifecycle.errorMessage
+  })
+}
 
 const cloneKnowledgeBaseNodes = (nodes: KnowledgeBaseNodeConfig[] = []): KnowledgeBaseNodeConfig[] =>
   nodes.map((node) => ({
@@ -2215,43 +2258,64 @@ const createInProcessSshSession = (): SshShellSession => ({
 
 const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
   const target = resolveSshTarget(options)
+  const cwd = target.username ? `/home/${target.username}` : '~'
+  const lifecycleBase = {
+    kind: 'ssh' as const,
+    shell: 'ssh',
+    cwd,
+    host: target.host,
+    port: target.port,
+    username: target.username,
+    connectionId: `ssh-${id}`
+  }
   if (process.env.NODE_ENV === 'test') {
     return {
       shell: 'ssh',
-      cwd: target.username ? `/home/${target.username}` : '~',
+      cwd,
       session: createInProcessSshSession(),
-      connection: target
+      connection: target,
+      lifecycle: createTerminalLifecycleEvent(id, {
+        ...lifecycleBase,
+        stage: 'shell-ready',
+        message: target.host ? `SSH shell ready for ${target.username}@${target.host}:${target.port}` : 'SSH shell ready.'
+      })
     }
   }
 
   const ssh2 = loadSsh2()
   if (!ssh2) {
-    owner.webContents.send('terminal:data', { id, data: '\n[aiopsterm] ssh2 runtime is not available. Run npm install and rebuild native modules if needed.\n' })
-    owner.webContents.send('terminal:exit', { id, code: 1 })
+    const error = new Error('ssh2 runtime is not available. Run npm install and rebuild native modules if needed.')
+    const lifecycle = sendTerminalErrorLifecycle(owner, id, 'ssh', error, {
+      ...lifecycleBase,
+      code: 1,
+      message: 'SSH runtime is not available.'
+    })
+    owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] ${error.message}\n` })
+    sendTerminalExit(owner, lifecycle, 1)
     return {
       shell: 'ssh',
       cwd: '~',
-      session: {
-        write: () => undefined,
-        resize: () => undefined,
-        kill: () => undefined
-      } satisfies SshShellSession,
-      connection: target
+      session: null,
+      connection: target,
+      lifecycle
     }
   }
 
   if (!target.host || !target.username || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) {
-    owner.webContents.send('terminal:data', { id, data: '\n[aiopsterm] SSH target requires host, username, and a valid port.\n' })
-    owner.webContents.send('terminal:exit', { id, code: 1 })
+    const error = new Error('SSH target requires host, username, and a valid port.')
+    const lifecycle = sendTerminalErrorLifecycle(owner, id, 'ssh', error, {
+      ...lifecycleBase,
+      code: 1,
+      message: 'SSH target is invalid.'
+    })
+    owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] ${error.message}\n` })
+    sendTerminalExit(owner, lifecycle, 1)
     return {
       shell: 'ssh',
       cwd: '~',
-      session: {
-        write: () => undefined,
-        resize: () => undefined,
-        kill: () => undefined
-      } satisfies SshShellSession,
-      connection: target
+      session: null,
+      connection: target,
+      lifecycle
     }
   }
 
@@ -2263,11 +2327,56 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
   let rows = options.rows || 30
   const pendingWrites: string[] = []
 
-  const finish = (code: number | null) => {
+  let lifecycle = sendTerminalLifecycle(owner, id, {
+    ...lifecycleBase,
+    stage: 'connecting',
+    message: `Connecting ${target.username}@${target.host}:${target.port}`
+  })
+
+  const finish = (
+    code: number | null,
+    reason: TerminalDisconnectReason,
+    event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>> = {}
+  ) => {
     if (closed) return
     closed = true
     sessions.delete(id)
-    owner.webContents.send('terminal:exit', { id, code })
+    lifecycle = sendTerminalLifecycle(owner, id, {
+      ...lifecycleBase,
+      ...event,
+      stage: reason === 'error' || reason === 'network' ? 'error' : 'closed',
+      code,
+      reason,
+      isNetworkDisconnect: reason === 'network' || event.isNetworkDisconnect === true,
+      message:
+        event.message ||
+        (reason === 'manual'
+          ? 'Terminal closed by user.'
+          : reason === 'process'
+            ? 'Terminal process exited.'
+            : reason === 'network'
+              ? 'SSH connection closed by network.'
+              : 'SSH terminal closed.')
+    })
+    sendTerminalExit(owner, lifecycle, code)
+  }
+
+  const fail = (
+    error: unknown,
+    message: string,
+    code = 1,
+    event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>> = {}
+  ) => {
+    if (closed) return
+    closed = true
+    sessions.delete(id)
+    lifecycle = sendTerminalErrorLifecycle(owner, id, 'ssh', error, {
+      ...lifecycleBase,
+      ...event,
+      code,
+      message
+    })
+    sendTerminalExit(owner, lifecycle, code)
   }
 
   const session: SshShellSession = {
@@ -2286,8 +2395,8 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         ;(stream as unknown as { setWindow: (...args: number[]) => void }).setWindow(rows, cols, 0, 0)
       }
     },
-    kill() {
-      closed = true
+    kill(reason: TerminalDisconnectReason = 'manual') {
+      finish(0, reason)
       try {
         stream?.close()
       } catch {}
@@ -2308,27 +2417,38 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
   client
     .on('ready', () => {
       if (closed) return
+      lifecycle = sendTerminalLifecycle(owner, id, {
+        ...lifecycleBase,
+        stage: 'connected',
+        message: `SSH connected ${target.username}@${target.host}:${target.port}`
+      })
       client.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
         if (error) {
           owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] SSH shell failed: ${error.message}\n` })
-          finish(1)
+          fail(error, 'SSH shell failed.', 1)
           return
         }
         stream = channel
+        lifecycle = sendTerminalLifecycle(owner, id, {
+          ...lifecycleBase,
+          stage: 'shell-ready',
+          message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
+        })
         owner.webContents.send('terminal:data', { id, data: `[aiopsterm] connected ${target.username}@${target.host}:${target.port}\n` })
         while (pendingWrites.length) {
           stream.write(pendingWrites.shift() || '')
         }
         channel.on('data', (chunk: Buffer | string) => owner.webContents.send('terminal:data', { id, data: chunk.toString() }))
         channel.stderr.on('data', (chunk: Buffer | string) => owner.webContents.send('terminal:data', { id, data: chunk.toString() }))
-        channel.on('close', () => finish(0))
+        channel.on('close', () => finish(0, 'process'))
       })
     })
     .on('error', (error) => {
       owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] SSH connection failed: ${error.message}\n` })
-      finish(1)
+      fail(error, 'SSH connection failed.', 1)
     })
-    .on('close', () => finish(null))
+    .on('close', () => finish(null, 'unknown'))
+    .on('end', () => finish(null, 'unknown'))
 
   const connectConfig: ConnectConfig = {
     host: target.host,
@@ -2350,6 +2470,12 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
     try {
       const proxy = await createSshProxySocketForAsset(target.asset, getConfig().sshProxyConfigs, target.host, target.port)
       if (proxy) {
+        lifecycle = sendTerminalLifecycle(owner, id, {
+          ...lifecycleBase,
+          stage: 'proxy-opening',
+          proxyName: proxy.config.name,
+          message: `Opening SSH proxy ${proxy.config.name}`
+        })
         owner.webContents.send('terminal:data', { id, data: `[aiopsterm] opening SSH proxy ${proxy.config.name}\n` })
         proxySocket = proxy.socket
         connectConfig.sock = proxy.socket
@@ -2366,15 +2492,16 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         id,
         data: `\n[aiopsterm] SSH proxy tunnel failed: ${error instanceof Error ? error.message : String(error)}\n`
       })
-      finish(1)
+      fail(error, 'SSH proxy tunnel failed.', 1)
     }
   })()
 
   return {
     shell: 'ssh',
-    cwd: target.username ? `/home/${target.username}` : '~',
+    cwd,
     session,
-    connection: target
+    connection: target,
+    lifecycle
   }
 }
 
@@ -3069,26 +3196,66 @@ const registerIpc = () => {
     const id = randomUUID()
     if (options.kind === 'ssh' || options.ssh || options.assetId) {
       const result = createSshTerminal(owner, id, options)
-      sessions.set(id, {
-        id,
-        process: result.session,
-        shell: result.shell,
-        cwd: result.cwd,
-        window: owner,
-        kind: 'ssh',
-        host: result.connection.host
-      })
+      if (result.session) {
+        sessions.set(id, {
+          id,
+          process: result.session,
+          shell: result.shell,
+          cwd: result.cwd,
+          window: owner,
+          kind: 'ssh',
+          host: result.connection.host
+        })
+      }
       return {
         id,
         shell: result.shell,
         cwd: result.cwd,
         kind: 'ssh' as const,
-        connection: createSshTerminalConnectionInfo(id, result.connection, options)
+        connection: createSshTerminalConnectionInfo(id, result.connection, options),
+        lifecycle: result.lifecycle
       }
     }
 
     const terminalShell = options.shell || getDefaultShell()
     const cwd = options.cwd || app.getPath('home')
+    const localLifecycleBase = {
+      kind: 'local' as const,
+      shell: terminalShell,
+      cwd
+    }
+    let lifecycle = sendTerminalLifecycle(owner, id, {
+      ...localLifecycleBase,
+      stage: 'starting',
+      message: `Starting local shell ${terminalShell}`
+    })
+    let localClosed = false
+    const finishLocal = (code: number | null, reason: TerminalDisconnectReason, message: string) => {
+      if (localClosed) return
+      localClosed = true
+      const terminalSession = sessions.get(id)
+      sessions.delete(id)
+      lifecycle = sendTerminalLifecycle(owner, id, {
+        ...localLifecycleBase,
+        stage: 'closed',
+        code,
+        reason: terminalSession?.manualCloseRequested ? 'manual' : reason,
+        isNetworkDisconnect: false,
+        message: terminalSession?.manualCloseRequested ? 'Terminal closed by user.' : message
+      })
+      sendTerminalExit(owner, lifecycle, code)
+    }
+    const failLocal = (error: unknown, message: string, code = 1) => {
+      if (localClosed) return
+      localClosed = true
+      sessions.delete(id)
+      lifecycle = sendTerminalErrorLifecycle(owner, id, 'local', error, {
+        ...localLifecycleBase,
+        code,
+        message
+      })
+      sendTerminalExit(owner, lifecycle, code)
+    }
     const ptyModule = loadPty()
     if (ptyModule) {
       const ptyProcess = ptyModule.spawn(terminalShell, [], {
@@ -3107,10 +3274,14 @@ const registerIpc = () => {
         kind: 'pty',
         host: 'local'
       })
+      lifecycle = sendTerminalLifecycle(owner, id, {
+        ...localLifecycleBase,
+        stage: 'shell-ready',
+        message: `Local shell ready ${terminalShell}`
+      })
       ptyProcess.onData((data) => owner.webContents.send('terminal:data', { id, data }))
       ptyProcess.onExit((event) => {
-        sessions.delete(id)
-        owner.webContents.send('terminal:exit', { id, code: event.exitCode })
+        finishLocal(event.exitCode, 'process', 'Local shell exited.')
       })
     } else {
       const child = spawn(terminalShell, [], {
@@ -3128,6 +3299,11 @@ const registerIpc = () => {
         kind: 'process',
         host: 'local'
       })
+      lifecycle = sendTerminalLifecycle(owner, id, {
+        ...localLifecycleBase,
+        stage: 'shell-ready',
+        message: `Local shell ready ${terminalShell}`
+      })
 
       child.stdout.on('data', (chunk: Buffer) => {
         owner.webContents.send('terminal:data', { id, data: chunk.toString('utf8') })
@@ -3136,11 +3312,11 @@ const registerIpc = () => {
         owner.webContents.send('terminal:data', { id, data: chunk.toString('utf8') })
       })
       child.on('exit', (code) => {
-        sessions.delete(id)
-        owner.webContents.send('terminal:exit', { id, code })
+        finishLocal(code, 'process', 'Local shell exited.')
       })
       child.on('error', (childError) => {
         owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] failed to start shell: ${childError.message}\n` })
+        failLocal(childError, 'Local shell failed to start.')
       })
       owner.webContents.send('terminal:data', {
         id,
@@ -3148,7 +3324,7 @@ const registerIpc = () => {
       })
     }
 
-    return { id, shell: terminalShell, cwd, kind: 'local' as const }
+    return { id, shell: terminalShell, cwd, kind: 'local' as const, lifecycle }
   })
 
   ipcMain.handle('terminal:write', (_event, id: string, data: string) => {
@@ -3178,12 +3354,12 @@ const registerIpc = () => {
   ipcMain.handle('terminal:kill', (_event, id: string) => {
     const session = sessions.get(id)
     if (!session) return createTerminalKillResult(id, false)
+    session.manualCloseRequested = true
     if (session.kind === 'ssh') {
-      ;(session.process as SshShellSession).kill()
+      ;(session.process as SshShellSession).kill('manual')
     } else {
       session.process.kill()
     }
-    sessions.delete(id)
     return createTerminalKillResult(id, true)
   })
 

@@ -3499,6 +3499,55 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('consumes backend terminal lifecycle events for reconnect-aware panel state', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    expect(window.aiops.onTerminalLifecycle).toHaveBeenCalled()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.findAll('.terminal-toolbar button').find((button) => button.text().includes('打开本地 shell'))!.trigger('click')
+    await flushPromises()
+    expect(store.activePanel.sessionId).toBe('test-session-local')
+
+    const lifecycleListener = vi.mocked(window.aiops.onTerminalLifecycle).mock.calls.at(-1)?.[0]
+    expect(lifecycleListener).toBeTruthy()
+    lifecycleListener?.({
+      id: 'test-session-local',
+      kind: 'local',
+      stage: 'error',
+      shell: '/bin/bash',
+      cwd: '/',
+      code: 1,
+      reason: 'error',
+      isNetworkDisconnect: false,
+      errorMessage: 'failed to start shell',
+      at: 1717200005000
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(store.activePanel.status).toBe('error')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.output).not.toContain('[connection disconnected]')
+    expect(store.activePanel.terminalExit).toEqual(expect.objectContaining({ reason: 'error', errorMessage: 'failed to start shell' }))
+
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    expect(wrapper.find('.terminal-context-menu').text()).toContain('重新连接')
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('重新连接'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.sessionId).toBe('test-session-local')
+
+    wrapper.unmount()
+  })
+
   it('matches External reference-style terminal context menu, search overlay, suggestions, and global command bar', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

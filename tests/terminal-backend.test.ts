@@ -1,14 +1,18 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 let createSshTerminalConnectionInfo: (terminalId: string, target: any, options?: any, createdAt?: number) => any
+let createTerminalErrorLifecycleEvent: (id: string, kind: any, error: unknown, event?: any, at?: number) => any
 let createTerminalKillResult: (id: string, exists: boolean) => any
+let createTerminalLifecycleEvent: (id: string, event: any, at?: number) => any
 let createTerminalWriteResult: (id: string, data: string, exists: boolean) => any
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/terminal'
   const backend = await import(modulePath)
   createSshTerminalConnectionInfo = backend.createSshTerminalConnectionInfo
+  createTerminalErrorLifecycleEvent = backend.createTerminalErrorLifecycleEvent
   createTerminalKillResult = backend.createTerminalKillResult
+  createTerminalLifecycleEvent = backend.createTerminalLifecycleEvent
   createTerminalWriteResult = backend.createTerminalWriteResult
 })
 
@@ -109,6 +113,75 @@ describe('terminal backend boundary', () => {
       ok: false,
       errorCode: 'TERMINAL_SESSION_NOT_FOUND',
       errorMessage: 'Terminal session is not available.'
+    })
+  })
+
+  it('normalizes terminal lifecycle events at the backend boundary', () => {
+    expect(
+      createTerminalLifecycleEvent(
+        'terminal-life-unit',
+        {
+          kind: 'ssh',
+          stage: 'proxy-opening',
+          shell: 'ssh',
+          cwd: '/home/ops',
+          host: '10.8.0.6',
+          port: 70000,
+          username: 'ops',
+          connectionId: 'ssh-terminal-life-unit',
+          proxyName: 'release-proxy',
+          message: 'Opening proxy'
+        },
+        1717200003000
+      )
+    ).toEqual({
+      id: 'terminal-life-unit',
+      kind: 'ssh',
+      stage: 'proxy-opening',
+      at: 1717200003000,
+      shell: 'ssh',
+      cwd: '/home/ops',
+      host: '10.8.0.6',
+      port: 65535,
+      username: 'ops',
+      connectionId: 'ssh-terminal-life-unit',
+      proxyName: 'release-proxy',
+      message: 'Opening proxy'
+    })
+  })
+
+  it('classifies terminal transport failures for reconnect-aware UI state', () => {
+    const error = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    expect(
+      createTerminalErrorLifecycleEvent(
+        'terminal-error-unit',
+        'ssh',
+        error,
+        {
+          shell: 'ssh',
+          host: '10.8.0.6',
+          port: 22,
+          username: 'ops',
+          code: 1,
+          message: 'SSH connection failed.'
+        },
+        1717200004000
+      )
+    ).toEqual({
+      id: 'terminal-error-unit',
+      kind: 'ssh',
+      stage: 'error',
+      at: 1717200004000,
+      shell: 'ssh',
+      host: '10.8.0.6',
+      port: 22,
+      username: 'ops',
+      message: 'SSH connection failed.',
+      code: 1,
+      reason: 'network',
+      isNetworkDisconnect: true,
+      errorCode: 'ECONNRESET',
+      errorMessage: 'read ECONNRESET'
     })
   })
 })
