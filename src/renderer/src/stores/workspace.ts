@@ -53,6 +53,7 @@ import type {
   KnowledgeBaseUserConfig,
   KnowledgeNode,
   KnowledgeNodeType,
+  KubernetesAgentProxyConfig,
   KubernetesBastionGroup,
   KubernetesCatalog,
   KubernetesClusterRecord,
@@ -134,15 +135,20 @@ type K8sNamespaceInfo = KubernetesNamespaceInfo
 type K8sResource = KubernetesResource
 type K8sResourceKind = KubernetesResourceKind
 type K8sConnectionStatus = KubernetesConnectionStatus
-type K8sProxyConfig = {
-  enabled: boolean
-  type: 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
-  host: string
-  port: number
-  enableProxyIdentity: boolean
-  username: string
-  password: string
+type K8sProxyConfig = KubernetesAgentProxyConfig
+const defaultK8sProxyConfig: K8sProxyConfig = {
+  enabled: false,
+  type: 'SOCKS5',
+  host: '127.0.0.1',
+  port: 1080,
+  enableProxyIdentity: false,
+  username: '',
+  password: '',
+  updatedAt: ''
 }
+
+const cloneK8sProxyConfig = (config: K8sProxyConfig): K8sProxyConfig => ({ ...config })
+
 type K8sTerminalStatus = KubernetesTerminalStatus
 type K8sTerminalTab = {
   id: string
@@ -2715,15 +2721,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const k8sAgentRuns = ref<K8sAgentRunRecord[]>([])
   const k8sAgentLastResult = ref<K8sAgentRunRecord | null>(null)
   const k8sAgentTesting = ref(false)
-  const k8sProxyConfig = ref<K8sProxyConfig>({
-    enabled: false,
-    type: 'SOCKS5',
-    host: '127.0.0.1',
-    port: 1080,
-    enableProxyIdentity: false,
-    username: '',
-    password: ''
-  })
+  const savedK8sProxyConfig = ref<K8sProxyConfig>(cloneK8sProxyConfig(defaultK8sProxyConfig))
+  const k8sProxyConfig = ref<K8sProxyConfig>(cloneK8sProxyConfig(defaultK8sProxyConfig))
   const k8sProxyConfigOpen = ref(false)
   const activeSettingsSection = ref<SettingSectionKey>('general')
   const editorSettings = ref<EditorSettings>({ ...defaultEditorSettings })
@@ -8009,6 +8008,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       activateK8sTerminal(k8sTerminalTabs.value[0].id)
     }
 
+    const agentProxyConfig = catalog.agentProxyConfig || defaultK8sProxyConfig
+    savedK8sProxyConfig.value = cloneK8sProxyConfig(agentProxyConfig)
+    if (!k8sProxyConfigOpen.value) {
+      k8sProxyConfig.value = cloneK8sProxyConfig(agentProxyConfig)
+    }
+
     const activeCluster = k8sClusters.value.find((cluster) => cluster.id === k8sActiveClusterId.value)
     if (activeCluster && (!k8sAgentClusterId.value || !k8sClusters.value.some((cluster) => cluster.id === k8sAgentClusterId.value))) {
       k8sAgentClusterId.value = activeCluster.id
@@ -8080,10 +8085,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openK8sProxyConfig = () => {
+    k8sProxyConfig.value = cloneK8sProxyConfig(savedK8sProxyConfig.value)
     k8sProxyConfigOpen.value = true
   }
 
   const closeK8sProxyConfig = () => {
+    k8sProxyConfig.value = cloneK8sProxyConfig(savedK8sProxyConfig.value)
     k8sProxyConfigOpen.value = false
   }
 
@@ -8099,13 +8106,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const saveK8sProxyConfig = () => {
+  const saveK8sProxyConfig = async () => {
     if (k8sProxyConfig.value.enabled && (!k8sProxyConfig.value.host.trim() || !k8sProxyConfig.value.port)) {
       setK8sNotice('请补全 Kubernetes Agent 代理主机和端口')
       return false
     }
+    if (!window.aiops?.saveKubernetesAgentProxyConfig) {
+      setK8sNotice('Kubernetes Agent 代理配置服务不可用')
+      return false
+    }
+    const draft = cloneK8sProxyConfig(k8sProxyConfig.value)
+    try {
+      const result = await window.aiops.saveKubernetesAgentProxyConfig(draft)
+      if (!result?.ok || !result.data?.proxyConfig) {
+        setK8sNotice(result?.errorMessage || 'Kubernetes Agent 代理配置保存失败')
+        return false
+      }
+      savedK8sProxyConfig.value = cloneK8sProxyConfig(result.data.proxyConfig)
+      k8sProxyConfig.value = cloneK8sProxyConfig(result.data.proxyConfig)
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : 'Kubernetes Agent 代理配置保存失败')
+      return false
+    }
     k8sProxyConfigOpen.value = false
-    setK8sNotice(k8sProxyConfig.value.enabled ? 'Kubernetes Agent 代理配置已应用' : 'Kubernetes Agent 代理已关闭')
+    setK8sNotice(savedK8sProxyConfig.value.enabled ? 'Kubernetes Agent 代理配置已应用' : 'Kubernetes Agent 代理已关闭')
     return true
   }
 
@@ -8145,9 +8169,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           k8sAgentStatus.value = 'ready'
         }
         completeK8sTerminalConnect(id)
+        const appliedProxyConfig = savedK8sProxyConfig.value
         setK8sNotice(
-          k8sProxyConfig.value.enabled
-            ? `${latest?.name || cluster.name} 连接成功，K8s Agent 代理 ${k8sProxyConfig.value.type} ${k8sProxyConfig.value.host}:${k8sProxyConfig.value.port} 已应用`
+          appliedProxyConfig.enabled
+            ? `${latest?.name || cluster.name} 连接成功，K8s Agent 代理 ${appliedProxyConfig.type} ${appliedProxyConfig.host}:${appliedProxyConfig.port} 已应用`
             : `${latest?.name || cluster.name} 连接成功`
         )
         return true

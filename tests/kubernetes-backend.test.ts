@@ -4,15 +4,18 @@ import {
   addKubernetesCluster,
   cleanupKubernetesAgent,
   closeKubernetesTerminal,
+  configureKubernetesBackendRuntime,
   createKubernetesTerminal,
   executeKubernetesCommand,
+  getKubernetesAgentProxyConfig,
   importKubernetesKubeconfig,
   listKubernetesCatalog,
   refreshKubernetesResources,
   resizeKubernetesTerminal,
+  saveKubernetesAgentProxyConfig,
   testKubernetesClusterConnection
 } from '@shared/kubernetes'
-import { chmod, mkdtemp, rm, writeFile } from 'fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -20,7 +23,10 @@ describe('kubernetes backend boundary', () => {
   const tempDirs: string[] = []
   const originalKubectlPath = process.env.AIOPSTERM_KUBECTL_PATH
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'aiopsterm-k8s-state-'))
+    tempDirs.push(stateDir)
+    configureKubernetesBackendRuntime({ stateDir })
     __resetKubernetesCatalogForTests()
   })
 
@@ -167,6 +173,96 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.output).toContain('ARGS=get pods --context=qa/dev --namespace=qa')
     expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods')
     expect(result.data?.terminalOutput).toContain('fake kubectl invoked')
+  })
+
+  it('persists Kubernetes Agent proxy config and applies it to local kubectl runs', async () => {
+    await createFakeKubectl(
+      [
+        'echo "HTTP_PROXY=$HTTP_PROXY"',
+        'echo "HTTPS_PROXY=$HTTPS_PROXY"',
+        'echo "ALL_PROXY=$ALL_PROXY"',
+        'echo "ARGS=$*"'
+      ].join('\n')
+    )
+    const saved = await saveKubernetesAgentProxyConfig({
+      enabled: true,
+      type: 'SOCKS5',
+      host: 'proxy.internal',
+      port: 18080,
+      enableProxyIdentity: true,
+      username: 'ops user',
+      password: 'p@ss word'
+    })
+
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.proxyConfig).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        type: 'SOCKS5',
+        host: 'proxy.internal',
+        port: 18080,
+        username: 'ops user',
+        password: 'p@ss word',
+        updatedAt: '刚刚'
+      })
+    )
+    const persisted = JSON.parse(await readFile(join(tempDirs[0], 'agent-proxy.json'), 'utf-8'))
+    expect(persisted).toMatchObject({ enabled: true, type: 'SOCKS5', host: 'proxy.internal', port: 18080 })
+
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0] })
+    await expect(getKubernetesAgentProxyConfig()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        proxyConfig: expect.objectContaining({ enabled: true, host: 'proxy.internal', port: 18080 })
+      }
+    })
+    await expect(listKubernetesCatalog()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        agentProxyConfig: expect.objectContaining({ enabled: true, host: 'proxy.internal', port: 18080 })
+      }
+    })
+
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    const result = await executeKubernetesCommand({
+      command: 'kubectl get pods',
+      clusterId: added.data!.cluster!.id,
+      namespace: 'qa'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.output).toContain('HTTP_PROXY=socks5://ops%20user:p%40ss%20word@proxy.internal:18080')
+    expect(result.data?.output).toContain('HTTPS_PROXY=socks5://ops%20user:p%40ss%20word@proxy.internal:18080')
+    expect(result.data?.output).toContain('ALL_PROXY=socks5://ops%20user:p%40ss%20word@proxy.internal:18080')
+  })
+
+  it('rejects invalid Kubernetes Agent proxy config at the backend boundary', async () => {
+    await expect(saveKubernetesAgentProxyConfig({ enabled: true, host: '' })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_AGENT_PROXY_HOST_REQUIRED',
+      errorMessage: 'Kubernetes Agent proxy host is required.'
+    })
+    await expect(
+      saveKubernetesAgentProxyConfig({
+        enabled: true,
+        host: 'proxy.internal',
+        enableProxyIdentity: true,
+        username: 'ops',
+        password: ''
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_AGENT_PROXY_CREDENTIALS_REQUIRED',
+      errorMessage: 'Proxy authentication requires username and password.'
+    })
   })
 
   it('refreshes explicit kubeconfig cluster resources from kubectl tables', async () => {

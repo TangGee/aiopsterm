@@ -106,16 +106,19 @@ import {
 import {
   addKubernetesCluster,
   cleanupKubernetesAgent,
+  configureKubernetesBackendRuntime,
   connectKubernetesCluster,
   closeKubernetesTerminal,
   createKubernetesTerminal,
   deleteKubernetesCluster,
   disconnectKubernetesCluster,
   executeKubernetesCommand,
+  getKubernetesAgentProxyConfig,
   importKubernetesKubeconfig,
   listKubernetesCatalog,
   refreshKubernetesResources,
   resizeKubernetesTerminal,
+  saveKubernetesAgentProxyConfig,
   switchKubernetesContext,
   syncKubernetesBastion,
   testKubernetesClusterConnection,
@@ -227,6 +230,7 @@ import type {
   KnowledgeBaseNodeConfig,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
+  KubernetesAgentProxyConfigInput,
   KubernetesClusterInput,
   KubernetesKubeconfigImportInput,
   KubernetesClusterTestInput,
@@ -1158,6 +1162,7 @@ configureAiChatRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig })
 configureVoiceBackendRuntime({ getConfig })
 configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
+configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')
@@ -3157,6 +3162,8 @@ const registerIpc = () => {
   ipcMain.handle('kubernetes:terminal:close', (_event, id: string, exitCode?: number) => closeKubernetesTerminal(id, exitCode))
   ipcMain.handle('kubernetes:execute-command', (_event, input: KubernetesCommandInput) => executeKubernetesCommand(input))
   ipcMain.handle('kubernetes:resources:refresh', (_event, input: KubernetesResourceRefreshInput) => refreshKubernetesResources(input))
+  ipcMain.handle('kubernetes:agent:proxy:get', () => getKubernetesAgentProxyConfig())
+  ipcMain.handle('kubernetes:agent:proxy:save', (_event, input: KubernetesAgentProxyConfigInput) => saveKubernetesAgentProxyConfig(input))
   ipcMain.handle('kubernetes:agent:cleanup', () => cleanupKubernetesAgent())
   ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())
   ipcMain.handle('files:sessions:save', (_event, session: FileSessionInfo) => saveFileSession(session))

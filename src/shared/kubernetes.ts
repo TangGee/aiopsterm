@@ -1,10 +1,14 @@
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
-import { join } from 'path'
+import { isAbsolute, join, resolve } from 'path'
 import type {
   AiopsMutationResult,
+  KubernetesAgentProxyConfig,
+  KubernetesAgentProxyConfigInput,
+  KubernetesAgentProxyConfigResult,
   KubernetesBastionGroup,
   KubernetesBastionSyncResult,
   KubernetesCatalog,
@@ -36,6 +40,19 @@ import type {
 } from './preload'
 
 const nowLabel = () => '刚刚'
+
+type KubernetesBackendRuntimeConfig = {
+  stateDir?: string
+}
+
+const defaultKubernetesStateDir = () => {
+  const envRoot = String(process.env.AIOPSTERM_KUBERNETES_STATE_DIR || '').trim()
+  return envRoot ? (isAbsolute(envRoot) ? envRoot : resolve(envRoot)) : join(process.cwd(), '.aiopsterm-kubernetes')
+}
+
+let runtimeConfig: Required<KubernetesBackendRuntimeConfig> = {
+  stateDir: defaultKubernetesStateDir()
+}
 
 const defaultContexts: KubernetesContextInfo[] = [
   {
@@ -325,6 +342,19 @@ const defaultImportContexts: KubernetesImportContextInfo[] = [
   { name: 'staging/devops', cluster: 'staging-cluster', server: 'https://staging.k8s.local:6443', namespace: 'staging' }
 ]
 
+const kubernetesProxyTypes: KubernetesAgentProxyConfig['type'][] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
+
+const defaultAgentProxyConfig: KubernetesAgentProxyConfig = {
+  enabled: false,
+  type: 'SOCKS5',
+  host: '127.0.0.1',
+  port: 1080,
+  enableProxyIdentity: false,
+  username: '',
+  password: '',
+  updatedAt: ''
+}
+
 let contexts = defaultContexts.map((context) => ({ ...context }))
 let clusters = defaultClusters.map((cluster) => ({ ...cluster }))
 let bastions = defaultBastions.map((bastion) => ({ ...bastion }))
@@ -332,6 +362,104 @@ let namespaces = defaultNamespaces.map((namespace) => ({ ...namespace }))
 let resources = defaultResources.map((resource) => ({ ...resource }))
 let importContexts = defaultImportContexts.map((context) => ({ ...context }))
 let terminalSessions: KubernetesTerminalRecord[] = []
+let agentProxyConfigCache: KubernetesAgentProxyConfig | null = null
+
+const cloneAgentProxyConfig = (config: KubernetesAgentProxyConfig): KubernetesAgentProxyConfig => ({ ...config })
+
+const agentProxyConfigPath = () => join(runtimeConfig.stateDir, 'agent-proxy.json')
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T): T =>
+  typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback
+
+const numberInRange = (value: unknown, fallback: number, min: number, max: number) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(min, Math.min(max, Math.round(number)))
+}
+
+const normalizeAgentProxyConfig = (
+  input: unknown,
+  base: KubernetesAgentProxyConfig = defaultAgentProxyConfig
+): { config: KubernetesAgentProxyConfig; changed: boolean } => {
+  const source = isRecord(input) ? input : {}
+  const enabled = typeof source.enabled === 'boolean' ? source.enabled : base.enabled
+  const enableProxyIdentity = typeof source.enableProxyIdentity === 'boolean' ? source.enableProxyIdentity : base.enableProxyIdentity
+  const config: KubernetesAgentProxyConfig = {
+    enabled,
+    type: stringFromOptions(source.type, kubernetesProxyTypes, base.type),
+    host: typeof source.host === 'string' ? source.host.trim() : base.host,
+    port: numberInRange(source.port, base.port, 1, 65535),
+    enableProxyIdentity,
+    username: enableProxyIdentity && typeof source.username === 'string' ? source.username : '',
+    password: enableProxyIdentity && typeof source.password === 'string' ? source.password : '',
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : base.updatedAt
+  }
+  const allowedKeys = new Set(['enabled', 'type', 'host', 'port', 'enableProxyIdentity', 'username', 'password', 'updatedAt'])
+  const changed =
+    !isRecord(input) ||
+    source.enabled !== config.enabled ||
+    source.type !== config.type ||
+    source.host !== config.host ||
+    source.port !== config.port ||
+    source.enableProxyIdentity !== config.enableProxyIdentity ||
+    source.username !== config.username ||
+    source.password !== config.password ||
+    source.updatedAt !== config.updatedAt ||
+    Object.keys(source).some((key) => !allowedKeys.has(key))
+
+  return { config, changed }
+}
+
+const validateAgentProxyConfig = (config: KubernetesAgentProxyConfig) => {
+  if (!config.enabled) return
+  if (!config.host.trim()) {
+    throw Object.assign(new Error('Kubernetes Agent proxy host is required.'), { code: 'K8S_AGENT_PROXY_HOST_REQUIRED' })
+  }
+  if (config.port < 1 || config.port > 65535) {
+    throw Object.assign(new Error('Kubernetes Agent proxy port must be between 1 and 65535.'), { code: 'K8S_AGENT_PROXY_PORT_INVALID' })
+  }
+  if (!config.enableProxyIdentity) return
+  if (config.type === 'SOCKS4' && !config.username.trim()) {
+    throw Object.assign(new Error('SOCKS4 proxy authentication requires username.'), { code: 'K8S_AGENT_PROXY_USERNAME_REQUIRED' })
+  }
+  if (config.type !== 'SOCKS4' && (!config.username.trim() || !config.password)) {
+    throw Object.assign(new Error('Proxy authentication requires username and password.'), { code: 'K8S_AGENT_PROXY_CREDENTIALS_REQUIRED' })
+  }
+}
+
+const loadAgentProxyConfig = (): KubernetesAgentProxyConfig => {
+  if (agentProxyConfigCache) return cloneAgentProxyConfig(agentProxyConfigCache)
+  try {
+    const filePath = agentProxyConfigPath()
+    if (!existsSync(filePath)) {
+      agentProxyConfigCache = { ...defaultAgentProxyConfig }
+      return cloneAgentProxyConfig(agentProxyConfigCache)
+    }
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
+    const { config } = normalizeAgentProxyConfig(parsed)
+    validateAgentProxyConfig(config)
+    agentProxyConfigCache = config
+    return cloneAgentProxyConfig(agentProxyConfigCache)
+  } catch {
+    agentProxyConfigCache = { ...defaultAgentProxyConfig }
+    return cloneAgentProxyConfig(agentProxyConfigCache)
+  }
+}
+
+const writeAgentProxyConfig = (config: KubernetesAgentProxyConfig) => {
+  mkdirSync(runtimeConfig.stateDir, { recursive: true })
+  writeFileSync(agentProxyConfigPath(), JSON.stringify(config, null, 2), 'utf-8')
+  agentProxyConfigCache = cloneAgentProxyConfig(config)
+}
+
+export const configureKubernetesBackendRuntime = (config: KubernetesBackendRuntimeConfig = {}) => {
+  runtimeConfig = {
+    stateDir: config.stateDir ? (isAbsolute(config.stateDir) ? config.stateDir : resolve(config.stateDir)) : defaultKubernetesStateDir()
+  }
+  agentProxyConfigCache = null
+}
 
 const cloneCatalog = (): KubernetesCatalog => {
   const activeCluster = clusters.find((cluster) => cluster.is_active === 1) || null
@@ -344,7 +472,8 @@ const cloneCatalog = (): KubernetesCatalog => {
     resources: resources.map((resource) => ({ ...resource })),
     importContexts: importContexts.map((context) => ({ ...context })),
     activeClusterId: activeCluster?.id || null,
-    selectedClusterId: activeCluster?.id || clusters[0]?.id || null
+    selectedClusterId: activeCluster?.id || clusters[0]?.id || null,
+    agentProxyConfig: loadAgentProxyConfig()
   }
 }
 
@@ -516,6 +645,31 @@ const upsertContextForCluster = (cluster: KubernetesClusterRecord, isActive = cl
 }
 
 export const listKubernetesCatalog = async (): Promise<KubernetesCatalogResult> => asResult(() => cloneCatalog())
+
+export const getKubernetesAgentProxyConfig = async (): Promise<KubernetesAgentProxyConfigResult> =>
+  asResult(() => ({
+    proxyConfig: loadAgentProxyConfig(),
+    message: 'Kubernetes Agent proxy configuration loaded.'
+  }))
+
+export const saveKubernetesAgentProxyConfig = async (input: KubernetesAgentProxyConfigInput): Promise<KubernetesAgentProxyConfigResult> =>
+  asResult(() => {
+    const current = loadAgentProxyConfig()
+    const { config } = normalizeAgentProxyConfig(
+      {
+        ...current,
+        ...(isRecord(input) ? input : {}),
+        updatedAt: nowLabel()
+      },
+      current
+    )
+    validateAgentProxyConfig(config)
+    writeAgentProxyConfig(config)
+    return {
+      proxyConfig: cloneAgentProxyConfig(config),
+      message: config.enabled ? 'Kubernetes Agent proxy configuration saved.' : 'Kubernetes Agent proxy disabled.'
+    }
+  }, 'K8S_AGENT_PROXY_SAVE_FAILED')
 
 export const switchKubernetesContext = async (contextName: string): Promise<KubernetesContextSwitchResult> =>
   asResult(() => {
@@ -810,6 +964,7 @@ export const __resetKubernetesCatalogForTests = () => {
   resources = defaultResources.map((resource) => ({ ...resource }))
   importContexts = defaultImportContexts.map((context) => ({ ...context }))
   terminalSessions = []
+  agentProxyConfigCache = null
 }
 
 const resourceTypeByKind: Record<KubernetesResourceKind, string> = {
@@ -963,6 +1118,20 @@ const createKubectlEnvironment = async (cluster: KubernetesClusterRecord) => {
     env.KUBECONFIG = kubeconfigPath
   } else if (cluster.kubeconfig_path?.trim()) {
     env.KUBECONFIG = expandHomePath(cluster.kubeconfig_path.trim())
+  }
+  const proxyConfig = loadAgentProxyConfig()
+  if (proxyConfig.enabled) {
+    const scheme = proxyConfig.type.toLowerCase()
+    const username = proxyConfig.enableProxyIdentity ? encodeURIComponent(proxyConfig.username.trim()) : ''
+    const password = proxyConfig.enableProxyIdentity && proxyConfig.type !== 'SOCKS4' ? `:${encodeURIComponent(proxyConfig.password)}` : ''
+    const auth = username ? `${username}${password}@` : ''
+    const proxyUrl = `${scheme}://${auth}${proxyConfig.host}:${proxyConfig.port}`
+    env.HTTP_PROXY = proxyUrl
+    env.HTTPS_PROXY = proxyUrl
+    env.ALL_PROXY = proxyUrl
+    env.http_proxy = proxyUrl
+    env.https_proxy = proxyUrl
+    env.all_proxy = proxyUrl
   }
   const cleanup = async () => {
     if (tempDir) await rm(tempDir, { recursive: true, force: true })

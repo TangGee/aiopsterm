@@ -2222,12 +2222,32 @@ const defaultKubernetesCatalog = {
     { name: 'staging/devops', cluster: 'staging-cluster', server: 'https://staging.k8s.local:6443', namespace: 'staging' }
   ],
   activeClusterId: 'k8s-1',
-  selectedClusterId: 'k8s-1'
+  selectedClusterId: 'k8s-1',
+  agentProxyConfig: {
+    enabled: false,
+    type: 'SOCKS5' as const,
+    host: '127.0.0.1',
+    port: 1080,
+    enableProxyIdentity: false,
+    username: '',
+    password: '',
+    updatedAt: ''
+  }
 }
 
 type TestKubernetesConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error'
 type TestKubernetesClusterSource = 'local' | 'jumpserver'
 type TestKubernetesResourceKind = 'pods' | 'deployments' | 'services' | 'nodes'
+type TestKubernetesAgentProxyConfig = {
+  enabled: boolean
+  type: 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
+  host: string
+  port: number
+  enableProxyIdentity: boolean
+  username: string
+  password: string
+  updatedAt: string
+}
 type TestKubernetesCatalog = {
   contexts: Array<{ name: string; cluster: string; namespace: string; server: string; isActive: boolean }>
   currentContext: string
@@ -2272,6 +2292,7 @@ type TestKubernetesCatalog = {
   importContexts: Array<{ name: string; cluster: string; server: string; namespace: string }>
   activeClusterId: string | null
   selectedClusterId: string | null
+  agentProxyConfig: TestKubernetesAgentProxyConfig
 }
 type TestKubernetesCluster = TestKubernetesCatalog['clusters'][number]
 type TestKubernetesContext = TestKubernetesCatalog['contexts'][number]
@@ -2285,7 +2306,8 @@ const cloneKubernetesCatalog = (catalog: TestKubernetesCatalog = kubernetesCatal
   resources: catalog.resources.map((resource) => ({ ...resource })),
   importContexts: catalog.importContexts.map((context) => ({ ...context })),
   activeClusterId: catalog.clusters.find((cluster) => cluster.is_active === 1)?.id || null,
-  selectedClusterId: catalog.selectedClusterId || catalog.clusters[0]?.id || null
+  selectedClusterId: catalog.selectedClusterId || catalog.clusters[0]?.id || null,
+  agentProxyConfig: { ...catalog.agentProxyConfig }
 })
 
 let kubernetesCatalogMock: TestKubernetesCatalog = {
@@ -2297,7 +2319,8 @@ let kubernetesCatalogMock: TestKubernetesCatalog = {
   resources: defaultKubernetesCatalog.resources.map((resource) => ({ ...resource })),
   importContexts: defaultKubernetesCatalog.importContexts.map((context) => ({ ...context })),
   activeClusterId: defaultKubernetesCatalog.activeClusterId,
-  selectedClusterId: defaultKubernetesCatalog.selectedClusterId
+  selectedClusterId: defaultKubernetesCatalog.selectedClusterId,
+  agentProxyConfig: { ...defaultKubernetesCatalog.agentProxyConfig }
 }
 
 const resetKubernetesCatalogMock = () => {
@@ -2310,7 +2333,8 @@ const resetKubernetesCatalogMock = () => {
     resources: defaultKubernetesCatalog.resources.map((resource) => ({ ...resource })),
     importContexts: defaultKubernetesCatalog.importContexts.map((context) => ({ ...context })),
     activeClusterId: defaultKubernetesCatalog.activeClusterId,
-    selectedClusterId: defaultKubernetesCatalog.selectedClusterId
+    selectedClusterId: defaultKubernetesCatalog.selectedClusterId,
+    agentProxyConfig: { ...defaultKubernetesCatalog.agentProxyConfig }
   }
   kubernetesTerminalSequenceMock = 1
 }
@@ -5787,6 +5811,41 @@ Object.defineProperty(window, 'aiops', {
         refreshedNamespaces,
         message: `Kubernetes resources refreshed from backend for ${cluster.name}.`
       })
+    }),
+    getKubernetesAgentProxyConfig: vi.fn(async () => ({
+      ok: true,
+      data: {
+        proxyConfig: { ...kubernetesCatalogMock.agentProxyConfig },
+        message: 'Kubernetes Agent proxy configuration loaded.'
+      }
+    })),
+    saveKubernetesAgentProxyConfig: vi.fn(async (input: Partial<TestKubernetesAgentProxyConfig>) => {
+      const enabled = typeof input.enabled === 'boolean' ? input.enabled : kubernetesCatalogMock.agentProxyConfig.enabled
+      const enableProxyIdentity =
+        typeof input.enableProxyIdentity === 'boolean' ? input.enableProxyIdentity : kubernetesCatalogMock.agentProxyConfig.enableProxyIdentity
+      const proxyConfig: TestKubernetesAgentProxyConfig = {
+        enabled,
+        type: ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].includes(input.type || '')
+          ? (input.type as TestKubernetesAgentProxyConfig['type'])
+          : kubernetesCatalogMock.agentProxyConfig.type,
+        host: typeof input.host === 'string' ? input.host.trim() : kubernetesCatalogMock.agentProxyConfig.host,
+        port: Math.max(1, Math.min(65535, Number(input.port) || kubernetesCatalogMock.agentProxyConfig.port)),
+        enableProxyIdentity,
+        username: enableProxyIdentity && typeof input.username === 'string' ? input.username : '',
+        password: enableProxyIdentity && typeof input.password === 'string' ? input.password : '',
+        updatedAt: '刚刚'
+      }
+      if (proxyConfig.enabled && !proxyConfig.host) {
+        return { ok: false, errorCode: 'K8S_AGENT_PROXY_HOST_REQUIRED', errorMessage: 'Kubernetes Agent proxy host is required.' }
+      }
+      kubernetesCatalogMock.agentProxyConfig = proxyConfig
+      return {
+        ok: true,
+        data: {
+          proxyConfig: { ...proxyConfig },
+          message: proxyConfig.enabled ? 'Kubernetes Agent proxy configuration saved.' : 'Kubernetes Agent proxy disabled.'
+        }
+      }
     }),
     listFileSessionCatalog: vi.fn(async () => fileSessionResultMock(cloneFileSessionCatalogMock())),
     saveFileSession: vi.fn(async (session: TestFileSessionInfo) => {

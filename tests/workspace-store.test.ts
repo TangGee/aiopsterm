@@ -4733,7 +4733,10 @@ describe('workspace store', () => {
     expect(store.k8sProxyConfigOpen).toBe(true)
     store.updateK8sProxyConfig({ enabled: true, type: 'HTTPS', host: 'proxy.internal', port: 8443, enableProxyIdentity: true, username: 'ops', password: 'secret' })
     expect(store.k8sProxyConfig).toMatchObject({ enabled: true, type: 'HTTPS', host: 'proxy.internal', port: 8443, username: 'ops' })
-    expect(store.saveK8sProxyConfig()).toBe(true)
+    await expect(store.saveK8sProxyConfig()).resolves.toBe(true)
+    expect(window.aiops.saveKubernetesAgentProxyConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, type: 'HTTPS', host: 'proxy.internal', port: 8443, username: 'ops', password: 'secret' })
+    )
     expect(store.k8sProxyConfigOpen).toBe(false)
 
     store.connectK8sCluster('k8s-2')
@@ -4976,6 +4979,7 @@ describe('workspace store', () => {
         importContexts: store.k8sImportContexts.map((context) => ({ ...context })),
         activeClusterId: store.k8sActiveClusterId,
         selectedClusterId: store.k8sSelectedClusterId,
+        agentProxyConfig: { ...store.k8sProxyConfig },
         command: 'kubectl get pods --all-namespaces',
         output: '',
         terminalOutput: '',
@@ -5026,6 +5030,42 @@ describe('workspace store', () => {
       expect(store.k8sAgentStatus).toBe('ready')
     } finally {
       ;(window.aiops as any).cleanupKubernetesAgent = originalCleanup
+    }
+  })
+
+  it('does not fabricate Kubernetes Agent proxy save success without backend acknowledgement', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    const originalSaveProxy = window.aiops.saveKubernetesAgentProxyConfig
+
+    try {
+      store.openK8sProxyConfig()
+      store.updateK8sProxyConfig({ enabled: true, type: 'SOCKS5', host: 'unsaved.proxy', port: 18080 })
+      ;(window.aiops as any).saveKubernetesAgentProxyConfig = undefined
+      await expect(store.saveK8sProxyConfig()).resolves.toBe(false)
+      expect(store.k8sProxyConfigOpen).toBe(true)
+      expect(store.k8sClusterNotice).toBe('Kubernetes Agent 代理配置服务不可用')
+
+      ;(window.aiops as any).saveKubernetesAgentProxyConfig = originalSaveProxy
+      vi.mocked(window.aiops.saveKubernetesAgentProxyConfig!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'K8S_AGENT_PROXY_SAVE_FAILED',
+        errorMessage: 'proxy backend refused save'
+      })
+      await expect(store.saveK8sProxyConfig()).resolves.toBe(false)
+      expect(store.k8sProxyConfigOpen).toBe(true)
+      expect(store.k8sClusterNotice).toBe('proxy backend refused save')
+
+      vi.mocked(window.aiops.saveKubernetesAgentProxyConfig!).mockRejectedValueOnce(new Error('proxy bridge offline'))
+      await expect(store.saveK8sProxyConfig()).resolves.toBe(false)
+      expect(store.k8sProxyConfigOpen).toBe(true)
+      expect(store.k8sClusterNotice).toBe('proxy bridge offline')
+
+      store.connectK8sCluster('k8s-2')
+      await vi.advanceTimersByTimeAsync(280)
+      expect(store.k8sClusterNotice).not.toContain('unsaved.proxy')
+    } finally {
+      ;(window.aiops as any).saveKubernetesAgentProxyConfig = originalSaveProxy
     }
   })
 

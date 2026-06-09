@@ -1949,6 +1949,26 @@ export type KubernetesResource = {
   selector?: string
 }
 
+export type KubernetesProxyType = 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
+
+export type KubernetesAgentProxyConfig = {
+  enabled: boolean
+  type: KubernetesProxyType
+  host: string
+  port: number
+  enableProxyIdentity: boolean
+  username: string
+  password: string
+  updatedAt: string
+}
+
+export type KubernetesAgentProxyConfigInput = Partial<Omit<KubernetesAgentProxyConfig, 'updatedAt'>>
+
+export type KubernetesAgentProxyConfigResult = AiopsMutationResult<{
+  proxyConfig: KubernetesAgentProxyConfig
+  message: string
+}>
+
 export type KubernetesCatalog = {
   contexts: KubernetesContextInfo[]
   currentContext: string
@@ -1959,6 +1979,7 @@ export type KubernetesCatalog = {
   importContexts: KubernetesImportContextInfo[]
   activeClusterId: string | null
   selectedClusterId: string | null
+  agentProxyConfig: KubernetesAgentProxyConfig
 }
 
 export type KubernetesCatalogResult = AiopsMutationResult<KubernetesCatalog>
@@ -2242,6 +2263,8 @@ export type AiopsPreloadApi = {
   closeKubernetesTerminal: (id: string, exitCode?: number) => Promise<KubernetesTerminalCloseResult>
   executeKubernetesCommand: (input: KubernetesCommandInput) => Promise<KubernetesCommandResult>
   refreshKubernetesResources: (input: KubernetesResourceRefreshInput) => Promise<KubernetesResourceRefreshResult>
+  getKubernetesAgentProxyConfig: () => Promise<KubernetesAgentProxyConfigResult>
+  saveKubernetesAgentProxyConfig: (input: KubernetesAgentProxyConfigInput) => Promise<KubernetesAgentProxyConfigResult>
   cleanupKubernetesAgent: () => Promise<KubernetesAgentCleanupResult>
   listFileSessionCatalog: () => Promise<FileSessionCatalogResult>
   saveFileSession: (session: FileSessionInfo) => Promise<FileSessionMutationResult>
