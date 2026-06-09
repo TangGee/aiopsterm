@@ -1390,7 +1390,7 @@ export type AiChatResponseInput = {
 
 export type AiChatResponseResult = AiopsMutationResult<{
   text: string
-  provider: 'aiopsterm-local'
+  provider: 'aiopsterm-local' | ModelProviderCheckKey
   model: string
   durationMs: number
 }>

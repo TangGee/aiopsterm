@@ -27,7 +27,7 @@ import {
   saveAssetFolder,
   saveKeychain
 } from './backend/assets'
-import { createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
+import { configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
 import { listAiContextCatalog } from './backend/aiContext'
 import { listAiTodoSnapshot } from './backend/aiTodos'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
@@ -1139,6 +1139,7 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
 configureTerminalSuggestionsRuntime({ getConfig })
+configureAiChatRuntime({ getConfig })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

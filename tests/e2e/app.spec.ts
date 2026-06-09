@@ -723,6 +723,10 @@ test('aiopsterm primary desktop flows', async () => {
     await thinkingModelRow.click()
     await expect(page.getByTestId('ai-model-select')).toContainText('gpt-5')
     await expect(page.getByTestId('ai-model-select')).not.toContainText('Thinking')
+    await page.getByTestId('ai-model-select').click()
+    await page.locator('.ai-model-popup header input').fill('aiopsterm-local')
+    await page.locator('.ai-model-popup .select-list button:not(.locked-model-option)').filter({ hasText: 'aiopsterm-local-agent' }).click()
+    await expect(page.getByTestId('ai-model-select')).toContainText('aiopsterm-local-agent')
 
     await page.locator('.context-trigger-tag').click()
     await expect(page.locator('.context-select-popup')).toBeVisible()

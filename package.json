@@ -1,7 +1,7 @@
 {
   "name": "aiopsterm",
   "version": "0.1.0",
-  "description": "Self-owned AI operations terminal shell with local mock backends.",
+  "description": "Self-owned AI operations terminal shell with backend-owned runtime boundaries.",
   "main": "./out/main/index.js",
   "author": {
     "name": "aiopsterm",

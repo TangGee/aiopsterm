@@ -4,13 +4,13 @@ import { mkdirSync } from 'fs'
 import { pathToFileURL } from 'url'
 import type {
   ModelProviderCheckKey,
-  ModelProviderUserConfig,
   TerminalCommandGenerationInput,
   TerminalCommandGenerationResult,
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext,
   UserConfig
 } from '@shared/preload'
+import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderResolvedConfig, type AiProviderTextRequest } from './modelProviderText'
 
 type SqliteRunResult = { changes: number; lastInsertRowid: number | bigint }
 
@@ -60,11 +60,6 @@ type ResolvedFigContext = {
   args?: FigArg | FigArg[]
 }
 
-type AiSuggestProviderConfig = {
-  provider: ModelProviderCheckKey
-  config: ModelProviderUserConfig
-}
-
 type TerminalSuggestionRuntimeConfig = {
   getConfig?: () => UserConfig
   databasePath?: string
@@ -78,15 +73,6 @@ type TerminalSuggestionStore = {
   query(command: string, host?: string, limit?: number): TerminalCommandSuggestion[]
 }
 
-type AiSuggestRequest = {
-  provider: ModelProviderCheckKey
-  config: ModelProviderUserConfig
-  endpoint: string
-  headers: Record<string, string>
-  body: string
-  parseText: (payload: unknown) => string
-}
-
 const maxSuggestionRows = 6
 const maxStoredCommandLength = 255
 const defaultAiSuggestTimeoutMs = 2000
@@ -96,7 +82,6 @@ let availableSpecNames: Set<string> | null = null
 let storeInstance: TerminalSuggestionStore | null = null
 let runtimeConfig: TerminalSuggestionRuntimeConfig = {}
 
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const normalizeText = (value: unknown) => String(value || '').trim()
 const normalizeHost = (value: unknown) => normalizeText(value) || 'local'
 const nowSeconds = () => Math.floor((runtimeConfig.now ? runtimeConfig.now() : Date.now()) / 1000)
@@ -529,63 +514,6 @@ async function getFigSuggestions(commandLine: string, limit: number): Promise<Te
   return dedupeSuggestions(suggestions, limit)
 }
 
-function providerForModel(config: UserConfig, requestedModel?: string): AiSuggestProviderConfig | null {
-  const modelName = normalizeText(requestedModel) || normalizeText(config.modelName)
-  if (!modelName || modelName === 'aiopsterm-local-agent') return null
-  const modelSettings = config.modelSettings
-  if (!modelSettings) return null
-  const option = modelSettings.options?.find((item) => item.name === modelName && item.checked && !item.locked)
-  const rawProvider = option?.apiProvider || config.modelProvider
-  const provider =
-    rawProvider === 'openai-compatible'
-      ? 'openai'
-      : rawProvider === 'openai'
-        ? 'openai'
-        : rawProvider === 'litellm' || rawProvider === 'bedrock' || rawProvider === 'deepseek' || rawProvider === 'anthropic' || rawProvider === 'ollama'
-          ? rawProvider
-          : null
-  if (!provider) return null
-  const providerConfig = modelSettings.providers?.[provider]
-  if (!providerConfig) return null
-  return {
-    provider,
-    config: {
-      ...providerConfig,
-      modelId: normalizeText(providerConfig.modelId) || modelName
-    }
-  }
-}
-
-function appendEndpointPath(baseUrl: string, path: string): string {
-  try {
-    const parsed = new URL(baseUrl)
-    const existing = parsed.pathname.split('/').filter(Boolean)
-    const segments = path.split('/').filter(Boolean)
-    if (!segments.every((segment, index) => existing[existing.length - segments.length + index] === segment)) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/${segments.join('/')}`
-    }
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return baseUrl
-  }
-}
-
-function normalizeOpenAiBaseUrl(baseUrl: string): string {
-  if (!baseUrl) return ''
-  try {
-    const parsed = new URL(baseUrl)
-    const hasV1 = parsed.pathname.split('/').filter(Boolean).includes('v1')
-    if (!hasV1) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return baseUrl
-  }
-}
-
 function createAiSuggestPrompt(partialCommand: string, context?: TerminalCommandSuggestionContext): string {
   const host = normalizeText(context?.host)
   const shell = normalizeText(context?.shell)
@@ -603,120 +531,7 @@ function createAiSuggestPrompt(partialCommand: string, context?: TerminalCommand
     .join('\n')
 }
 
-function createProviderTextRequest(input: AiSuggestProviderConfig, systemPrompt: string, userPrompt: string, maxTokens: number): AiSuggestRequest | null {
-  const model = normalizeText(input.config.modelId)
-  const apiKey = normalizeText(input.config.apiKey)
-  const baseUrl = normalizeText(input.config.baseUrl)
-  if (!model) return null
-
-  if (input.provider === 'ollama') {
-    const endpoint = appendEndpointPath(baseUrl || 'http://localhost:11434', 'api/chat')
-    return {
-      provider: input.provider,
-      config: input.config,
-      endpoint,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        options: { num_predict: maxTokens }
-      }),
-      parseText: (payload) => {
-        if (!isRecord(payload)) return ''
-        return isRecord(payload.message) ? normalizeText(payload.message.content) : normalizeText(payload.response)
-      }
-    }
-  }
-
-  if (input.provider === 'anthropic') {
-    if (!apiKey) return null
-    const endpoint = appendEndpointPath(baseUrl || 'https://api.anthropic.com', 'v1/messages')
-    return {
-      provider: input.provider,
-      config: input.config,
-      endpoint,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }]
-      }),
-      parseText: (payload) => {
-        if (!isRecord(payload) || !Array.isArray(payload.content)) return ''
-        return payload.content.map((part: unknown) => (isRecord(part) && part.type === 'text' ? normalizeText(part.text) : '')).join('')
-      }
-    }
-  }
-
-  if (input.provider === 'bedrock') return null
-  if (!apiKey) return null
-
-  const endpoint =
-    input.provider === 'litellm'
-      ? appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'http://localhost:4000'), 'chat/completions')
-      : input.provider === 'deepseek'
-        ? appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'https://api.deepseek.com'), 'chat/completions')
-        : input.config.apiFormat === 'responses'
-          ? appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'https://api.openai.com'), 'responses')
-          : appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'https://api.openai.com'), 'chat/completions')
-
-  const useResponses = input.provider === 'openai' && input.config.apiFormat === 'responses'
-  return {
-    provider: input.provider,
-    config: input.config,
-    endpoint,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(
-      useResponses
-          ? {
-            model,
-            input: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            max_output_tokens: maxTokens
-          }
-        : {
-            model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            max_tokens: maxTokens
-          }
-    ),
-    parseText: (payload) => {
-      if (!isRecord(payload)) return ''
-      if (Array.isArray(payload.choices)) {
-        const first = payload.choices[0]
-        if (!isRecord(first)) return ''
-        return isRecord(first.message) ? normalizeText(first.message.content) : normalizeText(first.text)
-      }
-      if (typeof payload.output_text === 'string') return payload.output_text
-      if (Array.isArray(payload.output)) {
-        return payload.output
-          .flatMap((item: unknown) => (isRecord(item) && Array.isArray(item.content) ? item.content : []))
-          .map((part: unknown) => (isRecord(part) ? normalizeText(part.text) : ''))
-          .join('')
-      }
-      return ''
-    }
-  }
-}
-
-function createAiSuggestRequest(input: AiSuggestProviderConfig, partialCommand: string, context?: TerminalCommandSuggestionContext): AiSuggestRequest | null {
+function createAiSuggestRequest(input: AiProviderResolvedConfig, partialCommand: string, context?: TerminalCommandSuggestionContext): AiProviderTextRequest | null {
   return createProviderTextRequest(input, 'You are a terminal autocomplete engine.', createAiSuggestPrompt(partialCommand, context), 80)
 }
 
@@ -733,29 +548,14 @@ function parseAiSuggestResponse(response: string, partialCommand: string): Termi
 async function fetchAiSuggestion(query: string, context?: TerminalCommandSuggestionContext): Promise<TerminalCommandSuggestion[]> {
   const getConfig = runtimeConfig.getConfig
   if (!getConfig || query.trim().length < 3) return []
-  const provider = providerForModel(getConfig(), context?.modelName)
+  const provider = resolveModelProvider(getConfig(), context?.modelName)
   if (!provider) return []
   const request = createAiSuggestRequest(provider, query.trim(), context)
   if (!request) return []
-  const fetchImpl = runtimeConfig.fetch || fetch
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), defaultAiSuggestTimeoutMs)
-  try {
-    const response = await fetchImpl(request.endpoint, {
-      method: 'POST',
-      headers: request.headers,
-      body: request.body,
-      signal: controller.signal
-    })
-    if (!response.ok) return []
-    const payload = await response.json().catch(() => null)
-    const parsed = parseAiSuggestResponse(request.parseText(payload), query)
-    return parsed ? [parsed] : []
-  } catch {
-    return []
-  } finally {
-    clearTimeout(timeout)
-  }
+  const response = await fetchProviderText(request, { fetch: runtimeConfig.fetch, timeoutMs: defaultAiSuggestTimeoutMs, errorCodePrefix: 'TERMINAL_SUGGESTION_PROVIDER' })
+  if (!response.ok) return []
+  const parsed = parseAiSuggestResponse(response.text, query)
+  return parsed ? [parsed] : []
 }
 
 function createCommandGenerationPrompt(instruction: string, context: TerminalCommandGenerationInput['context']): string {
@@ -774,7 +574,7 @@ function createCommandGenerationPrompt(instruction: string, context: TerminalCom
   ].join('\n')
 }
 
-function createCommandGenerationRequest(input: AiSuggestProviderConfig, instruction: string, context: TerminalCommandGenerationInput['context']) {
+function createCommandGenerationRequest(input: AiProviderResolvedConfig, instruction: string, context: TerminalCommandGenerationInput['context']) {
   return createProviderTextRequest(
     input,
     'You generate precise terminal commands from operator instructions.',
@@ -802,56 +602,35 @@ function extractGeneratedCommand(response: string): string {
   return normalized
 }
 
-async function fetchGeneratedCommand(request: AiSuggestRequest): Promise<{ ok: true; command: string } | { ok: false; errorCode: string; errorMessage: string }> {
-  const fetchImpl = runtimeConfig.fetch || fetch
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), defaultCommandGenerationTimeoutMs)
-  try {
-    const response = await fetchImpl(request.endpoint, {
-      method: 'POST',
-      headers: request.headers,
-      body: request.body,
-      signal: controller.signal
-    })
-    if (!response.ok) {
-      const body = typeof response.text === 'function' ? await response.text().catch(() => '') : ''
-      return {
-        ok: false,
-        errorCode: 'TERMINAL_COMMAND_PROVIDER_ERROR',
-        errorMessage: body || `Command generation provider returned HTTP ${response.status || 'error'}`
-      }
-    }
-    const payload = await response.json().catch(() => null)
-    const command = extractGeneratedCommand(request.parseText(payload))
-    if (!command) {
-      return {
-        ok: false,
-        errorCode: 'TERMINAL_COMMAND_GENERATION_FAILED',
-        errorMessage: 'Command generation failed'
-      }
-    }
-    if (!isValidTerminalCommandForHistory(command)) {
-      return {
-        ok: false,
-        errorCode: 'TERMINAL_COMMAND_UNSAFE',
-        errorMessage: 'Generated command did not pass terminal safety validation'
-      }
-    }
-    return { ok: true, command }
-  } catch (error) {
+async function fetchGeneratedCommand(request: AiProviderTextRequest): Promise<{ ok: true; command: string } | { ok: false; errorCode: string; errorMessage: string }> {
+  const response = await fetchProviderText(request, {
+    fetch: runtimeConfig.fetch,
+    timeoutMs: defaultCommandGenerationTimeoutMs,
+    errorCodePrefix: 'TERMINAL_COMMAND_PROVIDER'
+  })
+  if (!response.ok) {
     return {
       ok: false,
-      errorCode: error instanceof Error && error.name === 'AbortError' ? 'TERMINAL_COMMAND_PROVIDER_TIMEOUT' : 'TERMINAL_COMMAND_PROVIDER_ERROR',
-      errorMessage:
-        error instanceof Error && error.name === 'AbortError'
-          ? `Command generation timed out after ${defaultCommandGenerationTimeoutMs}ms`
-          : error instanceof Error
-            ? error.message
-            : String(error)
+      errorCode: response.errorCode,
+      errorMessage: response.errorMessage
     }
-  } finally {
-    clearTimeout(timeout)
   }
+  const command = extractGeneratedCommand(response.text)
+  if (!command) {
+    return {
+      ok: false,
+      errorCode: 'TERMINAL_COMMAND_GENERATION_FAILED',
+      errorMessage: 'Command generation failed'
+    }
+  }
+  if (!isValidTerminalCommandForHistory(command)) {
+    return {
+      ok: false,
+      errorCode: 'TERMINAL_COMMAND_UNSAFE',
+      errorMessage: 'Generated command did not pass terminal safety validation'
+    }
+  }
+  return { ok: true, command }
 }
 
 const inferGeneratedCommand = (instruction: string, cwd = '~') => {
@@ -918,7 +697,7 @@ export const generateTerminalCommand = async (input: TerminalCommandGenerationIn
     let provider: 'aiopsterm-local' | ModelProviderCheckKey = 'aiopsterm-local'
     const modelName = normalizeText(input.modelName) || 'aiopsterm-local-agent'
     const config = runtimeConfig.getConfig?.()
-    const providerConfig = config ? providerForModel(config, modelName) : null
+    const providerConfig = config ? resolveModelProvider(config, modelName) : null
     if (providerConfig) {
       const request = createCommandGenerationRequest(providerConfig, instruction, input.context)
       if (!request) {
