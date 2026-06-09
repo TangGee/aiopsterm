@@ -1,5 +1,6 @@
-import Store from 'electron-store'
 import { randomUUID } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { dirname, isAbsolute, resolve } from 'path'
 import type {
   AiChatConversationDeleteResult,
   AiChatConversationMutationResult,
@@ -12,7 +13,13 @@ import type {
   AiChatMessageMetadataResult
 } from '@shared/preload'
 
+type ChatHistoryBackendRuntimeConfig = {
+  stateFilePath?: string
+  useSeedData?: boolean
+}
+
 type ChatHistoryStoreShape = {
+  version: 1
   conversations: AiChatConversationRecord[]
   messagesByConversationId: Record<string, AiChatHistoryMessage[]>
   selectedConversationId: string
@@ -33,7 +40,30 @@ const cloneMessages = (messages: AiChatHistoryMessage[]) => messages.map(cloneMe
 
 const seedTime = 1780488000000
 
-const defaultState = (): ChatHistoryStoreShape => ({
+const defaultChatHistoryStateFilePath = () => {
+  const envPath = String(process.env.AIOPSTERM_CHAT_HISTORY_STATE_FILE || '').trim()
+  return envPath ? (isAbsolute(envPath) ? envPath : resolve(envPath)) : resolve(process.cwd(), '.aiopsterm-chat-history.json')
+}
+
+const legacyChatHistoryStateFilePath = () => resolve(dirname(runtimeConfig.stateFilePath), 'aiopsterm-chat-history.json')
+
+const defaultChatHistorySeedMode = () =>
+  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED || '').trim() === '1'
+
+let runtimeConfig: Required<ChatHistoryBackendRuntimeConfig> = {
+  stateFilePath: defaultChatHistoryStateFilePath(),
+  useSeedData: defaultChatHistorySeedMode()
+}
+
+const emptyState = (): ChatHistoryStoreShape => ({
+  version: 1,
+  selectedConversationId: '',
+  conversations: [],
+  messagesByConversationId: {}
+})
+
+const seedState = (): ChatHistoryStoreShape => ({
+  version: 1,
   selectedConversationId: 'conv-1',
   conversations: [
     {
@@ -80,6 +110,10 @@ const defaultState = (): ChatHistoryStoreShape => ({
   }
 })
 
+let chatHistoryState: ChatHistoryStoreShape = runtimeConfig.useSeedData ? seedState() : emptyState()
+let chatHistoryStateLoaded = false
+let loadedStateFilePath = ''
+
 const normalizeText = (value: unknown) => String(value || '').trim()
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -113,20 +147,32 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
         text,
         hosts: hosts?.length ? hosts : undefined,
         state: item.state === 'streaming' || item.state === 'done' ? item.state : undefined,
-        favorite: item.favorite === undefined ? undefined : Boolean(item.favorite),
+        favorite: item.favorite === true ? true : undefined,
         feedback: item.feedback === 'up' || item.feedback === 'down' ? item.feedback : undefined
       }
     })
     .filter(Boolean) as AiChatHistoryMessage[]
 }
 
-const normalizeState = (source?: Partial<ChatHistoryStoreShape>): ChatHistoryStoreShape => {
-  const fallback = defaultState()
+const uniqueId = (value: string, fallback: string, seenIds: Set<string>) => {
+  let id = value || fallback
+  let suffix = 2
+  while (seenIds.has(id)) {
+    id = `${value || fallback}-${suffix}`
+    suffix += 1
+  }
+  seenIds.add(id)
+  return id
+}
+
+const normalizeState = (source?: Partial<ChatHistoryStoreShape> | null): ChatHistoryStoreShape => {
+  const fallback = runtimeConfig.useSeedData ? seedState() : emptyState()
   const rawConversations = Array.isArray(source?.conversations) ? source.conversations : fallback.conversations
+  const seenConversationIds = new Set<string>()
   const conversations = rawConversations
     .map((item, index): AiChatConversationRecord | null => {
       if (!isRecord(item)) return null
-      const id = normalizeText(item.id) || `conv-${index + 1}`
+      const id = uniqueId(normalizeText(item.id), `conv-${index + 1}`, seenConversationIds)
       const title = normalizeText(item.title) || 'New Chat'
       return {
         id,
@@ -135,7 +181,7 @@ const normalizeState = (source?: Partial<ChatHistoryStoreShape>): ChatHistorySto
         updatedAt: normalizeText(item.updatedAt) || nowText(),
         ts: typeof item.ts === 'number' && Number.isFinite(item.ts) ? item.ts : Date.now() - index,
         ipAddress: normalizeText(item.ipAddress) || undefined,
-        favorite: Boolean(item.favorite)
+        favorite: item.favorite === true ? true : undefined
       }
     })
     .filter(Boolean) as AiChatConversationRecord[]
@@ -143,53 +189,54 @@ const normalizeState = (source?: Partial<ChatHistoryStoreShape>): ChatHistorySto
   const rawMessages = isRecord(source?.messagesByConversationId) ? source.messagesByConversationId : fallback.messagesByConversationId
   conversations.forEach((conversation) => {
     const messages = normalizeMessages(rawMessages[conversation.id])
-    nextMessages[conversation.id] = messages.length
-      ? messages
-      : [
-          { id: `history-${conversation.id}-user`, role: 'user', text: conversation.summary || conversation.title },
-          { id: `history-${conversation.id}-assistant`, role: 'assistant', text: `${conversation.title} history restored from aiopsterm backend.`, state: 'done' }
-        ]
+    nextMessages[conversation.id] = messages
   })
   const selectedConversationId = conversations.some((item) => item.id === source?.selectedConversationId)
     ? String(source?.selectedConversationId)
     : conversations[0]?.id || ''
-  return { conversations, messagesByConversationId: nextMessages, selectedConversationId }
+  return { version: 1, conversations, messagesByConversationId: nextMessages, selectedConversationId }
 }
 
-class ChatHistoryStore {
-  private store: Store<ChatHistoryStoreShape> | null = null
-  private memory = defaultState()
+const applyInitialState = () => {
+  chatHistoryState = runtimeConfig.useSeedData ? seedState() : emptyState()
+}
 
-  constructor() {
-    try {
-      this.store = new Store<ChatHistoryStoreShape>({
-        name: 'aiopsterm-chat-history',
-        defaults: defaultState()
-      })
-    } catch {
-      this.store = null
-    }
-  }
+const readPersistedState = (stateFilePath: string) => {
+  const parsed = JSON.parse(readFileSync(stateFilePath, 'utf-8')) as Partial<ChatHistoryStoreShape>
+  return normalizeState(parsed)
+}
 
-  get(): ChatHistoryStoreShape {
-    const normalized = normalizeState(this.store ? this.store.store : this.memory)
-    this.save(normalized)
-    return normalizeState(normalized)
-  }
-
-  save(state: ChatHistoryStoreShape) {
-    const normalized = normalizeState(state)
-    if (this.store) {
-      this.store.set('conversations', normalized.conversations)
-      this.store.set('messagesByConversationId', normalized.messagesByConversationId)
-      this.store.set('selectedConversationId', normalized.selectedConversationId)
-    } else {
-      this.memory = normalizeState(normalized)
-    }
+const ensureStateLoaded = () => {
+  if (chatHistoryStateLoaded && loadedStateFilePath === runtimeConfig.stateFilePath) return
+  chatHistoryStateLoaded = true
+  loadedStateFilePath = runtimeConfig.stateFilePath
+  applyInitialState()
+  const stateFilePath = existsSync(runtimeConfig.stateFilePath) ? runtimeConfig.stateFilePath : legacyChatHistoryStateFilePath()
+  if (!existsSync(stateFilePath)) return
+  try {
+    chatHistoryState = readPersistedState(stateFilePath)
+    if (stateFilePath !== runtimeConfig.stateFilePath) saveState(chatHistoryState)
+  } catch {
+    /* Keep the backend-owned empty or seed state when persisted chat history is corrupt. */
   }
 }
 
-const store = new ChatHistoryStore()
+const getState = () => {
+  ensureStateLoaded()
+  return normalizeState(chatHistoryState)
+}
+
+const saveState = (state: ChatHistoryStoreShape) => {
+  chatHistoryState = normalizeState(state)
+  try {
+    mkdirSync(dirname(runtimeConfig.stateFilePath), { recursive: true })
+    const tempPath = `${runtimeConfig.stateFilePath}.${process.pid}.${Date.now()}.tmp`
+    writeFileSync(tempPath, JSON.stringify(chatHistoryState, null, 2), 'utf-8')
+    renameSync(tempPath, runtimeConfig.stateFilePath)
+  } catch {
+    /* Chat history persistence should not turn successful UI mutations into failures. */
+  }
+}
 
 const successSnapshot = (state: ChatHistoryStoreShape): AiChatHistoryListResult => ({
   ok: true,
@@ -214,10 +261,26 @@ const errorResult = <T>(errorCode: string, errorMessage: string): { ok: false; e
   errorMessage
 })
 
-export const listChatConversations = (): AiChatHistoryListResult => successSnapshot(store.get())
+export const configureChatHistoryBackendRuntime = (config: ChatHistoryBackendRuntimeConfig = {}) => {
+  runtimeConfig = {
+    stateFilePath: config.stateFilePath ? (isAbsolute(config.stateFilePath) ? config.stateFilePath : resolve(config.stateFilePath)) : defaultChatHistoryStateFilePath(),
+    useSeedData: config.useSeedData ?? defaultChatHistorySeedMode()
+  }
+  chatHistoryStateLoaded = false
+  loadedStateFilePath = ''
+  applyInitialState()
+}
+
+export const resetChatHistoryForTests = () => {
+  applyInitialState()
+  chatHistoryStateLoaded = true
+  loadedStateFilePath = runtimeConfig.stateFilePath
+}
+
+export const listChatConversations = (): AiChatHistoryListResult => successSnapshot(getState())
 
 export const createChatConversation = (): AiChatConversationMutationResult => {
-  const state = store.get()
+  const state = getState()
   const conversation: AiChatConversationRecord = {
     id: `conv-${randomUUID()}`,
     title: '新会话',
@@ -228,14 +291,14 @@ export const createChatConversation = (): AiChatConversationMutationResult => {
   state.conversations.unshift(conversation)
   state.selectedConversationId = conversation.id
   state.messagesByConversationId[conversation.id] = [{ id: `history-${conversation.id}-assistant`, role: 'assistant', text: '请输入本次运维目标。', state: 'done' }]
-  store.save(state)
+  saveState(state)
   return mutationResult(state, conversation)
 }
 
 export const updateChatConversation = (input: AiChatConversationUpdateInput): AiChatConversationMutationResult => {
   const id = normalizeText(input.id)
   if (!id) return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiChatConversationMutationResult
-  const state = store.get()
+  const state = getState()
   const conversation = state.conversations.find((item) => item.id === id)
   if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatConversationMutationResult
 
@@ -257,21 +320,21 @@ export const updateChatConversation = (input: AiChatConversationUpdateInput): Ai
   conversation.updatedAt = nowText()
   conversation.ts = Math.max(Date.now(), ...state.conversations.map((item) => item.ts), 0) + 1
   if (savedMessages) state.selectedConversationId = id
-  store.save(state)
+  saveState(state)
   return mutationResult(state, conversation)
 }
 
 export const deleteChatConversation = (idInput: string): AiChatConversationDeleteResult => {
   const id = normalizeText(idInput)
   if (!id) return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiChatConversationDeleteResult
-  const state = store.get()
+  const state = getState()
   if (!state.conversations.some((item) => item.id === id)) {
     return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatConversationDeleteResult
   }
   state.conversations = state.conversations.filter((item) => item.id !== id)
   delete state.messagesByConversationId[id]
   if (state.selectedConversationId === id) state.selectedConversationId = state.conversations[0]?.id || ''
-  store.save(state)
+  saveState(state)
   return {
     ok: true,
     data: {
@@ -285,11 +348,11 @@ export const deleteChatConversation = (idInput: string): AiChatConversationDelet
 export const restoreChatConversation = (idInput: string): AiChatConversationRestoreResult => {
   const id = normalizeText(idInput)
   if (!id) return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiChatConversationRestoreResult
-  const state = store.get()
+  const state = getState()
   const conversation = state.conversations.find((item) => item.id === id)
   if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatConversationRestoreResult
   state.selectedConversationId = id
-  store.save(state)
+  saveState(state)
   return {
     ok: true,
     data: {
@@ -304,7 +367,7 @@ export const saveChatMessageMetadata = (input: AiChatMessageMetadataInput): AiCh
   const messageId = normalizeText(input.messageId)
   if (!conversationId) return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiChatMessageMetadataResult
   if (!messageId) return errorResult('CHAT_HISTORY_MESSAGE_ID_REQUIRED', 'Message id is required.') as AiChatMessageMetadataResult
-  const state = store.get()
+  const state = getState()
   const conversation = state.conversations.find((item) => item.id === conversationId)
   if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatMessageMetadataResult
   const messages = state.messagesByConversationId[conversationId] || []
@@ -319,7 +382,7 @@ export const saveChatMessageMetadata = (input: AiChatMessageMetadataInput): AiCh
     }
   }
   state.messagesByConversationId[conversationId] = messages
-  store.save(state)
+  saveState(state)
   return {
     ok: true,
     data: {

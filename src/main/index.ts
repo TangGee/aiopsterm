@@ -35,6 +35,7 @@ import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiT
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
+  configureChatHistoryBackendRuntime,
   createChatConversation,
   deleteChatConversation,
   listChatConversations,
@@ -1229,6 +1230,7 @@ configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
 configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
 configureAiTodoBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'ai-todos.json') })
+configureChatHistoryBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'chat-history.json') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')
