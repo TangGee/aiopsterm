@@ -6816,6 +6816,12 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       vi.mocked(window.aiops.openLogDir).mockRejectedValueOnce(new Error('log dir offline'))
       await expect(store.openSettingsExternalAction('日志目录')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('日志目录 打开失败')
+      vi.mocked(window.aiops.openLogDir).mockResolvedValueOnce(undefined as any)
+      await expect(store.openSettingsExternalAction('日志目录')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('日志目录打开失败')
+      vi.mocked(window.aiops.openLogDir).mockResolvedValueOnce({ path: '   ' })
+      await expect(store.openSettingsExternalAction('日志目录')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('日志目录打开失败')
 
       ;(window.aiops as any).getUserAccount = undefined
       await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(false)

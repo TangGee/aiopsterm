@@ -5797,7 +5797,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           setSettingsNotice('日志目录服务不可用')
           return false
         }
-        await window.aiops.openLogDir()
+        const result = await window.aiops.openLogDir()
+        if (!result || typeof result.path !== 'string' || !result.path.trim()) {
+          setSettingsNotice('日志目录打开失败')
+          return false
+        }
         setSettingsNotice('日志目录已打开')
         return true
       }
