@@ -674,6 +674,33 @@ const cloneFileTransferTask = (task: FileTransferTask): FileTransferTask => ({
 
 const activeFileTransferTasks = new Map<string, FileTransferTask>()
 
+type FileTransferAbortControl = {
+  cancelled: boolean
+  cancel: () => void
+  assertActive: () => void
+}
+
+const activeFileTransferControls = new Map<string, FileTransferAbortControl>()
+
+const transferCancelledError = () => Object.assign(new Error('File transfer cancelled'), { code: 'FILES_TRANSFER_CANCELLED' })
+
+const isFileTransferCancelledError = (error: unknown) =>
+  (error as { code?: unknown } | undefined)?.code === 'FILES_TRANSFER_CANCELLED' ||
+  (error as { __cancelled?: unknown } | undefined)?.__cancelled === true
+
+const createFileTransferAbortControl = (): FileTransferAbortControl => {
+  const control: FileTransferAbortControl = {
+    cancelled: false,
+    cancel: () => {
+      control.cancelled = true
+    },
+    assertActive: () => {
+      if (control.cancelled) throw transferCancelledError()
+    }
+  }
+  return control
+}
+
 const normalizeTransferStatus = (status: unknown): FileTransferTask['status'] => {
   if (status === 'running' || status === 'failed' || status === 'error' || status === 'success') return status
   return 'success'
@@ -724,10 +751,99 @@ const taskRecordPayload = (input: FileTransferTaskRecordInput): FileTransferTask
 const transferFromHost = (options: FileListOptions) => options.fromHost || options.host
 const transferToHost = (options: FileListOptions) => options.toHost || options.host
 
-const registerActiveFileTransferTask = (task: FileTransferTask) => {
+const fileTransferTaskIds = (task: FileTransferTask) => [task.id, ...(task.children || []).map((child) => child.id)]
+
+const registerFileTransferTaskControl = (task: FileTransferTask, control: FileTransferAbortControl) => {
+  fileTransferTaskIds(task).forEach((taskId) => activeFileTransferControls.set(taskId, control))
+}
+
+const registerActiveFileTransferTask = (task: FileTransferTask, control?: FileTransferAbortControl) => {
   if (task.status !== 'running') return
   activeFileTransferTasks.set(task.id, cloneFileTransferTask(task))
+  if (control) registerFileTransferTaskControl(task, control)
 }
+
+const updateActiveFileTransferTask = (task: FileTransferTask, control?: FileTransferAbortControl) => {
+  if (task.status !== 'running' || !activeFileTransferTasks.has(task.id)) return
+  activeFileTransferTasks.set(task.id, cloneFileTransferTask(task))
+  if (control) registerFileTransferTaskControl(task, control)
+}
+
+const deleteActiveFileTransferTaskIds = (taskIds: Iterable<string>) => {
+  for (const taskId of taskIds) {
+    activeFileTransferTasks.delete(taskId)
+    activeFileTransferControls.delete(taskId)
+  }
+}
+
+const finishActiveFileTransferTask = (task: FileTransferTask) => {
+  deleteActiveFileTransferTaskIds(fileTransferTaskIds(task))
+}
+
+const addActiveFileTransferChild = (task: FileTransferTask, child: FileTransferTask, control: FileTransferAbortControl) => {
+  task.children = [...(task.children || []), child]
+  task.totalFiles = task.children.length
+  registerFileTransferTaskControl(task, control)
+  updateActiveFileTransferTask(task, control)
+}
+
+const updateRunningFileTransferProgress = (task: FileTransferTask, control: FileTransferAbortControl) => {
+  const totalFiles = task.totalFiles || task.children?.length || 0
+  const finishedFiles = task.finishedFiles || 0
+  task.progress = totalFiles > 0 ? Math.max(0, Math.min(99, Math.round((finishedFiles / totalFiles) * 100))) : 0
+  updateActiveFileTransferTask(task, control)
+}
+
+const completeRunningFileTransferTask = (task: FileTransferTask, fileCount: number) => {
+  task.status = 'success'
+  task.progress = 100
+  task.speed = '完成'
+  task.totalFiles = fileCount
+  task.finishedFiles = fileCount
+  task.children?.forEach((child) => {
+    child.status = 'success'
+    child.progress = 100
+    child.speed = '完成'
+  })
+  finishActiveFileTransferTask(task)
+  return cloneFileTransferTask(task)
+}
+
+const cancelRunningFileTransferTask = (task: FileTransferTask) => {
+  task.status = 'failed'
+  task.speed = '已取消'
+  task.progress = Math.min(task.progress, 99)
+  task.children?.forEach((child) => {
+    if (child.status === 'success') return
+    child.status = 'failed'
+    child.speed = '已取消'
+    child.progress = Math.min(child.progress, 99)
+  })
+  finishActiveFileTransferTask(task)
+  return cloneFileTransferTask(task)
+}
+
+const fileTransferCancelledResult = (
+  source: string,
+  target: string,
+  bytes: number,
+  files: number,
+  mtimeMs: number,
+  itemKind: 'file' | 'directory',
+  task: FileTransferTask
+): FileTransferOperationResult => ({
+  ok: true,
+  data: {
+    status: 'cancelled',
+    source,
+    target,
+    bytes,
+    files: Math.max(files, 1),
+    mtimeMs,
+    itemKind,
+    task
+  }
+})
 
 const createCompletedFileTransferTask = (input: FileTransferTaskRecordPayload) => cloneFileTransferTask(createFileTransferTaskRecord({ progress: 100, status: 'success', speed: '完成', ...input }))
 
@@ -849,7 +965,9 @@ export const cancelFileTransferTask = async (input: FileTransferTaskCancelInput)
   const taskIds = findActiveFileTransferTaskIds(id)
   if (!id) return { ok: false, errorCode: 'FILES_TRANSFER_TASK_ID_REQUIRED', errorMessage: 'File transfer task id is required.' }
   if (!taskIds.length) return { ok: true, data: { id, taskIds: [], status: 'not_found' } }
-  taskIds.forEach((taskId) => activeFileTransferTasks.delete(taskId))
+  const controls = new Set(taskIds.map((taskId) => activeFileTransferControls.get(taskId)).filter((control): control is FileTransferAbortControl => !!control))
+  controls.forEach((control) => control.cancel())
+  deleteActiveFileTransferTaskIds(taskIds)
   return { ok: true, data: { id, taskIds, status: 'aborted' } }
 }
 
@@ -1155,6 +1273,7 @@ export const __dropFileSessionCatalogCacheForTests = () => {
 export const __resetFileSessionCatalogForTests = () => {
   fileSessionCatalog = getFileSessionCatalogStore().reset()
   activeFileTransferTasks.clear()
+  activeFileTransferControls.clear()
 }
 
 const sortEntries = (entries: FileListEntry[]) =>
@@ -1587,56 +1706,88 @@ const downloadRemoteDirectoryViaSftp = async (
       if (sftpEntryType(stats) !== 'directory') return { ok: false, errorCode: 'not_directory', errorMessage: 'Source must be a directory' }
       let bytes = 0
       let fileCount = 0
-      const children: FileTransferTaskRecordPayload[] = []
+      const control = createFileTransferAbortControl()
+      const task = createFileTransferTaskRecord({
+        type: 'download',
+        name: remoteDirectoryDownloadName(source),
+        source,
+        target: destination,
+        progress: 0,
+        speed: 'pending',
+        status: 'running',
+        fromHost: transferFromHost(options),
+        ...(options.toHost ? { toHost: options.toHost } : {}),
+        stage: 'scanning',
+        isGroup: true,
+        totalFiles: 0,
+        finishedFiles: 0
+      })
+      registerActiveFileTransferTask(task, control)
       const downloadDirectory = async (remoteDir: string, localDir: string) => {
+        control.assertActive()
         await mkdir(localDir, { recursive: true })
+        control.assertActive()
         const rows = (await sftpReaddir(sftp, remoteDir))
           .filter((row) => row.filename !== '.' && row.filename !== '..')
           .sort((left, right) => left.filename.localeCompare(right.filename))
         for (const row of rows) {
+          control.assertActive()
           const remoteChild = normalizeRemotePath(`${remoteDir}/${row.filename}`)
           const localChild = join(localDir, row.filename)
           if (sftpEntryType(row.attrs as Partial<SftpStats>) === 'directory') {
             await downloadDirectory(remoteChild, localChild)
             continue
           }
-          const content = await sftpReadFile(sftp, remoteChild)
-          await mkdir(getLocalDirname(localChild), { recursive: true })
-          await writeFile(localChild, content)
-          bytes += content.length
-          fileCount += 1
-          children.push({
+          const child = createFileTransferTaskRecord({
             type: 'download',
             name: row.filename,
             source: remoteChild,
             target: localChild,
-            progress: 100,
-            speed: '完成',
-            status: 'success',
+            progress: 0,
+            speed: 'pending',
+            status: 'running',
             fromHost: transferFromHost(options),
             ...(options.toHost ? { toHost: options.toHost } : {}),
             stage: 'pending'
           })
+          addActiveFileTransferChild(task, child, control)
+          const content = await sftpReadFile(sftp, remoteChild)
+          control.assertActive()
+          await mkdir(getLocalDirname(localChild), { recursive: true })
+          control.assertActive()
+          await writeFile(localChild, content)
+          control.assertActive()
+          bytes += content.length
+          fileCount += 1
+          child.progress = 100
+          child.speed = '完成'
+          child.status = 'success'
+          task.finishedFiles = fileCount
+          updateRunningFileTransferProgress(task, control)
         }
       }
-      await downloadDirectory(source, destination)
-      const task = createFileTransferTaskRecord({
-        type: 'download',
-        name: remoteDirectoryDownloadName(source),
-        source,
-        target: destination,
-        progress: 100,
-        speed: '完成',
-        status: 'success',
-        fromHost: transferFromHost(options),
-        ...(options.toHost ? { toHost: options.toHost } : {}),
-        stage: 'scanning',
-        isGroup: true,
-        totalFiles: fileCount,
-        finishedFiles: fileCount,
-        ...(children.length ? { children } : {})
-      })
-      return { ok: true, data: { status: 'success', source, target: destination, bytes, files: Math.max(fileCount, 1), mtimeMs, itemKind: 'directory', task } }
+      try {
+        await downloadDirectory(source, destination)
+      } catch (error) {
+        if (isFileTransferCancelledError(error)) {
+          return fileTransferCancelledResult(source, destination, bytes, fileCount, mtimeMs, 'directory', cancelRunningFileTransferTask(task))
+        }
+        finishActiveFileTransferTask(task)
+        throw error
+      }
+      return {
+        ok: true,
+        data: {
+          status: 'success',
+          source,
+          target: destination,
+          bytes,
+          files: Math.max(fileCount, 1),
+          mtimeMs,
+          itemKind: 'directory',
+          task: completeRunningFileTransferTask(task, fileCount)
+        }
+      }
     })
   } catch (error) {
     return fileError(error, 'transfer_failed')
@@ -1703,11 +1854,30 @@ const uploadRemoteDirectoryViaSftp = async (
     return await withRemoteSftp(target, async (sftp) => {
       let bytes = 0
       let fileCount = 0
-      const children: FileTransferTaskRecordPayload[] = []
+      const control = createFileTransferAbortControl()
+      const task = createFileTransferTaskRecord({
+        type: 'upload',
+        name,
+        source,
+        target: destination,
+        progress: 0,
+        speed: 'pending',
+        status: 'running',
+        ...(options.fromHost ? { fromHost: options.fromHost } : {}),
+        toHost: transferToHost(options),
+        stage: 'scanning',
+        isGroup: true,
+        totalFiles: 0,
+        finishedFiles: 0
+      })
+      registerActiveFileTransferTask(task, control)
       const uploadDirectory = async (localDir: string, remoteDir: string) => {
+        control.assertActive()
         await ensureRemoteDirectoryViaSftp(sftp, remoteDir)
+        control.assertActive()
         const rows = (await readdir(localDir, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))
         for (const row of rows) {
+          control.assertActive()
           const localChild = join(localDir, row.name)
           const remoteChild = normalizeRemotePath(`${remoteDir}/${row.name}`)
           if (row.isDirectory()) {
@@ -1715,42 +1885,54 @@ const uploadRemoteDirectoryViaSftp = async (
             continue
           }
           if (!row.isFile()) continue
-          const content = await readFile(localChild)
-          await sftpWriteFile(sftp, remoteChild, content)
-          bytes += content.length
-          fileCount += 1
-          children.push({
+          const child = createFileTransferTaskRecord({
             type: 'upload',
             name: row.name,
             source: localChild,
             target: remoteChild,
-            progress: 100,
-            speed: '完成',
-            status: 'success',
+            progress: 0,
+            speed: 'pending',
+            status: 'running',
             ...(options.fromHost ? { fromHost: options.fromHost } : {}),
             toHost: transferToHost(options),
             stage: 'pending'
           })
+          addActiveFileTransferChild(task, child, control)
+          const content = await readFile(localChild)
+          control.assertActive()
+          await sftpWriteFile(sftp, remoteChild, content)
+          control.assertActive()
+          bytes += content.length
+          fileCount += 1
+          child.progress = 100
+          child.speed = '完成'
+          child.status = 'success'
+          task.finishedFiles = fileCount
+          updateRunningFileTransferProgress(task, control)
         }
       }
-      await uploadDirectory(source, destination)
-      const task = createFileTransferTaskRecord({
-        type: 'upload',
-        name,
-        source,
-        target: destination,
-        progress: 100,
-        speed: '完成',
-        status: 'success',
-        ...(options.fromHost ? { fromHost: options.fromHost } : {}),
-        toHost: transferToHost(options),
-        stage: 'scanning',
-        isGroup: true,
-        totalFiles: fileCount,
-        finishedFiles: fileCount,
-        ...(children.length ? { children } : {})
-      })
-      return { ok: true, data: { status: 'success', source, target: destination, bytes, files: Math.max(fileCount, 1), mtimeMs, itemKind: 'directory', task } }
+      try {
+        await uploadDirectory(source, destination)
+      } catch (error) {
+        if (isFileTransferCancelledError(error)) {
+          return fileTransferCancelledResult(source, destination, bytes, fileCount, mtimeMs, 'directory', cancelRunningFileTransferTask(task))
+        }
+        finishActiveFileTransferTask(task)
+        throw error
+      }
+      return {
+        ok: true,
+        data: {
+          status: 'success',
+          source,
+          target: destination,
+          bytes,
+          files: Math.max(fileCount, 1),
+          mtimeMs,
+          itemKind: 'directory',
+          task: completeRunningFileTransferTask(task, fileCount)
+        }
+      }
     })
   } catch (error) {
     return fileError(error, 'transfer_failed')
@@ -1766,53 +1948,85 @@ const downloadRemoteDirectoryFromSeed = async (remotePath: string, localDirector
   const mtimeMs = Date.now()
   let bytes = 0
   let fileCount = 0
-  const children: FileTransferTaskRecordPayload[] = []
+  const control = createFileTransferAbortControl()
+  const task = createFileTransferTaskRecord({
+    type: 'download',
+    name: remoteDirectoryDownloadName(source),
+    source,
+    target: destination,
+    progress: 0,
+    speed: 'pending',
+    status: 'running',
+    fromHost: transferFromHost(options),
+    ...(options.toHost ? { toHost: options.toHost } : {}),
+    stage: 'scanning',
+    isGroup: true,
+    totalFiles: 0,
+    finishedFiles: 0
+  })
+  registerActiveFileTransferTask(task, control)
   const downloadDirectory = async (remoteDir: string, localDir: string) => {
+    control.assertActive()
     await mkdir(localDir, { recursive: true })
+    control.assertActive()
     for (const row of sortEntries((remoteSeedTree[remoteDir] || []).map((item) => ({ ...item })))) {
+      control.assertActive()
       const localChild = join(localDir, row.name)
       if (row.type === 'directory') {
         await downloadDirectory(row.path, localChild)
         continue
       }
       if (row.type !== 'file') continue
-      const content = Buffer.from(remoteFileContents[row.path]?.content || '', 'utf-8')
-      await mkdir(getLocalDirname(localChild), { recursive: true })
-      await writeFile(localChild, content)
-      bytes += content.length
-      fileCount += 1
-      children.push({
+      const child = createFileTransferTaskRecord({
         type: 'download',
         name: row.name,
         source: row.path,
         target: localChild,
-        progress: 100,
-        speed: '完成',
-        status: 'success',
+        progress: 0,
+        speed: 'pending',
+        status: 'running',
         fromHost: transferFromHost(options),
         ...(options.toHost ? { toHost: options.toHost } : {}),
         stage: 'pending'
       })
+      addActiveFileTransferChild(task, child, control)
+      const content = Buffer.from(remoteFileContents[row.path]?.content || '', 'utf-8')
+      control.assertActive()
+      await mkdir(getLocalDirname(localChild), { recursive: true })
+      control.assertActive()
+      await writeFile(localChild, content)
+      control.assertActive()
+      bytes += content.length
+      fileCount += 1
+      child.progress = 100
+      child.speed = '完成'
+      child.status = 'success'
+      task.finishedFiles = fileCount
+      updateRunningFileTransferProgress(task, control)
     }
   }
-  await downloadDirectory(source, destination)
-  const task = createFileTransferTaskRecord({
-    type: 'download',
-    name: remoteDirectoryDownloadName(source),
-    source,
-    target: destination,
-    progress: 100,
-    speed: '完成',
-    status: 'success',
-    fromHost: transferFromHost(options),
-    ...(options.toHost ? { toHost: options.toHost } : {}),
-    stage: 'scanning',
-    isGroup: true,
-    totalFiles: fileCount,
-    finishedFiles: fileCount,
-    ...(children.length ? { children } : {})
-  })
-  return { ok: true, data: { status: 'success', source, target: destination, bytes, files: Math.max(fileCount, 1), mtimeMs, itemKind: 'directory', task } }
+  try {
+    await downloadDirectory(source, destination)
+  } catch (error) {
+    if (isFileTransferCancelledError(error)) {
+      return fileTransferCancelledResult(source, destination, bytes, fileCount, mtimeMs, 'directory', cancelRunningFileTransferTask(task))
+    }
+    finishActiveFileTransferTask(task)
+    throw error
+  }
+  return {
+    ok: true,
+    data: {
+      status: 'success',
+      source,
+      target: destination,
+      bytes,
+      files: Math.max(fileCount, 1),
+      mtimeMs,
+      itemKind: 'directory',
+      task: completeRunningFileTransferTask(task, fileCount)
+    }
+  }
 }
 
 export const transferFileEntry = async (operation: FileTransferOperation, options: FileListOptions = {}): Promise<FileTransferOperationResult> => {

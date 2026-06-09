@@ -15,6 +15,15 @@ const ssh2Mock = vi.hoisted(() => {
   const nodes = new Map<string, MockNode>()
   const connectConfigs: Array<Record<string, unknown>> = []
   const calls: Array<Record<string, unknown>> = []
+  const writeFileDelays = new Map<
+    string,
+    {
+      released: Promise<void>
+      release: () => void
+      reached: Promise<void>
+      markReached: () => void
+    }
+  >()
 
   const normalize = (path: string) => {
     const normalized = String(path || '/')
@@ -101,12 +110,24 @@ const ssh2Mock = vi.hoisted(() => {
     writeFile(path: string, content: Buffer, callback: (error?: Error | null) => void) {
       const normalized = normalize(path)
       calls.push({ method: 'writeFile', path: normalized, content: Buffer.from(content).toString('utf-8') })
-      if (!nodes.has(dirname(normalized))) {
-        callback(missingError(dirname(normalized)))
+      const complete = () => {
+        if (!nodes.has(dirname(normalized))) {
+          callback(missingError(dirname(normalized)))
+          return
+        }
+        nodes.set(normalized, { type: 'file', content: Buffer.from(content), mode: 0o100644, mtime: 1_717_200_200 })
+        callback(null)
+      }
+      const delay = writeFileDelays.get(normalized)
+      if (!delay) {
+        complete()
         return
       }
-      nodes.set(normalized, { type: 'file', content: Buffer.from(content), mode: 0o100644, mtime: 1_717_200_200 })
-      callback(null)
+      delay.markReached()
+      delay.released.then(() => {
+        writeFileDelays.delete(normalized)
+        complete()
+      })
     },
     rename(oldPath: string, newPath: string, callback: (error?: Error | null) => void) {
       const normalizedOld = normalize(oldPath)
@@ -216,6 +237,8 @@ const ssh2Mock = vi.hoisted(() => {
     nodes.clear()
     connectConfigs.length = 0
     calls.length = 0
+    writeFileDelays.forEach((delay) => delay.release())
+    writeFileDelays.clear()
     ensureDirectory('/')
     ensureDirectory('/srv')
     ensureDirectory('/srv/logs')
@@ -229,6 +252,19 @@ const ssh2Mock = vi.hoisted(() => {
   return {
     Client,
     reset,
+    pauseWriteFile(path: string) {
+      const normalized = normalize(path)
+      let release!: () => void
+      let markReached!: () => void
+      const released = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const reached = new Promise<void>((resolve) => {
+        markReached = resolve
+      })
+      writeFileDelays.set(normalized, { released, release, reached, markReached })
+      return { release, reached }
+    },
     connectConfigs,
     calls,
     nodes
@@ -1214,6 +1250,87 @@ describe('files backend content boundary', () => {
       })
       expect(ssh2Mock.nodes.get('/srv/archive/dropped-dir/drop.txt')?.content?.toString('utf-8')).toBe('dropped directory file\n')
     } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('aborts active asset-backed directory uploads from the backend cancel boundary', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-dir-cancel-'))
+    const localDirectory = join(dir, 'release-dir')
+    const firstWrite = ssh2Mock.pauseWriteFile('/srv/archive/release-dir/README.txt')
+    try {
+      await mkdir(localDirectory, { recursive: true })
+      await writeFile(join(localDirectory, 'README.txt'), Buffer.from('release notes\n', 'utf-8'))
+      await writeFile(join(localDirectory, 'z-after.txt'), Buffer.from('should not upload\n', 'utf-8'))
+
+      const transferPromise = transferFileEntry(
+        { kind: 'upload-directory', localPath: localDirectory, remoteDirectory: '/srv/archive' },
+        { kind: 'remote', sessionId, fromHost: '127.0.0.1', toHost: 'sftp.example.test' }
+      )
+
+      await firstWrite.reached
+      const activeTasks = await listFileTransferTasks()
+      expect(activeTasks).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          type: 'upload',
+          name: 'release-dir',
+          source: localDirectory,
+          target: '/srv/archive/release-dir',
+          status: 'running',
+          children: [
+            expect.objectContaining({
+              id: expect.stringMatching(/^transfer-/),
+              name: 'README.txt',
+              target: '/srv/archive/release-dir/README.txt',
+              status: 'running'
+            })
+          ]
+        })
+      ])
+
+      const cancelled = await cancelFileTransferTask({ id: activeTasks[0].children[0].id })
+      expect(cancelled).toEqual({
+        ok: true,
+        data: {
+          id: activeTasks[0].children[0].id,
+          taskIds: [activeTasks[0].id, activeTasks[0].children[0].id],
+          status: 'aborted'
+        }
+      })
+      await expect(listFileTransferTasks()).resolves.toEqual([])
+
+      firstWrite.release()
+      const uploadedDirectory = await transferPromise
+      expect(uploadedDirectory.ok).toBe(true)
+      expect(uploadedDirectory.data).toEqual(
+        expect.objectContaining({
+          status: 'cancelled',
+          source: localDirectory,
+          target: '/srv/archive/release-dir',
+          bytes: 0,
+          files: 1,
+          itemKind: 'directory',
+          task: expect.objectContaining({
+            id: activeTasks[0].id,
+            status: 'failed',
+            speed: '已取消',
+            children: [
+              expect.objectContaining({
+                id: activeTasks[0].children[0].id,
+                status: 'failed',
+                speed: '已取消'
+              })
+            ]
+          })
+        })
+      )
+      expect(ssh2Mock.nodes.get('/srv/archive/release-dir/README.txt')?.content?.toString('utf-8')).toBe('release notes\n')
+      expect(ssh2Mock.nodes.has('/srv/archive/release-dir/z-after.txt')).toBe(false)
+      expect(ssh2Mock.calls.filter((call) => call.method === 'writeFile').map((call) => call.path)).toEqual(['/srv/archive/release-dir/README.txt'])
+    } finally {
+      firstWrite.release()
       await rm(dir, { recursive: true, force: true })
     }
   })

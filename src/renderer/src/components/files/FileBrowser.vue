@@ -461,7 +461,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileEntryMutation, FileListEntry, FileListOptions, FileSessionInfo } from '@shared/preload'
+import type { FileEntryMutation, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult } from '@shared/preload'
 
 type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
   mode: string
@@ -601,6 +601,20 @@ const getSessionListOptions = (session: FileSessionInfo | undefined, overrides: 
         ...overrides
       }
     : getListOptions(overrides)
+
+const applyTransferResult = (transfer: FileTransferOperationResult, fallbackError: string, cancelledNotice: string, skippedNotice: string) => {
+  if (!transfer.ok) throw new Error(transfer.errorMessage || fallbackError)
+  if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+  if (transfer.data?.status === 'cancelled') {
+    fileNotice.value = cancelledNotice
+    return false
+  }
+  if (transfer.data?.status === 'skipped') {
+    fileNotice.value = skippedNotice
+    return false
+  }
+  return true
+}
 
 const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
   name: entry.name,
@@ -745,8 +759,7 @@ const queueUpload = async (kind: 'file' | 'directory') => {
       { kind: kind === 'file' ? 'upload-file' : 'upload-directory', localPath, remoteDirectory: currentPath.value },
       getListOptions()
     )
-    if (!transfer.ok) throw new Error(transfer.errorMessage || '上传失败')
-    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
     await loadEntries()
     fileNotice.value = `${name} 上传成功`
   } catch (uploadError) {
@@ -840,8 +853,7 @@ const handleOsFileDrop = async (event: DragEvent) => {
   loading.value = true
   try {
     const transfer = await window.aiops.transferFileEntry({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
-    if (!transfer.ok) throw new Error(transfer.errorMessage || '上传失败')
-    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
     await loadEntries()
     fileNotice.value = `${name} 上传成功`
   } catch (uploadError) {
@@ -876,8 +888,7 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
       operation,
       transferOptions
     )
-    if (!transfer.ok) throw new Error(transfer.errorMessage || '传输失败')
-    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    if (!applyTransferResult(transfer, '传输失败', `${payload.name} 传输已取消`, `${payload.name} 传输已跳过`)) return
     await loadEntries()
     fileNotice.value = `${payload.name} 传输成功`
   } catch (transferError) {
@@ -1030,8 +1041,7 @@ const downloadEntry = async (entry: FileBrowserEntry) => {
   loading.value = true
   try {
     const transfer = await window.aiops.transferFileEntry({ kind: 'download-file', remotePath: entry.path, localPath }, getListOptions())
-    if (!transfer.ok) throw new Error(transfer.errorMessage || '下载失败')
-    if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
+    if (!applyTransferResult(transfer, '下载失败', `${entry.name} 下载已取消`, `${entry.name} 下载已跳过`)) return
     fileNotice.value = `${entry.name} 下载成功`
   } catch (downloadError) {
     fileNotice.value = downloadError instanceof Error ? downloadError.message : '下载失败'

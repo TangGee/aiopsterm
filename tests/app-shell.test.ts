@@ -4189,6 +4189,36 @@ describe('AppShell', () => {
     )
     expect(wrapper.text()).toContain('release-note-v2.md 下载成功')
 
+    const listCallsBeforeCancelledDownload = vi.mocked(window.aiops.listFiles).mock.calls.length
+    vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/downloads/release-note-v2-cancelled.md' })
+    vi.mocked(window.aiops.transferFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'cancelled',
+        source: '/tmp/local-picked/release-note-v2.md',
+        target: '/tmp/downloads/release-note-v2-cancelled.md',
+        bytes: 0,
+        files: 1,
+        mtimeMs: Date.now(),
+        itemKind: 'file',
+        task: {
+          id: 'transfer-cancelled-download',
+          type: 'download',
+          name: 'release-note-v2.md',
+          source: '/tmp/local-picked/release-note-v2.md',
+          target: '/tmp/downloads/release-note-v2-cancelled.md',
+          progress: 80,
+          speed: '已取消',
+          status: 'failed'
+        }
+      }
+    })
+    await renamedRow.find('.file-row-actions button[title="下载"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('release-note-v2.md 下载已取消')
+    expect(wrapper.text()).not.toContain('release-note-v2.md 下载成功')
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(listCallsBeforeCancelledDownload)
+
     await renamedRow.find('.file-row-actions button[title="更多"]').trigger('click')
     expect(wrapper.find('.file-more-menu').exists()).toBe(true)
     vi.mocked(navigator.clipboard.writeText).mockClear()
