@@ -66,13 +66,6 @@
                 <Import />
                 导入
               </button>
-              <input
-                ref="assetImportInput"
-                class="asset-hidden-file-input"
-                type="file"
-                accept=".json,.csv,.xsh,.xts,.ini,.xml,.mxtsessions"
-                @change="handleAssetImportFile"
-              />
               <button
                 class="asset-action-button icon-only"
                 title="导入帮助"
@@ -667,14 +660,6 @@
             @drop.prevent="handleKeyDrop"
             @click="openKeyImportDialog"
           >
-            <input
-              ref="keyImportInput"
-              class="key-hidden-file-input"
-              type="file"
-              accept=".pem,.key,.txt,.pub,.asc,.crt,.cer,.der,.p12,.pfx,.ssh,.ppk,.gpg,.any"
-              @click.stop
-              @change="handleKeyFileChange"
-            />
             <Upload />
             <span>拖拽或点击导入密钥文件</span>
           </div>
@@ -895,7 +880,6 @@ const contextPosition = reactive({ x: 0, y: 0 })
 const importNotice = ref('')
 const assetFormError = ref('')
 const managedFormError = ref('')
-const assetImportInput = ref<HTMLInputElement | null>(null)
 const exportModalOpen = ref(false)
 const exportCheckedIds = ref<string[]>([])
 const exportQuery = ref('')
@@ -942,7 +926,6 @@ const keyDragOver = ref(false)
 const keyServiceNotice = ref('')
 const keyImportNotice = ref('')
 const keyFormError = ref('')
-const keyImportInput = ref<HTMLInputElement | null>(null)
 const keyForm = reactive({
   id: '',
   name: '',
@@ -1563,18 +1546,69 @@ const confirmExport = async () => {
   exportModalOpen.value = false
 }
 
-const openImportDialog = () => {
-  importNotice.value = '支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 导入。'
-  assetImportInput.value?.click()
+const localFileName = (filePath: string) => filePath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || filePath
+
+const readLocalTextFile = async (filePath: string, unavailableMessage: string) => {
+  const readLocalFile = window.aiops?.readLocalFile
+  if (typeof readLocalFile !== 'function') {
+    throw new Error(unavailableMessage)
+  }
+  const result = await readLocalFile(filePath)
+  return result.content
 }
 
-const readFileAsText = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('Failed to read file'))
-    reader.readAsText(file, 'utf-8')
-  })
+const loadAssetImportPreviewFromPath = async (filePath: string) => {
+  if (!filePath) {
+    importNotice.value = '没有选择导入文件。'
+    return
+  }
+  const fileName = localFileName(filePath)
+  let content = ''
+  try {
+    content = await readLocalTextFile(filePath, '导入文件读取服务不可用。')
+  } catch (error) {
+    importNotice.value = error instanceof Error ? error.message : '导入文件读取失败。'
+    return
+  }
+  try {
+    const preview = parseAssetImportContent(content, fileName).map(toImportPreviewAsset)
+    if (!preview.length) {
+      importNotice.value = '导入文件没有可识别的主机。'
+      return
+    }
+    importPreviewAssets.value = preview
+    importPreviewOpen.value = true
+  } catch {
+    importNotice.value = '导入文件解析失败。'
+  }
+}
+
+const openImportDialog = async () => {
+  importNotice.value = '支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 导入。'
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    importNotice.value = '导入文件选择服务不可用。'
+    return
+  }
+  let result: Awaited<ReturnType<typeof showOpenDialog>>
+  try {
+    result = await showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Asset Import Files', extensions: ['json', 'csv', 'xsh', 'xts', 'ini', 'xml', 'mxtsessions'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+  } catch {
+    importNotice.value = '导入文件选择失败。'
+    return
+  }
+  if (result?.canceled) {
+    importNotice.value = '已取消导入。'
+    return
+  }
+  await loadAssetImportPreviewFromPath(result?.filePaths?.[0] || '')
+}
 
 const toImportPreviewAsset = (draft: ImportedAssetDraft, index: number): ImportPreviewAsset => {
   const duplicate = assets.value.find((asset) => asset.host === draft.host && asset.username === draft.username && asset.port === draft.port)
@@ -1592,26 +1626,6 @@ const toImportPreviewAsset = (draft: ImportedAssetDraft, index: number): ImportP
     password: draft.password,
     needProxy: draft.needProxy,
     proxyName: draft.proxyName
-  }
-}
-
-const handleAssetImportFile = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  try {
-    const content = await readFileAsText(file)
-    const preview = parseAssetImportContent(content, file.name).map(toImportPreviewAsset)
-    if (!preview.length) {
-      importNotice.value = '导入文件没有可识别的主机。'
-      return
-    }
-    importPreviewAssets.value = preview
-    importPreviewOpen.value = true
-  } catch {
-    importNotice.value = '导入文件解析失败。'
-  } finally {
-    input.value = ''
   }
 }
 
@@ -1831,26 +1845,45 @@ const applyImportedKeyFile = (fileName: string, content: string) => {
   keyImportNotice.value = `已导入 ${fileName}，识别为 ${type}。`
 }
 
-const openKeyImportDialog = () => {
-  keyImportNotice.value = '请选择 .pem、.key、.pub、.ppk 等密钥文件。'
-  if (keyImportInput.value) {
-    keyImportInput.value.value = ''
-    keyImportInput.value.click()
+const importKeyFileFromPath = async (filePath: string) => {
+  if (!filePath) {
+    keyImportNotice.value = '没有选择密钥文件。'
+    return
+  }
+  const fileName = localFileName(filePath)
+  try {
+    const content = await readLocalTextFile(filePath, '密钥文件读取服务不可用。')
+    applyImportedKeyFile(fileName, content)
+  } catch (error) {
+    keyImportNotice.value = error instanceof Error ? error.message : '密钥文件读取失败。'
   }
 }
 
-const handleKeyFileChange = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  try {
-    const content = await readFileAsText(file)
-    applyImportedKeyFile(file.name, content)
-  } catch {
-    keyImportNotice.value = '密钥文件读取失败。'
-  } finally {
-    input.value = ''
+const openKeyImportDialog = async () => {
+  keyImportNotice.value = '请选择 .pem、.key、.pub、.ppk 等密钥文件。'
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    keyImportNotice.value = '密钥文件选择服务不可用。'
+    return
   }
+  let result: Awaited<ReturnType<typeof showOpenDialog>>
+  try {
+    result = await showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+  } catch {
+    keyImportNotice.value = '密钥文件选择失败。'
+    return
+  }
+  if (result?.canceled) {
+    keyImportNotice.value = '已取消导入密钥。'
+    return
+  }
+  await importKeyFileFromPath(result?.filePaths?.[0] || '')
 }
 
 const handleKeyDrop = async (event: DragEvent) => {
@@ -1860,12 +1893,14 @@ const handleKeyDrop = async (event: DragEvent) => {
     keyImportNotice.value = '没有检测到可导入的密钥文件。'
     return
   }
-  try {
-    const content = await readFileAsText(file)
-    applyImportedKeyFile(file.name, content)
-  } catch {
-    keyImportNotice.value = '密钥文件读取失败。'
+  const getPathForFile = window.aiops?.getPathForFile
+  const filePath =
+    (typeof getPathForFile === 'function' ? getPathForFile(file) : '') || String((file as File & { path?: string }).path || '').trim()
+  if (!filePath) {
+    keyImportNotice.value = '拖拽导入需要本地文件路径。'
+    return
   }
+  await importKeyFileFromPath(filePath)
 }
 
 const closeConfirm = () => {

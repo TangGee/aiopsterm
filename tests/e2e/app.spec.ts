@@ -281,6 +281,10 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.export-assets-modal .export-leaf-row').filter({ hasText: 'prod-bastion' }).locator('input').check()
     await page.locator('.export-assets-modal').getByText('确认').click()
     await expect(page.getByText('选择导出主机')).not.toBeVisible()
+    await page.locator('.asset-action-button').filter({ hasText: '导入' }).click()
+    await expect(page.locator('.import-assets-modal')).toContainText('e2e-imported-json')
+    await page.locator('.import-assets-modal footer button').filter({ hasText: '确认导入' }).click()
+    await expect(page.locator('.host-card').filter({ hasText: 'e2e-imported-json' })).toBeVisible()
     const jumpserverCard = page.getByRole('button', { name: 'jumpserver-org 主机, sync' })
     await jumpserverCard.click({ button: 'right' })
     await page.locator('.asset-context-menu').getByText('刷新资产').click()
@@ -313,11 +317,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.keychain-card').filter({ hasText: 'e2e-key' })).toContainText('类型ed25519')
     await page.getByTestId('key-new-button').click()
     await page.locator('.key-form-panel label').filter({ hasText: '名称' }).locator('input').fill('e2e-import-key')
-    await page.locator('.key-hidden-file-input').setInputFiles({
-      name: 'e2e-import-rsa.pem',
-      mimeType: 'text/plain',
-      buffer: Buffer.from('-----BEGIN RSA PRIVATE KEY-----\ne2e import\n-----END RSA PRIVATE KEY-----')
-    })
+    await page.locator('.key-drop-area').click()
     await expect(page.getByText('已导入 e2e-import-rsa.pem，识别为 RSA')).toBeVisible()
     await page.locator('.key-form-panel .asset-submit-button').click()
     await expect(page.locator('.keychain-card').filter({ hasText: 'e2e-import-key' })).toContainText('类型rsa')

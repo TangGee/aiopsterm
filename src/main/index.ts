@@ -2589,6 +2589,32 @@ const registerIpc = () => {
       Array.isArray(options?.properties) &&
       options.properties.includes('openFile') &&
       Array.isArray(options?.filters) &&
+      options.filters.some((filter: { name?: string }) => filter?.name === 'Asset Import Files')
+    ) {
+      const assetImportPath = join(app.getPath('userData'), 'e2e-external-reference-assets.json')
+      await writeFile(
+        assetImportPath,
+        JSON.stringify([{ username: 'ops', ip: '10.73.0.9', label: 'e2e-imported-json', group_name: 'E2E', port: 2299 }]),
+        'utf-8'
+      )
+      return { canceled: false, filePaths: [assetImportPath] }
+    }
+    if (
+      process.env.NODE_ENV === 'test' &&
+      Array.isArray(options?.properties) &&
+      options.properties.includes('openFile') &&
+      Array.isArray(options?.filters) &&
+      options.filters.some((filter: { name?: string }) => filter?.name === 'Key Files')
+    ) {
+      const keyImportPath = join(app.getPath('userData'), 'e2e-import-rsa.pem')
+      await writeFile(keyImportPath, '-----BEGIN RSA PRIVATE KEY-----\ne2e import\n-----END RSA PRIVATE KEY-----', 'utf-8')
+      return { canceled: false, filePaths: [keyImportPath] }
+    }
+    if (
+      process.env.NODE_ENV === 'test' &&
+      Array.isArray(options?.properties) &&
+      options.properties.includes('openFile') &&
+      Array.isArray(options?.filters) &&
       options.filters.some((filter: { name?: string }) => filter?.name === 'Images')
     ) {
       const backgroundPath = join(app.getPath('userData'), 'e2e-background.png')

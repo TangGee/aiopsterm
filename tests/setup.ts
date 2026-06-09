@@ -4303,6 +4303,7 @@ Object.defineProperty(window, 'aiops', {
     updateSkill: vi.fn(async () => undefined),
     exportSkillZip: vi.fn(async (skillName: string) => ({ success: true, filePath: `/tmp/${skillName}.zip` })),
     onSkillsUpdate: vi.fn(() => () => undefined),
+    getPathForFile: vi.fn((file: File & { path?: string }) => String(file?.path || '')),
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/tmp/imported-note.md'] })),
     showSaveDialog: vi.fn(async (options?: { defaultPath?: string }) => ({ canceled: false, filePath: `/tmp/${options?.defaultPath || 'downloaded-file'}` })),
     saveCustomBackground: vi.fn(async (srcAbsPath: string) => {
@@ -4314,8 +4315,9 @@ Object.defineProperty(window, 'aiops', {
         size: 128
       }
     }),
-    readLocalFile: vi.fn(async (filePath: string) => ({
-      content: [
+    readLocalFile: vi.fn(async (filePath: string) => {
+      const localPath = String(filePath || '')
+      let content = [
         'apiVersion: v1',
         'kind: Config',
         'current-context: prod/admin',
@@ -4335,10 +4337,28 @@ Object.defineProperty(window, 'aiops', {
         '  context:',
         '    cluster: staging-cluster',
         '    namespace: staging'
-      ].join('\n'),
-      mtimeMs: 1717200000000,
-      size: filePath.length + 512
-    })),
+      ].join('\n')
+      if (localPath.endsWith('external-reference-assets.json')) {
+        content = JSON.stringify([
+          { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
+          { username: 'ops', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200 }
+        ])
+      } else if (localPath.endsWith('MobaXterm.mxtsessions')) {
+        content = [
+          '[Bookmarks]',
+          'moba-prod=#109#0%10.88.1.5%22%mobauser%%-1%10.88.1.1%2200%jumpuser%-1%2224%-1%_ProfileDir_/keys/moba.pem'
+        ].join('\n')
+      } else if (localPath.endsWith('unit-rsa.pem')) {
+        content = '-----BEGIN RSA PRIVATE KEY-----\nunit import\n-----END RSA PRIVATE KEY-----'
+      } else if (localPath.endsWith('drop-ed25519.key')) {
+        content = '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----'
+      }
+      return {
+        content,
+        mtimeMs: 1717200000000,
+        size: content.length
+      }
+    }),
     writeLocalFile: vi.fn(async () => undefined),
     readFileContent: vi.fn(async (filePath: string) => ({
       ok: true,

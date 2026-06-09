@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AiopsPreloadApi,
   FileListEntry,
@@ -14,6 +14,7 @@ import type {
 } from '@shared/preload'
 
 const api: AiopsPreloadApi = {
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   platform: () => ipcRenderer.invoke('app:platform'),
   shell: () => ipcRenderer.invoke('app:shell'),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),

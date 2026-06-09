@@ -633,52 +633,57 @@ describe('AppShell', () => {
 
     const originalKeyFileReader = window.FileReader
     const originalGlobalKeyFileReader = globalThis.FileReader
-    let keyReaderPayload = '-----BEGIN RSA PRIVATE KEY-----\nunit import\n-----END RSA PRIVATE KEY-----'
-    class MockKeyImportFileReader {
-      result = keyReaderPayload
-      onload: null | (() => void) = null
-      onerror: null | (() => void) = null
-      readAsText() {
-        this.onload?.()
-      }
-      readAsDataURL() {
-        this.result = `data:text/plain;base64,${Buffer.from(keyReaderPayload).toString('base64')}`
-        this.onload?.()
+    class ForbiddenKeyFileReader {
+      constructor() {
+        throw new Error('renderer FileReader must not read key import files')
       }
     }
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockKeyImportFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockKeyImportFileReader })
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: ForbiddenKeyFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: ForbiddenKeyFileReader })
 
-    await keys.find('[data-testid="key-new-button"]').trigger('click')
-    await keys.find('.key-form-panel input').setValue('import-unit')
-    const keyInput = keys.find('input.key-hidden-file-input')
-    Object.defineProperty(keyInput.element, 'files', {
-      configurable: true,
-      value: [new File([keyReaderPayload], 'unit-rsa.pem', { type: 'text/plain' })]
-    })
-    await keyInput.trigger('change')
-    await flushPromises()
-    expect(keys.text()).toContain('已导入 unit-rsa.pem，识别为 RSA')
-    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
-    await flushPromises()
-    expect(keys.findAll('.keychain-card').find((button) => button.text().includes('import-unit'))!.text()).toContain('类型rsa')
+    try {
+      await keys.find('[data-testid="key-new-button"]').trigger('click')
+      await keys.find('.key-form-panel input').setValue('import-unit')
+      vi.mocked(window.aiops.showOpenDialog).mockClear()
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/unit-rsa.pem'] })
+      await keys.find('.key-drop-area').trigger('click')
+      await flushPromises()
+      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          properties: ['openFile'],
+          filters: expect.arrayContaining([expect.objectContaining({ name: 'Key Files' })])
+        })
+      )
+      expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/unit-rsa.pem')
+      expect(keys.text()).toContain('已导入 unit-rsa.pem，识别为 RSA')
+      await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+      await flushPromises()
+      expect(keys.findAll('.keychain-card').find((button) => button.text().includes('import-unit'))!.text()).toContain('类型rsa')
 
-    await keys.find('[data-testid="key-new-button"]').trigger('click')
-    await flushPromises()
-    await keys.find('.key-form-panel input').setValue('drop-unit')
-    keyReaderPayload = '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----'
-    await keys.find('.key-drop-area').trigger('drop', {
-      dataTransfer: {
-        files: [new File([keyReaderPayload], 'drop-ed25519.key', { type: 'text/plain' })]
-      }
-    })
-    await flushPromises()
-    expect(keys.text()).toContain('已导入 drop-ed25519.key，识别为 ED25519')
-    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
-    await flushPromises()
-    expect(keys.findAll('.keychain-card').find((button) => button.text().includes('drop-unit'))!.text()).toContain('类型ed25519')
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalKeyFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalKeyFileReader })
+      await keys.find('[data-testid="key-new-button"]').trigger('click')
+      await flushPromises()
+      await keys.find('.key-form-panel input').setValue('drop-unit')
+      vi.mocked(window.aiops.getPathForFile).mockClear()
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      const droppedKeyFile = new File(['ignored-renderer-bytes'], 'drop-ed25519.key', { type: 'text/plain' })
+      Object.defineProperty(droppedKeyFile, 'path', { configurable: true, value: '/tmp/drop-ed25519.key' })
+      await keys.find('.key-drop-area').trigger('drop', {
+        dataTransfer: {
+          files: [droppedKeyFile]
+        }
+      })
+      await flushPromises()
+      expect(window.aiops.getPathForFile).toHaveBeenCalledWith(droppedKeyFile)
+      expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/drop-ed25519.key')
+      expect(keys.text()).toContain('已导入 drop-ed25519.key，识别为 ED25519')
+      await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+      await flushPromises()
+      expect(keys.findAll('.keychain-card').find((button) => button.text().includes('drop-unit'))!.text()).toContain('类型ed25519')
+    } finally {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalKeyFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalKeyFileReader })
+    }
 
     await keys.findAll('.keychain-card').find((button) => button.text().includes('unit-key'))!.trigger('contextmenu', {
       clientX: 310,
@@ -774,6 +779,65 @@ describe('AppShell', () => {
     }
   })
 
+  it('does not import key files without preload dialog, path, or read bridges', async () => {
+    const originalAiops = {
+      showOpenDialog: window.aiops.showOpenDialog,
+      readLocalFile: window.aiops.readLocalFile,
+      getPathForFile: window.aiops.getPathForFile
+    }
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const keys = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await keys.findAll('.asset-management-item').find((button) => button.text().includes('密钥管理'))!.trigger('click')
+    await keys.find('[data-testid="key-new-button"]').trigger('click')
+    await keys.find('.key-form-panel input').setValue('bridge-import-key')
+    const privateKeyField = () => keys.find('.key-form-panel textarea').element as HTMLTextAreaElement
+
+    try {
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      ;(window.aiops as any).showOpenDialog = undefined
+      await keys.find('.key-drop-area').trigger('click')
+      await flushPromises()
+      expect(keys.text()).toContain('密钥文件选择服务不可用。')
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
+      expect(privateKeyField().value).toBe('')
+
+      ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
+      ;(window.aiops as any).readLocalFile = undefined
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/unit-rsa.pem'] })
+      await keys.find('.key-drop-area').trigger('click')
+      await flushPromises()
+      expect(keys.text()).toContain('密钥文件读取服务不可用。')
+      expect(privateKeyField().value).toBe('')
+
+      ;(window.aiops as any).readLocalFile = originalAiops.readLocalFile
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/unit-rsa.pem'] })
+      vi.mocked(window.aiops.readLocalFile).mockRejectedValueOnce(new Error('key disk denied'))
+      await keys.find('.key-drop-area').trigger('click')
+      await flushPromises()
+      expect(keys.text()).toContain('key disk denied')
+      expect(privateKeyField().value).toBe('')
+
+      vi.mocked(window.aiops.getPathForFile).mockReturnValueOnce('')
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      await keys.find('.key-drop-area').trigger('drop', {
+        dataTransfer: {
+          files: [new File(['renderer-bytes-must-not-be-read'], 'missing-path.pem', { type: 'text/plain' })]
+        }
+      })
+      await flushPromises()
+      expect(keys.text()).toContain('拖拽导入需要本地文件路径。')
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
+      expect(privateKeyField().value).toBe('')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('supports External reference-style asset import/export and organization asset table management', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -816,70 +880,55 @@ describe('AppShell', () => {
 
     const originalFileReader = window.FileReader
     const originalGlobalFileReader = globalThis.FileReader
-    let assetImportPayload = JSON.stringify([
-      { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
-      { username: 'ops', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200 }
-    ])
-    class MockAssetImportFileReader {
-      result = ''
-      onload: null | (() => void) = null
-      onerror: null | (() => void) = null
-      readAsText() {
-        this.result = assetImportPayload
-        this.onload?.()
-      }
-      readAsDataURL() {
-        this.result = 'data:image/png;base64,aW1wb3J0LWZpbGU='
-        this.onload?.()
+    class ForbiddenAssetImportFileReader {
+      constructor() {
+        throw new Error('renderer FileReader must not read asset import files')
       }
     }
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockAssetImportFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockAssetImportFileReader })
-    const importFile = new File(
-      [assetImportPayload],
-      'external-reference-assets.json',
-      { type: 'application/json' }
-    )
-    const input = assets.find('input.asset-hidden-file-input')
-    Object.defineProperty(input.element, 'files', {
-      configurable: true,
-      value: [importFile]
-    })
-    await input.trigger('change')
-    await flushPromises()
-    expect(assets.find('.import-assets-modal').text()).toContain('其中 1 个与现有主机重复')
-    expect(assets.find('.import-assets-modal').text()).toContain('imported-json')
-    vi.mocked(window.aiops.saveAsset).mockClear()
-    await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('跳过重复'))!.trigger('click')
-    await flushPromises()
-    expect(vi.mocked(window.aiops.saveAsset).mock.calls).toEqual([
-      [expect.objectContaining({ host: '10.55.0.9' })]
-    ])
-    expect(vi.mocked(window.aiops.saveAsset).mock.calls[0]?.[0]).not.toHaveProperty('id')
-    expect(assets.text()).toContain('imported-json')
-    expect(assets.findAll('.host-card').some((card) => card.text().includes('prod-bastion-imported'))).toBe(false)
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: ForbiddenAssetImportFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: ForbiddenAssetImportFileReader })
+    try {
+      vi.mocked(window.aiops.showOpenDialog).mockClear()
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
+      await flushPromises()
+      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          properties: ['openFile'],
+          filters: expect.arrayContaining([expect.objectContaining({ name: 'Asset Import Files' })])
+        })
+      )
+      expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/external-reference-assets.json')
+      expect(assets.find('.import-assets-modal').text()).toContain('其中 1 个与现有主机重复')
+      expect(assets.find('.import-assets-modal').text()).toContain('imported-json')
+      vi.mocked(window.aiops.saveAsset).mockClear()
+      await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('跳过重复'))!.trigger('click')
+      await flushPromises()
+      expect(vi.mocked(window.aiops.saveAsset).mock.calls).toEqual([
+        [expect.objectContaining({ host: '10.55.0.9' })]
+      ])
+      expect(vi.mocked(window.aiops.saveAsset).mock.calls[0]?.[0]).not.toHaveProperty('id')
+      expect(assets.text()).toContain('imported-json')
+      expect(assets.findAll('.host-card').some((card) => card.text().includes('prod-bastion-imported'))).toBe(false)
 
-    const mobaPayload = [
-      '[Bookmarks]',
-      'moba-prod=#109#0%10.88.1.5%22%mobauser%%-1%10.88.1.1%2200%jumpuser%-1%2224%-1%_ProfileDir_/keys/moba.pem'
-    ].join('\n')
-    assetImportPayload = mobaPayload
-    const mobaInput = assets.find('input.asset-hidden-file-input')
-    Object.defineProperty(mobaInput.element, 'files', {
-      configurable: true,
-      value: [new File([mobaPayload], 'MobaXterm.mxtsessions', { type: 'text/plain' })]
-    })
-    await mobaInput.trigger('change')
-    await flushPromises()
-    expect(assets.find('.import-assets-modal').text()).toContain('moba-prod')
-    expect(assets.find('.import-assets-modal').text()).toContain('10.88.1.5')
-    vi.mocked(window.aiops.saveAsset).mockClear()
-    await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
-    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
-    expect(assets.text()).toContain('moba-prod')
-    expect(assets.text()).toContain('mobauser')
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+      vi.mocked(window.aiops.showOpenDialog).mockClear()
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/MobaXterm.mxtsessions'] })
+      await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
+      await flushPromises()
+      expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/MobaXterm.mxtsessions')
+      expect(assets.find('.import-assets-modal').text()).toContain('moba-prod')
+      expect(assets.find('.import-assets-modal').text()).toContain('10.88.1.5')
+      vi.mocked(window.aiops.saveAsset).mockClear()
+      await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+      expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
+      expect(assets.text()).toContain('moba-prod')
+      expect(assets.text()).toContain('mobauser')
+    } finally {
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+    }
 
     const managed = mount(AssetsPanel, {
       props: { query: '' },
@@ -1009,6 +1058,50 @@ describe('AppShell', () => {
       expect(assets.text()).toContain('导出文件写入失败')
       expect(assets.find('.export-assets-modal').exists()).toBe(true)
       expect(assets.text()).not.toContain('已导出 1 个主机')
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
+  it('does not fabricate Assets import preview when file picker or read bridges fail', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    const importButton = () => assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!
+    const originalAiops = {
+      showOpenDialog: window.aiops.showOpenDialog,
+      readLocalFile: window.aiops.readLocalFile
+    }
+
+    try {
+      vi.mocked(window.aiops.readLocalFile).mockClear()
+      ;(window.aiops as any).showOpenDialog = undefined
+      await importButton().trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('导入文件选择服务不可用。')
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
+      expect(assets.find('.import-assets-modal').exists()).toBe(false)
+
+      ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
+      ;(window.aiops as any).readLocalFile = undefined
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      await importButton().trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('导入文件读取服务不可用。')
+      expect(assets.find('.import-assets-modal').exists()).toBe(false)
+
+      ;(window.aiops as any).readLocalFile = originalAiops.readLocalFile
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      vi.mocked(window.aiops.readLocalFile).mockRejectedValueOnce(new Error('asset read denied'))
+      await importButton().trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('asset read denied')
+      expect(assets.find('.import-assets-modal').exists()).toBe(false)
     } finally {
       Object.assign(window.aiops, originalAiops)
     }

@@ -2039,6 +2039,7 @@ export type KubernetesAgentCleanupResult = AiopsMutationResult<{
 }>
 
 export type AiopsPreloadApi = {
+  getPathForFile: (file: File) => string
   platform: () => Promise<string>
   shell: () => Promise<string>
   checkUpdate: () => Promise<AppUpdateCheckResult>
