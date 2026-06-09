@@ -2881,7 +2881,7 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
     expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('开始语音输入')
     expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音转写完成')
-    expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).toContain('语音输入：请检查当前主机状态')
+    expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).toContain('Provider transcript from test voice backend')
 
     const markdownContext = store.selectedContexts.find((context) => context.label === 'Markdown语法指南.md')!
     await wrapper.find(`.chat-editable [data-context-id="${markdownContext.id}"] button`).trigger('click')

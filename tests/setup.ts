@@ -5173,8 +5173,9 @@ Object.defineProperty(window, 'aiops', {
       return {
         ok: true,
         data: {
-          text: `语音输入：请检查当前主机状态（${input.audioFormat || 'wav'}, ${Math.round(Number(input.durationMs || 0) / 1000)}s）`,
-          provider: 'aiopsterm-local' as const
+          text: 'Provider transcript from test voice backend',
+          provider: 'openai' as const,
+          model: 'test-voice-provider'
         }
       }
     }),

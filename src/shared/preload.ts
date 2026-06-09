@@ -1358,9 +1358,12 @@ export type VoiceTranscriptionInput = {
   source?: 'browser'
 }
 
+export type VoiceTranscriptionProvider = 'aiopsterm-local' | ModelProviderCheckKey
+
 export type VoiceTranscriptionResult = AiopsMutationResult<{
   text: string
-  provider: 'aiopsterm-local'
+  provider: VoiceTranscriptionProvider
+  model?: string
 }>
 
 export type AiChatMessageInput = {

@@ -1,5 +1,7 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
+import { createServer } from 'http'
 import { mkdir } from 'fs/promises'
+import type { AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
 
@@ -14,6 +16,81 @@ const launchApp = async (name: string) => {
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'
     }
+  })
+}
+
+const startVoiceTranscriptionServer = async () => {
+  const requests: Array<{ method?: string; url?: string; authorization?: string; body: Buffer }> = []
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+    request.on('end', () => {
+      const body = Buffer.concat(chunks)
+      requests.push({
+        method: request.method,
+        url: request.url,
+        authorization: request.headers.authorization,
+        body
+      })
+      if (request.method !== 'POST' || request.url !== '/v1/audio/transcriptions' || request.headers.authorization !== 'Bearer e2e-voice-key') {
+        response.writeHead(400, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: { message: 'unexpected voice transcription request' } }))
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ text: 'Provider transcript from E2E voice backend' }))
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address() as AddressInfo
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+  }
+}
+
+const configureVoiceTranscriptionProvider = async (page: Page, baseUrl: string) => {
+  await page.evaluate(async (providerBaseUrl) => {
+    const api = (window as unknown as { aiops: { getConfig: () => Promise<any>; saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
+    const config = await api.getConfig()
+    const modelSettings = config.modelSettings || {}
+    const providers = modelSettings.providers || {}
+    const options = Array.isArray(modelSettings.options) ? modelSettings.options.filter((option: { name?: string }) => option.name !== 'whisper-e2e') : []
+    await api.saveConfig({
+      modelProvider: 'openai-compatible',
+      modelName: 'whisper-e2e',
+      modelSettings: {
+        ...modelSettings,
+        providers: {
+          ...providers,
+          openai: {
+            ...(providers.openai || {}),
+            baseUrl: providerBaseUrl,
+            apiKey: 'e2e-voice-key',
+            modelId: 'whisper-1',
+            apiFormat: 'chat-completions'
+          }
+        },
+        options: [...options, { name: 'whisper-e2e', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }]
+      }
+    })
+  }, baseUrl)
+}
+
+const restoreLocalAiProvider = async (page: Page) => {
+  await page.evaluate(async () => {
+    const api = (window as unknown as { aiops: { saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
+    await api.saveConfig({
+      modelProvider: 'local',
+      modelName: 'aiopsterm-local-agent'
+    })
   })
 }
 
@@ -66,6 +143,7 @@ const installVoiceRecorderDouble = async (page: Page) => {
 
 test('aiopsterm primary desktop flows', async () => {
   await mkdir('test-results', { recursive: true })
+  const voiceServer = await startVoiceTranscriptionServer()
   const app = await launchApp('primary')
 
   try {
@@ -767,13 +845,22 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.chat-editable .mention-chip-doc')).toContainText(/\.md/)
     await expect(page.getByTestId('ai-voice-button')).toBeVisible()
     await expect(page.getByTestId('ai-voice-button')).toHaveAttribute('title', '开始语音输入')
+    await configureVoiceTranscriptionProvider(page, voiceServer.baseUrl)
     await page.getByTestId('ai-voice-button').click()
     await expect(page.getByTestId('ai-voice-button')).toHaveClass(/recording/)
     await expect(page.getByTestId('ai-voice-button')).toHaveAttribute('title', '停止语音录制')
     await page.waitForTimeout(240)
     await page.getByTestId('ai-voice-button').click()
     await expect(page.locator('.input-placeholder-notice')).toContainText('语音转写完成')
-    await expect(page.locator('.chat-editable')).toContainText('语音输入：请检查当前主机状态')
+    await expect(page.locator('.chat-editable')).toContainText('Provider transcript from E2E voice backend')
+    expect(voiceServer.requests).toHaveLength(1)
+    expect(voiceServer.requests[0]).toMatchObject({
+      method: 'POST',
+      url: '/v1/audio/transcriptions',
+      authorization: 'Bearer e2e-voice-key'
+    })
+    expect(voiceServer.requests[0].body.toString('utf8')).toContain('name="model"')
+    await restoreLocalAiProvider(page)
 
     await page.locator('.todo-inline-header').click()
     await expect(page.locator('.todo-compact-list')).not.toBeVisible()
@@ -794,6 +881,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.screenshot({ path: path.join('test-results', 'aiopsterm-agents.png'), fullPage: true })
   } finally {
     await app.close()
+    await voiceServer.close()
   }
 })
 

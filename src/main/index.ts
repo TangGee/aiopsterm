@@ -151,7 +151,7 @@ import {
   skipUserLogin,
   updateUserProfile
 } from './backend/userAccount'
-import { transcribeVoiceInput } from './backend/voice'
+import { configureVoiceBackendRuntime, transcribeVoiceInput } from './backend/voice'
 import {
   aiopstermProtocolPrefix,
   aiopstermProtocolScheme,
@@ -1142,6 +1142,7 @@ const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config
 configureTerminalSuggestionsRuntime({ getConfig })
 configureAiChatRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig })
+configureVoiceBackendRuntime({ getConfig })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

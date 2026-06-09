@@ -1,18 +1,60 @@
-import type { VoiceTranscriptionInput, VoiceTranscriptionResult } from './preload'
+import type { VoiceTranscriptionInput, VoiceTranscriptionProvider, VoiceTranscriptionResult } from './preload'
 
 const supportedAudioFormats = new Set(['wav', 'pcm', 'ogg-opus', 'speex', 'silk', 'mp3', 'm4a', 'aac', 'amr'])
 const maxAudioBytes = 50 * 1024 * 1024
+const localVoiceModelName = 'aiopsterm-local-agent'
+
+export type VoiceTranscriptionProviderInput = {
+  audioData: string
+  audioFormat: string
+  audioSize: number
+  durationMs: number
+  source: VoiceTranscriptionInput['source']
+  modelName: string
+}
+
+export type VoiceTranscriptionProviderResult =
+  | {
+      ok: true
+      text: string
+      provider: VoiceTranscriptionProvider
+      model?: string
+    }
+  | {
+      ok: false
+      errorCode: string
+      errorMessage: string
+      provider?: VoiceTranscriptionProvider
+      model?: string
+    }
+
+export type VoiceTranscriptionRuntime = {
+  getModelName?: () => string | undefined
+  transcribe?: (input: VoiceTranscriptionProviderInput) => Promise<VoiceTranscriptionProviderResult>
+}
+
+let voiceTranscriptionRuntime: VoiceTranscriptionRuntime = {}
+
+const normalizeText = (value: unknown) => String(value || '').trim()
 
 const normalizeAudioFormat = (value?: string) => {
-  const normalized = String(value || '').trim().toLowerCase()
+  const normalized = normalizeText(value).toLowerCase()
   if (!normalized) return 'wav'
   if (normalized.includes('ogg') || normalized.includes('opus') || normalized.includes('webm')) return 'ogg-opus'
   if (normalized.includes('mpeg')) return 'mp3'
   return supportedAudioFormats.has(normalized) ? normalized : 'wav'
 }
 
-export const transcribeVoiceInput = (input: Partial<VoiceTranscriptionInput> = {}): VoiceTranscriptionResult => {
-  const audioData = String(input.audioData || '').trim()
+const voiceModelName = () => normalizeText(voiceTranscriptionRuntime.getModelName?.()) || localVoiceModelName
+
+const shouldUseVoiceProvider = (modelName: string) => normalizeText(modelName) !== '' && normalizeText(modelName) !== localVoiceModelName
+
+export function configureVoiceTranscriptionRuntime(config?: VoiceTranscriptionRuntime) {
+  voiceTranscriptionRuntime = config || {}
+}
+
+export const transcribeVoiceInput = async (input: Partial<VoiceTranscriptionInput> = {}): Promise<VoiceTranscriptionResult> => {
+  const audioData = normalizeText(input.audioData)
   const audioSize = Number(input.audioSize || 0)
   if (!audioData || audioSize <= 0) {
     return {
@@ -36,14 +78,52 @@ export const transcribeVoiceInput = (input: Partial<VoiceTranscriptionInput> = {
     }
   }
 
-  const audioFormat = normalizeAudioFormat(input.audioFormat)
-  const durationMs = Math.max(0, Number(input.durationMs || 0))
-  const suffix = `（${audioFormat}${durationMs ? `, ${Math.round(durationMs / 1000)}s` : ''}）`
+  const modelName = voiceModelName()
+  if (!shouldUseVoiceProvider(modelName)) {
+    return {
+      ok: false,
+      errorCode: 'VOICE_LOCAL_TRANSCRIBER_UNAVAILABLE',
+      errorMessage: 'Local voice transcription is not configured.'
+    }
+  }
+
+  if (!voiceTranscriptionRuntime.transcribe) {
+    return {
+      ok: false,
+      errorCode: 'VOICE_TRANSCRIPTION_PROVIDER_UNAVAILABLE',
+      errorMessage: 'Voice transcription provider is unavailable.'
+    }
+  }
+
+  const providerResponse = await voiceTranscriptionRuntime.transcribe({
+    audioData,
+    audioFormat: normalizeAudioFormat(input.audioFormat),
+    audioSize,
+    durationMs: Math.max(0, Number(input.durationMs || 0)),
+    source: input.source,
+    modelName
+  })
+  if (!providerResponse.ok) {
+    return {
+      ok: false,
+      errorCode: providerResponse.errorCode,
+      errorMessage: providerResponse.errorMessage
+    }
+  }
+  const text = normalizeText(providerResponse.text)
+  if (!text) {
+    return {
+      ok: false,
+      errorCode: 'VOICE_TRANSCRIPTION_PROVIDER_EMPTY',
+      errorMessage: 'Voice transcription provider returned an empty response.'
+    }
+  }
   return {
     ok: true,
     data: {
-      text: `语音输入：请检查当前主机状态${suffix}`,
-      provider: 'aiopsterm-local'
+      text,
+      provider: providerResponse.provider,
+      model: providerResponse.model || modelName
     }
   }
 }
