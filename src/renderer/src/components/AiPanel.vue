@@ -1014,14 +1014,6 @@
       >
         <Image />
       </button>
-      <input
-        ref="imageInputRef"
-        type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp"
-        multiple
-        hidden
-        @change="handleImageSelected"
-      />
       <div
         ref="editableRef"
         class="chat-editable"
@@ -1180,7 +1172,6 @@ const editDraft = ref('')
 const editImageInputParts = ref<AiImageContentPart[]>([])
 const editFileInputParts = ref<AiDocChipContentPart[]>([])
 const editHostContexts = ref<AiContextOption[]>([])
-const imageInputRef = ref<HTMLInputElement | null>(null)
 const modelSearchInputRef = ref<HTMLInputElement | null>(null)
 const contextSearchInputRef = ref<HTMLInputElement | null>(null)
 const commandSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -2425,18 +2416,36 @@ const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
   insertChipIntoEditableCursor(editTarget, part, handleEditEditableInput, '@')
 }
 
-const insertImageFilesIntoEdit = async (files: File[]) => {
-  for (const file of files) {
-    const part = await processImageFile(file)
-    if (part) insertImageAtEditCursor(part)
+const clipboardHasImage = (event: ClipboardEvent) => Array.from(event.clipboardData?.items || []).some((item) => item.type.startsWith('image/'))
+
+const preparePastedImagePart = async (): Promise<AiImageContentPart | null> => {
+  const prepareClipboardImage = window.aiops?.prepareChatImageAttachmentFromClipboard
+  if (typeof prepareClipboardImage !== 'function') {
+    showInputPlaceholderNotice('图片上传失败：剪贴板图片服务不可用')
+    return null
+  }
+  try {
+    const result = await prepareClipboardImage()
+    if (!result.ok || !result.data) {
+      showInputPlaceholderNotice(`图片上传失败：${result.errorMessage || result.errorCode || '图片处理失败'}`)
+      return null
+    }
+    return {
+      type: 'image',
+      mediaType: result.data.mediaType,
+      data: result.data.data,
+      name: result.data.name
+    }
+  } catch (error) {
+    showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
+    return null
   }
 }
 
-const getImageFilesFromClipboard = (event: ClipboardEvent) =>
-  Array.from(event.clipboardData?.items || [])
-    .filter((item) => item.type.startsWith('image/'))
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => Boolean(file))
+const insertPastedImageIntoEdit = async () => {
+  const part = await preparePastedImagePart()
+  if (part) insertImageAtEditCursor(part)
+}
 
 const insertPlainTextIntoEditableCursor = (editable: HTMLElement | null, text: string, onInserted: () => void) => {
   if (!editable || !text) return
@@ -2936,10 +2945,9 @@ const handleEditEditableClick = (event: MouseEvent) => {
 }
 
 const handleEditEditablePaste = (event: ClipboardEvent) => {
-  const imageFiles = getImageFilesFromClipboard(event)
-  if (imageFiles.length > 0) {
+  if (clipboardHasImage(event)) {
     event.preventDefault()
-    void insertImageFilesIntoEdit(imageFiles)
+    void insertPastedImageIntoEdit()
     return
   }
 
@@ -3146,13 +3154,9 @@ const insertPlainTextAtEditableCursor = (text: string) => {
 }
 
 const handleEditablePaste = (event: ClipboardEvent) => {
-  const imageFiles = Array.from(event.clipboardData?.items || [])
-    .filter((item) => item.type.startsWith('image/'))
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => Boolean(file))
-  if (imageFiles.length > 0) {
+  if (clipboardHasImage(event)) {
     event.preventDefault()
-    void insertImageFiles(imageFiles)
+    void insertPastedImage()
     return
   }
 
@@ -3160,36 +3164,16 @@ const handleEditablePaste = (event: ClipboardEvent) => {
   insertPlainTextAtEditableCursor(event.clipboardData?.getData('text/plain') || '')
 }
 
-const fileToBase64 = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const value = typeof reader.result === 'string' ? reader.result : ''
-      resolve(value.includes(',') ? value.split(',')[1] : value)
-    }
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+const imagePickerFilters = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }]
 
-const processImageFile = async (file: File): Promise<AiImageContentPart | null> => {
+const processImageFilePath = async (filePath: string): Promise<AiImageContentPart | null> => {
+  const prepareImageFromFile = window.aiops?.prepareChatImageAttachmentFromFile
+  if (typeof prepareImageFromFile !== 'function') {
+    showInputPlaceholderNotice('图片上传失败：图片读取服务不可用')
+    return null
+  }
   try {
-    const validation = await window.aiops.validateChatImageAttachment({
-      mediaType: file.type,
-      name: file.name,
-      size: file.size
-    })
-    if (!validation.ok || !validation.data) {
-      showInputPlaceholderNotice(`图片上传失败：${validation.errorMessage || validation.errorCode || '图片校验失败'}`)
-      return null
-    }
-
-    const data = await fileToBase64(file)
-    const result = await window.aiops.prepareChatImageAttachment({
-      mediaType: validation.data.mediaType,
-      data,
-      name: validation.data.name,
-      size: validation.data.size
-    })
+    const result = await prepareImageFromFile({ filePath })
     if (!result.ok || !result.data) {
       showInputPlaceholderNotice(`图片上传失败：${result.errorMessage || result.errorCode || '图片处理失败'}`)
       return null
@@ -3206,17 +3190,36 @@ const processImageFile = async (file: File): Promise<AiImageContentPart | null> 
   }
 }
 
-const insertImageFiles = async (files: File[]) => {
+const insertImageFilePaths = async (filePaths: string[]) => {
   if (streaming.value) return
-  for (const file of files) {
-    const part = await processImageFile(file)
+  for (const filePath of filePaths) {
+    const part = await processImageFilePath(filePath)
     if (part) insertImageAtEditableCursor(part)
   }
 }
 
-const openImagePicker = () => {
+const insertPastedImage = async () => {
+  const part = await preparePastedImagePart()
+  if (part) insertImageAtEditableCursor(part)
+}
+
+const openImagePicker = async () => {
   if (streaming.value) return
-  imageInputRef.value?.click()
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    showInputPlaceholderNotice('图片上传失败：文件选择服务不可用')
+    return
+  }
+  try {
+    const result = await showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: imagePickerFilters
+    })
+    if (!result || result.canceled || !result.filePaths?.length) return
+    await insertImageFilePaths(result.filePaths)
+  } catch (error) {
+    showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const showInputPlaceholderNotice = (message: string) => {
@@ -3509,13 +3512,6 @@ const toggleVoiceInput = () => {
     return
   }
   void startVoiceRecording()
-}
-
-const handleImageSelected = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files || [])
-  await insertImageFiles(files)
-  input.value = ''
 }
 
 type AiopstermDragPayload = {

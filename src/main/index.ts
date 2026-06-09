@@ -40,7 +40,12 @@ import {
   saveChatMessageMetadata,
   updateChatConversation
 } from './backend/chatHistory'
-import { prepareChatImageAttachment, validateChatImageAttachment } from './backend/chatImageAttachment'
+import {
+  prepareChatImageAttachment,
+  prepareChatImageAttachmentFromClipboard,
+  prepareChatImageAttachmentFromFile,
+  validateChatImageAttachment
+} from './backend/chatImageAttachment'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -250,6 +255,8 @@ import type {
   TerminalCommandSuggestionContext,
   TerminalCreateOptions,
   ChatImageAttachmentPrepareInput,
+  ChatImageAttachmentClipboardInput,
+  ChatImageAttachmentFileInput,
   ChatImageAttachmentValidateInput,
   UserConfig,
   VoiceTranscriptionInput,
@@ -2707,6 +2714,10 @@ const registerIpc = () => {
   })
   ipcMain.handle('chat:validate-image-attachment', (_event, input?: ChatImageAttachmentValidateInput) => validateChatImageAttachment(input || {}))
   ipcMain.handle('chat:prepare-image-attachment', (_event, input?: ChatImageAttachmentPrepareInput) => prepareChatImageAttachment(input || {}))
+  ipcMain.handle('chat:prepare-image-attachment-from-file', (_event, input?: ChatImageAttachmentFileInput) => prepareChatImageAttachmentFromFile(input || {}))
+  ipcMain.handle('chat:prepare-image-attachment-from-clipboard', (_event, input?: ChatImageAttachmentClipboardInput) =>
+    prepareChatImageAttachmentFromClipboard(input || {})
+  )
   ipcMain.handle('kb:check-path', async (_event, payload: { absPath: string }) => {
     const absPath = typeof payload?.absPath === 'string' ? payload.absPath : ''
     try {

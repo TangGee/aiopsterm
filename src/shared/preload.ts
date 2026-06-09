@@ -1103,6 +1103,15 @@ export type ChatImageAttachmentPrepareInput = {
 
 export type ChatImageAttachmentValidateInput = Omit<ChatImageAttachmentPrepareInput, 'data'>
 
+export type ChatImageAttachmentFileInput = {
+  filePath: string
+  name?: string
+}
+
+export type ChatImageAttachmentClipboardInput = {
+  name?: string
+}
+
 export type ChatImageAttachmentValidateResult = AiopsMutationResult<{
   mediaType: ChatImageAttachmentMediaType
   name?: string
@@ -2099,6 +2108,8 @@ export type AiopsPreloadApi = {
   stageChatAttachment: (payload: { taskId: string; srcAbsPath: string }) => Promise<ChatAttachmentStageResult>
   validateChatImageAttachment: (input: ChatImageAttachmentValidateInput) => Promise<ChatImageAttachmentValidateResult>
   prepareChatImageAttachment: (input: ChatImageAttachmentPrepareInput) => Promise<ChatImageAttachmentPrepareResult>
+  prepareChatImageAttachmentFromFile: (input: ChatImageAttachmentFileInput) => Promise<ChatImageAttachmentPrepareResult>
+  prepareChatImageAttachmentFromClipboard: (input?: ChatImageAttachmentClipboardInput) => Promise<ChatImageAttachmentPrepareResult>
   kbCheckPath: (absPath: string) => Promise<{ exists: boolean; isDirectory: boolean; isFile: boolean }>
   kbEnsureRoot: () => Promise<{ success: boolean }>
   kbGetRoot: () => Promise<{ root: string }>

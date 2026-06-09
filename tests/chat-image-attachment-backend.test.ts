@@ -1,7 +1,33 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { MAX_CHAT_IMAGE_ATTACHMENT_BYTES, prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
 
+const electronMock = vi.hoisted(() => ({
+  clipboard: {
+    readImage: vi.fn()
+  }
+}))
+
+vi.mock('electron', () => electronMock)
+
+type ChatImageBackend = {
+  prepareChatImageAttachmentFromFile: (input: { filePath: string; name?: string }) => Promise<ReturnType<typeof prepareChatImageAttachment>>
+  prepareChatImageAttachmentFromClipboard: (input?: { name?: string }) => ReturnType<typeof prepareChatImageAttachment>
+}
+let backend: ChatImageBackend
+
+beforeAll(async () => {
+  const modulePath = '../src/main/backend/chatImageAttachment'
+  backend = (await import(modulePath)) as ChatImageBackend
+})
+
 describe('chat image attachment backend boundary', () => {
+  beforeEach(() => {
+    electronMock.clipboard.readImage.mockReset()
+  })
+
   it('validates image metadata before renderer file reads', () => {
     expect(
       validateChatImageAttachment({
@@ -81,5 +107,83 @@ describe('chat image attachment backend boundary', () => {
         errorCode: 'CHAT_IMAGE_EMPTY_DATA'
       })
     )
+  })
+
+  it('prepares image attachments from local file paths in the main backend', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-image-'))
+    const filePath = join(dir, 'input.png')
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02])
+
+    try {
+      await writeFile(filePath, bytes)
+      const result = await backend.prepareChatImageAttachmentFromFile({ filePath })
+
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          type: 'image',
+          mediaType: 'image/png',
+          data: bytes.toString('base64'),
+          name: 'input.png',
+          size: bytes.byteLength
+        }
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects non-image local files before creating image parts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-image-invalid-'))
+    const filePath = join(dir, 'note.txt')
+
+    try {
+      await writeFile(filePath, 'TEXT')
+      const result = await backend.prepareChatImageAttachmentFromFile({ filePath })
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'CHAT_IMAGE_UNSUPPORTED_TYPE'
+        })
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('prepares pasted image attachments from the Electron clipboard boundary', () => {
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x03, 0x04])
+    electronMock.clipboard.readImage.mockReturnValue({
+      isEmpty: () => false,
+      toPNG: () => bytes
+    })
+
+    const result = backend.prepareChatImageAttachmentFromClipboard()
+
+    expect(electronMock.clipboard.readImage).toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        type: 'image',
+        mediaType: 'image/png',
+        data: bytes.toString('base64'),
+        name: 'clipboard.png',
+        size: bytes.byteLength
+      }
+    })
+  })
+
+  it('rejects empty clipboard images without renderer-provided data', () => {
+    electronMock.clipboard.readImage.mockReturnValue({
+      isEmpty: () => true,
+      toPNG: () => Buffer.alloc(0)
+    })
+
+    expect(backend.prepareChatImageAttachmentFromClipboard()).toEqual({
+      ok: false,
+      errorCode: 'CHAT_IMAGE_CLIPBOARD_EMPTY',
+      errorMessage: '剪贴板中没有可用图片。'
+    })
   })
 })

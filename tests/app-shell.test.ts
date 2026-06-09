@@ -2445,46 +2445,42 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
     store.chatMessages = [{ id: 'existing-system', role: 'system', text: '已有后端消息。' }]
 
-    const originalFileReader = window.FileReader
-    const originalGlobalFileReader = globalThis.FileReader
-    const readAsDataUrl = vi.fn(function (this: { onload: null | (() => void) }) {
-      this.onload?.()
-    })
-    class MockImageFileReader {
-      result = 'data:text/plain;base64,VEVYVA=='
-      onload: null | (() => void) = null
-      onerror: null | (() => void) = null
-      readAsDataURL = readAsDataUrl
-    }
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockImageFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockImageFileReader })
+    const originalPrepareImageFromFile = window.aiops.prepareChatImageAttachmentFromFile
 
     try {
-      vi.mocked(window.aiops.validateChatImageAttachment).mockClear()
-      vi.mocked(window.aiops.prepareChatImageAttachment).mockClear()
-      const invalidImageFile = new File(['TEXT'], 'note.txt', { type: 'text/plain' })
-      Object.defineProperty(wrapper.find('.chat-input input[type="file"]').element, 'files', {
-        configurable: true,
-        value: [invalidImageFile]
+      expect(wrapper.find('.chat-input input[type="file"]').exists()).toBe(false)
+      vi.mocked(window.aiops.showOpenDialog).mockClear()
+      vi.mocked(window.aiops.prepareChatImageAttachmentFromFile).mockClear()
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/note.txt'] })
+      vi.mocked(window.aiops.prepareChatImageAttachmentFromFile).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'CHAT_IMAGE_UNSUPPORTED_TYPE',
+        errorMessage: '不支持的图片类型：note.txt'
       })
-      await wrapper.find('.chat-input input[type="file"]').trigger('change')
+      await wrapper.find('[title="上传图片"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
 
-      expect(window.aiops.validateChatImageAttachment).toHaveBeenCalledWith({
-        mediaType: 'text/plain',
-        name: 'note.txt',
-        size: invalidImageFile.size
+      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }]
       })
+      expect(window.aiops.prepareChatImageAttachmentFromFile).toHaveBeenCalledWith({ filePath: '/tmp/note.txt' })
+      expect(window.aiops.validateChatImageAttachment).not.toHaveBeenCalled()
       expect(window.aiops.prepareChatImageAttachment).not.toHaveBeenCalled()
-      expect(readAsDataUrl).not.toHaveBeenCalled()
       expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(false)
       expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：不支持的图片类型')
       expect(store.chatMessages).toEqual([{ id: 'existing-system', role: 'system', text: '已有后端消息。' }])
       expect(store.chatMessages.some((message) => message.id.startsWith('image-upload'))).toBe(false)
+
+      ;(window.aiops as any).prepareChatImageAttachmentFromFile = undefined
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/input.png'] })
+      await wrapper.find('[title="上传图片"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：图片读取服务不可用')
+      expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(false)
     } finally {
-      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
-      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
+      ;(window.aiops as any).prepareChatImageAttachmentFromFile = originalPrepareImageFromFile
       wrapper.unmount()
     }
   })
@@ -2928,26 +2924,15 @@ describe('AppShell', () => {
     await mainInput.trigger('input')
     vi.mocked(window.aiops.validateChatImageAttachment).mockClear()
     vi.mocked(window.aiops.prepareChatImageAttachment).mockClear()
-    const imageFile = new File([new Uint8Array([137, 80, 78, 71])], 'input.png', { type: 'image/png' })
-    Object.defineProperty(wrapper.find('.chat-input input[type="file"]').element, 'files', {
-      configurable: true,
-      value: [imageFile]
-    })
-    await wrapper.find('.chat-input input[type="file"]').trigger('change')
+    vi.mocked(window.aiops.prepareChatImageAttachmentFromFile).mockClear()
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/input.png'] })
+    await wrapper.find('[title="上传图片"]').trigger('click')
     await flushPromises()
     await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.vm.$nextTick()
-    expect(window.aiops.validateChatImageAttachment).toHaveBeenCalledWith({
-      mediaType: 'image/png',
-      name: 'input.png',
-      size: imageFile.size
-    })
-    expect(window.aiops.prepareChatImageAttachment).toHaveBeenCalledWith({
-      mediaType: 'image/png',
-      data: expect.any(String),
-      name: 'input.png',
-      size: imageFile.size
-    })
+    expect(window.aiops.validateChatImageAttachment).not.toHaveBeenCalled()
+    expect(window.aiops.prepareChatImageAttachment).not.toHaveBeenCalled()
+    expect(window.aiops.prepareChatImageAttachmentFromFile).toHaveBeenCalledWith({ filePath: '/tmp/input.png' })
     expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-context-usage-ring"]').attributes('title')).toContain('context used')
     const sendSlashTextNode = document.createTextNode('/')
@@ -3098,19 +3083,17 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.user-message-edit-container .context-tag').some((tag) => tag.text().includes('10.32.6.9'))).toBe(true)
     expect(store.selectedContexts.map((context) => context.id)).toEqual(selectedContextIdsBeforeEditContext)
 
-    const originalFileReader = window.FileReader
-    const originalGlobalFileReader = globalThis.FileReader
-    class MockEditFileReader {
-      result = 'data:image/png;base64,ZWRpdC1pbWFnZQ=='
-      onload: null | (() => void) = null
-      onerror: null | (() => void) = null
-      readAsDataURL() {
-        this.onload?.()
+    vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard).mockClear()
+    vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        type: 'image',
+        mediaType: 'image/png',
+        data: 'ZWRpdC1pbWFnZQ==',
+        name: 'edit.png',
+        size: 16
       }
-    }
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockEditFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockEditFileReader })
-    const editPasteFile = new File([new Uint8Array([137, 80, 78, 71])], 'edit.png', { type: 'image/png' })
+    })
     const editPasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
     Object.defineProperty(editPasteEvent, 'clipboardData', {
       configurable: true,
@@ -3119,7 +3102,7 @@ describe('AppShell', () => {
         items: [
           {
             type: 'image/png',
-            getAsFile: () => editPasteFile
+            getAsFile: () => null
           }
         ]
       }
@@ -3127,9 +3110,8 @@ describe('AppShell', () => {
     editInput.element.dispatchEvent(editPasteEvent)
     await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(window.aiops.prepareChatImageAttachmentFromClipboard).toHaveBeenCalledWith()
     expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(true)
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
 
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/edit-attachment.sql'] })
     await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')

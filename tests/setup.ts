@@ -4378,6 +4378,38 @@ Object.defineProperty(window, 'aiops', {
     }),
     validateChatImageAttachment: vi.fn(async (input: Parameters<typeof validateChatImageAttachment>[0]) => validateChatImageAttachment(input)),
     prepareChatImageAttachment: vi.fn(async (input: Parameters<typeof prepareChatImageAttachment>[0]) => prepareChatImageAttachment(input)),
+    prepareChatImageAttachmentFromFile: vi.fn(async (input: { filePath: string; name?: string }) => {
+      const filePath = String(input.filePath || '').trim()
+      if (!filePath) {
+        return {
+          ok: false as const,
+          errorCode: 'CHAT_IMAGE_FILE_PATH_REQUIRED',
+          errorMessage: '请选择图片文件。'
+        }
+      }
+      if (filePath.endsWith('.txt')) {
+        return {
+          ok: false as const,
+          errorCode: 'CHAT_IMAGE_UNSUPPORTED_TYPE',
+          errorMessage: '不支持的图片类型：note.txt'
+        }
+      }
+      const name = input.name || filePath.split(/[/\\]/).pop() || 'image.png'
+      return prepareChatImageAttachment({
+        mediaType: name.endsWith('.webp') ? 'image/webp' : name.endsWith('.gif') ? 'image/gif' : name.endsWith('.jpg') || name.endsWith('.jpeg') ? 'image/jpeg' : 'image/png',
+        data: Buffer.from(filePath).toString('base64'),
+        name,
+        size: filePath.length
+      })
+    }),
+    prepareChatImageAttachmentFromClipboard: vi.fn(async (input?: { name?: string }) =>
+      prepareChatImageAttachment({
+        mediaType: 'image/png',
+        data: Buffer.from('clipboard-image').toString('base64'),
+        name: input?.name || 'clipboard.png',
+        size: 15
+      })
+    ),
     kbCheckPath: vi.fn(async (absPath: string) => ({ exists: true, isDirectory: absPath.endsWith('/folder'), isFile: !absPath.endsWith('/folder') })),
     kbEnsureRoot: vi.fn(async () => ({ success: true })),
     kbGetRoot: vi.fn(async () => ({ root: '/tmp/aiopsterm/knowledgebase' })),
