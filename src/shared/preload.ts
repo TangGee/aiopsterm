@@ -2047,6 +2047,26 @@ export type KubernetesResource = {
   selector?: string
 }
 
+export type KubernetesResourceAction = 'get' | 'describe' | 'logs'
+
+export type KubernetesResourceActionInput = {
+  resourceId: string
+  action?: KubernetesResourceAction
+}
+
+export type KubernetesResourceActionPlanResult = AiopsMutationResult<{
+  resourceId: string
+  resourceName: string
+  resourceKind: KubernetesResourceKind
+  action: KubernetesResourceAction
+  title: string
+  command: string
+  clusterId: string
+  clusterName: string
+  contextName: string
+  namespace: string
+}>
+
 export type KubernetesProxyType = 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
 
 export type KubernetesAgentProxyConfig = {
@@ -2136,6 +2156,16 @@ export type KubernetesCommandResult = AiopsMutationResult<{
   namespace: string
   source: 'terminal' | 'agent' | 'resource'
 }>
+
+export type KubernetesResourceActionExecuteResult = AiopsMutationResult<
+  NonNullable<KubernetesCommandResult['data']> & {
+    resourceId: string
+    resourceName: string
+    resourceKind: KubernetesResourceKind
+    action: KubernetesResourceAction
+    title: string
+  }
+>
 
 export type KubernetesResourceRefreshInput = {
   clusterId: string
@@ -2365,6 +2395,8 @@ export type AiopsPreloadApi = {
   resizeKubernetesTerminal: (id: string, cols: number, rows: number) => Promise<KubernetesTerminalMutationResult>
   closeKubernetesTerminal: (id: string, exitCode?: number) => Promise<KubernetesTerminalCloseResult>
   executeKubernetesCommand: (input: KubernetesCommandInput) => Promise<KubernetesCommandResult>
+  planKubernetesResourceAction: (input: KubernetesResourceActionInput) => Promise<KubernetesResourceActionPlanResult>
+  executeKubernetesResourceAction: (input: KubernetesResourceActionInput) => Promise<KubernetesResourceActionExecuteResult>
   refreshKubernetesResources: (input: KubernetesResourceRefreshInput) => Promise<KubernetesResourceRefreshResult>
   getKubernetesAgentProxyConfig: () => Promise<KubernetesAgentProxyConfigResult>
   saveKubernetesAgentProxyConfig: (input: KubernetesAgentProxyConfigInput) => Promise<KubernetesAgentProxyConfigResult>

@@ -7,9 +7,11 @@ import {
   configureKubernetesBackendRuntime,
   createKubernetesTerminal,
   executeKubernetesCommand,
+  executeKubernetesResourceAction,
   getKubernetesAgentProxyConfig,
   importKubernetesKubeconfig,
   listKubernetesCatalog,
+  planKubernetesResourceAction,
   refreshKubernetesResources,
   resizeKubernetesTerminal,
   saveKubernetesAgentProxyConfig,
@@ -598,6 +600,148 @@ describe('kubernetes backend boundary', () => {
     })
     expect(result.data?.output).toBe('Error from server (NotFound): pods "missing" not found')
     expect(result.data?.terminalOutput).toBe('[aiopsterm kubectl] kubectl describe pod missing -n ops\nError from server (NotFound): pods "missing" not found')
+  })
+
+  it('plans Kubernetes resource actions behind the backend boundary', async () => {
+    await expect(
+      planKubernetesResourceAction({
+        resourceId: 'k8s-pod-worker-1',
+        action: 'describe'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        resourceId: 'k8s-pod-worker-1',
+        resourceName: 'billing-worker-7f9d6f9dd9-rx8mm',
+        resourceKind: 'pods',
+        action: 'describe',
+        title: 'Describe billing-worker-7f9d6f9dd9-rx8mm',
+        command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops',
+        clusterId: 'k8s-1',
+        clusterName: 'prod-cluster',
+        contextName: 'prod/admin',
+        namespace: 'ops'
+      }
+    })
+
+    await expect(
+      planKubernetesResourceAction({
+        resourceId: 'k8s-node-prod-1',
+        action: 'logs'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_RESOURCE_LOGS_POD_REQUIRED',
+      errorMessage: 'Kubernetes logs are only available for pods.'
+    })
+
+    await expect(
+      planKubernetesResourceAction({
+        resourceId: 'missing-resource',
+        action: 'describe'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_RESOURCE_NOT_FOUND'
+    })
+  })
+
+  it('executes Kubernetes resource actions through the shared command runner', async () => {
+    const result = await executeKubernetesResourceAction({
+      resourceId: 'k8s-pod-worker-1',
+      action: 'logs'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      resourceId: 'k8s-pod-worker-1',
+      resourceName: 'billing-worker-7f9d6f9dd9-rx8mm',
+      resourceKind: 'pods',
+      action: 'logs',
+      title: 'Logs billing-worker-7f9d6f9dd9-rx8mm',
+      command: 'kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120',
+      clusterId: 'k8s-1',
+      contextName: 'prod/admin',
+      namespace: 'ops',
+      source: 'resource',
+      success: true
+    })
+    expect(result.data?.output).toContain('missing secret billing-api-token')
+    expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
+  })
+
+  it('limits backend seed get resource actions to the selected object', async () => {
+    const result = await executeKubernetesResourceAction({
+      resourceId: 'k8s-pod-worker-1',
+      action: 'get'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      command: 'kubectl get pod billing-worker-7f9d6f9dd9-rx8mm -n ops -o wide',
+      resourceId: 'k8s-pod-worker-1',
+      action: 'get',
+      success: true
+    })
+    expect(result.data?.output).toContain('billing-worker-7f9d6f9dd9-rx8mm')
+    expect(result.data?.output).not.toContain('api-gateway-6d8c9bb7f6-l6j2m')
+  })
+
+  it('executes explicit kubeconfig resource actions through real kubectl backend plumbing', async () => {
+    await createFakeKubectl(
+      [
+        'case "$1:$2" in',
+        '  get:namespaces)',
+        '    echo "NAME STATUS AGE"',
+        '    echo "qa Active 12d"',
+        '    ;;',
+        '  get:pods)',
+        '    echo "NAME READY STATUS RESTARTS AGE"',
+        '    echo "qa-api-5d6f7c8d9b-abcde 1/1 Running 0 4h"',
+        '    ;;',
+        '  describe:pod)',
+        '    echo "DESCRIBE_ARGS=$*"',
+        '    ;;',
+        '  *)',
+        '    echo "unexpected args: $*" >&2',
+        '    exit 17',
+        '    ;;',
+        'esac'
+      ].join('\n')
+    )
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    const clusterId = added.data!.cluster!.id
+    await refreshKubernetesResources({
+      clusterId,
+      namespace: 'qa',
+      kind: 'pods'
+    })
+    const catalog = await listKubernetesCatalog()
+    const pod = catalog.data?.resources.find((resource) => resource.clusterId === clusterId && resource.kind === 'pods' && resource.name === 'qa-api-5d6f7c8d9b-abcde')
+    expect(pod).toBeTruthy()
+
+    const result = await executeKubernetesResourceAction({
+      resourceId: pod!.id,
+      action: 'describe'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      command: 'kubectl describe pod qa-api-5d6f7c8d9b-abcde -n qa',
+      contextName: 'qa/dev',
+      namespace: 'qa',
+      source: 'resource',
+      success: true
+    })
+    expect(result.data?.output).toContain('DESCRIBE_ARGS=describe pod qa-api-5d6f7c8d9b-abcde -n qa --context=qa/dev')
   })
 
   it('returns a backend-owned Kubernetes Agent cleanup result', async () => {

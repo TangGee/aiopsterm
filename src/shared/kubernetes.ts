@@ -29,6 +29,10 @@ import type {
   KubernetesKubeconfigImportResult,
   KubernetesNamespaceInfo,
   KubernetesResource,
+  KubernetesResourceAction,
+  KubernetesResourceActionExecuteResult,
+  KubernetesResourceActionInput,
+  KubernetesResourceActionPlanResult,
   KubernetesResourceKind,
   KubernetesResourceRefreshInput,
   KubernetesResourceRefreshResult,
@@ -495,6 +499,15 @@ const requireCluster = (id: string) => {
   if (!cluster) throw Object.assign(new Error('Kubernetes cluster not found.'), { code: 'K8S_CLUSTER_NOT_FOUND' })
   return cluster
 }
+
+const requireResource = (id: string) => {
+  const resource = resources.find((item) => item.id === id)
+  if (!resource) throw Object.assign(new Error('Kubernetes resource not found.'), { code: 'K8S_RESOURCE_NOT_FOUND' })
+  return resource
+}
+
+const normalizeResourceAction = (action: KubernetesResourceAction | undefined): KubernetesResourceAction =>
+  action === 'describe' || action === 'logs' || action === 'get' ? action : 'get'
 
 const clampTerminalDimension = (value: unknown, fallback: number, min: number, max: number) => {
   const number = Math.round(Number(value) || fallback)
@@ -981,6 +994,12 @@ const kubectlGetResourceByKind: Record<KubernetesResourceKind, string> = {
   nodes: 'nodes'
 }
 
+const resourceActionTitlePrefix: Record<KubernetesResourceAction, string> = {
+  get: 'Get',
+  describe: 'Describe',
+  logs: 'Logs'
+}
+
 const allKubernetesResourceKinds: KubernetesResourceKind[] = ['pods', 'deployments', 'services', 'nodes']
 
 const kindFromToken = (token: string): KubernetesResourceKind | null => {
@@ -1215,9 +1234,15 @@ const renderList = (command: string, clusterId: string, namespace: string) => {
   if (!kind) return ''
   const includeAll = command.includes('--all-namespaces') || command.includes(' -A')
   const targetNamespace = namespaceFromCommand(command, namespace)
+  const parsed = tokenizeKubectlCommand(command)
+  const args = parsed.ok ? parsed.args : []
+  if (/^kubectl(?:\.exe)?$/i.test(args[0] || '')) args.shift()
+  const kindIndex = args[0] === 'get' ? 1 : -1
+  const requestedName = kindIndex >= 0 && args[kindIndex + 1] && !args[kindIndex + 1].startsWith('-') ? args[kindIndex + 1] : ''
   return resources
     .filter((resource) => resource.clusterId === clusterId && resource.kind === kind)
     .filter((resource) => kind === 'nodes' || includeAll || resource.namespace === targetNamespace)
+    .filter((resource) => !requestedName || resource.name === requestedName)
     .map((resource) =>
       [
         kind !== 'nodes' && includeAll ? resource.namespace : '',
@@ -1418,6 +1443,14 @@ const buildKubernetesGetCommand = (kind: KubernetesResourceKind, namespace: stri
   return namespace === 'all' ? `kubectl get ${resource} --all-namespaces` : `kubectl get ${resource} -n ${namespace || 'default'}`
 }
 
+const buildKubernetesResourceActionCommand = (resource: KubernetesResource, action: KubernetesResourceAction) => {
+  const type = resourceTypeByKind[resource.kind]
+  const namespaceArg = resource.kind === 'nodes' ? '' : ` -n ${resource.namespace}`
+  if (action === 'logs') return `kubectl logs ${resource.name}${namespaceArg} --tail=120`
+  if (action === 'describe') return `kubectl describe ${type} ${resource.name}${namespaceArg}`
+  return `kubectl get ${type} ${resource.name}${namespaceArg} -o wide`
+}
+
 const filterResourcesOutsideRefreshScope = (clusterId: string, kind: KubernetesResourceKind, namespace: string) =>
   resources.filter((resource) => {
     if (resource.clusterId !== clusterId || resource.kind !== kind) return true
@@ -1521,6 +1554,70 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
     data: {
       ...createKubernetesCommandRun(input, command, output, success, startedAt, success ? '' : output),
       terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output)
+    }
+  }
+}
+
+export async function planKubernetesResourceAction(input: KubernetesResourceActionInput): Promise<KubernetesResourceActionPlanResult> {
+  return asResult(() => {
+    const resourceId = input.resourceId?.trim() || ''
+    if (!resourceId) throw Object.assign(new Error('Kubernetes resource is required.'), { code: 'K8S_RESOURCE_REQUIRED' })
+    const resource = requireResource(resourceId)
+    const cluster = requireCluster(resource.clusterId)
+    const action = normalizeResourceAction(input.action)
+    if (action === 'logs' && resource.kind !== 'pods') {
+      throw Object.assign(new Error('Kubernetes logs are only available for pods.'), { code: 'K8S_RESOURCE_LOGS_POD_REQUIRED' })
+    }
+    const namespace = resource.kind === 'nodes' ? 'all' : resource.namespace
+    return {
+      resourceId: resource.id,
+      resourceName: resource.name,
+      resourceKind: resource.kind,
+      action,
+      title: `${resourceActionTitlePrefix[action]} ${resource.name}`,
+      command: buildKubernetesResourceActionCommand(resource, action),
+      clusterId: cluster.id,
+      clusterName: cluster.name,
+      contextName: cluster.context_name,
+      namespace
+    }
+  }, 'K8S_RESOURCE_ACTION_PLAN_FAILED')
+}
+
+export async function executeKubernetesResourceAction(input: KubernetesResourceActionInput): Promise<KubernetesResourceActionExecuteResult> {
+  const planned = await planKubernetesResourceAction(input)
+  if (!planned.ok || !planned.data) {
+    return {
+      ok: false,
+      errorCode: planned.errorCode || 'K8S_RESOURCE_ACTION_PLAN_FAILED',
+      errorMessage: planned.errorMessage || 'Kubernetes resource action could not be planned.'
+    }
+  }
+  const plan = planned.data
+  const result = await executeKubernetesCommand({
+    command: plan.command,
+    clusterId: plan.clusterId,
+    clusterName: plan.clusterName,
+    contextName: plan.contextName,
+    namespace: plan.namespace,
+    source: 'resource'
+  })
+  if (!result.ok || !result.data) {
+    return {
+      ok: false,
+      errorCode: result.errorCode || 'K8S_RESOURCE_ACTION_EXECUTE_FAILED',
+      errorMessage: result.errorMessage || 'Kubernetes resource action failed.'
+    }
+  }
+  return {
+    ok: true,
+    data: {
+      ...result.data,
+      resourceId: plan.resourceId,
+      resourceName: plan.resourceName,
+      resourceKind: plan.resourceKind,
+      action: plan.action,
+      title: plan.title
     }
   }
 }

@@ -2502,6 +2502,7 @@ const defaultKubernetesCatalog = {
 type TestKubernetesConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error'
 type TestKubernetesClusterSource = 'local' | 'jumpserver'
 type TestKubernetesResourceKind = 'pods' | 'deployments' | 'services' | 'nodes'
+type TestKubernetesResourceAction = 'get' | 'describe' | 'logs'
 type TestKubernetesAgentProxyConfig = {
   enabled: boolean
   type: 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
@@ -2623,6 +2624,58 @@ const upsertKubernetesContextMock = (cluster: TestKubernetesCluster, isActive = 
 }
 
 const findKubernetesClusterMock = (id: string) => kubernetesCatalogMock.clusters.find((cluster) => cluster.id === id) || null
+const findKubernetesResourceMock = (id: string) => kubernetesCatalogMock.resources.find((resource) => resource.id === id) || null
+
+const k8sResourceTypeByKindMock: Record<TestKubernetesResourceKind, string> = {
+  pods: 'pod',
+  deployments: 'deployment',
+  services: 'service',
+  nodes: 'node'
+}
+
+const k8sResourceActionTitleMock: Record<TestKubernetesResourceAction, string> = {
+  get: 'Get',
+  describe: 'Describe',
+  logs: 'Logs'
+}
+
+const normalizeKubernetesResourceActionMock = (action: TestKubernetesResourceAction | undefined): TestKubernetesResourceAction =>
+  action === 'describe' || action === 'logs' || action === 'get' ? action : 'get'
+
+const k8sResourceActionPlanMock = (resourceId: string, action?: TestKubernetesResourceAction) => {
+  const resource = findKubernetesResourceMock(resourceId)
+  if (!resource) return { ok: false, errorCode: 'K8S_RESOURCE_NOT_FOUND', errorMessage: 'Kubernetes resource not found.' }
+  const cluster = findKubernetesClusterMock(resource.clusterId)
+  if (!cluster) return { ok: false, errorCode: 'K8S_CLUSTER_NOT_FOUND', errorMessage: 'Kubernetes cluster not found.' }
+  const normalizedAction = normalizeKubernetesResourceActionMock(action)
+  if (normalizedAction === 'logs' && resource.kind !== 'pods') {
+    return { ok: false, errorCode: 'K8S_RESOURCE_LOGS_POD_REQUIRED', errorMessage: 'Kubernetes logs are only available for pods.' }
+  }
+  const namespace = resource.kind === 'nodes' ? 'all' : resource.namespace
+  const namespaceArg = resource.kind === 'nodes' ? '' : ` -n ${resource.namespace}`
+  const type = k8sResourceTypeByKindMock[resource.kind]
+  const command =
+    normalizedAction === 'logs'
+      ? `kubectl logs ${resource.name}${namespaceArg} --tail=120`
+      : normalizedAction === 'describe'
+        ? `kubectl describe ${type} ${resource.name}${namespaceArg}`
+        : `kubectl get ${type} ${resource.name}${namespaceArg} -o wide`
+  return {
+    ok: true,
+    data: {
+      resourceId: resource.id,
+      resourceName: resource.name,
+      resourceKind: resource.kind,
+      action: normalizedAction,
+      title: `${k8sResourceActionTitleMock[normalizedAction]} ${resource.name}`,
+      command,
+      clusterId: cluster.id,
+      clusterName: cluster.name,
+      contextName: cluster.context_name,
+      namespace
+    }
+  }
+}
 
 const k8sRefreshCommandMock = (kind: TestKubernetesResourceKind | 'all', namespace: string) => {
   if (kind === 'all') {
@@ -6166,6 +6219,33 @@ Object.defineProperty(window, 'aiops', {
           contextName: input.contextName || 'prod/admin',
           namespace,
           source: input.source || 'terminal'
+        }
+      }
+    }),
+    planKubernetesResourceAction: vi.fn(async (input: { resourceId: string; action?: TestKubernetesResourceAction }) =>
+      k8sResourceActionPlanMock(input.resourceId, input.action)
+    ),
+    executeKubernetesResourceAction: vi.fn(async (input: { resourceId: string; action?: TestKubernetesResourceAction }) => {
+      const plan = k8sResourceActionPlanMock(input.resourceId, input.action)
+      if (!plan.ok || !plan.data) return plan
+      const commandResult = await window.aiops.executeKubernetesCommand({
+        command: plan.data.command,
+        clusterId: plan.data.clusterId,
+        clusterName: plan.data.clusterName,
+        contextName: plan.data.contextName,
+        namespace: plan.data.namespace,
+        source: 'resource'
+      })
+      if (!commandResult.ok || !commandResult.data) return commandResult
+      return {
+        ok: true,
+        data: {
+          ...commandResult.data,
+          resourceId: plan.data.resourceId,
+          resourceName: plan.data.resourceName,
+          resourceKind: plan.data.resourceKind,
+          action: plan.data.action,
+          title: plan.data.title
         }
       }
     }),

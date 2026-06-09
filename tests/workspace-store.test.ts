@@ -5016,7 +5016,15 @@ describe('workspace store', () => {
     expect(store.k8sActiveTerminal?.output).toContain('[Terminal session ended]')
 
     store.k8sActiveClusterId = 'k8s-1'
+    vi.mocked(window.aiops.executeKubernetesResourceAction).mockClear()
     await store.describeK8sResource('k8s-pod-worker-1')
+    expect(window.aiops.executeKubernetesResourceAction).toHaveBeenCalledWith({ resourceId: 'k8s-pod-worker-1', action: 'describe' })
+    expect(window.aiops.executeKubernetesCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops',
+        source: 'resource'
+      })
+    )
     expect(store.copyK8sResourceOutput()).toContain('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     const sentOutputCommand = await store.sendK8sCurrentOutputToTerminal()
     expect(sentOutputCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
@@ -5027,6 +5035,18 @@ describe('workspace store', () => {
     store.clearK8sResourceOutput()
     expect(store.k8sResourceOutputTitle).toBe('资源输出')
     expect(store.k8sCopiedCommand).toBe('')
+    vi.mocked(window.aiops.planKubernetesResourceAction).mockClear()
+    await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'logs')).resolves.toBe('kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
+    expect(window.aiops.planKubernetesResourceAction).toHaveBeenCalledWith({ resourceId: 'k8s-pod-worker-1', action: 'logs' })
+    expect(store.k8sCopiedCommand).toBe('kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
+    vi.mocked(window.aiops.executeKubernetesResourceAction).mockClear()
+    await store.showK8sPodLogs('k8s-pod-worker-1')
+    expect(window.aiops.executeKubernetesResourceAction).toHaveBeenCalledWith({ resourceId: 'k8s-pod-worker-1', action: 'logs' })
+    expect(store.k8sResourceOutput).toContain('missing secret billing-api-token')
+    vi.mocked(window.aiops.planKubernetesResourceAction).mockClear()
+    await store.sendK8sResourceCommand('k8s-pod-worker-1', 'describe')
+    expect(window.aiops.planKubernetesResourceAction).toHaveBeenCalledWith({ resourceId: 'k8s-pod-worker-1', action: 'describe' })
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
 
     expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
     expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-1', contextName: 'prod/admin' })
@@ -5242,6 +5262,51 @@ describe('workspace store', () => {
       expect(store.k8sAgentStatus).toBe('ready')
     } finally {
       ;(window.aiops as any).cleanupKubernetesAgent = originalCleanup
+    }
+  })
+
+  it('does not fabricate Kubernetes resource action commands without backend planning or execution', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    store.k8sActiveClusterId = 'k8s-1'
+    const originalPlan = window.aiops.planKubernetesResourceAction
+    const originalExecute = window.aiops.executeKubernetesResourceAction
+
+    try {
+      ;(window.aiops as any).planKubernetesResourceAction = undefined
+      await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'logs')).resolves.toBe('')
+      expect(store.k8sCopiedCommand).toBe('')
+      expect(store.k8sClusterNotice).toBe('Kubernetes resource action API 不可用')
+      await expect(store.sendK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBeUndefined()
+      expect(store.k8sTerminalTabs).toHaveLength(0)
+
+      ;(window.aiops as any).planKubernetesResourceAction = originalPlan
+      vi.mocked(window.aiops.planKubernetesResourceAction).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'K8S_RESOURCE_NOT_FOUND',
+        errorMessage: 'resource missing from backend catalog'
+      })
+      await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
+      expect(store.k8sClusterNotice).toBe('resource missing from backend catalog')
+      expect(store.k8sCopiedCommand).toBe('')
+
+      ;(window.aiops as any).executeKubernetesResourceAction = undefined
+      await expect(store.describeK8sResource('k8s-pod-worker-1')).resolves.toBeUndefined()
+      expect(store.k8sResourceOutput).toBe('选择 Kubernetes 资源后，可在这里查看 Describe、Logs 或 kubectl 执行结果。')
+      expect(store.k8sClusterNotice).toBe('Kubernetes resource action API 不可用')
+
+      ;(window.aiops as any).executeKubernetesResourceAction = originalExecute
+      vi.mocked(window.aiops.executeKubernetesResourceAction).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'K8S_RESOURCE_ACTION_EXECUTE_FAILED',
+        errorMessage: 'resource action refused by backend'
+      })
+      await expect(store.showK8sPodLogs('k8s-pod-worker-1')).resolves.toBeUndefined()
+      expect(store.k8sResourceOutput).toBe('选择 Kubernetes 资源后，可在这里查看 Describe、Logs 或 kubectl 执行结果。')
+      expect(store.k8sClusterNotice).toBe('resource action refused by backend')
+    } finally {
+      ;(window.aiops as any).planKubernetesResourceAction = originalPlan
+      ;(window.aiops as any).executeKubernetesResourceAction = originalExecute
     }
   })
 

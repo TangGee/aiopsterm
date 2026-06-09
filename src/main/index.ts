@@ -119,9 +119,11 @@ import {
   deleteKubernetesCluster,
   disconnectKubernetesCluster,
   executeKubernetesCommand,
+  executeKubernetesResourceAction,
   getKubernetesAgentProxyConfig,
   importKubernetesKubeconfig,
   listKubernetesCatalog,
+  planKubernetesResourceAction,
   refreshKubernetesResources,
   resizeKubernetesTerminal,
   saveKubernetesAgentProxyConfig,
@@ -248,6 +250,7 @@ import type {
   KubernetesClusterTestInput,
   KubernetesClusterUpdateInput,
   KubernetesCommandInput,
+  KubernetesResourceActionInput,
   KubernetesResourceRefreshInput,
   KubernetesTerminalCreateInput,
   KnowledgeBaseUserConfig,
@@ -3253,6 +3256,8 @@ const registerIpc = () => {
   ipcMain.handle('kubernetes:terminal:resize', (_event, id: string, cols: number, rows: number) => resizeKubernetesTerminal(id, cols, rows))
   ipcMain.handle('kubernetes:terminal:close', (_event, id: string, exitCode?: number) => closeKubernetesTerminal(id, exitCode))
   ipcMain.handle('kubernetes:execute-command', (_event, input: KubernetesCommandInput) => executeKubernetesCommand(input))
+  ipcMain.handle('kubernetes:resource-action:plan', (_event, input: KubernetesResourceActionInput) => planKubernetesResourceAction(input))
+  ipcMain.handle('kubernetes:resource-action:execute', (_event, input: KubernetesResourceActionInput) => executeKubernetesResourceAction(input))
   ipcMain.handle('kubernetes:resources:refresh', (_event, input: KubernetesResourceRefreshInput) => refreshKubernetesResources(input))
   ipcMain.handle('kubernetes:agent:proxy:get', () => getKubernetesAgentProxyConfig())
   ipcMain.handle('kubernetes:agent:proxy:save', (_event, input: KubernetesAgentProxyConfigInput) => saveKubernetesAgentProxyConfig(input))

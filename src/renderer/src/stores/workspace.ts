@@ -133,6 +133,7 @@ type K8sImportContextInfo = KubernetesImportContextInfo
 type K8sNamespaceInfo = KubernetesNamespaceInfo
 type K8sResource = KubernetesResource
 type K8sResourceKind = KubernetesResourceKind
+type K8sResourceAction = 'get' | 'describe' | 'logs'
 type K8sConnectionStatus = KubernetesConnectionStatus
 type K8sProxyConfig = KubernetesAgentProxyConfig
 const defaultK8sProxyConfig: K8sProxyConfig = {
@@ -683,12 +684,6 @@ const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme :
 const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
 const MACRO_MAX_COMMAND_COUNT = 50
 const MACRO_DEFAULT_SLEEP_THRESHOLD_MS = 500
-const k8sResourceTypeByKind: Record<K8sResourceKind, string> = {
-  pods: 'pod',
-  deployments: 'deployment',
-  services: 'service',
-  nodes: 'node'
-}
 const k8sKindLabels: Record<K8sResourceKind, string> = {
   pods: 'Pods',
   deployments: 'Deployments',
@@ -8569,6 +8564,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesCommand']>>['data']>
   type K8sBackendResourceRefreshData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['refreshKubernetesResources']>>['data']>
+  type K8sBackendResourceActionPlanData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['planKubernetesResourceAction']>>['data']>
+  type K8sBackendResourceActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesResourceAction']>>['data']>
 
   const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData | null> => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
@@ -8659,17 +8656,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const findK8sResource = (resourceId: string) => k8sResources.value.find((resource) => resource.id === resourceId) || null
+  const currentK8sOutputCommand = () => k8sResourceOutput.value.split('\n').find((line) => line.trim().startsWith('kubectl '))?.trim() || ''
 
-  const buildK8sResourceCommand = (resource: K8sResource, action: 'get' | 'describe' | 'logs') => {
-    const type = k8sResourceTypeByKind[resource.kind]
-    const namespaceArg = resource.kind === 'nodes' ? '' : ` -n ${resource.namespace}`
-    if (action === 'logs') return `kubectl logs ${resource.name}${namespaceArg} --tail=120`
-    if (action === 'describe') return `kubectl describe ${type} ${resource.name}${namespaceArg}`
-    return `kubectl get ${type} ${resource.name}${namespaceArg} -o wide`
+  const planK8sResourceAction = async (resourceId: string, action: K8sResourceAction = 'get'): Promise<K8sBackendResourceActionPlanData | null> => {
+    if (!window.aiops?.planKubernetesResourceAction) {
+      setK8sNotice('Kubernetes resource action API 不可用')
+      return null
+    }
+    try {
+      const result = await window.aiops.planKubernetesResourceAction({ resourceId, action })
+      if (result.ok && result.data) return result.data
+      setK8sNotice(result.errorMessage || 'Kubernetes 资源命令生成失败')
+      return null
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : 'Kubernetes 资源命令生成失败')
+      return null
+    }
   }
 
-  const currentK8sOutputCommand = () => k8sResourceOutput.value.split('\n').find((line) => line.trim().startsWith('kubectl '))?.trim() || ''
+  const executeK8sResourceAction = async (resourceId: string, action: K8sResourceAction = 'get'): Promise<K8sBackendResourceActionData | null> => {
+    if (!window.aiops?.executeKubernetesResourceAction) {
+      setK8sNotice('Kubernetes resource action API 不可用')
+      return null
+    }
+    try {
+      const result = await window.aiops.executeKubernetesResourceAction({ resourceId, action })
+      if (result.ok && result.data) return result.data
+      setK8sNotice(result.errorMessage || 'Kubernetes 资源操作失败')
+      return null
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : 'Kubernetes 资源操作失败')
+      return null
+    }
+  }
 
   const setK8sResourceKind = (kind: K8sResourceKind) => {
     k8sResourceKind.value = kind
@@ -8833,29 +8852,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const describeK8sResource = async (resourceId: string) => {
-    const resource = findK8sResource(resourceId)
-    if (!resource) return
-    const command = buildK8sResourceCommand(resource, 'describe')
-    k8sResourceOutputTitle.value = `Describe ${resource.name}`
-    const result = await executeK8sBackendCommand(command, resource.clusterId, resource.namespace, 'resource')
+    const result = await executeK8sResourceAction(resourceId, 'describe')
     if (!result) return
-    k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}`
+    k8sResourceOutputTitle.value = result.title
+    k8sResourceOutput.value = `${result.command}\n\n${result.output || result.error || ''}`
   }
 
   const showK8sPodLogs = async (resourceId: string) => {
-    const resource = findK8sResource(resourceId)
-    if (!resource || resource.kind !== 'pods') return
-    const command = buildK8sResourceCommand(resource, 'logs')
-    k8sResourceOutputTitle.value = `Logs ${resource.name}`
-    const result = await executeK8sBackendCommand(command, resource.clusterId, resource.namespace, 'resource')
+    const result = await executeK8sResourceAction(resourceId, 'logs')
     if (!result) return
-    k8sResourceOutput.value = `${command}\n\n${result.output || result.error || ''}`
+    k8sResourceOutputTitle.value = result.title
+    k8sResourceOutput.value = `${result.command}\n\n${result.output || result.error || ''}`
   }
 
-  const copyK8sResourceCommand = (resourceId: string, action: 'get' | 'describe' | 'logs' = 'get') => {
-    const resource = findK8sResource(resourceId)
-    if (!resource || (action === 'logs' && resource.kind !== 'pods')) return ''
-    const command = buildK8sResourceCommand(resource, action)
+  const copyK8sResourceCommand = async (resourceId: string, action: K8sResourceAction = 'get') => {
+    const plan = await planK8sResourceAction(resourceId, action)
+    if (!plan) return ''
+    const command = plan.command
     k8sCopiedCommand.value = command
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(command).catch(() => undefined)
@@ -8914,12 +8927,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const sendK8sResourceCommand = async (resourceId: string, action: 'get' | 'describe' | 'logs' = 'get') => {
-    const resource = findK8sResource(resourceId)
-    const cluster = resource ? k8sClusters.value.find((item) => item.id === resource.clusterId) : null
-    if (!resource || !cluster || (action === 'logs' && resource.kind !== 'pods')) return
-    await openK8sTerminal(cluster.id)
-    const terminalOutput = await sendK8sTerminalCommand(buildK8sResourceCommand(resource, action))
+  const sendK8sResourceCommand = async (resourceId: string, action: K8sResourceAction = 'get') => {
+    const plan = await planK8sResourceAction(resourceId, action)
+    const cluster = plan ? k8sClusters.value.find((item) => item.id === plan.clusterId) : null
+    if (!plan || !cluster) return
+    await openK8sTerminal(plan.clusterId)
+    const terminalOutput = await sendK8sTerminalCommand(plan.command)
     if (!terminalOutput) return
     setK8sNotice(`已发送到 ${cluster.name} 终端`)
   }
