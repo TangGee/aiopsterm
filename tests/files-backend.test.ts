@@ -715,25 +715,25 @@ describe('files backend content boundary', () => {
     })
   })
 
-  it('reads remote seed content behind the main-process file boundary', async () => {
-    const result = await readFileContent('/home/staging/release-note.md', { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
-
-    expect(result.ok).toBe(true)
-    expect(result.data).toMatchObject({
-      action: 'edit',
-      content: expect.stringContaining('Staging release')
-    })
-  })
-
-  it('keeps credentialless development assets on the seed backend even when an SSH agent socket exists', async () => {
+  it('fails closed for credentialless remote sessions instead of returning seeded remote files', async () => {
     const originalAgent = process.env.SSH_AUTH_SOCK
     const originalFilesAgent = process.env.AIOPSTERM_FILES_SFTP_AGENT
     process.env.SSH_AUTH_SOCK = '/tmp/aiopsterm-test-agent.sock'
     delete process.env.AIOPSTERM_FILES_SFTP_AGENT
     try {
-      const rows = await listFiles('/home/deploy', { kind: 'remote', sessionId: 'asset-1', host: 'prod-bastion' })
-
-      expect(rows.map((entry) => entry.name)).toContain('release-note.md')
+      await expect(listFiles('/home/deploy', { kind: 'remote', sessionId: 'asset-1', host: 'prod-bastion' })).rejects.toThrow(
+        'SFTP connection is unavailable for this file session.'
+      )
+      await expect(readFileContent('/home/deploy/release-note.md', { kind: 'remote', sessionId: 'asset-1', host: 'prod-bastion' })).resolves.toEqual({
+        ok: false,
+        errorCode: 'FILES_SFTP_UNAVAILABLE',
+        errorMessage: 'SFTP connection is unavailable for this file session.'
+      })
+      await expect(writeFileContent('/home/deploy/new.txt', 'must not persist\n', { kind: 'remote', sessionId: 'asset-1', host: 'prod-bastion' })).resolves.toEqual({
+        ok: false,
+        errorCode: 'FILES_SFTP_UNAVAILABLE',
+        errorMessage: 'SFTP connection is unavailable for this file session.'
+      })
       expect(ssh2Mock.connectConfigs).toEqual([])
     } finally {
       if (originalAgent === undefined) delete process.env.SSH_AUTH_SOCK
@@ -1396,313 +1396,33 @@ describe('files backend content boundary', () => {
     }
   })
 
-  it('returns create mode for missing remote files and persists writes', async () => {
-    const path = `/home/staging/new-${Date.now()}.txt`
-    const missing = await readFileContent(path, { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
-
-    expect(missing.ok).toBe(true)
-    expect(missing.data).toMatchObject({ action: 'create', content: '' })
-
-    const saved = await writeFileContent(path, 'created through backend\n', { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
-    expect(saved.ok).toBe(true)
-    expect(saved.data.task).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^transfer-/),
-        type: 'r2r',
-        name: expect.stringContaining('new-'),
-        source: path,
-        target: path,
-        fromHost: 'staging-app',
-        toHost: 'staging-app',
-        status: 'success',
-        speed: '已保存'
-      })
-    )
-
-    const reread = await readFileContent(path, { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
-    expect(reread.ok).toBe(true)
-    expect(reread.data).toMatchObject({ action: 'edit', content: 'created through backend\n' })
-  })
-
-  it('renames, chmods, and deletes remote entries through the mutation boundary', async () => {
-    const sourcePath = `/home/staging/mutate-${Date.now()}.txt`
-    const renamedPath = sourcePath.replace('.txt', '-renamed.txt')
-    await writeFileContent(sourcePath, 'remote mutation content\n', { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' })
-
-    const renamed = await mutateFileEntry({ kind: 'rename', oldPath: sourcePath, newPath: renamedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
-    expect(renamed.ok).toBe(true)
-
-    const afterRename = await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })
-    expect(afterRename.map((entry) => entry.path)).toContain(renamedPath)
-    expect(afterRename.map((entry) => entry.path)).not.toContain(sourcePath)
-
-    const chmodded = await mutateFileEntry({ kind: 'chmod', path: renamedPath, mode: '700' }, { kind: 'remote', sessionId: 'ssh-staging' })
-    expect(chmodded.ok).toBe(true)
-    expect(chmodded.data.task).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^transfer-/),
-        type: 'r2r',
-        name: expect.stringContaining('chmod mutate-'),
-        source: renamedPath,
-        target: 'permissions',
-        status: 'success'
-      })
-    )
-    expect((await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).find((entry) => entry.path === renamedPath)?.mode).toBe('-700')
-
-    const deleted = await mutateFileEntry({ kind: 'delete', path: renamedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
-    expect(deleted.ok).toBe(true)
-    expect(deleted.data.task).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^transfer-/),
-        type: 'r2r',
-        name: expect.stringContaining('delete mutate-'),
-        source: renamedPath,
-        target: '/home/staging',
-        status: 'success'
-      })
-    )
-    expect((await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).map((entry) => entry.path)).not.toContain(renamedPath)
-  })
-
-  it('copies and moves remote entries through the mutation boundary', async () => {
-    const sourcePath = `/home/staging/copy-move-${Date.now()}.txt`
-    const copiedPath = sourcePath.replace('.txt', '-copy.txt')
-    const movedPath = sourcePath.replace('.txt', '-moved.txt')
-    await writeFileContent(sourcePath, 'copy move remote content\n', { kind: 'remote', sessionId: 'ssh-staging' })
-
-    const copied = await mutateFileEntry({ kind: 'copy', srcPath: sourcePath, targetPath: copiedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
-    expect(copied.ok).toBe(true)
-    expect(copied.data.task).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^transfer-/),
-        type: 'r2r',
-        name: expect.stringContaining('copy-move-'),
-        source: sourcePath,
-        target: copiedPath,
-        status: 'success'
-      })
-    )
-    expect((await readFileContent(copiedPath, { kind: 'remote', sessionId: 'ssh-staging' })).data?.content).toBe('copy move remote content\n')
-
-    const moved = await mutateFileEntry({ kind: 'move', srcPath: sourcePath, targetPath: movedPath }, { kind: 'remote', sessionId: 'ssh-staging' })
-    expect(moved.ok).toBe(true)
-    expect(moved.data.task).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^transfer-/),
-        type: 'r2r',
-        source: sourcePath,
-        target: movedPath,
-        status: 'success'
-      })
-    )
-    const paths = (await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).map((entry) => entry.path)
-    expect(paths).toContain(copiedPath)
-    expect(paths).toContain(movedPath)
-    expect(paths).not.toContain(sourcePath)
-  })
-
-  it('uploads local files into remote seed content and downloads remote files locally', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-file-transfer-'))
-    const localUpload = join(dir, 'upload.txt')
-    const localDownload = join(dir, 'download.txt')
-    try {
-      await writeFileContent(localUpload, 'uploaded through transfer boundary\n', { kind: 'local', sessionId: 'local' })
-      const uploaded = await transferFileEntry(
-        { kind: 'upload-file', localPath: localUpload, remoteDirectory: '/home/staging' },
-        { kind: 'remote', sessionId: 'ssh-staging', fromHost: '127.0.0.1', toHost: 'staging-app' }
-      )
-      expect(uploaded.ok).toBe(true)
-      expect(uploaded.data.task).toEqual(
-        expect.objectContaining({
-          id: expect.stringMatching(/^transfer-/),
-          type: 'upload',
-          name: 'upload.txt',
-          source: localUpload,
-          target: '/home/staging/upload.txt',
-          progress: 100,
-          speed: '完成',
-          status: 'success',
-          stage: 'pending',
-          fromHost: '127.0.0.1',
-          toHost: 'staging-app'
-        })
-      )
-      expect((await readFileContent('/home/staging/upload.txt', { kind: 'remote', sessionId: 'ssh-staging' })).data?.content).toBe(
-        'uploaded through transfer boundary\n'
-      )
-
-      const downloaded = await transferFileEntry(
-        { kind: 'download-file', remotePath: '/home/staging/upload.txt', localPath: localDownload },
-        { kind: 'remote', sessionId: 'ssh-staging', fromHost: 'staging-app', toHost: '127.0.0.1' }
-      )
-      expect(downloaded.ok).toBe(true)
-      expect(downloaded.data.task).toEqual(
-        expect.objectContaining({
-          id: expect.stringMatching(/^transfer-/),
-          type: 'download',
-          name: 'upload.txt',
-          source: '/home/staging/upload.txt',
-          target: localDownload,
-          progress: 100,
-          speed: '完成',
-          status: 'success',
-          fromHost: 'staging-app',
-          toHost: '127.0.0.1'
-        })
-      )
-      expect((await readFileContent(localDownload, { kind: 'local', sessionId: 'local' })).data?.content).toBe('uploaded through transfer boundary\n')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('downloads remote seed directories locally through the transfer boundary', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-seed-dir-download-'))
-    try {
-      const downloadedDirectory = await transferFileEntry(
-        { kind: 'download-directory', remotePath: '/home/staging/boot', localDirectory: dir },
-        { kind: 'remote', sessionId: 'ssh-staging', fromHost: 'staging-app', toHost: '127.0.0.1' }
-      )
-      const content = '[app]\nenv=staging\nport=8080\n'
-      expect(downloadedDirectory.ok).toBe(true)
-      expect(downloadedDirectory.data).toEqual(
-        expect.objectContaining({
-          status: 'success',
-          source: '/home/staging/boot',
-          target: join(dir, 'boot'),
-          bytes: Buffer.byteLength(content, 'utf-8'),
-          files: 1,
-          itemKind: 'directory',
-          task: expect.objectContaining({
-            type: 'download',
-            name: 'boot',
-            source: '/home/staging/boot',
-            target: join(dir, 'boot'),
-            stage: 'scanning',
-            isGroup: true,
-            totalFiles: 1,
-            finishedFiles: 1,
-            fromHost: 'staging-app',
-            toHost: '127.0.0.1',
-            status: 'success'
-          })
-        })
-      )
-      expect(await readFile(join(dir, 'boot', 'app.ini'), 'utf-8')).toBe(content)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('returns backend-owned task records for remote copies and directory uploads', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-transfer-task-meta-'))
-    const localDirectory = join(dir, 'release-dir')
-    try {
-      await mkdir(localDirectory)
-      const remoteCopyTarget = `/home/staging/release-note-copy-${Date.now()}.md`
-
-      const copied = await transferFileEntry(
-        { kind: 'copy-remote', remotePath: '/home/staging/release-note.md', targetPath: remoteCopyTarget },
-        { kind: 'remote', sessionId: 'ssh-staging', fromHost: 'staging-app', toHost: 'prod-bastion' }
-      )
-      expect(copied.ok).toBe(true)
-      expect(copied.data.task).toEqual(
-        expect.objectContaining({
-          id: expect.stringMatching(/^transfer-/),
-          type: 'r2r',
-          name: 'release-note.md',
-          source: '/home/staging/release-note.md',
-          target: remoteCopyTarget,
-          progress: 100,
-          speed: '完成',
-          status: 'success',
-          fromHost: 'staging-app',
-          toHost: 'prod-bastion'
-        })
-      )
-
-      const uploadedDirectory = await transferFileEntry(
-        { kind: 'upload-directory', localPath: localDirectory, remoteDirectory: '/home/staging' },
-        { kind: 'remote', sessionId: 'ssh-staging', fromHost: '127.0.0.1', toHost: 'staging-app' }
-      )
-      expect(uploadedDirectory.ok).toBe(true)
-      expect(uploadedDirectory.data).toMatchObject({ source: localDirectory, target: '/home/staging/release-dir', itemKind: 'directory' })
-      expect(uploadedDirectory.data.task).toEqual(
-        expect.objectContaining({
-          id: expect.stringMatching(/^transfer-/),
-          type: 'upload',
-          name: 'release-dir',
-          source: localDirectory,
-          target: '/home/staging/release-dir',
-          progress: 100,
-          speed: '完成',
-          status: 'success',
-          stage: 'scanning',
-          isGroup: true,
-          fromHost: '127.0.0.1',
-          toHost: 'staging-app',
-          totalFiles: 1,
-          finishedFiles: 1
-        })
-      )
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('uploads a dropped local path through the transfer boundary after backend type detection', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-os-drop-transfer-'))
+  it('rejects credentialless remote mutations and transfers instead of fabricating seed results', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-no-sftp-transfer-'))
     const localUpload = join(dir, 'dropped.log')
     const localDirectory = join(dir, 'dropped-dir')
+    const remoteOptions = { kind: 'remote' as const, sessionId: 'ssh-staging', host: 'staging-app', fromHost: '127.0.0.1', toHost: 'staging-app' }
+    const unavailable = {
+      ok: false,
+      errorCode: 'FILES_SFTP_UNAVAILABLE',
+      errorMessage: 'SFTP connection is unavailable for this file session.'
+    }
     try {
       await writeFileContent(localUpload, 'dropped through transfer boundary\n', { kind: 'local', sessionId: 'local' })
       await mkdir(localDirectory)
 
-      const uploadedFile = await transferFileEntry(
-        { kind: 'upload-path', localPath: localUpload, remoteDirectory: '/home/staging' },
-        { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' }
-      )
-      expect(uploadedFile.ok).toBe(true)
-      expect(uploadedFile.data).toMatchObject({ target: '/home/staging/dropped.log', itemKind: 'file' })
-      expect(uploadedFile.data.task).toEqual(
-        expect.objectContaining({
-          id: expect.stringMatching(/^transfer-/),
-          type: 'upload',
-          name: 'dropped.log',
-          source: localUpload,
-          target: '/home/staging/dropped.log',
-          stage: 'pending',
-          toHost: 'staging-app',
-          status: 'success'
-        })
-      )
-      expect((await readFileContent('/home/staging/dropped.log', { kind: 'remote', sessionId: 'ssh-staging' })).data?.content).toBe(
-        'dropped through transfer boundary\n'
-      )
-
-      const uploadedDirectory = await transferFileEntry(
-        { kind: 'upload-path', localPath: localDirectory, remoteDirectory: '/home/staging' },
-        { kind: 'remote', sessionId: 'ssh-staging', host: 'staging-app' }
-      )
-      expect(uploadedDirectory.ok).toBe(true)
-      expect(uploadedDirectory.data).toMatchObject({ target: '/home/staging/dropped-dir', itemKind: 'directory', bytes: 0 })
-      expect(uploadedDirectory.data.task).toEqual(
-        expect.objectContaining({
-          id: expect.stringMatching(/^transfer-/),
-          type: 'upload',
-          name: 'dropped-dir',
-          source: localDirectory,
-          target: '/home/staging/dropped-dir',
-          stage: 'scanning',
-          isGroup: true,
-          toHost: 'staging-app',
-          status: 'success'
-        })
-      )
-      expect((await listFiles('/home/staging', { kind: 'remote', sessionId: 'ssh-staging' })).map((entry) => entry.path)).toContain(
-        '/home/staging/dropped-dir'
-      )
+      await expect(mutateFileEntry({ kind: 'rename', oldPath: '/home/staging/app.ini', newPath: '/home/staging/app-v2.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'chmod', path: '/home/staging/app.ini', mode: '700' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'copy', srcPath: '/home/staging/app.ini', targetPath: '/home/staging/app-copy.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'move', srcPath: '/home/staging/app.ini', targetPath: '/home/staging/app-moved.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'delete', path: '/home/staging/app.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'copy-remote', remotePath: '/home/staging/app.ini', targetPath: '/home/staging/app-copy.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'download-file', remotePath: '/home/staging/app.ini', localPath: join(dir, 'app.ini') }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'download-directory', remotePath: '/home/staging/boot', localDirectory: dir }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-file', localPath: localUpload, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-directory', localPath: localDirectory, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-path', localPath: localUpload, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-path', localPath: localDirectory, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(listFileTransferTasks()).resolves.toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

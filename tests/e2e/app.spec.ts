@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer } from 'http'
-import { mkdir } from 'fs/promises'
+import { mkdir, rm, writeFile } from 'fs/promises'
 import type { AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
@@ -159,6 +159,10 @@ const disableE2eMotion = async (page: Page) => {
 test('aiopsterm primary desktop flows', async () => {
   test.setTimeout(360_000)
   await mkdir('test-results', { recursive: true })
+  const filesFixtureDir = path.join(os.tmpdir(), `aiopsterm-e2e-files-${Date.now()}`)
+  await mkdir(filesFixtureDir, { recursive: true })
+  await writeFile(path.join(filesFixtureDir, 'e2e-visible.txt'), 'E2E visible local file\n', 'utf-8')
+  await writeFile(path.join(filesFixtureDir, '.hidden-e2e.env'), 'AIOPSTERM_E2E=1\n', 'utf-8')
   const voiceServer = await startVoiceTranscriptionServer()
   const app = await launchApp('primary')
 
@@ -351,28 +355,36 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByText('新增连接 或 左侧拖拽至此')).toBeVisible()
     await expect(page.locator('.file-table')).toBeVisible()
     await page.locator('.files-session-header select').selectOption('asset-1')
-    await expect(page.locator('.file-table').filter({ hasText: 'release-note.md' })).toBeVisible()
+    await expect(page.locator('.files-session-card').filter({ hasText: 'prod-bastion' }).locator('.file-error')).toContainText(
+      'SFTP connection is unavailable for this file session.'
+    )
+    await expect(page.locator('.files-session-card').filter({ hasText: 'prod-bastion' }).locator('.file-table')).not.toContainText('release-note.md')
+    await page.locator('.files-session-header select').selectOption('local')
+    const transferLocalBrowser = page.locator('.files-session-card').filter({ hasText: 'Local' })
+    await transferLocalBrowser.locator('.file-path-input').fill(filesFixtureDir)
+    await transferLocalBrowser.locator('.file-path-input').press('Enter')
+    await expect(transferLocalBrowser.locator('.file-table')).toContainText('e2e-visible.txt')
+    await expect(transferLocalBrowser.locator('.file-table')).toContainText('.hidden-e2e.env')
+    await transferLocalBrowser.locator('.file-icon-button[title="隐藏隐藏文件"]').click()
+    await expect(transferLocalBrowser.locator('.file-table')).not.toContainText('.hidden-e2e.env')
     await expect(page.locator('.transfer-progress-panel')).not.toBeVisible()
     await page.getByRole('button', { name: '默认模式' }).click()
     await expect(page.locator('.files-default-layout')).toBeVisible()
     await page.locator('.files-default-title').filter({ hasText: 'prod-bastion' }).click()
-    await expect(page.getByText('.env.production')).toBeVisible()
-    await page.locator('.files-default-session').filter({ hasText: 'prod-bastion' }).locator('.file-icon-button[title="隐藏隐藏文件"]').click()
-    await expect(page.getByText('.env.production')).not.toBeVisible()
-    const releaseRow = page.locator('tbody tr').filter({ hasText: 'release-note.md' })
-    await releaseRow.hover()
-    await releaseRow.locator('.file-row-actions button[title="更多"]').click({ force: true })
-    await expect(page.locator('.file-more-menu')).toBeVisible()
-    await page.locator('.file-more-menu button').first().click()
+    await expect(page.locator('.files-default-session').filter({ hasText: 'prod-bastion' }).locator('.file-error')).toContainText(
+      'SFTP connection is unavailable for this file session.'
+    )
+    const defaultLocalBrowser = page.locator('.files-default-session').filter({ hasText: 'Local' })
+    await defaultLocalBrowser.locator('.file-path-input').fill(filesFixtureDir)
+    await defaultLocalBrowser.locator('.file-path-input').press('Enter')
+    await expect(defaultLocalBrowser.locator('.file-table')).toContainText('e2e-visible.txt')
+    const localFileRow = defaultLocalBrowser.locator('tbody tr').filter({ hasText: 'e2e-visible.txt' })
+    await localFileRow.hover()
+    await localFileRow.locator('.file-row-actions button[title="更多"]').click({ force: true })
+    await expect(defaultLocalBrowser.locator('.file-more-menu')).toBeVisible()
+    await defaultLocalBrowser.locator('.file-more-menu button').first().click()
     await expect(page.getByText('复制到')).toBeVisible()
-    await page.locator('.file-modal-card footer button.primary').click()
-    await expect(page.getByText('冲突提示')).toBeVisible()
-    await page.locator('.file-modal-card.small footer button').filter({ hasText: '重命名' }).click()
-    await expect(page.locator('.transfer-progress-panel')).toBeVisible()
-    await page.locator('.transfer-progress-panel header button').click()
-    await expect(page.locator('.transfer-fab')).toBeVisible()
-    await page.locator('.transfer-fab').dispatchEvent('click')
-    await expect(page.locator('.transfer-progress-panel')).toBeVisible()
+    await page.locator('.file-modal-card header button[title="关闭"]').click()
 
     await page.getByTitle('知识库').click()
     await expect(page.getByRole('heading', { name: '知识库' })).toBeVisible()
@@ -899,6 +911,7 @@ test('aiopsterm primary desktop flows', async () => {
   } finally {
     await app.close()
     await voiceServer.close()
+    await rm(filesFixtureDir, { recursive: true, force: true })
   }
 })
 
