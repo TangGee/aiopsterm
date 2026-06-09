@@ -26,6 +26,8 @@ import type {
   KubernetesNamespaceInfo,
   KubernetesResource,
   KubernetesResourceKind,
+  KubernetesResourceRefreshInput,
+  KubernetesResourceRefreshResult,
   KubernetesTerminalCloseResult,
   KubernetesTerminalCreateInput,
   KubernetesTerminalCreateResult,
@@ -817,6 +819,15 @@ const resourceTypeByKind: Record<KubernetesResourceKind, string> = {
   nodes: 'node'
 }
 
+const kubectlGetResourceByKind: Record<KubernetesResourceKind, string> = {
+  pods: 'pods',
+  deployments: 'deployments',
+  services: 'services',
+  nodes: 'nodes'
+}
+
+const allKubernetesResourceKinds: KubernetesResourceKind[] = ['pods', 'deployments', 'services', 'nodes']
+
 const kindFromToken = (token: string): KubernetesResourceKind | null => {
   if (/^pods?$/.test(token)) return 'pods'
   if (/^deploy(ments?)?$/.test(token) || /^deployments?$/.test(token)) return 'deployments'
@@ -932,10 +943,10 @@ const canRunLocalKubectl = (cluster: KubernetesClusterRecord) =>
   Boolean(cluster.kubeconfig_content?.trim() || cluster.kubeconfig_path?.trim())
 
 const nonRunnableKubernetesReason = (cluster: KubernetesClusterRecord) => {
-  if (developmentSeedClusterIds.has(cluster.id)) return ''
   if (cluster.source_type === 'jumpserver' || cluster.auth_type === 'jumpserver') {
     return 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
   }
+  if (developmentSeedClusterIds.has(cluster.id)) return ''
   if (!cluster.kubeconfig_content?.trim() && !cluster.kubeconfig_path?.trim()) {
     return 'Kubeconfig path or content is required before executing kubectl.'
   }
@@ -1132,6 +1143,125 @@ const renderTerminalCommandOutput = (command: string, output: string, error = ''
   return `[aiopsterm kubectl] ${command}${body ? `\n${body}` : ''}`
 }
 
+const idPart = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item'
+
+const parseKubectlTable = (output: string) => {
+  const lines = stripAnsi(output)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^warning:/i.test(line))
+  const headerIndex = lines.findIndex((line) => /^(?:NAMESPACE\s+)?NAME\s+/.test(line))
+  if (headerIndex < 0) return []
+  const headers = lines[headerIndex].split(/\s+/)
+  return lines
+    .slice(headerIndex + 1)
+    .filter((line) => !/^No resources found\b/i.test(line))
+    .map((line) => {
+      const cells = line.split(/\s+/)
+      return headers.reduce<Record<string, string>>((row, header, index) => {
+        row[header] = cells[index] || ''
+        return row
+      }, {})
+    })
+    .filter((row) => Boolean(row.NAME))
+}
+
+const parseRestartCount = (value: string) => {
+  const count = Number.parseInt(value, 10)
+  return Number.isFinite(count) ? count : 0
+}
+
+const deploymentStatusFromRow = (row: Record<string, string>) => {
+  const available = Number.parseInt(row.AVAILABLE || '', 10)
+  if (Number.isFinite(available) && available > 0) return 'Available'
+  const ready = row.READY || ''
+  if (ready && !ready.startsWith('0/')) return 'Available'
+  return 'Progressing'
+}
+
+const parseKubectlNamespaces = (clusterId: string, output: string): KubernetesNamespaceInfo[] =>
+  parseKubectlTable(output).map((row) => ({
+    id: `k8s-ns-${idPart(clusterId)}-${idPart(row.NAME)}`,
+    clusterId,
+    name: row.NAME,
+    status: row.STATUS || 'Unknown',
+    age: row.AGE || '-'
+  }))
+
+const parseKubectlResources = (
+  cluster: KubernetesClusterRecord,
+  kind: KubernetesResourceKind,
+  output: string,
+  namespace: string
+): KubernetesResource[] =>
+  parseKubectlTable(output).map((row) => {
+    const resourceNamespace = kind === 'nodes' ? 'cluster' : row.NAMESPACE || namespace || cluster.default_namespace || 'default'
+    const base = {
+      id: `k8s-${idPart(cluster.id)}-${idPart(kind)}-${idPart(resourceNamespace)}-${idPart(row.NAME)}`,
+      clusterId: cluster.id,
+      kind,
+      name: row.NAME,
+      namespace: resourceNamespace,
+      status: row.STATUS || 'Unknown',
+      ready: row.READY || '-',
+      age: row.AGE || '-'
+    }
+
+    if (kind === 'pods') {
+      return {
+        ...base,
+        detail: `Pod ${row.NAME} reported by kubectl from ${cluster.name}.`,
+        node: row.NODE || '',
+        restarts: parseRestartCount(row.RESTARTS || '')
+      }
+    }
+    if (kind === 'deployments') {
+      return {
+        ...base,
+        status: deploymentStatusFromRow(row),
+        detail: `Deployment ${row.NAME} reported by kubectl from ${cluster.name}.`,
+        selector: row.SELECTOR || '',
+        node: [row['UP-TO-DATE'], row.AVAILABLE].filter(Boolean).join('/') || ''
+      }
+    }
+    if (kind === 'services') {
+      return {
+        ...base,
+        status: row.TYPE || row.STATUS || 'Unknown',
+        ready: row['CLUSTER-IP'] || row.READY || '-',
+        detail: `Service ${row.NAME} reported by kubectl from ${cluster.name}.`,
+        ports: row['PORT(S)'] || row.PORTS || ''
+      }
+    }
+    return {
+      ...base,
+      namespace: 'cluster',
+      ready: row.VERSION || base.ready,
+      detail: `Node ${row.NAME} reported by kubectl from ${cluster.name}.`,
+      node: row.ROLES || ''
+    }
+  })
+
+const buildKubernetesGetCommand = (kind: KubernetesResourceKind, namespace: string) => {
+  if (kind === 'nodes') return 'kubectl get nodes'
+  const resource = kubectlGetResourceByKind[kind]
+  return namespace === 'all' ? `kubectl get ${resource} --all-namespaces` : `kubectl get ${resource} -n ${namespace || 'default'}`
+}
+
+const filterResourcesOutsideRefreshScope = (clusterId: string, kind: KubernetesResourceKind, namespace: string) =>
+  resources.filter((resource) => {
+    if (resource.clusterId !== clusterId || resource.kind !== kind) return true
+    if (kind === 'nodes' || namespace === 'all') return false
+    return resource.namespace !== namespace
+  })
+
+const resourcesInRefreshScope = (clusterId: string, kind: KubernetesResourceKind, namespace: string) =>
+  resources.filter((resource) => {
+    if (resource.clusterId !== clusterId || resource.kind !== kind) return false
+    return kind === 'nodes' || namespace === 'all' || resource.namespace === namespace
+  })
+
 const createKubernetesCommandRun = (
   input: KubernetesCommandInput,
   command: string,
@@ -1224,6 +1354,138 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
       terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output)
     }
   }
+}
+
+export async function refreshKubernetesResources(input: KubernetesResourceRefreshInput): Promise<KubernetesResourceRefreshResult> {
+  const startedAt = Date.now()
+  const clusterId = input.clusterId?.trim() || ''
+  const requestedKind = input.kind || 'all'
+  const namespace = requestedKind === 'nodes' ? 'all' : input.namespace?.trim() || 'all'
+  const asRefreshResult = (
+    cluster: KubernetesClusterRecord | null,
+    command: string,
+    output: string,
+    success: boolean,
+    error: string,
+    refreshedResources: number,
+    refreshedNamespaces: number,
+    message: string,
+    kind: KubernetesResourceKind | 'all' = requestedKind
+  ): KubernetesResourceRefreshResult => {
+    const data = {
+      ...cloneCatalog(),
+      runId: `k8s-run-${randomUUID()}`,
+      refreshedClusterId: cluster?.id || clusterId,
+      refreshedKind: kind,
+      clusterId: cluster?.id || clusterId,
+      contextName: cluster?.context_name || 'unknown-context',
+      namespace,
+      command,
+      output,
+      terminalOutput: renderTerminalCommandOutput(command, output || error, error),
+      success,
+      error,
+      durationMs: Math.max(1, Date.now() - startedAt),
+      startedAt: nowLabel(),
+      source: 'resource' as const,
+      refreshedResources,
+      refreshedNamespaces,
+      message
+    }
+    return { ok: true, data }
+  }
+
+  if (!clusterId) {
+    return { ok: false, errorCode: 'K8S_CLUSTER_REQUIRED', errorMessage: 'Kubernetes cluster is required.' }
+  }
+  const cluster = clusters.find((item) => item.id === clusterId)
+  if (!cluster) {
+    return { ok: false, errorCode: 'K8S_CLUSTER_NOT_FOUND', errorMessage: 'Kubernetes cluster not found.' }
+  }
+  if (requestedKind !== 'all' && !allKubernetesResourceKinds.includes(requestedKind)) {
+    return { ok: false, errorCode: 'K8S_RESOURCE_KIND_UNSUPPORTED', errorMessage: 'Unsupported Kubernetes resource kind.' }
+  }
+
+  if (canRunLocalKubectl(cluster)) {
+    const refreshedKinds = requestedKind === 'all' ? allKubernetesResourceKinds : [requestedKind]
+    const commands: string[] = []
+    const outputs: string[] = []
+    const parsedByKind = new Map<KubernetesResourceKind, KubernetesResource[]>()
+    let parsedNamespaces: KubernetesNamespaceInfo[] | null = null
+
+    const namespaceResult = await runLocalKubectl(cluster, 'kubectl get namespaces', cluster.default_namespace || 'default')
+    commands.push('kubectl get namespaces')
+    outputs.push(namespaceResult.output || namespaceResult.error)
+    if (!namespaceResult.success) {
+      const output = outputs.filter(Boolean).join('\n\n')
+      return asRefreshResult(cluster, commands.join(' && '), output, false, namespaceResult.error || output, 0, 0, namespaceResult.error || 'Kubernetes namespaces refresh failed.')
+    }
+    parsedNamespaces = parseKubectlNamespaces(cluster.id, namespaceResult.output)
+
+    for (const kind of refreshedKinds) {
+      const command = buildKubernetesGetCommand(kind, namespace)
+      const result = await runLocalKubectl(cluster, command, kind === 'nodes' ? 'all' : namespace)
+      commands.push(command)
+      outputs.push(result.output || result.error)
+      if (!result.success) {
+        const output = outputs.filter(Boolean).join('\n\n')
+        return asRefreshResult(cluster, commands.join(' && '), output, false, result.error || output, 0, 0, result.error || 'Kubernetes resources refresh failed.', requestedKind)
+      }
+      parsedByKind.set(kind, parseKubectlResources(cluster, kind, result.output, namespace === 'all' ? cluster.default_namespace || 'default' : namespace))
+    }
+
+    namespaces = namespaces.filter((item) => item.clusterId !== cluster.id)
+    namespaces = [...namespaces, ...parsedNamespaces]
+    refreshedKinds.forEach((kind) => {
+      const parsedResources = parsedByKind.get(kind) || []
+      resources = [...filterResourcesOutsideRefreshScope(cluster.id, kind, namespace), ...parsedResources]
+    })
+    const refreshedResources = refreshedKinds.reduce((count, kind) => count + resourcesInRefreshScope(cluster.id, kind, namespace).length, 0)
+    const output = outputs.filter(Boolean).join('\n\n')
+    return asRefreshResult(
+      cluster,
+      commands.join(' && '),
+      output,
+      true,
+      '',
+      refreshedResources,
+      parsedNamespaces.length,
+      `Kubernetes resources refreshed from kubectl for ${cluster.name}.`,
+      requestedKind
+    )
+  }
+
+  const nonRunnableReason = nonRunnableKubernetesReason(cluster)
+  if (nonRunnableReason) {
+    const command =
+      requestedKind === 'all'
+        ? ['kubectl get namespaces', ...allKubernetesResourceKinds.map((kind) => buildKubernetesGetCommand(kind, namespace))].join(' && ')
+        : buildKubernetesGetCommand(requestedKind, namespace)
+    return asRefreshResult(cluster, command, nonRunnableReason, false, nonRunnableReason, 0, 0, nonRunnableReason, requestedKind)
+  }
+
+  const refreshedKinds = requestedKind === 'all' ? allKubernetesResourceKinds : [requestedKind]
+  const command =
+    requestedKind === 'all'
+      ? ['kubectl get namespaces', ...refreshedKinds.map((kind) => buildKubernetesGetCommand(kind, namespace))].join(' && ')
+      : buildKubernetesGetCommand(requestedKind, namespace)
+  const outputParts =
+    requestedKind === 'all'
+      ? [renderCommand({ command: 'kubectl get namespaces', clusterId: cluster.id, namespace: cluster.default_namespace || 'default' }), ...refreshedKinds.map((kind) => renderList(buildKubernetesGetCommand(kind, namespace), cluster.id, namespace))]
+      : [renderList(command, cluster.id, namespace)]
+  const refreshedResources = refreshedKinds.reduce((count, kind) => count + resourcesInRefreshScope(cluster.id, kind, namespace).length, 0)
+  const refreshedNamespaces = namespaces.filter((item) => item.clusterId === cluster.id).length
+  return asRefreshResult(
+    cluster,
+    command,
+    outputParts.filter(Boolean).join('\n\n'),
+    true,
+    '',
+    refreshedResources,
+    refreshedNamespaces,
+    `Kubernetes development seed resources refreshed for ${cluster.name}.`,
+    requestedKind
+  )
 }
 
 export async function cleanupKubernetesAgent(): Promise<KubernetesAgentCleanupResult> {

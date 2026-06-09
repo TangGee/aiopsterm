@@ -239,6 +239,7 @@ const api: AiopsPreloadApi = {
   resizeKubernetesTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('kubernetes:terminal:resize', id, cols, rows),
   closeKubernetesTerminal: (id: string, exitCode?: number) => ipcRenderer.invoke('kubernetes:terminal:close', id, exitCode),
   executeKubernetesCommand: (input) => ipcRenderer.invoke('kubernetes:execute-command', input),
+  refreshKubernetesResources: (input) => ipcRenderer.invoke('kubernetes:resources:refresh', input),
   cleanupKubernetesAgent: () => ipcRenderer.invoke('kubernetes:agent:cleanup'),
   listFileSessionCatalog: () => ipcRenderer.invoke('files:sessions:catalog'),
   saveFileSession: (session) => ipcRenderer.invoke('files:sessions:save', session),

@@ -1969,6 +1969,34 @@ export type KubernetesCommandResult = AiopsMutationResult<{
   source: 'terminal' | 'agent' | 'resource'
 }>
 
+export type KubernetesResourceRefreshInput = {
+  clusterId: string
+  namespace?: string
+  kind?: KubernetesResourceKind | 'all'
+}
+
+export type KubernetesResourceRefreshResult = AiopsMutationResult<
+  KubernetesCatalog & {
+    runId: string
+    refreshedClusterId: string
+    refreshedKind: KubernetesResourceKind | 'all'
+    clusterId: string
+    contextName: string
+    namespace: string
+    command: string
+    output: string
+    terminalOutput: string
+    success: boolean
+    error: string
+    durationMs: number
+    startedAt: string
+    source: 'resource'
+    refreshedResources: number
+    refreshedNamespaces: number
+    message: string
+  }
+>
+
 export type KubernetesAgentCleanupResult = AiopsMutationResult<{
   cleared: boolean
   cleanedAt: string
@@ -2159,6 +2187,7 @@ export type AiopsPreloadApi = {
   resizeKubernetesTerminal: (id: string, cols: number, rows: number) => Promise<KubernetesTerminalMutationResult>
   closeKubernetesTerminal: (id: string, exitCode?: number) => Promise<KubernetesTerminalCloseResult>
   executeKubernetesCommand: (input: KubernetesCommandInput) => Promise<KubernetesCommandResult>
+  refreshKubernetesResources: (input: KubernetesResourceRefreshInput) => Promise<KubernetesResourceRefreshResult>
   cleanupKubernetesAgent: () => Promise<KubernetesAgentCleanupResult>
   listFileSessionCatalog: () => Promise<FileSessionCatalogResult>
   saveFileSession: (session: FileSessionInfo) => Promise<FileSessionMutationResult>

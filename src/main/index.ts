@@ -107,6 +107,7 @@ import {
   executeKubernetesCommand,
   importKubernetesKubeconfig,
   listKubernetesCatalog,
+  refreshKubernetesResources,
   resizeKubernetesTerminal,
   switchKubernetesContext,
   syncKubernetesBastion,
@@ -222,6 +223,7 @@ import type {
   KubernetesClusterTestInput,
   KubernetesClusterUpdateInput,
   KubernetesCommandInput,
+  KubernetesResourceRefreshInput,
   KubernetesTerminalCreateInput,
   KnowledgeBaseUserConfig,
   McpConfigFile,
@@ -3103,6 +3105,7 @@ const registerIpc = () => {
   ipcMain.handle('kubernetes:terminal:resize', (_event, id: string, cols: number, rows: number) => resizeKubernetesTerminal(id, cols, rows))
   ipcMain.handle('kubernetes:terminal:close', (_event, id: string, exitCode?: number) => closeKubernetesTerminal(id, exitCode))
   ipcMain.handle('kubernetes:execute-command', (_event, input: KubernetesCommandInput) => executeKubernetesCommand(input))
+  ipcMain.handle('kubernetes:resources:refresh', (_event, input: KubernetesResourceRefreshInput) => refreshKubernetesResources(input))
   ipcMain.handle('kubernetes:agent:cleanup', () => cleanupKubernetesAgent())
   ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())
   ipcMain.handle('files:sessions:save', (_event, session: FileSessionInfo) => saveFileSession(session))

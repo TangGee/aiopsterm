@@ -7,6 +7,7 @@ export {
   deleteKubernetesCluster,
   disconnectKubernetesCluster,
   executeKubernetesCommand,
+  refreshKubernetesResources,
   importKubernetesKubeconfig,
   listKubernetesCatalog,
   resizeKubernetesTerminal,

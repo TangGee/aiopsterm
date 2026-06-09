@@ -2336,6 +2336,22 @@ const upsertKubernetesContextMock = (cluster: TestKubernetesCluster, isActive = 
 
 const findKubernetesClusterMock = (id: string) => kubernetesCatalogMock.clusters.find((cluster) => cluster.id === id) || null
 
+const k8sRefreshCommandMock = (kind: TestKubernetesResourceKind | 'all', namespace: string) => {
+  if (kind === 'all') {
+    return ['kubectl get namespaces', 'kubectl get pods --all-namespaces', 'kubectl get deployments --all-namespaces', 'kubectl get services --all-namespaces', 'kubectl get nodes'].join(' && ')
+  }
+  if (kind === 'nodes') return 'kubectl get nodes'
+  return namespace === 'all' ? `kubectl get ${kind} --all-namespaces` : `kubectl get ${kind} -n ${namespace}`
+}
+
+const refreshedKubernetesResourceCountMock = (clusterId: string, kind: TestKubernetesResourceKind | 'all', namespace: string) =>
+  kubernetesCatalogMock.resources.filter((resource) => {
+    if (resource.clusterId !== clusterId) return false
+    if (kind !== 'all' && resource.kind !== kind) return false
+    if (resource.kind !== 'nodes' && namespace !== 'all' && resource.namespace !== namespace) return false
+    return true
+  }).length
+
 const findKubernetesTestContextMock = (contextName: string) => {
   const imported = kubernetesCatalogMock.importContexts.find((context) => context.name === contextName)
   if (imported) return imported
@@ -5642,6 +5658,45 @@ Object.defineProperty(window, 'aiops', {
           source: input.source || 'terminal'
         }
       }
+    }),
+    refreshKubernetesResources: vi.fn(async (input: { clusterId: string; namespace?: string; kind?: TestKubernetesResourceKind | 'all' }) => {
+      const cluster = findKubernetesClusterMock(input.clusterId)
+      if (!cluster) return { ok: false, errorCode: 'K8S_CLUSTER_NOT_FOUND', errorMessage: 'Kubernetes cluster not found.' }
+      const namespace = input.kind === 'nodes' ? 'all' : input.namespace || 'all'
+      const kind = input.kind || 'all'
+      const command = k8sRefreshCommandMock(kind, namespace)
+      const refreshedResources = refreshedKubernetesResourceCountMock(cluster.id, kind, namespace)
+      const refreshedNamespaces = kubernetesCatalogMock.namespaces.filter((item) => item.clusterId === cluster.id).length
+      const output =
+        kind === 'nodes'
+          ? kubernetesCatalogMock.resources
+              .filter((resource) => resource.clusterId === cluster.id && resource.kind === 'nodes')
+              .map((resource) => `${resource.name}\t${resource.status}\t${resource.node || '-'}\t${resource.age}\t${resource.ready}`)
+              .join('\n')
+          : kubernetesCatalogMock.resources
+              .filter((resource) => resource.clusterId === cluster.id && (kind === 'all' || resource.kind === kind))
+              .filter((resource) => resource.kind === 'nodes' || namespace === 'all' || resource.namespace === namespace)
+              .map((resource) => `${resource.namespace}\t${resource.name}\t${resource.ready}\t${resource.status}\t${resource.age}`)
+              .join('\n')
+      return k8sCatalogResultMock({
+        runId: `k8s-run-refresh-test-${kind}-${namespace}`,
+        refreshedClusterId: cluster.id,
+        refreshedKind: kind,
+        clusterId: cluster.id,
+        contextName: cluster.context_name,
+        namespace,
+        command,
+        output,
+        terminalOutput: `[aiopsterm kubectl] ${command}${output ? `\n${output}` : ''}`,
+        success: true,
+        error: '',
+        durationMs: 1,
+        startedAt: '刚刚',
+        source: 'resource' as const,
+        refreshedResources,
+        refreshedNamespaces,
+        message: `Kubernetes resources refreshed from backend for ${cluster.name}.`
+      })
     }),
     listFileSessionCatalog: vi.fn(async () => fileSessionResultMock(cloneFileSessionCatalogMock())),
     saveFileSession: vi.fn(async (session: TestFileSessionInfo) => {

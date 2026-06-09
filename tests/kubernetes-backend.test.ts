@@ -7,6 +7,8 @@ import {
   createKubernetesTerminal,
   executeKubernetesCommand,
   importKubernetesKubeconfig,
+  listKubernetesCatalog,
+  refreshKubernetesResources,
   resizeKubernetesTerminal,
   testKubernetesClusterConnection
 } from '@shared/kubernetes'
@@ -165,6 +167,125 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.output).toContain('ARGS=get pods --context=qa/dev --namespace=qa')
     expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods')
     expect(result.data?.terminalOutput).toContain('fake kubectl invoked')
+  })
+
+  it('refreshes explicit kubeconfig cluster resources from kubectl tables', async () => {
+    await createFakeKubectl(
+      [
+        'case "$1:$2" in',
+        '  get:namespaces)',
+        '    echo "NAME STATUS AGE"',
+        '    echo "qa Active 12d"',
+        '    echo "ops Active 3d"',
+        '    ;;',
+        '  get:pods)',
+        '    echo "NAMESPACE NAME READY STATUS RESTARTS AGE"',
+        '    echo "qa qa-api-5d6f7c8d9b-abcde 1/1 Running 0 4h"',
+        '    echo "ops ops-job-0 0/1 Pending 1 8m"',
+        '    ;;',
+        '  get:deployments)',
+        '    echo "NAMESPACE NAME READY UP-TO-DATE AVAILABLE AGE"',
+        '    echo "qa qa-api 3/3 3 3 12d"',
+        '    ;;',
+        '  get:services)',
+        '    echo "NAMESPACE NAME TYPE CLUSTER-IP EXTERNAL-IP PORT(S) AGE"',
+        '    echo "qa qa-api ClusterIP 10.44.0.12 <none> 8080/TCP 12d"',
+        '    ;;',
+        '  get:nodes)',
+        '    echo "NAME STATUS ROLES AGE VERSION"',
+        '    echo "qa-node-01 Ready worker 30d v1.29.4"',
+        '    ;;',
+        '  *)',
+        '    echo "unexpected args: $*" >&2',
+        '    exit 17',
+        '    ;;',
+        'esac'
+      ].join('\n')
+    )
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    const clusterId = added.data!.cluster!.id
+
+    const result = await refreshKubernetesResources({
+      clusterId,
+      namespace: 'all',
+      kind: 'all'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        runId: expect.stringMatching(/^k8s-run-/),
+        refreshedClusterId: clusterId,
+        refreshedKind: 'all',
+        clusterId,
+        contextName: 'qa/dev',
+        namespace: 'all',
+        success: true,
+        error: '',
+        source: 'resource',
+        refreshedResources: 5,
+        refreshedNamespaces: 2
+      })
+    )
+    expect(result.data?.command).toContain('kubectl get namespaces')
+    expect(result.data?.command).toContain('kubectl get pods --all-namespaces')
+    expect(result.data?.output).toContain('qa-api-5d6f7c8d9b-abcde')
+    expect(result.data?.message).toContain('qa-cluster')
+
+    const catalog = await listKubernetesCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.namespaces.filter((namespace) => namespace.clusterId === clusterId)).toEqual([
+      { id: expect.any(String), clusterId, name: 'qa', status: 'Active', age: '12d' },
+      { id: expect.any(String), clusterId, name: 'ops', status: 'Active', age: '3d' }
+    ])
+    expect(catalog.data?.resources.filter((resource) => resource.clusterId === clusterId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'pods', namespace: 'qa', name: 'qa-api-5d6f7c8d9b-abcde', ready: '1/1', status: 'Running', restarts: 0 }),
+        expect.objectContaining({ kind: 'pods', namespace: 'ops', name: 'ops-job-0', ready: '0/1', status: 'Pending', restarts: 1 }),
+        expect.objectContaining({ kind: 'deployments', namespace: 'qa', name: 'qa-api', ready: '3/3', status: 'Available' }),
+        expect.objectContaining({ kind: 'services', namespace: 'qa', name: 'qa-api', status: 'ClusterIP', ready: '10.44.0.12', ports: '8080/TCP' }),
+        expect.objectContaining({ kind: 'nodes', namespace: 'cluster', name: 'qa-node-01', status: 'Ready', ready: 'v1.29.4', node: 'worker' })
+      ])
+    )
+    expect(catalog.data?.resources.some((resource) => resource.clusterId === clusterId && resource.name === 'api-gateway-6d8c9bb7f6-l6j2m')).toBe(false)
+  })
+
+  it('fails closed for non-runnable Kubernetes resource refreshes', async () => {
+    const before = await listKubernetesCatalog()
+    const beforeJumpResources = before.data?.resources.filter((resource) => resource.clusterId === 'k8s-3') || []
+
+    const result = await refreshKubernetesResources({
+      clusterId: 'k8s-3',
+      namespace: 'ops',
+      kind: 'pods'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        refreshedClusterId: 'k8s-3',
+        refreshedKind: 'pods',
+        clusterId: 'k8s-3',
+        contextName: 'jumpserver/prod',
+        namespace: 'ops',
+        command: 'kubectl get pods -n ops',
+        success: false,
+        refreshedResources: 0,
+        refreshedNamespaces: 0
+      })
+    )
+    expect(result.data?.error).toContain('JumpServer Kubernetes command streaming is not connected')
+
+    const after = await listKubernetesCatalog()
+    expect(after.data?.resources.filter((resource) => resource.clusterId === 'k8s-3')).toEqual(beforeJumpResources)
   })
 
   it('returns backend-owned failure metadata for nonzero kubectl exits', async () => {

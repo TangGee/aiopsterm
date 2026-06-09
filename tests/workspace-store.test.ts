@@ -4954,10 +4954,21 @@ describe('workspace store', () => {
     expect(store.k8sClusterNotice).toBe('apiserver unavailable')
     expect(store.k8sClusterNotice).not.toBe('Kubernetes namespaces 已刷新')
 
-    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+    vi.mocked(window.aiops.refreshKubernetesResources).mockResolvedValueOnce({
       ok: true,
       data: {
         runId: 'k8s-run-failed-resources',
+        refreshedClusterId: 'k8s-1',
+        refreshedKind: 'pods',
+        currentContext: 'prod/admin',
+        clusters: store.k8sClusters.map((cluster) => ({ ...cluster })),
+        contexts: store.k8sContexts.map((context) => ({ ...context })),
+        bastions: store.k8sBastions.map((bastion) => ({ ...bastion })),
+        namespaces: store.k8sNamespaces.map((namespace) => ({ ...namespace })),
+        resources: store.k8sResources.map((resource) => ({ ...resource })),
+        importContexts: store.k8sImportContexts.map((context) => ({ ...context })),
+        activeClusterId: store.k8sActiveClusterId,
+        selectedClusterId: store.k8sSelectedClusterId,
         command: 'kubectl get pods --all-namespaces',
         output: '',
         terminalOutput: '',
@@ -4968,7 +4979,10 @@ describe('workspace store', () => {
         clusterId: 'k8s-1',
         contextName: 'prod/admin',
         namespace: 'default',
-        source: 'resource'
+        source: 'resource',
+        refreshedResources: 0,
+        refreshedNamespaces: 0,
+        message: 'resource list denied'
       }
     })
     const resourceRun = await store.refreshK8sResources()
