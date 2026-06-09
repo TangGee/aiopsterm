@@ -5,6 +5,7 @@ import {
   cleanupKubernetesAgent,
   closeKubernetesTerminal,
   configureKubernetesBackendRuntime,
+  connectKubernetesCluster,
   createKubernetesTerminal,
   executeKubernetesCommand,
   executeKubernetesResourceAction,
@@ -514,6 +515,125 @@ describe('kubernetes backend boundary', () => {
       ok: false,
       errorCode: 'K8S_KUBECONFIG_CONTEXTS_EMPTY'
     })
+  })
+
+  it('does not expose development seed clusters in non-seed runtime catalogs', async () => {
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    __resetKubernetesCatalogForTests()
+
+    const catalog = await listKubernetesCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.clusters).toEqual([])
+    expect(catalog.data?.resources).toEqual([])
+    expect(catalog.data?.bastions).toEqual([])
+    expect(catalog.data?.clusters.some((cluster) => cluster.id === 'k8s-1' || cluster.id === 'k8s-2' || cluster.id === 'k8s-3')).toBe(false)
+  })
+
+  it('persists non-seed Kubernetes catalog mutations and restores them through the backend store', async () => {
+    await createFakeKubectl(
+      [
+        'case "$1:$2" in',
+        '  get:namespaces)',
+        '    echo "NAME STATUS AGE"',
+        '    echo "qa Active 12d"',
+        '    ;;',
+        '  get:pods)',
+        '    echo "NAMESPACE NAME READY STATUS RESTARTS AGE"',
+        '    echo "qa qa-api-5d6f7c8d9b-abcde 1/1 Running 0 4h"',
+        '    ;;',
+        '  get:deployments)',
+        '    echo "NAMESPACE NAME READY UP-TO-DATE AVAILABLE AGE"',
+        '    echo "qa qa-api 3/3 3 3 12d"',
+        '    ;;',
+        '  get:services)',
+        '    echo "NAMESPACE NAME TYPE CLUSTER-IP EXTERNAL-IP PORT(S) AGE"',
+        '    echo "qa qa-api ClusterIP 10.44.0.12 <none> 8080/TCP 12d"',
+        '    ;;',
+        '  get:nodes)',
+        '    echo "NAME STATUS ROLES AGE VERSION"',
+        '    echo "qa-node-01 Ready worker 30d v1.29.4"',
+        '    ;;',
+        '  *)',
+        '    echo "unexpected args: $*" >&2',
+        '    exit 17',
+        '    ;;',
+        'esac'
+      ].join('\n')
+    )
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    __resetKubernetesCatalogForTests()
+
+    await expect(listKubernetesCatalog()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        clusters: []
+      }
+    })
+
+    const imported = await importKubernetesKubeconfig({ kubeconfigContent: qaKubeconfigContent })
+    expect(imported.ok).toBe(true)
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    expect(added.ok).toBe(true)
+    const clusterId = added.data!.cluster!.id
+
+    await expect(connectKubernetesCluster(clusterId)).resolves.toMatchObject({
+      ok: true,
+      data: {
+        cluster: expect.objectContaining({
+          id: clusterId,
+          connection_status: 'connected',
+          is_active: 1
+        })
+      }
+    })
+
+    const refreshed = await refreshKubernetesResources({ clusterId, namespace: 'all', kind: 'all' })
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.refreshedResources).toBe(4)
+
+    const persisted = JSON.parse(await readFile(join(tempDirs[0], 'catalog.json'), 'utf-8')) as {
+      clusters: Array<{ id: string; connection_status: string }>
+      resources: Array<{ clusterId: string; name: string }>
+      importContexts: Array<{ name: string }>
+    }
+    expect(persisted.clusters.map((cluster) => cluster.id)).toEqual([clusterId])
+    expect(persisted.clusters[0]).toMatchObject({ connection_status: 'connected' })
+    expect(persisted.resources.map((resource) => resource.name)).toEqual(expect.arrayContaining(['qa-api-5d6f7c8d9b-abcde', 'qa-api', 'qa-node-01']))
+    expect(persisted.importContexts.map((context) => context.name)).toContain('qa/dev')
+
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    const restored = await listKubernetesCatalog()
+
+    expect(restored.ok).toBe(true)
+    expect(restored.data?.clusters.map((cluster) => cluster.id)).toEqual([clusterId])
+    expect(restored.data?.clusters[0]).toMatchObject({
+      name: 'qa-cluster',
+      context_name: 'qa/dev',
+      connection_status: 'disconnected',
+      is_active: 1
+    })
+    expect(restored.data?.clusters.some((cluster) => cluster.id === 'k8s-1' || cluster.id === 'k8s-2' || cluster.id === 'k8s-3')).toBe(false)
+    expect(restored.data?.namespaces.filter((namespace) => namespace.clusterId === clusterId)).toEqual([
+      { id: expect.any(String), clusterId, name: 'qa', status: 'Active', age: '12d' }
+    ])
+    expect(restored.data?.resources.filter((resource) => resource.clusterId === clusterId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'pods', namespace: 'qa', name: 'qa-api-5d6f7c8d9b-abcde', ready: '1/1', status: 'Running' }),
+        expect.objectContaining({ kind: 'deployments', namespace: 'qa', name: 'qa-api', ready: '3/3', status: 'Available' }),
+        expect.objectContaining({ kind: 'services', namespace: 'qa', name: 'qa-api', status: 'ClusterIP', ready: '10.44.0.12' }),
+        expect.objectContaining({ kind: 'nodes', namespace: 'cluster', name: 'qa-node-01', status: 'Ready', ready: 'v1.29.4' })
+      ])
+    )
+    expect(restored.data?.importContexts.map((context) => context.name)).toContain('qa/dev')
   })
 
   it('returns pod logs with backend status details', async () => {

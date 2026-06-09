@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { isAbsolute, join, resolve } from 'path'
@@ -19,6 +19,7 @@ import type {
   KubernetesClusterTestInput,
   KubernetesClusterTestResult,
   KubernetesClusterUpdateInput,
+  KubernetesConnectionStatus,
   KubernetesAgentCleanupResult,
   KubernetesCommandInput,
   KubernetesCommandResult,
@@ -47,6 +48,7 @@ const nowLabel = () => '刚刚'
 
 type KubernetesBackendRuntimeConfig = {
   stateDir?: string
+  useSeedData?: boolean
 }
 
 const defaultKubernetesStateDir = () => {
@@ -54,8 +56,12 @@ const defaultKubernetesStateDir = () => {
   return envRoot ? (isAbsolute(envRoot) ? envRoot : resolve(envRoot)) : join(process.cwd(), '.aiopsterm-kubernetes')
 }
 
+const defaultKubernetesSeedMode = () =>
+  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED || '').trim() === '1'
+
 let runtimeConfig: Required<KubernetesBackendRuntimeConfig> = {
-  stateDir: defaultKubernetesStateDir()
+  stateDir: defaultKubernetesStateDir(),
+  useSeedData: defaultKubernetesSeedMode()
 }
 
 const defaultContexts: KubernetesContextInfo[] = [
@@ -359,14 +365,55 @@ const defaultAgentProxyConfig: KubernetesAgentProxyConfig = {
   updatedAt: ''
 }
 
-let contexts = defaultContexts.map((context) => ({ ...context }))
-let clusters = defaultClusters.map((cluster) => ({ ...cluster }))
-let bastions = defaultBastions.map((bastion) => ({ ...bastion }))
-let namespaces = defaultNamespaces.map((namespace) => ({ ...namespace }))
-let resources = defaultResources.map((resource) => ({ ...resource }))
-let importContexts = defaultImportContexts.map((context) => ({ ...context }))
+const developmentSeedBastionIds = new Set(defaultBastions.map((bastion) => bastion.uuid))
+const developmentSeedContextNames = new Set(defaultContexts.map((context) => context.name))
+const kubernetesConnectionStatuses = new Set<KubernetesConnectionStatus>(['connected', 'connecting', 'disconnected', 'error'])
+const kubernetesClusterSources = new Set<KubernetesClusterRecord['source_type']>(['local', 'jumpserver'])
+const kubernetesResourceKinds = new Set<KubernetesResourceKind>(['pods', 'deployments', 'services', 'nodes'])
+
+const shouldUseKubernetesSeedData = () => runtimeConfig.useSeedData
+
+const initialKubernetesState = () =>
+  shouldUseKubernetesSeedData()
+    ? {
+        contexts: defaultContexts.map((context) => ({ ...context })),
+        clusters: defaultClusters.map((cluster) => ({ ...cluster })),
+        bastions: defaultBastions.map((bastion) => ({ ...bastion })),
+        namespaces: defaultNamespaces.map((namespace) => ({ ...namespace })),
+        resources: defaultResources.map((resource) => ({ ...resource })),
+        importContexts: defaultImportContexts.map((context) => ({ ...context }))
+      }
+    : {
+        contexts: [] as KubernetesContextInfo[],
+        clusters: [] as KubernetesClusterRecord[],
+        bastions: [] as KubernetesBastionGroup[],
+        namespaces: [] as KubernetesNamespaceInfo[],
+        resources: [] as KubernetesResource[],
+        importContexts: [] as KubernetesImportContextInfo[]
+      }
+
+const applyInitialKubernetesState = () => {
+  const state = initialKubernetesState()
+  contexts = state.contexts
+  clusters = state.clusters
+  bastions = state.bastions
+  namespaces = state.namespaces
+  resources = state.resources
+  importContexts = state.importContexts
+}
+
+let contexts: KubernetesContextInfo[] = []
+let clusters: KubernetesClusterRecord[] = []
+let bastions: KubernetesBastionGroup[] = []
+let namespaces: KubernetesNamespaceInfo[] = []
+let resources: KubernetesResource[] = []
+let importContexts: KubernetesImportContextInfo[] = []
 let terminalSessions: KubernetesTerminalRecord[] = []
 let agentProxyConfigCache: KubernetesAgentProxyConfig | null = null
+let kubernetesCatalogLoadedStateDir = ''
+let kubernetesCatalogStateLoaded = false
+
+applyInitialKubernetesState()
 
 const cloneAgentProxyConfig = (config: KubernetesAgentProxyConfig): KubernetesAgentProxyConfig => ({ ...config })
 
@@ -458,14 +505,313 @@ const writeAgentProxyConfig = (config: KubernetesAgentProxyConfig) => {
   agentProxyConfigCache = cloneAgentProxyConfig(config)
 }
 
+type KubernetesPersistedCatalogState = {
+  version: 1
+  contexts: KubernetesContextInfo[]
+  clusters: KubernetesClusterRecord[]
+  bastions: KubernetesBastionGroup[]
+  namespaces: KubernetesNamespaceInfo[]
+  resources: KubernetesResource[]
+  importContexts: KubernetesImportContextInfo[]
+}
+
+const kubernetesCatalogStatePath = () => join(runtimeConfig.stateDir, 'catalog.json')
+
+const persistedString = (value: unknown, fallback = '') => (typeof value === 'string' && value.trim() ? value.trim() : fallback)
+
+const persistedNullableString = (value: unknown) => {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  return text || null
+}
+
+const persistedNumberFlag = (value: unknown) => (value === 1 || value === true || value === '1' ? 1 : 0)
+
+const sanitizeRestoredConnectionStatus = (value: unknown): KubernetesConnectionStatus => {
+  const status = typeof value === 'string' && kubernetesConnectionStatuses.has(value as KubernetesConnectionStatus) ? (value as KubernetesConnectionStatus) : 'disconnected'
+  return status === 'connected' || status === 'connecting' ? 'disconnected' : status
+}
+
+const normalizePersistedContext = (value: unknown): KubernetesContextInfo | null => {
+  if (!isRecord(value)) return null
+  const name = persistedString(value.name)
+  const cluster = persistedString(value.cluster)
+  const server = persistedString(value.server)
+  if (!name || !cluster) return null
+  return {
+    name,
+    cluster,
+    namespace: persistedString(value.namespace, 'default'),
+    server,
+    isActive: value.isActive === true
+  }
+}
+
+const normalizePersistedImportContext = (value: unknown): KubernetesImportContextInfo | null => {
+  if (!isRecord(value)) return null
+  const name = persistedString(value.name)
+  const cluster = persistedString(value.cluster)
+  const server = persistedString(value.server)
+  if (!name || !cluster) return null
+  return {
+    name,
+    cluster,
+    server,
+    namespace: persistedString(value.namespace, 'default')
+  }
+}
+
+const normalizePersistedBastion = (value: unknown): KubernetesBastionGroup | null => {
+  if (!isRecord(value)) return null
+  const uuid = persistedString(value.uuid)
+  const label = persistedString(value.label)
+  if (!uuid || !label) return null
+  return {
+    uuid,
+    label,
+    ip: persistedString(value.ip)
+  }
+}
+
+const normalizePersistedCluster = (value: unknown): KubernetesClusterRecord | null => {
+  if (!isRecord(value)) return null
+  const id = persistedString(value.id)
+  const name = persistedString(value.name)
+  const contextName = persistedString(value.context_name)
+  const serverUrl = persistedString(value.server_url)
+  if (!id || !name || !contextName || !serverUrl) return null
+  if (!shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(id)) return null
+  const sourceType =
+    typeof value.source_type === 'string' && kubernetesClusterSources.has(value.source_type as KubernetesClusterRecord['source_type'])
+      ? (value.source_type as KubernetesClusterRecord['source_type'])
+      : 'local'
+  return {
+    id,
+    name,
+    kubeconfig_path: persistedNullableString(value.kubeconfig_path),
+    kubeconfig_content: typeof value.kubeconfig_content === 'string' && value.kubeconfig_content.trim() ? value.kubeconfig_content : null,
+    context_name: contextName,
+    server_url: serverUrl,
+    auth_type: persistedString(value.auth_type, sourceType === 'jumpserver' ? 'jumpserver' : 'kubeconfig'),
+    is_active: persistedNumberFlag(value.is_active),
+    connection_status: sanitizeRestoredConnectionStatus(value.connection_status),
+    auto_connect: persistedNumberFlag(value.auto_connect),
+    default_namespace: persistedString(value.default_namespace, 'default'),
+    created_at: typeof value.created_at === 'string' ? value.created_at : nowLabel(),
+    updated_at: typeof value.updated_at === 'string' ? value.updated_at : nowLabel(),
+    source_type: sourceType,
+    bastion_uuid: persistedNullableString(value.bastion_uuid),
+    bastion_asset_address: persistedNullableString(value.bastion_asset_address),
+    bastion_asset_name: persistedNullableString(value.bastion_asset_name),
+    bastion_asset_id_last: Number.isFinite(Number(value.bastion_asset_id_last)) ? Number(value.bastion_asset_id_last) : null
+  }
+}
+
+const normalizePersistedNamespace = (value: unknown, knownClusterIds: Set<string>): KubernetesNamespaceInfo | null => {
+  if (!isRecord(value)) return null
+  const id = persistedString(value.id)
+  const clusterId = persistedString(value.clusterId)
+  const name = persistedString(value.name)
+  if (!id || !clusterId || !name || !knownClusterIds.has(clusterId)) return null
+  return {
+    id,
+    clusterId,
+    name,
+    status: persistedString(value.status, 'Unknown'),
+    age: persistedString(value.age, '-')
+  }
+}
+
+const normalizePersistedResource = (value: unknown, knownClusterIds: Set<string>): KubernetesResource | null => {
+  if (!isRecord(value)) return null
+  const id = persistedString(value.id)
+  const clusterId = persistedString(value.clusterId)
+  const kind = typeof value.kind === 'string' && kubernetesResourceKinds.has(value.kind as KubernetesResourceKind) ? (value.kind as KubernetesResourceKind) : null
+  const name = persistedString(value.name)
+  if (!id || !clusterId || !kind || !name || !knownClusterIds.has(clusterId)) return null
+  const restarts = Number(value.restarts)
+  return {
+    id,
+    clusterId,
+    kind,
+    name,
+    namespace: persistedString(value.namespace, kind === 'nodes' ? 'cluster' : 'default'),
+    status: persistedString(value.status, 'Unknown'),
+    ready: persistedString(value.ready, '-'),
+    age: persistedString(value.age, '-'),
+    detail: persistedString(value.detail),
+    ...(persistedString(value.node) ? { node: persistedString(value.node) } : {}),
+    ...(persistedString(value.image) ? { image: persistedString(value.image) } : {}),
+    ...(persistedString(value.ports) ? { ports: persistedString(value.ports) } : {}),
+    ...(Number.isFinite(restarts) ? { restarts: Math.max(0, Math.round(restarts)) } : {}),
+    ...(persistedString(value.selector) ? { selector: persistedString(value.selector) } : {})
+  }
+}
+
+const uniqueBy = <T>(items: T[], keyOf: (item: T) => string) => {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = keyOf(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+const normalizePersistedKubernetesState = (value: unknown): KubernetesPersistedCatalogState | null => {
+  if (!isRecord(value)) return null
+  const clusters = Array.isArray(value.clusters)
+    ? uniqueBy(
+        value.clusters.map(normalizePersistedCluster).filter((cluster): cluster is KubernetesClusterRecord => Boolean(cluster)),
+        (cluster) => cluster.id
+      )
+    : []
+  const knownClusterIds = new Set(clusters.map((cluster) => cluster.id))
+  const contexts = Array.isArray(value.contexts)
+    ? uniqueBy(
+        value.contexts
+          .map(normalizePersistedContext)
+          .filter((context): context is KubernetesContextInfo => Boolean(context))
+          .filter((context) => shouldUseKubernetesSeedData() || !developmentSeedContextNames.has(context.name)),
+        (context) => context.name
+      )
+    : []
+  const bastions = Array.isArray(value.bastions)
+    ? uniqueBy(
+        value.bastions
+          .map(normalizePersistedBastion)
+          .filter((bastion): bastion is KubernetesBastionGroup => Boolean(bastion))
+          .filter((bastion) => shouldUseKubernetesSeedData() || !developmentSeedBastionIds.has(bastion.uuid)),
+        (bastion) => bastion.uuid
+      )
+    : []
+  return {
+    version: 1,
+    contexts,
+    clusters,
+    bastions,
+    namespaces: Array.isArray(value.namespaces)
+      ? uniqueBy(
+          value.namespaces
+            .map((namespace) => normalizePersistedNamespace(namespace, knownClusterIds))
+            .filter((namespace): namespace is KubernetesNamespaceInfo => Boolean(namespace)),
+          (namespace) => namespace.id
+        )
+      : [],
+    resources: Array.isArray(value.resources)
+      ? uniqueBy(
+          value.resources
+            .map((resource) => normalizePersistedResource(resource, knownClusterIds))
+            .filter((resource): resource is KubernetesResource => Boolean(resource)),
+          (resource) => resource.id
+        )
+      : [],
+    importContexts: Array.isArray(value.importContexts)
+      ? uniqueBy(
+          value.importContexts
+            .map(normalizePersistedImportContext)
+            .filter((context): context is KubernetesImportContextInfo => Boolean(context))
+            .filter((context) => shouldUseKubernetesSeedData() || !developmentSeedContextNames.has(context.name)),
+          (context) => context.name
+        )
+      : []
+  }
+}
+
+const applyKubernetesPersistedState = (state: KubernetesPersistedCatalogState) => {
+  contexts = state.contexts.map((context) => ({ ...context }))
+  clusters = state.clusters.map((cluster) => ({ ...cluster }))
+  bastions = state.bastions.map((bastion) => ({ ...bastion }))
+  namespaces = state.namespaces.map((namespace) => ({ ...namespace }))
+  resources = state.resources.map((resource) => ({ ...resource }))
+  importContexts = state.importContexts.map((context) => ({ ...context }))
+}
+
+const discoverDefaultKubeconfigState = (): Pick<KubernetesPersistedCatalogState, 'contexts' | 'importContexts'> | null => {
+  if (shouldUseKubernetesSeedData()) return null
+  const kubeconfigPath = join(homedir(), '.kube', 'config')
+  if (!existsSync(kubeconfigPath)) return null
+  try {
+    const content = readFileSync(kubeconfigPath, 'utf-8')
+    const parsed = parseKubeconfig(content)
+    if (!parsed.contexts.length) return null
+    const discoveredContexts = parsed.contexts.map((context) => ({
+      name: context.name,
+      cluster: context.cluster,
+      namespace: context.namespace,
+      server: context.server,
+      isActive: Boolean(parsed.currentContext && context.name === parsed.currentContext)
+    }))
+    return {
+      contexts: discoveredContexts,
+      importContexts: parsed.contexts.map((context) => ({ ...context }))
+    }
+  } catch {
+    return null
+  }
+}
+
+const ensureKubernetesCatalogStateLoaded = () => {
+  if (kubernetesCatalogStateLoaded && kubernetesCatalogLoadedStateDir === runtimeConfig.stateDir) return
+  kubernetesCatalogStateLoaded = true
+  kubernetesCatalogLoadedStateDir = runtimeConfig.stateDir
+  applyInitialKubernetesState()
+  const filePath = kubernetesCatalogStatePath()
+  if (existsSync(filePath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
+      const state = normalizePersistedKubernetesState(parsed)
+      if (state) {
+        applyKubernetesPersistedState(state)
+        return
+      }
+    } catch {
+      /* Keep the seed or empty catalog when local Kubernetes state is corrupt. */
+    }
+  }
+  const discovered = discoverDefaultKubeconfigState()
+  if (discovered) {
+    contexts = discovered.contexts
+    importContexts = discovered.importContexts
+  }
+}
+
+const persistKubernetesCatalogState = () => {
+  ensureKubernetesCatalogStateLoaded()
+  const state: KubernetesPersistedCatalogState = {
+    version: 1,
+    contexts: contexts.map((context) => ({ ...context })),
+    clusters: clusters.map((cluster) => ({ ...cluster })),
+    bastions: bastions.map((bastion) => ({ ...bastion })),
+    namespaces: namespaces.map((namespace) => ({ ...namespace })),
+    resources: resources.map((resource) => ({ ...resource })),
+    importContexts: importContexts.map((context) => ({ ...context }))
+  }
+  try {
+    mkdirSync(runtimeConfig.stateDir, { recursive: true })
+    const filePath = kubernetesCatalogStatePath()
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+    writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')
+    renameSync(tempPath, filePath)
+  } catch {
+    /* Persistence must not turn a successful Kubernetes API action into a UI failure. */
+  }
+}
+
 export const configureKubernetesBackendRuntime = (config: KubernetesBackendRuntimeConfig = {}) => {
   runtimeConfig = {
-    stateDir: config.stateDir ? (isAbsolute(config.stateDir) ? config.stateDir : resolve(config.stateDir)) : defaultKubernetesStateDir()
+    stateDir: config.stateDir ? (isAbsolute(config.stateDir) ? config.stateDir : resolve(config.stateDir)) : defaultKubernetesStateDir(),
+    useSeedData: config.useSeedData ?? defaultKubernetesSeedMode()
   }
   agentProxyConfigCache = null
+  terminalSessions = []
+  kubernetesCatalogLoadedStateDir = ''
+  kubernetesCatalogStateLoaded = false
+  applyInitialKubernetesState()
 }
 
 const cloneCatalog = (): KubernetesCatalog => {
+  ensureKubernetesCatalogStateLoaded()
   const activeCluster = clusters.find((cluster) => cluster.is_active === 1) || null
   return {
     contexts: contexts.map((context) => ({ ...context })),
@@ -495,12 +841,14 @@ const asResult = <T>(fn: () => T, fallbackCode = 'K8S_BACKEND_ERROR'): AiopsMuta
 }
 
 const requireCluster = (id: string) => {
+  ensureKubernetesCatalogStateLoaded()
   const cluster = clusters.find((item) => item.id === id)
   if (!cluster) throw Object.assign(new Error('Kubernetes cluster not found.'), { code: 'K8S_CLUSTER_NOT_FOUND' })
   return cluster
 }
 
 const requireResource = (id: string) => {
+  ensureKubernetesCatalogStateLoaded()
   const resource = resources.find((item) => item.id === id)
   if (!resource) throw Object.assign(new Error('Kubernetes resource not found.'), { code: 'K8S_RESOURCE_NOT_FOUND' })
   return resource
@@ -627,6 +975,7 @@ const parseKubeconfig = (content: string) => {
 const parseKubeconfigContexts = (content: string) => parseKubeconfig(content).contexts
 
 const findKubernetesTestContext = (contextName: string): KubernetesImportContextInfo | null => {
+  ensureKubernetesCatalogStateLoaded()
   const imported = importContexts.find((context) => context.name === contextName)
   if (imported) return { ...imported }
   const listed = contexts.find((context) => context.name === contextName)
@@ -686,6 +1035,7 @@ export const saveKubernetesAgentProxyConfig = async (input: KubernetesAgentProxy
 
 export const switchKubernetesContext = async (contextName: string): Promise<KubernetesContextSwitchResult> =>
   asResult(() => {
+    ensureKubernetesCatalogStateLoaded()
     const name = contextName.trim()
     const context = contexts.find((item) => item.name === name)
     if (!context) throw Object.assign(new Error('Kubernetes context not found.'), { code: 'K8S_CONTEXT_NOT_FOUND' })
@@ -694,6 +1044,7 @@ export const switchKubernetesContext = async (contextName: string): Promise<Kube
     if (cluster) {
       clusters = clusters.map((item) => ({ ...item, is_active: item.id === cluster.id ? 1 : 0 }))
     }
+    persistKubernetesCatalogState()
     return {
       ...cloneCatalog(),
       currentContext: name
@@ -702,6 +1053,7 @@ export const switchKubernetesContext = async (contextName: string): Promise<Kube
 
 export const testKubernetesClusterConnection = async (input: KubernetesClusterTestInput): Promise<KubernetesClusterTestResult> =>
   asResult(() => {
+    ensureKubernetesCatalogStateLoaded()
     const contextName = input.contextName?.trim() || ''
     const requestedServerUrl = input.serverUrl?.trim() || ''
     if (!contextName) {
@@ -733,6 +1085,7 @@ export const testKubernetesClusterConnection = async (input: KubernetesClusterTe
 
 export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImportInput): Promise<KubernetesKubeconfigImportResult> {
   try {
+    ensureKubernetesCatalogStateLoaded()
     const kubeconfigPath = input.kubeconfigPath?.trim() || ''
     const providedContent = input.kubeconfigContent ?? ''
     if (!kubeconfigPath && !providedContent.trim()) {
@@ -755,6 +1108,7 @@ export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImpo
       return { ok: false, errorCode: 'K8S_KUBECONFIG_CONTEXTS_EMPTY', errorMessage: 'No kubeconfig contexts were found.' }
     }
     importContexts = parsed.contexts.map((context) => ({ ...context }))
+    persistKubernetesCatalogState()
     return {
       ok: true,
       data: {
@@ -775,6 +1129,7 @@ export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImpo
 
 export const addKubernetesCluster = async (input: KubernetesClusterInput): Promise<KubernetesClusterMutationResult> =>
   asResult(() => {
+    ensureKubernetesCatalogStateLoaded()
     const name = input.name.trim()
     const contextName = input.contextName.trim()
     const serverUrl = input.serverUrl.trim()
@@ -803,6 +1158,7 @@ export const addKubernetesCluster = async (input: KubernetesClusterInput): Promi
     }
     clusters = [cluster, ...clusters]
     upsertContextForCluster(cluster, false)
+    persistKubernetesCatalogState()
     return {
       ...cloneCatalog(),
       cluster: { ...cluster }
@@ -821,6 +1177,7 @@ export const updateKubernetesCluster = async (id: string, input: KubernetesClust
     }
     clusters = clusters.map((cluster) => (cluster.id === id ? next : cluster))
     upsertContextForCluster(next)
+    persistKubernetesCatalogState()
     return {
       ...cloneCatalog(),
       cluster: { ...next }
@@ -835,6 +1192,7 @@ export const deleteKubernetesCluster = async (id: string): Promise<KubernetesClu
     namespaces = namespaces.filter((namespace) => namespace.clusterId !== id)
     resources = resources.filter((resource) => resource.clusterId !== id)
     terminalSessions = terminalSessions.filter((session) => session.clusterId !== id)
+    persistKubernetesCatalogState()
     return cloneCatalog()
   })
 
@@ -849,6 +1207,7 @@ export const connectKubernetesCluster = async (id: string): Promise<KubernetesCl
     }))
     contexts = contexts.map((context) => ({ ...context, isActive: context.name === current.context_name }))
     const connected = requireCluster(id)
+    persistKubernetesCatalogState()
     return {
       ...cloneCatalog(),
       cluster: { ...connected }
@@ -866,6 +1225,7 @@ export const disconnectKubernetesCluster = async (id: string): Promise<Kubernete
     }
     clusters = clusters.map((cluster) => (cluster.id === id ? next : cluster))
     terminalSessions = terminalSessions.filter((session) => session.clusterId !== id)
+    persistKubernetesCatalogState()
     return {
       ...cloneCatalog(),
       cluster: { ...next }
@@ -881,6 +1241,7 @@ export const syncKubernetesBastion = async (bastionUuid: string): Promise<Kubern
       clusters = clusters.map((cluster) =>
         cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastionUuid ? { ...cluster, updated_at: nowLabel() } : cluster
       )
+      persistKubernetesCatalogState()
       return {
         ...cloneCatalog(),
         syncedCount: 0,
@@ -910,6 +1271,7 @@ export const syncKubernetesBastion = async (bastionUuid: string): Promise<Kubern
     }
     clusters = [cluster, ...clusters]
     upsertContextForCluster(cluster, false)
+    persistKubernetesCatalogState()
     return {
       ...cloneCatalog(),
       syncedCount: 1,
@@ -970,14 +1332,11 @@ export const closeKubernetesTerminal = async (id: string, exitCode = 0): Promise
   })
 
 export const __resetKubernetesCatalogForTests = () => {
-  contexts = defaultContexts.map((context) => ({ ...context }))
-  clusters = defaultClusters.map((cluster) => ({ ...cluster }))
-  bastions = defaultBastions.map((bastion) => ({ ...bastion }))
-  namespaces = defaultNamespaces.map((namespace) => ({ ...namespace }))
-  resources = defaultResources.map((resource) => ({ ...resource }))
-  importContexts = defaultImportContexts.map((context) => ({ ...context }))
+  applyInitialKubernetesState()
   terminalSessions = []
   agentProxyConfigCache = null
+  kubernetesCatalogLoadedStateDir = ''
+  kubernetesCatalogStateLoaded = false
 }
 
 const resourceTypeByKind: Record<KubernetesResourceKind, string> = {
@@ -1491,6 +1850,7 @@ const createKubernetesCommandRun = (
 }
 
 export async function executeKubernetesCommand(input: KubernetesCommandInput): Promise<KubernetesCommandResult> {
+  ensureKubernetesCatalogStateLoaded()
   const startedAt = Date.now()
   const command = normalize(input.command)
   if (!command) {
@@ -1623,6 +1983,7 @@ export async function executeKubernetesResourceAction(input: KubernetesResourceA
 }
 
 export async function refreshKubernetesResources(input: KubernetesResourceRefreshInput): Promise<KubernetesResourceRefreshResult> {
+  ensureKubernetesCatalogStateLoaded()
   const startedAt = Date.now()
   const clusterId = input.clusterId?.trim() || ''
   const requestedKind = input.kind || 'all'
@@ -1706,6 +2067,7 @@ export async function refreshKubernetesResources(input: KubernetesResourceRefres
       const parsedResources = parsedByKind.get(kind) || []
       resources = [...filterResourcesOutsideRefreshScope(cluster.id, kind, namespace), ...parsedResources]
     })
+    persistKubernetesCatalogState()
     const refreshedResources = refreshedKinds.reduce((count, kind) => count + resourcesInRefreshScope(cluster.id, kind, namespace).length, 0)
     const output = outputs.filter(Boolean).join('\n\n')
     return asRefreshResult(
