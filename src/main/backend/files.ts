@@ -34,6 +34,7 @@ import type {
 import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'
 import { getAsset, getAssetSecret, getKeychainSecret } from './assets'
 import { loadSsh2 } from './ssh2Runtime'
+import { createConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 
 type BackendFileEntry = FileListEntry & { mode: string }
@@ -54,7 +55,7 @@ type RemoteSftpTarget = {
   password?: string
   privateKey?: string
   passphrase?: string
-  agent?: string
+  agent?: ConnectConfig['agent']
   proxyAsset?: {
     needProxy?: boolean
     proxyName?: string
@@ -62,7 +63,7 @@ type RemoteSftpTarget = {
 }
 
 type FilesBackendRuntimeConfig = {
-  getConfig?: () => Pick<UserConfig, 'sshProxyConfigs'>
+  getConfig?: () => Pick<UserConfig, 'sshProxyConfigs' | 'sshAgentKeys' | 'terminal'>
 }
 
 const filesRuntimeConfig: FilesBackendRuntimeConfig = {}
@@ -72,6 +73,13 @@ export const configureFilesBackendRuntime = (config: FilesBackendRuntimeConfig =
 }
 
 const getSshProxyConfigs = () => filesRuntimeConfig.getConfig?.().sshProxyConfigs || []
+const getSshAgentRuntimeConfig = () => {
+  const config = filesRuntimeConfig.getConfig?.()
+  return {
+    terminal: config?.terminal,
+    sshAgentKeys: config?.sshAgentKeys
+  }
+}
 
 const seedTime = new Date('2026-06-04T05:10:00.000Z').getTime()
 
@@ -133,8 +141,9 @@ const resolveRemoteSftpTarget = (options: FileListOptions): RemoteSftpTarget | n
   const password = textSecret(secret.password)
   const privateKey = usablePrivateKey(secret.privateKey) || usablePrivateKey(keychainSecret.privateKey)
   const passphrase = textSecret(secret.passphrase) || textSecret(keychainSecret.passphrase)
-  const agent =
-    !password && !privateKey && process.env.AIOPSTERM_FILES_SFTP_AGENT === '1' ? textSecret(process.env.SSH_AUTH_SOCK) : ''
+  const configuredAgent =
+    !password && !privateKey ? createConfiguredSshAgentAuth(getSshAgentRuntimeConfig(), (keyChainId) => getKeychainSecret(keyChainId))?.agent : undefined
+  const agent = configuredAgent || (!password && !privateKey && process.env.AIOPSTERM_FILES_SFTP_AGENT === '1' ? textSecret(process.env.SSH_AUTH_SOCK) : '')
   const host = textSecret(asset.host || asset.ip || options.host)
   const username = textSecret(asset.username)
   const port = Number(asset.port || 22)

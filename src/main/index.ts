@@ -143,6 +143,7 @@ import {
   saveSettingsShortcut
 } from './backend/settingsPreferences'
 import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
+import { applyConfiguredSshAgentAuth } from './backend/sshAgent'
 import { createSshProxySocketForAsset } from './backend/sshProxy'
 import type { SshProxySocket } from './backend/sshProxy'
 import {
@@ -277,7 +278,7 @@ import type {
   AiopsSshTunnelStartInput,
   AiopsSshTunnelStopInput
 } from '@shared/preload'
-import type { ClientChannel } from 'ssh2'
+import type { ClientChannel, ConnectConfig } from 'ssh2'
 
 type PtyProcess = {
   write(data: string): void
@@ -311,7 +312,7 @@ type Ssh2Client = {
   on(event: 'ready', listener: () => void): Ssh2Client
   on(event: 'error', listener: (error: Error) => void): Ssh2Client
   on(event: 'close' | 'end', listener: () => void): Ssh2Client
-  connect(config: Record<string, unknown>): void
+  connect(config: ConnectConfig): void
   shell(options: Record<string, unknown>, callback: (error: Error | undefined, stream: ClientChannel) => void): void
   end(): void
 }
@@ -2289,7 +2290,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
     })
     .on('close', () => finish(null))
 
-  const connectConfig: Record<string, unknown> = {
+  const connectConfig: ConnectConfig = {
     host: target.host,
     port: target.port,
     username: target.username,
@@ -2299,7 +2300,11 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
   if (target.password) connectConfig.password = target.password
   if (target.privateKey) connectConfig.privateKey = target.privateKey
   if (target.passphrase) connectConfig.passphrase = target.passphrase
-  if (!target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) connectConfig.agent = process.env.SSH_AUTH_SOCK
+  const configuredAgentAuth = applyConfiguredSshAgentAuth(connectConfig, getConfig(), (keyChainId) => getKeychainSecret(keyChainId), {
+    enableForward: true,
+    overrideExistingAgent: false
+  })
+  if (!configuredAgentAuth && !target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) connectConfig.agent = process.env.SSH_AUTH_SOCK
 
   void (async () => {
     try {

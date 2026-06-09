@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -329,8 +330,9 @@ let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
 let deleteFileSessionFolder: (uuid: string) => Promise<any>
 let resetFileSessionCatalog: () => void
 let dropFileSessionCatalogCache: () => void
-let configureFilesBackendRuntime: (config?: { getConfig?: () => { sshProxyConfigs?: any[] } }) => void
+let configureFilesBackendRuntime: (config?: { getConfig?: () => { sshProxyConfigs?: any[]; sshAgentKeys?: any[]; terminal?: any } }) => void
 let saveAsset: (asset: any) => any
+let saveKeychain: (keychain: any) => any
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/files'
@@ -355,7 +357,9 @@ beforeAll(async () => {
   dropFileSessionCatalogCache = backend.__dropFileSessionCatalogCacheForTests
   configureFilesBackendRuntime = backend.configureFilesBackendRuntime
   const assetsModulePath = '../src/main/backend/assets'
-  saveAsset = (await import(assetsModulePath)).saveAsset
+  const assetsBackend = await import(assetsModulePath)
+  saveAsset = assetsBackend.saveAsset
+  saveKeychain = assetsBackend.saveKeychain
 })
 
 beforeEach(() => {
@@ -387,6 +391,19 @@ describe('files backend content boundary', () => {
     expect(saved.ok).toBe(true)
     return saved.data.id
   }
+
+  const createPrivateKey = () =>
+    generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: {
+        type: 'pkcs1',
+        format: 'pem'
+      },
+      publicKeyEncoding: {
+        type: 'pkcs1',
+        format: 'pem'
+      }
+    }).privateKey
 
   it('loads and mutates file session catalog behind the main-process boundary', async () => {
     const initial = await listFileSessionCatalog()
@@ -803,6 +820,68 @@ describe('files backend content boundary', () => {
     expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('host')
     expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('port')
     expect(sshProxyMock.sockets[0].destroyed).toBe(true)
+  })
+
+  it('authenticates asset-backed SFTP through configured SSH Agent keychains', async () => {
+    const privateKey = createPrivateKey()
+    const savedKeychain = saveKeychain({
+      id: 'key-files-agent-test',
+      name: 'files-agent-test',
+      type: 'rsa',
+      publicKey: '',
+      privateKey
+    })
+    expect(savedKeychain.ok).toBe(true)
+    configureFilesBackendRuntime({
+      getConfig: () => ({
+        sshProxyConfigs: [],
+        terminal: { sshAgentsStatus: true },
+        sshAgentKeys: [
+          {
+            id: 'key-files-agent-test',
+            keyChainId: 'key-files-agent-test',
+            fingerprint: 'SHA256:files-agent',
+            comment: 'files-agent-test',
+            keyType: 'RSA'
+          }
+        ]
+      })
+    })
+    const saved = saveAsset({
+      id: 'asset-sftp-files-agent-test',
+      name: 'sftp-files-agent-test',
+      title: 'sftp-files-agent-test',
+      host: 'agent-sftp.example.test',
+      ip: 'agent-sftp.example.test',
+      group: '测试',
+      group_name: '测试',
+      status: 'online',
+      username: 'ops',
+      port: 7992,
+      asset_type: 'person',
+      auth_type: 'keyBased',
+      tags: ['sftp', 'agent']
+    })
+    expect(saved.ok).toBe(true)
+
+    const rows = await listFiles('/srv', { kind: 'remote', sessionId: saved.data.id, host: 'client-host-ignored' })
+
+    expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(['archive', 'logs', 'note.txt']))
+    expect(ssh2Mock.connectConfigs).toEqual([
+      expect.objectContaining({
+        host: 'agent-sftp.example.test',
+        port: 7992,
+        username: 'ops',
+        agent: expect.objectContaining({
+          getIdentities: expect.any(Function),
+          sign: expect.any(Function),
+          getStream: expect.any(Function)
+        })
+      })
+    ])
+    expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('password')
+    expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('privateKey')
+    expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('agentForward')
   })
 
   it('returns backend errors instead of seed fallback when asset-backed SFTP fails', async () => {
