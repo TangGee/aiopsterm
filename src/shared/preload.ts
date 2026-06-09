@@ -1715,11 +1715,13 @@ export type DatabaseAiPaneLifecycleResult = AiopsMutationResult<{
   assistantMessage: DatabaseAiPaneMessageRecord
 }>
 
+export type DatabaseAiResponseProvider = 'aiopsterm-local' | ModelProviderCheckKey
+
 export type DatabaseAiPaneResponseResult = AiopsMutationResult<{
   requestId: string
   assistantMessage: DatabaseAiPaneMessageRecord
   text: string
-  provider: 'aiopsterm-local'
+  provider: DatabaseAiResponseProvider
   durationMs: number
 }>
 
@@ -1772,7 +1774,7 @@ export type DatabaseAiDrawerResponseResult = AiopsMutationResult<{
   text: string
   reasoning: string
   sql: string
-  provider: 'aiopsterm-local'
+  provider: DatabaseAiResponseProvider
   durationMs: number
 }>
 

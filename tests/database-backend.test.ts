@@ -2,11 +2,13 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { UserConfig } from '@shared/preload'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
   connectDatabaseConnection,
+  configureDatabaseAiRuntime,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
   createDatabaseCatalog,
@@ -32,6 +34,20 @@ import {
   testDatabaseConnection
 } from '@shared/database'
 
+let configureDatabaseBackendRuntime: (config?: {
+  getConfig?: () => UserConfig
+  fetch?: typeof fetch
+  wait?: (durationMs: number) => Promise<unknown>
+  now?: () => number
+  timeoutMs?: number
+}) => void
+
+beforeAll(async () => {
+  const modulePath = '../src/main/backend/database'
+  const backend = await import(modulePath)
+  configureDatabaseBackendRuntime = backend.configureDatabaseBackendRuntime
+})
+
 describe('database backend boundary', () => {
   let tempDirs: string[] = []
 
@@ -42,11 +58,14 @@ describe('database backend boundary', () => {
   }
 
   beforeEach(() => {
+    configureDatabaseBackendRuntime()
     resetDatabaseBackendSeed()
     tempDirs = []
   })
 
   afterEach(async () => {
+    configureDatabaseBackendRuntime()
+    vi.restoreAllMocks()
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
     tempDirs = []
   })
@@ -700,6 +719,187 @@ describe('database backend boundary', () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(475)
   })
 
+  it('calls the configured DB AI provider for non-local pane responses', async () => {
+    const generateText = vi.fn(async (input) => {
+      expect(input.surface).toBe('pane')
+      expect(input.modelName).toBe('ops-db')
+      expect(input.systemPrompt).toContain('database-workspace assistant')
+      expect(input.systemPrompt).toContain('Current database: orders')
+      expect(input.systemPrompt).toContain('orders.public.orders')
+      expect(input.messages.at(-1)).toEqual({ role: 'user', content: 'Summarize schema' })
+      return {
+        ok: true as const,
+        provider: 'openai' as const,
+        text: 'Provider summary for orders.public.orders.\n\n```sql\nSELECT id, service FROM \"public\".\"orders\" LIMIT 20;\n```'
+      }
+    })
+    configureDatabaseAiRuntime({
+      getModelName: () => 'ops-db',
+      now: () => 30_000,
+      generateText
+    })
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    const result = await generateDatabaseAiPaneResponse({
+      requestId: created.data!.requestId,
+      assistantMessageId: created.data!.assistantMessage.id,
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      },
+      messages: [{ role: 'user', content: 'previous database question' }]
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      requestId: created.data!.requestId,
+      provider: 'openai',
+      text: expect.stringContaining('Provider summary'),
+      assistantMessage: {
+        id: created.data!.assistantMessage.id,
+        status: 'done',
+        content: expect.stringContaining('Provider summary')
+      },
+      durationMs: 1
+    })
+    expect(result.data?.text).not.toContain('当前响应由 aiopsterm DB AI 本地后端生成')
+    expect(generateText).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the main-process model provider runtime for non-local DB AI pane responses', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'Provider-backed DB pane response from OpenAI-compatible runtime.'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+    configureDatabaseBackendRuntime({
+      now: () => 35_000,
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'ops-db',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-db', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4410',
+                apiKey: 'sk-db',
+                modelId: 'ops-db',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as UserConfig
+    })
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Explain the active query',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      },
+      activeSql: 'select * from public.orders;'
+    })
+
+    const result = await generateDatabaseAiPaneResponse({
+      requestId: created.data!.requestId,
+      assistantMessageId: created.data!.assistantMessage.id,
+      prompt: 'Explain the active query',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      },
+      activeSql: 'select * from public.orders;'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      provider: 'openai',
+      text: 'Provider-backed DB pane response from OpenAI-compatible runtime.'
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:4410/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer sk-db' })
+      })
+    )
+    const body = JSON.parse(String((fetchMock as any).mock.calls[0][1].body))
+    expect(body.model).toBe('ops-db')
+    expect(body.messages[0]).toMatchObject({ role: 'system' })
+    expect(body.messages[0].content).toContain('Current database: orders')
+    expect(body.messages[0].content).toContain('orders.public.orders')
+    expect(body.messages.at(-1)).toEqual({ role: 'user', content: 'Explain the active query' })
+  })
+
+  it('returns a backend error when a non-local DB AI pane model has no provider runtime', async () => {
+    configureDatabaseAiRuntime({
+      getModelName: () => 'ops-db',
+      now: () => 40_000
+    })
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+    expect(startDatabaseAiPaneResponse({ requestId: created.data!.requestId, assistantMessageId: created.data!.assistantMessage.id }).data?.assistantMessage).toMatchObject({
+      status: 'streaming'
+    })
+
+    const result = await generateDatabaseAiPaneResponse({
+      requestId: created.data!.requestId,
+      assistantMessageId: created.data!.assistantMessage.id,
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('DB_AI_PROVIDER_UNAVAILABLE')
+    expect(result.data).toMatchObject({
+      provider: 'aiopsterm-local',
+      assistantMessage: {
+        id: created.data!.assistantMessage.id,
+        status: 'error',
+        content: 'Database AI provider is unavailable.'
+      },
+      text: 'Database AI provider is unavailable.'
+    })
+  })
+
   it('keeps DB AI pane lifecycle status behind the database backend boundary', async () => {
     const created = await createDatabaseAiPaneRequest({
       prompt: 'Summarize schema',
@@ -743,6 +943,60 @@ describe('database backend boundary', () => {
       status: 'cancelled'
     })
     expect(lateResponse.data?.text).not.toContain('当前响应由 aiopsterm DB AI 本地后端生成')
+  })
+
+  it('keeps cancelled DB AI pane provider results from overwriting backend state', async () => {
+    let resolveProvider: (value: { ok: true; provider: 'openai'; text: string }) => void = () => {}
+    const providerPromise = new Promise<{ ok: true; provider: 'openai'; text: string }>((resolve) => {
+      resolveProvider = resolve
+    })
+    const generateText = vi.fn(() => providerPromise)
+    configureDatabaseAiRuntime({
+      getModelName: () => 'ops-db',
+      now: () => 50_000,
+      generateText
+    })
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+    const requestId = created.data!.requestId
+    const assistantMessageId = created.data!.assistantMessage.id
+    expect(startDatabaseAiPaneResponse({ requestId, assistantMessageId }).data?.assistantMessage).toMatchObject({ status: 'streaming' })
+
+    const responsePromise = generateDatabaseAiPaneResponse({
+      requestId,
+      assistantMessageId,
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+    expect(cancelDatabaseAiPaneResponse({ requestId, assistantMessageId }).data?.assistantMessage).toMatchObject({
+      id: assistantMessageId,
+      status: 'cancelled'
+    })
+    resolveProvider({ ok: true, provider: 'openai', text: 'late provider pane text' })
+
+    const lateResponse = await responsePromise
+    expect(lateResponse.ok).toBe(true)
+    expect(lateResponse.data).toMatchObject({
+      provider: 'openai',
+      assistantMessage: {
+        id: assistantMessageId,
+        status: 'cancelled',
+        content: 'Response cancelled before the first chunk.'
+      },
+      text: 'Response cancelled before the first chunk.'
+    })
   })
 
   it('returns backend-owned DB AI pane error message records', async () => {
@@ -844,6 +1098,113 @@ describe('database backend boundary', () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(240)
   })
 
+  it('calls the configured DB AI provider for non-local drawer responses', async () => {
+    const generateText = vi.fn(async (input) => {
+      expect(input.surface).toBe('drawer')
+      expect(input.modelName).toBe('ops-db')
+      expect(input.action).toBe('convert')
+      expect(input.targetDialect).toBe('mssql')
+      expect(input.systemPrompt).toContain('exactly one fenced SQL block')
+      expect(input.messages[0].content).toContain('Source SQL')
+      return {
+        ok: true as const,
+        provider: 'openai' as const,
+        text: `Reasoning
+- Converted quoting for SQL Server.
+
+\`\`\`sql
+SELECT TOP (20) id
+FROM [public].[orders]
+WHERE status = ''open'';
+\`\`\``
+      }
+    })
+    configureDatabaseAiRuntime({
+      getModelName: () => 'ops-db',
+      now: () => 60_000,
+      generateText
+    })
+    const created = await createDatabaseAiDrawerRequest({
+      action: 'convert',
+      sourceSql: 'select id from "public"."orders" where status = \'open\'',
+      targetDialect: 'mssql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        contextSummary: 'orders-postgres · postgresql · orders · public'
+      }
+    })
+
+    const result = await generateDatabaseAiDrawerResponse({
+      requestId: created.data!.id,
+      action: created.data!.action,
+      sourceSql: created.data!.sourceSql,
+      targetDialect: created.data!.targetDialect,
+      context: created.data!.backendContext
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      provider: 'openai',
+      reasoning: expect.stringContaining('Converted quoting'),
+      sql: "SELECT TOP (20) id\nFROM [public].[orders]\nWHERE status = ''open'';",
+      request: {
+        id: created.data!.id,
+        status: 'done',
+        text: expect.stringContaining('```sql')
+      },
+      durationMs: 1
+    })
+    expect(result.data?.reasoning).not.toContain('aiopsterm DB AI 本地后端生成')
+    expect(generateText).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects provider drawer responses that omit fenced SQL', async () => {
+    configureDatabaseAiRuntime({
+      getModelName: () => 'ops-db',
+      now: () => 70_000,
+      generateText: vi.fn(async () => ({
+        ok: true as const,
+        provider: 'openai' as const,
+        text: 'Reasoning only, no SQL block.'
+      }))
+    })
+    const created = await createDatabaseAiDrawerRequest({
+      action: 'convert',
+      sourceSql: 'select id from "public"."orders"',
+      targetDialect: 'mssql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+    expect(startDatabaseAiDrawerResponse({ requestId: created.data!.id }).data).toMatchObject({ status: 'streaming' })
+
+    const result = await generateDatabaseAiDrawerResponse({
+      requestId: created.data!.id,
+      action: created.data!.action,
+      sourceSql: created.data!.sourceSql,
+      targetDialect: created.data!.targetDialect,
+      context: created.data!.backendContext
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('DB_AI_PROVIDER_SQL_MISSING')
+    expect(result.data).toMatchObject({
+      provider: 'openai',
+      request: {
+        id: created.data!.id,
+        status: 'error',
+        text: expect.stringContaining('fenced SQL block')
+      },
+      sql: ''
+    })
+  })
+
   it('keeps DB AI drawer lifecycle status behind the database backend boundary', async () => {
     const created = await createDatabaseAiDrawerRequest({
       action: 'convert',
@@ -876,6 +1237,58 @@ describe('database backend boundary', () => {
     expect(lateResponse.data?.request).toMatchObject({ id: requestId, status: 'cancelled' })
     expect(lateResponse.data?.text).toBe('')
     expect(lateResponse.data?.sql).toBe('')
+  })
+
+  it('keeps cancelled DB AI drawer provider results from overwriting backend state', async () => {
+    let resolveProvider: (value: { ok: true; provider: 'openai'; text: string }) => void = () => {}
+    const providerPromise = new Promise<{ ok: true; provider: 'openai'; text: string }>((resolve) => {
+      resolveProvider = resolve
+    })
+    configureDatabaseAiRuntime({
+      getModelName: () => 'ops-db',
+      now: () => 80_000,
+      generateText: vi.fn(() => providerPromise)
+    })
+    const created = await createDatabaseAiDrawerRequest({
+      action: 'convert',
+      sourceSql: 'select id from "public"."orders"',
+      targetDialect: 'mssql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+    const requestId = created.data!.id
+    expect(startDatabaseAiDrawerResponse({ requestId }).data).toMatchObject({ status: 'streaming' })
+
+    const responsePromise = generateDatabaseAiDrawerResponse({
+      requestId,
+      action: created.data!.action,
+      sourceSql: created.data!.sourceSql,
+      targetDialect: created.data!.targetDialect,
+      context: created.data!.backendContext
+    })
+    expect(cancelDatabaseAiDrawerResponse({ requestId }).data).toMatchObject({ id: requestId, status: 'cancelled' })
+    resolveProvider({
+      ok: true,
+      provider: 'openai',
+      text: 'Reasoning\n- late result\n\n```sql\nSELECT 1;\n```'
+    })
+
+    const lateResponse = await responsePromise
+    expect(lateResponse.ok).toBe(true)
+    expect(lateResponse.data).toMatchObject({
+      provider: 'openai',
+      request: {
+        id: requestId,
+        status: 'cancelled',
+        text: ''
+      },
+      reasoning: '',
+      sql: ''
+    })
   })
 
   it('returns backend-owned DB AI drawer error request records', async () => {

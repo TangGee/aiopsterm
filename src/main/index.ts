@@ -44,6 +44,7 @@ import { prepareChatImageAttachment, validateChatImageAttachment } from './backe
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
+  configureDatabaseBackendRuntime,
   connectDatabaseConnection,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
@@ -1140,6 +1141,7 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
 configureTerminalSuggestionsRuntime({ getConfig })
 configureAiChatRuntime({ getConfig })
+configureDatabaseBackendRuntime({ getConfig })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

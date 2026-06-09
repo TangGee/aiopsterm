@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import type {
   DatabaseColumnFilter,
   DatabaseColumnSort,
+  DatabaseAiResponseProvider,
   DatabaseAiDrawerAction,
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerLifecycleResult,
@@ -1236,6 +1237,45 @@ export const DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS = 260
 const databaseAiPaneMessages = new Map<string, DatabaseAiPaneMessageRecord>()
 const databaseAiDrawerRequests = new Map<string, DatabaseAiDrawerRequestRecord>()
 
+export type DatabaseAiProviderTextMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type DatabaseAiProviderTextInput = {
+  surface: 'pane' | 'drawer'
+  systemPrompt: string
+  messages: DatabaseAiProviderTextMessage[]
+  maxTokens: number
+  modelName: string
+  prompt: string
+  context: DatabaseAiPaneResponseInput['context'] | DatabaseAiDrawerResponseInput['context']
+  requestId?: string
+  assistantMessageId?: string
+  action?: DatabaseAiDrawerAction
+  activeSql?: string
+  sourceSql?: string
+  targetDialect?: DatabaseAiTargetDialect
+  errorMessage?: string
+}
+
+export type DatabaseAiProviderTextResult =
+  | { ok: true; text: string; provider: DatabaseAiResponseProvider; model?: string }
+  | { ok: false; errorCode: string; errorMessage: string; provider?: DatabaseAiResponseProvider }
+
+type DatabaseAiRuntimeConfig = {
+  getModelName?: () => string | undefined
+  generateText?: (input: DatabaseAiProviderTextInput) => Promise<DatabaseAiProviderTextResult>
+  wait?: (durationMs: number) => Promise<unknown>
+  now?: () => number
+}
+
+let databaseAiRuntime: DatabaseAiRuntimeConfig = {}
+
+export function configureDatabaseAiRuntime(config?: DatabaseAiRuntimeConfig) {
+  databaseAiRuntime = config ? { ...config } : {}
+}
+
 const databaseAiPaneMessageRecord = (
   input: {
     requestId: string
@@ -1288,7 +1328,7 @@ const updateDatabaseAiPaneAssistantMessage = (
   const updated: DatabaseAiPaneMessageRecord = {
     ...existing,
     ...patch,
-    updatedAt: patch.updatedAt ?? Date.now()
+    updatedAt: patch.updatedAt ?? databaseAiNow()
   }
   databaseAiPaneMessages.set(updated.id, cloneDatabaseAiPaneMessageRecord(updated))
   return updated
@@ -1320,7 +1360,7 @@ const updateDatabaseAiDrawerRequest = (
   const updated = {
     ...existing,
     ...patch,
-    updatedAt: patch.updatedAt ?? Date.now()
+    updatedAt: patch.updatedAt ?? databaseAiNow()
   }
   databaseAiDrawerRequests.set(updated.id, cloneDatabaseAiDrawerRequestRecord(updated))
   return updated
@@ -1334,7 +1374,8 @@ const databaseAiPaneErrorResponse = (
   input: DatabaseAiPaneResponseInput,
   startedAt: number,
   errorCode: string,
-  errorMessage: string
+  errorMessage: string,
+  provider: DatabaseAiResponseProvider = 'aiopsterm-local'
 ): DatabaseAiPaneResponseResult => {
   const requestId = trim(input.requestId) || `dbai-pane-request-${randomUUID()}`
   const contextSummary = databaseAiPaneContextSummary(input)
@@ -1369,8 +1410,8 @@ const databaseAiPaneErrorResponse = (
       requestId,
       assistantMessage,
       text: assistantMessage.content,
-      provider: 'aiopsterm-local',
-      durationMs: Math.max(1, Date.now() - startedAt)
+      provider,
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
     }
   }
 }
@@ -1379,7 +1420,8 @@ const databaseAiDrawerErrorResponse = (
   input: DatabaseAiDrawerResponseInput,
   startedAt: number,
   errorCode: string,
-  errorMessage: string
+  errorMessage: string,
+  provider: DatabaseAiResponseProvider = 'aiopsterm-local'
 ): DatabaseAiDrawerResponseResult => {
   const requestId = trim(input.requestId)
   const existing = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
@@ -1409,7 +1451,7 @@ const databaseAiDrawerErrorResponse = (
           contextSummary: trim(input.context.contextSummary) || undefined
         },
         createdAt: startedAt,
-        updatedAt: Date.now()
+        updatedAt: databaseAiNow()
       })
   }
 
@@ -1422,8 +1464,8 @@ const databaseAiDrawerErrorResponse = (
       text: request.text,
       reasoning: request.text,
       sql: '',
-      provider: 'aiopsterm-local',
-      durationMs: Math.max(1, Date.now() - startedAt)
+      provider,
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
     }
   }
 }
@@ -1451,7 +1493,16 @@ const databaseAiDrawerActionName = (action: DatabaseAiDrawerAction) => {
   }
 }
 
-const wait = (durationMs: number) => new Promise((resolve) => setTimeout(resolve, durationMs))
+const wait = (durationMs: number) => {
+  if (databaseAiRuntime.wait) return databaseAiRuntime.wait(durationMs)
+  return new Promise((resolve) => setTimeout(resolve, durationMs))
+}
+
+const databaseAiNow = () => (databaseAiRuntime.now ? databaseAiRuntime.now() : Date.now())
+
+const databaseAiModelName = () => trim(databaseAiRuntime.getModelName?.()) || 'aiopsterm-local-agent'
+
+const shouldUseDatabaseAiProvider = (modelName: string) => trim(modelName) !== '' && trim(modelName) !== 'aiopsterm-local-agent'
 
 const unquoteIdentifier = (value: string) => value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
 
@@ -1709,6 +1760,339 @@ const buildDrawerReasoning = (input: DatabaseAiDrawerResponseInput, generatedSql
 }
 
 const composeDrawerResponseText = (reasoning: string, generatedSql: string) => `${reasoning}\n\n\`\`\`sql\n${generatedSql}\n\`\`\``
+
+const normalizeDatabaseAiProviderText = (value: unknown) => String(value || '').trim()
+
+const databaseAiContextLines = (context: DatabaseAiPaneResponseInput['context'] | DatabaseAiDrawerResponseInput['context']) => {
+  const lines = [
+    `Connection id: ${normalizeDatabaseAiProviderText(context.connectionId) || '(not set)'}`,
+    `Engine: ${normalizeDatabaseAiProviderText(context.dbType) || '(not set)'}`,
+    `Current database: ${normalizeDatabaseAiProviderText(context.databaseName) || '(not set)'}`,
+    `Current schema: ${normalizeDatabaseAiProviderText(context.schemaName) || '(not set)'}`,
+    `Context summary: ${normalizeDatabaseAiProviderText(context.contextSummary) || '(not set)'}`
+  ]
+  const tableName = 'tableName' in context ? normalizeDatabaseAiProviderText(context.tableName) : ''
+  if (tableName) lines.push(`Current table: ${tableName}`)
+  return lines
+}
+
+const databaseAiSchemaSummaryForContext = (context: DatabaseAiPaneResponseInput['context'] | DatabaseAiDrawerResponseInput['context']) => {
+  const connectionId = normalizeDatabaseAiProviderText(context.connectionId)
+  const databaseName = normalizeDatabaseAiProviderText(context.databaseName)
+  const schemaName = normalizeDatabaseAiProviderText(context.schemaName)
+  if (!connectionId || !databaseName) return ['- No backend schema metadata is available for this request context.']
+  const keys = tableKeysForContext({ connectionId, databaseName, schemaName })
+  if (!keys.length) return ['- No backend schema metadata is available for this request context.']
+  return keys.slice(0, 16).map((key) => {
+    const parts = keyParts(key)
+    const columns = tableColumns[key] ?? columnsForRows(tableRows[key] ?? [])
+    const qualified = [parts.databaseName, parts.schemaName, parts.tableName].filter(Boolean).join('.')
+    return `- ${qualified}: ${columns.slice(0, 12).join(', ')}`
+  })
+}
+
+const buildDatabaseAiProviderSystemPrompt = (
+  surface: 'pane' | 'drawer',
+  context: DatabaseAiPaneResponseInput['context'] | DatabaseAiDrawerResponseInput['context'],
+  extra: string[] = []
+) =>
+  [
+    'You are aiopsterm DB-AI, a database-workspace assistant for relational database analysis, SQL drafting, SQL review, and safe diagnostics.',
+    'Respond in the same language as the operator when possible.',
+    'There is no shell, filesystem, SSH, or remote-host workspace in this request. Only use the database context supplied below.',
+    'Do not claim that you executed SQL, changed schemas, queried live data, or inspected objects unless the supplied context explicitly includes that result.',
+    'Never reveal or invent credentials, connection strings, API keys, hostnames, or IP addresses.',
+    'Do not invent tables, columns, indexes, constraints, or types. If schema metadata is missing, say what is missing and ask for the next required context.',
+    'Prefer read-only SQL and diagnostics. For destructive or write operations, provide SQL as review text only and explain the risk; do not claim execution.',
+    surface === 'drawer'
+      ? 'For drawer requests, return a concise reasoning section followed by exactly one fenced SQL block using ```sql. The SQL block is required.'
+      : 'For pane requests, answer conversationally and include SQL in fenced ```sql blocks when SQL is useful.',
+    '',
+    'Database context:',
+    ...databaseAiContextLines(context),
+    '',
+    'Backend schema metadata available to this request:',
+    ...databaseAiSchemaSummaryForContext(context),
+    ...extra
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+
+const paneProviderMessages = (input: DatabaseAiPaneResponseInput, prompt: string): DatabaseAiProviderTextMessage[] => {
+  const messages = (input.messages || [])
+    .slice(-12)
+    .map((message): DatabaseAiProviderTextMessage | null => {
+      const content = normalizeDatabaseAiProviderText(message.content)
+      if (!content) return null
+      return { role: message.role === 'assistant' ? 'assistant' : 'user', content }
+    })
+    .filter(Boolean) as DatabaseAiProviderTextMessage[]
+  if (normalizeDatabaseAiProviderText(input.activeSql)) {
+    messages.push({ role: 'user', content: `Active SQL editor content:\n${normalizeDatabaseAiProviderText(input.activeSql)}` })
+  }
+  const last = messages[messages.length - 1]
+  if (!last || last.role !== 'user' || last.content !== prompt) {
+    messages.push({ role: 'user', content: prompt })
+  }
+  return messages
+}
+
+const drawerProviderMessages = (input: DatabaseAiDrawerResponseInput, dialect: DatabaseAiTargetDialect): DatabaseAiProviderTextMessage[] => {
+  const actionLabel = databaseAiDrawerActionName(input.action)
+  const details = [
+    `Action: ${actionLabel}`,
+    `Target dialect: ${dialectLabel(dialect)}`,
+    normalizeDatabaseAiProviderText(input.errorMessage) ? `Observed SQL error: ${normalizeDatabaseAiProviderText(input.errorMessage)}` : '',
+    normalizeDatabaseAiProviderText(input.sourceSql) ? `Source SQL:\n${normalizeDatabaseAiProviderText(input.sourceSql)}` : '',
+    '',
+    'Return a concise reasoning section followed by one fenced SQL block. The SQL must match the target dialect and the current database context.'
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return [{ role: 'user', content: details }]
+}
+
+const extractFencedSqlBlock = (text: string) => {
+  const match = text.match(/```(?:sql|mysql|postgresql|sqlite|oracle|mssql|tsql)?\s*([\s\S]*?)```/i)
+  const sql = normalizeDatabaseAiProviderText(match?.[1])
+  if (!match || !sql) return { sql: '', reasoning: normalizeDatabaseAiProviderText(text) }
+  const reasoning = normalizeDatabaseAiProviderText(text.slice(0, match.index)) || normalizeDatabaseAiProviderText(text.replace(match[0], ''))
+  return { sql, reasoning }
+}
+
+const storeDatabaseAiPaneDoneResponse = (
+  input: DatabaseAiPaneResponseInput,
+  startedAt: number,
+  requestId: string,
+  text: string,
+  contextLine: string
+) => {
+  const existing = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  const assistantMessage = storeDatabaseAiPaneMessage(
+    databaseAiPaneMessageRecord(
+      {
+        requestId,
+        role: 'assistant',
+        status: 'done',
+        content: text,
+        contextSummary: contextLine,
+        createdAt: existing?.createdAt ?? startedAt
+      },
+      input.assistantMessageId || existing?.id || `dbai-pane-message-${randomUUID()}`
+    )
+  )
+  assistantMessage.updatedAt = databaseAiNow()
+  databaseAiPaneMessages.set(assistantMessage.id, cloneDatabaseAiPaneMessageRecord(assistantMessage))
+  return assistantMessage
+}
+
+async function generateProviderDatabaseAiPaneResponse(
+  input: DatabaseAiPaneResponseInput,
+  modelName: string,
+  startedAt: number,
+  prompt: string
+): Promise<DatabaseAiPaneResponseResult> {
+  const generateText = databaseAiRuntime.generateText
+  if (!generateText) {
+    return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROVIDER_UNAVAILABLE', 'Database AI provider is unavailable.')
+  }
+  const contextLine = databaseAiPaneContextSummary(input)
+  const requestId = input.requestId || `dbai-pane-request-${randomUUID()}`
+  const existingBefore = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  if (existingBefore?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        requestId,
+        assistantMessage: existingBefore,
+        text: existingBefore.content,
+        provider: 'aiopsterm-local',
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
+      }
+    }
+  }
+
+  const providerResponse = await generateText({
+    surface: 'pane',
+    modelName,
+    prompt,
+    context: input.context,
+    requestId,
+    assistantMessageId: input.assistantMessageId,
+    activeSql: input.activeSql,
+    systemPrompt: buildDatabaseAiProviderSystemPrompt('pane', input.context, [
+      normalizeDatabaseAiProviderText(input.activeSql) ? 'Active SQL editor content is included in the user messages.' : 'No active SQL editor content was supplied.'
+    ]),
+    messages: paneProviderMessages(input, prompt),
+    maxTokens: 1800
+  })
+  const existingAfter = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  if (existingAfter?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        requestId,
+        assistantMessage: existingAfter,
+        text: existingAfter.content,
+        provider: providerResponse.ok ? providerResponse.provider : providerResponse.provider || 'aiopsterm-local',
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
+      }
+    }
+  }
+  if (!providerResponse.ok) {
+    return databaseAiPaneErrorResponse(
+      input,
+      startedAt,
+      providerResponse.errorCode,
+      providerResponse.errorMessage,
+      providerResponse.provider || 'aiopsterm-local'
+    )
+  }
+  const text = normalizeDatabaseAiProviderText(providerResponse.text)
+  if (!text) {
+    return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROVIDER_EMPTY', 'Database AI provider returned an empty response.', providerResponse.provider)
+  }
+  const assistantMessage = storeDatabaseAiPaneDoneResponse(input, startedAt, requestId, text, contextLine)
+  return {
+    ok: true,
+    data: {
+      requestId,
+      assistantMessage,
+      text,
+      provider: providerResponse.provider,
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
+    }
+  }
+}
+
+const storeDatabaseAiDrawerDoneResponse = (
+  input: DatabaseAiDrawerResponseInput,
+  startedAt: number,
+  requestId: string,
+  dialect: DatabaseAiTargetDialect,
+  text: string
+) => {
+  const existing = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  return existing && requestId
+    ? updateDatabaseAiDrawerRequest({ requestId }, { status: 'done', text, targetDialect: dialect })
+    : storeDatabaseAiDrawerRequest({
+        id: requestId || `dbai-drawer-request-${randomUUID()}`,
+        action: input.action,
+        label: databaseAiDrawerActionName(input.action),
+        status: 'done',
+        contextSummary: trim(input.context.contextSummary),
+        sourceSql: input.sourceSql,
+        text,
+        targetDialect: dialect,
+        backendContext: {
+          connectionId: trim(input.context.connectionId),
+          dbType: input.context.dbType || '',
+          databaseName: trim(input.context.databaseName),
+          schemaName: trim(input.context.schemaName) || undefined,
+          tableName: trim(input.context.tableName) || undefined,
+          contextSummary: trim(input.context.contextSummary) || undefined
+        },
+        createdAt: startedAt,
+        updatedAt: databaseAiNow()
+      })
+}
+
+async function generateProviderDatabaseAiDrawerResponse(
+  input: DatabaseAiDrawerResponseInput,
+  modelName: string,
+  startedAt: number,
+  dialect: DatabaseAiTargetDialect
+): Promise<DatabaseAiDrawerResponseResult> {
+  const generateText = databaseAiRuntime.generateText
+  if (!generateText) {
+    return databaseAiDrawerErrorResponse(input, startedAt, 'DB_AI_PROVIDER_UNAVAILABLE', 'Database AI provider is unavailable.')
+  }
+  const requestId = trim(input.requestId)
+  const existingBefore = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  if (existingBefore?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        request: existingBefore,
+        text: existingBefore.text,
+        reasoning: '',
+        sql: '',
+        provider: 'aiopsterm-local',
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
+      }
+    }
+  }
+
+  const providerResponse = await generateText({
+    surface: 'drawer',
+    modelName,
+    prompt: databaseAiDrawerActionName(input.action),
+    context: input.context,
+    requestId,
+    action: input.action,
+    sourceSql: input.sourceSql,
+    targetDialect: dialect,
+    errorMessage: input.errorMessage,
+    systemPrompt: buildDatabaseAiProviderSystemPrompt('drawer', input.context, [
+      `Drawer action: ${databaseAiDrawerActionName(input.action)}`,
+      `Target dialect: ${dialectLabel(dialect)}`
+    ]),
+    messages: drawerProviderMessages(input, dialect),
+    maxTokens: 1400
+  })
+  const existingAfter = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  if (existingAfter?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        request: existingAfter,
+        text: existingAfter.text,
+        reasoning: '',
+        sql: '',
+        provider: providerResponse.ok ? providerResponse.provider : providerResponse.provider || 'aiopsterm-local',
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
+      }
+    }
+  }
+  if (!providerResponse.ok) {
+    return databaseAiDrawerErrorResponse(
+      input,
+      startedAt,
+      providerResponse.errorCode,
+      providerResponse.errorMessage,
+      providerResponse.provider || 'aiopsterm-local'
+    )
+  }
+  const providerText = normalizeDatabaseAiProviderText(providerResponse.text)
+  if (!providerText) {
+    return databaseAiDrawerErrorResponse(input, startedAt, 'DB_AI_PROVIDER_EMPTY', 'Database AI provider returned an empty response.', providerResponse.provider)
+  }
+  const parsed = extractFencedSqlBlock(providerText)
+  if (!parsed.sql) {
+    return databaseAiDrawerErrorResponse(
+      input,
+      startedAt,
+      'DB_AI_PROVIDER_SQL_MISSING',
+      'Database AI provider response did not include a fenced SQL block.',
+      providerResponse.provider
+    )
+  }
+  const reasoning = parsed.reasoning || `Reasoning\n- Provider returned SQL for ${databaseAiDrawerActionName(input.action)}.`
+  const text = composeDrawerResponseText(reasoning, parsed.sql)
+  const request = storeDatabaseAiDrawerDoneResponse(input, startedAt, requestId, dialect, text)
+  if (!request) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
+  return {
+    ok: true,
+    data: {
+      request,
+      text,
+      reasoning,
+      sql: parsed.sql,
+      provider: providerResponse.provider,
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
+    }
+  }
+}
 
 const schemaNameFromSql = (sql: string) => {
   const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?)\s*\.\s*([`"\[]?[\w.-]+[`"\]]?)/i)
@@ -2242,7 +2626,7 @@ export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput
 }
 
 export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneResponseInput): Promise<DatabaseAiPaneResponseResult> {
-  const startedAt = Date.now()
+  const startedAt = databaseAiNow()
   const prompt = trim(input.prompt)
   if (!prompt) return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROMPT_REQUIRED', 'Prompt is required.')
   if (!trim(input.context.connectionId)) {
@@ -2250,6 +2634,11 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
   }
   if (!trim(input.context.databaseName)) {
     return databaseAiPaneErrorResponse(input, startedAt, 'DB_DATABASE_REQUIRED', 'Database name is required.')
+  }
+
+  const modelName = databaseAiModelName()
+  if (shouldUseDatabaseAiProvider(modelName)) {
+    return generateProviderDatabaseAiPaneResponse(input, modelName, startedAt, prompt)
   }
 
   const promptLower = prompt.toLowerCase()
@@ -2293,7 +2682,7 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
     )
   }
 
-  const elapsedMs = Date.now() - startedAt
+  const elapsedMs = databaseAiNow() - startedAt
   if (elapsedMs < DATABASE_AI_PANE_RESPONSE_MIN_DELAY_MS) {
     await wait(DATABASE_AI_PANE_RESPONSE_MIN_DELAY_MS - elapsedMs)
   }
@@ -2309,7 +2698,7 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
         assistantMessage: existing,
         text: existing.content,
         provider: 'aiopsterm-local',
-        durationMs: Math.max(1, Date.now() - startedAt)
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
       }
     }
   }
@@ -2326,7 +2715,7 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
       input.assistantMessageId || existing?.id || `dbai-pane-message-${randomUUID()}`
     )
   )
-  assistantMessage.updatedAt = Date.now()
+  assistantMessage.updatedAt = databaseAiNow()
   databaseAiPaneMessages.set(assistantMessage.id, cloneDatabaseAiPaneMessageRecord(assistantMessage))
   return {
     ok: true,
@@ -2335,7 +2724,7 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
       assistantMessage,
       text,
       provider: 'aiopsterm-local',
-      durationMs: Math.max(1, Date.now() - startedAt)
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
     }
   }
 }
@@ -2394,7 +2783,7 @@ export function cancelDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleI
 }
 
 export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerResponseInput): Promise<DatabaseAiDrawerResponseResult> {
-  const startedAt = Date.now()
+  const startedAt = databaseAiNow()
   const action = input.action
   const validActions: DatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
   if (!validActions.includes(action)) {
@@ -2408,10 +2797,15 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
   }
 
   const dialect = drawerTargetDialect(input)
+  const modelName = databaseAiModelName()
+  if (shouldUseDatabaseAiProvider(modelName)) {
+    return generateProviderDatabaseAiDrawerResponse(input, modelName, startedAt, dialect)
+  }
+
   const generatedSql = buildDrawerGeneratedSql(input, dialect)
   const reasoning = buildDrawerReasoning(input, generatedSql, dialect)
   const requestId = trim(input.requestId)
-  const elapsedMs = Date.now() - startedAt
+  const elapsedMs = databaseAiNow() - startedAt
   if (elapsedMs < DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS) {
     await wait(DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS - elapsedMs)
   }
@@ -2426,7 +2820,7 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
         reasoning: '',
         sql: '',
         provider: 'aiopsterm-local',
-        durationMs: Math.max(1, Date.now() - startedAt)
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
       }
     }
   }
@@ -2453,7 +2847,7 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
             contextSummary: trim(input.context.contextSummary) || undefined
           },
           createdAt: startedAt,
-          updatedAt: Date.now()
+          updatedAt: databaseAiNow()
         })
 
   if (!request) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
@@ -2466,7 +2860,7 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
       reasoning,
       sql: generatedSql,
       provider: 'aiopsterm-local',
-      durationMs: Math.max(1, Date.now() - startedAt)
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
     }
   }
 }
