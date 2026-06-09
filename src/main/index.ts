@@ -2079,6 +2079,7 @@ const syncKeywordHighlightConfigFromContent = (content: string) => {
   const nextKeywordHighlight = normalizeKeywordHighlightConfig(parsed.keywordHighlight || parsed)
   const next = mergeConfig(getConfig(), { keywordHighlight: nextKeywordHighlight })
   store.set('config', next)
+  return next.keywordHighlight
 }
 
 const broadcastKeywordHighlightConfigChanged = (content: string) => {
@@ -2097,6 +2098,7 @@ const syncSecurityConfigFromContent = (content: string) => {
   const nextSecurityConfig = normalizeSecurityConfig(parsed.securityConfig || parsed)
   const next = mergeConfig(getConfig(), { securityConfig: nextSecurityConfig })
   store.set('config', next)
+  return next.securityConfig
 }
 
 const broadcastSecurityConfigChanged = (content: string) => {
@@ -2456,10 +2458,15 @@ const registerIpc = () => {
   })
   ipcMain.handle('security-config:write', async (_event, content: string) => {
     const configPath = await ensureSecurityConfigFile()
-    JSON.parse(removeJsonComments(content))
+    const parsed = JSON.parse(removeJsonComments(content)) as Partial<UserConfig>
+    if (!parsed.securityConfig && !('security' in parsed)) {
+      return { ok: false, errorCode: 'SECURITY_CONFIG_INVALID', errorMessage: 'Security config content is missing the security root.' }
+    }
+    const securityConfig = normalizeSecurityConfig(parsed.securityConfig || parsed)
     await writeFile(configPath, content, 'utf-8')
-    syncSecurityConfigFromContent(content)
+    store.set('config', mergeConfig(getConfig(), { securityConfig }))
     broadcastSecurityConfigChanged(content)
+    return { ok: true, data: { securityConfig } }
   })
   ipcMain.handle('keyword-highlight-config:path', async () => ensureKeywordHighlightConfigFile())
   ipcMain.handle('keyword-highlight-config:read', async () => {
@@ -2468,10 +2475,15 @@ const registerIpc = () => {
   })
   ipcMain.handle('keyword-highlight-config:write', async (_event, content: string) => {
     const configPath = await ensureKeywordHighlightConfigFile()
-    JSON.parse(content)
+    const parsed = JSON.parse(content) as Partial<UserConfig>
+    if (!parsed.keywordHighlight && !('keyword-highlight' in parsed)) {
+      return { ok: false, errorCode: 'KEYWORD_HIGHLIGHT_CONFIG_INVALID', errorMessage: 'Keyword highlight config content is missing the keyword-highlight root.' }
+    }
+    const keywordHighlight = normalizeKeywordHighlightConfig(parsed.keywordHighlight || parsed)
     await writeFile(configPath, content, 'utf-8')
-    syncKeywordHighlightConfigFromContent(content)
+    store.set('config', mergeConfig(getConfig(), { keywordHighlight }))
     broadcastKeywordHighlightConfigChanged(content)
+    return { ok: true, data: { keywordHighlight } }
   })
   ipcMain.handle('mcp-config:path', async () => ensureMcpConfigFile())
   ipcMain.handle('mcp:get-servers', async () => {

@@ -725,6 +725,14 @@ export type SecurityUserConfig = {
   }
 }
 
+export type KeywordHighlightConfigWriteResult = AiopsMutationResult<{
+  keywordHighlight: KeywordHighlightUserConfig
+}>
+
+export type SecurityConfigWriteResult = AiopsMutationResult<{
+  securityConfig: SecurityUserConfig
+}>
+
 export type PrivacyUserConfig = {
   telemetry: 'enabled' | 'disabled'
   secretRedaction: 'enabled' | 'disabled'
@@ -2147,11 +2155,11 @@ export type AiopsPreloadApi = {
   resetSettingsShortcuts: () => Promise<SettingsPreferencesMutationResult>
   getSecurityConfigPath: () => Promise<string>
   readSecurityConfig: () => Promise<string>
-  writeSecurityConfig: (content: string) => Promise<void>
+  writeSecurityConfig: (content: string) => Promise<SecurityConfigWriteResult>
   onSecurityConfigFileChanged: (listener: (content: string) => void) => () => void
   getKeywordHighlightConfigPath: () => Promise<string>
   readKeywordHighlightConfig: () => Promise<string>
-  writeKeywordHighlightConfig: (content: string) => Promise<void>
+  writeKeywordHighlightConfig: (content: string) => Promise<KeywordHighlightConfigWriteResult>
   onKeywordHighlightConfigFileChanged: (listener: (content: string) => void) => () => void
   getMcpConfigPath: () => Promise<string>
   getMcpServers: () => Promise<McpServerUserConfig[]>

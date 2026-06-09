@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AiopsPreloadApi,
   FileListEntry,
+  KeywordHighlightConfigWriteResult,
   TerminalCreateOptions,
   TerminalDataEvent,
   TerminalExitEvent,
@@ -9,6 +10,7 @@ import type {
   KnowledgeBaseTransferProgress,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
+  SecurityConfigWriteResult,
   UserConfig,
   SkillUserConfig
 } from '@shared/preload'
@@ -79,7 +81,7 @@ const api: AiopsPreloadApi = {
   resetSettingsShortcuts: () => ipcRenderer.invoke('settings-preferences:reset-shortcuts'),
   getSecurityConfigPath: () => ipcRenderer.invoke('security-config:path') as Promise<string>,
   readSecurityConfig: () => ipcRenderer.invoke('security-config:read') as Promise<string>,
-  writeSecurityConfig: (content: string) => ipcRenderer.invoke('security-config:write', content) as Promise<void>,
+  writeSecurityConfig: (content: string) => ipcRenderer.invoke('security-config:write', content) as Promise<SecurityConfigWriteResult>,
   onSecurityConfigFileChanged: (listener: (content: string) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, content: string) => listener(content)
     ipcRenderer.on('security-config:changed', wrapped)
@@ -87,7 +89,7 @@ const api: AiopsPreloadApi = {
   },
   getKeywordHighlightConfigPath: () => ipcRenderer.invoke('keyword-highlight-config:path') as Promise<string>,
   readKeywordHighlightConfig: () => ipcRenderer.invoke('keyword-highlight-config:read') as Promise<string>,
-  writeKeywordHighlightConfig: (content: string) => ipcRenderer.invoke('keyword-highlight-config:write', content) as Promise<void>,
+  writeKeywordHighlightConfig: (content: string) => ipcRenderer.invoke('keyword-highlight-config:write', content) as Promise<KeywordHighlightConfigWriteResult>,
   onKeywordHighlightConfigFileChanged: (listener: (content: string) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, content: string) => listener(content)
     ipcRenderer.on('keyword-highlight-config:changed', wrapped)

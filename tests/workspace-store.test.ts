@@ -6459,11 +6459,8 @@ describe('workspace store', () => {
     expect(store.keywordHighlightSettings).toEqual(keywordConfig)
     expect(store.keywordHighlightEditorLastSaved).toBe(true)
     expect(window.aiops.writeKeywordHighlightConfig).toHaveBeenCalledWith(JSON.stringify(keywordConfig, null, 2))
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        keywordHighlight: keywordConfig
-      })
-    )
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    expect(store.config.keywordHighlight).toEqual(keywordConfig)
     const externalKeywordConfig = {
       'keyword-highlight': {
         enabled: true,
@@ -6493,11 +6490,8 @@ describe('workspace store', () => {
     await store.resetKeywordHighlightEditor()
     expect(store.keywordHighlightSettings).toEqual(defaultKeywordHighlight)
     expect(window.aiops.writeKeywordHighlightConfig).toHaveBeenCalledWith(JSON.stringify(defaultKeywordHighlight, null, 2))
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        keywordHighlight: defaultKeywordHighlight
-      })
-    )
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    expect(store.config.keywordHighlight).toEqual(defaultKeywordHighlight)
     store.closeKeywordHighlightEditor()
     expect(store.keywordHighlightEditorOpen).toBe(false)
     expect(removeKeywordHighlightFileListener).toHaveBeenCalled()
@@ -6544,11 +6538,8 @@ ${JSON.stringify(defaultSecurityConfig, null, 2)}`)
     expect(store.securitySettings).toEqual(securityConfig)
     expect(store.securityConfigEditorLastSaved).toBe(true)
     expect(window.aiops.writeSecurityConfig).toHaveBeenCalledWith(JSON.stringify(securityConfig, null, 2))
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        securityConfig
-      })
-    )
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    expect(store.config.securityConfig).toEqual(securityConfig)
     const externalSecurityConfig = {
       security: {
         enableCommandSecurity: false,
@@ -6574,11 +6565,8 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     await store.resetSecurityConfigEditor()
     expect(store.securitySettings).toEqual(defaultSecurityConfig)
     expect(window.aiops.writeSecurityConfig).toHaveBeenCalledWith(JSON.stringify(defaultSecurityConfig, null, 2))
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        securityConfig: defaultSecurityConfig
-      })
-    )
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    expect(store.config.securityConfig).toEqual(defaultSecurityConfig)
     store.closeSecurityConfigEditor()
     expect(store.securityConfigEditorOpen).toBe(false)
     expect(removeSecurityConfigFileListener).toHaveBeenCalled()
@@ -7813,6 +7801,83 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
+  })
+
+  it('does not persist Settings JSON editor state when config file write results are malformed or mismatched', async () => {
+    const store = useWorkspaceStore()
+    await store.openKeywordHighlightEditor()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    const originalKeywordSettings = JSON.stringify(store.keywordHighlightSettings)
+    const keywordConfig = {
+      'keyword-highlight': {
+        enabled: true,
+        applyTo: { output: false, input: true },
+        rules: [
+          {
+            name: 'fatal',
+            enabled: true,
+            scope: 'output' as const,
+            matchType: 'wildcard' as const,
+            pattern: '*fatal*',
+            style: { foreground: '#F87171', fontStyle: 'bold' as const }
+          }
+        ]
+      }
+    }
+
+    store.updateKeywordHighlightEditorContent(JSON.stringify(keywordConfig, null, 2))
+    vi.mocked(window.aiops.writeKeywordHighlightConfig).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await expect(store.saveKeywordHighlightEditor()).resolves.toBe(false)
+    expect(store.keywordHighlightEditorError).toBe('Save failed: keyword highlight config write did not return saved settings')
+    expect(store.keywordHighlightEditorLastSaved).toBe(false)
+    expect(JSON.stringify(store.keywordHighlightSettings)).toBe(originalKeywordSettings)
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.writeKeywordHighlightConfig).mockResolvedValueOnce({
+      ok: true,
+      data: { keywordHighlight: defaultKeywordHighlight }
+    })
+    await expect(store.saveKeywordHighlightEditor()).resolves.toBe(false)
+    expect(store.keywordHighlightEditorError).toBe('Save failed: keyword highlight config write returned different settings')
+    expect(JSON.stringify(store.keywordHighlightSettings)).toBe(originalKeywordSettings)
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+    await store.openSecurityConfigEditor()
+    const originalSecuritySettings = JSON.stringify(store.securitySettings)
+    const securityConfig = {
+      security: {
+        enableCommandSecurity: true,
+        enableStrictMode: true,
+        blacklistPatterns: ['curl metadata-service'],
+        whitelistPatterns: ['ls'],
+        dangerousCommands: ['shutdown'],
+        maxCommandLength: 2048,
+        securityPolicy: {
+          blockCritical: true,
+          askForMedium: false,
+          askForHigh: true,
+          askForBlacklist: false
+        }
+      }
+    }
+
+    store.updateSecurityConfigEditorContent(JSON.stringify(securityConfig, null, 2))
+    vi.mocked(window.aiops.writeSecurityConfig).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await expect(store.saveSecurityConfigEditor()).resolves.toBe(false)
+    expect(store.securityConfigEditorError).toBe('Save failed: security config write did not return saved settings')
+    expect(store.securityConfigEditorLastSaved).toBe(false)
+    expect(JSON.stringify(store.securitySettings)).toBe(originalSecuritySettings)
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.writeSecurityConfig).mockResolvedValueOnce({
+      ok: true,
+      data: { securityConfig: defaultSecurityConfig }
+    })
+    await expect(store.saveSecurityConfigEditor()).resolves.toBe(false)
+    expect(store.securityConfigEditorError).toBe('Save failed: security config write returned different settings')
+    expect(JSON.stringify(store.securitySettings)).toBe(originalSecuritySettings)
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
   it('manages External reference-style onboarding guide, tour preparation, and completion state', () => {

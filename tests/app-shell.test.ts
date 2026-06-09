@@ -7193,13 +7193,12 @@ describe('AppShell', () => {
       }
     }
     await securityEditor.setValue(JSON.stringify(securityConfig, null, 2))
+    vi.mocked(window.aiops.saveConfig).mockClear()
     await new Promise((resolve) => window.setTimeout(resolve, 1100))
     expect(store.securitySettings).toEqual(securityConfig)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        securityConfig
-      })
-    )
+    expect(window.aiops.writeSecurityConfig).toHaveBeenCalledWith(JSON.stringify(securityConfig, null, 2))
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    expect(store.config.securityConfig).toEqual(securityConfig)
     await workspace.find('.security-config-toolbar .settings-button').trigger('click')
     expect(store.securitySettings).toEqual({
       security: {
@@ -7688,13 +7687,12 @@ describe('AppShell', () => {
       }
     }
     await keywordEditor.setValue(JSON.stringify(keywordConfig, null, 2))
+    vi.mocked(window.aiops.saveConfig).mockClear()
     await new Promise((resolve) => window.setTimeout(resolve, 1100))
     expect(store.keywordHighlightSettings).toEqual(keywordConfig)
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        keywordHighlight: keywordConfig
-      })
-    )
+    expect(window.aiops.writeKeywordHighlightConfig).toHaveBeenCalledWith(JSON.stringify(keywordConfig, null, 2))
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    expect(store.config.keywordHighlight).toEqual(keywordConfig)
     await workspace.find('.keyword-highlight-toolbar .settings-button').trigger('click')
     expect(store.keywordHighlightSettings).toEqual({
       'keyword-highlight': {

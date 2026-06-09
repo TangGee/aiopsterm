@@ -1429,6 +1429,12 @@ const securityEditorContentFromFile = (content: string) => {
 
 const parseSecurityEditorContent = (content: string) => JSON.parse(removeJsonComments(content))
 
+const keywordHighlightSettingsSnapshotsMatch = (left: KeywordHighlightSettings, right: KeywordHighlightSettings) =>
+  JSON.stringify(normalizeKeywordHighlightConfig(left).normalized) === JSON.stringify(normalizeKeywordHighlightConfig(right).normalized)
+
+const securitySettingsSnapshotsMatch = (left: SecuritySettings, right: SecuritySettings) =>
+  JSON.stringify(normalizeSecurityConfig(left).normalized) === JSON.stringify(normalizeSecurityConfig(right).normalized)
+
 const privacyStatusValues = ['enabled', 'disabled'] as const
 const privacyStatusFromOptions = (value: unknown, fallback: PrivacyUserConfig['telemetry']) =>
   stringFromOptions(value, privacyStatusValues, fallback)
@@ -5092,8 +5098,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const persistKeywordHighlightSettings = () => {
-    saveConfig({ keywordHighlight: normalizeKeywordHighlightConfig(keywordHighlightSettings.value).normalized })
+  const applyKeywordHighlightSettingsSnapshot = (settings: KeywordHighlightSettings) => {
+    const normalized = normalizeKeywordHighlightConfig(settings).normalized
+    keywordHighlightSettings.value = normalized
+    config.value = mergeUserConfig(config.value, { keywordHighlight: normalized })
+    return normalized
+  }
+
+  const applySavedKeywordHighlightConfig = (
+    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeKeywordHighlightConfig']>>>,
+    expected: KeywordHighlightSettings,
+    prefix: 'Save' | 'Reset'
+  ) => {
+    if (!result?.ok || !result.data || !isRecord(result.data.keywordHighlight)) {
+      keywordHighlightEditorError.value = `${prefix} failed: ${result?.errorMessage || 'keyword highlight config write did not return saved settings'}`
+      keywordHighlightEditorLastSaved.value = false
+      return false
+    }
+    const saved = normalizeKeywordHighlightConfig(result.data.keywordHighlight).normalized
+    if (!keywordHighlightSettingsSnapshotsMatch(saved, expected)) {
+      keywordHighlightEditorError.value = `${prefix} failed: keyword highlight config write returned different settings`
+      keywordHighlightEditorLastSaved.value = false
+      return false
+    }
+    applyKeywordHighlightSettingsSnapshot(saved)
+    keywordHighlightEditorContent.value = JSON.stringify(saved, null, 2)
+    keywordHighlightEditorError.value = ''
+    keywordHighlightEditorLastSaved.value = true
+    return true
   }
 
   const applyKeywordHighlightConfigFileContent = (content: string, markSaved = true) => {
@@ -5102,7 +5134,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const parsed = parseKeywordHighlightEditorContent(editorContent)
       const { normalized } = normalizeKeywordHighlightConfig(parsed)
-      keywordHighlightSettings.value = normalized
+      applyKeywordHighlightSettingsSnapshot(normalized)
       keywordHighlightEditorError.value = ''
       keywordHighlightEditorLastSaved.value = markSaved
       return true
@@ -5117,9 +5149,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const installKeywordHighlightConfigFileListener = () => {
     if (removeKeywordHighlightConfigFileListener || !window.aiops?.onKeywordHighlightConfigFileChanged) return
     removeKeywordHighlightConfigFileListener = window.aiops.onKeywordHighlightConfigFileChanged((content) => {
-      if (applyKeywordHighlightConfigFileContent(content, true)) {
-        persistKeywordHighlightSettings()
-      }
+      applyKeywordHighlightConfigFileContent(content, true)
     })
   }
 
@@ -5203,12 +5233,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     try {
-      await writeKeywordHighlightConfig(normalizedContent)
-      keywordHighlightSettings.value = normalized
-      keywordHighlightEditorContent.value = normalizedContent
-      keywordHighlightEditorError.value = ''
-      keywordHighlightEditorLastSaved.value = true
-      persistKeywordHighlightSettings()
+      const result = await writeKeywordHighlightConfig(normalizedContent)
+      if (!applySavedKeywordHighlightConfig(result, normalized, 'Save')) return false
       setSettingsNotice('关键词高亮配置已保存')
       return true
     } catch (error) {
@@ -5233,12 +5259,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     try {
-      await writeKeywordHighlightConfig(normalizedContent)
-      keywordHighlightSettings.value = normalized
-      keywordHighlightEditorContent.value = normalizedContent
-      keywordHighlightEditorError.value = ''
-      keywordHighlightEditorLastSaved.value = true
-      persistKeywordHighlightSettings()
+      const result = await writeKeywordHighlightConfig(normalizedContent)
+      if (!applySavedKeywordHighlightConfig(result, normalized, 'Reset')) return false
       setSettingsNotice('关键词高亮配置已重置')
       return true
     } catch (error) {
@@ -5249,8 +5271,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const persistSecuritySettings = () => {
-    saveConfig({ securityConfig: normalizeSecurityConfig(securitySettings.value).normalized })
+  const applySecuritySettingsSnapshot = (settings: SecuritySettings) => {
+    const normalized = normalizeSecurityConfig(settings).normalized
+    securitySettings.value = normalized
+    config.value = mergeUserConfig(config.value, { securityConfig: normalized })
+    return normalized
+  }
+
+  const applySavedSecurityConfig = (
+    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeSecurityConfig']>>>,
+    expected: SecuritySettings,
+    prefix: 'Save' | 'Reset'
+  ) => {
+    if (!result?.ok || !result.data || !isRecord(result.data.securityConfig)) {
+      securityConfigEditorError.value = `${prefix} failed: ${result?.errorMessage || 'security config write did not return saved settings'}`
+      securityConfigEditorLastSaved.value = false
+      return false
+    }
+    const saved = normalizeSecurityConfig(result.data.securityConfig).normalized
+    if (!securitySettingsSnapshotsMatch(saved, expected)) {
+      securityConfigEditorError.value = `${prefix} failed: security config write returned different settings`
+      securityConfigEditorLastSaved.value = false
+      return false
+    }
+    applySecuritySettingsSnapshot(saved)
+    securityConfigEditorContent.value = JSON.stringify(saved, null, 2)
+    securityConfigEditorError.value = ''
+    securityConfigEditorLastSaved.value = true
+    return true
   }
 
   const applySecurityConfigFileContent = (content: string, markSaved = true) => {
@@ -5259,7 +5307,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const parsed = parseSecurityEditorContent(editorContent)
       const { normalized } = normalizeSecurityConfig(parsed)
-      securitySettings.value = normalized
+      applySecuritySettingsSnapshot(normalized)
       securityConfigEditorError.value = ''
       securityConfigEditorLastSaved.value = markSaved
       return true
@@ -5274,9 +5322,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const installSecurityConfigFileListener = () => {
     if (removeSecurityConfigFileListener || !window.aiops?.onSecurityConfigFileChanged) return
     removeSecurityConfigFileListener = window.aiops.onSecurityConfigFileChanged((content) => {
-      if (applySecurityConfigFileContent(content, true)) {
-        persistSecuritySettings()
-      }
+      applySecurityConfigFileContent(content, true)
     })
   }
 
@@ -5360,12 +5406,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     try {
-      await writeSecurityConfig(normalizedContent)
-      securitySettings.value = normalized
-      securityConfigEditorContent.value = normalizedContent
-      securityConfigEditorError.value = ''
-      securityConfigEditorLastSaved.value = true
-      persistSecuritySettings()
+      const result = await writeSecurityConfig(normalizedContent)
+      if (!applySavedSecurityConfig(result, normalized, 'Save')) return false
       setSettingsNotice('安全配置已保存')
       return true
     } catch (error) {
@@ -5390,12 +5432,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     try {
-      await writeSecurityConfig(normalizedContent)
-      securitySettings.value = normalized
-      securityConfigEditorContent.value = normalizedContent
-      securityConfigEditorError.value = ''
-      securityConfigEditorLastSaved.value = true
-      persistSecuritySettings()
+      const result = await writeSecurityConfig(normalizedContent)
+      if (!applySavedSecurityConfig(result, normalized, 'Reset')) return false
       setSettingsNotice('安全配置已重置')
       return true
     } catch (error) {
