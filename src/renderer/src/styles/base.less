@@ -1465,6 +1465,37 @@ em {
   font-family: inherit;
 }
 
+.asset-proxy-empty {
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 10px;
+  text-align: center;
+}
+
+.asset-proxy-empty small {
+  color: var(--muted);
+}
+
+.asset-proxy-empty button {
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.asset-proxy-empty button:hover {
+  background: var(--surface-3);
+}
+
 .key-management-container {
   height: 100%;
   min-height: 0;

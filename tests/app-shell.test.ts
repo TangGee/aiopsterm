@@ -531,6 +531,11 @@ describe('AppShell', () => {
 
     await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
     expect(assets.text()).toContain('新建主机')
+    expect(assets.text()).toContain('暂无 SSH 代理配置')
+    expect(assets.text()).toContain('去设置代理')
+    expect(assets.find('[data-testid="asset-proxy-select"]').exists()).toBe(false)
+    expect(assets.text()).not.toContain('prod-proxy')
+    expect(assets.text()).not.toContain('office-proxy')
     let assetFormInputs = assets.findAll('.asset-form-panel input')
     await assetFormInputs.at(0)!.setValue('unit-host')
     await assetFormInputs.at(1)!.setValue('10.10.10.10')
@@ -998,6 +1003,82 @@ describe('AppShell', () => {
     await organization.find('.managed-asset-form textarea').setValue('刷新备注')
     await organization.find('.managed-asset-form .asset-submit-button').trigger('click')
     expect(organization.text()).toContain('刷新备注')
+  })
+
+  it('uses backend-confirmed SSH proxy configs in the asset host form', async () => {
+    const releaseProxy = {
+      name: 'release-proxy',
+      type: 'SOCKS5' as const,
+      host: '10.0.0.8',
+      port: 1080,
+      enableProxyIdentity: true,
+      username: 'ops',
+      password: 'secret'
+    }
+    const baseConfig = await window.aiops.getConfig()
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      ...baseConfig,
+      sshProxyConfigs: [releaseProxy]
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    await assets.vm.$nextTick()
+
+    const proxySelect = assets.find('[data-testid="asset-proxy-select"]')
+    expect(proxySelect.exists()).toBe(true)
+    expect(proxySelect.text()).toContain('release-proxy')
+    expect(proxySelect.text()).not.toContain('prod-proxy')
+    expect(proxySelect.text()).not.toContain('office-proxy')
+    await proxySelect.setValue('release-proxy')
+
+    const assetFormInputs = assets.findAll('.asset-form-panel input')
+    await assetFormInputs.at(0)!.setValue('proxy-unit')
+    await assetFormInputs.at(1)!.setValue('10.70.0.7')
+    await assetFormInputs.at(2)!.setValue('ops')
+    await assetFormInputs.at(5)!.setValue('2222')
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await assets.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        host: '10.70.0.7',
+        username: 'ops',
+        needProxy: true,
+        proxyName: 'release-proxy'
+      })
+    )
+    expect(assets.text()).toContain('proxy-unit')
+  })
+
+  it('opens Terminal proxy settings when the asset form has no SSH proxy configs', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const store = useWorkspaceStore()
+
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    await assets.find('.asset-proxy-empty button').trigger('click')
+
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('terminal')
+    expect(store.sshProxyConfigModalOpen).toBe(true)
+    expect(store.sshProxyAddModalOpen).toBe(true)
   })
 
   it('does not fabricate the Workspace local shell row when the backend snapshot omits it', async () => {

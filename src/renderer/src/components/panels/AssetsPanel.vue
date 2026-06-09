@@ -300,11 +300,32 @@
             </label>
             <label>
               <span>代理</span>
-              <select v-model="form.proxyName">
+              <select
+                v-if="sshProxyOptions.length"
+                v-model="form.proxyName"
+                data-testid="asset-proxy-select"
+              >
                 <option value="">不使用代理</option>
-                <option value="prod-proxy">prod-proxy</option>
-                <option value="office-proxy">office-proxy</option>
+                <option
+                  v-for="proxy in sshProxyOptions"
+                  :key="proxy.name"
+                  :value="proxy.name"
+                >
+                  {{ proxy.name }}
+                </option>
               </select>
+              <div
+                v-else
+                class="asset-proxy-empty"
+              >
+                <small>暂无 SSH 代理配置</small>
+                <button
+                  type="button"
+                  @click="openSshProxySettings"
+                >
+                  去设置代理
+                </button>
+              </div>
             </label>
             <label>
               <span>跳板机</span>
@@ -1094,6 +1115,14 @@ const flatFilteredAssets = computed(() => filteredAssetGroups.value.flatMap((gro
 const contextAsset = computed(() => assets.value.find((asset) => asset.id === assetContextMenuId.value))
 const managedOrganization = computed(() => assets.value.find((asset) => asset.id === managedOrganizationId.value && asset.asset_type === 'organization'))
 const jumpHostOptions = computed(() => assets.value.filter((asset) => asset.asset_type === 'person' && asset.id !== form.id))
+const sshProxyOptions = computed(() =>
+  workspace.sshProxyConfigs
+    .map((config) => ({
+      name: config.name.trim()
+    }))
+    .filter((config) => config.name)
+)
+const configuredSshProxyNames = computed(() => new Set(sshProxyOptions.value.map((proxy) => proxy.name)))
 const filteredExportGroups = computed(() => filterGroups(assetGroups.value, exportQuery.value))
 const resolvedExportIds = computed(() => exportCheckedIds.value.filter((id) => assets.value.some((asset) => asset.id === id)))
 const managedSourceAssets = computed(() => {
@@ -1180,6 +1209,20 @@ const openOnboardingCreatePanel = () => {
   editorOpen.value = true
 }
 
+const resolveConfiguredSshProxyName = (proxyName?: string) => {
+  const name = String(proxyName || '').trim()
+  return name && configuredSshProxyNames.value.has(name) ? name : ''
+}
+
+const resolveAssetProxyName = (asset: AssetRecord) => (asset.needProxy ? resolveConfiguredSshProxyName(asset.proxyName) : '')
+
+const openSshProxySettings = () => {
+  workspace.setActiveModule('settings')
+  workspace.setActiveSettingsSection('terminal')
+  workspace.openSshProxyConfig()
+  workspace.openAddSshProxyConfig()
+}
+
 const editAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
@@ -1198,7 +1241,7 @@ const editAsset = (assetId: string | null) => {
     auth_type: asset.auth_type,
     password: '',
     keyId: asset.keychainId || '',
-    proxyName: '',
+    proxyName: resolveAssetProxyName(asset),
     jumpHostId: '',
     bastionType: asset.asset_type === 'organization' ? 'jumpserver' : 'jumpserver',
     switchBrand: asset.asset_type === 'switch' ? 'cisco' : 'cisco'
@@ -1225,7 +1268,7 @@ const cloneAsset = (assetId: string | null) => {
     auth_type: asset.auth_type,
     password: '',
     keyId: asset.keychainId || '',
-    proxyName: '',
+    proxyName: resolveAssetProxyName(asset),
     jumpHostId: '',
     bastionType: 'jumpserver',
     switchBrand: 'cisco'
@@ -1340,6 +1383,12 @@ const submitForm = async () => {
     assetFormError.value = '请选择密钥链。'
     return
   }
+  const selectedProxyName = form.proxyName.trim()
+  const selectedProxy = selectedProxyName ? workspace.sshProxyConfigs.find((config) => config.name.trim() === selectedProxyName) : undefined
+  if (selectedProxyName && !selectedProxy) {
+    assetFormError.value = '请选择已配置的 SSH 代理。'
+    return
+  }
   const title = form.title.trim() || host
   const group = form.group.trim()
   const baseAsset: AiopsAssetInput = {
@@ -1358,6 +1407,8 @@ const submitForm = async () => {
     comment: editMode.value ? '本地编辑' : '本地创建',
     data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
     keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
+    needProxy: Boolean(selectedProxy),
+    proxyName: selectedProxy ? selectedProxyName : '',
     ...(form.password.trim() ? { password: form.password } : {})
   }
   try {
@@ -1934,6 +1985,15 @@ watch(
   assetManagementPageCount,
   (count) => {
     if (assetManagementPage.value > count) assetManagementPage.value = count
+  }
+)
+
+watch(
+  configuredSshProxyNames,
+  () => {
+    if (form.proxyName && !configuredSshProxyNames.value.has(form.proxyName)) {
+      form.proxyName = ''
+    }
   }
 )
 
