@@ -75,6 +75,8 @@ import type {
   ModelSettingsUserConfig,
   PrivacyUserConfig,
   QuickCommandGroupConfig,
+  QuickCommandScriptPlan,
+  QuickCommandScriptSegment,
   QuickCommandSnippetConfig,
   QuickCommandsUserConfig,
   SecurityUserConfig,
@@ -115,16 +117,6 @@ type OnboardingAiRequest =
   | 'open-context-hosts'
   | 'prepare-send'
 type OnboardingAssetRequest = 'none' | 'open-host-management' | 'open-create-form'
-type ParsedSnippetCommand =
-  | { type: 'COMMAND'; payload: string }
-  | { type: 'SLEEP'; payload: number }
-  | { type: 'KEY'; payload: 'esc' | 'tab' | 'return' | 'backspace' | 'up' | 'down' | 'left' | 'right' }
-  | { type: 'CTRL'; payload: string }
-
-type SnippetWriteSegment = {
-  text: string
-  delayBeforeMs: number
-}
 
 type TerminalOutputScope = 'output' | 'input'
 type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
@@ -209,7 +201,7 @@ export type TerminalSecurityExecution = {
   shellText?: string
   writeToShell: boolean
   source: TerminalCommandSource
-  snippetSegments?: SnippetWriteSegment[]
+  snippetSegments?: QuickCommandScriptSegment[]
 }
 
 export type TerminalSecurityPrompt = {
@@ -752,7 +744,7 @@ const keyMap: Record<string, string> = {
   right: '\x1b[C',
   left: '\x1b[D'
 }
-const keySequences = Object.entries(keyMap).sort(([, first], [, second]) => second.length - first.length) as Array<[SnippetKeyPayload, string]>
+const keySequences = Object.entries(keyMap).sort(([, first], [, second]) => second.length - first.length)
 const ctrlSequences = Object.entries(ctrlKeyMap).sort(([, first], [, second]) => second.length - first.length)
 
 const defaultTerminalSettings: TerminalSettings = {
@@ -1803,6 +1795,15 @@ const isQuickCommandSnippetDeleteData = (source: unknown, id: number) => {
 const isQuickCommandReorderData = (source: unknown, expectedOrder: number[]) =>
   isQuickCommandsSnapshot(source) && source.snippets.map((snippet) => snippet.id).join(',') === expectedOrder.join(',')
 
+const isQuickCommandScriptPlan = (source: unknown): source is QuickCommandScriptPlan => {
+  if (!isRecord(source) || !Array.isArray(source.segments) || typeof source.shellText !== 'string' || typeof source.securityCommand !== 'string') return false
+  return source.segments.every((segment) => {
+    if (!isRecord(segment) || typeof segment.text !== 'string') return false
+    const delayBeforeMs = segment.delayBeforeMs
+    return typeof delayBeforeMs === 'number' && Number.isFinite(delayBeforeMs) && delayBeforeMs >= 0
+  })
+}
+
 const normalizeKnowledgeNodes = (source: unknown, parentRelDir = '', seen = new Set<string>()): KnowledgeNode[] => {
   const rawNodes = Array.isArray(source) ? source : []
   const nodes: KnowledgeNode[] = []
@@ -2525,32 +2526,6 @@ const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<st
 
 const resolveUpdateVersion = (result?: AppUpdateCheckResult | null) =>
   result?.updateInfo?.version || result?.versionInfo?.version || (result?.isUpdateAvailable || result?.available ? '0.1.1' : '')
-
-type SnippetKeyPayload = Extract<ParsedSnippetCommand, { type: 'KEY' }>['payload']
-
-const parseSnippetScript = (text: string): ParsedSnippetCommand[] => {
-  const commands: ParsedSnippetCommand[] = []
-  text.split(/\r\n|\n|\r/).forEach((line) => {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) return
-    const sleepMatch = trimmed.match(/^sleep==(\d+)$/i)
-    if (sleepMatch) {
-      commands.push({ type: 'SLEEP', payload: Number(sleepMatch[1]) })
-      return
-    }
-    const lower = trimmed.toLowerCase()
-    if (lower.startsWith('ctrl+') && ctrlKeyMap[lower]) {
-      commands.push({ type: 'CTRL', payload: lower })
-      return
-    }
-    if (['esc', 'tab', 'return', 'backspace', 'up', 'down', 'left', 'right'].includes(lower)) {
-      commands.push({ type: 'KEY', payload: lower as SnippetKeyPayload })
-      return
-    }
-    commands.push({ type: 'COMMAND', payload: trimmed })
-  })
-  return commands
-}
 
 const getKbParent = (relPath: string) => {
   const parts = relPath.split('/').filter(Boolean)
@@ -7340,57 +7315,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const snippetItemText = (
-    item: Exclude<ParsedSnippetCommand, { type: 'SLEEP' }>,
-    context: { autoExecute: boolean; lastCommandPayload?: string; commandCount: number; seenCommandCount: number }
-  ) => {
-    if (item.type === 'COMMAND') {
-      context.seenCommandCount += 1
-      const isLastCommand = item.payload === context.lastCommandPayload && context.seenCommandCount === context.commandCount
-      const suffix = isLastCommand && !context.autoExecute ? '' : '\n'
-      return `${item.payload}${suffix}`
-    }
-    if (item.type === 'KEY') return keyMap[item.payload]
-    if (item.type === 'CTRL') return ctrlKeyMap[item.payload] || ''
-    return ''
-  }
-
-  const buildSnippetWriteSegments = (scriptContent: string, autoExecute: boolean): SnippetWriteSegment[] => {
-    const parsed = parseSnippetScript(scriptContent)
-    const commandItems = parsed.filter((item): item is Extract<ParsedSnippetCommand, { type: 'COMMAND' }> => item.type === 'COMMAND')
-    const context = {
-      autoExecute,
-      lastCommandPayload: commandItems.at(-1)?.payload,
-      commandCount: commandItems.length,
-      seenCommandCount: 0
-    }
-    const segments: SnippetWriteSegment[] = []
-    let buffer = ''
-    let delayBeforeMs = 0
-    const flush = () => {
-      if (!buffer) return
-      segments.push({ text: buffer, delayBeforeMs })
-      buffer = ''
-      delayBeforeMs = 0
-    }
-    parsed.forEach((item) => {
-      if (item.type === 'SLEEP') {
-        flush()
-        delayBeforeMs += item.payload
-        return
-      }
-      buffer += snippetItemText(item, context)
-    })
-    flush()
-    return segments
-  }
-
-  const serializeSnippetScript = (scriptContent: string, autoExecute: boolean) => {
-    return buildSnippetWriteSegments(scriptContent, autoExecute)
-      .map((segment) => segment.text)
-      .join('')
-  }
-
   const resolveQuickCommandPanelIds = (allTabs: boolean) => {
     const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
     if (allTabs) {
@@ -7401,21 +7325,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return [targetPanel.id]
   }
 
+  const reportQuickCommandPlanUnavailable = (command: string, panelIds: string[], reason = '快捷命令执行计划服务不可用') => {
+    setTopNotice(reason)
+    terminalSecurityPrompt.value = null
+    return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
+  }
+
+  const resolveQuickCommandScriptPlan = async (id: number, autoExecute: boolean) => {
+    const planQuickCommandScriptBridge = window.aiops?.planQuickCommandScript
+    if (typeof planQuickCommandScriptBridge !== 'function') return null
+    try {
+      const result = await planQuickCommandScriptBridge({ snippetId: id, autoExecute })
+      if (!result?.ok || !isQuickCommandScriptPlan(result.data)) return null
+      return result.data
+    } catch {
+      return null
+    }
+  }
+
   const runQuickCommand = async (id: number, autoExecute = true, allTabs = false) => {
     const command = quickCommands.value.find((item) => item.id === id)
     if (!command) return
-    const snippetSegments = buildSnippetWriteSegments(command.snippet_content, autoExecute)
-    const payload = snippetSegments.map((segment) => segment.text).join('')
-    const securityCommand = parseSnippetScript(command.snippet_content).find((item) => item.type === 'COMMAND')?.payload || command.snippet_name
     const targetPanelIds = resolveQuickCommandPanelIds(allTabs)
+    const plan = await resolveQuickCommandScriptPlan(id, autoExecute)
+    if (!plan) {
+      return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, '快捷命令执行计划生成失败')
+    }
+    if (!plan.segments.length) {
+      return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, '快捷命令内容为空')
+    }
     const decision = prepareTerminalSecurityExecution({
-      command: securityCommand,
+      command: plan.securityCommand || command.snippet_name,
       panelIds: targetPanelIds,
-      inputText: payload,
-      shellText: payload,
+      inputText: plan.shellText,
+      shellText: plan.shellText,
       writeToShell: true,
       source: 'snippet',
-      snippetSegments
+      snippetSegments: plan.segments
     })
     if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
     return writeTerminalExecution(decision.execution)

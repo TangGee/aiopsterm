@@ -14,6 +14,10 @@ import type {
   QuickCommandSnippetDeleteResult,
   QuickCommandSnippetMutationResult,
   QuickCommandSnippetSaveInput,
+  QuickCommandScriptPlan,
+  QuickCommandScriptPlanInput,
+  QuickCommandScriptPlanResult,
+  QuickCommandScriptSegment,
   QuickCommandsUserConfig
 } from '@shared/preload'
 
@@ -27,6 +31,119 @@ type SqliteDatabase = {
     all(...args: unknown[]): unknown[]
     get(...args: unknown[]): unknown
     run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
+  }
+}
+
+type ParsedQuickCommandScriptItem =
+  | { type: 'COMMAND'; payload: string }
+  | { type: 'SLEEP'; payload: number }
+  | { type: 'KEY'; payload: keyof typeof keyMap }
+  | { type: 'CTRL'; payload: keyof typeof ctrlKeyMap }
+
+const keyMap = {
+  esc: '\x1b',
+  tab: '\t',
+  return: '\r',
+  backspace: '\b',
+  up: '\x1b[A',
+  down: '\x1b[B',
+  right: '\x1b[C',
+  left: '\x1b[D'
+}
+
+const ctrlKeyMap = {
+  'ctrl+a': '\x01',
+  'ctrl+b': '\x02',
+  'ctrl+c': '\x03',
+  'ctrl+d': '\x04',
+  'ctrl+e': '\x05',
+  'ctrl+f': '\x06',
+  'ctrl+g': '\x07',
+  'ctrl+h': '\x08',
+  'ctrl+k': '\x0b',
+  'ctrl+l': '\x0c',
+  'ctrl+n': '\x0e',
+  'ctrl+p': '\x10',
+  'ctrl+r': '\x12',
+  'ctrl+t': '\x14',
+  'ctrl+u': '\x15',
+  'ctrl+w': '\x17',
+  'ctrl+z': '\x1a'
+}
+
+const isKeyToken = (value: string): value is keyof typeof keyMap => Object.prototype.hasOwnProperty.call(keyMap, value)
+const isCtrlToken = (value: string): value is keyof typeof ctrlKeyMap => Object.prototype.hasOwnProperty.call(ctrlKeyMap, value)
+
+const parseQuickCommandScript = (text: string): ParsedQuickCommandScriptItem[] => {
+  const commands: ParsedQuickCommandScriptItem[] = []
+  text.split(/\r\n|\n|\r/).forEach((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) return
+    const sleepMatch = trimmed.match(/^sleep==(\d+)$/i)
+    if (sleepMatch) {
+      commands.push({ type: 'SLEEP', payload: Number(sleepMatch[1]) })
+      return
+    }
+    const lower = trimmed.toLowerCase()
+    if (lower.startsWith('ctrl+') && isCtrlToken(lower)) {
+      commands.push({ type: 'CTRL', payload: lower })
+      return
+    }
+    if (isKeyToken(lower)) {
+      commands.push({ type: 'KEY', payload: lower })
+      return
+    }
+    commands.push({ type: 'COMMAND', payload: trimmed })
+  })
+  return commands
+}
+
+const quickCommandScriptItemText = (
+  item: Exclude<ParsedQuickCommandScriptItem, { type: 'SLEEP' }>,
+  context: { autoExecute: boolean; lastCommandPayload?: string; commandCount: number; seenCommandCount: number }
+) => {
+  if (item.type === 'COMMAND') {
+    context.seenCommandCount += 1
+    const isLastCommand = item.payload === context.lastCommandPayload && context.seenCommandCount === context.commandCount
+    const suffix = isLastCommand && !context.autoExecute ? '' : '\n'
+    return `${item.payload}${suffix}`
+  }
+  if (item.type === 'KEY') return keyMap[item.payload]
+  return ctrlKeyMap[item.payload]
+}
+
+const buildQuickCommandScriptPlan = (scriptContent: string, autoExecute: boolean, fallbackSecurityCommand = 'Quick Command'): QuickCommandScriptPlan => {
+  const parsed = parseQuickCommandScript(scriptContent)
+  const commandItems = parsed.filter((item): item is Extract<ParsedQuickCommandScriptItem, { type: 'COMMAND' }> => item.type === 'COMMAND')
+  const context = {
+    autoExecute,
+    lastCommandPayload: commandItems.at(-1)?.payload,
+    commandCount: commandItems.length,
+    seenCommandCount: 0
+  }
+  const segments: QuickCommandScriptSegment[] = []
+  let buffer = ''
+  let delayBeforeMs = 0
+  const flush = () => {
+    if (!buffer) return
+    segments.push({ text: buffer, delayBeforeMs })
+    buffer = ''
+    delayBeforeMs = 0
+  }
+  parsed.forEach((item) => {
+    if (item.type === 'SLEEP') {
+      flush()
+      delayBeforeMs += item.payload
+      return
+    }
+    buffer += quickCommandScriptItemText(item, context)
+  })
+  flush()
+  const securityCommand = commandItems[0]?.payload || fallbackSecurityCommand.trim() || 'Quick Command'
+  return {
+    segments,
+    shellText: segments.map((segment) => segment.text).join(''),
+    securityCommand
   }
 }
 
@@ -370,3 +487,17 @@ export const saveQuickCommandSnippet = (input: QuickCommandSnippetSaveInput): Qu
   asResult(() => getStore().saveSnippet(input))
 export const deleteQuickCommandSnippet = (id: number): QuickCommandSnippetDeleteResult => asResult(() => getStore().deleteSnippet(id))
 export const reorderQuickCommands = (input: QuickCommandReorderInput): QuickCommandReorderResult => asResult(() => getStore().reorder(input))
+export const planQuickCommandScript = (input: QuickCommandScriptPlanInput): QuickCommandScriptPlanResult =>
+  asResult(() => {
+    if (!isRecord(input)) throw new Error('Quick command script input is required')
+    const autoExecute = input.autoExecute !== false
+    if (input.snippetId !== undefined) {
+      const snippetId = Number(input.snippetId)
+      if (!Number.isInteger(snippetId) || snippetId <= 0) throw new Error('Quick command snippet id is invalid')
+      const snippet = getStore().get().snippets.find((item) => item.id === snippetId)
+      if (!snippet) throw new Error('Quick command snippet not found')
+      return buildQuickCommandScriptPlan(snippet.snippet_content, autoExecute, snippet.snippet_name)
+    }
+    if (typeof input.snippetContent !== 'string') throw new Error('Quick command script content is required')
+    return buildQuickCommandScriptPlan(input.snippetContent, autoExecute)
+  })

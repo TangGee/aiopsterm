@@ -134,6 +134,7 @@ import {
   deleteQuickCommandGroup,
   deleteQuickCommandSnippet,
   getQuickCommands,
+  planQuickCommandScript,
   reorderQuickCommands,
   saveQuickCommandGroup,
   saveQuickCommandSnippet,
@@ -255,6 +256,7 @@ import type {
   ModelSettingsUserConfig,
   QuickCommandGroupSaveInput,
   QuickCommandReorderInput,
+  QuickCommandScriptPlanInput,
   QuickCommandSnippetSaveInput,
   QuickCommandsUserConfig,
   SecurityUserConfig,
@@ -2671,6 +2673,7 @@ const registerIpc = () => {
   ipcMain.handle('quick-commands:snippet:save', (_event, input: QuickCommandSnippetSaveInput) => saveQuickCommandSnippet(input))
   ipcMain.handle('quick-commands:snippet:delete', (_event, id: number) => deleteQuickCommandSnippet(id))
   ipcMain.handle('quick-commands:reorder', (_event, input: QuickCommandReorderInput) => reorderQuickCommands(input))
+  ipcMain.handle('quick-commands:script:plan', (_event, input: QuickCommandScriptPlanInput) => planQuickCommandScript(input))
   ipcMain.handle('aliases:list', (_event, query?: string) => listAliasCommands(query || ''))
   ipcMain.handle('aliases:save', (_event, input: AliasCommandSaveInput) => saveAliasCommand(input))
   ipcMain.handle('aliases:delete', (_event, input: AliasCommandDeleteInput) => deleteAliasCommand(input))

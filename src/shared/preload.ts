@@ -982,11 +982,29 @@ export type QuickCommandReorderInput = {
   orderedIds: number[]
 }
 
+export type QuickCommandScriptPlanInput = {
+  snippetId?: number
+  snippetContent?: string
+  autoExecute?: boolean
+}
+
+export type QuickCommandScriptSegment = {
+  text: string
+  delayBeforeMs: number
+}
+
+export type QuickCommandScriptPlan = {
+  segments: QuickCommandScriptSegment[]
+  shellText: string
+  securityCommand: string
+}
+
 export type QuickCommandGroupMutationResult = AiopsMutationResult<QuickCommandsUserConfig & { group: QuickCommandGroupConfig }>
 export type QuickCommandGroupDeleteResult = AiopsMutationResult<QuickCommandsUserConfig & { groupUuid: string }>
 export type QuickCommandSnippetMutationResult = AiopsMutationResult<QuickCommandsUserConfig & { snippet: QuickCommandSnippetConfig }>
 export type QuickCommandSnippetDeleteResult = AiopsMutationResult<QuickCommandsUserConfig & { id: number }>
 export type QuickCommandReorderResult = AiopsMutationResult<QuickCommandsUserConfig>
+export type QuickCommandScriptPlanResult = AiopsMutationResult<QuickCommandScriptPlan>
 
 export type KnowledgeBaseNodeConfig = {
   id: string
@@ -2262,6 +2280,7 @@ export type AiopsPreloadApi = {
   saveQuickCommandSnippet: (input: QuickCommandSnippetSaveInput) => Promise<QuickCommandSnippetMutationResult>
   deleteQuickCommandSnippet: (id: number) => Promise<QuickCommandSnippetDeleteResult>
   reorderQuickCommands: (input: QuickCommandReorderInput) => Promise<QuickCommandReorderResult>
+  planQuickCommandScript: (input: QuickCommandScriptPlanInput) => Promise<QuickCommandScriptPlanResult>
   listAliasCommands: (query?: string) => Promise<AliasCommandListResult>
   saveAliasCommand: (input: AliasCommandSaveInput) => Promise<AliasCommandMutationResult>
   deleteAliasCommand: (input: AliasCommandDeleteInput) => Promise<AliasCommandDeleteResult>

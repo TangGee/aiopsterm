@@ -183,6 +183,7 @@ const api: AiopsPreloadApi = {
   saveQuickCommandSnippet: (input) => ipcRenderer.invoke('quick-commands:snippet:save', input),
   deleteQuickCommandSnippet: (id: number) => ipcRenderer.invoke('quick-commands:snippet:delete', id),
   reorderQuickCommands: (input) => ipcRenderer.invoke('quick-commands:reorder', input),
+  planQuickCommandScript: (input) => ipcRenderer.invoke('quick-commands:script:plan', input),
   listAliasCommands: (query?: string) => ipcRenderer.invoke('aliases:list', query),
   saveAliasCommand: (input) => ipcRenderer.invoke('aliases:save', input),
   deleteAliasCommand: (input) => ipcRenderer.invoke('aliases:delete', input),

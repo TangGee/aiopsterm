@@ -3192,6 +3192,104 @@ const cloneQuickCommandSnapshot = (config: typeof defaultQuickCommands) => ({
 })
 const nextQuickCommandGroupIdMock = () => Math.max(0, ...quickCommandStoreMock.groups.map((group) => group.id)) + 1
 const nextQuickCommandSnippetIdMock = () => Math.max(0, ...quickCommandStoreMock.snippets.map((snippet) => snippet.id)) + 1
+const quickCommandKeyMapMock = {
+  esc: '\x1b',
+  tab: '\t',
+  return: '\r',
+  backspace: '\b',
+  up: '\x1b[A',
+  down: '\x1b[B',
+  right: '\x1b[C',
+  left: '\x1b[D'
+}
+const quickCommandCtrlKeyMapMock = {
+  'ctrl+a': '\x01',
+  'ctrl+b': '\x02',
+  'ctrl+c': '\x03',
+  'ctrl+d': '\x04',
+  'ctrl+e': '\x05',
+  'ctrl+f': '\x06',
+  'ctrl+g': '\x07',
+  'ctrl+h': '\x08',
+  'ctrl+k': '\x0b',
+  'ctrl+l': '\x0c',
+  'ctrl+n': '\x0e',
+  'ctrl+p': '\x10',
+  'ctrl+r': '\x12',
+  'ctrl+t': '\x14',
+  'ctrl+u': '\x15',
+  'ctrl+w': '\x17',
+  'ctrl+z': '\x1a'
+}
+type QuickCommandParsedScriptMock =
+  | { type: 'COMMAND'; payload: string }
+  | { type: 'SLEEP'; payload: number }
+  | { type: 'KEY'; payload: keyof typeof quickCommandKeyMapMock }
+  | { type: 'CTRL'; payload: keyof typeof quickCommandCtrlKeyMapMock }
+const isQuickCommandKeyMock = (value: string): value is keyof typeof quickCommandKeyMapMock => hasOwn(quickCommandKeyMapMock, value)
+const isQuickCommandCtrlKeyMock = (value: string): value is keyof typeof quickCommandCtrlKeyMapMock => hasOwn(quickCommandCtrlKeyMapMock, value)
+const parseQuickCommandScriptMock = (text: string): QuickCommandParsedScriptMock[] => {
+  const commands: QuickCommandParsedScriptMock[] = []
+  text.split(/\r\n|\n|\r/).forEach((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) return
+    const sleepMatch = trimmed.match(/^sleep==(\d+)$/i)
+    if (sleepMatch) {
+      commands.push({ type: 'SLEEP', payload: Number(sleepMatch[1]) })
+      return
+    }
+    const lower = trimmed.toLowerCase()
+    if (lower.startsWith('ctrl+') && isQuickCommandCtrlKeyMock(lower)) {
+      commands.push({ type: 'CTRL', payload: lower })
+      return
+    }
+    if (isQuickCommandKeyMock(lower)) {
+      commands.push({ type: 'KEY', payload: lower })
+      return
+    }
+    commands.push({ type: 'COMMAND', payload: trimmed })
+  })
+  return commands
+}
+const planQuickCommandScriptMock = (scriptContent: string, autoExecute = true, fallbackSecurityCommand = 'Quick Command') => {
+  const parsed = parseQuickCommandScriptMock(scriptContent)
+  const commandItems = parsed.filter((item): item is Extract<QuickCommandParsedScriptMock, { type: 'COMMAND' }> => item.type === 'COMMAND')
+  const context = {
+    autoExecute,
+    lastCommandPayload: commandItems.at(-1)?.payload,
+    commandCount: commandItems.length,
+    seenCommandCount: 0
+  }
+  const segments: Array<{ text: string; delayBeforeMs: number }> = []
+  let buffer = ''
+  let delayBeforeMs = 0
+  const flush = () => {
+    if (!buffer) return
+    segments.push({ text: buffer, delayBeforeMs })
+    buffer = ''
+    delayBeforeMs = 0
+  }
+  parsed.forEach((item) => {
+    if (item.type === 'SLEEP') {
+      flush()
+      delayBeforeMs += item.payload
+      return
+    }
+    if (item.type === 'COMMAND') {
+      context.seenCommandCount += 1
+      const isLastCommand = item.payload === context.lastCommandPayload && context.seenCommandCount === context.commandCount
+      buffer += `${item.payload}${isLastCommand && !context.autoExecute ? '' : '\n'}`
+      return
+    }
+    buffer += item.type === 'KEY' ? quickCommandKeyMapMock[item.payload] : quickCommandCtrlKeyMapMock[item.payload]
+  })
+  flush()
+  return {
+    segments,
+    shellText: segments.map((segment) => segment.text).join(''),
+    securityCommand: commandItems[0]?.payload || fallbackSecurityCommand
+  }
+}
 const sanitizeKeychain = (keychain: TestKeychainRecord): TestKeychainRecord => ({
   ...keychain,
   privateKey: undefined,
@@ -4892,6 +4990,18 @@ Object.defineProperty(window, 'aiops', {
         snippets: [...rest, ...ordered].map((snippet) => ({ ...snippet }))
       }
       return { ok: true, data: cloneQuickCommandSnapshot(quickCommandStoreMock) }
+    }),
+    planQuickCommandScript: vi.fn(async (input: { snippetId?: number; snippetContent?: string; autoExecute?: boolean }) => {
+      const autoExecute = input.autoExecute !== false
+      if (input.snippetId !== undefined) {
+        const snippet = quickCommandStoreMock.snippets.find((item) => item.id === Number(input.snippetId))
+        if (!snippet) return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command snippet not found' }
+        return { ok: true, data: planQuickCommandScriptMock(snippet.snippet_content, autoExecute, snippet.snippet_name) }
+      }
+      if (typeof input.snippetContent !== 'string') {
+        return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command script content is required' }
+      }
+      return { ok: true, data: planQuickCommandScriptMock(input.snippetContent, autoExecute) }
     }),
     listAliasCommands: vi.fn(async (query?: string) => {
       const normalized = String(query || '').trim().toLowerCase()

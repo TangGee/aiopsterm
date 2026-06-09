@@ -6,6 +6,8 @@ import type {
   QuickCommandGroupSaveInput,
   QuickCommandReorderInput,
   QuickCommandReorderResult,
+  QuickCommandScriptPlanInput,
+  QuickCommandScriptPlanResult,
   QuickCommandSnippetDeleteResult,
   QuickCommandSnippetMutationResult,
   QuickCommandSnippetSaveInput,
@@ -50,6 +52,7 @@ type QuickCommandsBackend = {
   saveQuickCommandSnippet: (input: QuickCommandSnippetSaveInput) => QuickCommandSnippetMutationResult
   deleteQuickCommandSnippet: (id: number) => QuickCommandSnippetDeleteResult
   reorderQuickCommands: (input: QuickCommandReorderInput) => QuickCommandReorderResult
+  planQuickCommandScript: (input: QuickCommandScriptPlanInput) => QuickCommandScriptPlanResult
 }
 
 const loadBackend = async () => {
@@ -180,6 +183,69 @@ describe('quick commands backend boundary', () => {
         ok: false,
         errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
         errorMessage: 'Snippet content is required'
+      })
+    )
+  })
+
+  it('builds backend-owned script plans with External reference syntax semantics', async () => {
+    const backend = await loadBackend()
+
+    const planned = backend.planQuickCommandScript({
+      snippetContent: `
+        # ignored
+        echo first
+        sleep==250
+        CTRL+C
+        up
+        echo second
+      `,
+      autoExecute: false
+    })
+
+    expect(planned.ok).toBe(true)
+    expect(planned.data).toEqual({
+      securityCommand: 'echo first',
+      shellText: 'echo first\n\x03\x1b[Aecho second',
+      segments: [
+        { text: 'echo first\n', delayBeforeMs: 0 },
+        { text: '\x03\x1b[Aecho second', delayBeforeMs: 250 }
+      ]
+    })
+  })
+
+  it('plans saved snippets from backend state instead of renderer payloads', async () => {
+    const backend = await loadBackend()
+    const snippet = backend.saveQuickCommandSnippet({
+      snippet_name: '保存脚本',
+      snippet_content: 'echo persisted\nsleep==100\necho done',
+      group_uuid: null
+    }).data!.snippet
+
+    const planned = backend.planQuickCommandScript({ snippetId: snippet.id, autoExecute: true })
+
+    expect(planned.ok).toBe(true)
+    expect(planned.data?.securityCommand).toBe('echo persisted')
+    expect(planned.data?.segments).toEqual([
+      { text: 'echo persisted\n', delayBeforeMs: 0 },
+      { text: 'echo done\n', delayBeforeMs: 100 }
+    ])
+  })
+
+  it('returns structured errors for missing script plan inputs', async () => {
+    const backend = await loadBackend()
+
+    expect(backend.planQuickCommandScript({ snippetId: 404 })).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command snippet not found'
+      })
+    )
+    expect(backend.planQuickCommandScript({})).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command script content is required'
       })
     )
   })

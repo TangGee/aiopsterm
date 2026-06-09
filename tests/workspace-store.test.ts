@@ -3664,8 +3664,11 @@ describe('workspace store', () => {
     store.activePanel.sessionId = 'quick-command-session'
     const outputBeforeQuickCommand = store.activePanel.output
     vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.planQuickCommandScript).mockClear()
     const quickCommandRun = store.runQuickCommand(1, false)
     await Promise.resolve()
+    await Promise.resolve()
+    expect(window.aiops.planQuickCommandScript).toHaveBeenCalledWith({ snippetId: 1, autoExecute: false })
     expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
     expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'quick-command-session', 'df -h\n')
     expect(store.activePanel.output).toBe(outputBeforeQuickCommand)
@@ -3683,10 +3686,32 @@ describe('workspace store', () => {
     store.activePanel.sessionId = undefined
     const outputBeforeUnavailableSnippet = store.activePanel.output
     vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.planQuickCommandScript).mockClear()
     const unavailableSnippetDecision = await store.runQuickCommand(1, false)
     expect(unavailableSnippetDecision?.status).toBe('unavailable')
+    expect(window.aiops.planQuickCommandScript).toHaveBeenCalledWith({ snippetId: 1, autoExecute: false })
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
     expect(store.activePanel.output).toBe(outputBeforeUnavailableSnippet)
+
+    const originalPlanQuickCommandScript = window.aiops.planQuickCommandScript
+    store.activePanel.sessionId = 'quick-command-session'
+    ;(window.aiops as any).planQuickCommandScript = undefined
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const missingPlannerDecision = await store.runQuickCommand(1, true)
+    expect(missingPlannerDecision?.status).toBe('unavailable')
+    if (missingPlannerDecision?.status === 'unavailable') {
+      expect(missingPlannerDecision.reason).toBe('快捷命令执行计划生成失败')
+    }
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    ;(window.aiops as any).planQuickCommandScript = originalPlanQuickCommandScript
+    vi.mocked(window.aiops.planQuickCommandScript!).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+      errorMessage: 'planner offline'
+    })
+    const failedPlannerDecision = await store.runQuickCommand(1, true)
+    expect(failedPlannerDecision?.status).toBe('unavailable')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
 
     const dangerousSnippet = await store.createQuickCommand({ snippet_name: '危险删除', snippet_content: 'rm /tmp/file', group_uuid: null })
     expect(dangerousSnippet).toBeTruthy()
