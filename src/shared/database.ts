@@ -254,6 +254,7 @@ const databaseConnectionSeed: DatabaseConnectionInfo[] = [
     ]
   }
 ]
+const databaseConnectionSeedIds = new Set(databaseConnectionSeed.map((connection) => connection.id))
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -279,12 +280,47 @@ type SqliteDatabaseConstructor = new (
   filePath: string,
   options?: { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
 ) => SqliteDatabase
+type MySqlConnection = {
+  query: <T = unknown>(sql: string, params?: unknown[]) => Promise<[T, unknown]>
+  end: () => Promise<unknown>
+  destroy?: () => unknown
+}
+type MySqlDriver = {
+  createConnection: (config: Record<string, unknown>) => Promise<MySqlConnection>
+}
+type PostgresClient = {
+  connect: () => Promise<unknown>
+  query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{
+    rows?: T[]
+    fields?: Array<{ name: string }>
+    rowCount?: number | null
+  }>
+  end: () => Promise<unknown>
+}
+type PostgresDriver = {
+  Client: new (config: Record<string, unknown>) => PostgresClient
+}
+export type DatabaseRuntimeConfig = {
+  useSeedData?: boolean
+  mysqlDriver?: MySqlDriver
+  postgresDriver?: PostgresDriver
+}
 type SqliteSchemaTableRow = { name?: string; type?: string }
 type SqliteTableColumnRow = { cid?: number; name?: string; type?: string; notnull?: number; pk?: number; hidden?: number }
 
 const SQLITE_MAIN_SCHEMA = 'main'
 const SQLITE_TIMEOUT_MS = 5000
+const RELATIONAL_TIMEOUT_MS = 10_000
 let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
+let databaseRuntimeConfig: DatabaseRuntimeConfig = {}
+let mysqlRuntime: MySqlDriver | null | undefined
+let postgresRuntime: PostgresDriver | null | undefined
+const databaseConnectionSecrets = new Map<string, string>()
+const databaseVerifiedConnections = new Set<string>()
+
+export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
+  databaseRuntimeConfig = config ? { ...config } : {}
+}
 
 const loadSqliteRuntime = () => {
   if (sqliteRuntime !== undefined) return sqliteRuntime
@@ -296,6 +332,52 @@ const loadSqliteRuntime = () => {
     sqliteRuntime = null
   }
   return sqliteRuntime
+}
+
+const isNodeTestRuntime = () => {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV === 'test'
+  } catch {
+    return false
+  }
+}
+
+const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? isNodeTestRuntime()
+
+const loadMysqlRuntime = () => {
+  if (databaseRuntimeConfig.mysqlDriver) return databaseRuntimeConfig.mysqlDriver
+  if (mysqlRuntime !== undefined) return mysqlRuntime
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loaded = require('mysql2/promise') as unknown as { createConnection?: MySqlDriver['createConnection']; default?: MySqlDriver }
+    mysqlRuntime =
+      typeof loaded.createConnection === 'function'
+        ? { createConnection: loaded.createConnection }
+        : loaded.default && typeof loaded.default.createConnection === 'function'
+          ? loaded.default
+          : null
+  } catch {
+    mysqlRuntime = null
+  }
+  return mysqlRuntime
+}
+
+const loadPostgresRuntime = () => {
+  if (databaseRuntimeConfig.postgresDriver) return databaseRuntimeConfig.postgresDriver
+  if (postgresRuntime !== undefined) return postgresRuntime
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loaded = require('pg') as unknown as { Client?: PostgresDriver['Client']; default?: PostgresDriver }
+    postgresRuntime =
+      typeof loaded.Client === 'function'
+        ? { Client: loaded.Client }
+        : loaded.default && typeof loaded.default.Client === 'function'
+          ? loaded.default
+          : null
+  } catch {
+    postgresRuntime = null
+  }
+  return postgresRuntime
 }
 
 const sqliteFilePathFromConnection = (connection: Pick<DatabaseConnectionInfo, 'filePath' | 'url'>) =>
@@ -665,6 +747,824 @@ const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTa
   }
 }
 
+const isRelationalConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is DatabaseConnectionInfo =>
+  !!connection && (connection.dbType === 'mysql' || connection.dbType === 'postgresql')
+
+const relationalErrorCode = (error: unknown, fallback: string) => {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+  return code.startsWith('DB_') ? code : code || fallback
+}
+
+const relationalErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
+
+const normalizeQueryRows = (rows: unknown): Array<Record<string, unknown>> =>
+  Array.isArray(rows)
+    ? rows.map((row) => (row && typeof row === 'object' && !Array.isArray(row) ? { ...(row as Record<string, unknown>) } : { value: row }))
+    : []
+
+const relationalIdentifier = (value: string, dbType: 'mysql' | 'postgresql') =>
+  dbType === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
+
+const relationalPlaceholder = (dbType: 'mysql' | 'postgresql', index: number) => (dbType === 'postgresql' ? `$${index}` : '?')
+
+const relationalTableReference = (
+  connection: Pick<DatabaseConnectionInfo, 'dbType'>,
+  input: Pick<DatabaseTableDdlInput, 'databaseName' | 'schemaName' | 'tableName'>
+) => {
+  const table = relationalIdentifier(trim(input.tableName), connection.dbType as 'mysql' | 'postgresql')
+  if (connection.dbType === 'postgresql') return `${relationalIdentifier(trim(input.schemaName) || 'public', 'postgresql')}.${table}`
+  return `${relationalIdentifier(trim(input.databaseName), 'mysql')}.${table}`
+}
+
+const relationalRowCount = (result: unknown, fallback = 0) => {
+  if (result && typeof result === 'object') {
+    const record = result as Record<string, unknown>
+    const affectedRows = Number(record.affectedRows)
+    if (Number.isFinite(affectedRows)) return affectedRows
+    const rowCount = Number(record.rowCount)
+    if (Number.isFinite(rowCount)) return rowCount
+    const changes = Number(record.changes)
+    if (Number.isFinite(changes)) return changes
+  }
+  return fallback
+}
+
+const mysqlConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
+  host: trim(input.host),
+  port: normalizedDatabasePort(input.port) ?? undefined,
+  user: trim(input.user),
+  password: input.password || undefined,
+  database: trim(input.database) || undefined,
+  connectTimeout: RELATIONAL_TIMEOUT_MS,
+  ...(trim(input.sslMode) && trim(input.sslMode) !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {})
+})
+
+const postgresConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
+  host: trim(input.host),
+  port: normalizedDatabasePort(input.port) ?? undefined,
+  user: trim(input.user),
+  password: input.password || undefined,
+  database: trim(input.database) || undefined,
+  connectionTimeoutMillis: RELATIONAL_TIMEOUT_MS,
+  ...(trim(input.sslMode) && trim(input.sslMode) !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {})
+})
+
+const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): DatabaseConnectionTestInput => ({
+  dbType: connection.dbType,
+  name: connection.name,
+  host: connection.host,
+  port: connection.port,
+  user: connection.user,
+  password: databaseConnectionSecrets.get(connection.id) || '',
+  database: connection.database,
+  filePath: connection.filePath,
+  readonly: connection.readonly,
+  sslMode: connection.sslMode,
+  url: connection.url
+})
+
+const openMysqlConnection = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => {
+  const driver = loadMysqlRuntime()
+  if (!driver) {
+    throw Object.assign(new Error('MySQL driver is unavailable. Install mysql2 before connecting to MySQL.'), {
+      code: 'DB_MYSQL_DRIVER_UNAVAILABLE'
+    })
+  }
+  return driver.createConnection(mysqlConfigFor(input))
+}
+
+const openPostgresClient = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => {
+  const driver = loadPostgresRuntime()
+  if (!driver) {
+    throw Object.assign(new Error('PostgreSQL driver is unavailable. Install pg before connecting to PostgreSQL.'), {
+      code: 'DB_POSTGRES_DRIVER_UNAVAILABLE'
+    })
+  }
+  const client = new driver.Client(postgresConfigFor(input))
+  await client.connect()
+  return client
+}
+
+const withMysqlConnection = async <T>(connection: DatabaseConnectionInfo, fn: (client: MySqlConnection) => Promise<T>) => {
+  let client: MySqlConnection | null = null
+  try {
+    client = await openMysqlConnection(connectionTestInputFromSaved(connection))
+    return await fn(client)
+  } finally {
+    if (client) {
+      try {
+        await client.end()
+      } catch {
+        client.destroy?.()
+      }
+    }
+  }
+}
+
+const withPostgresClient = async <T>(connection: DatabaseConnectionInfo, fn: (client: PostgresClient) => Promise<T>) => {
+  let client: PostgresClient | null = null
+  try {
+    client = await openPostgresClient(connectionTestInputFromSaved(connection))
+    return await fn(client)
+  } finally {
+    if (client) {
+      try {
+        await client.end()
+      } catch {
+        /* ignore close errors */
+      }
+    }
+  }
+}
+
+const mysqlRows = async <T extends Record<string, unknown>>(client: MySqlConnection, sql: string, params: unknown[] = []) => {
+  const [rows] = await client.query<T[]>(sql, params)
+  return normalizeQueryRows(rows) as T[]
+}
+
+const mysqlExec = async (client: MySqlConnection, sql: string, params: unknown[] = []) => {
+  const [result] = await client.query(sql, params)
+  return relationalRowCount(result)
+}
+
+const postgresRows = async <T extends Record<string, unknown>>(client: PostgresClient, sql: string, params: unknown[] = []) => {
+  const result = await client.query<T>(sql, params)
+  return normalizeQueryRows(result.rows)
+}
+
+const postgresExec = async (client: PostgresClient, sql: string, params: unknown[] = []) => {
+  const result = await client.query(sql, params)
+  return relationalRowCount(result, Number(result.rowCount ?? 0))
+}
+
+const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInput, startedAt: number): Promise<DatabaseConnectionTestResult> => {
+  if (input.dbType === 'mysql') {
+    let client: MySqlConnection | null = null
+    try {
+      client = await openMysqlConnection(input)
+      const rows = await mysqlRows<{ version?: string; v?: string }>(client, 'SELECT VERSION() AS version')
+      const version = trim(rows[0]?.version || rows[0]?.v)
+      return {
+        ok: true,
+        data: {
+          dbType: 'mysql',
+          serverVersion: version ? `MySQL ${version}` : 'MySQL',
+          endpoint: endpointFor(input),
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    } catch (error) {
+      return { ok: false, errorCode: relationalErrorCode(error, 'DB_MYSQL_CONNECTION_FAILED'), errorMessage: relationalErrorMessage(error, 'MySQL connection failed.') }
+    } finally {
+      if (client) {
+        try {
+          await client.end()
+        } catch {
+          client.destroy?.()
+        }
+      }
+    }
+  }
+
+  let client: PostgresClient | null = null
+  try {
+    client = await openPostgresClient(input)
+    const rows = await postgresRows<{ version?: string }>(client, 'SELECT version() AS version')
+    const version = trim(rows[0]?.version)
+    return {
+      ok: true,
+      data: {
+        dbType: 'postgresql',
+        serverVersion: version || 'PostgreSQL',
+        endpoint: endpointFor(input),
+        durationMs: Math.max(1, Date.now() - startedAt)
+      }
+    }
+  } catch (error) {
+    return { ok: false, errorCode: relationalErrorCode(error, 'DB_POSTGRES_CONNECTION_FAILED'), errorMessage: relationalErrorMessage(error, 'PostgreSQL connection failed.') }
+  } finally {
+    if (client) {
+      try {
+        await client.end()
+      } catch {
+        /* ignore close errors */
+      }
+    }
+  }
+}
+
+const databaseColumnId = (connectionId: string, tableName: string) => `tbl-${connectionId}-${tableName.replace(/[^A-Za-z0-9_-]+/g, '-')}`
+
+const mysqlCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> =>
+  withMysqlConnection(connection, async (client) => {
+    const schemaRows = await mysqlRows<{ SCHEMA_NAME?: string; schema_name?: string }>(
+      client,
+      "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys') ORDER BY SCHEMA_NAME"
+    )
+    const catalogNames = schemaRows.map((row) => trim(row.SCHEMA_NAME || row.schema_name)).filter(Boolean)
+    const selected = trim(connection.database)
+    const orderedCatalogs = Array.from(new Set([selected, ...catalogNames].filter(Boolean)))
+    const catalogs: DatabaseCatalogInfo[] = []
+
+    for (const catalogName of orderedCatalogs) {
+      const tableRows = await mysqlRows<{ TABLE_NAME?: string; table_name?: string; TABLE_TYPE?: string; table_type?: string }>(
+        client,
+        'SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME',
+        [catalogName]
+      )
+      const columnRows = await mysqlRows<{
+        TABLE_NAME?: string
+        table_name?: string
+        COLUMN_NAME?: string
+        column_name?: string
+        COLUMN_TYPE?: string
+        column_type?: string
+        DATA_TYPE?: string
+        data_type?: string
+        IS_NULLABLE?: string
+        is_nullable?: string
+        COLUMN_KEY?: string
+        column_key?: string
+      }>(
+        client,
+        'SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, IS_NULLABLE, COLUMN_KEY FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION',
+        [catalogName]
+      )
+      const columnsByTable = new Map<string, DatabaseColumnInfo[]>()
+      columnRows.forEach((row) => {
+        const tableName = trim(row.TABLE_NAME || row.table_name)
+        const name = trim(row.COLUMN_NAME || row.column_name)
+        if (!tableName || !name) return
+        const column: DatabaseColumnInfo = {
+          name,
+          type: trim(row.COLUMN_TYPE || row.column_type || row.DATA_TYPE || row.data_type) || 'unknown',
+          nullable: trim(row.IS_NULLABLE || row.is_nullable).toUpperCase() !== 'NO',
+          ...(trim(row.COLUMN_KEY || row.column_key).toUpperCase() === 'PRI' ? { key: 'PK' as const } : {})
+        }
+        columnsByTable.set(tableName, [...(columnsByTable.get(tableName) ?? []), column])
+      })
+      catalogs.push({
+        name: catalogName,
+        tables: tableRows
+          .filter((row) => trim(row.TABLE_TYPE || row.table_type).toUpperCase() !== 'VIEW')
+          .map((row) => {
+            const name = trim(row.TABLE_NAME || row.table_name)
+            const columns = columnsByTable.get(name) ?? []
+            return {
+              id: databaseColumnId(connection.id, `${catalogName}-${name}`),
+              name,
+              columns,
+              primaryKey: sqlitePrimaryKeyForColumns(columns)
+            }
+          })
+          .filter((table) => table.name)
+      })
+    }
+
+    return catalogs
+  })
+
+const postgresCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> =>
+  withPostgresClient(connection, async (client) => {
+    const databaseName = trim(connection.database)
+    const schemaRows = await postgresRows<{ schema_name?: string }>(
+      client,
+      "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg_toast%' AND schema_name NOT LIKE 'pg_temp_%' ORDER BY schema_name"
+    )
+    const objectRows = await postgresRows<{ table_schema?: string; table_name?: string; table_type?: string }>(
+      client,
+      "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema NOT LIKE 'pg_toast%' AND table_schema NOT LIKE 'pg_temp_%' ORDER BY table_schema, table_name"
+    )
+    const columnRows = await postgresRows<{
+      table_schema?: string
+      table_name?: string
+      column_name?: string
+      data_type?: string
+      udt_name?: string
+      character_maximum_length?: number | null
+      is_nullable?: string
+    }>(
+      client,
+      "SELECT table_schema, table_name, column_name, data_type, udt_name, character_maximum_length, is_nullable FROM information_schema.columns WHERE table_catalog = current_database() AND table_schema NOT LIKE 'pg_toast%' AND table_schema NOT LIKE 'pg_temp_%' ORDER BY table_schema, table_name, ordinal_position"
+    )
+    const primaryKeyRows = await postgresRows<{ table_schema?: string; table_name?: string; column_name?: string }>(
+      client,
+      "SELECT kcu.table_schema, kcu.table_name, kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_catalog = current_database() ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position"
+    )
+    const routineRows = await postgresRows<{ routine_schema?: string; routine_name?: string; routine_type?: string }>(
+      client,
+      "SELECT routine_schema, routine_name, routine_type FROM information_schema.routines WHERE specific_catalog = current_database() AND routine_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY routine_schema, routine_name"
+    )
+
+    const pkByTable = new Map<string, string[]>()
+    primaryKeyRows.forEach((row) => {
+      const key = `${trim(row.table_schema)}.${trim(row.table_name)}`
+      const column = trim(row.column_name)
+      if (key !== '.' && column) pkByTable.set(key, [...(pkByTable.get(key) ?? []), column])
+    })
+    const columnsByTable = new Map<string, DatabaseColumnInfo[]>()
+    columnRows.forEach((row) => {
+      const key = `${trim(row.table_schema)}.${trim(row.table_name)}`
+      const name = trim(row.column_name)
+      if (key === '.' || !name) return
+      const primaryKey = pkByTable.get(key) ?? []
+      const type = trim(row.character_maximum_length) && trim(row.data_type).includes('character') ? `${trim(row.data_type)}(${row.character_maximum_length})` : trim(row.data_type || row.udt_name) || 'unknown'
+      columnsByTable.set(key, [
+        ...(columnsByTable.get(key) ?? []),
+        {
+          name,
+          type,
+          nullable: trim(row.is_nullable).toUpperCase() !== 'NO',
+          ...(primaryKey.includes(name) ? { key: 'PK' as const } : {})
+        }
+      ])
+    })
+
+    const schemas = schemaRows
+      .map((row) => trim(row.schema_name))
+      .filter(Boolean)
+      .map((schemaName): DatabaseSchemaInfo => {
+        const schemaObjects = objectRows.filter((row) => trim(row.table_schema) === schemaName)
+        const functions = routineRows
+          .filter((row) => trim(row.routine_schema) === schemaName && trim(row.routine_type).toUpperCase() === 'FUNCTION')
+          .map((row) => trim(row.routine_name))
+          .filter(Boolean)
+        const procedures = routineRows
+          .filter((row) => trim(row.routine_schema) === schemaName && trim(row.routine_type).toUpperCase() === 'PROCEDURE')
+          .map((row) => trim(row.routine_name))
+          .filter(Boolean)
+        const tableFor = (row: { table_name?: string }) => {
+          const name = trim(row.table_name)
+          const key = `${schemaName}.${name}`
+          const columns = columnsByTable.get(key) ?? []
+          return {
+            id: databaseColumnId(connection.id, `${databaseName}-${schemaName}-${name}`),
+            name,
+            columns,
+            primaryKey: pkByTable.get(key) ?? []
+          }
+        }
+        return {
+          name: schemaName,
+          tables: schemaObjects
+            .filter((row) => trim(row.table_type).toUpperCase() === 'BASE TABLE')
+            .map(tableFor)
+            .filter((table) => table.name),
+          views: schemaObjects
+            .filter((row) => trim(row.table_type).toUpperCase() === 'VIEW')
+            .map(tableFor)
+            .filter((table) => table.name),
+          functions,
+          procedures
+        }
+      })
+      .filter(schemaHasObjects)
+
+    return [{ name: databaseName, schemas }]
+  })
+
+const relationalCatalogsForConnection = (connection: DatabaseConnectionInfo) =>
+  connection.dbType === 'mysql' ? mysqlCatalogsForConnection(connection) : postgresCatalogsForConnection(connection)
+
+const applyConnectionFailure = (connectionId: string, error: unknown, fallbackCode: string, fallbackMessage: string) => {
+  const index = databaseConnections.findIndex((connection) => connection.id === connectionId)
+  if (index >= 0) databaseConnections[index] = { ...databaseConnections[index], status: 'failed' }
+  return {
+    ok: false as const,
+    errorCode: relationalErrorCode(error, fallbackCode),
+    errorMessage: relationalErrorMessage(error, fallbackMessage)
+  }
+}
+
+const relationalColumnsForTable = async (
+  connection: DatabaseConnectionInfo,
+  input: Pick<DatabaseTableQueryInput, 'databaseName' | 'schemaName' | 'tableName'>
+): Promise<DatabaseColumnInfo[]> => {
+  if (connection.dbType === 'mysql') {
+    return withMysqlConnection(connection, async (client) =>
+      mysqlRows<{
+        COLUMN_NAME?: string
+        COLUMN_TYPE?: string
+        DATA_TYPE?: string
+        IS_NULLABLE?: string
+        COLUMN_KEY?: string
+      }>(
+        client,
+        'SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, IS_NULLABLE, COLUMN_KEY FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
+        [trim(input.databaseName), trim(input.tableName)]
+      ).then((rows) =>
+        rows.map((row) => ({
+          name: trim(row.COLUMN_NAME),
+          type: trim(row.COLUMN_TYPE || row.DATA_TYPE) || 'unknown',
+          nullable: trim(row.IS_NULLABLE).toUpperCase() !== 'NO',
+          ...(trim(row.COLUMN_KEY).toUpperCase() === 'PRI' ? { key: 'PK' as const } : {})
+        }))
+      )
+    )
+  }
+  return withPostgresClient(connection, async (client) => {
+    const schemaName = trim(input.schemaName) || 'public'
+    const primaryKeys = await postgresRows<{ column_name?: string }>(
+      client,
+      "SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = $1 AND tc.table_name = $2 ORDER BY kcu.ordinal_position",
+      [schemaName, trim(input.tableName)]
+    )
+    const pk = primaryKeys.map((row) => trim(row.column_name)).filter(Boolean)
+    const rows = await postgresRows<{
+      column_name?: string
+      data_type?: string
+      udt_name?: string
+      character_maximum_length?: number | null
+      is_nullable?: string
+    }>(
+      client,
+      'SELECT column_name, data_type, udt_name, character_maximum_length, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position',
+      [schemaName, trim(input.tableName)]
+    )
+    return rows.map((row) => {
+      const name = trim(row.column_name)
+      const type = trim(row.character_maximum_length) && trim(row.data_type).includes('character') ? `${trim(row.data_type)}(${row.character_maximum_length})` : trim(row.data_type || row.udt_name) || 'unknown'
+      return {
+        name,
+        type,
+        nullable: trim(row.is_nullable).toUpperCase() !== 'NO',
+        ...(pk.includes(name) ? { key: 'PK' as const } : {})
+      }
+    })
+  })
+}
+
+const relationalWhereForFilters = (dbType: 'mysql' | 'postgresql', filters: DatabaseColumnFilter[], knownColumns: string[]) => {
+  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
+  const clauses: string[] = []
+  const params: unknown[] = []
+  filters.forEach((filter) => {
+    const column = known.get(trim(filter.column).toLowerCase())
+    if (!column) return
+    const quoted = relationalIdentifier(column, dbType)
+    if (filter.operator === 'isnull') {
+      clauses.push(`${quoted} IS NULL`)
+      return
+    }
+    if (filter.operator === 'notnull') {
+      clauses.push(`${quoted} IS NOT NULL`)
+      return
+    }
+    if (filter.operator === 'like') {
+      params.push(`%${String(filter.value ?? '')}%`)
+      clauses.push(`${quoted} LIKE ${relationalPlaceholder(dbType, params.length)}`)
+      return
+    }
+    if (filter.operator === 'eq') {
+      params.push(String(filter.value ?? ''))
+      clauses.push(`${quoted} = ${relationalPlaceholder(dbType, params.length)}`)
+      return
+    }
+    if (filter.operator === 'neq') {
+      params.push(String(filter.value ?? ''))
+      clauses.push(`${quoted} <> ${relationalPlaceholder(dbType, params.length)}`)
+      return
+    }
+    const values = (filter.values ?? []).map(String)
+    if (!values.length) {
+      clauses.push('0 = 1')
+      return
+    }
+    const placeholders = values.map((value) => {
+      params.push(value)
+      return relationalPlaceholder(dbType, params.length)
+    })
+    clauses.push(`${quoted} IN (${placeholders.join(', ')})`)
+  })
+  return {
+    sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '',
+    params
+  }
+}
+
+const relationalOrderByFor = (dbType: 'mysql' | 'postgresql', sort: DatabaseColumnSort | null | undefined, knownColumns: string[]) => {
+  if (!sort) return ''
+  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
+  const column = known.get(trim(sort.column).toLowerCase())
+  if (!column) return ''
+  return ` ORDER BY ${relationalIdentifier(column, dbType)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+}
+
+const relationalQueryTable = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableQueryInput,
+  startedAt: number
+): Promise<DatabaseTableQueryResult> => {
+  const dbType = connection.dbType as 'mysql' | 'postgresql'
+  try {
+    const columns = await relationalColumnsForTable(connection, input)
+    if (!columns.length) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const knownColumns = columns.map((column) => column.name)
+    const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
+    const where = relationalWhereForFilters(dbType, filters, knownColumns)
+    const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
+    const orderBy = relationalOrderByFor(dbType, sort, knownColumns)
+    const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(input.pageSize) || 100)))
+    const page = Math.max(1, Math.floor(Number(input.page) || 1))
+    const offset = (page - 1) * pageSize
+    const tableRef = relationalTableReference(connection, input)
+    const limitPlaceholder = relationalPlaceholder(dbType, where.params.length + 1)
+    const offsetPlaceholder = relationalPlaceholder(dbType, where.params.length + 2)
+    const rowsSql = `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
+    const countSql = `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`
+    const params = [...where.params, pageSize, offset]
+
+    if (connection.dbType === 'mysql') {
+      return await withMysqlConnection(connection, async (client) => {
+        const rows = await mysqlRows<Record<string, unknown>>(client, rowsSql, params)
+        const count = input.withTotal ? await mysqlRows<{ total?: number | string }>(client, countSql, where.params) : []
+        return {
+          ok: true,
+          data: {
+            columns: knownColumns,
+            rows,
+            rowCount: rows.length,
+            durationMs: Math.max(1, Date.now() - startedAt),
+            total: input.withTotal ? Number(count[0]?.total ?? 0) : null,
+            knownColumns
+          }
+        }
+      })
+    }
+
+    return await withPostgresClient(connection, async (client) => {
+      const rows = await postgresRows<Record<string, unknown>>(client, rowsSql, params)
+      const count = input.withTotal ? await postgresRows<{ total?: number | string }>(client, countSql, where.params) : []
+      return {
+        ok: true,
+        data: {
+          columns: knownColumns,
+          rows,
+          rowCount: rows.length,
+          durationMs: Math.max(1, Date.now() - startedAt),
+          total: input.withTotal ? Number(count[0]?.total ?? 0) : null,
+          knownColumns
+        }
+      }
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_QUERY_FAILED' : 'DB_POSTGRES_QUERY_FAILED'),
+      errorMessage: relationalErrorMessage(error, 'Database table query failed.')
+    }
+  }
+}
+
+const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteResult> => {
+  try {
+    if (connection.dbType === 'mysql') {
+      return await withMysqlConnection(connection, async (client) => {
+        const [rawRows, rawFields] = await client.query(rawSql)
+        const rows = normalizeQueryRows(rawRows)
+        const fields = Array.isArray(rawFields) ? (rawFields as Array<{ name?: string }>) : []
+        return {
+          ok: true,
+          data: {
+            columns: fields.map((field) => trim(field.name)).filter(Boolean) || columnsForRows(rows),
+            rows,
+            rowCount: rows.length || relationalRowCount(rawRows),
+            durationMs: Math.max(1, Date.now() - startedAt)
+          }
+        }
+      })
+    }
+    return await withPostgresClient(connection, async (client) => {
+      const result = await client.query<Record<string, unknown>>(rawSql)
+      const rows = normalizeQueryRows(result.rows)
+      const columns = Array.isArray(result.fields) && result.fields.length ? result.fields.map((field) => trim(field.name)).filter(Boolean) : columnsForRows(rows)
+      return {
+        ok: true,
+        data: {
+          columns,
+          rows,
+          rowCount: rows.length || Number(result.rowCount ?? 0),
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_QUERY_FAILED' : 'DB_POSTGRES_QUERY_FAILED'),
+      errorMessage: relationalErrorMessage(error, 'Database query failed.')
+    }
+  }
+}
+
+const postgresColumnTypeDdl = (row: {
+  data_type?: string
+  udt_name?: string
+  character_maximum_length?: number | null
+  numeric_precision?: number | null
+  numeric_scale?: number | null
+}) => {
+  const dataType = trim(row.data_type)
+  if (row.character_maximum_length && dataType.includes('character')) return `${dataType}(${row.character_maximum_length})`
+  if (row.numeric_precision && dataType === 'numeric') return row.numeric_scale ? `numeric(${row.numeric_precision}, ${row.numeric_scale})` : `numeric(${row.numeric_precision})`
+  return dataType || trim(row.udt_name) || 'text'
+}
+
+const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> => {
+  try {
+    if (connection.dbType === 'mysql') {
+      return await withMysqlConnection(connection, async (client) => {
+        const rows = await mysqlRows<Record<string, unknown>>(
+          client,
+          `SHOW CREATE TABLE ${relationalTableReference(connection, input)}`
+        )
+        const values = Object.values(rows[0] ?? {})
+        const ddl = values.find((value, index) => index > 0 && typeof value === 'string')
+        if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        return { ok: true, data: { ddl: String(ddl) } }
+      })
+    }
+
+    return await withPostgresClient(connection, async (client) => {
+      const schemaName = trim(input.schemaName) || 'public'
+      const tableName = trim(input.tableName)
+      const columns = await postgresRows<{
+        column_name?: string
+        data_type?: string
+        udt_name?: string
+        character_maximum_length?: number | null
+        numeric_precision?: number | null
+        numeric_scale?: number | null
+        is_nullable?: string
+        column_default?: string | null
+      }>(
+        client,
+        'SELECT column_name, data_type, udt_name, character_maximum_length, numeric_precision, numeric_scale, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position',
+        [schemaName, tableName]
+      )
+      if (!columns.length) {
+        const viewRows = await postgresRows<{ ddl?: string }>(
+          client,
+          'SELECT pg_get_viewdef(($1)::regclass, true) AS ddl',
+          [`${relationalIdentifier(schemaName, 'postgresql')}.${relationalIdentifier(tableName, 'postgresql')}`]
+        ).catch(() => [])
+        const viewDdl = trim(viewRows[0]?.ddl)
+        if (!viewDdl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        return { ok: true, data: { ddl: `CREATE VIEW ${relationalTableReference(connection, input)} AS\n${viewDdl};` } }
+      }
+      const primaryKeys = await postgresRows<{ column_name?: string }>(
+        client,
+        "SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = $1 AND tc.table_name = $2 ORDER BY kcu.ordinal_position",
+        [schemaName, tableName]
+      )
+      const columnLines = columns.map((row) => {
+        const pieces = [
+          `  ${relationalIdentifier(trim(row.column_name), 'postgresql')} ${postgresColumnTypeDdl(row)}`,
+          trim(row.is_nullable).toUpperCase() === 'NO' ? 'NOT NULL' : '',
+          trim(row.column_default) ? `DEFAULT ${trim(row.column_default)}` : ''
+        ].filter(Boolean)
+        return pieces.join(' ')
+      })
+      const pk = primaryKeys.map((row) => trim(row.column_name)).filter(Boolean)
+      if (pk.length) {
+        columnLines.push(`  PRIMARY KEY (${pk.map((column) => relationalIdentifier(column, 'postgresql')).join(', ')})`)
+      }
+      return { ok: true, data: { ddl: `CREATE TABLE ${relationalTableReference(connection, input)} (\n${columnLines.join(',\n')}\n);` } }
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_DDL_FAILED' : 'DB_POSTGRES_DDL_FAILED'),
+      errorMessage: relationalErrorMessage(error, 'Database DDL lookup failed.')
+    }
+  }
+}
+
+const relationalDecodePrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
+  if (!primaryKey.length) return null
+  try {
+    const parsed = JSON.parse(rowKey)
+    return Array.isArray(parsed) && parsed.length === primaryKey.length ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const relationalPrimaryKeyWhere = (
+  dbType: 'mysql' | 'postgresql',
+  mutation: Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>,
+  params: unknown[]
+) => {
+  const primaryKey = mutation.primaryKey.map(trim).filter(Boolean)
+  const values = relationalDecodePrimaryKeyRowKey(mutation.rowKey, primaryKey)
+  if (!values) {
+    throw Object.assign(new Error('Primary-key row identity is required for database row mutations.'), { code: 'DB_PRIMARY_KEY_REQUIRED' })
+  }
+  return primaryKey
+    .map((column, index) => {
+      const value = values[index]
+      if (value === null || value === undefined) return `${relationalIdentifier(column, dbType)} IS NULL`
+      params.push(value)
+      return `${relationalIdentifier(column, dbType)} = ${relationalPlaceholder(dbType, params.length)}`
+    })
+    .join(' AND ')
+}
+
+const buildRelationalMutationStatement = (
+  connection: DatabaseConnectionInfo,
+  tableRef: string,
+  knownColumns: Set<string>,
+  mutation: DatabaseTableMutationInput['mutations'][number]
+) => {
+  const dbType = connection.dbType as 'mysql' | 'postgresql'
+  const params: unknown[] = []
+  if (mutation.kind === 'drop') return { sql: `DROP TABLE ${tableRef}`, params }
+  if (mutation.kind === 'truncate') return { sql: `TRUNCATE TABLE ${tableRef}`, params }
+  if (mutation.kind === 'insert') {
+    const columns = Object.keys(mutation.values).filter((column) => knownColumns.has(column.toLowerCase()))
+    if (!columns.length) return null
+    columns.forEach((column) => params.push(mutation.values[column]))
+    return {
+      sql: `INSERT INTO ${tableRef} (${columns.map((column) => relationalIdentifier(column, dbType)).join(', ')}) VALUES (${columns.map((_column, index) => relationalPlaceholder(dbType, index + 1)).join(', ')})`,
+      params
+    }
+  }
+  if (mutation.kind === 'delete') {
+    const where = relationalPrimaryKeyWhere(dbType, mutation, params)
+    return { sql: `DELETE FROM ${tableRef} WHERE ${where}`, params }
+  }
+  const columns = Object.keys(mutation.patch).filter((column) => knownColumns.has(column.toLowerCase()))
+  if (!columns.length) return null
+  columns.forEach((column) => params.push(mutation.patch[column]))
+  const setSql = columns.map((column, index) => `${relationalIdentifier(column, dbType)} = ${relationalPlaceholder(dbType, index + 1)}`).join(', ')
+  const where = relationalPrimaryKeyWhere(dbType, mutation, params)
+  return { sql: `UPDATE ${tableRef} SET ${setSql} WHERE ${where}`, params }
+}
+
+const relationalMutateTable = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableMutationInput,
+  startedAt: number
+): Promise<DatabaseTableMutationResult> => {
+  const dbType = connection.dbType as 'mysql' | 'postgresql'
+  try {
+    const columns = await relationalColumnsForTable(connection, input)
+    if (!columns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const knownColumns = new Set(columns.map((column) => column.name.toLowerCase()))
+    const tableRef = relationalTableReference(connection, input)
+    const statements = input.mutations
+      .map((mutation) => buildRelationalMutationStatement(connection, tableRef, knownColumns, mutation))
+      .filter((statement): statement is { sql: string; params: unknown[] } => !!statement)
+    let affected = 0
+    if (connection.dbType === 'mysql') {
+      await withMysqlConnection(connection, async (client) => {
+        await mysqlExec(client, 'BEGIN')
+        try {
+          for (const statement of statements) affected += await mysqlExec(client, statement.sql, statement.params)
+          await mysqlExec(client, 'COMMIT')
+        } catch (error) {
+          await mysqlExec(client, 'ROLLBACK').catch(() => undefined)
+          throw error
+        }
+      })
+    } else {
+      await withPostgresClient(connection, async (client) => {
+        await postgresExec(client, 'BEGIN')
+        try {
+          for (const statement of statements) affected += await postgresExec(client, statement.sql, statement.params)
+          await postgresExec(client, 'COMMIT')
+        } catch (error) {
+          await postgresExec(client, 'ROLLBACK').catch(() => undefined)
+          throw error
+        }
+      })
+    }
+    const index = databaseConnections.findIndex((item) => item.id === connection.id)
+    if (index >= 0) {
+      const catalogs = await relationalCatalogsForConnection({ ...databaseConnections[index] }).catch(() => databaseConnections[index].catalogs)
+      databaseConnections[index] = { ...databaseConnections[index], catalogs }
+    }
+    return {
+      ok: true,
+      data: {
+        affected,
+        durationMs: Math.max(1, Date.now() - startedAt),
+        catalog: databaseWorkspaceCatalogFor(input.connectionId)
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: relationalErrorCode(error, dbType === 'mysql' ? 'DB_MYSQL_MUTATION_FAILED' : 'DB_POSTGRES_MUTATION_FAILED'),
+      errorMessage: relationalErrorMessage(error, 'Database table mutation failed.')
+    }
+  }
+}
+
 const endpointFor = (input: DatabaseConnectionTestInput) => {
   if (input.dbType === 'sqlite') return trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
   if (input.dbType === 'oracle' && trim(input.url)) return trim(input.url)
@@ -822,8 +1722,12 @@ const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo
 
 const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseConnectionInfo => ({
   ...connection,
+  status:
+    !shouldUseDatabaseSeedData() && isRelationalConnection(connection) && connection.status === 'connected' && !databaseVerifiedConnections.has(connection.id)
+      ? 'idle'
+      : connection.status,
   catalogs:
-    connection.dbType === 'sqlite' && isRealSqliteConnection(connection)
+    (connection.dbType === 'sqlite' && isRealSqliteConnection(connection)) || !shouldUseDatabaseSeedData()
       ? connection.catalogs.map(cloneDatabaseCatalogRaw)
       : connection.catalogs.map((catalog) => cloneDatabaseCatalog(connection.id, catalog))
 })
@@ -831,6 +1735,11 @@ const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseCo
 let databaseGroups: DatabaseGroupInfo[] = databaseGroupSeed.map((group) => ({ ...group }))
 let databaseGroupParents: Record<string, string | null> = { ...databaseGroupParentSeed }
 let databaseConnections: DatabaseConnectionInfo[] = databaseConnectionSeed.map(cloneDatabaseConnection)
+
+const visibleDatabaseConnections = () =>
+  shouldUseDatabaseSeedData()
+    ? databaseConnections
+    : databaseConnections.filter((connection) => !databaseConnectionSeedIds.has(connection.id) || databaseVerifiedConnections.has(connection.id) || databaseConnectionSecrets.has(connection.id))
 
 const defaultDatabaseCatalogDefaults = (): DatabaseCatalogDefaults => ({
   selectedNodeId: 'conn-prod-pg',
@@ -846,10 +1755,22 @@ const schemaHasObjects = (schema: DatabaseSchemaInfo) =>
 
 const databaseCatalogDefaultsFor = (selectedConnectionId = 'conn-prod-pg'): DatabaseCatalogDefaults => {
   const baseDefaults = defaultDatabaseCatalogDefaults()
-  const selectedConnection = databaseConnections.find((connection) => connection.id === selectedConnectionId)
+  const visibleConnections = visibleDatabaseConnections()
+  const selectedConnection = visibleConnections.find((connection) => connection.id === selectedConnectionId)
   const selectedGroup = databaseGroups.find((group) => group.id === selectedConnectionId)
   const expandedGroupIds = databaseGroups.map((group) => group.id)
   if (!selectedConnection || selectedConnectionId === 'conn-prod-pg') {
+    if (!shouldUseDatabaseSeedData() && !selectedConnection) {
+      const firstConnection = visibleConnections[0]
+      return {
+        selectedNodeId: selectedGroup?.id ?? firstConnection?.id ?? null,
+        expandedGroupIds,
+        expandedConnectionIds: firstConnection ? [firstConnection.id] : [],
+        expandedCatalogIds: [],
+        expandedSchemaIds: [],
+        expandedSchemaObjectFolderIds: []
+      }
+    }
     return {
       ...baseDefaults,
       selectedNodeId: selectedGroup?.id ?? baseDefaults.selectedNodeId,
@@ -886,7 +1807,7 @@ const databaseWorkspaceCatalogFor = (selectedConnectionId = 'conn-prod-pg'): Dat
   engines: databaseEngines.map((engine) => ({ ...engine })),
   groups: databaseGroups.map((group) => ({ ...group })),
   groupParents: { ...databaseGroupParents },
-  connections: databaseConnections.map(cloneDatabaseConnection),
+  connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
   defaults: databaseCatalogDefaultsFor(selectedConnectionId)
 })
 
@@ -1041,6 +1962,9 @@ const normalizeDatabaseConnectionSaveDraft = (
 }
 
 export function resetDatabaseBackendSeed() {
+  databaseRuntimeConfig = {}
+  databaseConnectionSecrets.clear()
+  databaseVerifiedConnections.clear()
   Object.keys(tableRows).forEach((key) => {
     delete tableRows[key]
   })
@@ -1216,6 +2140,7 @@ export async function removeDatabaseConnection(connectionId: string): Promise<Da
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   databaseConnections = databaseConnections.filter((connection) => connection.id !== id)
+  databaseConnectionSecrets.delete(id)
   return {
     ok: true,
     data: {
@@ -1227,6 +2152,25 @@ export async function removeDatabaseConnection(connectionId: string): Promise<Da
 }
 
 export async function connectDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  const id = trim(connectionId)
+  const connection = databaseConnections.find((item) => item.id === id)
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData() && isRelationalConnection(connection)) {
+    try {
+      const catalogs = await relationalCatalogsForConnection(connection)
+      databaseVerifiedConnections.add(id)
+      return databaseConnectionMutation(id, 'Connection opened', (current) => ({
+        ...current,
+        status: 'connected',
+        catalogs
+      }))
+    } catch (error) {
+      const failed = applyConnectionFailure(id, error, connection.dbType === 'mysql' ? 'DB_MYSQL_CONNECTION_FAILED' : 'DB_POSTGRES_CONNECTION_FAILED', 'Database connection failed.')
+      return failed
+    }
+  }
   return databaseConnectionMutation(connectionId, 'Connection opened', (connection) => ({
     ...connection,
     status: 'connected'
@@ -1234,6 +2178,7 @@ export async function connectDatabaseConnection(connectionId: string): Promise<D
 }
 
 export async function disconnectDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  databaseVerifiedConnections.delete(trim(connectionId))
   return databaseConnectionMutation(connectionId, 'Connection closed', (connection) => ({
     ...connection,
     status: 'idle'
@@ -1241,6 +2186,25 @@ export async function disconnectDatabaseConnection(connectionId: string): Promis
 }
 
 export async function refreshDatabaseConnection(connectionId: string): Promise<DatabaseConnectionMutationResult> {
+  const id = trim(connectionId)
+  const connection = databaseConnections.find((item) => item.id === id)
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData() && isRelationalConnection(connection)) {
+    try {
+      const catalogs = await relationalCatalogsForConnection(connection)
+      databaseVerifiedConnections.add(id)
+      return databaseConnectionMutation(id, 'Connection schema refreshed', (current) => ({
+        ...current,
+        status: 'connected',
+        catalogs
+      }))
+    } catch (error) {
+      const failed = applyConnectionFailure(id, error, connection.dbType === 'mysql' ? 'DB_MYSQL_REFRESH_FAILED' : 'DB_POSTGRES_REFRESH_FAILED', 'Database schema refresh failed.')
+      return failed
+    }
+  }
   return databaseConnectionMutation(connectionId, 'Connection schema refreshed', (connection) => {
     if (connection.dbType !== 'sqlite') return { ...connection }
     const catalogs = sqliteCatalogsForConnection(connection)
@@ -2370,6 +3334,19 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
     }
   }
 
+  if (!shouldUseDatabaseSeedData()) {
+    if (input.dbType === 'mysql' || input.dbType === 'postgresql') {
+      return testRelationalDatabaseConnection(input, startedAt)
+    }
+    if (input.dbType === 'oracle') {
+      return {
+        ok: false,
+        errorCode: 'DB_ORACLE_DRIVER_UNAVAILABLE',
+        errorMessage: 'Oracle driver is not wired in this aiopsterm backend yet.'
+      }
+    }
+  }
+
   return {
     ok: true,
     data: {
@@ -2382,7 +3359,21 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
 }
 
 export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput): Promise<DatabaseConnectionSaveResult> {
-  const testResult = await testDatabaseConnection(input.connection)
+  const existingIndex = input.mode === 'edit' ? databaseConnections.findIndex((connection) => connection.id === trim(input.id)) : -1
+  if (input.mode === 'edit' && existingIndex === -1) {
+    return {
+      ok: false,
+      errorCode: 'DB_CONNECTION_NOT_FOUND',
+      errorMessage: 'Database connection was not found.'
+    }
+  }
+  const existing = existingIndex >= 0 ? databaseConnections[existingIndex] : null
+  const connectionSecret = trim(input.connection.password)
+  const validationConnection =
+    input.mode === 'edit' && !connectionSecret && existing?.hasPassword
+      ? { ...input.connection, password: databaseConnectionSecrets.get(existing.id) || '' }
+      : input.connection
+  const testResult = await testDatabaseConnection(validationConnection)
   if (!testResult.ok) {
     return {
       ok: false,
@@ -2394,32 +3385,26 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
   const normalized = normalizeDatabaseConnectionSaveDraft(input.connection)
 
   if (input.mode === 'edit') {
-    const existingIndex = databaseConnections.findIndex((connection) => connection.id === input.id)
-    if (existingIndex === -1) {
-      return {
-        ok: false,
-        errorCode: 'DB_CONNECTION_NOT_FOUND',
-        errorMessage: 'Database connection was not found.'
-      }
-    }
-
     const existing = databaseConnections[existingIndex]
     const saved: DatabaseConnectionInfo = {
       id: existing.id,
       ...normalized,
-      hasPassword: trim(input.connection.password) ? true : existing.hasPassword,
-      status: existing.status,
+      hasPassword: connectionSecret ? true : existing.hasPassword,
+      status: existing.dbType === normalized.dbType && existing.host === normalized.host && existing.port === normalized.port && existing.database === normalized.database ? existing.status : 'idle',
       catalogs:
-        existing.dbType === normalized.dbType && existing.database === normalized.database
+        existing.dbType === normalized.dbType && existing.database === normalized.database && shouldUseDatabaseSeedData()
           ? existing.catalogs.map((catalog) => cloneDatabaseCatalog(existing.id, catalog))
           : defaultCatalogsForSavedConnection({
               id: existing.id,
               ...normalized,
-              hasPassword: trim(input.connection.password) ? true : existing.hasPassword,
+              hasPassword: connectionSecret ? true : existing.hasPassword,
               status: existing.status
             })
     }
     databaseConnections[existingIndex] = saved
+    if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
+    if (!connectionSecret && !saved.hasPassword) databaseConnectionSecrets.delete(saved.id)
+    databaseVerifiedConnections.delete(saved.id)
     return {
       ok: true,
       data: {
@@ -2433,12 +3418,13 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
   const saved: DatabaseConnectionInfo = {
     id: nextDatabaseConnectionId(normalized.name),
     ...normalized,
-    hasPassword: !!trim(input.connection.password),
+    hasPassword: !!connectionSecret,
     status: 'idle',
     catalogs: []
   }
   saved.catalogs = defaultCatalogsForSavedConnection(saved)
   databaseConnections.push(saved)
+  if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
 
   return {
     ok: true,
@@ -2471,10 +3457,30 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
     return { ok: false, errorCode: 'DB_CREATE_DATABASE_DUPLICATE', errorMessage: 'Database already exists.' }
   }
 
+  if (!shouldUseDatabaseSeedData()) {
+    try {
+      if (connection.dbType === 'mysql') {
+        await withMysqlConnection(connection, async (client) => {
+          await mysqlExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'mysql')}`)
+        })
+      } else {
+        await withPostgresClient(connection, async (client) => {
+          await postgresExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'postgresql')}`)
+        })
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_CREATE_DATABASE_FAILED' : 'DB_POSTGRES_CREATE_DATABASE_FAILED'),
+        errorMessage: relationalErrorMessage(error, 'Create database failed.')
+      }
+    }
+  }
+
   const catalog = createDatabaseCatalogForConnection(connection, name)
   const saved: DatabaseConnectionInfo = {
     ...connection,
-    catalogs: [...connection.catalogs.map((item) => cloneDatabaseCatalog(connection.id, item)), catalog]
+    catalogs: [...connection.catalogs.map((item) => (shouldUseDatabaseSeedData() ? cloneDatabaseCatalog(connection.id, item) : cloneDatabaseCatalogRaw(item))), catalog]
   }
   databaseConnections[connectionIndex] = saved
 
@@ -2506,6 +3512,13 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
   const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
     return sqliteExecute(connection, rawSql, startedAt)
+  }
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData()) {
+    if (isRelationalConnection(connection)) return relationalExecute(connection, rawSql, startedAt)
+    return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine execution is not wired in this aiopsterm backend yet.' }
   }
 
   const explained = /^explain\b/i.test(sql)
@@ -2542,6 +3555,13 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
     return sqliteTableDdl(connection, input)
   }
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData()) {
+    if (isRelationalConnection(connection)) return relationalTableDdl(connection, input)
+    return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine DDL lookup is not wired in this aiopsterm backend yet.' }
+  }
 
   const key = tableKeyForContext(input)
   if (!key) {
@@ -2572,6 +3592,13 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
   const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
     return sqliteQueryTable(connection, input, startedAt)
+  }
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData()) {
+    if (isRelationalConnection(connection)) return relationalQueryTable(connection, input, startedAt)
+    return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table query is not wired in this aiopsterm backend yet.' }
   }
 
   const tableKey = tableKeyForContext(input)
@@ -2608,6 +3635,13 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
   const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
     return sqliteMutateTable(connection, input, startedAt)
+  }
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData()) {
+    if (isRelationalConnection(connection)) return relationalMutateTable(connection, input, startedAt)
+    return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table mutations are not wired in this aiopsterm backend yet.' }
   }
 
   const key = tableKeyForContext(input)

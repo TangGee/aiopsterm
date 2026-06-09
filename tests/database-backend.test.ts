@@ -9,6 +9,7 @@ import {
   cancelDatabaseAiPaneResponse,
   connectDatabaseConnection,
   configureDatabaseAiRuntime,
+  configureDatabaseRuntime,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
   createDatabaseCatalog,
@@ -35,6 +36,158 @@ import {
   startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from '@shared/database'
+
+const fieldsForRows = (rows: Array<Record<string, unknown>>) => Object.keys(rows[0] ?? {}).map((name) => ({ name }))
+
+const createPostgresDriverDouble = () => {
+  const state = {
+    connected: 0,
+    closed: 0,
+    configs: [] as Array<Record<string, unknown>>,
+    createdDatabases: [] as string[],
+    ordersDropped: false,
+    rows: [
+      { id: 1, service: 'live-api', status: 'open', owner: 'nina', updated_at: '2026-06-09 10:00:00' },
+      { id: 2, service: 'live-worker', status: 'closed', owner: 'omar', updated_at: '2026-06-09 09:00:00' }
+    ] as Array<Record<string, unknown>>
+  }
+  class Client {
+    readonly config: Record<string, unknown>
+
+    constructor(config: Record<string, unknown>) {
+      this.config = config
+      state.configs.push({ ...config })
+    }
+
+    async connect() {
+      state.connected += 1
+    }
+
+    async end() {
+      state.closed += 1
+    }
+
+    async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
+      const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+      const rowsFor = (rows: Array<Record<string, unknown>>, rowCount = rows.length) => ({ rows: rows as T[], fields: fieldsForRows(rows), rowCount })
+
+      if (normalized.startsWith('select version()')) return rowsFor([{ version: 'PostgreSQL 16.9 live-driver' }])
+      if (normalized.startsWith('select schema_name from information_schema.schemata')) return rowsFor([{ schema_name: 'public' }])
+      if (normalized.includes('from information_schema.tables')) {
+        return rowsFor(state.ordersDropped ? [] : [{ table_schema: 'public', table_name: 'orders', table_type: 'BASE TABLE' }])
+      }
+      if (normalized.includes('from information_schema.columns')) {
+        if (state.ordersDropped) return rowsFor([])
+        return rowsFor([
+          { table_schema: 'public', table_name: 'orders', column_name: 'id', data_type: 'integer', is_nullable: 'NO' },
+          { table_schema: 'public', table_name: 'orders', column_name: 'service', data_type: 'text', is_nullable: 'NO' },
+          { table_schema: 'public', table_name: 'orders', column_name: 'status', data_type: 'text', is_nullable: 'NO' },
+          { table_schema: 'public', table_name: 'orders', column_name: 'owner', data_type: 'text', is_nullable: 'YES' },
+          { table_schema: 'public', table_name: 'orders', column_name: 'updated_at', data_type: 'timestamp without time zone', is_nullable: 'NO' }
+        ])
+      }
+      if (normalized.includes('from information_schema.table_constraints')) return rowsFor(state.ordersDropped ? [] : [{ table_schema: 'public', table_name: 'orders', column_name: 'id' }])
+      if (normalized.includes('from information_schema.routines')) return rowsFor([])
+      if (normalized.startsWith('select pg_get_viewdef')) return rowsFor([])
+      if (normalized === 'begin' || normalized === 'commit' || normalized === 'rollback') return rowsFor([], 0)
+      if (normalized.startsWith('create database')) {
+        state.createdDatabases.push(String(sql.match(/"([^"]+)"/)?.[1] || 'unknown'))
+        return rowsFor([], 0)
+      }
+      if (normalized.startsWith('update ')) {
+        const owner = params[0]
+        const id = params[1]
+        const row = state.rows.find((item) => item.id === id)
+        if (row) row.owner = owner
+        return rowsFor([], row ? 1 : 0)
+      }
+      if (normalized.startsWith('insert ')) {
+        const next = { id: params[0], service: params[1], status: params[2], owner: params[3], updated_at: params[4] }
+        state.rows.push(next)
+        return rowsFor([], 1)
+      }
+      if (normalized.startsWith('delete ')) {
+        const id = params[0]
+        const before = state.rows.length
+        state.rows = state.rows.filter((row) => row.id !== id)
+        return rowsFor([], before - state.rows.length)
+      }
+      if (normalized.startsWith('truncate ')) {
+        const affected = state.rows.length
+        state.rows = []
+        return rowsFor([], affected)
+      }
+      if (normalized.startsWith('drop table')) {
+        state.ordersDropped = true
+        return rowsFor([], 0)
+      }
+      if (normalized.startsWith('select count(*)')) {
+        const status = params[0]
+        const total = status ? state.rows.filter((row) => row.status === status).length : state.rows.length
+        return rowsFor([{ total }])
+      }
+      if (normalized.startsWith('select') && normalized.includes('orders')) {
+        let rows = state.rows
+        if (params.length && typeof params[0] === 'string') rows = rows.filter((row) => row.status === params[0])
+        return rowsFor(rows.map((row) => ({ ...row })))
+      }
+      throw Object.assign(new Error(`unexpected postgres query: ${sql}`), { code: 'PG_FAKE_UNHANDLED' })
+    }
+  }
+  return { driver: { Client }, state }
+}
+
+const createMysqlDriverDouble = () => {
+  const state = {
+    connected: 0,
+    closed: 0,
+    configs: [] as Array<Record<string, unknown>>,
+    rows: [
+      { id: 1, service: 'gateway', region: 'shanghai', latency_ms: 22, healthy: 1 },
+      { id: 2, service: 'worker', region: 'hangzhou', latency_ms: 61, healthy: 1 }
+    ] as Array<Record<string, unknown>>
+  }
+  return {
+    driver: {
+      async createConnection(config: Record<string, unknown>) {
+        state.connected += 1
+        state.configs.push({ ...config })
+        return {
+          async query<T = unknown>(sql: string, params: unknown[] = []): Promise<[T, unknown]> {
+            const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+            const rowsFor = (rows: Array<Record<string, unknown>>, fields = fieldsForRows(rows)) => [rows as T, fields] as [T, unknown]
+            if (normalized.startsWith('select version()')) return rowsFor([{ version: '8.4.0-live-driver' }])
+            if (normalized.includes('from information_schema.schemata')) return rowsFor([{ SCHEMA_NAME: 'metrics' }])
+            if (normalized.includes('from information_schema.tables')) return rowsFor([{ TABLE_NAME: 'service_health', TABLE_TYPE: 'BASE TABLE' }])
+            if (normalized.includes('from information_schema.columns')) {
+              return rowsFor([
+                { TABLE_NAME: 'service_health', COLUMN_NAME: 'id', COLUMN_TYPE: 'int', IS_NULLABLE: 'NO', COLUMN_KEY: 'PRI' },
+                { TABLE_NAME: 'service_health', COLUMN_NAME: 'service', COLUMN_TYPE: 'varchar(80)', IS_NULLABLE: 'NO', COLUMN_KEY: '' },
+                { TABLE_NAME: 'service_health', COLUMN_NAME: 'region', COLUMN_TYPE: 'varchar(32)', IS_NULLABLE: 'NO', COLUMN_KEY: '' },
+                { TABLE_NAME: 'service_health', COLUMN_NAME: 'latency_ms', COLUMN_TYPE: 'int', IS_NULLABLE: 'NO', COLUMN_KEY: '' },
+                { TABLE_NAME: 'service_health', COLUMN_NAME: 'healthy', COLUMN_TYPE: 'tinyint', IS_NULLABLE: 'NO', COLUMN_KEY: '' }
+              ])
+            }
+            if (normalized.startsWith('show create table')) {
+              return rowsFor([{ Table: 'service_health', 'Create Table': 'CREATE TABLE `service_health` (`id` int PRIMARY KEY)' }])
+            }
+            if (normalized.startsWith('select count(*)')) return rowsFor([{ total: state.rows.length }])
+            if (normalized.startsWith('select') && normalized.includes('service_health')) return rowsFor(state.rows.map((row) => ({ ...row })))
+            if (normalized === 'begin' || normalized === 'commit' || normalized === 'rollback') return [{ affectedRows: 0 } as T, []]
+            throw Object.assign(new Error(`unexpected mysql query: ${sql}`), { code: 'MYSQL_FAKE_UNHANDLED' })
+          },
+          async end() {
+            state.closed += 1
+          },
+          destroy() {
+            state.closed += 1
+          }
+        }
+      }
+    },
+    state
+  }
+}
 
 let configureDatabaseBackendRuntime: (config?: {
   getConfig?: () => UserConfig
@@ -1594,5 +1747,230 @@ WHERE status = ''open'';
     expect(catalogAfterDrop.ok).toBe(true)
     expect(publicSchema?.tables.some((table) => table.name === 'orders')).toBe(false)
     expect(publicSchema?.views?.some((table) => table.name === 'open_orders_v')).toBe(true)
+  })
+
+  it('uses the injected PostgreSQL driver in non-seed runtime instead of backend seed rows', async () => {
+    const { driver, state } = createPostgresDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver })
+
+    const emptyCatalog = await listDatabaseCatalog()
+    expect(emptyCatalog.ok).toBe(true)
+    expect(emptyCatalog.data?.connections).toEqual([])
+    expect(emptyCatalog.data?.defaults.selectedNodeId).toBeNull()
+
+    const probe = await testDatabaseConnection({
+      dbType: 'postgresql',
+      name: 'live-postgres',
+      host: '127.0.0.1',
+      port: 5432,
+      user: 'ops',
+      password: 'secret',
+      database: 'orders',
+      sslMode: 'require'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'postgresql',
+      serverVersion: 'PostgreSQL 16.9 live-driver',
+      endpoint: '127.0.0.1:5432'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'postgresql',
+        name: 'live-postgres',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'ops',
+        password: 'secret',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({ id: 'conn-live-postgres', status: 'idle', catalogs: [{ name: 'orders' }] })
+
+    const edited = await saveDatabaseConnection({
+      mode: 'edit',
+      id: 'conn-live-postgres',
+      connection: {
+        dbType: 'postgresql',
+        name: 'live-postgres',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'ops',
+        password: '',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(edited.ok).toBe(true)
+    expect(state.configs.at(-1)).toMatchObject({ password: 'secret' })
+
+    const connected = await connectDatabaseConnection('conn-live-postgres')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    expect(connected.data?.connection.catalogs[0]?.schemas?.[0]?.tables[0]).toMatchObject({
+      name: 'orders',
+      primaryKey: ['id'],
+      columns: expect.arrayContaining([expect.objectContaining({ name: 'service', type: 'text' })])
+    })
+    expect((await listDatabaseCatalog()).data?.connections.map((connection) => connection.id)).toEqual(['conn-live-postgres'])
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-postgres',
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      sql: 'select * from public.orders'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.rows).toEqual([
+      expect.objectContaining({ service: 'live-api', owner: 'nina' }),
+      expect.objectContaining({ service: 'live-worker', owner: 'omar' })
+    ])
+    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-postgres',
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }],
+      sort: null,
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data?.rows).toEqual([expect.objectContaining({ service: 'live-api' })])
+    expect(tablePage.data?.total).toBe(1)
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-postgres',
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE "public"."orders"')
+    expect(ddl.data?.ddl).toContain('"id" integer NOT NULL')
+    expect(ddl.data?.ddl).toContain('PRIMARY KEY ("id")')
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-postgres',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { owner: 'live-owner' } },
+        { kind: 'insert', values: { id: 3, service: 'live-cron', status: 'open', owner: 'ivy', updated_at: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(state.rows).toEqual([
+      expect.objectContaining({ id: 1, owner: 'live-owner' }),
+      expect.objectContaining({ id: 3, service: 'live-cron' })
+    ])
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-postgres',
+      requestedName: 'ops_live',
+      sql: 'CREATE DATABASE "ops_live";'
+    })
+    expect(createdDatabase.ok).toBe(true)
+    expect(state.createdDatabases).toEqual(['ops_live'])
+    expect(createdDatabase.data?.connection.catalogs.map((catalog) => catalog.name)).toContain('ops_live')
+
+    const disconnected = await disconnectDatabaseConnection('conn-live-postgres')
+    expect(disconnected.ok).toBe(true)
+    expect(disconnected.data?.connection.status).toBe('idle')
+    expect(state.connected).toBeGreaterThan(0)
+    expect(state.closed).toBeGreaterThan(0)
+  })
+
+  it('uses the injected MySQL driver and reports unsupported engines without seed success in non-seed runtime', async () => {
+    const { driver } = createMysqlDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, mysqlDriver: driver })
+
+    const mysqlProbe = await testDatabaseConnection({
+      dbType: 'mysql',
+      name: 'live-mysql',
+      host: '127.0.0.1',
+      port: 3306,
+      user: 'ops',
+      password: 'secret',
+      database: 'metrics'
+    })
+    expect(mysqlProbe.ok).toBe(true)
+    expect(mysqlProbe.data).toMatchObject({ dbType: 'mysql', serverVersion: 'MySQL 8.4.0-live-driver' })
+
+    const oracleProbe = await testDatabaseConnection({
+      dbType: 'oracle',
+      name: 'oracle-prod',
+      user: 'ops',
+      password: 'secret',
+      database: 'ORCLPDB1',
+      url: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1'
+    })
+    expect(oracleProbe).toEqual({
+      ok: false,
+      errorCode: 'DB_ORACLE_DRIVER_UNAVAILABLE',
+      errorMessage: 'Oracle driver is not wired in this aiopsterm backend yet.'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'mysql',
+        name: 'live-mysql',
+        host: '127.0.0.1',
+        port: 3306,
+        user: 'ops',
+        password: 'secret',
+        database: 'metrics',
+        env: 'Staging',
+        groupId: 'group-default',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+
+    const refreshed = await refreshDatabaseConnection('conn-live-mysql')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.status).toBe('connected')
+    expect(refreshed.data?.connection.catalogs[0]?.tables?.[0]).toMatchObject({
+      name: 'service_health',
+      primaryKey: ['id']
+    })
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-mysql',
+      dbType: 'mysql',
+      databaseName: 'metrics',
+      sql: 'select * from service_health'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-mysql',
+      dbType: 'mysql',
+      databaseName: 'metrics',
+      tableName: 'service_health'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toBe('CREATE TABLE `service_health` (`id` int PRIMARY KEY)')
   })
 })
