@@ -9,6 +9,7 @@ import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFi
 import Store from 'electron-store'
 import AdmZip from 'adm-zip'
 import {
+  configureAssetConnectionRuntime,
   deleteAsset,
   deleteAssetGroup,
   deleteAssetFolder,
@@ -25,7 +26,8 @@ import {
   renameAssetGroup,
   saveAsset,
   saveAssetFolder,
-  saveKeychain
+  saveKeychain,
+  testAssetConnection
 } from './backend/assets'
 import { configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
 import { listAiContextCatalog } from './backend/aiContext'
@@ -1166,6 +1168,7 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
 configureTerminalSuggestionsRuntime({ getConfig })
 configureAiChatRuntime({ getConfig })
+configureAssetConnectionRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig })
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
@@ -2649,6 +2652,7 @@ const registerIpc = () => {
   ipcMain.handle('assets:groups:rename', (_event, input: AiopsAssetGroupRenameInput) => renameAssetGroup(input))
   ipcMain.handle('assets:groups:delete', (_event, input: AiopsAssetGroupDeleteInput) => deleteAssetGroup(input))
   ipcMain.handle('assets:save', (_event, asset: AiopsAssetInput) => saveAsset(asset))
+  ipcMain.handle('assets:test-connection', (_event, input) => testAssetConnection(input))
   ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
   ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))
   ipcMain.handle('ssh:tunnel:start', (_event, input: AiopsSshTunnelStartInput) => startSshTunnel(input))

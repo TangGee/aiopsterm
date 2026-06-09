@@ -164,6 +164,7 @@ const api: AiopsPreloadApi = {
   renameAssetGroup: (input) => ipcRenderer.invoke('assets:groups:rename', input),
   deleteAssetGroup: (input) => ipcRenderer.invoke('assets:groups:delete', input),
   saveAsset: (asset) => ipcRenderer.invoke('assets:save', asset),
+  testAssetConnection: (input) => ipcRenderer.invoke('assets:test-connection', input),
   deleteAsset: (id: string) => ipcRenderer.invoke('assets:delete', id),
   refreshOrganizationAssets: (input) => ipcRenderer.invoke('assets:organization:refresh', input),
   startSshTunnel: (input) => ipcRenderer.invoke('ssh:tunnel:start', input),

@@ -527,7 +527,22 @@
           >
             {{ hostFormError }}
           </p>
+          <p
+            v-if="hostTestMessage"
+            class="files-folder-error workspace-host-form-wide asset-connection-test-result"
+            :class="{ success: hostTestOk }"
+          >
+            {{ hostTestMessage }}
+          </p>
           <footer class="workspace-host-form-wide">
+            <button
+              type="button"
+              data-testid="workspace-host-test-connection"
+              :disabled="hostTestLoading"
+              @click="testHostFormConnection"
+            >
+              {{ hostTestLoading ? '测试中' : '测试连接' }}
+            </button>
             <button
               type="button"
               @click="closeHostModal"
@@ -762,6 +777,9 @@ const hostForm = reactive({
   passphrase: ''
 })
 const hostFormError = ref('')
+const hostTestLoading = ref(false)
+const hostTestMessage = ref('')
+const hostTestOk = ref(false)
 const deleteAssetModal = reactive({ visible: false, assetId: '' })
 const managementModal = reactive({ visible: false, organizationId: '', query: '' })
 
@@ -954,6 +972,12 @@ const refreshAssets = async () => {
   await refreshDirectGroupOptions()
 }
 
+const resetHostConnectionTest = () => {
+  hostTestLoading.value = false
+  hostTestMessage.value = ''
+  hostTestOk.value = false
+}
+
 const saveAssetRecord = async (input: AiopsAssetInput) => {
   const saveAsset = window.aiops?.saveAsset
   if (typeof saveAsset !== 'function') {
@@ -1111,6 +1135,7 @@ const openCreateHost = () => {
   hostForm.privateKey = ''
   hostForm.passphrase = ''
   hostFormError.value = ''
+  resetHostConnectionTest()
 }
 
 const closeFolderModal = () => {
@@ -1139,6 +1164,7 @@ const closeHostModal = () => {
   hostForm.privateKey = ''
   hostForm.passphrase = ''
   hostFormError.value = ''
+  resetHostConnectionTest()
 }
 
 const closeDeleteAssetModal = () => {
@@ -1546,6 +1572,7 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostForm.privateKey = ''
   hostForm.passphrase = ''
   hostFormError.value = ''
+  resetHostConnectionTest()
   closeContextMenu()
 }
 
@@ -1571,10 +1598,11 @@ const parseHostPort = () => {
 const buildHostInput = (id: string | undefined, port: number, sourceAsset?: WorkspaceAsset): AiopsAssetInput => {
   const shouldAttachOrganization = activeWorkspace.value === 'bastion' && hostForm.assetType !== 'organization'
   const group = hostForm.group.trim() || (hostForm.assetType === 'organization' ? '企业' : undefined)
+  const title = hostForm.title.trim() || hostForm.host.trim()
   return {
     ...(id ? { id } : {}),
-    name: hostForm.title.trim(),
-    title: hostForm.title.trim(),
+    name: title,
+    title,
     host: hostForm.host.trim(),
     ip: hostForm.host.trim(),
     username: hostForm.username.trim(),
@@ -1597,6 +1625,49 @@ const buildHostInput = (id: string | undefined, port: number, sourceAsset?: Work
     ...(hostForm.password.trim() ? { password: hostForm.password } : {}),
     ...(hostForm.privateKey.trim() ? { privateKey: hostForm.privateKey } : {}),
     ...(hostForm.passphrase.trim() ? { passphrase: hostForm.passphrase } : {})
+  }
+}
+
+const validateHostConnectionDraft = () => {
+  const host = hostForm.host.trim()
+  const username = hostForm.username.trim()
+  const port = parseHostPort()
+  if (!host || !username) {
+    hostFormError.value = '请填写地址和用户名'
+    return null
+  }
+  if (port === null) return null
+  return port
+}
+
+const testHostFormConnection = async () => {
+  const testAssetConnection = window.aiops?.testAssetConnection
+  if (typeof testAssetConnection !== 'function') {
+    hostTestOk.value = false
+    hostTestMessage.value = '连接测试服务不可用'
+    return
+  }
+  const port = validateHostConnectionDraft()
+  if (port === null) return
+  const sourceAsset = hostModal.mode === 'create' ? null : findEditableAsset(hostModal.assetId)
+  hostTestLoading.value = true
+  hostTestMessage.value = '正在测试连接...'
+  hostTestOk.value = false
+  try {
+    const result = await testAssetConnection({
+      ...(sourceAsset ? { assetId: sourceAsset.id } : {}),
+      asset: buildHostInput(sourceAsset?.id, port, sourceAsset || undefined)
+    })
+    if (!result?.ok || !result.data) {
+      throw new Error(result?.errorMessage || '连接测试失败')
+    }
+    hostTestOk.value = true
+    hostTestMessage.value = `连接成功 ${result.data.endpoint} · ${result.data.durationMs}ms`
+  } catch (error) {
+    hostTestOk.value = false
+    hostTestMessage.value = error instanceof Error ? error.message : '连接测试失败'
+  } finally {
+    hostTestLoading.value = false
   }
 }
 

@@ -176,6 +176,27 @@ export type AiopsAssetInput = {
   passphrase?: string
 }
 
+export type AiopsAssetConnectionTestInput = {
+  assetId?: string
+  asset?: AiopsAssetInput
+  timeoutMs?: number
+}
+
+export type AiopsAssetConnectionTestInfo = {
+  assetId?: string
+  endpoint: string
+  host: string
+  port: number
+  username: string
+  authType: AiopsAssetAuthType
+  authSource: 'password' | 'privateKey' | 'keychain' | 'sshAgent'
+  durationMs: number
+  proxyName?: string
+  agentKeyCount?: number
+}
+
+export type AiopsAssetConnectionTestResult = AiopsMutationResult<AiopsAssetConnectionTestInfo>
+
 export type AiopsKeychainType = 'rsa' | 'ed25519' | 'ecdsa'
 
 export type AiopsKeychainRecord = {
@@ -2222,6 +2243,7 @@ export type AiopsPreloadApi = {
   renameAssetGroup: (input: AiopsAssetGroupRenameInput) => Promise<AiopsMutationResult<AiopsAssetSnapshot>>
   deleteAssetGroup: (input: AiopsAssetGroupDeleteInput) => Promise<AiopsMutationResult<AiopsAssetSnapshot>>
   saveAsset: (asset: AiopsAssetInput) => Promise<AiopsMutationResult<AiopsAssetRecord>>
+  testAssetConnection: (input: AiopsAssetConnectionTestInput) => Promise<AiopsAssetConnectionTestResult>
   deleteAsset: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
   refreshOrganizationAssets: (input?: AiopsOrganizationAssetRefreshInput) => Promise<AiopsOrganizationAssetRefreshResult>
   startSshTunnel: (input: AiopsSshTunnelStartInput) => Promise<AiopsSshTunnelMutationResult>

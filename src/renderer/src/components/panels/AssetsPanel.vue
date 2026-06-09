@@ -340,13 +340,30 @@
                 </option>
               </select>
             </label>
-            <button
-              class="asset-submit-button"
-              data-onboarding-id="asset-form-submit"
-              @click="submitForm"
+            <div class="asset-form-actions">
+              <button
+                class="asset-submit-button secondary"
+                data-testid="asset-test-connection"
+                :disabled="assetTestLoading"
+                @click="testAssetFormConnection"
+              >
+                {{ assetTestLoading ? '测试中' : '测试连接' }}
+              </button>
+              <button
+                class="asset-submit-button"
+                data-onboarding-id="asset-form-submit"
+                @click="submitForm"
+              >
+                保存
+              </button>
+            </div>
+            <small
+              v-if="assetTestMessage"
+              class="asset-form-error asset-connection-test-result"
+              :class="{ success: assetTestOk }"
             >
-              保存
-            </button>
+              {{ assetTestMessage }}
+            </small>
             <small
               v-if="assetFormError"
               class="asset-form-error"
@@ -905,6 +922,9 @@ const exportModalOpen = ref(false)
 const exportCheckedIds = ref<string[]>([])
 const exportQuery = ref('')
 const selectedRows = ref<string[]>([])
+const assetTestLoading = ref(false)
+const assetTestMessage = ref('')
+const assetTestOk = ref(false)
 type AssetRecord = AiopsAssetRecord & {
   password?: string
   needProxy?: boolean
@@ -1163,8 +1183,15 @@ const filteredKeychains = computed(() => {
   return keychains.value.filter((key) => `${key.name} ${key.type} ${key.publicKey}`.toLowerCase().includes(keyword))
 })
 
+const resetAssetConnectionTest = () => {
+  assetTestLoading.value = false
+  assetTestMessage.value = ''
+  assetTestOk.value = false
+}
+
 const resetForm = () => {
   assetFormError.value = ''
+  resetAssetConnectionTest()
   Object.assign(form, {
     id: '',
     title: '',
@@ -1230,6 +1257,7 @@ const editAsset = (assetId: string | null) => {
   activeAssetView.value = 'assetConfig'
   editMode.value = true
   assetFormError.value = ''
+  resetAssetConnectionTest()
   Object.assign(form, {
     id: asset.id,
     title: asset.title,
@@ -1257,6 +1285,7 @@ const cloneAsset = (assetId: string | null) => {
   activeAssetView.value = 'assetConfig'
   editMode.value = false
   assetFormError.value = ''
+  resetAssetConnectionTest()
   Object.assign(form, {
     id: '',
     title: `${asset.title}_Clone`,
@@ -1370,51 +1399,87 @@ const openAssetContextMenu = (event: MouseEvent, assetId: string) => {
   contextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
 }
 
-const submitForm = async () => {
+const buildAssetFormInput = (): { asset: AiopsAssetInput; title: string } | null => {
   assetFormError.value = ''
   const host = form.host.trim()
   const username = form.username.trim()
   const port = Number(form.port)
-  if (!host || !username || !Number.isFinite(port) || port <= 0) {
+  if (!host || !username || !Number.isInteger(port) || port < 1 || port > 65535) {
     assetFormError.value = '请填写地址、用户名和有效端口。'
-    return
+    return null
   }
   if (form.auth_type === 'keyBased' && !form.keyId) {
     assetFormError.value = '请选择密钥链。'
-    return
+    return null
   }
   const selectedProxyName = form.proxyName.trim()
   const selectedProxy = selectedProxyName ? workspace.sshProxyConfigs.find((config) => config.name.trim() === selectedProxyName) : undefined
   if (selectedProxyName && !selectedProxy) {
     assetFormError.value = '请选择已配置的 SSH 代理。'
-    return
+    return null
   }
   const title = form.title.trim() || host
   const group = form.group.trim()
-  const baseAsset: AiopsAssetInput = {
-    ...(form.id ? { id: form.id } : {}),
-    name: title,
+  return {
     title,
-    host,
-    ip: host,
-    ...(group ? { group, group_name: group } : {}),
-    status: 'online',
-    tags: [form.auth_type === 'keyBased' ? 'key' : 'ssh'],
-    username,
-    port,
-    asset_type: form.asset_type,
-    auth_type: form.auth_type,
-    comment: editMode.value ? '本地编辑' : '本地创建',
-    data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
-    keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
-    needProxy: Boolean(selectedProxy),
-    proxyName: selectedProxy ? selectedProxyName : '',
-    ...(form.password.trim() ? { password: form.password } : {})
+    asset: {
+      ...(form.id ? { id: form.id } : {}),
+      name: title,
+      title,
+      host,
+      ip: host,
+      ...(group ? { group, group_name: group } : {}),
+      status: 'online',
+      tags: [form.auth_type === 'keyBased' ? 'key' : 'ssh'],
+      username,
+      port,
+      asset_type: form.asset_type,
+      auth_type: form.auth_type,
+      comment: editMode.value ? '本地编辑' : '本地创建',
+      data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
+      keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
+      needProxy: Boolean(selectedProxy),
+      proxyName: selectedProxy ? selectedProxyName : '',
+      ...(form.password.trim() ? { password: form.password } : {})
+    }
   }
+}
+
+const testAssetFormConnection = async () => {
+  const testAssetConnection = window.aiops?.testAssetConnection
+  if (typeof testAssetConnection !== 'function') {
+    assetTestOk.value = false
+    assetTestMessage.value = '连接测试服务不可用。'
+    return
+  }
+  const draft = buildAssetFormInput()
+  if (!draft) return
+  assetTestLoading.value = true
+  assetTestMessage.value = '正在测试连接...'
+  assetTestOk.value = false
   try {
-    const saved = await saveAssetRecord(baseAsset)
+    const result = await testAssetConnection({
+      ...(form.id ? { assetId: form.id } : {}),
+      asset: draft.asset
+    })
+    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '连接测试失败。')
+    assetTestOk.value = true
+    assetTestMessage.value = `连接成功 ${result.data.endpoint} · ${result.data.durationMs}ms`
+  } catch (error) {
+    assetTestOk.value = false
+    assetTestMessage.value = error instanceof Error ? error.message : '连接测试失败。'
+  } finally {
+    assetTestLoading.value = false
+  }
+}
+
+const submitForm = async () => {
+  const draft = buildAssetFormInput()
+  if (!draft) return
+  try {
+    const saved = await saveAssetRecord(draft.asset)
     selectedAssetId.value = saved.id
-    importNotice.value = `${editMode.value ? '已保存' : '已创建'} ${title}。`
+    importNotice.value = `${editMode.value ? '已保存' : '已创建'} ${draft.title}。`
     editorOpen.value = false
     if (workspace.onboardingActiveTour === 'addAndConnectHost') {
       workspace.jumpOnboardingStep('connect-asset')

@@ -4652,6 +4652,30 @@ Object.defineProperty(window, 'aiops', {
       assetStoreMock = index >= 0 ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
       return { ok: true, data: cloneAsset(asset) }
     }),
+    testAssetConnection: vi.fn(async (input: { assetId?: string; asset?: TestAssetInput }) => {
+      const existing = input.assetId ? assetStoreMock.find((asset) => asset.id === input.assetId) : undefined
+      if (existing?.isLocalShell) {
+        return { ok: false, errorCode: 'ASSET_SSH_UNSUPPORTED_TARGET', errorMessage: '本地连接不支持 SSH 连通性测试' }
+      }
+      const asset = normalizeAssetInputMock(input.asset || existing || ({ name: '', host: '' } as TestAssetInput), existing)
+      if (!asset.host || !asset.username || !Number.isInteger(Number(asset.port)) || Number(asset.port) < 1 || Number(asset.port) > 65535) {
+        return { ok: false, errorCode: 'ASSET_SSH_TARGET_REQUIRED', errorMessage: 'SSH 测试需要地址、用户名和 1-65535 的端口' }
+      }
+      return {
+        ok: true,
+        data: {
+          assetId: existing?.id || input.assetId,
+          endpoint: `${asset.username}@${asset.host}:${asset.port}`,
+          host: asset.host,
+          port: asset.port,
+          username: asset.username,
+          authType: asset.auth_type,
+          authSource: asset.auth_type === 'password' ? 'password' : 'keychain',
+          durationMs: 12,
+          ...(asset.needProxy && asset.proxyName ? { proxyName: asset.proxyName } : {})
+        }
+      }
+    }),
     deleteAsset: vi.fn(async (id: string) => {
       if (id === LOCAL_SHELL_ASSET_ID) {
         return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: '本地连接是系统资产，不能编辑或删除' }

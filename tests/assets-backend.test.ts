@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'events'
 
 vi.mock('electron', () => ({
   app: {
@@ -34,6 +35,39 @@ const loadBackend = async () => {
   vi.resetModules()
   const modulePath = '../src/main/backend/assets'
   return import(modulePath)
+}
+
+const createSshRuntime = (options: { fail?: Error } = {}) => {
+  const connectConfigs: Array<Record<string, unknown>> = []
+  const clients: Array<EventEmitter & { connect: (config: Record<string, unknown>) => void; end: () => void; ended: boolean }> = []
+  class FakeClient extends EventEmitter {
+    ended = false
+
+    connect(config: Record<string, unknown>) {
+      connectConfigs.push(config)
+      queueMicrotask(() => {
+        if (options.fail) this.emit('error', options.fail)
+        else this.emit('ready')
+      })
+    }
+
+    end() {
+      this.ended = true
+      this.emit('end')
+    }
+  }
+  return {
+    runtime: {
+      Client: class extends FakeClient {
+        constructor() {
+          super()
+          clients.push(this)
+        }
+      }
+    },
+    connectConfigs,
+    clients
+  }
 }
 
 describe('assets backend boundary', () => {
@@ -180,6 +214,154 @@ describe('assets backend boundary', () => {
       keyType: 'RSA'
     })
     expect(options.every((option: Record<string, unknown>) => !('privateKey' in option) && !('passphrase' in option))).toBe(true)
+  })
+
+  it('tests saved password SSH assets through an injected backend ssh runtime', async () => {
+    const backend = await loadBackend()
+    const ssh = createSshRuntime()
+    backend.configureAssetConnectionRuntime({
+      ssh2Runtime: ssh.runtime,
+      now: (() => {
+        let value = 1000
+        return () => {
+          value += 23
+          return value
+        }
+      })()
+    })
+    const saved = backend.saveAsset({
+      name: 'ssh-password-host',
+      title: 'ssh-password-host',
+      host: '10.71.0.8',
+      username: 'deploy',
+      port: 2222,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['manual'],
+      password: 'backend-secret'
+    })
+
+    expect(saved.ok).toBe(true)
+    expect(saved.data).toEqual(expect.not.objectContaining({ password: 'backend-secret' }))
+
+    const tested = await backend.testAssetConnection({ assetId: saved.data!.id })
+    expect(tested).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        assetId: saved.data!.id,
+        endpoint: 'deploy@10.71.0.8:2222',
+        host: '10.71.0.8',
+        port: 2222,
+        username: 'deploy',
+        authType: 'password',
+        authSource: 'password',
+        durationMs: 23
+      })
+    })
+    expect(ssh.connectConfigs.at(-1)).toEqual(
+      expect.objectContaining({
+        host: '10.71.0.8',
+        port: 2222,
+        username: 'deploy',
+        password: 'backend-secret'
+      })
+    )
+    expect(ssh.clients.at(-1)?.ended).toBe(true)
+  })
+
+  it('tests edit drafts with blank secrets by reusing the saved backend secret', async () => {
+    const backend = await loadBackend()
+    const ssh = createSshRuntime()
+    backend.configureAssetConnectionRuntime({ ssh2Runtime: ssh.runtime })
+    const saved = backend.saveAsset({
+      name: 'ssh-edit-host',
+      title: 'ssh-edit-host',
+      host: '10.71.0.9',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['manual'],
+      password: 'saved-password'
+    })
+
+    const tested = await backend.testAssetConnection({
+      assetId: saved.data!.id,
+      asset: {
+        id: saved.data!.id,
+        name: 'ssh-edit-host',
+        title: 'ssh-edit-host',
+        host: '10.71.0.10',
+        username: 'root',
+        port: 2200,
+        asset_type: 'person',
+        auth_type: 'password',
+        group: '测试',
+        group_name: '测试',
+        tags: ['manual'],
+        password: ''
+      }
+    })
+
+    expect(tested.ok).toBe(true)
+    expect(ssh.connectConfigs.at(-1)).toEqual(
+      expect.objectContaining({
+        host: '10.71.0.10',
+        port: 2200,
+        username: 'root',
+        password: 'saved-password'
+      })
+    )
+  })
+
+  it('fails connection tests closed when credentials or ssh runtime are missing', async () => {
+    const backend = await loadBackend()
+    backend.configureAssetConnectionRuntime({ ssh2Runtime: null })
+    const missingRuntime = await backend.testAssetConnection({
+      asset: {
+        name: 'runtime-missing-host',
+        title: 'runtime-missing-host',
+        host: '10.71.0.11',
+        username: 'ops',
+        port: 22,
+        asset_type: 'person',
+        auth_type: 'password',
+        group: '测试',
+        group_name: '测试',
+        tags: ['manual'],
+        password: 'secret'
+      }
+    })
+    expect(missingRuntime).toEqual({
+      ok: false,
+      errorCode: 'ASSET_SSH_RUNTIME_UNAVAILABLE',
+      errorMessage: 'ssh2 runtime is not available'
+    })
+
+    backend.configureAssetConnectionRuntime({ ssh2Runtime: createSshRuntime().runtime })
+    const missingAuth = await backend.testAssetConnection({
+      asset: {
+        name: 'missing-auth-host',
+        title: 'missing-auth-host',
+        host: '10.71.0.12',
+        username: 'ops',
+        port: 22,
+        asset_type: 'person',
+        auth_type: 'password',
+        group: '测试',
+        group_name: '测试',
+        tags: ['manual']
+      }
+    })
+    expect(missingAuth).toEqual({
+      ok: false,
+      errorCode: 'ASSET_SSH_AUTH_REQUIRED',
+      errorMessage: 'SSH 密码不能为空'
+    })
   })
 
   it('refreshes organization assets and returns a backend-owned snapshot', async () => {

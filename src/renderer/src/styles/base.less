@@ -1606,6 +1606,12 @@ em {
   color: #ff6b6b;
 }
 
+.asset-form-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .asset-submit-button,
 .asset-empty-state button {
   height: 30px;
@@ -1614,6 +1620,20 @@ em {
   background: var(--surface-2);
   color: var(--text);
   cursor: pointer;
+}
+
+.asset-submit-button.secondary {
+  background: transparent;
+}
+
+.asset-submit-button:disabled,
+.files-folder-form footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.asset-connection-test-result.success {
+  color: #22c55e;
 }
 
 .asset-empty-state {
