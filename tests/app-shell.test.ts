@@ -3772,7 +3772,11 @@ describe('AppShell', () => {
         rootPath: '/home/deploy'
       })
     )
-    expect(store.panels.find((panel) => panel.id === store.activePanelId)?.output).toContain('[file manager] opened terminal-files-host on left transfer pane')
+    const terminalFileManagerPanel = store.panels.find((panel) => panel.id === store.activePanelId)
+    expect(terminalFileManagerPanel?.output).not.toContain('[file manager]')
+    expect(terminalFileManagerPanel?.outputSegments).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('[file manager]') })])
+    )
 
     store.setActiveModule('workspace')
     await expect(store.updateTerminalSettings({ rightMouseEvent: 'paste' })).resolves.toBe(true)

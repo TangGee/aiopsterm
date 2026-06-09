@@ -3040,7 +3040,10 @@ describe('workspace store', () => {
     expect(window.aiops.saveFileSession).not.toHaveBeenCalled()
     expect(store.activeModule).toBe('files')
     expect(store.selectedLeftFileSessionId).toBe('local')
-    expect(store.activePanel.output).toContain('[file manager] opened Local on left transfer pane')
+    expect(store.activePanel.output).not.toContain('[file manager]')
+    expect(store.activePanel.outputSegments).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('[file manager]') })])
+    )
 
     store.setActiveModule('workspace')
     store.registerSshSession(store.activePanelId, {
@@ -3111,6 +3114,10 @@ describe('workspace store', () => {
       })
     )
     expect(store.selectedRightFileSessionId).toBe('asset-terminal-file')
+    expect(store.activePanel.output).not.toContain('[file manager]')
+    expect(store.activePanel.outputSegments).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('[file manager]') })])
+    )
 
     vi.mocked(window.aiops.generateTerminalCommand).mockClear()
     const record = await store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')

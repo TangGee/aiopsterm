@@ -6996,7 +6996,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setFilesUiMode('transfer')
     openFileSession(session.id, side)
     setActiveModule('files')
-    appendTerminalSegment(panel, `[file manager] opened ${session.label} on ${side} transfer pane\n$ `, 'output')
     return session
   }
 
