@@ -1,9 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
 type UserBackend = {
+  configureUserAccountBackendRuntime: (config?: { stateFilePath?: string; useSeedData?: boolean }) => void
   resetUserAccountForTests: () => void
   patchUserAccountForTests: (patch: Record<string, unknown>) => void
   getUserAccount: () => any
@@ -21,10 +22,15 @@ type UserBackend = {
 }
 
 let backend: UserBackend
+const tempDirs: string[] = []
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/userAccount'
   backend = (await import(modulePath)) as UserBackend
+})
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
 const expectOkData = <T extends { ok: boolean; data?: unknown }>(result: T) => {
@@ -34,7 +40,10 @@ const expectOkData = <T extends { ok: boolean; data?: unknown }>(result: T) => {
 }
 
 describe('user account backend boundary', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-'))
+    tempDirs.push(dir)
+    backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: true })
     backend.resetUserAccountForTests()
   })
 
@@ -281,5 +290,131 @@ describe('user account backend boundary', () => {
       message: '可信设备已移除'
     })
     expect(data.trustedDevices.map((device: { id: number }) => device.id)).toEqual([1])
+  })
+
+  it('does not expose development seed trusted devices in non-seed runtime defaults', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-nonseed-'))
+    tempDirs.push(dir)
+    backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: false })
+    backend.resetUserAccountForTests()
+
+    const data = expectOkData(backend.getUserAccount())
+
+    expect(data.profile).toMatchObject({
+      uid: 0,
+      subscription: 'free',
+      skippedLogin: true,
+      localDatabaseReady: false,
+      lastLoginMethod: 'skip'
+    })
+    expect(data.profile.email).toBe('')
+    expect(data.profile.mobile).toBe('')
+    expect(data.trustedDevices).toHaveLength(1)
+    expect(data.trustedDevices[0]).toMatchObject({ id: 1, current: true })
+    expect(data.trustedDevices.some((device: { deviceName: string }) => device.deviceName === 'MacBook')).toBe(false)
+  })
+
+  it('persists account mutations and restores profile plus trusted devices through the backend store', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-persist-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'user-account.json')
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
+    backend.resetUserAccountForTests()
+
+    expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
+    expectOkData(backend.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead', avatarInitials: 'ol' }))
+    expectOkData(backend.bindUserContact({ kind: 'email', value: 'ops@example.local', code: '123456' }))
+    expectOkData(backend.resetUserPassword({ password: 'Aa123456!' }))
+    expectOkData(backend.revokeTrustedDevice(2))
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
+      profile: { name: string; username: string; email: string; passwordUpdatedAt: string; avatarInitials: string }
+      trustedDevices: Array<{ id: number; deviceName: string }>
+    }
+    expect(persisted.profile).toMatchObject({
+      name: 'Ops Lead',
+      username: 'ops_lead',
+      email: 'ops@example.local',
+      avatarInitials: 'OL'
+    })
+    expect(persisted.profile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+    expect(persisted.trustedDevices.map((device) => device.id)).toEqual([1])
+
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
+    const restored = expectOkData(backend.getUserAccount())
+
+    expect(restored.profile).toMatchObject({
+      name: 'Ops Lead',
+      username: 'ops_lead',
+      email: 'ops@example.local',
+      avatarInitials: 'OL',
+      lastLoginMethod: 'account',
+      localDatabaseReady: true
+    })
+    expect(restored.profile.passwordUpdatedAt).toBe(persisted.profile.passwordUpdatedAt)
+    expect(restored.trustedDevices.map((device: { id: number }) => device.id)).toEqual([1])
+  })
+
+  it('normalizes malformed persisted account state instead of leaking invalid client data', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-malformed-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'user-account.json')
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        profile: {
+          name: '  Restored User  ',
+          username: '',
+          email: 'not-an-email',
+          mobile: '10000000000',
+          registrationCode: 99,
+          authProvider: 'remote',
+          subscription: 'lifetime',
+          needDeviceVerification: true,
+          localDatabaseReady: true
+        },
+        trustedDevices: [
+          { id: 5, deviceName: 'Recovered Workstation', current: false },
+          { id: 5, deviceName: 'Duplicate Id Device', current: true }
+        ]
+      }),
+      'utf-8'
+    )
+
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
+    const restored = expectOkData(backend.getUserAccount())
+
+    expect(restored.profile).toMatchObject({
+      name: 'Restored User',
+      username: 'local_ops',
+      email: 'operator@example.local',
+      mobile: '13800000000',
+      registrationCode: 9,
+      authProvider: 'local',
+      subscription: 'pro',
+      needDeviceVerification: false,
+      localDatabaseReady: true
+    })
+    expect(restored.trustedDevices).toEqual([
+      expect.objectContaining({ id: 5, deviceName: 'Recovered Workstation', current: false }),
+      expect.objectContaining({ id: 6, deviceName: 'Duplicate Id Device', current: true })
+    ])
+  })
+
+  it('falls back to backend-owned defaults when persisted account state is corrupt', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-corrupt-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'user-account.json')
+    await writeFile(stateFilePath, '{bad json', 'utf-8')
+
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
+    const restored = expectOkData(backend.getUserAccount())
+
+    expect(restored.profile).toMatchObject({
+      name: 'Local Operator',
+      username: 'local_ops'
+    })
+    expect(restored.trustedDevices.map((device: { deviceName: string }) => device.deviceName)).toEqual(['Linux Workstation', 'MacBook'])
   })
 })

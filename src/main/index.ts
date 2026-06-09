@@ -169,6 +169,7 @@ import {
 } from './backend/terminal'
 import {
   bindUserContact,
+  configureUserAccountBackendRuntime,
   getUserAccount,
   loginUserAccount,
   logoutUserAccount,
@@ -1226,6 +1227,7 @@ configureFilesBackendRuntime({ getConfig })
 configureSshTunnelBackendRuntime({ getConfig })
 configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
+configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

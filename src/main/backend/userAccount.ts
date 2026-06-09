@@ -15,8 +15,10 @@ import type {
   AiopsUserProfile,
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { readFile, stat } from 'fs/promises'
-import { basename, extname } from 'path'
+import { hostname, networkInterfaces, userInfo } from 'os'
+import { basename, dirname, extname, isAbsolute, resolve } from 'path'
 
 const defaultUserProfile: AiopsUserProfile = {
   uid: 2001007,
@@ -64,8 +66,117 @@ const defaultTrustedDevices: AiopsTrustedDevice[] = [
   }
 ]
 
-let profileStore: AiopsUserProfile = { ...defaultUserProfile }
-let trustedDeviceStore: AiopsTrustedDevice[] = defaultTrustedDevices.map((device) => ({ ...device }))
+type UserAccountBackendRuntimeConfig = {
+  stateFilePath?: string
+  useSeedData?: boolean
+}
+
+type UserAccountPersistedState = {
+  version: 1
+  profile: AiopsUserProfile
+  trustedDevices: AiopsTrustedDevice[]
+}
+
+const defaultUserAccountStateFilePath = () => {
+  const envPath = String(process.env.AIOPSTERM_USER_ACCOUNT_STATE_FILE || '').trim()
+  return envPath ? (isAbsolute(envPath) ? envPath : resolve(envPath)) : resolve(process.cwd(), '.aiopsterm-user-account.json')
+}
+
+const defaultUserAccountSeedMode = () =>
+  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED || '').trim() === '1'
+
+let runtimeConfig: Required<UserAccountBackendRuntimeConfig> = {
+  stateFilePath: defaultUserAccountStateFilePath(),
+  useSeedData: defaultUserAccountSeedMode()
+}
+
+const firstLocalInterface = () => {
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family === 'IPv4' && !entry.internal) return entry
+    }
+  }
+  return null
+}
+
+const safeLocalUsername = () => {
+  try {
+    return userInfo().username || 'local_user'
+  } catch {
+    return 'local_user'
+  }
+}
+
+const normalizedUsername = (value: string) => {
+  const cleaned = value.replace(/[^A-Za-z0-9_]/g, '_').slice(0, 20)
+  if (cleaned.length >= 6) return cleaned
+  return `${cleaned || 'local'}_user`.slice(0, 20)
+}
+
+const initialsFromName = (value: string) => {
+  const letters = value
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+  return (letters || 'AI').slice(0, 3)
+}
+
+const createLocalUserProfile = (): AiopsUserProfile => {
+  const net = firstLocalInterface()
+  const rawUsername = safeLocalUsername()
+  const username = normalizedUsername(rawUsername)
+  const name = rawUsername || username
+  return {
+    uid: 0,
+    name,
+    username,
+    avatarInitials: initialsFromName(name),
+    avatarImageUrl: '',
+    registrationType: 'personal',
+    registrationCode: 9,
+    authProvider: 'local',
+    subscription: 'free',
+    subscriptionExpiresAt: '',
+    email: '',
+    mobile: '',
+    localIp: net?.address || '127.0.0.1',
+    macAddress: net?.mac || '',
+    isOfficeDevice: false,
+    needDeviceVerification: false,
+    skippedLogin: true,
+    localDatabaseReady: false,
+    lastLoginMethod: 'skip',
+    lastLoginAt: '',
+    passwordUpdatedAt: '',
+    avatarUpdatedAt: ''
+  }
+}
+
+const createLocalTrustedDevices = (): AiopsTrustedDevice[] => {
+  const net = firstLocalInterface()
+  return [
+    {
+      id: 1,
+      deviceName: hostname() || 'Local Device',
+      macAddress: net?.mac || '',
+      lastLoginIp: net?.address || '127.0.0.1',
+      location: 'Local',
+      lastLoginUserAgent: `${process.platform} ${process.arch}`,
+      current: true
+    }
+  ]
+}
+
+const createInitialUserProfile = () => (runtimeConfig.useSeedData ? { ...defaultUserProfile } : createLocalUserProfile())
+const createInitialTrustedDevices = () =>
+  runtimeConfig.useSeedData ? defaultTrustedDevices.map((device) => ({ ...device })) : createLocalTrustedDevices()
+
+let profileStore: AiopsUserProfile = createInitialUserProfile()
+let trustedDeviceStore: AiopsTrustedDevice[] = createInitialTrustedDevices()
+let userAccountStateLoaded = false
+let userAccountLoadedStateFilePath = ''
 
 type UserCodeCooldownScope = 'login' | 'contact'
 type UserCodeKind = AiopsUserCodeInput['kind']
@@ -76,14 +187,168 @@ type UserCodeCooldown = {
 const userCodeCooldownMs = 300_000
 const userCodeCooldowns = new Map<string, UserCodeCooldown>()
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
+const persistedString = (value: unknown, fallback = '') => (typeof value === 'string' ? value.trim() || fallback : fallback)
+
+const persistedRawString = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback)
+
+const persistedBoolean = (value: unknown, fallback: boolean) => (typeof value === 'boolean' ? value : fallback)
+
+const persistedNumber = (value: unknown, fallback: number) => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+
+const persistedPositiveInteger = (value: unknown, fallback: number) => {
+  const numeric = Number(value)
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : fallback
+}
+
+const registrationCodes = new Set([1, 2, 3, 4, 6, 7, 9])
+const lastLoginMethods = new Set(['account', 'email', 'mobile', 'skip', 'external'])
+const authProviders = new Set(['local', 'sso', 'oauth'])
+const subscriptions = new Set(['free', 'pro', 'ultra'])
+
+const normalizeRegistrationCode = (value: unknown, fallback: AiopsUserProfile['registrationCode']) => {
+  const numeric = Number(value)
+  return registrationCodes.has(numeric) ? (numeric as AiopsUserProfile['registrationCode']) : fallback
+}
+
+const normalizeLastLoginMethod = (value: unknown, fallback: AiopsUserProfile['lastLoginMethod']) =>
+  typeof value === 'string' && lastLoginMethods.has(value) ? (value as AiopsUserProfile['lastLoginMethod']) : fallback
+
+const normalizeAuthProvider = (value: unknown, fallback: AiopsUserProfile['authProvider']) =>
+  typeof value === 'string' && authProviders.has(value) ? (value as AiopsUserProfile['authProvider']) : fallback
+
+const normalizeSubscription = (value: unknown, fallback: AiopsUserProfile['subscription']) =>
+  typeof value === 'string' && subscriptions.has(value) ? (value as AiopsUserProfile['subscription']) : fallback
+
+const normalizeRegistrationType = (value: unknown, fallback: AiopsUserProfile['registrationType']) =>
+  value === 'enterprise' || value === 'personal' ? value : fallback
+
+const normalizePersistedProfile = (value: unknown): AiopsUserProfile => {
+  const base = createInitialUserProfile()
+  const record = isRecord(value) ? value : {}
+  const name = persistedString(record.name, base.name)
+  const avatarInitials = persistedString(record.avatarInitials, initialsFromName(name)).toUpperCase().slice(0, 3) || base.avatarInitials
+  const email = persistedString(record.email, base.email)
+  const mobile = persistedString(record.mobile, base.mobile)
+  return {
+    uid: persistedNumber(record.uid, base.uid),
+    name,
+    username: persistedString(record.username, base.username),
+    avatarInitials,
+    avatarImageUrl: persistedRawString(record.avatarImageUrl, base.avatarImageUrl),
+    registrationType: normalizeRegistrationType(record.registrationType, base.registrationType),
+    registrationCode: normalizeRegistrationCode(record.registrationCode, base.registrationCode),
+    authProvider: normalizeAuthProvider(record.authProvider, base.authProvider),
+    subscription: normalizeSubscription(record.subscription, base.subscription),
+    subscriptionExpiresAt: persistedString(record.subscriptionExpiresAt, base.subscriptionExpiresAt),
+    email: !email || isValidEmail(email) ? email : base.email,
+    mobile: !mobile || isValidMobile(mobile) ? mobile : base.mobile,
+    localIp: persistedString(record.localIp, base.localIp),
+    macAddress: persistedString(record.macAddress, base.macAddress),
+    isOfficeDevice: persistedBoolean(record.isOfficeDevice, base.isOfficeDevice),
+    needDeviceVerification: false,
+    skippedLogin: persistedBoolean(record.skippedLogin, base.skippedLogin),
+    localDatabaseReady: persistedBoolean(record.localDatabaseReady, base.localDatabaseReady),
+    lastLoginMethod: normalizeLastLoginMethod(record.lastLoginMethod, base.lastLoginMethod),
+    lastLoginAt: persistedString(record.lastLoginAt, base.lastLoginAt),
+    passwordUpdatedAt: persistedString(record.passwordUpdatedAt, base.passwordUpdatedAt),
+    avatarUpdatedAt: persistedString(record.avatarUpdatedAt, base.avatarUpdatedAt)
+  }
+}
+
+const normalizePersistedTrustedDevices = (value: unknown): AiopsTrustedDevice[] => {
+  const fallback = createInitialTrustedDevices()
+  if (!Array.isArray(value)) return fallback
+  const ids = new Set<number>()
+  const devices: AiopsTrustedDevice[] = []
+  value.forEach((item, index) => {
+    if (!isRecord(item)) return
+    const deviceName = persistedString(item.deviceName)
+    if (!deviceName) return
+    let id = persistedPositiveInteger(item.id, index + 1)
+    while (ids.has(id)) id += 1
+    ids.add(id)
+    devices.push({
+      id,
+      deviceName,
+      macAddress: persistedString(item.macAddress),
+      lastLoginIp: persistedString(item.lastLoginIp),
+      location: persistedString(item.location),
+      lastLoginUserAgent: persistedString(item.lastLoginUserAgent),
+      current: persistedBoolean(item.current, false)
+    })
+  })
+  if (!devices.length) return fallback
+  if (!devices.some((device) => device.current)) devices[0] = { ...devices[0], current: true }
+  return devices.map((device, index) => ({ ...device, current: device.current && !devices.slice(0, index).some((item) => item.current) }))
+}
+
+const normalizePersistedUserAccountState = (value: unknown): UserAccountPersistedState | null => {
+  if (!isRecord(value)) return null
+  return {
+    version: 1,
+    profile: normalizePersistedProfile(value.profile),
+    trustedDevices: normalizePersistedTrustedDevices(value.trustedDevices)
+  }
+}
+
+const applyInitialUserAccountState = () => {
+  profileStore = createInitialUserProfile()
+  trustedDeviceStore = createInitialTrustedDevices()
+}
+
+const applyPersistedUserAccountState = (state: UserAccountPersistedState) => {
+  profileStore = { ...state.profile }
+  trustedDeviceStore = state.trustedDevices.map((device) => ({ ...device }))
+}
+
+const ensureUserAccountStateLoaded = () => {
+  if (userAccountStateLoaded && userAccountLoadedStateFilePath === runtimeConfig.stateFilePath) return
+  userAccountStateLoaded = true
+  userAccountLoadedStateFilePath = runtimeConfig.stateFilePath
+  applyInitialUserAccountState()
+  if (!existsSync(runtimeConfig.stateFilePath)) return
+  try {
+    const parsed = JSON.parse(readFileSync(runtimeConfig.stateFilePath, 'utf-8')) as unknown
+    const state = normalizePersistedUserAccountState(parsed)
+    if (state) applyPersistedUserAccountState(state)
+  } catch {
+    /* Keep the backend-owned default account state when local account state is corrupt. */
+  }
+}
+
+const persistUserAccountState = () => {
+  ensureUserAccountStateLoaded()
+  const state: UserAccountPersistedState = {
+    version: 1,
+    profile: { ...profileStore },
+    trustedDevices: trustedDeviceStore.map((device) => ({ ...device }))
+  }
+  try {
+    mkdirSync(dirname(runtimeConfig.stateFilePath), { recursive: true })
+    const tempPath = `${runtimeConfig.stateFilePath}.${process.pid}.${Date.now()}.tmp`
+    writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')
+    renameSync(tempPath, runtimeConfig.stateFilePath)
+  } catch {
+    /* Persistence failures must not turn a successful local account action into a UI failure. */
+  }
+}
+
 const cloneProfile = (profile: AiopsUserProfile = profileStore): AiopsUserProfile => ({ ...profile })
 
 const cloneTrustedDevices = (devices: AiopsTrustedDevice[] = trustedDeviceStore) => devices.map((device) => ({ ...device }))
 
-const snapshot = (): AiopsUserAccountSnapshot => ({
-  profile: cloneProfile(),
-  trustedDevices: cloneTrustedDevices()
-})
+const snapshot = (): AiopsUserAccountSnapshot => {
+  ensureUserAccountStateLoaded()
+  return {
+    profile: cloneProfile(),
+    trustedDevices: cloneTrustedDevices()
+  }
+}
 
 const errorResult = <T>(errorCode: string, errorMessage: string): AiopsMutationResult<T> => ({
   ok: false,
@@ -173,6 +438,7 @@ const passwordScore = (password: string) => {
 }
 
 const applyProfile = (patch: Partial<AiopsUserProfile>) => {
+  ensureUserAccountStateLoaded()
   profileStore = {
     ...profileStore,
     ...patch
@@ -189,22 +455,42 @@ const loginProfile = (patch: Partial<AiopsUserProfile>) => {
   })
 }
 
-const successMutation = (message: string): AiopsUserMutationResult => ({
-  ok: true,
-  data: {
-    ...snapshot(),
-    message
+const successMutation = (message: string): AiopsUserMutationResult => {
+  persistUserAccountState()
+  return {
+    ok: true,
+    data: {
+      ...snapshot(),
+      message
+    }
   }
-})
+}
+
+export const configureUserAccountBackendRuntime = (config: UserAccountBackendRuntimeConfig = {}) => {
+  runtimeConfig = {
+    stateFilePath: config.stateFilePath
+      ? isAbsolute(config.stateFilePath)
+        ? config.stateFilePath
+        : resolve(config.stateFilePath)
+      : defaultUserAccountStateFilePath(),
+    useSeedData: config.useSeedData ?? defaultUserAccountSeedMode()
+  }
+  userCodeCooldowns.clear()
+  userAccountStateLoaded = false
+  userAccountLoadedStateFilePath = ''
+  applyInitialUserAccountState()
+}
 
 export const resetUserAccountForTests = () => {
-  profileStore = { ...defaultUserProfile }
-  trustedDeviceStore = defaultTrustedDevices.map((device) => ({ ...device }))
+  applyInitialUserAccountState()
   userCodeCooldowns.clear()
+  userAccountStateLoaded = true
+  userAccountLoadedStateFilePath = runtimeConfig.stateFilePath
 }
 
 export const patchUserAccountForTests = (patch: Partial<AiopsUserProfile>) => {
   applyProfile(patch)
+  persistUserAccountState()
 }
 
 export const getUserAccount = (): AiopsUserAccountResult => ({
@@ -228,6 +514,7 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
         needDeviceVerification: true,
         localDatabaseReady: false
       })
+      persistUserAccountState()
       return {
         ok: false,
         data: {
@@ -334,6 +621,7 @@ export const prepareUserAvatarImage = async (input: AiopsUserAvatarPrepareInput)
 }
 
 const validateProfileUpdate = (input: AiopsUserProfileUpdateInput) => {
+  ensureUserAccountStateLoaded()
   const username = trimText(input.username ?? profileStore.username)
   const name = trimText(input.name ?? profileStore.name)
   if (!username || username.length < 6 || username.length > 20) return '用户名长度需要在 6 到 20 个字符之间'
@@ -362,6 +650,7 @@ const canEditEmail = () => ![2, 3, 4, 6].includes(profileStore.registrationCode)
 const canResetPassword = () => profileStore.registrationCode !== 1 && profileStore.authProvider !== 'sso'
 
 const validateContact = (kind: 'email' | 'mobile', value: string) => {
+  ensureUserAccountStateLoaded()
   if (kind === 'email') {
     if (!canEditEmail()) return '当前登录方式不允许修改邮箱'
     if (!isValidEmail(value)) return '邮箱格式不正确'
@@ -390,6 +679,7 @@ export const bindUserContact = (input: AiopsUserContactBindInput): AiopsUserMuta
 }
 
 export const resetUserPassword = (input: AiopsUserPasswordInput): AiopsUserMutationResult => {
+  ensureUserAccountStateLoaded()
   if (!canResetPassword()) return errorResult('USER_PASSWORD_RESET_FORBIDDEN', 'SSO 用户不能修改密码')
   if (input.password.length < 6) return errorResult('USER_PASSWORD_TOO_SHORT', '密码长度不能小于6位')
   if (passwordScore(input.password) < 1) return errorResult('USER_PASSWORD_WEAK', '请具有弱以上的密码强度')
@@ -398,11 +688,13 @@ export const resetUserPassword = (input: AiopsUserPasswordInput): AiopsUserMutat
 }
 
 export const revokeTrustedDevice = (id: number): AiopsTrustedDeviceRevokeResult => {
+  ensureUserAccountStateLoaded()
   const deviceId = Number(id)
   const device = trustedDeviceStore.find((item) => item.id === deviceId)
   if (!device) return errorResult('TRUSTED_DEVICE_NOT_FOUND', 'Trusted device not found.')
   if (device.current) return errorResult('TRUSTED_DEVICE_CURRENT', 'Current trusted device cannot be revoked.')
   trustedDeviceStore = trustedDeviceStore.filter((item) => item.id !== deviceId)
+  persistUserAccountState()
   return {
     ok: true,
     data: {
