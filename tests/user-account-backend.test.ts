@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -105,24 +105,53 @@ describe('user account backend boundary', () => {
     })
   })
 
-  it('validates login code targets before starting countdown state', () => {
-    expect(backend.sendUserLoginCode({ kind: 'email', value: 'bad' })).toEqual({
-      ok: false,
-      errorCode: 'USER_EMAIL_INVALID',
-      errorMessage: '邮箱格式不正确'
-    })
-    expect(backend.sendUserLoginCode({ kind: 'mobile', value: '10000000000' })).toEqual({
-      ok: false,
-      errorCode: 'USER_MOBILE_INVALID',
-      errorMessage: '手机号格式不正确'
-    })
+  it('validates login code targets before issuing backend-owned cooldowns', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
 
-    const result = backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' })
-    expect(expectOkData(result)).toMatchObject({
-      kind: 'email',
-      target: 'login@example.local',
-      countdownSeconds: 300
-    })
+    try {
+      expect(backend.sendUserLoginCode({ kind: 'email', value: 'bad' })).toEqual({
+        ok: false,
+        errorCode: 'USER_EMAIL_INVALID',
+        errorMessage: '邮箱格式不正确'
+      })
+      expect(backend.sendUserLoginCode({ kind: 'mobile', value: '10000000000' })).toEqual({
+        ok: false,
+        errorCode: 'USER_MOBILE_INVALID',
+        errorMessage: '手机号格式不正确'
+      })
+
+      const result = backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' })
+      const first = expectOkData(result)
+      expect(first).toMatchObject({
+        kind: 'email',
+        target: 'login@example.local',
+        countdownSeconds: 300,
+        remainingSeconds: 300,
+        message: '邮箱登录验证码已发送'
+      })
+      expect(first.expiresAt).toBe(Date.now() + 300_000)
+
+      vi.advanceTimersByTime(60_000)
+      const repeated = expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+      expect(repeated.expiresAt).toBe(first.expiresAt)
+      expect(repeated.countdownSeconds).toBe(240)
+      expect(repeated.remainingSeconds).toBe(240)
+      expect(repeated.message).toBe('验证码已发送，请 240 秒后重试')
+
+      const contact = expectOkData(backend.sendUserContactCode({ kind: 'email', value: 'login@example.local' }))
+      expect(contact.expiresAt).toBe(Date.now() + 300_000)
+      expect(contact.expiresAt).not.toBe(first.expiresAt)
+
+      expect(expectOkData(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })).profile.email).toBe(
+        'login@example.local'
+      )
+      const afterLogin = expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+      expect(afterLogin.expiresAt).toBe(Date.now() + 300_000)
+      expect(afterLogin.expiresAt).not.toBe(first.expiresAt)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('validates and applies profile edits through backend-owned mutations', () => {
@@ -194,7 +223,12 @@ describe('user account backend boundary', () => {
     })
 
     const mobileCode = backend.sendUserContactCode({ kind: 'mobile', value: '13800000002' })
-    expect(expectOkData(mobileCode).message).toBe('手机验证码已发送')
+    expect(expectOkData(mobileCode)).toMatchObject({
+      target: '13800000002',
+      countdownSeconds: 300,
+      remainingSeconds: 300,
+      message: '手机验证码已发送'
+    })
 
     const bindMissingCode = backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '' })
     expect(bindMissingCode).toEqual({

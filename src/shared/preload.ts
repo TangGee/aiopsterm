@@ -413,6 +413,8 @@ export type AiopsUserCodeResult = AiopsMutationResult<{
   kind: 'email' | 'mobile'
   target: string
   countdownSeconds: number
+  remainingSeconds: number
+  expiresAt: number
   message: string
 }>
 

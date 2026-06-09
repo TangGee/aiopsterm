@@ -376,6 +376,11 @@ const cloneTrustedDeviceMock = (device: TestTrustedDevice): TestTrustedDevice =>
 let userProfileStoreMock = cloneUserProfileMock(defaultUserProfile)
 let trustedDeviceStoreMock = defaultTrustedDevices.map(cloneTrustedDeviceMock)
 
+type UserCodeCooldownScopeMock = 'login' | 'contact'
+type UserCodeKindMock = 'email' | 'mobile'
+const userCodeCooldownMsMock = 300_000
+const userCodeCooldownStoreMock = new Map<string, { expiresAt: number }>()
+
 const userTimestampMock = (value = new Date()) => {
   const pad = (input: number) => input.toString().padStart(2, '0')
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`
@@ -386,6 +391,38 @@ const trimUserTextMock = (value: unknown) => String(value || '').trim()
 const isValidUserEmailMock = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 const isValidUserMobileMock = (value: string) => /^1[3-9]\d{9}$/.test(value)
+
+const userCodeCooldownKeyMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string) =>
+  [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
+
+const remainingUserCodeCooldownSecondsMock = (expiresAt: number, now = Date.now()) => Math.max(0, Math.ceil((expiresAt - now) / 1000))
+
+const clearUserCodeCooldownMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string) => {
+  userCodeCooldownStoreMock.delete(userCodeCooldownKeyMock(scope, kind, target))
+}
+
+const issueUserCodeCooldownMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string, message: string) => {
+  const now = Date.now()
+  const key = userCodeCooldownKeyMock(scope, kind, target)
+  const active = userCodeCooldownStoreMock.get(key)
+  const activeRemainingSeconds = active ? remainingUserCodeCooldownSecondsMock(active.expiresAt, now) : 0
+  const expiresAt = activeRemainingSeconds > 0 ? active!.expiresAt : now + userCodeCooldownMsMock
+  const remainingSeconds = activeRemainingSeconds > 0 ? activeRemainingSeconds : remainingUserCodeCooldownSecondsMock(expiresAt, now)
+  if (activeRemainingSeconds <= 0) {
+    userCodeCooldownStoreMock.set(key, { expiresAt })
+  }
+  return {
+    ok: true as const,
+    data: {
+      kind,
+      target,
+      countdownSeconds: remainingSeconds,
+      remainingSeconds,
+      expiresAt,
+      message: activeRemainingSeconds > 0 ? `验证码已发送，请 ${remainingSeconds} 秒后重试` : message
+    }
+  }
+}
 
 const userPasswordScoreMock = (password: string) => {
   if (!password) return 0
@@ -435,6 +472,7 @@ const loginUserProfileMock = (patch: Partial<TestUserProfile>) => {
 const resetUserAccountStoreMock = () => {
   userProfileStoreMock = cloneUserProfileMock(defaultUserProfile)
   trustedDeviceStoreMock = defaultTrustedDevices.map(cloneTrustedDeviceMock)
+  userCodeCooldownStoreMock.clear()
 }
 
 const validateUserProfileUpdateMock = (input: Partial<Pick<TestUserProfile, 'name' | 'username' | 'avatarInitials' | 'avatarImageUrl'>>) => {
@@ -3932,6 +3970,7 @@ Object.defineProperty(window, 'aiops', {
             registrationCode: 2,
             lastLoginMethod: 'email'
           })
+          clearUserCodeCooldownMock('login', 'email', email)
           return userSuccessMock('邮箱登录成功，本地数据库初始化完成')
         }
 
@@ -3944,6 +3983,7 @@ Object.defineProperty(window, 'aiops', {
           registrationCode: 7,
           lastLoginMethod: 'mobile'
         })
+        clearUserCodeCooldownMock('login', 'mobile', mobile)
         return userSuccessMock('手机号登录成功，本地数据库初始化完成')
       }
     ),
@@ -3972,15 +4012,7 @@ Object.defineProperty(window, 'aiops', {
       const value = trimUserTextMock(input.value)
       if (input.kind === 'email' && !isValidUserEmailMock(value)) return userErrorMock('USER_EMAIL_INVALID', '邮箱格式不正确')
       if (input.kind === 'mobile' && !isValidUserMobileMock(value)) return userErrorMock('USER_MOBILE_INVALID', '手机号格式不正确')
-      return {
-        ok: true as const,
-        data: {
-          kind: input.kind,
-          target: value,
-          countdownSeconds: 300,
-          message: `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`
-        }
-      }
+      return issueUserCodeCooldownMock('login', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`)
     }),
     prepareUserAvatarImage: vi.fn(async (input: { filePath: string }) => {
       const filePath = trimUserTextMock(input.filePath)
@@ -4029,15 +4061,7 @@ Object.defineProperty(window, 'aiops', {
       const value = trimUserTextMock(input.value)
       const validation = validateUserContactMock(input.kind, value)
       if (validation) return userErrorMock(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
-      return {
-        ok: true as const,
-        data: {
-          kind: input.kind,
-          target: value,
-          countdownSeconds: 300,
-          message: `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`
-        }
-      }
+      return issueUserCodeCooldownMock('contact', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
     }),
     bindUserContact: vi.fn(async (input: { kind: 'email' | 'mobile'; value: string; code: string }) => {
       const value = trimUserTextMock(input.value)
@@ -4045,6 +4069,7 @@ Object.defineProperty(window, 'aiops', {
       if (validation) return userErrorMock(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
       if (!trimUserTextMock(input.code)) return userErrorMock('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
       applyUserProfileMock({ [input.kind]: value })
+      clearUserCodeCooldownMock('contact', input.kind, value)
       return userSuccessMock(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')
     }),
     revokeTrustedDevice: vi.fn(async (id: number) => {

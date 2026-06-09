@@ -67,6 +67,15 @@ const defaultTrustedDevices: AiopsTrustedDevice[] = [
 let profileStore: AiopsUserProfile = { ...defaultUserProfile }
 let trustedDeviceStore: AiopsTrustedDevice[] = defaultTrustedDevices.map((device) => ({ ...device }))
 
+type UserCodeCooldownScope = 'login' | 'contact'
+type UserCodeKind = AiopsUserCodeInput['kind']
+type UserCodeCooldown = {
+  expiresAt: number
+}
+
+const userCodeCooldownMs = 300_000
+const userCodeCooldowns = new Map<string, UserCodeCooldown>()
+
 const cloneProfile = (profile: AiopsUserProfile = profileStore): AiopsUserProfile => ({ ...profile })
 
 const cloneTrustedDevices = (devices: AiopsTrustedDevice[] = trustedDeviceStore) => devices.map((device) => ({ ...device }))
@@ -94,6 +103,40 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 const isValidMobile = (value: string) => /^1[3-9]\d{9}$/.test(value)
 
 const maxAvatarBytes = 2 * 1024 * 1024
+
+const userCodeCooldownKey = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) =>
+  [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
+
+const remainingCodeCooldownSeconds = (expiresAt: number, now = Date.now()) => Math.max(0, Math.ceil((expiresAt - now) / 1000))
+
+const clearUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) => {
+  userCodeCooldowns.delete(userCodeCooldownKey(scope, kind, target))
+}
+
+const issueUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string, message: string): AiopsUserCodeResult => {
+  const now = Date.now()
+  const key = userCodeCooldownKey(scope, kind, target)
+  const active = userCodeCooldowns.get(key)
+  const activeRemainingSeconds = active ? remainingCodeCooldownSeconds(active.expiresAt, now) : 0
+  const expiresAt = activeRemainingSeconds > 0 ? active!.expiresAt : now + userCodeCooldownMs
+  const remainingSeconds = activeRemainingSeconds > 0 ? activeRemainingSeconds : remainingCodeCooldownSeconds(expiresAt, now)
+
+  if (activeRemainingSeconds <= 0) {
+    userCodeCooldowns.set(key, { expiresAt })
+  }
+
+  return {
+    ok: true,
+    data: {
+      kind,
+      target,
+      countdownSeconds: remainingSeconds,
+      remainingSeconds,
+      expiresAt,
+      message: activeRemainingSeconds > 0 ? `验证码已发送，请 ${remainingSeconds} 秒后重试` : message
+    }
+  }
+}
 
 const avatarMimeByExtension: Record<string, string> = {
   '.png': 'image/png',
@@ -157,6 +200,7 @@ const successMutation = (message: string): AiopsUserMutationResult => ({
 export const resetUserAccountForTests = () => {
   profileStore = { ...defaultUserProfile }
   trustedDeviceStore = defaultTrustedDevices.map((device) => ({ ...device }))
+  userCodeCooldowns.clear()
 }
 
 export const patchUserAccountForTests = (patch: Partial<AiopsUserProfile>) => {
@@ -215,6 +259,7 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
       registrationCode: 2,
       lastLoginMethod: 'email'
     })
+    clearUserCodeCooldown('login', 'email', email)
     return successMutation('邮箱登录成功，本地数据库初始化完成')
   }
 
@@ -227,6 +272,7 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
     registrationCode: 7,
     lastLoginMethod: 'mobile'
   })
+  clearUserCodeCooldown('login', 'mobile', mobile)
   return successMutation('手机号登录成功，本地数据库初始化完成')
 }
 
@@ -257,15 +303,7 @@ export const sendUserLoginCode = (input: AiopsUserCodeInput): AiopsUserCodeResul
   const value = trimText(input.value)
   if (input.kind === 'email' && !isValidEmail(value)) return errorResult('USER_EMAIL_INVALID', '邮箱格式不正确')
   if (input.kind === 'mobile' && !isValidMobile(value)) return errorResult('USER_MOBILE_INVALID', '手机号格式不正确')
-  return {
-    ok: true,
-    data: {
-      kind: input.kind,
-      target: value,
-      countdownSeconds: 300,
-      message: `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`
-    }
-  }
+  return issueUserCodeCooldown('login', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`)
 }
 
 export const prepareUserAvatarImage = async (input: AiopsUserAvatarPrepareInput): Promise<AiopsUserAvatarPrepareResult> => {
@@ -338,15 +376,7 @@ export const sendUserContactCode = (input: AiopsUserCodeInput): AiopsUserCodeRes
   const value = trimText(input.value)
   const validation = validateContact(input.kind, value)
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
-  return {
-    ok: true,
-    data: {
-      kind: input.kind,
-      target: value,
-      countdownSeconds: 300,
-      message: `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`
-    }
-  }
+  return issueUserCodeCooldown('contact', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
 }
 
 export const bindUserContact = (input: AiopsUserContactBindInput): AiopsUserMutationResult => {
@@ -355,6 +385,7 @@ export const bindUserContact = (input: AiopsUserContactBindInput): AiopsUserMuta
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
   if (!trimText(input.code)) return errorResult('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
   applyProfile({ [input.kind]: value })
+  clearUserCodeCooldown('contact', input.kind, value)
   return successMutation(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')
 }
 

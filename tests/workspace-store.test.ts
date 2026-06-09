@@ -6988,6 +6988,44 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('derives user code countdowns from backend expiry snapshots', async () => {
+    vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'email',
+        target: 'login@example.local',
+        countdownSeconds: 300,
+        remainingSeconds: 123,
+        expiresAt: Date.now() + 123_000,
+        message: '邮箱登录验证码已发送'
+      }
+    })
+    await expect(store.sendUserLoginCode('email', 'login@example.local')).resolves.toBe(true)
+    expect(store.userLoginCodeCountdown.email).toBe(123)
+    expect(store.userNotice).toBe('邮箱登录验证码已发送')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userLoginCodeCountdown.email).toBe(122)
+
+    vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'mobile',
+        target: '13800000002',
+        countdownSeconds: 300,
+        remainingSeconds: 45,
+        expiresAt: Date.now() + 45_000,
+        message: '手机验证码已发送'
+      }
+    })
+    await expect(store.sendUserContactCode('mobile', '13800000002')).resolves.toBe(true)
+    expect(store.userContactCodeCountdown.mobile).toBe(45)
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+  })
+
   it('does not fabricate user account writes when bridge operations are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshUserAccount()
