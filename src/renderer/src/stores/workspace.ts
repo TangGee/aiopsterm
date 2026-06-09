@@ -119,6 +119,11 @@ type ParsedSnippetCommand =
   | { type: 'KEY'; payload: 'esc' | 'tab' | 'return' | 'backspace' | 'up' | 'down' | 'left' | 'right' }
   | { type: 'CTRL'; payload: string }
 
+type SnippetWriteSegment = {
+  text: string
+  delayBeforeMs: number
+}
+
 type TerminalOutputScope = 'output' | 'input'
 type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
 type ExtensionInstallProgress = {
@@ -203,6 +208,7 @@ export type TerminalSecurityExecution = {
   shellText?: string
   writeToShell: boolean
   source: TerminalCommandSource
+  snippetSegments?: SnippetWriteSegment[]
 }
 
 export type TerminalSecurityPrompt = {
@@ -7087,24 +7093,54 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const serializeSnippetScript = (scriptContent: string, autoExecute: boolean) => {
+  const snippetItemText = (
+    item: Exclude<ParsedSnippetCommand, { type: 'SLEEP' }>,
+    context: { autoExecute: boolean; lastCommandPayload?: string; commandCount: number; seenCommandCount: number }
+  ) => {
+    if (item.type === 'COMMAND') {
+      context.seenCommandCount += 1
+      const isLastCommand = item.payload === context.lastCommandPayload && context.seenCommandCount === context.commandCount
+      const suffix = isLastCommand && !context.autoExecute ? '' : '\n'
+      return `${item.payload}${suffix}`
+    }
+    if (item.type === 'KEY') return keyMap[item.payload]
+    if (item.type === 'CTRL') return ctrlKeyMap[item.payload] || ''
+    return ''
+  }
+
+  const buildSnippetWriteSegments = (scriptContent: string, autoExecute: boolean): SnippetWriteSegment[] => {
     const parsed = parseSnippetScript(scriptContent)
     const commandItems = parsed.filter((item): item is Extract<ParsedSnippetCommand, { type: 'COMMAND' }> => item.type === 'COMMAND')
-    const lastCommandPayload = commandItems.at(-1)?.payload
-    let seenCommandCount = 0
-    return parsed
-      .filter((item) => item.type !== 'SLEEP')
-      .map((item) => {
-        if (item.type === 'COMMAND') {
-          seenCommandCount += 1
-          const isLastCommand = item.payload === lastCommandPayload && seenCommandCount === commandItems.length
-          const suffix = isLastCommand && !autoExecute ? '' : '\n'
-          return `${item.payload}${suffix}`
-        }
-        if (item.type === 'KEY') return keyMap[item.payload]
-        if (item.type === 'CTRL') return ctrlKeyMap[item.payload] || ''
-        return ''
-      })
+    const context = {
+      autoExecute,
+      lastCommandPayload: commandItems.at(-1)?.payload,
+      commandCount: commandItems.length,
+      seenCommandCount: 0
+    }
+    const segments: SnippetWriteSegment[] = []
+    let buffer = ''
+    let delayBeforeMs = 0
+    const flush = () => {
+      if (!buffer) return
+      segments.push({ text: buffer, delayBeforeMs })
+      buffer = ''
+      delayBeforeMs = 0
+    }
+    parsed.forEach((item) => {
+      if (item.type === 'SLEEP') {
+        flush()
+        delayBeforeMs += item.payload
+        return
+      }
+      buffer += snippetItemText(item, context)
+    })
+    flush()
+    return segments
+  }
+
+  const serializeSnippetScript = (scriptContent: string, autoExecute: boolean) => {
+    return buildSnippetWriteSegments(scriptContent, autoExecute)
+      .map((segment) => segment.text)
       .join('')
   }
 
@@ -7121,7 +7157,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const runQuickCommand = async (id: number, autoExecute = true, allTabs = false) => {
     const command = quickCommands.value.find((item) => item.id === id)
     if (!command) return
-    const payload = serializeSnippetScript(command.snippet_content, autoExecute)
+    const snippetSegments = buildSnippetWriteSegments(command.snippet_content, autoExecute)
+    const payload = snippetSegments.map((segment) => segment.text).join('')
     const securityCommand = parseSnippetScript(command.snippet_content).find((item) => item.type === 'COMMAND')?.payload || command.snippet_name
     const targetPanelIds = resolveQuickCommandPanelIds(allTabs)
     const decision = prepareTerminalSecurityExecution({
@@ -7130,7 +7167,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       inputText: payload,
       shellText: payload,
       writeToShell: true,
-      source: 'snippet'
+      source: 'snippet',
+      snippetSegments
     })
     if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
     return writeTerminalExecution(decision.execution)
@@ -9229,6 +9267,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const terminalWriteFailureReason = (result?: Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>) =>
     result?.errorMessage || '终端写入失败，请重新打开本地 shell 或连接 SSH'
 
+  const waitForSnippetDelay = (delayMs: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, delayMs)))
+
   const canWriteTerminalExecution = (execution: Pick<TerminalSecurityExecution, 'panelIds' | 'writeToShell'>) => {
     if (!execution.writeToShell) return true
     if (typeof window.aiops?.writeTerminal !== 'function') return false
@@ -9272,6 +9312,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     if (!canWriteTerminalExecution(execution)) {
       return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
+    }
+    if (execution.source === 'snippet' && execution.snippetSegments?.length) {
+      for (const segment of execution.snippetSegments) {
+        if (segment.delayBeforeMs > 0) await waitForSnippetDelay(segment.delayBeforeMs)
+        for (const panelId of execution.panelIds) {
+          const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+          if (!panel?.sessionId) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
+          const result = await window.aiops.writeTerminal(panel.sessionId, segment.text)
+          if (result?.ok === false) {
+            return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, terminalWriteFailureReason(result))
+          }
+          appendTerminalSegment(panel, segment.text, 'input')
+        }
+      }
+      if (execution.outputText) {
+        execution.panelIds.forEach((panelId) => {
+          const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+          if (!panel) return
+          appendTerminalSegment(panel, execution.outputText!, 'output')
+          panel.status = 'running'
+        })
+      }
+      return { status: 'allow', execution }
     }
     for (const panelId of execution.panelIds) {
       const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)

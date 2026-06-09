@@ -3656,9 +3656,16 @@ describe('workspace store', () => {
 
     store.activePanel.sessionId = 'quick-command-session'
     vi.mocked(window.aiops.writeTerminal).mockClear()
-    const quickCommandDecision = await store.runQuickCommand(1, false)
+    const quickCommandRun = store.runQuickCommand(1, false)
+    await Promise.resolve()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'quick-command-session', 'df -h\n')
+    expect(store.activePanel.output).toContain('df -h')
+    expect(store.activePanel.output).not.toContain('du -sh * | sort -h')
+    await vi.advanceTimersByTimeAsync(1000)
+    const quickCommandDecision = await quickCommandRun
     expect(quickCommandDecision?.status).toBe('allow')
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'df -h\ndu -sh * | sort -h')
+    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(2, 'quick-command-session', 'du -sh * | sort -h')
     expect(store.activePanel.output).toContain('df -h')
     expect(store.activePanel.output).toContain('du -sh * | sort -h')
     expect(store.activePanel.output).not.toContain('[snippet]')
@@ -3688,6 +3695,22 @@ describe('workspace store', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'rm /tmp/file\n')
     expect(store.activePanel.output).toContain('rm /tmp/file')
     expect(store.activePanel.output).not.toContain('[snippet] 危险删除')
+
+    const delayedFailureSnippet = await store.createQuickCommand({ snippet_name: '延时失败', snippet_content: 'echo first\nsleep==250\necho second', group_uuid: null })
+    expect(delayedFailureSnippet).toBeTruthy()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'TERMINAL_WRITE_FAILED',
+      errorMessage: 'terminal closed'
+    })
+    const failedDelayedDecision = await store.runQuickCommand(delayedFailureSnippet!.id, true)
+    expect(failedDelayedDecision?.status).toBe('unavailable')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'echo first\n')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(store.activePanel.output).not.toContain('echo second')
 
     await store.createSnippetGroup('发布命令')
     const group = store.snippetGroups.find((item) => item.group_name === '发布命令')
