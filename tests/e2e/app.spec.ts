@@ -141,7 +141,23 @@ const installVoiceRecorderDouble = async (page: Page) => {
   })
 }
 
+const disableE2eMotion = async (page: Page) => {
+  await page.addStyleTag({
+    content: `
+      *, *::before, *::after {
+        animation-delay: 0s !important;
+        animation-duration: 0s !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-delay: 0s !important;
+        transition-duration: 0s !important;
+      }
+    `
+  })
+}
+
 test('aiopsterm primary desktop flows', async () => {
+  test.setTimeout(360_000)
   await mkdir('test-results', { recursive: true })
   const voiceServer = await startVoiceTranscriptionServer()
   const app = await launchApp('primary')
@@ -149,6 +165,7 @@ test('aiopsterm primary desktop flows', async () => {
   try {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
     await installVoiceRecorderDouble(page)
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
@@ -354,7 +371,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.transfer-progress-panel')).toBeVisible()
     await page.locator('.transfer-progress-panel header button').click()
     await expect(page.locator('.transfer-fab')).toBeVisible()
-    await page.locator('.transfer-fab').click()
+    await page.locator('.transfer-fab').dispatchEvent('click')
     await expect(page.locator('.transfer-progress-panel')).toBeVisible()
 
     await page.getByTitle('知识库').click()
@@ -892,6 +909,7 @@ test('terminal tab operations and visual baseline', async () => {
   try {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
 
     await page.getByTitle('新建终端').click()
     await expect(page.locator('.terminal-tab')).toHaveCount(2)

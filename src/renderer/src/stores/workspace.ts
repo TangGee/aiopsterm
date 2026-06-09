@@ -206,7 +206,6 @@ export type TerminalSecurityExecution = {
   command: string
   panelIds: string[]
   inputText: string
-  outputText?: string
   shellText?: string
   writeToShell: boolean
   source: TerminalCommandSource
@@ -219,7 +218,6 @@ export type TerminalSecurityPrompt = {
   panelIds: string[]
   source: TerminalCommandSource
   result: CommandSecurityResult
-  summary: string
   execution: TerminalSecurityExecution
 } | null
 
@@ -9475,21 +9473,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       .join('')
   }
 
-  const terminalSecuritySummary = (result: CommandSecurityResult, command: string) => {
+  const commandSecurityNotice = (result: CommandSecurityResult, command: string) => {
     const reason = result.reason || 'Security policy requires review'
-    const severity = result.severity ? `severity=${result.severity}` : 'severity=unknown'
-    const category = result.category ? `category=${result.category}` : 'category=security'
-    return `[security] ${result.action === 'block' ? 'blocked' : 'approval required'}: ${command}\n[security] ${reason} (${category}, ${severity})\n`
-  }
-
-  const appendSecurityBlockedOutput = (panelIds: string[], result: CommandSecurityResult, command: string) => {
-    const summary = terminalSecuritySummary(result, command)
-    panelIds.forEach((panelId) => {
-      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-      if (panel) {
-        appendTerminalSegment(panel, summary, 'output')
-      }
-    })
+    return `命令已被安全策略阻止：${command}（${reason}）`
   }
 
   const applyTerminalExecution = (execution: TerminalSecurityExecution) => {
@@ -9499,10 +9485,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       appendTerminalSegment(panel, execution.inputText, 'input')
       if (execution.source !== 'snippet') {
         recordMacroTerminalInput(panel.id, execution.shellText || execution.inputText)
-      }
-      if (execution.outputText) {
-        appendTerminalSegment(panel, execution.outputText, 'output')
-        panel.status = 'running'
       }
     })
   }
@@ -9544,7 +9526,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         panelIds: execution.panelIds,
         source: execution.source,
         result,
-        summary: terminalSecuritySummary(result, execution.command),
         execution
       }
       terminalSecurityPrompt.value = prompt
@@ -9552,7 +9533,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
 
     if (!result.isAllowed) {
-      appendSecurityBlockedOutput(execution.panelIds, result, execution.command)
+      setTopNotice(commandSecurityNotice(result, execution.command))
       terminalSecurityPrompt.value = null
       return { status: 'blocked', result }
     }
@@ -9596,7 +9577,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'allow', execution }
   }
 
-  const executeTerminalCommand = (panelId: string, command: string, options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'outputText' | 'shellText' | 'writeToShell' | 'source'>> = {}) => {
+  const executeTerminalCommand = (panelId: string, command: string, options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'shellText' | 'writeToShell' | 'source'>> = {}) => {
     const text = command.trim()
     if (!text) return { status: 'allow' } as TerminalSecurityDecision
     const writeToShell = options.writeToShell ?? true
@@ -9604,7 +9585,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       command: text,
       panelIds: [panelId],
       inputText: options.inputText ?? `${text}\n`,
-      outputText: options.outputText,
       shellText: options.shellText ?? `${text}\n`,
       writeToShell,
       source: options.source ?? 'direct'
@@ -9615,7 +9595,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const runTerminalCommand = async (
     panelId: string,
     command: string,
-    options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'outputText' | 'shellText' | 'writeToShell' | 'source'>> = {}
+    options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'shellText' | 'writeToShell' | 'source'>> = {}
   ) => {
     const decision = executeTerminalCommand(panelId, command, options)
     if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
@@ -9661,10 +9641,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const cancelTerminalSecurityPrompt = () => {
     const prompt = terminalSecurityPrompt.value
     if (!prompt) return null
-    prompt.panelIds.forEach((panelId) => {
-      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-      if (panel) appendTerminalSegment(panel, `[security] command rejected: ${prompt.command}\n$ `, 'output')
-    })
+    setTopNotice(`命令执行已取消：${prompt.command}`)
     terminalSecurityPrompt.value = null
     return prompt.execution
   }

@@ -3698,6 +3698,15 @@ describe('workspace store', () => {
     expect(decision?.status).toBe('needs-approval')
     expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/file')
     expect(store.activePanel.output).not.toContain('[snippet] 危险删除')
+    const outputBeforeSecurityCancel = store.activePanel.output
+    const cancelledSnippetExecution = store.cancelTerminalSecurityPrompt()
+    expect(cancelledSnippetExecution?.command).toBe('rm /tmp/file')
+    expect(store.terminalSecurityPrompt).toBeNull()
+    expect(store.topNotice).toBe('命令执行已取消：rm /tmp/file')
+    expect(store.activePanel.output).toBe(outputBeforeSecurityCancel)
+    expect(store.activePanel.output).not.toContain('[security] command rejected')
+    const approvalDecision = await store.runQuickCommand(dangerousSnippet!.id, true)
+    expect(approvalDecision?.status).toBe('needs-approval')
     const approvedSnippetExecution = store.approveTerminalSecurityPrompt()
     expect(approvedSnippetExecution?.writeToShell).toBe(true)
     const approvedSnippetDecision = await store.writeTerminalExecution(approvedSnippetExecution!)
@@ -3722,6 +3731,25 @@ describe('workspace store', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
     expect(store.activePanel.output).not.toContain('echo first')
     expect(store.activePanel.output).not.toContain('echo second')
+
+    store.securitySettings = {
+      security: {
+        ...store.securitySettings.security,
+        blacklistPatterns: ['rm *'],
+        securityPolicy: {
+          ...store.securitySettings.security.securityPolicy,
+          askForBlacklist: false
+        }
+      }
+    }
+    const outputBeforeBlockedCommand = store.activePanel.output
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const blockedDecision = await store.runActiveTerminalCommand('rm -rf /tmp')
+    expect(blockedDecision?.status).toBe('blocked')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.topNotice).toContain('命令已被安全策略阻止：rm -rf /tmp')
+    expect(store.activePanel.output).toBe(outputBeforeBlockedCommand)
+    expect(store.activePanel.output).not.toContain('[security] blocked')
 
     await store.createSnippetGroup('发布命令')
     const group = store.snippetGroups.find((item) => item.group_name === '发布命令')

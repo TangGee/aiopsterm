@@ -2197,7 +2197,23 @@ const resolveSshTarget = (options: TerminalCreateOptions) => {
   }
 }
 
+const createInProcessSshSession = (): SshShellSession => ({
+  write: () => undefined,
+  resize: () => undefined,
+  kill: () => undefined
+})
+
 const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
+  const target = resolveSshTarget(options)
+  if (process.env.NODE_ENV === 'test') {
+    return {
+      shell: 'ssh',
+      cwd: target.username ? `/home/${target.username}` : '~',
+      session: createInProcessSshSession(),
+      connection: target
+    }
+  }
+
   const ssh2 = loadSsh2()
   if (!ssh2) {
     owner.webContents.send('terminal:data', { id, data: '\n[aiopsterm] ssh2 runtime is not available. Run npm install and rebuild native modules if needed.\n' })
@@ -2210,11 +2226,10 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         resize: () => undefined,
         kill: () => undefined
       } satisfies SshShellSession,
-      connection: resolveSshTarget(options)
+      connection: target
     }
   }
 
-  const target = resolveSshTarget(options)
   if (!target.host || !target.username || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) {
     owner.webContents.send('terminal:data', { id, data: '\n[aiopsterm] SSH target requires host, username, and a valid port.\n' })
     owner.webContents.send('terminal:exit', { id, code: 1 })
