@@ -28,7 +28,9 @@ describe('terminal backend boundary', () => {
           asset_type: 'person',
           organizationId: 'org-prod',
           group_name: '生产',
-          auth_type: 'keyBased'
+          auth_type: 'keyBased',
+          needProxy: true,
+          proxyName: 'release-proxy'
         }
       },
       { kind: 'ssh', assetId: 'asset-fork-unit' },
@@ -45,6 +47,8 @@ describe('terminal backend boundary', () => {
       assetType: 'person',
       organizationId: 'org-prod',
       authType: 'keyBased',
+      needProxy: true,
+      proxyName: 'release-proxy',
       title: 'fork-source',
       createdAt: 1717200001000
     })

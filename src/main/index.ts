@@ -142,6 +142,8 @@ import {
   saveSettingsShortcut
 } from './backend/settingsPreferences'
 import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
+import { createSshProxySocketForAsset } from './backend/sshProxy'
+import type { SshProxySocket } from './backend/sshProxy'
 import {
   configureTerminalSuggestionsRuntime,
   generateTerminalCommand,
@@ -2163,8 +2165,10 @@ const resolveSshTarget = (options: TerminalCreateOptions) => {
   const host = options.ssh?.host || asset?.host || ''
   const username = options.ssh?.username || asset?.username || ''
   const port = Number(options.ssh?.port || asset?.port || 22)
+  const requestProxyName = typeof options.ssh?.proxyName === 'string' ? options.ssh.proxyName.trim() : ''
+  const targetProxyName = asset?.needProxy ? asset.proxyName : requestProxyName
   return {
-    asset,
+    asset: asset || (options.ssh?.needProxy ? { needProxy: true, proxyName: targetProxyName } : null),
     host,
     username,
     port,
@@ -2210,6 +2214,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
 
   const client = new ssh2.Client()
   let stream: ClientChannel | null = null
+  let proxySocket: SshProxySocket | null = null
   let closed = false
   let cols = options.cols || 100
   let rows = options.rows || 30
@@ -2242,6 +2247,9 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
       closed = true
       try {
         stream?.close()
+      } catch {}
+      try {
+        proxySocket?.destroy()
       } catch {}
       try {
         client.end()
@@ -2290,7 +2298,30 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
   if (target.privateKey) connectConfig.privateKey = target.privateKey
   if (target.passphrase) connectConfig.passphrase = target.passphrase
   if (!target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) connectConfig.agent = process.env.SSH_AUTH_SOCK
-  client.connect(connectConfig)
+
+  void (async () => {
+    try {
+      const proxy = await createSshProxySocketForAsset(target.asset, getConfig().sshProxyConfigs, target.host, target.port)
+      if (proxy) {
+        owner.webContents.send('terminal:data', { id, data: `[aiopsterm] opening SSH proxy ${proxy.config.name}\n` })
+        proxySocket = proxy.socket
+        connectConfig.sock = proxy.socket
+        delete connectConfig.host
+        delete connectConfig.port
+      }
+      if (closed) {
+        proxySocket?.destroy()
+        return
+      }
+      client.connect(connectConfig)
+    } catch (error) {
+      owner.webContents.send('terminal:data', {
+        id,
+        data: `\n[aiopsterm] SSH proxy tunnel failed: ${error instanceof Error ? error.message : String(error)}\n`
+      })
+      finish(1)
+    }
+  })()
 
   return {
     shell: 'ssh',

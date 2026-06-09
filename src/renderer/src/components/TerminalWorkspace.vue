@@ -736,6 +736,8 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
         host: ssh.host,
         port: ssh.port,
         username: ssh.username,
+        needProxy: Boolean(ssh.needProxy),
+        proxyName: ssh.proxyName || '',
         ...(ssh.forkFromConnectionId ? { forkFromConnectionId: ssh.forkFromConnectionId } : {})
       }
     })
@@ -748,7 +750,9 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
       username: ssh.username,
       group_name: ssh.organizationId,
       asset_type: ssh.assetType,
-      auth_type: ssh.authType
+      auth_type: ssh.authType,
+      needProxy: ssh.needProxy,
+      proxyName: ssh.proxyName
     }))
     if (!connected) workspace.setTopNotice('SSH 终端启动失败')
     return connected

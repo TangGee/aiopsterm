@@ -3057,9 +3057,12 @@ describe('workspace store', () => {
       port: 22,
       username: 'deploy',
       group_name: '生产',
-      asset_type: 'person'
+      asset_type: 'person',
+      needProxy: true,
+      proxyName: 'release-proxy'
     })
     expect(store.activePanel.sshSession?.connectionId).toBeUndefined()
+    expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ needProxy: true, proxyName: 'release-proxy' }))
     const appliedSshSession = store.applySshTerminalSession(store.activePanelId, {
       id: 'test-session-asset-terminal-file',
       shell: 'ssh',
@@ -3074,11 +3077,20 @@ describe('workspace store', () => {
         assetName: 'terminal-file-host',
         assetType: 'person',
         organizationId: '生产',
+        needProxy: true,
+        proxyName: 'release-proxy',
         title: 'terminal-file-host',
         createdAt: 1717200001000
       }
     })
-    expect(appliedSshSession).toEqual(expect.objectContaining({ connectionId: 'ssh-test-session-asset-terminal-file', createdAt: 1717200001000 }))
+    expect(appliedSshSession).toEqual(
+      expect.objectContaining({
+        connectionId: 'ssh-test-session-asset-terminal-file',
+        needProxy: true,
+        proxyName: 'release-proxy',
+        createdAt: 1717200001000
+      })
+    )
     vi.mocked(window.aiops.saveFileSessionFromTerminalContext).mockClear()
     const remoteSession = await store.ensureFileSessionForTerminalPanel(store.activePanelId, 'right')
     expect(remoteSession).toEqual(
@@ -3099,7 +3111,9 @@ describe('workspace store', () => {
           connectionId: 'ssh-test-session-asset-terminal-file',
           assetId: 'asset-terminal-file',
           host: '10.8.0.9',
-          username: 'deploy'
+          username: 'deploy',
+          needProxy: true,
+          proxyName: 'release-proxy'
         })
       })
     )
@@ -3123,6 +3137,17 @@ describe('workspace store', () => {
     expect(decision?.status).toBe('allow')
     expect(store.activePanel.output).toContain('df -h')
     expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'df -h', scope: 'input' })
+
+    const sourcePanelId = store.activePanelId
+    expect(store.canForkSshPanel(sourcePanelId)).toBe(true)
+    const forkPanel = store.forkSshPanel(sourcePanelId)
+    expect(forkPanel?.sshSession).toEqual(
+      expect.objectContaining({
+        forkFromConnectionId: 'ssh-test-session-asset-terminal-file',
+        needProxy: true,
+        proxyName: 'release-proxy'
+      })
+    )
   })
 
   it('does not fabricate Files SFTP sessions or file-session updates when the preload bridge is unavailable', async () => {

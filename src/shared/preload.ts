@@ -15,6 +15,8 @@ export type TerminalCreateOptions = {
     password?: string
     privateKey?: string
     passphrase?: string
+    needProxy?: boolean
+    proxyName?: string
     forkFromConnectionId?: string
   }
 }
@@ -29,6 +31,8 @@ export type TerminalSshConnectionInfo = {
   assetType?: string
   organizationId?: string
   authType?: string
+  needProxy?: boolean
+  proxyName?: string
   title?: string
   createdAt: number
   forkFromConnectionId?: string
@@ -282,6 +286,8 @@ export type FileSessionTerminalContext = {
     assetType?: string
     organizationId?: string
     authType?: string
+    needProxy?: boolean
+    proxyName?: string
     createdAt?: number
     forkFromConnectionId?: string
   }

@@ -1,7 +1,9 @@
 import type { AiopsAssetRecord, TerminalCreateOptions, TerminalKillResult, TerminalSshConnectionInfo, TerminalWriteResult } from '@shared/preload'
 
 export type SshTerminalConnectionTarget = {
-  asset?: Pick<AiopsAssetRecord, 'id' | 'name' | 'title' | 'asset_type' | 'organizationId' | 'group_name' | 'auth_type'> | null
+  asset?: Partial<
+    Pick<AiopsAssetRecord, 'id' | 'name' | 'title' | 'asset_type' | 'organizationId' | 'group_name' | 'auth_type' | 'needProxy' | 'proxyName'>
+  > | null
   host: string
   port: number
   username: string
@@ -35,6 +37,8 @@ export const createSshTerminalConnectionInfo = (
       ? { organizationId: cleanOptional(asset?.organizationId) || cleanOptional(asset?.group_name) }
       : {}),
     ...(cleanOptional(asset?.auth_type) ? { authType: cleanOptional(asset?.auth_type) } : {}),
+    ...(asset?.needProxy ? { needProxy: true } : {}),
+    ...(asset?.needProxy && cleanOptional(asset?.proxyName) ? { proxyName: cleanOptional(asset?.proxyName) } : {}),
     ...(title ? { title } : {}),
     createdAt,
     ...(cleanOptional(options.ssh?.forkFromConnectionId) ? { forkFromConnectionId: cleanOptional(options.ssh?.forkFromConnectionId) } : {})
