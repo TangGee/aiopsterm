@@ -109,6 +109,7 @@ export {
   moveDatabaseConnection,
   moveDatabaseGroup,
   mutateDatabaseTable,
+  planDatabaseTableMutation,
   queryDatabaseTable,
   refreshDatabaseConnection,
   removeDatabaseConnection,

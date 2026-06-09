@@ -2208,6 +2208,7 @@ import type {
   DatabaseSqlExecuteResult,
   DatabaseTableDdlResult,
   DatabaseTableInfo,
+  DatabaseTableMutation,
   DatabaseTableQueryResult,
   DatabaseWorkspaceCatalog
 } from '@shared/preload'
@@ -2242,10 +2243,14 @@ type DataEditSummary = {
   warning: string
   error: string
 }
-type DataMutationStatement = { sql: string; params: unknown[]; kind: 'delete' | 'update' | 'insert' }
-type DataMutationBuildResult =
-  | { ok: true; statements: DataMutationStatement[]; warning: string }
-  | { ok: false; statements: DataMutationStatement[]; warning: string; error: string }
+type DataMutationPlanState = {
+  key: string
+  loading: boolean
+  statementCount: number
+  preview: string
+  warning: string
+  error: string
+}
 type DbAiAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
 type DbAiTargetDialect = DatabaseEngineCode | 'mssql'
 type DbAiBackendContext = DatabaseAiDrawerResponseInput['context']
@@ -2373,6 +2378,7 @@ type WorkspaceTab =
       durationMs: number
       dirtyState: DirtyState
       undoStack: EditOp[]
+      mutationPlan: DataMutationPlanState
       saving: boolean
       saveError: string | null
     }
@@ -2537,7 +2543,7 @@ const ResultGrid = defineComponent({
     const editInputRef = ref<HTMLInputElement | null>(null)
     const rowKey = (row: Record<string, unknown>, index: number) => {
       if (props.primaryKey.length) return JSON.stringify(props.primaryKey.map((key) => row[key]))
-      return `row-${props.startRowIndex + index}`
+      return `row-${Math.max(0, props.startRowIndex - 1) + index}`
     }
     const displayCellValue = (row: Record<string, unknown>, key: string, column: string) => {
       const patch = props.updatedCells.get(key)
@@ -3381,6 +3387,7 @@ function repairTabsForConnection(connectionId: string) {
       tab.total = 0
       tab.dirtyState = makeDirtyState([], tab.primaryKey)
       tab.undoStack = []
+      resetDataMutationPlan(tab)
     }
   })
 }
@@ -3701,6 +3708,7 @@ function applyDatabaseCatalog(catalog: DatabaseWorkspaceCatalog) {
         tab.total = 0
         tab.dirtyState = makeDirtyState([], tab.primaryKey)
         tab.undoStack = []
+        resetDataMutationPlan(tab)
       }
     }
   })
@@ -3810,6 +3818,7 @@ async function openTable(connectionId: string, catalogName: string, table: Datab
     durationMs: 0,
     dirtyState: makeDirtyState([], table.primaryKey),
     undoStack: [],
+    mutationPlan: makeDataMutationPlanState(),
     saving: false,
     saveError: null
   }
@@ -4834,6 +4843,97 @@ function dataEditDisabledReason(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
   return ''
 }
 
+function makeDataMutationPlanState(overrides: Partial<DataMutationPlanState> = {}): DataMutationPlanState {
+  return {
+    key: '',
+    loading: false,
+    statementCount: 0,
+    preview: '',
+    warning: '',
+    error: '',
+    ...overrides
+  }
+}
+
+function buildDataMutationPayload(tab: Extract<WorkspaceTab, { kind: 'data' }>): DatabaseTableMutation[] {
+  return [
+    ...Array.from(tab.dirtyState.deletedRowKeys).map((rowKey) => {
+      const snapshot = tab.dirtyState.originalRows.get(rowKey)
+      return {
+        kind: 'delete' as const,
+        rowKey,
+        primaryKey: tab.primaryKey.slice(),
+        ...(snapshot ? { originalRow: { ...snapshot } } : {})
+      }
+    }),
+    ...Array.from(tab.dirtyState.updatedCells.entries()).map(([rowKey, patch]) => {
+      const snapshot = tab.dirtyState.originalRows.get(rowKey)
+      return {
+        kind: 'update' as const,
+        rowKey,
+        primaryKey: tab.primaryKey.slice(),
+        patch: { ...patch },
+        ...(snapshot ? { originalRow: { ...snapshot } } : {})
+      }
+    }),
+    ...tab.dirtyState.newRows.map((row) => ({ kind: 'insert' as const, values: { ...row.values } }))
+  ]
+}
+
+function buildDataMutationPlanInput(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
+  const connection = findConnection(tab.connectionId)
+  return {
+    connectionId: tab.connectionId,
+    dbType: connection?.dbType,
+    databaseName: tab.catalogName,
+    schemaName: tab.schemaName,
+    tableName: tab.tableName,
+    columns: tab.columns.slice(),
+    knownColumns: tab.knownColumns.slice(),
+    mutations: buildDataMutationPayload(tab)
+  }
+}
+
+function resetDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
+  tab.mutationPlan = makeDataMutationPlanState()
+}
+
+async function refreshDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data' }>, force = false): Promise<DataMutationPlanState> {
+  if (!isDataTabDirty(tab)) {
+    resetDataMutationPlan(tab)
+    return tab.mutationPlan
+  }
+  const input = buildDataMutationPlanInput(tab)
+  const key = JSON.stringify(input)
+  if (!force && tab.mutationPlan.key === key && !tab.mutationPlan.loading) return tab.mutationPlan
+  tab.mutationPlan = makeDataMutationPlanState({ key, loading: true })
+  try {
+    const result = await window.aiops.planDatabaseTableMutation(input)
+    if (tab.mutationPlan.key !== key) return tab.mutationPlan
+    if (!result.ok || !result.data) {
+      tab.mutationPlan = makeDataMutationPlanState({
+        key,
+        error: result.errorMessage || 'Backend table mutation planning failed.'
+      })
+      return tab.mutationPlan
+    }
+    tab.mutationPlan = makeDataMutationPlanState({
+      key,
+      statementCount: result.data.statementCount,
+      preview: result.data.preview,
+      warning: result.data.warning
+    })
+  } catch (error) {
+    if (tab.mutationPlan.key === key) {
+      tab.mutationPlan = makeDataMutationPlanState({
+        key,
+        error: errorToMessage(error)
+      })
+    }
+  }
+  return tab.mutationPlan
+}
+
 function updateDataCell(rowKey: string, column: string, value: string) {
   const tab = activeDataTab.value
   if (!tab || !canEditDataTab(tab) || tab.saving) return
@@ -4850,6 +4950,7 @@ function updateDataCell(rowKey: string, column: string, value: string) {
   else dirtyState.updatedCells.delete(rowKey)
   tab.dirtyState = dirtyState
   tab.undoStack = [...tab.undoStack, { kind: 'update', rowKey, column, oldValue, newValue: value }]
+  void refreshDataMutationPlan(tab)
 }
 
 function updateNewDataRowCell(tmpId: string, column: string, value: string) {
@@ -4860,6 +4961,7 @@ function updateNewDataRowCell(tmpId: string, column: string, value: string) {
   const newRows = dirtyState.newRows.map((row) => (row.tmpId === tmpId ? { ...row, values: { ...row.values, [column]: value } } : row))
   if (!newRows.some((row) => row.tmpId === tmpId)) return
   tab.dirtyState = { ...dirtyState, newRows }
+  void refreshDataMutationPlan(tab)
 }
 
 function setActiveDataSelectedRow(key: string) {
@@ -4886,6 +4988,7 @@ function addDataRow() {
   tab.dirtyState = { ...dirtyState, newRows: [...dirtyState.newRows, { tmpId, values }] }
   tab.undoStack = [...tab.undoStack, { kind: 'add', tmpId }]
   tab.selectedRowKey = tmpId
+  void refreshDataMutationPlan(tab)
   showNotice('New row added locally')
 }
 
@@ -4908,6 +5011,7 @@ function deleteSelectedDataRow() {
     tab.dirtyState = dirtyState
     tab.undoStack = addOpIndex >= 0 ? undoStack : [...tab.undoStack]
     tab.selectedRowKey = null
+    void refreshDataMutationPlan(tab)
     showNotice('New row removed')
     return
   }
@@ -4919,6 +5023,7 @@ function deleteSelectedDataRow() {
   tab.dirtyState = dirtyState
   tab.undoStack = [...tab.undoStack, { kind: 'delete', rowKey: key, snapshot: { ...snapshot } }]
   tab.selectedRowKey = null
+  void refreshDataMutationPlan(tab)
   showNotice('Row marked for deletion')
 }
 
@@ -4945,6 +5050,7 @@ function undoDataChanges() {
   }
   tab.dirtyState = dirtyState
   tab.undoStack = undoStack
+  void refreshDataMutationPlan(tab)
   showNotice('Last data edit reverted')
 }
 
@@ -4957,13 +5063,13 @@ async function saveDataChanges() {
     showNotice(reason)
     return
   }
-  const mutation = buildDataMutationStatements(tab)
-  if (!mutation.ok) {
-    tab.saveError = mutation.error
-    showNotice(mutation.error)
+  const plan = await refreshDataMutationPlan(tab, true)
+  if (plan.error) {
+    tab.saveError = plan.error
+    showNotice(plan.error)
     return
   }
-  if (mutation.statements.length === 0) {
+  if (plan.statementCount === 0) {
     tab.saveError = 'No SQL statement will be generated until a new row contains at least one value.'
     showNotice(tab.saveError)
     return
@@ -4980,7 +5086,7 @@ async function saveDataChanges() {
   }
   await reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false })
   tab.saving = false
-  showNotice(`Changes saved through backend table store (${mutation.statements.length} statement${mutation.statements.length > 1 ? 's' : ''})`)
+  showNotice(`Changes saved through backend table store (${plan.statementCount} statement${plan.statementCount > 1 ? 's' : ''})`)
 }
 
 function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
@@ -4989,16 +5095,7 @@ function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }
     databaseName: tab.catalogName,
     schemaName: tab.schemaName,
     tableName: tab.tableName,
-    mutations: [
-      ...Array.from(tab.dirtyState.deletedRowKeys).map((rowKey) => ({ kind: 'delete' as const, rowKey, primaryKey: tab.primaryKey.slice() })),
-      ...Array.from(tab.dirtyState.updatedCells.entries()).map(([rowKey, patch]) => ({
-        kind: 'update' as const,
-        rowKey,
-        primaryKey: tab.primaryKey.slice(),
-        patch: { ...patch }
-      })),
-      ...tab.dirtyState.newRows.map((row) => ({ kind: 'insert' as const, values: { ...row.values } }))
-    ]
+    mutations: buildDataMutationPayload(tab)
   })
 }
 
@@ -5009,6 +5106,7 @@ function discardDataChanges() {
   tab.undoStack = []
   tab.selectedRowKey = null
   tab.saveError = null
+  resetDataMutationPlan(tab)
   showNotice('Local data edits discarded')
 }
 
@@ -5062,8 +5160,10 @@ async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, optio
       tab.undoStack = []
       tab.selectedRowKey = null
       tab.saveError = null
+      resetDataMutationPlan(tab)
     } else {
       tab.dirtyState = { ...tab.dirtyState, originalRows: makeOriginalRows(tab.rows, tab.primaryKey) }
+      void refreshDataMutationPlan(tab)
     }
     if (options.notice) showNotice(options.notice)
   } catch (error) {
@@ -5172,212 +5272,18 @@ function buildDataEditSummary(tab: Extract<WorkspaceTab, { kind: 'data' }>): Dat
   const updatedRows = tab.dirtyState.updatedCells.size
   const deletedRows = tab.dirtyState.deletedRowKeys.size
   const isDirty = newRows > 0 || updatedRows > 0 || deletedRows > 0
-  const mutation = isDirty ? buildDataMutationStatements(tab) : { ok: true as const, statements: [], warning: '' }
+  const plan = isDirty ? tab.mutationPlan : makeDataMutationPlanState()
   return {
     isDirty,
     newRows,
     updatedRows,
     deletedRows,
     undoDepth: tab.undoStack.length,
-    statementCount: mutation.statements.length,
-    preview: mutation.statements.map(formatDataMutationStatementPreview).join('\n'),
-    warning: mutation.warning,
-    error: mutation.ok ? '' : mutation.error
+    statementCount: plan.statementCount,
+    preview: plan.preview,
+    warning: plan.warning,
+    error: plan.error
   }
-}
-
-function buildDataMutationPreview(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  return buildDataMutationStatements(tab).statements.map(formatDataMutationStatementPreview).join('\n')
-}
-
-function buildDataMutationStatements(tab: Extract<WorkspaceTab, { kind: 'data' }>): DataMutationBuildResult {
-  const warning = dataMutationWarning(tab)
-  const validationError = validateDataMutationContext(tab)
-  if (validationError) return { ok: false, statements: [], warning, error: validationError }
-  const statements: DataMutationStatement[] = []
-  Array.from(tab.dirtyState.deletedRowKeys).forEach((rowKey) => {
-    const statement = buildDeleteMutation(tab, rowKey)
-    if (statement) statements.push(statement)
-  })
-  Array.from(tab.dirtyState.updatedCells.entries()).forEach(([rowKey, patch]) => {
-    const statement = buildUpdateMutation(tab, rowKey, patch)
-    if (statement) statements.push(statement)
-  })
-  tab.dirtyState.newRows.forEach((row) => {
-    const statement = buildInsertMutation(tab, row.values)
-    if (statement) statements.push(statement)
-  })
-  return { ok: true, statements, warning }
-}
-
-function buildDeletePreview(tab: Extract<WorkspaceTab, { kind: 'data' }>, rowKey: string) {
-  const statement = buildDeleteMutation(tab, rowKey)
-  return statement ? formatDataMutationStatementPreview(statement) : ''
-}
-
-function buildUpdatePreview(tab: Extract<WorkspaceTab, { kind: 'data' }>, rowKey: string, patch: Record<string, unknown>) {
-  const statement = buildUpdateMutation(tab, rowKey, patch)
-  return statement ? formatDataMutationStatementPreview(statement) : ''
-}
-
-function buildInsertPreview(tab: Extract<WorkspaceTab, { kind: 'data' }>, values: Record<string, unknown>) {
-  const statement = buildInsertMutation(tab, values)
-  return statement ? formatDataMutationStatementPreview(statement) : ''
-}
-
-function buildDeleteMutation(tab: Extract<WorkspaceTab, { kind: 'data' }>, rowKey: string): DataMutationStatement | null {
-  const params: unknown[] = []
-  const where = whereMutation(tab, rowKey, params)
-  if (!where) return null
-  return { kind: 'delete', sql: applySingleRowMutationGuard(tab, `DELETE FROM ${dataTableReference(tab)} WHERE ${where}`, where), params }
-}
-
-function buildUpdateMutation(tab: Extract<WorkspaceTab, { kind: 'data' }>, rowKey: string, patch: Record<string, unknown>): DataMutationStatement | null {
-  const columns = Object.keys(patch).filter((column) => Object.prototype.hasOwnProperty.call(patch, column))
-  if (!columns.length) return null
-  const params: unknown[] = []
-  const assignments = columns.map((column) => {
-    params.push(patch[column])
-    return `${quoteSqlIdentifier(column, dataTabDialect(tab))} = ${placeholder(params.length, dataTabDialect(tab))}`
-  })
-  const where = whereMutation(tab, rowKey, params)
-  if (!where) return null
-  return { kind: 'update', sql: applySingleRowMutationGuard(tab, `UPDATE ${dataTableReference(tab)} SET ${assignments.join(', ')} WHERE ${where}`, where), params }
-}
-
-function buildInsertMutation(tab: Extract<WorkspaceTab, { kind: 'data' }>, values: Record<string, unknown>): DataMutationStatement | null {
-  const dialect = dataTabDialect(tab)
-  const columns = tab.columns.filter((column) => values[column] !== null && values[column] !== undefined)
-  if (!columns.length) return null
-  const params = columns.map((column) => values[column])
-  return {
-    kind: 'insert',
-    sql: `INSERT INTO ${dataTableReference(tab)} (${columns.map((column) => quoteSqlIdentifier(column, dialect)).join(', ')}) VALUES (${params.map((_, index) => placeholder(index + 1, dialect)).join(', ')})`,
-    params
-  }
-}
-
-function wherePreview(tab: Extract<WorkspaceTab, { kind: 'data' }>, rowKey: string) {
-  const snapshot = tab.dirtyState.originalRows.get(rowKey)
-  const pkValues = decodePrimaryKeyRowKey(rowKey, tab.primaryKey)
-  if (tab.primaryKey.length && pkValues) {
-    return tab.primaryKey.map((column, index) => compareSqlValue(column, pkValues[index], dataTabDialect(tab))).join(' AND ')
-  }
-  if (!snapshot) return '1 = 0'
-  return tab.columns.map((column) => compareSqlValue(column, snapshot[column], dataTabDialect(tab))).join(' AND ')
-}
-
-function whereMutation(tab: Extract<WorkspaceTab, { kind: 'data' }>, rowKey: string, params: unknown[]) {
-  const dialect = dataTabDialect(tab)
-  const snapshot = tab.dirtyState.originalRows.get(rowKey)
-  const pkValues = decodePrimaryKeyRowKey(rowKey, tab.primaryKey)
-  if (tab.primaryKey.length && pkValues) {
-    return tab.primaryKey
-      .map((column, index) => {
-        const value = pkValues[index]
-        if (value === null || value === undefined) return `${quoteSqlIdentifier(column, dialect)} IS NULL`
-        params.push(value)
-        return `${quoteSqlIdentifier(column, dialect)} = ${placeholder(params.length, dialect)}`
-      })
-      .join(' AND ')
-  }
-  if (!snapshot) return ''
-  return tab.knownColumns
-    .map((column) => {
-      const value = snapshot[column]
-      if (value === null || value === undefined) return `${quoteSqlIdentifier(column, dialect)} IS NULL`
-      params.push(value)
-      return `${quoteSqlIdentifier(column, dialect)} = ${placeholder(params.length, dialect)}`
-    })
-    .join(' AND ')
-}
-
-function decodePrimaryKeyRowKey(rowKey: string, primaryKey: string[]) {
-  if (!primaryKey.length) return null
-  try {
-    const parsed = JSON.parse(rowKey)
-    return Array.isArray(parsed) && parsed.length === primaryKey.length ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function compareSqlValue(column: string, value: unknown, dialect: DatabaseEngineCode) {
-  const quoted = quoteSqlIdentifier(column, dialect)
-  return value === null || value === undefined ? `${quoted} IS NULL` : `${quoted} = ${formatSqlLiteral(value)}`
-}
-
-function dataTableReference(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  const dialect = dataTabDialect(tab)
-  const parts = dialect === 'mysql' || dialect === 'sqlite' ? [tab.catalogName, tab.tableName] : [tab.schemaName, tab.tableName]
-  return parts.filter(Boolean).map((part) => quoteSqlIdentifier(String(part), dialect)).join('.')
-}
-
-function quoteSqlIdentifier(value: string, dialect: DatabaseEngineCode = 'postgresql') {
-  const clean = DB_IDENT_RE.test(value) ? value : quoteIdentifier(value)
-  if (dialect === 'mysql') return `\`${String(clean).replace(/`/g, '``')}\``
-  return `"${String(clean).replace(/"/g, '""')}"`
-}
-
-function formatDataMutationStatementPreview(statement: DataMutationStatement) {
-  let paramIndex = 0
-  const sql = statement.sql.replace(/\$(\d+)|:(\d+)|\?/g, (match) => {
-    if (match === '?') {
-      const value = statement.params[paramIndex]
-      paramIndex += 1
-      return formatSqlLiteral(value)
-    }
-    const index = Number((match.startsWith('$') ? match.slice(1) : match.slice(1)) || paramIndex + 1)
-    return formatSqlLiteral(statement.params[index - 1])
-  })
-  return `${sql};`
-}
-
-function placeholder(index: number, dialect: DatabaseEngineCode) {
-  if (dialect === 'postgresql') return `$${index}`
-  if (dialect === 'oracle') return `:${index}`
-  return '?'
-}
-
-function dataTabDialect(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  return findConnection(tab.connectionId)?.dbType ?? 'mysql'
-}
-
-function dataMutationWarning(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  if (tab.primaryKey.length) return ''
-  const dialect = dataTabDialect(tab)
-  if (dialect === 'oracle') return 'Oracle table editing requires a primary key in this version.'
-  return 'No primary key detected. UPDATE and DELETE previews use the original row snapshot with a single-row guard.'
-}
-
-function validateDataMutationContext(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  const dialect = dataTabDialect(tab)
-  if (!tab.catalogName || !tab.tableName) return 'Missing table context.'
-  if ((dialect === 'postgresql' || dialect === 'oracle') && !tab.schemaName) return 'Schema is required for this table context.'
-  if (!tab.knownColumns.length && !tab.columns.length) return 'Cannot build mutation SQL without known columns.'
-  if (!DB_IDENT_RE.test(tab.catalogName)) return `Invalid SQL identifier: ${tab.catalogName}`
-  if (tab.schemaName && !DB_IDENT_RE.test(tab.schemaName)) return `Invalid SQL identifier: ${tab.schemaName}`
-  if (!DB_IDENT_RE.test(tab.tableName)) return `Invalid SQL identifier: ${tab.tableName}`
-  for (const column of tab.columns) {
-    if (!DB_IDENT_RE.test(column)) return `Invalid SQL identifier: ${column}`
-  }
-  for (const column of tab.knownColumns) {
-    if (!DB_IDENT_RE.test(column)) return `Invalid SQL identifier: ${column}`
-  }
-  if (!tab.primaryKey.length && dialect === 'oracle' && isDataTabDirty(tab)) {
-    return 'Oracle table editing requires a primary key in this version.'
-  }
-  return ''
-}
-
-function applySingleRowMutationGuard(tab: Extract<WorkspaceTab, { kind: 'data' }>, sql: string, where: string) {
-  if (tab.primaryKey.length) return sql
-  const dialect = dataTabDialect(tab)
-  const tableRef = dataTableReference(tab)
-  if (dialect === 'mysql') return `${sql} LIMIT 1`
-  if (dialect === 'sqlite') return sql.replace(`WHERE ${where}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${where} LIMIT 1)`)
-  if (dialect === 'postgresql') return sql.replace(`WHERE ${where}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${where} LIMIT 1)`)
-  return sql
 }
 
 function isViewTable(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
@@ -5388,13 +5294,6 @@ function isViewTable(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
     return !!schema?.views?.some((table) => table.id === tab.tableId)
   }
   return false
-}
-
-function formatSqlLiteral(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
-  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
-  return `'${String(value).replace(/'/g, "''")}'`
 }
 
 function applyFilters(rows: Array<Record<string, unknown>>, filters: DbFilter[]) {

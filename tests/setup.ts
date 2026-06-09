@@ -6,6 +6,7 @@ import type {
   DatabaseCreateDatabaseInput,
   DatabaseConnectionSaveInput,
   DatabaseConnectionTestInput,
+  DatabaseEngineCode,
   DatabaseEngineInfo,
   DatabaseGroupCreateInput,
   DatabaseGroupInfo,
@@ -14,6 +15,8 @@ import type {
   DatabaseAiPaneMessageRecord,
   DatabaseAiPaneStateSnapshot,
   DatabaseWorkspaceCatalog,
+  DatabaseTableMutation,
+  DatabaseTableMutationPlanInput,
   DatabaseTableInfo,
   AiTodoItem,
   AiTodoSnapshotResult,
@@ -1755,6 +1758,190 @@ const refreshDatabaseConnectionMock = async (connectionId: string) =>
 function rowKeyForDatabaseMock(row: Record<string, unknown>, primaryKey: string[], index: number) {
   if (!primaryKey.length) return `row-${index}`
   return JSON.stringify(primaryKey.map((column) => row[column] ?? null))
+}
+
+type DatabaseMutationDialectMock = DatabaseEngineCode
+type DatabaseMutationStatementMock = { kind: DatabaseTableMutation['kind']; sql: string; params: unknown[] }
+
+const databaseMutationIdentifierMock = (value: string, dialect: DatabaseMutationDialectMock) =>
+  dialect === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
+
+const databaseMutationPlaceholderMock = (dialect: DatabaseMutationDialectMock, index: number) => {
+  if (dialect === 'postgresql') return `$${index}`
+  if (dialect === 'oracle') return `:${index}`
+  return '?'
+}
+
+const databaseMutationTableReferenceMock = (
+  input: Pick<DatabaseTableMutationPlanInput, 'databaseName' | 'schemaName' | 'tableName'>,
+  dialect: DatabaseMutationDialectMock
+) => {
+  const table = databaseMutationIdentifierMock(databaseTrimMock(input.tableName), dialect)
+  if (dialect === 'mysql' || dialect === 'sqlite') return `${databaseMutationIdentifierMock(databaseTrimMock(input.databaseName), dialect)}.${table}`
+  return `${databaseMutationIdentifierMock(databaseTrimMock(input.schemaName) || (dialect === 'postgresql' ? 'public' : ''), dialect)}.${table}`
+}
+
+const decodeDatabaseMutationPrimaryKeyRowKeyMock = (rowKey: string, primaryKey: string[]) => {
+  if (!primaryKey.length) return null
+  try {
+    const parsed = JSON.parse(rowKey)
+    return Array.isArray(parsed) && parsed.length === primaryKey.length ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const pushDatabaseMutationComparisonMock = (
+  clauses: string[],
+  params: unknown[],
+  dialect: DatabaseMutationDialectMock,
+  column: string,
+  value: unknown
+) => {
+  const quoted = databaseMutationIdentifierMock(column, dialect)
+  if (value === null || value === undefined) {
+    clauses.push(`${quoted} IS NULL`)
+    return
+  }
+  params.push(value)
+  clauses.push(`${quoted} = ${databaseMutationPlaceholderMock(dialect, params.length)}`)
+}
+
+const databaseMutationWhereForRowMock = (
+  dialect: DatabaseMutationDialectMock,
+  knownColumns: string[],
+  mutation: Extract<DatabaseTableMutation, { kind: 'delete' | 'update' }>,
+  params: unknown[]
+) => {
+  const primaryKey = mutation.primaryKey.map(databaseTrimMock).filter(Boolean)
+  const values = decodeDatabaseMutationPrimaryKeyRowKeyMock(mutation.rowKey, primaryKey)
+  if (primaryKey.length && values) {
+    const clauses: string[] = []
+    primaryKey.forEach((column, index) => pushDatabaseMutationComparisonMock(clauses, params, dialect, column, values[index]))
+    return { sql: clauses.join(' AND '), usesPrimaryKey: true }
+  }
+  if (dialect === 'oracle') throw Object.assign(new Error('Oracle table editing requires a primary key in this version.'), { code: 'DB_PRIMARY_KEY_REQUIRED' })
+  if (!mutation.originalRow) throw Object.assign(new Error('Original row snapshot is required for table mutations without a primary key.'), { code: 'DB_ROW_SNAPSHOT_REQUIRED' })
+  const clauses: string[] = []
+  knownColumns.forEach((column) => {
+    if (Object.prototype.hasOwnProperty.call(mutation.originalRow, column)) {
+      pushDatabaseMutationComparisonMock(clauses, params, dialect, column, mutation.originalRow?.[column])
+    }
+  })
+  if (!clauses.length) throw Object.assign(new Error('Original row snapshot does not contain known table columns.'), { code: 'DB_ROW_SNAPSHOT_REQUIRED' })
+  return { sql: clauses.join(' AND '), usesPrimaryKey: false }
+}
+
+const applyDatabaseMutationSingleRowGuardMock = (
+  dialect: DatabaseMutationDialectMock,
+  tableRef: string,
+  sql: string,
+  whereSql: string,
+  usesPrimaryKey: boolean
+) => {
+  if (usesPrimaryKey) return sql
+  if (dialect === 'mysql') return `${sql} LIMIT 1`
+  if (dialect === 'sqlite') return sql.replace(`WHERE ${whereSql}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
+  if (dialect === 'postgresql') return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
+  return sql
+}
+
+const buildDatabaseMutationStatementMock = (
+  dialect: DatabaseMutationDialectMock,
+  tableRef: string,
+  knownColumns: string[],
+  mutation: DatabaseTableMutation
+): DatabaseMutationStatementMock | null => {
+  const knownColumnSet = new Set(knownColumns.map((column) => column.toLowerCase()))
+  const params: unknown[] = []
+  if (mutation.kind === 'drop') return { kind: mutation.kind, sql: `DROP TABLE ${tableRef}`, params }
+  if (mutation.kind === 'truncate') return { kind: mutation.kind, sql: dialect === 'sqlite' ? `DELETE FROM ${tableRef}` : `TRUNCATE TABLE ${tableRef}`, params }
+  if (mutation.kind === 'insert') {
+    const columns = Object.keys(mutation.values).filter((column) => knownColumnSet.has(column.toLowerCase()) && mutation.values[column] !== null && mutation.values[column] !== undefined)
+    if (!columns.length) return null
+    columns.forEach((column) => params.push(mutation.values[column]))
+    return {
+      kind: mutation.kind,
+      sql: `INSERT INTO ${tableRef} (${columns.map((column) => databaseMutationIdentifierMock(column, dialect)).join(', ')}) VALUES (${columns.map((_column, index) => databaseMutationPlaceholderMock(dialect, index + 1)).join(', ')})`,
+      params
+    }
+  }
+  if (mutation.kind === 'delete') {
+    const where = databaseMutationWhereForRowMock(dialect, knownColumns, mutation, params)
+    const sql = `DELETE FROM ${tableRef} WHERE ${where.sql}`
+    return { kind: mutation.kind, sql: applyDatabaseMutationSingleRowGuardMock(dialect, tableRef, sql, where.sql, where.usesPrimaryKey), params }
+  }
+  const columns = Object.keys(mutation.patch).filter((column) => knownColumnSet.has(column.toLowerCase()))
+  if (!columns.length) return null
+  columns.forEach((column) => params.push(mutation.patch[column]))
+  const assignments = columns.map((column, index) => `${databaseMutationIdentifierMock(column, dialect)} = ${databaseMutationPlaceholderMock(dialect, index + 1)}`).join(', ')
+  const where = databaseMutationWhereForRowMock(dialect, knownColumns, mutation, params)
+  const sql = `UPDATE ${tableRef} SET ${assignments} WHERE ${where.sql}`
+  return { kind: mutation.kind, sql: applyDatabaseMutationSingleRowGuardMock(dialect, tableRef, sql, where.sql, where.usesPrimaryKey), params }
+}
+
+const formatDatabaseMutationSqlLiteralMock = (value: unknown) => {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+  return `'${String(value).replace(/'/g, "''")}'`
+}
+
+const formatDatabaseMutationStatementPreviewMock = (statement: DatabaseMutationStatementMock) => {
+  let paramIndex = 0
+  const sql = statement.sql.replace(/\$(\d+)|:(\d+)|\?/g, (match) => {
+    if (match === '?') {
+      const value = statement.params[paramIndex]
+      paramIndex += 1
+      return formatDatabaseMutationSqlLiteralMock(value)
+    }
+    const index = Number(match.slice(1) || paramIndex + 1)
+    return formatDatabaseMutationSqlLiteralMock(statement.params[index - 1])
+  })
+  return `${sql};`
+}
+
+const databaseMutationWarningMock = (dialect: DatabaseMutationDialectMock, mutations: DatabaseTableMutation[]) => {
+  const hasNoPrimaryKeyRowMutation = mutations.some((mutation) => {
+    if (mutation.kind !== 'delete' && mutation.kind !== 'update') return false
+    return mutation.primaryKey.map(databaseTrimMock).filter(Boolean).length === 0
+  })
+  if (!hasNoPrimaryKeyRowMutation) return ''
+  if (dialect === 'oracle') return 'Oracle table editing requires a primary key in this version.'
+  return 'No primary key detected. UPDATE and DELETE previews use the original row snapshot with a single-row guard.'
+}
+
+const planDatabaseTableMutationMock = async (input: DatabaseTableMutationPlanInput) => {
+  const connection = databaseConnectionsMock.find((item) => item.id === databaseTrimMock(input.connectionId))
+  if (!connection) return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  const key = databaseTableKey(input)
+  const rows = databaseTableRowsMock[key]
+  if (!rows) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+  const dialect = connection.dbType
+  const knownColumns = databaseTableColumnsMock[key] || input.knownColumns || input.columns || Object.keys(rows[0] || {})
+  try {
+    const tableRef = databaseMutationTableReferenceMock(input, dialect)
+    const statements = input.mutations
+      .map((mutation) => buildDatabaseMutationStatementMock(dialect, tableRef, knownColumns, mutation))
+      .filter((statement): statement is DatabaseMutationStatementMock => !!statement)
+      .map((statement) => ({ ...statement, preview: formatDatabaseMutationStatementPreviewMock(statement) }))
+    return {
+      ok: true,
+      data: {
+        statements,
+        statementCount: statements.length,
+        preview: statements.map((statement) => statement.preview).join('\n'),
+        warning: databaseMutationWarningMock(dialect, input.mutations)
+      }
+    }
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : 'DB_MUTATION_PLAN_FAILED'
+    return {
+      ok: false,
+      errorCode: code,
+      errorMessage: error instanceof Error ? error.message : 'Database table mutation planning failed.'
+    }
+  }
 }
 
 function filterDatabaseRowsMock(rows: Array<Record<string, unknown>>, filters: Array<{ column: string; operator: string; value?: string; values?: string[] }>) {
@@ -5601,6 +5788,7 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     ),
+    planDatabaseTableMutation: vi.fn(planDatabaseTableMutationMock),
     mutateDatabaseTable: vi.fn(
       async (input: {
         connectionId: string

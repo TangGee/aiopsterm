@@ -25,6 +25,7 @@ import {
   moveDatabaseConnection,
   moveDatabaseGroup,
   mutateDatabaseTable,
+  planDatabaseTableMutation,
   queryDatabaseTable,
   refreshDatabaseConnection,
   removeDatabaseConnection,
@@ -775,6 +776,67 @@ describe('database backend boundary', () => {
     })
     expect(dropped.ok).toBe(false)
     expect(dropped.errorCode).toBe('DB_TABLE_NOT_FOUND')
+  })
+
+  it('plans real SQLite table mutations without executing them', async () => {
+    const sqliteFilePath = await createTempSqliteFile()
+    const sqlite = new Database(sqliteFilePath)
+    sqlite.exec(`
+      CREATE TABLE cache_entries (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        ttl_seconds INTEGER,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO cache_entries (key, value, ttl_seconds, updated_at)
+      VALUES ('feature:checkout', 'enabled', 120, '2026-06-03 10:00:00');
+    `)
+    sqlite.close()
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'sqlite',
+        name: 'planning-sqlite',
+        filePath: sqliteFilePath,
+        readonly: false,
+        env: 'Development',
+        groupId: 'group-local',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-planning-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify(['feature:checkout']), primaryKey: ['key'], patch: { value: 'planned-only' } },
+        { kind: 'insert', values: { key: 'feature:billing', value: 'enabled', ttl_seconds: 45, updated_at: '2026-06-03 11:00:00' } }
+      ]
+    })
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.statementCount).toBe(2)
+    expect(plan.data?.preview).toContain('UPDATE "main"."cache_entries" SET "value" = \'planned-only\' WHERE "key" = \'feature:checkout\';')
+    expect(plan.data?.preview).toContain('INSERT INTO "main"."cache_entries"')
+
+    const rows = await queryDatabaseTable({
+      connectionId: 'conn-planning-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      filters: [],
+      sort: null,
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 100,
+      withTotal: true
+    })
+    expect(rows.ok).toBe(true)
+    expect(rows.data?.rows).toEqual([{ key: 'feature:checkout', value: 'enabled', ttl_seconds: 120, updated_at: '2026-06-03 10:00:00' }])
   })
 
   it('rejects real SQLite mutations for readonly connections', async () => {
@@ -1633,6 +1695,80 @@ WHERE status = ''open'';
     expect(result.data?.rowCount).toBe(1)
     expect(result.data?.total).toBe(1)
     expect(result.data?.knownColumns).toEqual(['id', 'service', 'status', 'owner', 'updated_at'])
+  })
+
+  it('plans table mutation SQL through the backend boundary', async () => {
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-prod-pg',
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      mutations: [
+        { kind: 'delete', rowKey: JSON.stringify([1002]), primaryKey: ['id'], originalRow: { id: 1002, service: 'orders-worker' } },
+        { kind: 'update', rowKey: JSON.stringify([1001]), primaryKey: ['id'], patch: { owner: 'dba-oncall' }, originalRow: { id: 1001, owner: 'alice' } },
+        { kind: 'insert', values: { id: 1005, service: 'scheduler', status: 'open', owner: 'erin', updated_at: '2026-06-03 12:00:00' } }
+      ]
+    })
+
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.statementCount).toBe(3)
+    expect(plan.data?.warning).toBe('')
+    expect(plan.data?.preview).toContain('DELETE FROM "public"."orders" WHERE "id" = 1002;')
+    expect(plan.data?.preview).toContain('UPDATE "public"."orders" SET "owner" = \'dba-oncall\' WHERE "id" = 1001;')
+    expect(plan.data?.preview).toContain('INSERT INTO "public"."orders"')
+    expect(plan.data?.statements[1]).toMatchObject({
+      kind: 'update',
+      sql: 'UPDATE "public"."orders" SET "owner" = $1 WHERE "id" = $2',
+      params: ['dba-oncall', 1001]
+    })
+  })
+
+  it('plans no-primary-key MySQL mutations with snapshot single-row guards', async () => {
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-metrics-mysql',
+      dbType: 'mysql',
+      databaseName: 'metrics',
+      tableName: 'metric_events',
+      mutations: [
+        {
+          kind: 'update',
+          rowKey: 'row-0',
+          primaryKey: [],
+          patch: { severity: 'critical' },
+          originalRow: { service: 'api-gateway', event_type: 'deploy', severity: 'info', created_at: '2026-06-03 10:42:00' }
+        }
+      ]
+    })
+
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.warning).toContain('No primary key detected')
+    expect(plan.data?.preview).toContain('UPDATE `metrics`.`metric_events` SET `severity` = \'critical\'')
+    expect(plan.data?.preview).toContain('`service` = \'api-gateway\'')
+    expect(plan.data?.preview).toContain('LIMIT 1;')
+  })
+
+  it('rejects Oracle no-primary-key mutation planning behind the backend boundary', async () => {
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-oracle-audit',
+      dbType: 'oracle',
+      databaseName: 'ORCLPDB1',
+      schemaName: 'OPS',
+      tableName: 'AUDIT_LOG',
+      mutations: [
+        {
+          kind: 'update',
+          rowKey: 'row-0',
+          primaryKey: [],
+          patch: { action: 'RELEASE_BLOCKED' },
+          originalRow: { event_id: 501, actor: 'deploy-bot', action: 'RELEASE_START', created_at: '2026-06-03 08:10:00' }
+        }
+      ]
+    })
+
+    expect(plan.ok).toBe(false)
+    expect(plan.errorCode).toBe('DB_PRIMARY_KEY_REQUIRED')
+    expect(plan.errorMessage).toContain('Oracle table editing requires a primary key')
   })
 
   it('applies table mutations through backend state and supports truncate/drop', async () => {

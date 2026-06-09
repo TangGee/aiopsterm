@@ -69,6 +69,7 @@ import {
   moveDatabaseConnection,
   moveDatabaseGroup,
   mutateDatabaseTable,
+  planDatabaseTableMutation,
   queryDatabaseTable,
   refreshDatabaseConnection,
   removeDatabaseConnection,
@@ -221,6 +222,7 @@ import type {
   DatabaseSqlExecuteInput,
   DatabaseTableDdlInput,
   DatabaseTableMutationInput,
+  DatabaseTableMutationPlanInput,
   DatabaseTableQueryInput,
   ExtensionInstallProgress,
   ExtensionPackageInstallInput,
@@ -3225,6 +3227,7 @@ const registerIpc = () => {
   ipcMain.handle('database:execute-sql', (_event, input: DatabaseSqlExecuteInput) => executeDatabaseSql(input))
   ipcMain.handle('database:table-ddl', (_event, input: DatabaseTableDdlInput) => getDatabaseTableDdl(input))
   ipcMain.handle('database:query-table', (_event, input: DatabaseTableQueryInput) => queryDatabaseTable(input))
+  ipcMain.handle('database:mutation-plan', (_event, input: DatabaseTableMutationPlanInput) => planDatabaseTableMutation(input))
   ipcMain.handle('database:mutate-table', (_event, input: DatabaseTableMutationInput) => mutateDatabaseTable(input))
   ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
   ipcMain.handle('database:ai-pane-state:save', (_event, input: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(input))

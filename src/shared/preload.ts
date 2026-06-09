@@ -1760,8 +1760,8 @@ export type DatabaseTableQueryResult = AiopsMutationResult<{
 }>
 
 export type DatabaseTableMutation =
-  | { kind: 'delete'; rowKey: string; primaryKey: string[] }
-  | { kind: 'update'; rowKey: string; primaryKey: string[]; patch: Record<string, unknown> }
+  | { kind: 'delete'; rowKey: string; primaryKey: string[]; originalRow?: Record<string, unknown> }
+  | { kind: 'update'; rowKey: string; primaryKey: string[]; patch: Record<string, unknown>; originalRow?: Record<string, unknown> }
   | { kind: 'insert'; values: Record<string, unknown> }
   | { kind: 'truncate' }
   | { kind: 'drop' }
@@ -1778,6 +1778,26 @@ export type DatabaseTableMutationResult = AiopsMutationResult<{
   affected: number
   durationMs: number
   catalog?: DatabaseWorkspaceCatalog
+}>
+
+export type DatabaseTableMutationPlanInput = DatabaseTableMutationInput & {
+  dbType?: DatabaseEngineCode
+  columns?: string[]
+  knownColumns?: string[]
+}
+
+export type DatabaseTableMutationPlanStatement = {
+  kind: DatabaseTableMutation['kind']
+  sql: string
+  params: unknown[]
+  preview: string
+}
+
+export type DatabaseTableMutationPlanResult = AiopsMutationResult<{
+  statements: DatabaseTableMutationPlanStatement[]
+  statementCount: number
+  preview: string
+  warning: string
 }>
 
 export type DatabaseAiPaneMessageInput = {
@@ -2319,6 +2339,7 @@ export type AiopsPreloadApi = {
   executeDatabaseSql: (input: DatabaseSqlExecuteInput) => Promise<DatabaseSqlExecuteResult>
   getDatabaseTableDdl: (input: DatabaseTableDdlInput) => Promise<DatabaseTableDdlResult>
   queryDatabaseTable: (input: DatabaseTableQueryInput) => Promise<DatabaseTableQueryResult>
+  planDatabaseTableMutation: (input: DatabaseTableMutationPlanInput) => Promise<DatabaseTableMutationPlanResult>
   mutateDatabaseTable: (input: DatabaseTableMutationInput) => Promise<DatabaseTableMutationResult>
   getDatabaseAiPaneState: () => Promise<DatabaseAiPaneStateResult>
   saveDatabaseAiPaneState: (input: DatabaseAiPaneStateSnapshot) => Promise<DatabaseAiPaneStateResult>

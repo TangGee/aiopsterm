@@ -35,6 +35,7 @@ import type {
   DatabaseAiPaneStateContext,
   DatabaseAiPaneStateResult,
   DatabaseAiPaneStateSnapshot,
+  DatabaseEngineCode,
   DatabaseEngineInfo,
   DatabaseGroupCreateInput,
   DatabaseGroupDeleteResult,
@@ -51,6 +52,9 @@ import type {
   DatabaseTableDdlResult,
   DatabaseTableInfo,
   DatabaseTableMutationInput,
+  DatabaseTableMutationPlanInput,
+  DatabaseTableMutationPlanResult,
+  DatabaseTableMutationPlanStatement,
   DatabaseTableMutationResult,
   DatabaseTableQueryInput,
   DatabaseTableQueryResult
@@ -642,7 +646,37 @@ const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTable
   }
 }
 
-const sqliteDecodePrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
+const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string) =>
+  sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
+
+type DatabaseMutationDialect = DatabaseEngineCode
+type DatabaseMutationStatement = Omit<DatabaseTableMutationPlanStatement, 'preview'>
+type DatabaseRowMutation = Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>
+
+const databaseMutationIdentifier = (value: string, dialect: DatabaseMutationDialect) =>
+  dialect === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
+
+const databaseMutationPlaceholder = (dialect: DatabaseMutationDialect, index: number) => {
+  if (dialect === 'postgresql') return `$${index}`
+  if (dialect === 'oracle') return `:${index}`
+  return '?'
+}
+
+const databaseMutationTableReference = (
+  connection: Pick<DatabaseConnectionInfo, 'dbType' | 'database'> | null,
+  input: Pick<DatabaseTableMutationInput, 'databaseName' | 'schemaName' | 'tableName'>,
+  dialect: DatabaseMutationDialect
+) => {
+  const table = databaseMutationIdentifier(trim(input.tableName), dialect)
+  if (dialect === 'mysql') return `${databaseMutationIdentifier(trim(input.databaseName), dialect)}.${table}`
+  if (dialect === 'sqlite') {
+    const schemaName = connection && connection.dbType === 'sqlite' ? sqliteSchemaNameFor(connection as DatabaseConnectionInfo, input.databaseName) : trim(input.databaseName) || SQLITE_MAIN_SCHEMA
+    return `${databaseMutationIdentifier(schemaName, dialect)}.${table}`
+  }
+  return `${databaseMutationIdentifier(trim(input.schemaName) || (dialect === 'postgresql' ? 'public' : ''), dialect)}.${table}`
+}
+
+const decodeDatabaseMutationPrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
   if (!primaryKey.length) return null
   try {
     const parsed = JSON.parse(rowKey)
@@ -652,48 +686,137 @@ const sqliteDecodePrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
   }
 }
 
-const sqliteKnownColumnSet = (db: SqliteDatabase, schemaName: string, tableName: string) =>
-  new Set(sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name.toLowerCase()))
-
-const sqlitePrimaryKeyWhere = (mutation: Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>) => {
-  const primaryKey = mutation.primaryKey.map(trim).filter(Boolean)
-  const values = sqliteDecodePrimaryKeyRowKey(mutation.rowKey, primaryKey)
-  if (!values) {
-    throw Object.assign(new Error('Primary-key row identity is required for SQLite row mutations.'), { code: 'DB_SQLITE_PRIMARY_KEY_REQUIRED' })
+const pushDatabaseMutationComparison = (clauses: string[], params: unknown[], dialect: DatabaseMutationDialect, column: string, value: unknown) => {
+  const quoted = databaseMutationIdentifier(column, dialect)
+  if (value === null || value === undefined) {
+    clauses.push(`${quoted} IS NULL`)
+    return
   }
-  return {
-    sql: primaryKey.map((column) => `${sqliteIdentifier(column)} IS ?`).join(' AND '),
-    params: values
-  }
+  params.push(value)
+  clauses.push(`${quoted} = ${databaseMutationPlaceholder(dialect, params.length)}`)
 }
 
-const sqliteApplyMutation = (db: SqliteDatabase, tableRef: string, knownColumns: Set<string>, mutation: DatabaseTableMutationInput['mutations'][number]) => {
+const databaseMutationWhereForRow = (
+  dialect: DatabaseMutationDialect,
+  knownColumns: string[],
+  mutation: DatabaseRowMutation,
+  params: unknown[]
+) => {
+  const primaryKey = mutation.primaryKey.map(trim).filter(Boolean)
+  const values = decodeDatabaseMutationPrimaryKeyRowKey(mutation.rowKey, primaryKey)
+  if (primaryKey.length && values) {
+    const clauses: string[] = []
+    primaryKey.forEach((column, index) => pushDatabaseMutationComparison(clauses, params, dialect, column, values[index]))
+    return { sql: clauses.join(' AND '), usesPrimaryKey: true }
+  }
+
+  if (dialect === 'oracle') {
+    throw Object.assign(new Error('Oracle table editing requires a primary key in this version.'), { code: 'DB_PRIMARY_KEY_REQUIRED' })
+  }
+  if (!mutation.originalRow) {
+    throw Object.assign(new Error('Original row snapshot is required for table mutations without a primary key.'), {
+      code: dialect === 'sqlite' ? 'DB_SQLITE_PRIMARY_KEY_REQUIRED' : 'DB_PRIMARY_KEY_REQUIRED'
+    })
+  }
+
+  const clauses: string[] = []
+  knownColumns.forEach((column) => {
+    if (Object.prototype.hasOwnProperty.call(mutation.originalRow, column)) {
+      pushDatabaseMutationComparison(clauses, params, dialect, column, mutation.originalRow?.[column])
+    }
+  })
+  if (!clauses.length) {
+    throw Object.assign(new Error('Original row snapshot does not contain known table columns.'), { code: 'DB_ROW_SNAPSHOT_REQUIRED' })
+  }
+  return { sql: clauses.join(' AND '), usesPrimaryKey: false }
+}
+
+const applyDatabaseMutationSingleRowGuard = (
+  dialect: DatabaseMutationDialect,
+  tableRef: string,
+  sql: string,
+  whereSql: string,
+  usesPrimaryKey: boolean
+) => {
+  if (usesPrimaryKey) return sql
+  if (dialect === 'mysql') return `${sql} LIMIT 1`
+  if (dialect === 'sqlite') return sql.replace(`WHERE ${whereSql}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
+  if (dialect === 'postgresql') return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
+  return sql
+}
+
+const buildDatabaseMutationStatement = (
+  dialect: DatabaseMutationDialect,
+  tableRef: string,
+  knownColumns: string[],
+  mutation: DatabaseTableMutationInput['mutations'][number]
+): DatabaseMutationStatement | null => {
+  const knownColumnSet = new Set(knownColumns.map((column) => column.toLowerCase()))
+  const params: unknown[] = []
+  if (mutation.kind === 'drop') return { kind: mutation.kind, sql: `DROP TABLE ${tableRef}`, params }
+  if (mutation.kind === 'truncate') {
+    return { kind: mutation.kind, sql: dialect === 'sqlite' ? `DELETE FROM ${tableRef}` : `TRUNCATE TABLE ${tableRef}`, params }
+  }
+  if (mutation.kind === 'insert') {
+    const columns = Object.keys(mutation.values).filter((column) => knownColumnSet.has(column.toLowerCase()) && mutation.values[column] !== null && mutation.values[column] !== undefined)
+    if (!columns.length) return null
+    columns.forEach((column) => params.push(mutation.values[column]))
+    return {
+      kind: mutation.kind,
+      sql: `INSERT INTO ${tableRef} (${columns.map((column) => databaseMutationIdentifier(column, dialect)).join(', ')}) VALUES (${columns.map((_column, index) => databaseMutationPlaceholder(dialect, index + 1)).join(', ')})`,
+      params
+    }
+  }
+  if (mutation.kind === 'delete') {
+    const where = databaseMutationWhereForRow(dialect, knownColumns, mutation, params)
+    const sql = `DELETE FROM ${tableRef} WHERE ${where.sql}`
+    return { kind: mutation.kind, sql: applyDatabaseMutationSingleRowGuard(dialect, tableRef, sql, where.sql, where.usesPrimaryKey), params }
+  }
+
+  const columns = Object.keys(mutation.patch).filter((column) => knownColumnSet.has(column.toLowerCase()))
+  if (!columns.length) return null
+  columns.forEach((column) => params.push(mutation.patch[column]))
+  const assignments = columns.map((column, index) => `${databaseMutationIdentifier(column, dialect)} = ${databaseMutationPlaceholder(dialect, index + 1)}`).join(', ')
+  const where = databaseMutationWhereForRow(dialect, knownColumns, mutation, params)
+  const sql = `UPDATE ${tableRef} SET ${assignments} WHERE ${where.sql}`
+  return { kind: mutation.kind, sql: applyDatabaseMutationSingleRowGuard(dialect, tableRef, sql, where.sql, where.usesPrimaryKey), params }
+}
+
+const formatDatabaseMutationSqlLiteral = (value: unknown) => {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+  if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`
+  return `'${String(value).replace(/'/g, "''")}'`
+}
+
+const formatDatabaseMutationStatementPreview = (statement: DatabaseMutationStatement) => {
+  let paramIndex = 0
+  const sql = statement.sql.replace(/\$(\d+)|:(\d+)|\?/g, (match) => {
+    if (match === '?') {
+      const value = statement.params[paramIndex]
+      paramIndex += 1
+      return formatDatabaseMutationSqlLiteral(value)
+    }
+    const index = Number(match.slice(1) || paramIndex + 1)
+    return formatDatabaseMutationSqlLiteral(statement.params[index - 1])
+  })
+  return `${sql};`
+}
+
+const addDatabaseMutationPreview = (statement: DatabaseMutationStatement): DatabaseTableMutationPlanStatement => ({
+  ...statement,
+  preview: formatDatabaseMutationStatementPreview(statement)
+})
+
+const sqliteApplyMutation = (db: SqliteDatabase, tableRef: string, knownColumns: string[], mutation: DatabaseTableMutationInput['mutations'][number]) => {
   if (mutation.kind === 'drop') {
     db.prepare(`DROP TABLE ${tableRef}`).run()
     return 0
   }
-  if (mutation.kind === 'truncate') {
-    const result = db.prepare(`DELETE FROM ${tableRef}`).run()
-    return Number(result.changes ?? 0)
-  }
-  if (mutation.kind === 'insert') {
-    const columns = Object.keys(mutation.values).filter((column) => knownColumns.has(column.toLowerCase()))
-    if (!columns.length) return 0
-    const sql = `INSERT INTO ${tableRef} (${columns.map(sqliteIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
-    const result = db.prepare(sql).run(...columns.map((column) => mutation.values[column]))
-    return Number(result.changes ?? 0)
-  }
-  if (mutation.kind === 'delete') {
-    const where = sqlitePrimaryKeyWhere(mutation)
-    const result = db.prepare(`DELETE FROM ${tableRef} WHERE ${where.sql}`).run(...where.params)
-    return Number(result.changes ?? 0)
-  }
-
-  const columns = Object.keys(mutation.patch).filter((column) => knownColumns.has(column.toLowerCase()))
-  if (!columns.length) return 0
-  const where = sqlitePrimaryKeyWhere(mutation)
-  const sql = `UPDATE ${tableRef} SET ${columns.map((column) => `${sqliteIdentifier(column)} = ?`).join(', ')} WHERE ${where.sql}`
-  const result = db.prepare(sql).run(...columns.map((column) => mutation.patch[column]), ...where.params)
+  const statement = buildDatabaseMutationStatement('sqlite', tableRef, knownColumns, mutation)
+  if (!statement) return 0
+  const result = db.prepare(statement.sql).run(...statement.params)
   return Number(result.changes ?? 0)
 }
 
@@ -707,8 +830,8 @@ const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTa
     db = openSqliteDatabase(sqliteFilePathFromConnection(connection), false)
     const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
     const tableName = trim(input.tableName)
-    const knownColumns = sqliteKnownColumnSet(db, schemaName, tableName)
-    if (!knownColumns.size) {
+    const knownColumns = sqliteKnownColumnsForTable(db, schemaName, tableName)
+    if (!knownColumns.length) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
     const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
@@ -1442,67 +1565,6 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
   }
 }
 
-const relationalDecodePrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
-  if (!primaryKey.length) return null
-  try {
-    const parsed = JSON.parse(rowKey)
-    return Array.isArray(parsed) && parsed.length === primaryKey.length ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-const relationalPrimaryKeyWhere = (
-  dbType: 'mysql' | 'postgresql',
-  mutation: Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>,
-  params: unknown[]
-) => {
-  const primaryKey = mutation.primaryKey.map(trim).filter(Boolean)
-  const values = relationalDecodePrimaryKeyRowKey(mutation.rowKey, primaryKey)
-  if (!values) {
-    throw Object.assign(new Error('Primary-key row identity is required for database row mutations.'), { code: 'DB_PRIMARY_KEY_REQUIRED' })
-  }
-  return primaryKey
-    .map((column, index) => {
-      const value = values[index]
-      if (value === null || value === undefined) return `${relationalIdentifier(column, dbType)} IS NULL`
-      params.push(value)
-      return `${relationalIdentifier(column, dbType)} = ${relationalPlaceholder(dbType, params.length)}`
-    })
-    .join(' AND ')
-}
-
-const buildRelationalMutationStatement = (
-  connection: DatabaseConnectionInfo,
-  tableRef: string,
-  knownColumns: Set<string>,
-  mutation: DatabaseTableMutationInput['mutations'][number]
-) => {
-  const dbType = connection.dbType as 'mysql' | 'postgresql'
-  const params: unknown[] = []
-  if (mutation.kind === 'drop') return { sql: `DROP TABLE ${tableRef}`, params }
-  if (mutation.kind === 'truncate') return { sql: `TRUNCATE TABLE ${tableRef}`, params }
-  if (mutation.kind === 'insert') {
-    const columns = Object.keys(mutation.values).filter((column) => knownColumns.has(column.toLowerCase()))
-    if (!columns.length) return null
-    columns.forEach((column) => params.push(mutation.values[column]))
-    return {
-      sql: `INSERT INTO ${tableRef} (${columns.map((column) => relationalIdentifier(column, dbType)).join(', ')}) VALUES (${columns.map((_column, index) => relationalPlaceholder(dbType, index + 1)).join(', ')})`,
-      params
-    }
-  }
-  if (mutation.kind === 'delete') {
-    const where = relationalPrimaryKeyWhere(dbType, mutation, params)
-    return { sql: `DELETE FROM ${tableRef} WHERE ${where}`, params }
-  }
-  const columns = Object.keys(mutation.patch).filter((column) => knownColumns.has(column.toLowerCase()))
-  if (!columns.length) return null
-  columns.forEach((column) => params.push(mutation.patch[column]))
-  const setSql = columns.map((column, index) => `${relationalIdentifier(column, dbType)} = ${relationalPlaceholder(dbType, index + 1)}`).join(', ')
-  const where = relationalPrimaryKeyWhere(dbType, mutation, params)
-  return { sql: `UPDATE ${tableRef} SET ${setSql} WHERE ${where}`, params }
-}
-
 const relationalMutateTable = async (
   connection: DatabaseConnectionInfo,
   input: DatabaseTableMutationInput,
@@ -1514,11 +1576,11 @@ const relationalMutateTable = async (
     if (!columns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
-    const knownColumns = new Set(columns.map((column) => column.name.toLowerCase()))
-    const tableRef = relationalTableReference(connection, input)
+    const knownColumns = columns.map((column) => column.name)
+    const tableRef = databaseMutationTableReference(connection, input, dbType)
     const statements = input.mutations
-      .map((mutation) => buildRelationalMutationStatement(connection, tableRef, knownColumns, mutation))
-      .filter((statement): statement is { sql: string; params: unknown[] } => !!statement)
+      .map((mutation) => buildDatabaseMutationStatement(dbType, tableRef, knownColumns, mutation))
+      .filter((statement): statement is DatabaseMutationStatement => !!statement)
     let affected = 0
     if (connection.dbType === 'mysql') {
       await withMysqlConnection(connection, async (client) => {
@@ -1669,6 +1731,47 @@ const tableExistsInBackend = (input: { connectionId: string; databaseName: strin
   const key = `${input.connectionId}:${input.databaseName}:${input.schemaName || ''}:${input.tableName}`
   return hasOwn(tableRows, key) || hasOwn(tableDdlEntries, key)
 }
+
+const databaseMutationWarning = (dialect: DatabaseMutationDialect, input: Pick<DatabaseTableMutationInput, 'mutations'>) => {
+  const hasNoPrimaryKeyRowMutation = input.mutations.some((mutation) => {
+    if (mutation.kind !== 'delete' && mutation.kind !== 'update') return false
+    return mutation.primaryKey.map(trim).filter(Boolean).length === 0
+  })
+  if (!hasNoPrimaryKeyRowMutation) return ''
+  if (dialect === 'oracle') return 'Oracle table editing requires a primary key in this version.'
+  return 'No primary key detected. UPDATE and DELETE previews use the original row snapshot with a single-row guard.'
+}
+
+const inputKnownColumns = (input: DatabaseTableMutationPlanInput) => {
+  const columns = [...(input.knownColumns ?? []), ...(input.columns ?? [])].map(trim).filter(Boolean)
+  return Array.from(new Set(columns))
+}
+
+const databaseMutationPlanData = (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableMutationPlanInput,
+  knownColumns: string[]
+): DatabaseTableMutationPlanResult['data'] => {
+  const dialect = connection.dbType
+  const tableRef = databaseMutationTableReference(connection, input, dialect)
+  const statements = input.mutations
+    .map((mutation) => buildDatabaseMutationStatement(dialect, tableRef, knownColumns, mutation))
+    .filter((statement): statement is DatabaseMutationStatement => !!statement)
+    .map(addDatabaseMutationPreview)
+  return {
+    statements,
+    statementCount: statements.length,
+    preview: statements.map((statement) => statement.preview).join('\n'),
+    warning: databaseMutationWarning(dialect, input)
+  }
+}
+
+const databaseMutationPlanErrorCode = (error: unknown, fallback: string) => {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+  return code.startsWith('DB_') ? code : fallback
+}
+
+const databaseMutationPlanErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
 
 const cloneDatabaseColumn = (column: DatabaseColumnInfo): DatabaseColumnInfo => ({ ...column })
 
@@ -3626,6 +3729,81 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
       durationMs: Math.max(1, Date.now() - startedAt),
       total: input.withTotal ? rows.length : null,
       knownColumns
+    }
+  }
+}
+
+export async function planDatabaseTableMutation(input: DatabaseTableMutationPlanInput): Promise<DatabaseTableMutationPlanResult> {
+  if (!trim(input.connectionId)) {
+    return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
+  }
+  if (!trim(input.databaseName)) {
+    return { ok: false, errorCode: 'DB_DATABASE_REQUIRED', errorMessage: 'Database name is required.' }
+  }
+  if (!trim(input.tableName)) {
+    return { ok: false, errorCode: 'DB_TABLE_REQUIRED', errorMessage: 'Table name is required.' }
+  }
+  if (!Array.isArray(input.mutations)) {
+    return { ok: false, errorCode: 'DB_MUTATIONS_REQUIRED', errorMessage: 'Table mutations are required.' }
+  }
+
+  const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
+  if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    let db: SqliteDatabase | null = null
+    try {
+      db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
+      const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+      const knownColumns = sqliteKnownColumnsForTable(db, schemaName, trim(input.tableName))
+      if (!knownColumns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
+        return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+      }
+      return { ok: true, data: databaseMutationPlanData(connection, input, knownColumns.length ? knownColumns : inputKnownColumns(input)) }
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: databaseMutationPlanErrorCode(error, 'DB_SQLITE_MUTATION_PLAN_FAILED'),
+        errorMessage: databaseMutationPlanErrorMessage(error, 'SQLite table mutation planning failed.')
+      }
+    } finally {
+      db?.close()
+    }
+  }
+  if (!connection) {
+    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+
+  if (!shouldUseDatabaseSeedData()) {
+    if (isRelationalConnection(connection)) {
+      try {
+        const columns = await relationalColumnsForTable(connection, input)
+        if (!columns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
+          return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        }
+        const knownColumns = columns.map((column) => column.name)
+        return { ok: true, data: databaseMutationPlanData(connection, input, knownColumns.length ? knownColumns : inputKnownColumns(input)) }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_MUTATION_PLAN_FAILED' : 'DB_POSTGRES_MUTATION_PLAN_FAILED'),
+          errorMessage: relationalErrorMessage(error, 'Database table mutation planning failed.')
+        }
+      }
+    }
+    return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table mutation planning is not wired in this aiopsterm backend yet.' }
+  }
+
+  const key = tableKeyForContext(input)
+  if (!key) {
+    return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+  }
+  const knownColumns = tableColumns[key]?.slice() ?? inputKnownColumns(input) ?? columnsForRows(tableRows[key])
+  try {
+    return { ok: true, data: databaseMutationPlanData(connection, input, knownColumns) }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: databaseMutationPlanErrorCode(error, 'DB_MUTATION_PLAN_FAILED'),
+      errorMessage: databaseMutationPlanErrorMessage(error, 'Database table mutation planning failed.')
     }
   }
 }

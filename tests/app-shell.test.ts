@@ -6156,6 +6156,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-result-table').text()).not.toContain('bob')
 
     const dataRow = wrapper.find('.db-result-table tbody tr')
+    vi.mocked(window.aiops.planDatabaseTableMutation).mockClear()
     await dataRow.trigger('click')
     expect(wrapper.find('.db-toolbar-btn-delete-row').attributes('disabled')).toBeUndefined()
     const ownerCell = dataRow.findAll('td').at(4)!
@@ -6165,6 +6166,7 @@ describe('AppShell', () => {
     expect((dataEditInput.element as HTMLInputElement).selectionStart).toBe(0)
     await dataEditInput.setValue('alice-edited')
     await dataEditInput.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
     expect(wrapper.find('.db-result-table tbody tr').findAll('td').at(4)!.classes()).toContain('updated')
     expect(wrapper.find('.db-result-table').text()).toContain('alice-edited')
@@ -6175,7 +6177,24 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-edit-summary').text()).toContain('1 SQL')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('UPDATE "public"."orders"')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('"owner" = \'alice-edited\'')
+    expect(window.aiops.planDatabaseTableMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders',
+        mutations: [
+          expect.objectContaining({
+            kind: 'update',
+            primaryKey: ['id'],
+            patch: { owner: 'alice-edited' },
+            originalRow: expect.objectContaining({ id: 1001, owner: 'alice' })
+          })
+        ]
+      })
+    )
     await wrapper.find('.db-toolbar button[title="Undo"]').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.db-result-table').text()).toContain('alice')
     expect(wrapper.find('.db-result-table tbody tr').classes()).not.toContain('updated')
     expect(wrapper.find('.db-edit-summary').exists()).toBe(false)
@@ -6191,6 +6210,7 @@ describe('AppShell', () => {
     const newRowInput = wrapper.find('.db-result-table tbody tr.new input')
     await newRowInput.setValue('new-owner')
     await newRowInput.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(wrapper.find('.db-result-table tbody tr.new').text()).toContain('new-owner')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('INSERT INTO "public"."orders"')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain("'new-owner'")
@@ -6206,6 +6226,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-result-table tbody tr.deleted').findAll('td').at(4)!.trigger('dblclick')
     expect(wrapper.find('.db-result-table td input').exists()).toBe(false)
     expect(wrapper.text()).toContain('Row marked for deletion')
+    await flushPromises()
     expect(wrapper.find('.db-edit-summary').text()).toContain('1 Deleted')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('DELETE FROM "public"."orders"')
     await wrapper.findAll('.db-edit-summary-actions button').find((button) => button.text().includes('Copy Preview'))!.trigger('click')
@@ -6216,6 +6237,7 @@ describe('AppShell', () => {
 
     await wrapper.find('.db-result-table tbody tr').trigger('click')
     await wrapper.find('.db-toolbar button[title="Delete row"]').trigger('click')
+    await flushPromises()
     await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('.db-result-table tbody tr.deleted').exists()).toBe(false)
@@ -6251,6 +6273,7 @@ describe('AppShell', () => {
     const metricEditInput = wrapper.find('.db-result-table td input')
     await metricEditInput.setValue('critical')
     await metricEditInput.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(wrapper.find('.db-edit-summary').text()).toContain('No primary key detected')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('UPDATE `metrics`.`metric_events`')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('LIMIT 1')
@@ -6259,6 +6282,7 @@ describe('AppShell', () => {
     await metricNewRow.findAll('td').at(1)!.trigger('dblclick')
     await wrapper.find('.db-result-table tbody tr.new input').setValue('search')
     await wrapper.find('.db-result-table tbody tr.new input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(wrapper.find('.db-edit-summary').text()).toContain('2 SQL')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('INSERT INTO `metrics`.`metric_events`')
     await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
@@ -6287,6 +6311,7 @@ describe('AppShell', () => {
     const oracleEditInput = wrapper.find('.db-result-table td input')
     await oracleEditInput.setValue('RELEASE_BLOCKED')
     await oracleEditInput.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(wrapper.find('.db-edit-summary').text()).toContain('Oracle table editing requires a primary key')
     await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
     expect(wrapper.find('.db-edit-summary').exists()).toBe(true)
