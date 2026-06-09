@@ -321,13 +321,26 @@ const parseProviderError = (body: string, fallback: string) => {
 
 export async function fetchProviderText(
   request: AiProviderTextRequest,
-  options: { fetch?: typeof fetch; timeoutMs?: number; errorCodePrefix?: string } = {}
+  options: { fetch?: typeof fetch; timeoutMs?: number; errorCodePrefix?: string; signal?: AbortSignal } = {}
 ): Promise<AiProviderTextFetchResult> {
   const fetchImpl = options.fetch || fetch
   const timeoutMs = Math.max(500, Math.min(120_000, Math.round(options.timeoutMs || 30_000)))
   const errorCodePrefix = normalizeText(options.errorCodePrefix) || 'AI_PROVIDER'
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let abortedByTimeout = false
+  const abortFromCaller = () => controller.abort()
+  if (options.signal?.aborted) {
+    return {
+      ok: false,
+      errorCode: `${errorCodePrefix}_CANCELLED`,
+      errorMessage: 'Provider request was cancelled'
+    }
+  }
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true })
+  const timeout = setTimeout(() => {
+    abortedByTimeout = true
+    controller.abort()
+  }, timeoutMs)
   try {
     const response = await fetchImpl(request.endpoint, {
       method: 'POST',
@@ -359,17 +372,21 @@ export async function fetchProviderText(
     }
     return { ok: true, text }
   } catch (error) {
+    const wasCancelled = error instanceof Error && error.name === 'AbortError' && options.signal?.aborted && !abortedByTimeout
     return {
       ok: false,
-      errorCode: error instanceof Error && error.name === 'AbortError' ? `${errorCodePrefix}_TIMEOUT` : `${errorCodePrefix}_ERROR`,
+      errorCode: wasCancelled ? `${errorCodePrefix}_CANCELLED` : error instanceof Error && error.name === 'AbortError' ? `${errorCodePrefix}_TIMEOUT` : `${errorCodePrefix}_ERROR`,
       errorMessage:
-        error instanceof Error && error.name === 'AbortError'
+        wasCancelled
+          ? 'Provider request was cancelled'
+          : error instanceof Error && error.name === 'AbortError'
           ? `Provider request timed out after ${timeoutMs}ms`
           : error instanceof Error
             ? error.message
             : String(error)
     }
   } finally {
+    options.signal?.removeEventListener('abort', abortFromCaller)
     clearTimeout(timeout)
   }
 }

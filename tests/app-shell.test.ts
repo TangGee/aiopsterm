@@ -3151,6 +3151,7 @@ describe('AppShell', () => {
     await wrapper.find('.command-select-popup .select-list button').trigger('click')
     vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
     vi.mocked(window.aiops.generateAiChatResponse).mockClear()
+    vi.mocked(window.aiops.cancelAiChatResponse).mockClear()
     await wrapper.find('.chat-input button[type="submit"]').trigger('submit')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -3181,8 +3182,15 @@ describe('AppShell', () => {
     const noticeAfterDisabledFileClick = wrapper.find('.input-placeholder-notice')
     expect(noticeAfterDisabledFileClick.exists() ? noticeAfterDisabledFileClick.text() : '').not.toContain('已添加文件')
     await wrapper.find('.chat-input button[type="submit"]').trigger('submit')
+    await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(window.aiops.cancelAiChatResponse).toHaveBeenCalledWith({
+      requestId: 'aichat-request-test-1',
+      assistantMessageId: 'aichat-request-test-1-assistant'
+    })
     expect(store.chatMessages.some((message) => message.state === 'streaming')).toBe(false)
+    expect(store.chatMessages.at(-1)?.state).toBe('cancelled')
+    expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
     expect(wrapper.find('[data-testid="ai-file-upload-button"]').attributes('disabled')).toBeUndefined()
 
     const originalUserMessageId = store.chatMessages.at(-2)?.id

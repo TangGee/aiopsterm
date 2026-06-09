@@ -19,6 +19,7 @@ import type {
   AiChatConversationRecord,
   AiChatExchangeRequestInput,
   AiChatHistoryMessage,
+  AiChatMessageState,
   AiChatMessageInput,
   AiChatResponseInput,
   AiTodoItem,
@@ -272,7 +273,7 @@ export type ChatMessage = {
   text: string
   contentParts?: AiContentPart[]
   hosts?: AiContextOption[]
-  state?: 'streaming' | 'done'
+  state?: AiChatMessageState
   favorite?: boolean
   feedback?: 'up' | 'down'
   executedCommand?: string
@@ -9756,9 +9757,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const result = await window.aiops.generateAiChatResponse(input)
     const message = chatMessages.value.find((item) => item.id === assistantId)
     if (!message || message.state !== 'streaming') return
-    message.state = 'done'
-    message.text = result.ok && result.data?.text ? result.data.text : result.errorMessage || 'AI 响应生成失败'
+    if (result.ok && result.data?.status === 'cancelled') {
+      message.state = 'cancelled'
+      message.text = result.data.text || '已停止生成。'
+    } else if (result.ok && result.data?.text) {
+      message.state = 'done'
+      message.text = result.data.text
+    } else {
+      message.state = 'error'
+      message.text = result.errorMessage || 'AI 响应生成失败'
+    }
     void updateCurrentConversationSnapshot()
+  }
+
+  const cancelStreamingAiChatResponse = async () => {
+    const message = [...chatMessages.value].reverse().find((item) => item.role === 'assistant' && item.state === 'streaming')
+    if (!message) return false
+    const cancelBridge = window.aiops?.cancelAiChatResponse
+    if (typeof cancelBridge !== 'function') {
+      setTopNotice('AI 生成取消服务不可用')
+      return false
+    }
+    const requestId = message.id.endsWith('-assistant') ? message.id.slice(0, -'-assistant'.length) : undefined
+    const result = await cancelBridge({
+      assistantMessageId: message.id,
+      requestId
+    })
+    if (!result?.ok || !result.data) {
+      setTopNotice(result?.errorMessage || 'AI 生成取消失败')
+      return false
+    }
+    if (message.state !== 'streaming') return true
+    message.state = 'cancelled'
+    message.text = result.data.text
+    void updateCurrentConversationSnapshot()
+    return true
   }
 
   const hostContextForExchangeRequest = (context: AiContextOption): NonNullable<AiChatExchangeRequestInput['hosts']>[number] | null => {
@@ -9813,6 +9846,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     chatMessages.value.push(userMessage)
     chatMessages.value.push(assistantMessage)
     void generateAiResponseForMessage(assistantMessage.id, {
+      requestId: request.data.requestId,
+      assistantMessageId: assistantMessage.id,
       prompt: userText,
       messages: [...historyForBackend, { role: 'user', text: userText }],
       contexts: messageContexts.map((item) => ({ id: item.id, kind: item.kind, label: item.label })),
@@ -10609,6 +10644,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     generateTerminalCommand,
     injectGeneratedTerminalCommand,
     sendChat,
+    cancelStreamingAiChatResponse,
     resendUserMessageFromParts,
     createConversation,
     deleteConversation,

@@ -210,6 +210,7 @@ const api: AiopsPreloadApi = {
   },
   createAiChatExchangeRequest: (input) => ipcRenderer.invoke('ai:chat-exchange-request', input),
   generateAiChatResponse: (input) => ipcRenderer.invoke('ai:chat-response', input),
+  cancelAiChatResponse: (input) => ipcRenderer.invoke('ai:chat-response:cancel', input),
   transcribeVoiceInput: (input) => ipcRenderer.invoke('voice:transcribe', input),
   listDatabaseCatalog: () => ipcRenderer.invoke('database:catalog'),
   testDatabaseConnection: (input) => ipcRenderer.invoke('database:test-connection', input),

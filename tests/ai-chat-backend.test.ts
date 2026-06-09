@@ -3,6 +3,7 @@ import type { UserConfig } from '../src/shared/preload'
 
 let generateAiChatResponse: (input: Record<string, unknown>) => Promise<any>
 let createAiChatExchangeRequest: (input: Record<string, unknown>) => any
+let cancelAiChatResponse: (input: Record<string, unknown>) => any
 let configureAiChatRuntime: (config?: {
   getConfig?: () => UserConfig
   fetch?: typeof fetch
@@ -17,6 +18,7 @@ beforeAll(async () => {
   const backend = await import(modulePath)
   createAiChatExchangeRequest = backend.createAiChatExchangeRequest
   generateAiChatResponse = backend.generateAiChatResponse
+  cancelAiChatResponse = backend.cancelAiChatResponse
   configureAiChatRuntime = backend.configureAiChatRuntime
   localAiChatResponseMinDelayMs = backend.LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS
 })
@@ -33,6 +35,7 @@ describe('ai chat backend response boundary', () => {
     })
 
     expect(result.ok).toBe(true)
+    expect(result.data?.requestId).toEqual(expect.stringMatching(/^aichat-request-.+/))
     expect(result.data?.userMessage).toMatchObject({
       id: expect.stringMatching(/^aichat-request-.+-user$/),
       role: 'user',
@@ -68,7 +71,8 @@ describe('ai chat backend response boundary', () => {
     expect(result.ok).toBe(true)
     expect(result.data).toMatchObject({
       provider: 'aiopsterm-local',
-      model: 'aiopsterm-local-agent'
+      model: 'aiopsterm-local-agent',
+      status: 'done'
     })
     expect(result.data?.text).toContain('hosts:prod-1')
     expect(result.data?.text).toContain('当前响应由 aiopsterm 本地后端生成')
@@ -130,6 +134,7 @@ describe('ai chat backend response boundary', () => {
     expect(result.data).toMatchObject({
       provider: 'openai',
       model: 'ops-chat',
+      status: 'done',
       text: '先执行 df -h 和 journalctl -n 120 --no-pager，确认磁盘与错误日志后再给变更建议。'
     })
     expect(fetchMock).toHaveBeenCalledWith(
@@ -165,6 +170,121 @@ describe('ai chat backend response boundary', () => {
       ok: false,
       errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE',
       errorMessage: 'AI chat provider is unavailable'
+    })
+  })
+
+  it('cancels active local responses at the backend boundary', async () => {
+    let nowMs = 50_000
+    const waits: Array<{ durationMs: number; resolve: () => void }> = []
+    configureAiChatRuntime({
+      now: () => nowMs,
+      wait: (durationMs: number) =>
+        new Promise((resolve) => {
+          waits.push({
+            durationMs,
+            resolve: () => {
+              nowMs += durationMs
+              resolve(undefined)
+            }
+          })
+        })
+    })
+
+    const response = generateAiChatResponse({
+      requestId: 'aichat-request-cancel-1',
+      assistantMessageId: 'aichat-request-cancel-1-assistant',
+      prompt: '检查生产磁盘',
+      model: 'aiopsterm-local-agent'
+    })
+    expect(waits).toHaveLength(1)
+
+    const cancel = cancelAiChatResponse({
+      assistantMessageId: 'aichat-request-cancel-1-assistant'
+    })
+    expect(cancel).toEqual({
+      ok: true,
+      data: {
+        status: 'cancelled',
+        requestId: 'aichat-request-cancel-1',
+        assistantMessageId: 'aichat-request-cancel-1-assistant',
+        text: '已停止生成。',
+        active: true
+      }
+    })
+
+    waits[0].resolve()
+    await expect(response).resolves.toMatchObject({
+      ok: true,
+      data: {
+        text: '已停止生成。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        status: 'cancelled',
+        requestId: 'aichat-request-cancel-1',
+        assistantMessageId: 'aichat-request-cancel-1-assistant'
+      }
+    })
+  })
+
+  it('aborts active provider responses when the backend cancel boundary is used', async () => {
+    let fetchAbortSignal: AbortSignal | undefined
+    const fetchMock = vi.fn(
+      (_url: string, options?: RequestInit) =>
+        new Promise((resolve, reject) => {
+          fetchAbortSignal = options?.signal || undefined
+          fetchAbortSignal?.addEventListener(
+            'abort',
+            () => {
+              reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }))
+            },
+            { once: true }
+          )
+        })
+    ) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 60_000,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as UserConfig
+    })
+
+    const response = generateAiChatResponse({
+      requestId: 'aichat-request-provider-cancel-1',
+      assistantMessageId: 'aichat-request-provider-cancel-1-assistant',
+      prompt: '检查生产磁盘',
+      model: 'ops-chat'
+    })
+    await vi.waitFor(() => expect(fetchAbortSignal).toBeDefined())
+
+    const cancel = cancelAiChatResponse({
+      requestId: 'aichat-request-provider-cancel-1'
+    })
+    expect(cancel.ok).toBe(true)
+    expect(fetchAbortSignal?.aborted).toBe(true)
+    await expect(response).resolves.toMatchObject({
+      ok: true,
+      data: {
+        text: '已停止生成。',
+        status: 'cancelled',
+        requestId: 'aichat-request-provider-cancel-1',
+        assistantMessageId: 'aichat-request-provider-cancel-1-assistant'
+      }
     })
   })
 

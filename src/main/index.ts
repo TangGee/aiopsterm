@@ -29,7 +29,7 @@ import {
   saveKeychain,
   testAssetConnection
 } from './backend/assets'
-import { configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
+import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
 import { listAiContextCatalog } from './backend/aiContext'
 import { listAiTodoSnapshot } from './backend/aiTodos'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
@@ -198,6 +198,7 @@ import type {
   AliasCommandConfig,
   AliasCommandDeleteInput,
   AliasCommandSaveInput,
+  AiChatCancelInput,
   AiChatExchangeRequestInput,
   AiChatMessageMetadataInput,
   AiChatResponseInput,
@@ -3389,6 +3390,7 @@ const registerIpc = () => {
   ipcMain.handle('extensions:cancel-install', (_event, pluginId: string) => cancelExtensionInstall(pluginId))
   ipcMain.handle('ai:chat-exchange-request', (_event, input: AiChatExchangeRequestInput) => createAiChatExchangeRequest(input))
   ipcMain.handle('ai:chat-response', (_event, input: AiChatResponseInput) => generateAiChatResponse(input))
+  ipcMain.handle('ai:chat-response:cancel', (_event, input: AiChatCancelInput) => cancelAiChatResponse(input))
   ipcMain.handle('voice:transcribe', (_event, input?: VoiceTranscriptionInput) => transcribeVoiceInput(input))
   ipcMain.handle('database:catalog', () => listDatabaseCatalog())
   ipcMain.handle('database:test-connection', (_event, input: DatabaseConnectionTestInput) => testDatabaseConnection(input))

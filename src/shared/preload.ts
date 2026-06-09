@@ -476,6 +476,7 @@ export type AiopsTrustedDeviceRevokeResult = AiopsMutationResult<{
 }>
 
 export type AiChatHistoryMessageRole = 'user' | 'assistant' | 'system'
+export type AiChatMessageState = 'streaming' | 'done' | 'cancelled' | 'error'
 
 export type AiChatHistoryHostContext = {
   id: string
@@ -489,7 +490,7 @@ export type AiChatHistoryMessage = {
   role: AiChatHistoryMessageRole
   text: string
   hosts?: AiChatHistoryHostContext[]
-  state?: 'streaming' | 'done'
+  state?: AiChatMessageState
   favorite?: boolean
   feedback?: 'up' | 'down'
 }
@@ -1517,11 +1518,14 @@ export type AiChatExchangeRequestInput = {
 }
 
 export type AiChatExchangeRequestResult = AiopsMutationResult<{
+  requestId: string
   userMessage: AiChatHistoryMessage
   assistantMessage: AiChatHistoryMessage
 }>
 
 export type AiChatResponseInput = {
+  requestId?: string
+  assistantMessageId?: string
   prompt: string
   messages?: AiChatMessageInput[]
   contexts?: Array<{ id: string; kind: AiContextKind | string; label: string }>
@@ -1536,6 +1540,22 @@ export type AiChatResponseResult = AiopsMutationResult<{
   provider: 'aiopsterm-local' | ModelProviderCheckKey
   model: string
   durationMs: number
+  status?: Extract<AiChatMessageState, 'done' | 'cancelled'>
+  requestId?: string
+  assistantMessageId?: string
+}>
+
+export type AiChatCancelInput = {
+  requestId?: string
+  assistantMessageId?: string
+}
+
+export type AiChatCancelResult = AiopsMutationResult<{
+  status: 'cancelled'
+  requestId?: string
+  assistantMessageId?: string
+  text: string
+  active: boolean
 }>
 
 export type DatabaseEngineCode = 'mysql' | 'postgresql' | 'sqlite' | 'oracle'
@@ -2382,6 +2402,7 @@ export type AiopsPreloadApi = {
   onExtensionInstallProgress: (listener: (event: ExtensionInstallProgress) => void) => () => void
   createAiChatExchangeRequest: (input: AiChatExchangeRequestInput) => Promise<AiChatExchangeRequestResult>
   generateAiChatResponse: (input: AiChatResponseInput) => Promise<AiChatResponseResult>
+  cancelAiChatResponse: (input: AiChatCancelInput) => Promise<AiChatCancelResult>
   transcribeVoiceInput: (input?: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
   testDatabaseConnection: (input: DatabaseConnectionTestInput) => Promise<DatabaseConnectionTestResult>
   saveDatabaseConnection: (input: DatabaseConnectionSaveInput) => Promise<DatabaseConnectionSaveResult>

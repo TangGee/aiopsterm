@@ -394,6 +394,8 @@
           {{ message.text }}
         </p>
         <em v-if="message.state === 'streaming'">streaming</em>
+        <em v-else-if="message.state === 'cancelled'">cancelled</em>
+        <em v-else-if="message.state === 'error'">error</em>
         <div
           v-if="isCommandSuggestionMessage(message)"
           class="message-command-actions"
@@ -3585,11 +3587,7 @@ const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFoc
 
 const handleSend = async () => {
   if (streaming.value) {
-    const message = [...workspace.chatMessages].reverse().find((item) => item.state === 'streaming')
-    if (message) {
-      message.state = 'done'
-      message.text = `${message.text}\n\n已停止生成。`
-    }
+    await workspace.cancelStreamingAiChatResponse()
     return
   }
   const contentParts = extractEditableContentParts()

@@ -1074,7 +1074,22 @@ const defaultDatabaseAiPaneStateMock = (): DatabaseAiPaneStateSnapshot => ({
 })
 let databaseAiPaneStateMock = defaultDatabaseAiPaneStateMock()
 let aiChatExchangeRequestSequenceMock = 1
+const cancelledAiChatResponseKeysMock = new Set<string>()
 let kubernetesTerminalSequenceMock = 1
+
+const aiChatRequestIdFromAssistantMessageIdMock = (assistantMessageId?: string) => {
+  const normalized = String(assistantMessageId || '').trim()
+  return normalized.endsWith('-assistant') ? normalized.slice(0, -'-assistant'.length) : ''
+}
+
+const aiChatResponseKeysMock = (input: { requestId?: string; assistantMessageId?: string }) => {
+  const assistantMessageId = String(input.assistantMessageId || '').trim()
+  const requestId = String(input.requestId || '').trim() || aiChatRequestIdFromAssistantMessageIdMock(assistantMessageId)
+  return [
+    requestId ? `request:${requestId}` : '',
+    assistantMessageId ? `assistant:${assistantMessageId}` : ''
+  ].filter(Boolean)
+}
 
 function cloneDatabaseTableRows() {
   return Object.fromEntries(Object.entries(defaultDatabaseTableRows).map(([key, rows]) => [key, rows.map((row) => ({ ...row }))]))
@@ -3092,7 +3107,7 @@ type TestChatHistoryMessage = {
   role: 'user' | 'assistant' | 'system'
   text: string
   hosts?: TestChatHistoryHostContext[]
-  state?: 'streaming' | 'done'
+  state?: 'streaming' | 'done' | 'cancelled' | 'error'
   favorite?: boolean
   feedback?: 'up' | 'down'
 }
@@ -3187,6 +3202,7 @@ const chatHistoryListResultMock = () => ({
 const resetChatHistoryStoreMock = () => {
   chatHistoryStateMock = defaultChatHistoryState()
   aiChatExchangeRequestSequenceMock = 1
+  cancelledAiChatResponseKeysMock.clear()
   kubernetesTerminalSequenceMock = 1
 }
 const setChatHistoryStoreMock = (conversations: TestChatConversationRecord[], messagesByConversationId?: Record<string, TestChatHistoryMessage[]>, selectedConversationId?: string) => {
@@ -4286,6 +4302,7 @@ Object.defineProperty(window, 'aiops', {
       return {
         ok: true,
         data: {
+          requestId,
           userMessage: {
             id: `${requestId}-user`,
             role: 'user' as const,
@@ -5728,9 +5745,25 @@ Object.defineProperty(window, 'aiops', {
       }
     }),
     generateAiChatResponse: vi.fn(
-      (input: { prompt: string; skills?: Array<{ name: string }> }) =>
+      (input: { requestId?: string; assistantMessageId?: string; prompt: string; skills?: Array<{ name: string }> }) =>
         new Promise((resolve) => {
           window.setTimeout(() => {
+            const cancelled = aiChatResponseKeysMock(input).some((key) => cancelledAiChatResponseKeysMock.has(key))
+            if (cancelled) {
+              resolve({
+                ok: true,
+                data: {
+                  text: '已停止生成。',
+                  provider: 'aiopsterm-local' as const,
+                  model: 'aiopsterm-local-agent',
+                  durationMs: 1,
+                  status: 'cancelled' as const,
+                  requestId: input.requestId,
+                  assistantMessageId: input.assistantMessageId
+                }
+              })
+              return
+            }
             resolve({
               ok: true,
               data: {
@@ -5748,12 +5781,38 @@ Object.defineProperty(window, 'aiops', {
                 ].join('\n'),
                 provider: 'aiopsterm-local' as const,
                 model: 'aiopsterm-local-agent',
-                durationMs: 1
+                durationMs: 1,
+                status: 'done' as const,
+                requestId: input.requestId,
+                assistantMessageId: input.assistantMessageId
               }
             })
           }, 700)
         })
     ),
+    cancelAiChatResponse: vi.fn(async (input: { requestId?: string; assistantMessageId?: string }) => {
+      const keys = aiChatResponseKeysMock(input)
+      if (!keys.length) {
+        return {
+          ok: false,
+          errorCode: 'AI_CHAT_CANCEL_TARGET_REQUIRED',
+          errorMessage: 'AI chat response cancellation requires a request or assistant message id'
+        }
+      }
+      keys.forEach((key) => cancelledAiChatResponseKeysMock.add(key))
+      const assistantMessageId = String(input.assistantMessageId || '').trim() || undefined
+      const requestId = String(input.requestId || '').trim() || aiChatRequestIdFromAssistantMessageIdMock(assistantMessageId) || undefined
+      return {
+        ok: true,
+        data: {
+          status: 'cancelled' as const,
+          requestId,
+          assistantMessageId,
+          text: '已停止生成。',
+          active: true
+        }
+      }
+    }),
     transcribeVoiceInput: vi.fn(async (input?: { audioData?: string; audioFormat?: string; audioSize?: number; durationMs?: number; source?: 'browser' }) => {
       if (!input?.audioData || !input.audioSize) {
         return {

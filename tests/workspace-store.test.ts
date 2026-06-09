@@ -386,6 +386,33 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-1)?.text).toContain('aiopsterm 本地后端生成')
   })
 
+  it('cancels streaming ai responses through the backend bridge and ignores late generation results', async () => {
+    const store = useWorkspaceStore()
+
+    await store.sendChat('停止这次生成')
+    expect(store.chatMessages.at(-1)?.id).toBe('aichat-request-test-1-assistant')
+    expect(store.chatMessages.at(-1)?.state).toBe('streaming')
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: 'aichat-request-test-1-assistant',
+        prompt: expect.stringContaining('停止这次生成')
+      })
+    )
+
+    await store.cancelStreamingAiChatResponse()
+    expect(window.aiops.cancelAiChatResponse).toHaveBeenCalledWith({
+      requestId: 'aichat-request-test-1',
+      assistantMessageId: 'aichat-request-test-1-assistant'
+    })
+    expect(store.chatMessages.at(-1)?.state).toBe('cancelled')
+    expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
+
+    await vi.runAllTimersAsync()
+    expect(store.chatMessages.at(-1)?.state).toBe('cancelled')
+    expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
+  })
+
   it('keeps configuration changes in local state before bridge persistence', async () => {
     const store = useWorkspaceStore()
 
