@@ -12,6 +12,7 @@ import type {
   DatabaseGroupUpdateInput,
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneMessageRecord,
+  DatabaseAiPaneStateSnapshot,
   DatabaseWorkspaceCatalog,
   DatabaseTableInfo,
   AiTodoItem,
@@ -1056,6 +1057,19 @@ let databaseAiPaneRequestSequenceMock = 1
 let databaseAiDrawerRequestSequenceMock = 1
 const databaseAiPaneMessagesMock = new Map<string, DatabaseAiPaneMessageRecord>()
 const databaseAiDrawerRequestsMock = new Map<string, DatabaseAiDrawerRequestRecord>()
+const defaultDatabaseAiPaneStateMock = (): DatabaseAiPaneStateSnapshot => ({
+  open: false,
+  width: 360,
+  context: {
+    connectionId: '',
+    catalogName: '',
+    schemaName: '',
+    dbType: ''
+  },
+  draft: '',
+  messages: []
+})
+let databaseAiPaneStateMock = defaultDatabaseAiPaneStateMock()
 let aiChatExchangeRequestSequenceMock = 1
 let kubernetesTerminalSequenceMock = 1
 
@@ -1080,6 +1094,7 @@ function resetDatabaseTableRowsMock() {
   databaseAiPaneRequestSequenceMock = 1
   databaseAiDrawerRequestSequenceMock = 1
   databaseAiPaneMessagesMock.clear()
+  databaseAiPaneStateMock = defaultDatabaseAiPaneStateMock()
   databaseAiDrawerRequestsMock.clear()
   resetDatabaseConnectionsMock()
 }
@@ -1188,6 +1203,30 @@ const databaseAiPaneMessageRecordMock = (
 })
 
 const cloneDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({ ...message })
+
+const cloneDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
+  open: state.open,
+  width: state.width,
+  context: { ...state.context },
+  draft: state.draft,
+  messages: state.messages.map(cloneDatabaseAiPaneMessageMock)
+})
+
+const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
+  open: state.open === true,
+  width: Math.min(720, Math.max(280, Math.round(Number(state.width) || 360))),
+  context: {
+    connectionId: databaseTrimMock(state.context?.connectionId),
+    catalogName: databaseTrimMock(state.context?.catalogName),
+    schemaName: databaseTrimMock(state.context?.schemaName),
+    dbType: ['mysql', 'postgresql', 'sqlite', 'oracle'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
+  },
+  draft: typeof state.draft === 'string' ? state.draft : '',
+  messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
+    ...cloneDatabaseAiPaneMessageMock(message),
+    status: message.status === 'queued' || message.status === 'streaming' ? 'cancelled' : message.status
+  }))
+})
 
 const storeDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord) => {
   databaseAiPaneMessagesMock.set(message.id, cloneDatabaseAiPaneMessageMock(message))
@@ -5335,6 +5374,11 @@ Object.defineProperty(window, 'aiops', {
       }
     }),
     listDatabaseCatalog: vi.fn(async () => ({ ok: true, data: databaseWorkspaceCatalogMock() })),
+    getDatabaseAiPaneState: vi.fn(async () => ({ ok: true as const, data: cloneDatabaseAiPaneStateMock(databaseAiPaneStateMock) })),
+    saveDatabaseAiPaneState: vi.fn(async (input: DatabaseAiPaneStateSnapshot) => {
+      databaseAiPaneStateMock = normalizeDatabaseAiPaneStateMock(input)
+      return { ok: true as const, data: cloneDatabaseAiPaneStateMock(databaseAiPaneStateMock) }
+    }),
     testDatabaseConnection: vi.fn(testDatabaseConnectionMock),
     saveDatabaseConnection: vi.fn(saveDatabaseConnectionMock),
     createDatabaseGroup: vi.fn(createDatabaseGroupMock),

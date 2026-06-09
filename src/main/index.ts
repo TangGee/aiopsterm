@@ -61,6 +61,7 @@ import {
   executeDatabaseSql,
   generateDatabaseAiDrawerResponse,
   generateDatabaseAiPaneResponse,
+  getDatabaseAiPaneState,
   getDatabaseTableDdl,
   listDatabaseCatalog,
   moveDatabaseConnection,
@@ -70,6 +71,7 @@ import {
   refreshDatabaseConnection,
   removeDatabaseConnection,
   renameDatabaseGroup,
+  saveDatabaseAiPaneState,
   saveDatabaseConnection,
   startDatabaseAiDrawerResponse,
   startDatabaseAiPaneResponse,
@@ -212,6 +214,7 @@ import type {
   DatabaseAiPaneLifecycleInput,
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneResponseInput,
+  DatabaseAiPaneStateSnapshot,
   DatabaseSqlExecuteInput,
   DatabaseTableDdlInput,
   DatabaseTableMutationInput,
@@ -3178,6 +3181,8 @@ const registerIpc = () => {
   ipcMain.handle('database:table-ddl', (_event, input: DatabaseTableDdlInput) => getDatabaseTableDdl(input))
   ipcMain.handle('database:query-table', (_event, input: DatabaseTableQueryInput) => queryDatabaseTable(input))
   ipcMain.handle('database:mutate-table', (_event, input: DatabaseTableMutationInput) => mutateDatabaseTable(input))
+  ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
+  ipcMain.handle('database:ai-pane-state:save', (_event, input: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(input))
   ipcMain.handle('database:ai-pane-request', (_event, input: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(input))
   ipcMain.handle('database:ai-pane-start', (_event, input: DatabaseAiPaneLifecycleInput) => startDatabaseAiPaneResponse(input))
   ipcMain.handle('database:ai-pane-cancel', (_event, input: DatabaseAiPaneLifecycleInput) => cancelDatabaseAiPaneResponse(input))

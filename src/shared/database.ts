@@ -32,6 +32,9 @@ import type {
   DatabaseConnectionSaveResult,
   DatabaseConnectionTestInput,
   DatabaseConnectionTestResult,
+  DatabaseAiPaneStateContext,
+  DatabaseAiPaneStateResult,
+  DatabaseAiPaneStateSnapshot,
   DatabaseEngineInfo,
   DatabaseGroupCreateInput,
   DatabaseGroupDeleteResult,
@@ -1054,6 +1057,7 @@ export function resetDatabaseBackendSeed() {
   databaseGroupParents = { ...databaseGroupParentSeed }
   databaseConnections = databaseConnectionSeed.map(cloneDatabaseConnection)
   databaseAiPaneMessages.clear()
+  databaseAiPaneState = defaultDatabaseAiPaneState()
   databaseAiDrawerRequests.clear()
 }
 
@@ -1061,6 +1065,21 @@ export async function listDatabaseCatalog(): Promise<DatabaseCatalogResult> {
   return {
     ok: true,
     data: databaseWorkspaceCatalogFor()
+  }
+}
+
+export function getDatabaseAiPaneState(): DatabaseAiPaneStateResult {
+  return {
+    ok: true,
+    data: cloneDatabaseAiPaneState(databaseAiPaneState)
+  }
+}
+
+export function saveDatabaseAiPaneState(input: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateResult {
+  databaseAiPaneState = normalizeDatabaseAiPaneState(input)
+  return {
+    ok: true,
+    data: cloneDatabaseAiPaneState(databaseAiPaneState)
   }
 }
 
@@ -1233,9 +1252,29 @@ const normalizeSql = (sql: string) => sql.trim().replace(/\s+/g, ' ')
 
 export const DATABASE_AI_PANE_RESPONSE_MIN_DELAY_MS = 500
 export const DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS = 260
+const DATABASE_AI_PANE_DEFAULT_WIDTH = 360
+const DATABASE_AI_PANE_MIN_WIDTH = 280
+const DATABASE_AI_PANE_MAX_WIDTH = 720
+const DATABASE_AI_PANE_MAX_MESSAGES = 24
+
+const defaultDatabaseAiPaneContext = (): DatabaseAiPaneStateContext => ({
+  connectionId: '',
+  catalogName: '',
+  schemaName: '',
+  dbType: ''
+})
+
+const defaultDatabaseAiPaneState = (): DatabaseAiPaneStateSnapshot => ({
+  open: false,
+  width: DATABASE_AI_PANE_DEFAULT_WIDTH,
+  context: defaultDatabaseAiPaneContext(),
+  draft: '',
+  messages: []
+})
 
 const databaseAiPaneMessages = new Map<string, DatabaseAiPaneMessageRecord>()
 const databaseAiDrawerRequests = new Map<string, DatabaseAiDrawerRequestRecord>()
+let databaseAiPaneState = defaultDatabaseAiPaneState()
 
 export type DatabaseAiProviderTextMessage = {
   role: 'user' | 'assistant'
@@ -1298,6 +1337,65 @@ const databaseAiPaneMessageRecord = (
 })
 
 const cloneDatabaseAiPaneMessageRecord = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({ ...message })
+
+const normalizeDatabaseAiPaneStateContext = (context?: Partial<DatabaseAiPaneStateContext>): DatabaseAiPaneStateContext => {
+  const dbType = context?.dbType && supportedEngines.has(context.dbType) ? context.dbType : ''
+  return {
+    connectionId: trim(context?.connectionId),
+    catalogName: trim(context?.catalogName),
+    schemaName: trim(context?.schemaName),
+    dbType
+  }
+}
+
+const normalizeDatabaseAiPaneStateMessage = (message: unknown): DatabaseAiPaneMessageRecord | null => {
+  if (!message || typeof message !== 'object') return null
+  const raw = message as Partial<DatabaseAiPaneMessageRecord>
+  const role = raw.role === 'user' || raw.role === 'assistant' ? raw.role : null
+  if (!role) return null
+  const id = trim(raw.id)
+  const requestId = trim(raw.requestId)
+  if (!id || !requestId) return null
+  const rawStatus = String(raw.status || '')
+  if (!['queued', 'streaming', 'done', 'error', 'cancelled'].includes(rawStatus)) return null
+  const createdAt = Number(raw.createdAt)
+  const updatedAt = Number(raw.updatedAt)
+  if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null
+  const status =
+    rawStatus === 'queued' || rawStatus === 'streaming' ? 'cancelled' : (rawStatus as DatabaseAiPaneMessageRecord['status'])
+  return {
+    id,
+    requestId,
+    role,
+    status,
+    content: String(raw.content ?? ''),
+    contextSummary: String(raw.contextSummary ?? ''),
+    createdAt,
+    updatedAt
+  }
+}
+
+const normalizeDatabaseAiPaneState = (state?: Partial<DatabaseAiPaneStateSnapshot>): DatabaseAiPaneStateSnapshot => {
+  const width = Number(state?.width)
+  const messages = Array.isArray(state?.messages)
+    ? state.messages.map(normalizeDatabaseAiPaneStateMessage).filter((message): message is DatabaseAiPaneMessageRecord => Boolean(message))
+    : []
+  return {
+    open: state?.open === true,
+    width: Math.min(DATABASE_AI_PANE_MAX_WIDTH, Math.max(DATABASE_AI_PANE_MIN_WIDTH, Number.isFinite(width) ? Math.round(width) : DATABASE_AI_PANE_DEFAULT_WIDTH)),
+    context: normalizeDatabaseAiPaneStateContext(state?.context),
+    draft: typeof state?.draft === 'string' ? state.draft : '',
+    messages: messages.slice(-DATABASE_AI_PANE_MAX_MESSAGES).map(cloneDatabaseAiPaneMessageRecord)
+  }
+}
+
+const cloneDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
+  open: state.open,
+  width: state.width,
+  context: { ...state.context },
+  draft: state.draft,
+  messages: state.messages.map(cloneDatabaseAiPaneMessageRecord)
+})
 
 const storeDatabaseAiPaneMessage = (message: DatabaseAiPaneMessageRecord) => {
   databaseAiPaneMessages.set(message.id, cloneDatabaseAiPaneMessageRecord(message))

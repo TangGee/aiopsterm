@@ -18,6 +18,7 @@ import {
   generateDatabaseAiDrawerResponse,
   generateDatabaseAiPaneResponse,
   executeDatabaseSql,
+  getDatabaseAiPaneState,
   getDatabaseTableDdl,
   listDatabaseCatalog,
   moveDatabaseConnection,
@@ -28,6 +29,7 @@ import {
   removeDatabaseConnection,
   renameDatabaseGroup,
   resetDatabaseBackendSeed,
+  saveDatabaseAiPaneState,
   saveDatabaseConnection,
   startDatabaseAiDrawerResponse,
   startDatabaseAiPaneResponse,
@@ -717,6 +719,78 @@ describe('database backend boundary', () => {
     expect(result.data?.text).toContain('orders(5 columns)')
     expect(result.data?.text).toContain('FROM "public"."open_orders_v"')
     expect(elapsedMs).toBeGreaterThanOrEqual(475)
+  })
+
+  it('keeps DB AI pane state behind the database backend boundary', () => {
+    expect(getDatabaseAiPaneState()).toEqual({
+      ok: true,
+      data: {
+        open: false,
+        width: 360,
+        context: {
+          connectionId: '',
+          catalogName: '',
+          schemaName: '',
+          dbType: ''
+        },
+        draft: '',
+        messages: []
+      }
+    })
+
+    const saved = saveDatabaseAiPaneState({
+      open: true,
+      width: 999,
+      context: {
+        connectionId: ' conn-prod-pg ',
+        catalogName: ' orders ',
+        schemaName: ' public ',
+        dbType: 'postgresql'
+      },
+      draft: ' explain this schema ',
+      messages: [
+        {
+          id: 'pane-user-1',
+          requestId: 'pane-req-1',
+          role: 'user',
+          status: 'done',
+          content: 'Explain',
+          contextSummary: 'orders-postgres · postgresql · orders · public',
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_000_000
+        },
+        {
+          id: 'pane-assistant-1',
+          requestId: 'pane-req-1',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          contextSummary: 'orders-postgres · postgresql · orders · public',
+          createdAt: 1_700_000_000_001,
+          updatedAt: 1_700_000_000_001
+        }
+      ]
+    })
+
+    expect(saved.data).toMatchObject({
+      open: true,
+      width: 720,
+      context: {
+        connectionId: 'conn-prod-pg',
+        catalogName: 'orders',
+        schemaName: 'public',
+        dbType: 'postgresql'
+      },
+      draft: ' explain this schema '
+    })
+    expect(saved.data?.messages).toHaveLength(2)
+    expect(saved.data?.messages[1]).toMatchObject({
+      id: 'pane-assistant-1',
+      status: 'cancelled'
+    })
+
+    saved.data!.messages[0].content = 'mutated outside backend'
+    expect(getDatabaseAiPaneState().data?.messages[0].content).toBe('Explain')
   })
 
   it('calls the configured DB AI provider for non-local pane responses', async () => {

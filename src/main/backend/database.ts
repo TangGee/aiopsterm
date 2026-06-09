@@ -103,6 +103,7 @@ export {
   executeDatabaseSql,
   generateDatabaseAiDrawerResponse,
   generateDatabaseAiPaneResponse,
+  getDatabaseAiPaneState,
   getDatabaseTableDdl,
   listDatabaseCatalog,
   moveDatabaseConnection,
@@ -114,6 +115,7 @@ export {
   renameDatabaseGroup,
   resetDatabaseBackendSeed,
   saveDatabaseConnection,
+  saveDatabaseAiPaneState,
   startDatabaseAiDrawerResponse,
   startDatabaseAiPaneResponse,
   testDatabaseConnection

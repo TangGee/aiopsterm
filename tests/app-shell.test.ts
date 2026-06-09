@@ -6597,7 +6597,8 @@ describe('AppShell', () => {
   })
 
   it('opens the Database DB AI pane with active context, streaming chat, resize, and persisted state', async () => {
-    localStorage.removeItem('aiopsterm.database.dbAiPane')
+    vi.mocked(window.aiops.getDatabaseAiPaneState).mockClear()
+    vi.mocked(window.aiops.saveDatabaseAiPaneState).mockClear()
     vi.mocked(window.aiops.createDatabaseAiPaneRequest).mockClear()
     vi.mocked(window.aiops.startDatabaseAiPaneResponse).mockClear()
     vi.mocked(window.aiops.cancelDatabaseAiPaneResponse).mockClear()
@@ -6607,6 +6608,7 @@ describe('AppShell', () => {
       global: { plugins: [createPinia()] }
     })
     await waitForDatabaseCatalog()
+    expect(window.aiops.getDatabaseAiPaneState).toHaveBeenCalled()
 
     await wrapper.find('button[title="New SQL"]').trigger('click')
     await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
@@ -6692,6 +6694,20 @@ describe('AppShell', () => {
 
     await wrapper.find('.db-ai-pane-composer textarea').setValue('persist this draft')
     await wrapper.vm.$nextTick()
+    await flushPromises()
+    expect(window.aiops.saveDatabaseAiPaneState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        open: true,
+        width: 360,
+        context: expect.objectContaining({
+          connectionId: 'conn-local-cache',
+          catalogName: 'cache.db',
+          dbType: 'sqlite'
+        }),
+        draft: 'persist this draft',
+        messages: expect.arrayContaining([expect.objectContaining({ status: 'cancelled' })])
+      })
+    )
     wrapper.unmount()
 
     const remounted = mount(DatabaseWorkspace, {
@@ -6706,11 +6722,9 @@ describe('AppShell', () => {
     expect(remounted.findAll('.db-ai-pane-message').some((message) => message.text().includes('Cancelled'))).toBe(true)
 
     remounted.unmount()
-    localStorage.removeItem('aiopsterm.database.dbAiPane')
   })
 
   it('renders backend-owned DB AI pane error message records', async () => {
-    localStorage.removeItem('aiopsterm.database.dbAiPane')
     vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockResolvedValueOnce({
       ok: false,
       errorCode: 'DB_AI_PROVIDER_ERROR',
@@ -6750,7 +6764,6 @@ describe('AppShell', () => {
     expect(assistantMessage.text()).toContain('Pane provider unavailable from backend record.')
 
     wrapper.unmount()
-    localStorage.removeItem('aiopsterm.database.dbAiPane')
   })
 
   it('keeps the SQL editor shell gutter, active line, and scroll state in sync', async () => {

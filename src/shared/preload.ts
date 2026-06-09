@@ -1743,6 +1743,23 @@ export type DatabaseAiPaneMessageRecord = {
   updatedAt: number
 }
 
+export type DatabaseAiPaneStateContext = {
+  connectionId: string
+  catalogName: string
+  schemaName: string
+  dbType: DatabaseEngineCode | ''
+}
+
+export type DatabaseAiPaneStateSnapshot = {
+  open: boolean
+  width: number
+  context: DatabaseAiPaneStateContext
+  draft: string
+  messages: DatabaseAiPaneMessageRecord[]
+}
+
+export type DatabaseAiPaneStateResult = AiopsMutationResult<DatabaseAiPaneStateSnapshot>
+
 export type DatabaseAiPaneResponseInput = {
   requestId?: string
   assistantMessageId?: string
@@ -2248,6 +2265,8 @@ export type AiopsPreloadApi = {
   getDatabaseTableDdl: (input: DatabaseTableDdlInput) => Promise<DatabaseTableDdlResult>
   queryDatabaseTable: (input: DatabaseTableQueryInput) => Promise<DatabaseTableQueryResult>
   mutateDatabaseTable: (input: DatabaseTableMutationInput) => Promise<DatabaseTableMutationResult>
+  getDatabaseAiPaneState: () => Promise<DatabaseAiPaneStateResult>
+  saveDatabaseAiPaneState: (input: DatabaseAiPaneStateSnapshot) => Promise<DatabaseAiPaneStateResult>
   createDatabaseAiPaneRequest: (input: DatabaseAiPaneRequestInput) => Promise<DatabaseAiPaneRequestResult>
   startDatabaseAiPaneResponse: (input: DatabaseAiPaneLifecycleInput) => Promise<DatabaseAiPaneLifecycleResult>
   cancelDatabaseAiPaneResponse: (input: DatabaseAiPaneLifecycleInput) => Promise<DatabaseAiPaneLifecycleResult>

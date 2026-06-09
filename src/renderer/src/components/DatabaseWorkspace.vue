@@ -2186,6 +2186,7 @@ import type {
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneMessageRecord,
   DatabaseAiPaneResponseResult,
+  DatabaseAiPaneStateSnapshot,
   DatabaseCatalogInfo,
   DatabaseColumnInfo,
   DatabaseConnectionDeleteResult,
@@ -2273,7 +2274,6 @@ type TableDdlResult = { ok: true; ddl: string } | { ok: false; errorCode: string
 const DB_FILTER_NULL = '__AIOPSTERM_DB_NULL__'
 const DB_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_GROUP_ID = 'group-default'
-const DB_AI_PANE_STORAGE_KEY = 'aiopsterm.database.dbAiPane'
 const DB_AI_PANE_DEFAULT_WIDTH = 360
 const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
@@ -3020,6 +3020,8 @@ const dbAiPaneMessageListRef = ref<HTMLElement | null>(null)
 let dbAiPaneResizeStartX = 0
 let dbAiPaneResizeStartWidth = DB_AI_PANE_DEFAULT_WIDTH
 let dbAiPaneContextTouched = false
+let dbAiPaneStateHydrating = false
+let dbAiPaneStateNoticeShown = false
 const dbAiOpen = ref(false)
 const dbAiRequests = ref<Record<string, DbAiRequest>>({})
 const dbAiActiveReqId = ref<string | null>(null)
@@ -4193,65 +4195,70 @@ function resetDbAiPaneWidth() {
   dbAiPaneWidth.value = DB_AI_PANE_DEFAULT_WIDTH
 }
 
-function loadDbAiPaneState() {
-  try {
-    const raw = localStorage.getItem(DB_AI_PANE_STORAGE_KEY)
-    if (!raw) {
-      ensureDbAiPaneContextInitialized(true)
-      return
-    }
-    const parsed = JSON.parse(raw) as {
-      open?: unknown
-      width?: unknown
-      draft?: unknown
-      context?: Partial<DbAiPaneContext>
-      messages?: DbAiPaneMessage[]
-    }
-    dbAiPaneOpen.value = parsed.open === true
-    if (typeof parsed.width === 'number') dbAiPaneWidth.value = clampDbAiPaneWidth(parsed.width)
-    if (parsed.context) applyDbAiPaneContext(parsed.context, Boolean(parsed.context.connectionId))
-    else ensureDbAiPaneContextInitialized(true)
-    dbAiPaneDraft.value = typeof parsed.draft === 'string' ? parsed.draft : ''
-    if (Array.isArray(parsed.messages)) {
-      dbAiPaneMessages.value = parsed.messages
-        .filter((message) => {
-          if (!message || (message.role !== 'user' && message.role !== 'assistant')) return false
-          if (!['queued', 'streaming', 'done', 'error', 'cancelled'].includes(String(message.status))) return false
-          return Number.isFinite(Number(message.createdAt)) && Number.isFinite(Number(message.updatedAt))
-        })
-        .slice(-24)
-        .map((message) => ({
-          ...message,
-          status: message.status === 'queued' || message.status === 'streaming' ? 'cancelled' : message.status === 'error' ? 'error' : message.status,
-          content: String(message.content ?? ''),
-          contextSummary: String(message.contextSummary ?? ''),
-          createdAt: Number(message.createdAt),
-          updatedAt: Number(message.updatedAt)
-        }))
-    }
-  } catch {
-    dbAiPaneOpen.value = false
-    dbAiPaneWidth.value = DB_AI_PANE_DEFAULT_WIDTH
-    dbAiPaneMessages.value = []
-    dbAiPaneDraft.value = ''
-    ensureDbAiPaneContextInitialized(true)
+function applyDbAiPaneStateSnapshot(snapshot: DatabaseAiPaneStateSnapshot) {
+  dbAiPaneOpen.value = snapshot.open === true
+  dbAiPaneWidth.value = clampDbAiPaneWidth(snapshot.width)
+  if (snapshot.context?.connectionId) applyDbAiPaneContext(snapshot.context, true)
+  else ensureDbAiPaneContextInitialized(true)
+  dbAiPaneDraft.value = snapshot.draft || ''
+  dbAiPaneMessages.value = snapshot.messages.map((message) => ({ ...message }))
+}
+
+function currentDbAiPaneStateSnapshot(): DatabaseAiPaneStateSnapshot {
+  return {
+    open: dbAiPaneOpen.value,
+    width: dbAiPaneWidth.value,
+    context: { ...dbAiPaneContext },
+    draft: dbAiPaneDraft.value,
+    messages: dbAiPaneMessages.value.slice(-24).map((message) => ({ ...message }))
   }
 }
 
-function persistDbAiPaneState() {
+async function loadDbAiPaneState() {
+  dbAiPaneStateHydrating = true
   try {
-    localStorage.setItem(
-      DB_AI_PANE_STORAGE_KEY,
-      JSON.stringify({
-        open: dbAiPaneOpen.value,
-        width: dbAiPaneWidth.value,
-        context: { ...dbAiPaneContext },
-        draft: dbAiPaneDraft.value,
-        messages: dbAiPaneMessages.value.slice(-24)
-      })
-    )
+    const bridge = window.aiops.getDatabaseAiPaneState
+    if (typeof bridge !== 'function') {
+      ensureDbAiPaneContextInitialized(true)
+      showNotice('DB AI pane state service unavailable')
+      return
+    }
+    const result = await bridge()
+    if (!result.ok || !result.data) {
+      ensureDbAiPaneContextInitialized(true)
+      showNotice(result.errorMessage || 'DB AI pane state load failed')
+      return
+    }
+    applyDbAiPaneStateSnapshot(result.data)
   } catch {
-    // Persistence is opportunistic in local backend mode.
+    ensureDbAiPaneContextInitialized(true)
+    showNotice('DB AI pane state load failed')
+  } finally {
+    dbAiPaneStateHydrating = false
+  }
+}
+
+async function persistDbAiPaneState() {
+  if (dbAiPaneStateHydrating) return
+  const bridge = window.aiops.saveDatabaseAiPaneState
+  if (typeof bridge !== 'function') {
+    if (!dbAiPaneStateNoticeShown) {
+      dbAiPaneStateNoticeShown = true
+      showNotice('DB AI pane state service unavailable')
+    }
+    return
+  }
+  try {
+    const result = await bridge(currentDbAiPaneStateSnapshot())
+    if (!result.ok && !dbAiPaneStateNoticeShown) {
+      dbAiPaneStateNoticeShown = true
+      showNotice(result.errorMessage || 'DB AI pane state save failed')
+    }
+  } catch {
+    if (!dbAiPaneStateNoticeShown) {
+      dbAiPaneStateNoticeShown = true
+      showNotice('DB AI pane state save failed')
+    }
   }
 }
 
