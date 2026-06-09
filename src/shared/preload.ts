@@ -1316,6 +1316,8 @@ export type TerminalCommandSuggestion = {
 export type TerminalCommandSuggestionContext = {
   panelId?: string
   host?: string
+  shell?: string
+  modelName?: string
   mode?: 'base' | 'ai'
 }
 

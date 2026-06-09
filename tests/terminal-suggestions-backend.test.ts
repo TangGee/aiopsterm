@@ -1,14 +1,22 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   TerminalCommandGenerationInput,
   TerminalCommandGenerationResult,
   TerminalCommandSuggestion,
-  TerminalCommandSuggestionContext
+  TerminalCommandSuggestionContext,
+  UserConfig
 } from '@shared/preload'
 
 type TerminalSuggestionsBackend = {
+  configureTerminalSuggestionsRuntime: (config?: {
+    databasePath?: string
+    now?: () => number
+    fetch?: typeof fetch
+    getConfig?: () => UserConfig
+  }) => void
   generateTerminalCommand: (input: TerminalCommandGenerationInput) => TerminalCommandGenerationResult
-  getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => TerminalCommandSuggestion[]
+  getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => Promise<TerminalCommandSuggestion[]>
+  recordTerminalCommandHistory: (command: string, context?: Pick<TerminalCommandSuggestionContext, 'host'>) => void
 }
 
 let backend: TerminalSuggestionsBackend
@@ -16,6 +24,18 @@ let backend: TerminalSuggestionsBackend
 beforeAll(async () => {
   const modulePath = '../src/main/backend/terminalSuggestions'
   backend = (await import(modulePath)) as TerminalSuggestionsBackend
+})
+
+beforeEach(() => {
+  backend.configureTerminalSuggestionsRuntime({
+    databasePath: ':memory:',
+    now: () => 1_780_488_000_000
+  })
+})
+
+afterEach(() => {
+  backend.configureTerminalSuggestionsRuntime()
+  vi.restoreAllMocks()
 })
 
 describe('terminal command backend boundary', () => {
@@ -47,12 +67,104 @@ describe('terminal command backend boundary', () => {
     )
   })
 
-  it('keeps suggestion rows behind the same terminal backend module', () => {
-    expect(backend.getTerminalCommandSuggestions('df', { mode: 'base', host: '10.8.0.9' })).toEqual([
-      expect.objectContaining({ command: 'df -h', source: 'base' })
+  it('persists executed command history and ranks same-host matches first', async () => {
+    backend.recordTerminalCommandHistory('systemctl status nginx', { host: '10.8.0.9' })
+    backend.recordTerminalCommandHistory('systemctl restart nginx', { host: '10.8.0.8' })
+    backend.recordTerminalCommandHistory('rm -rf /', { host: '10.8.0.9' })
+
+    const suggestions = await backend.getTerminalCommandSuggestions('sys', { mode: 'base', host: '10.8.0.9' })
+
+    expect(suggestions.slice(0, 2)).toEqual([
+      expect.objectContaining({ command: 'systemctl status nginx', source: 'history', explanation: 'history on this host' }),
+      expect.objectContaining({ command: 'systemctl restart nginx', source: 'history', explanation: 'history from 10.8.0.8' })
     ])
-    expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai' })).toEqual([
-      expect.objectContaining({ command: 'kubectl --help', source: 'ai' })
-    ])
+    expect(suggestions.some((item) => item.command === 'rm -rf /')).toBe(false)
+  })
+
+  it('loads command syntax suggestions from the packaged Fig spec catalog', async () => {
+    const suggestions = await backend.getTerminalCommandSuggestions('kubectl ge', { mode: 'base', host: '10.8.0.9' })
+
+    expect(suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: 'kubectl get',
+          source: 'base'
+        })
+      ])
+    )
+  })
+
+  it('calls the configured live model provider for AI suggestions instead of fabricating --help rows', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: 'CMD: git log --oneline -10\nEXP: recent commits'
+            }
+          }
+        ]
+      })
+    })) as unknown as typeof fetch
+
+    backend.configureTerminalSuggestionsRuntime({
+      databasePath: ':memory:',
+      now: () => 1_780_488_000_000,
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'ops-terminal',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-terminal', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-terminal',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as UserConfig
+    })
+
+    const suggestions = await backend.getTerminalCommandSuggestions('git lo', {
+      mode: 'ai',
+      host: '10.8.0.9',
+      shell: 'bash',
+      modelName: 'ops-terminal'
+    })
+
+    expect(suggestions).toEqual([{ command: 'git log --oneline -10', source: 'ai', explanation: 'recent commits' }])
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:4010/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer sk-test' }),
+        body: expect.stringContaining('git lo')
+      })
+    )
+  })
+
+  it('returns no AI suggestion when local backend model is selected', async () => {
+    backend.configureTerminalSuggestionsRuntime({
+      databasePath: ':memory:',
+      fetch: vi.fn() as unknown as typeof fetch,
+      getConfig: () =>
+        ({
+          modelName: 'aiopsterm-local-agent',
+          modelProvider: 'local',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'aiopsterm-local-agent', locked: false, checked: true, apiProvider: 'default' }],
+            providers: {}
+          }
+        }) as UserConfig
+    })
+
+    await expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai' })).resolves.toEqual([])
   })
 })

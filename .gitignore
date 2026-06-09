@@ -7,3 +7,4 @@ playwright-report/
 *.tsbuildinfo
 .DS_Store
 npm-debug.log*
+aiopsterm-state.db

@@ -4747,14 +4747,14 @@ Object.defineProperty(window, 'aiops', {
       const normalized = trimmed.toLowerCase()
       if (!normalized) return []
       if (context?.mode === 'ai') {
-        return [{ command: `${trimmed} --help`, source: 'ai' as const, explanation: 'AI suggestion' }]
+        return [{ command: 'top -o %CPU', source: 'ai' as const, explanation: 'Process CPU ranking' }]
       }
       return [
-        { command: 'df -h', source: 'base' as const, explanation: 'base command' },
-        { command: 'systemctl status nginx', source: 'base' as const, explanation: 'base command' },
-        { command: 'kubectl get pods -A', source: 'base' as const, explanation: 'base command' },
-        { command: 'journalctl -u docker --since "30 minutes ago"', source: 'base' as const, explanation: 'base command' },
-        { command: 'top -o %CPU', source: 'base' as const, explanation: 'base command' }
+        { command: 'df -h', source: 'base' as const, explanation: 'history on this host' },
+        { command: 'systemctl status nginx', source: 'history' as const, explanation: 'history on this host' },
+        { command: 'kubectl get', source: 'base' as const, explanation: 'Display one or many resources' },
+        { command: 'journalctl -u docker --since "30 minutes ago"', source: 'history' as const, explanation: 'history from local' },
+        { command: 'top -o %CPU', source: 'base' as const, explanation: 'Display processes by CPU' }
       ].filter((item) => item.command.toLowerCase().includes(normalized))
     }),
     generateTerminalCommand: vi.fn(async (input: {

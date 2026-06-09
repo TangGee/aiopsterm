@@ -130,7 +130,12 @@ import {
   saveSettingsShortcut
 } from './backend/settingsPreferences'
 import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
-import { generateTerminalCommand, getTerminalCommandSuggestions } from './backend/terminalSuggestions'
+import {
+  configureTerminalSuggestionsRuntime,
+  generateTerminalCommand,
+  getTerminalCommandSuggestions,
+  recordTerminalCommandHistory
+} from './backend/terminalSuggestions'
 import { createSshTerminalConnectionInfo, createTerminalKillResult, createTerminalWriteResult } from './backend/terminal'
 import {
   bindUserContact,
@@ -271,6 +276,7 @@ type TerminalSession = {
   cwd: string
   window: BrowserWindow
   kind: 'pty' | 'process' | 'ssh'
+  host?: string
 }
 
 type SshShellSession = {
@@ -1045,6 +1051,14 @@ const getDefaultShell = () => {
   return process.env.SHELL || '/bin/bash'
 }
 
+const terminalHistoryLinesFromWrite = (data: string) => {
+  const text = String(data || '')
+  if (!/[\r\n]/.test(text)) return []
+  const lines = text.split(/[\r\n]+/)
+  if (!/[\r\n]$/.test(text)) lines.pop()
+  return lines.map((line) => line.trim()).filter(Boolean)
+}
+
 const normalizeModelProvider = (value: unknown): UserConfig['modelProvider'] => {
   const provider = String(value || '').trim()
   if (!provider || provider === 'mock' || provider === 'local') return 'local'
@@ -1124,6 +1138,7 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 })
 
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
+configureTerminalSuggestionsRuntime({ getConfig })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')
@@ -2906,7 +2921,8 @@ const registerIpc = () => {
         shell: result.shell,
         cwd: result.cwd,
         window: owner,
-        kind: 'ssh'
+        kind: 'ssh',
+        host: result.connection.host
       })
       return {
         id,
@@ -2934,7 +2950,8 @@ const registerIpc = () => {
         shell: terminalShell,
         cwd,
         window: owner,
-        kind: 'pty'
+        kind: 'pty',
+        host: 'local'
       })
       ptyProcess.onData((data) => owner.webContents.send('terminal:data', { id, data }))
       ptyProcess.onExit((event) => {
@@ -2954,7 +2971,8 @@ const registerIpc = () => {
         shell: terminalShell,
         cwd,
         window: owner,
-        kind: 'process'
+        kind: 'process',
+        host: 'local'
       })
 
       child.stdout.on('data', (chunk: Buffer) => {
@@ -2989,6 +3007,7 @@ const registerIpc = () => {
     } else {
       ;(session.process as ChildProcessWithoutNullStreams).stdin.write(data)
     }
+    terminalHistoryLinesFromWrite(data).forEach((command) => recordTerminalCommandHistory(command, { host: session.host }))
     return createTerminalWriteResult(id, data, true)
   })
 

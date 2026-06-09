@@ -445,7 +445,6 @@ const suggestionPosition = reactive({ left: 38, top: 0 })
 const suggestionSelectionMode = ref(false)
 const activeSuggestion = ref(-1)
 const aiSuggestLoading = ref(false)
-const commandHistory = ref<string[]>([])
 let offData: (() => void) | null = null
 let offExit: (() => void) | null = null
 const fontSize = ref(12)
@@ -773,7 +772,9 @@ const getSuggestionContext = (panelId: string, mode: TerminalCommandSuggestionCo
   return {
     panelId,
     mode,
-    ...(panel?.sshSession?.host ? { host: panel.sshSession.host } : {})
+    ...(panel?.sshSession?.host ? { host: panel.sshSession.host } : { host: 'local' }),
+    shell: panel?.sessionId ? (panel.sshSession ? 'ssh' : 'local-shell') : 'bash',
+    modelName: workspace.terminalCommandModelOptions[0] || workspace.config.modelName
   }
 }
 
@@ -1017,7 +1018,6 @@ const applyGeneratedCommand = (panelId: string) => {
     const panel = panelById(panelId)
     if (panel) syncTerminalView(panel)
     command.value = commandDialog.generatedCommand
-    commandHistory.value = [commandDialog.generatedCommand, ...commandHistory.value.filter((item) => item !== commandDialog.generatedCommand)].slice(0, 10)
     commandDialog.instruction = ''
     commandDialog.generatedCommand = ''
     commandDialog.error = ''
@@ -1090,7 +1090,6 @@ const sendCommand = async (panel: TerminalPanel) => {
   if (decision.status === 'allow') {
     command.value = ''
     showDashboard.value = false
-    commandHistory.value = [text, ...commandHistory.value.filter((item) => item !== text)].slice(0, 10)
     syncTerminalView(panel)
   }
 }
@@ -1108,9 +1107,6 @@ const updateSuggestions = async (panelId: string) => {
     suggestionPanel.panelId = ''
     return
   }
-  const history = commandHistory.value
-    .filter((item) => item.toLowerCase().includes(query))
-    .map((item) => ({ command: item, source: 'history' as const, explanation: 'history' }))
   let base: TerminalSuggestion[] = []
   try {
     base = window.aiops?.getTerminalCommandSuggestions
@@ -1120,7 +1116,7 @@ const updateSuggestions = async (panelId: string) => {
     base = []
   }
   if (requestId !== suggestionRequestId || suggestionPanel.panelId !== panelId || command.value.trim().toLowerCase() !== query) return
-  suggestionItems.value = [...history, ...base].slice(0, 6)
+  suggestionItems.value = base.slice(0, 6)
   nextTick(() => updateSuggestionsPosition(panelId))
 }
 
@@ -1182,7 +1178,6 @@ const sendGlobalCommand = async () => {
   const decision = await workspace.runGlobalTerminalCommand(text)
   workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
   if (decision.status !== 'allow') return
-  commandHistory.value = [text, ...commandHistory.value.filter((item) => item !== text)].slice(0, 10)
   showDashboard.value = false
   globalCommand.value = ''
 }

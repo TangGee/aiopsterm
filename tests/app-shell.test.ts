@@ -3421,10 +3421,10 @@ describe('AppShell', () => {
       'top',
       expect.objectContaining({ panelId: store.activePanelId, mode: 'ai' })
     )
-    resolveAiSuggestions([{ command: 'top --help', source: 'ai', explanation: 'AI suggestion' }])
+    resolveAiSuggestions([{ command: 'top -o %CPU', source: 'ai', explanation: 'Process CPU ranking' }])
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(wrapper.text()).toContain('top --help')
+    expect(wrapper.text()).toContain('top -o %CPU')
     expect(wrapper.find('.terminal-suggestions .ai-trigger').exists()).toBe(false)
     expect(wrapper.find('.terminal-suggestions .ai-trigger-loading').exists()).toBe(false)
 

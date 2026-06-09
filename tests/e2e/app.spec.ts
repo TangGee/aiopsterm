@@ -852,9 +852,9 @@ test('terminal tab operations and visual baseline', async () => {
     await page.keyboard.press('Escape')
     await expect(page.locator('.terminal-command-dialog')).not.toBeVisible()
 
-    await page.locator('.command-line input').first().fill('kubectl')
+    await page.locator('.command-line input').first().fill('kubectl ge')
     await expect(page.locator('.terminal-suggestions')).toBeVisible()
-    await expect(page.locator('.terminal-suggestions')).toContainText('kubectl get pods -A')
+    await expect(page.locator('.terminal-suggestions')).toContainText('kubectl get')
 
     await page.locator('.xterm-host').first().click({ button: 'right' })
     await page.locator('.terminal-context-menu button').filter({ hasText: '文件管理' }).click()
