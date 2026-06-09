@@ -272,6 +272,45 @@ vi.mock('../src/main/backend/ssh2Runtime', () => ({
   loadSsh2: () => ({ Client: ssh2Mock.Client })
 }))
 
+const sshProxyMock = vi.hoisted(() => {
+  const sockets: Array<{ destroyed: boolean; destroy: () => void; id: string }> = []
+  const calls: Array<Record<string, unknown>> = []
+
+  const createSocket = (id: string) => {
+    const socket = {
+      id,
+      destroyed: false,
+      destroy() {
+        socket.destroyed = true
+      }
+    }
+    sockets.push(socket)
+    return socket
+  }
+
+  return {
+    sockets,
+    calls,
+    reset() {
+      sockets.length = 0
+      calls.length = 0
+    },
+    createSocket,
+    async createSshProxySocketForAsset(asset: unknown, configs: unknown, host: string, port: number) {
+      calls.push({ asset, configs, host, port })
+      if (!(asset as { needProxy?: boolean } | null | undefined)?.needProxy) return null
+      return {
+        config: { name: (asset as { proxyName?: string }).proxyName || 'unit-proxy' },
+        socket: createSocket(`proxy-${calls.length}`)
+      }
+    }
+  }
+})
+
+vi.mock('../src/main/backend/sshProxy', () => ({
+  createSshProxySocketForAsset: sshProxyMock.createSshProxySocketForAsset
+}))
+
 let readFileContent: (filePath: string, options?: Record<string, unknown>) => Promise<any>
 let writeFileContent: (filePath: string, content: string, options?: Record<string, unknown>) => Promise<any>
 let listFiles: (directory: string, options?: Record<string, unknown>) => Promise<any[]>
@@ -290,6 +329,7 @@ let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
 let deleteFileSessionFolder: (uuid: string) => Promise<any>
 let resetFileSessionCatalog: () => void
 let dropFileSessionCatalogCache: () => void
+let configureFilesBackendRuntime: (config?: { getConfig?: () => { sshProxyConfigs?: any[] } }) => void
 let saveAsset: (asset: any) => any
 
 beforeAll(async () => {
@@ -313,6 +353,7 @@ beforeAll(async () => {
   deleteFileSessionFolder = backend.deleteFileSessionFolder
   resetFileSessionCatalog = backend.__resetFileSessionCatalogForTests
   dropFileSessionCatalogCache = backend.__dropFileSessionCatalogCacheForTests
+  configureFilesBackendRuntime = backend.configureFilesBackendRuntime
   const assetsModulePath = '../src/main/backend/assets'
   saveAsset = (await import(assetsModulePath)).saveAsset
 })
@@ -320,10 +361,12 @@ beforeAll(async () => {
 beforeEach(() => {
   resetFileSessionCatalog?.()
   ssh2Mock.reset()
+  sshProxyMock.reset()
+  configureFilesBackendRuntime?.()
 })
 
 describe('files backend content boundary', () => {
-  const saveSftpAsset = () => {
+  const saveSftpAsset = (patch: Record<string, unknown> = {}) => {
     const saved = saveAsset({
       id: 'asset-sftp-files-test',
       name: 'sftp-files-test',
@@ -338,7 +381,8 @@ describe('files backend content boundary', () => {
       asset_type: 'person',
       auth_type: 'password',
       tags: ['sftp'],
-      password: 'backend-secret'
+      password: 'backend-secret',
+      ...patch
     })
     expect(saved.ok).toBe(true)
     return saved.data.id
@@ -705,6 +749,60 @@ describe('files backend content boundary', () => {
         { method: 'writeFile', path: '/srv/releases/new.txt', content: 'created on sftp\n' }
       ])
     )
+  })
+
+  it('routes asset-backed SFTP connections through configured SSH proxies', async () => {
+    configureFilesBackendRuntime({
+      getConfig: () => ({
+        sshProxyConfigs: [
+          {
+            name: 'release-proxy',
+            type: 'SOCKS5',
+            host: '127.0.0.1',
+            port: 1080,
+            enableProxyIdentity: false,
+            username: '',
+            password: ''
+          }
+        ]
+      })
+    })
+    const sessionId = saveSftpAsset({ needProxy: true, proxyName: 'release-proxy' })
+
+    const rows = await listFiles('/srv', { kind: 'remote', sessionId, host: 'client-host-ignored' })
+
+    expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(['archive', 'logs', 'note.txt']))
+    expect(sshProxyMock.calls).toEqual([
+      {
+        asset: {
+          needProxy: true,
+          proxyName: 'release-proxy'
+        },
+        configs: [
+          {
+            name: 'release-proxy',
+            type: 'SOCKS5',
+            host: '127.0.0.1',
+            port: 1080,
+            enableProxyIdentity: false,
+            username: '',
+            password: ''
+          }
+        ],
+        host: 'sftp.example.test',
+        port: 7992
+      }
+    ])
+    expect(ssh2Mock.connectConfigs).toEqual([
+      expect.objectContaining({
+        username: 'ops',
+        password: 'backend-secret',
+        sock: sshProxyMock.sockets[0]
+      })
+    ])
+    expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('host')
+    expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('port')
+    expect(sshProxyMock.sockets[0].destroyed).toBe(true)
   })
 
   it('returns backend errors instead of seed fallback when asset-backed SFTP fails', async () => {

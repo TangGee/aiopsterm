@@ -28,11 +28,13 @@ import type {
   FileTransferOperationResult,
   FileTransferTaskRecordInput,
   FileTransferTaskRecordResult,
-  FileWriteContentResult
+  FileWriteContentResult,
+  UserConfig
 } from '@shared/preload'
 import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'
 import { getAsset, getAssetSecret, getKeychainSecret } from './assets'
 import { loadSsh2 } from './ssh2Runtime'
+import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 
 type BackendFileEntry = FileListEntry & { mode: string }
 type FileSessionCatalogStoreShape = FileSessionCatalog
@@ -53,7 +55,23 @@ type RemoteSftpTarget = {
   privateKey?: string
   passphrase?: string
   agent?: string
+  proxyAsset?: {
+    needProxy?: boolean
+    proxyName?: string
+  } | null
 }
+
+type FilesBackendRuntimeConfig = {
+  getConfig?: () => Pick<UserConfig, 'sshProxyConfigs'>
+}
+
+const filesRuntimeConfig: FilesBackendRuntimeConfig = {}
+
+export const configureFilesBackendRuntime = (config: FilesBackendRuntimeConfig = {}) => {
+  filesRuntimeConfig.getConfig = config.getConfig
+}
+
+const getSshProxyConfigs = () => filesRuntimeConfig.getConfig?.().sshProxyConfigs || []
 
 const seedTime = new Date('2026-06-04T05:10:00.000Z').getTime()
 
@@ -130,7 +148,11 @@ const resolveRemoteSftpTarget = (options: FileListOptions): RemoteSftpTarget | n
     ...(password ? { password } : {}),
     ...(privateKey ? { privateKey } : {}),
     ...(passphrase ? { passphrase } : {}),
-    ...(agent ? { agent } : {})
+    ...(agent ? { agent } : {}),
+    proxyAsset: {
+      needProxy: Boolean(asset.needProxy),
+      proxyName: asset.proxyName
+    }
   }
 }
 
@@ -167,6 +189,14 @@ const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFT
   if (target.privateKey) connectConfig.privateKey = target.privateKey
   if (target.passphrase) connectConfig.passphrase = target.passphrase
   if (target.agent) connectConfig.agent = target.agent
+  let proxySocket: SshProxySocket | null = null
+  const proxy = await createSshProxySocketForAsset(target.proxyAsset, getSshProxyConfigs(), target.host, target.port)
+  if (proxy) {
+    proxySocket = proxy.socket
+    connectConfig.sock = proxy.socket
+    delete connectConfig.host
+    delete connectConfig.port
+  }
 
   return new Promise<T>((resolve, reject) => {
     let settled = false
@@ -178,6 +208,9 @@ const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFT
     const closeClient = () => {
       try {
         client.end()
+      } catch {}
+      try {
+        proxySocket?.destroy()
       } catch {}
     }
     client
@@ -194,9 +227,18 @@ const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFT
             .finally(closeClient)
         })
       })
-      .once('error', (error) => settle(() => reject(error)))
+      .once('error', (error) =>
+        settle(() => {
+          closeClient()
+          reject(error)
+        })
+      )
       .once('close', () => {
-        if (!settled) settle(() => reject(new Error('SFTP connection closed before it became ready')))
+        if (!settled)
+          settle(() => {
+            closeClient()
+            reject(new Error('SFTP connection closed before it became ready'))
+          })
       })
     client.connect(connectConfig)
   })

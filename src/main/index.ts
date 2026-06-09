@@ -101,6 +101,7 @@ import {
   saveFileSessionFromTerminalContext,
   transferFileEntry,
   updateFileSession,
+  configureFilesBackendRuntime,
   writeFileContent
 } from './backend/files'
 import {
@@ -1163,6 +1164,7 @@ configureTerminalSuggestionsRuntime({ getConfig })
 configureAiChatRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig })
 configureVoiceBackendRuntime({ getConfig })
+configureFilesBackendRuntime({ getConfig })
 configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
 
