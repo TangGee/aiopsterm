@@ -3951,6 +3951,22 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     }),
+    prepareUserAvatarImage: vi.fn(async (input: { filePath: string }) => {
+      const filePath = trimUserTextMock(input.filePath)
+      if (!filePath) return userErrorMock('USER_AVATAR_PATH_REQUIRED', '请选择头像图片')
+      const name = filePath.split(/[/\\]/).pop() || 'avatar.png'
+      return {
+        ok: true as const,
+        data: {
+          filePath,
+          name,
+          mimeType: 'image/png',
+          size: 6,
+          dataUrl: 'data:image/png;base64,avatar',
+          message: '头像图片已读取'
+        }
+      }
+    }),
     updateUserProfile: vi.fn(
       async (
         input: Partial<

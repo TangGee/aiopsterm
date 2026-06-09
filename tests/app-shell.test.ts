@@ -1600,17 +1600,6 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
     await store.refreshUserAccount()
     await rail.vm.$nextTick()
-    const originalFileReader = window.FileReader
-    const originalGlobalFileReader = globalThis.FileReader
-    class MockAvatarFileReader {
-      result = 'data:image/png;base64,avatar'
-      onload: null | (() => void) = null
-      readAsDataURL() {
-        this.onload?.()
-      }
-    }
-    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: MockAvatarFileReader })
-    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: MockAvatarFileReader })
 
     try {
       await rail.find('.user-rail-trigger').trigger('click')
@@ -1688,14 +1677,19 @@ describe('AppShell', () => {
       await panel.find('.user-avatar.large').trigger('click')
       expect(panel.find('.avatar-preview-placeholder').text()).toContain('点击上传头像')
       expect(panel.find('.avatar-settings-modal footer .primary').attributes('disabled')).toBeDefined()
-      const avatarFileInput = panel.find('.avatar-settings-modal input[type="file"]')
-      Object.defineProperty(avatarFileInput.element, 'files', {
-        configurable: true,
-        value: [new File(['avatar'], 'avatar.png', { type: 'image/png' })]
+      expect(panel.find('.avatar-settings-modal input[type="file"]').exists()).toBe(false)
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/avatar.png'] })
+      vi.mocked(window.aiops.prepareUserAvatarImage).mockClear()
+      await panel.find('.avatar-actions-row .settings-button').trigger('click')
+      await flushPromises()
+      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
       })
-      await avatarFileInput.trigger('change')
+      expect(window.aiops.prepareUserAvatarImage).toHaveBeenCalledWith({ filePath: '/tmp/avatar.png' })
       await panel.vm.$nextTick()
       expect(panel.find('.avatar-preview-box img').exists()).toBe(true)
+      expect(store.userNotice).toBe('头像图片已读取')
       await panel.find('.avatar-settings-modal footer .primary').trigger('click')
       await flushPromises()
       expect(store.userProfile.avatarImageUrl).toBe('data:image/png;base64,avatar')
@@ -1751,9 +1745,44 @@ describe('AppShell', () => {
       expect(store.userProfile.username).toBe('guest')
       expect(store.billingSettings.skippedLogin).toBe(true)
     } finally {
-      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalFileReader })
-      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
       vi.useRealTimers()
+    }
+  })
+
+  it('does not fabricate user avatar data when avatar backend preparation is unavailable or fails', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.refreshUserAccount()
+    const panel = mount(UserPanel, {
+      global: { plugins: [pinia] }
+    })
+    const originalPrepareUserAvatarImage = window.aiops.prepareUserAvatarImage
+
+    try {
+      await panel.find('.user-avatar.large').trigger('click')
+      ;(window.aiops as any).prepareUserAvatarImage = undefined
+      await panel.find('.avatar-actions-row .settings-button').trigger('click')
+      await flushPromises()
+      expect(store.userNotice).toBe('头像读取服务不可用')
+      expect(store.userProfile.avatarImageUrl).toBe('')
+      expect(panel.find('.avatar-preview-box img').exists()).toBe(false)
+
+      ;(window.aiops as any).prepareUserAvatarImage = originalPrepareUserAvatarImage
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/not-image.txt'] })
+      vi.mocked(window.aiops.prepareUserAvatarImage!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'USER_AVATAR_INVALID_IMAGE',
+        errorMessage: '请选择图片文件'
+      })
+      await panel.find('.avatar-actions-row .settings-button').trigger('click')
+      await flushPromises()
+      expect(window.aiops.prepareUserAvatarImage).toHaveBeenCalledWith({ filePath: '/tmp/not-image.txt' })
+      expect(store.userNotice).toBe('请选择图片文件')
+      expect(store.userProfile.avatarImageUrl).toBe('')
+      expect(panel.find('.avatar-preview-box img').exists()).toBe(false)
+    } finally {
+      ;(window.aiops as any).prepareUserAvatarImage = originalPrepareUserAvatarImage
     }
   })
 

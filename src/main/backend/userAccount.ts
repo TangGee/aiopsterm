@@ -2,6 +2,8 @@ import type {
   AiopsMutationResult,
   AiopsTrustedDevice,
   AiopsTrustedDeviceRevokeResult,
+  AiopsUserAvatarPrepareInput,
+  AiopsUserAvatarPrepareResult,
   AiopsUserAccountResult,
   AiopsUserAccountSnapshot,
   AiopsUserCodeInput,
@@ -13,6 +15,8 @@ import type {
   AiopsUserProfile,
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
+import { readFile, stat } from 'fs/promises'
+import { basename, extname } from 'path'
 
 const defaultUserProfile: AiopsUserProfile = {
   uid: 2001007,
@@ -88,6 +92,33 @@ const trimText = (value: unknown) => String(value || '').trim()
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 const isValidMobile = (value: string) => /^1[3-9]\d{9}$/.test(value)
+
+const maxAvatarBytes = 2 * 1024 * 1024
+
+const avatarMimeByExtension: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml'
+}
+
+const avatarMimeFromHeader = (buffer: Buffer, filePath: string) => {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
+  const gifHeader = buffer.subarray(0, 6).toString('ascii')
+  if (gifHeader === 'GIF87a' || gifHeader === 'GIF89a') return 'image/gif'
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  if (buffer.length >= 2 && buffer.subarray(0, 2).toString('ascii') === 'BM') return 'image/bmp'
+  const extensionMime = avatarMimeByExtension[extname(filePath).toLowerCase()] || ''
+  if (extensionMime === 'image/svg+xml') {
+    const prefix = buffer.subarray(0, Math.min(buffer.length, 512)).toString('utf-8').trimStart().toLowerCase()
+    if (prefix.startsWith('<svg') || (prefix.startsWith('<?xml') && prefix.includes('<svg'))) return extensionMime
+  }
+  return ''
+}
 
 const passwordScore = (password: string) => {
   if (!password) return 0
@@ -234,6 +265,33 @@ export const sendUserLoginCode = (input: AiopsUserCodeInput): AiopsUserCodeResul
       countdownSeconds: 300,
       message: `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`
     }
+  }
+}
+
+export const prepareUserAvatarImage = async (input: AiopsUserAvatarPrepareInput): Promise<AiopsUserAvatarPrepareResult> => {
+  const filePath = trimText(input?.filePath)
+  if (!filePath) return errorResult('USER_AVATAR_PATH_REQUIRED', '请选择头像图片')
+  try {
+    const info = await stat(filePath)
+    if (!info.isFile()) return errorResult('USER_AVATAR_NOT_FILE', '请选择图片文件')
+    if (info.size <= 0) return errorResult('USER_AVATAR_EMPTY', '头像图片不能为空')
+    if (info.size > maxAvatarBytes) return errorResult('USER_AVATAR_TOO_LARGE', '头像图片不能超过 2MB')
+    const content = await readFile(filePath)
+    const mimeType = avatarMimeFromHeader(content, filePath)
+    if (!mimeType) return errorResult('USER_AVATAR_INVALID_IMAGE', '请选择图片文件')
+    return {
+      ok: true,
+      data: {
+        filePath,
+        name: basename(filePath),
+        mimeType,
+        size: content.byteLength,
+        dataUrl: `data:${mimeType};base64,${content.toString('base64')}`,
+        message: '头像图片已读取'
+      }
+    }
+  } catch (error) {
+    return errorResult('USER_AVATAR_READ_FAILED', error instanceof Error ? error.message : '图片读取失败')
   }
 }
 

@@ -1,4 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 type UserBackend = {
   resetUserAccountForTests: () => void
@@ -9,6 +12,7 @@ type UserBackend = {
   logoutUserAccount: () => any
   skipUserLogin: () => any
   sendUserLoginCode: (input: any) => any
+  prepareUserAvatarImage: (input: any) => Promise<any>
   updateUserProfile: (input: any) => any
   sendUserContactCode: (input: any) => any
   bindUserContact: (input: any) => any
@@ -136,6 +140,48 @@ describe('user account backend boundary', () => {
       avatarInitials: 'OL'
     })
     expect(data.message).toBe('头像更新成功')
+  })
+
+  it('prepares local avatar images through the backend file boundary', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-avatar-'))
+    const filePath = join(dir, 'avatar.png')
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01])
+
+    try {
+      await writeFile(filePath, bytes)
+      const result = await backend.prepareUserAvatarImage({ filePath })
+
+      const data = expectOkData(result)
+      expect(data).toMatchObject({
+        filePath,
+        name: 'avatar.png',
+        mimeType: 'image/png',
+        size: bytes.byteLength,
+        message: '头像图片已读取'
+      })
+      expect(data.dataUrl).toBe(`data:image/png;base64,${bytes.toString('base64')}`)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects non-image avatar files before profile mutation', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-avatar-invalid-'))
+    const filePath = join(dir, 'avatar.txt')
+
+    try {
+      await writeFile(filePath, 'not an image')
+      const result = await backend.prepareUserAvatarImage({ filePath })
+
+      expect(result).toEqual({
+        ok: false,
+        errorCode: 'USER_AVATAR_INVALID_IMAGE',
+        errorMessage: '请选择图片文件'
+      })
+      expect(backend.getUserAccount().data?.profile.avatarImageUrl).toBe('')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('enforces contact binding gates based on the current login registration code', () => {

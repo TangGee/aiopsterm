@@ -145,6 +145,7 @@ import {
   loginUserAccount,
   logoutUserAccount,
   openUserLogin,
+  prepareUserAvatarImage,
   resetUserPassword,
   revokeTrustedDevice,
   sendUserContactCode,
@@ -178,6 +179,7 @@ import type {
   AiopsCustomFolderSaveInput,
   AiopsKeychainInput,
   AiopsOrganizationAssetRefreshInput,
+  AiopsUserAvatarPrepareInput,
   AiopsUserCodeInput,
   AiopsUserContactBindInput,
   AiopsUserLoginInput,
@@ -2305,6 +2307,7 @@ const registerIpc = () => {
   ipcMain.handle('user:logout', () => logoutUserAccount())
   ipcMain.handle('user:skip-login', () => skipUserLogin())
   ipcMain.handle('user:send-login-code', (_event, input: AiopsUserCodeInput) => sendUserLoginCode(input))
+  ipcMain.handle('user:avatar:prepare', (_event, input: AiopsUserAvatarPrepareInput) => prepareUserAvatarImage(input))
   ipcMain.handle('user:update-profile', (_event, input: AiopsUserProfileUpdateInput) => updateUserProfile(input))
   ipcMain.handle('user:reset-password', (_event, input: AiopsUserPasswordInput) => resetUserPassword(input))
   ipcMain.handle('user:send-contact-code', (_event, input: AiopsUserCodeInput) => sendUserContactCode(input))

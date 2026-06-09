@@ -373,6 +373,19 @@ export type AiopsUserProfileUpdateInput = Partial<
   Pick<AiopsUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl' | 'avatarUpdatedAt'>
 >
 
+export type AiopsUserAvatarPrepareInput = {
+  filePath: string
+}
+
+export type AiopsUserAvatarPrepareResult = AiopsMutationResult<{
+  filePath: string
+  name: string
+  mimeType: string
+  size: number
+  dataUrl: string
+  message: string
+}>
+
 export type AiopsUserCodeInput = {
   kind: 'email' | 'mobile'
   value: string
@@ -2023,6 +2036,7 @@ export type AiopsPreloadApi = {
   logoutUserAccount: () => Promise<AiopsUserMutationResult>
   skipUserLogin: () => Promise<AiopsUserMutationResult>
   sendUserLoginCode: (input: AiopsUserCodeInput) => Promise<AiopsUserCodeResult>
+  prepareUserAvatarImage: (input: AiopsUserAvatarPrepareInput) => Promise<AiopsUserAvatarPrepareResult>
   updateUserProfile: (input: AiopsUserProfileUpdateInput) => Promise<AiopsUserMutationResult>
   resetUserPassword: (input: AiopsUserPasswordInput) => Promise<AiopsUserMutationResult>
   sendUserContactCode: (input: AiopsUserCodeInput) => Promise<AiopsUserCodeResult>

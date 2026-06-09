@@ -547,13 +547,6 @@
           >
             使用缩写
           </button>
-          <input
-            ref="avatarInput"
-            class="visually-hidden-input"
-            type="file"
-            accept="image/*"
-            @change="handleAvatarFile"
-          />
         </div>
         <footer>
           <button
@@ -709,7 +702,6 @@ const contactDraft = ref('')
 const contactCodeDraft = ref('')
 const avatarPreview = ref('')
 const avatarZoom = ref(1)
-const avatarInput = ref<HTMLInputElement | null>(null)
 const avatarOffset = reactive({ x: 0, y: 0 })
 const avatarDrag = reactive({ active: false, startX: 0, startY: 0 })
 const loginDraft = reactive({
@@ -849,13 +841,41 @@ const openAvatarModal = () => {
   avatarModalOpen.value = true
 }
 
-const chooseAvatarImage = () => {
-  avatarInput.value?.click()
+const chooseAvatarImage = async () => {
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    workspace.setUserNotice('头像选择服务不可用')
+    return
+  }
+  const prepareUserAvatarImage = window.aiops?.prepareUserAvatarImage
+  if (typeof prepareUserAvatarImage !== 'function') {
+    workspace.setUserNotice('头像读取服务不可用')
+    return
+  }
+  try {
+    const result = await showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
+    })
+    if (!result || result.canceled || !result.filePaths.length) return
+    const prepared = await prepareUserAvatarImage({ filePath: result.filePaths[0] })
+    if (!prepared.ok || !prepared.data?.dataUrl) {
+      workspace.setUserNotice(prepared.errorMessage || '头像图片读取失败')
+      return
+    }
+    avatarPreview.value = prepared.data.dataUrl
+    avatarZoom.value = 1
+    avatarOffset.x = 0
+    avatarOffset.y = 0
+    avatarDrag.active = false
+    workspace.setUserNotice(prepared.data.message || '头像图片已读取')
+  } catch (error) {
+    workspace.setUserNotice(`头像图片读取失败：${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const clearAvatarImage = () => {
   resetAvatarPreview()
-  if (avatarInput.value) avatarInput.value.value = ''
 }
 
 const resetAvatarPreview = () => {
@@ -869,27 +889,6 @@ const resetAvatarPreview = () => {
 const cancelAvatarModal = () => {
   avatarModalOpen.value = false
   resetAvatarPreview()
-  if (avatarInput.value) avatarInput.value.value = ''
-}
-
-const handleAvatarFile = (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
-    workspace.setUserNotice('请选择图片文件')
-    return
-  }
-  const reader = new FileReader()
-  reader.onload = () => {
-    avatarPreview.value = String(reader.result || '')
-    avatarOffset.x = 0
-    avatarOffset.y = 0
-  }
-  reader.onerror = () => {
-    workspace.setUserNotice('图片读取失败')
-  }
-  reader.readAsDataURL(file)
-  if (avatarInput.value) avatarInput.value.value = ''
 }
 
 const onAvatarDragMove = (event: MouseEvent) => {

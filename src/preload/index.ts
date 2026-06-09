@@ -38,6 +38,7 @@ const api: AiopsPreloadApi = {
   logoutUserAccount: () => ipcRenderer.invoke('user:logout'),
   skipUserLogin: () => ipcRenderer.invoke('user:skip-login'),
   sendUserLoginCode: (input) => ipcRenderer.invoke('user:send-login-code', input),
+  prepareUserAvatarImage: (input) => ipcRenderer.invoke('user:avatar:prepare', input),
   updateUserProfile: (input) => ipcRenderer.invoke('user:update-profile', input),
   resetUserPassword: (input) => ipcRenderer.invoke('user:reset-password', input),
   sendUserContactCode: (input) => ipcRenderer.invoke('user:send-contact-code', input),
