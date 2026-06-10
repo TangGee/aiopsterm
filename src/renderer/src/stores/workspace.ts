@@ -148,6 +148,7 @@ import type {
   SshProxyType,
   TerminalCommandGenerationContext,
   TerminalCommandGenerationRecord,
+  TerminalDisconnectReason,
   TerminalExitEvent,
   TerminalLifecycleEvent,
   TerminalLifecycleStage,
@@ -326,6 +327,7 @@ type QuickCommandScriptPlanResolution =
 type TerminalWriteBridgeResult = Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>
 type TerminalWriteValidation = { ok: true } | { ok: false; reason: string }
 const terminalLifecycleStages: TerminalLifecycleStage[] = ['starting', 'connecting', 'proxy-opening', 'connected', 'shell-ready', 'error', 'closed']
+const terminalDisconnectReasons: TerminalDisconnectReason[] = ['manual', 'network', 'process', 'error', 'unknown']
 
 export type TerminalOutputSegment = {
   text: string
@@ -3097,6 +3099,16 @@ const mediaTypeFromKnowledgePath = (relPath: string) => {
 const createTerminalSegments = (text: string, scope: TerminalOutputScope = 'output'): TerminalOutputSegment[] => (text ? [{ text, scope }] : [])
 
 const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
+const hasOwnField = (record: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(record, key)
+const isOptionalField = (record: Record<string, unknown>, key: string, guard: (value: unknown) => boolean) =>
+  !hasOwnField(record, key) || record[key] === undefined || guard(record[key])
+const isTerminalKind = (value: unknown): value is 'local' | 'ssh' => value === 'local' || value === 'ssh'
+const isTerminalExitCode = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isFinite(value))
+const isTerminalPort = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
+const isTerminalDisconnectReason = (value: unknown): value is TerminalDisconnectReason =>
+  terminalDisconnectReasons.includes(value as TerminalDisconnectReason)
+const isOptionalNonEmptyText = (record: Record<string, unknown>, key: string) => isOptionalField(record, key, isNonEmptyText)
 
 const appendTerminalSegment = (panel: TerminalPanel, text: string, scope: TerminalOutputScope = 'output') => {
   if (!text) return
@@ -3127,13 +3139,46 @@ const createEmptyTerminalPanel = (
   ...(split ? { split } : {})
 })
 
-const isTerminalLifecycleEvent = (value: unknown, expectedId: string, expectedKind: 'local' | 'ssh'): value is TerminalLifecycleEvent =>
-  isRecord(value) &&
-  value.id === expectedId &&
-  value.kind === expectedKind &&
-  terminalLifecycleStages.includes(value.stage as TerminalLifecycleStage) &&
-  typeof value.at === 'number' &&
-  Number.isFinite(value.at)
+const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedKind?: 'local' | 'ssh'): value is TerminalLifecycleEvent => {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyText(value.id) ||
+    (expectedId !== undefined && value.id !== expectedId) ||
+    !isTerminalKind(value.kind) ||
+    (expectedKind !== undefined && value.kind !== expectedKind) ||
+    !terminalLifecycleStages.includes(value.stage as TerminalLifecycleStage) ||
+    typeof value.at !== 'number' ||
+    !Number.isFinite(value.at)
+  ) {
+    return false
+  }
+  return (
+    isOptionalNonEmptyText(value, 'shell') &&
+    isOptionalNonEmptyText(value, 'cwd') &&
+    isOptionalNonEmptyText(value, 'host') &&
+    isOptionalField(value, 'port', isTerminalPort) &&
+    isOptionalNonEmptyText(value, 'username') &&
+    isOptionalNonEmptyText(value, 'connectionId') &&
+    isOptionalNonEmptyText(value, 'proxyName') &&
+    isOptionalNonEmptyText(value, 'message') &&
+    isOptionalField(value, 'code', isTerminalExitCode) &&
+    isOptionalField(value, 'reason', isTerminalDisconnectReason) &&
+    isOptionalField(value, 'isNetworkDisconnect', (field) => typeof field === 'boolean') &&
+    isOptionalNonEmptyText(value, 'errorCode') &&
+    isOptionalNonEmptyText(value, 'errorMessage')
+  )
+}
+
+const isTerminalExitEvent = (value: unknown): value is TerminalExitEvent => {
+  if (!isRecord(value) || !isNonEmptyText(value.id) || !isTerminalExitCode(value.code)) return false
+  return (
+    isOptionalField(value, 'kind', isTerminalKind) &&
+    isOptionalField(value, 'reason', isTerminalDisconnectReason) &&
+    isOptionalField(value, 'isNetworkDisconnect', (field) => typeof field === 'boolean') &&
+    isOptionalNonEmptyText(value, 'errorCode') &&
+    isOptionalNonEmptyText(value, 'errorMessage')
+  )
+}
 
 const isLocalTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo =>
   isRecord(value) &&
@@ -10282,30 +10327,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const applyTerminalLifecycle = (event: TerminalLifecycleEvent) => {
+    if (!isTerminalLifecycleEvent(event)) return null
     const panel = panels.value.find((item) => item.sessionId === event.id || item.id === event.id || item.terminalLifecycle?.id === event.id)
     if (!panel) return null
-    panel.terminalLifecycle = event
-    panel.kind = 'terminal'
-    if (event.cwd) panel.cwd = event.cwd
+    if (panel.terminalLifecycle?.id === event.id && panel.terminalLifecycle.kind !== event.kind) return null
+    if (event.kind === 'local' && panel.sshSession && (panel.sessionId === event.id || panel.terminalLifecycle?.id === event.id)) return null
+    let nextSshSession: TerminalSshSession | null = null
     if (event.kind === 'ssh') {
       const previous = panel.sshSession
-      panel.sshSession = {
-        connectionId: event.connectionId || previous?.connectionId,
+      const connectionId = event.connectionId || previous?.connectionId
+      const host = event.host || previous?.host
+      const port = isTerminalPort(event.port) ? event.port : previous?.port
+      const username = event.username || previous?.username
+      if (!isNonEmptyText(connectionId) || !isNonEmptyText(host) || !isTerminalPort(port) || !isNonEmptyText(username)) return null
+      if (!previous && (!event.connectionId || !event.host || !event.username || !isTerminalPort(event.port))) return null
+      nextSshSession = {
+        connectionId,
         sourcePanelId: previous?.sourcePanelId,
         forkFromConnectionId: previous?.forkFromConnectionId,
-        host: event.host || previous?.host || '',
-        port: Number(event.port || previous?.port || 22),
-        username: event.username || previous?.username || 'root',
+        host,
+        port,
+        username,
         assetId: previous?.assetId,
-        assetName: previous?.assetName || event.host || 'ssh',
+        assetName: previous?.assetName || host,
         assetType: previous?.assetType,
         organizationId: previous?.organizationId,
         authType: previous?.authType,
-        needProxy: Boolean(previous?.needProxy),
+        needProxy: previous?.needProxy === true,
         proxyName: event.proxyName || previous?.proxyName || '',
         createdAt: previous?.createdAt
       }
     }
+    panel.terminalLifecycle = event
+    panel.kind = 'terminal'
+    if (event.cwd) panel.cwd = event.cwd
+    if (nextSshSession) panel.sshSession = nextSshSession
     if (event.stage === 'starting' || event.stage === 'connecting' || event.stage === 'proxy-opening') {
       panel.status = 'connecting'
       return panel
@@ -10331,8 +10387,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const applyTerminalExit = (event: TerminalExitEvent) => {
+    if (!isTerminalExitEvent(event)) return null
     const panel = panels.value.find((item) => item.sessionId === event.id || item.id === event.id || item.terminalLifecycle?.id === event.id)
     if (!panel) return null
+    if (event.kind && panel.terminalLifecycle?.id === event.id && panel.terminalLifecycle.kind !== event.kind) return null
+    if (event.kind === 'local' && panel.sshSession && (panel.sessionId === event.id || panel.terminalLifecycle?.id === event.id)) return null
+    if (event.kind === 'ssh' && !panel.sshSession && panel.terminalLifecycle?.kind !== 'ssh') return null
     panel.terminalExit = event
     if (panel.sessionId === event.id) {
       panel.sessionId = undefined

@@ -4031,6 +4031,19 @@ describe('AppShell', () => {
     expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit')).toBe(false)
     expect(store.topNotice).toBe('SSH 终端启动失败')
 
+    vi.mocked(window.aiops.killTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'terminal-wrong-fork-session' }
+    } as any)
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('断开连接'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('test-session-asset-fork-unit')
+    expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.output).not.toContain('[connection disconnected]')
+    expect(store.topNotice).toBe('终端断开失败')
+
     vi.mocked(window.aiops.killTerminal).mockClear()
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('断开连接'))!.trigger('click')
@@ -4107,6 +4120,23 @@ describe('AppShell', () => {
 
     const lifecycleListener = vi.mocked(window.aiops.onTerminalLifecycle).mock.calls.at(-1)?.[0]
     expect(lifecycleListener).toBeTruthy()
+    lifecycleListener?.({
+      id: 'test-session-local',
+      kind: 'local',
+      stage: 'closed',
+      shell: '/bin/bash',
+      cwd: '/tmp/forged',
+      code: 0,
+      reason: 'manual',
+      isNetworkDisconnect: false,
+      at: '1717200004990'
+    } as any)
+    await wrapper.vm.$nextTick()
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.sessionId).toBe('test-session-local')
+    expect(store.activePanel.cwd).not.toBe('/tmp/forged')
+    expect(store.activePanel.output).not.toContain('[process exited')
+
     lifecycleListener?.({
       id: 'test-session-local',
       kind: 'local',

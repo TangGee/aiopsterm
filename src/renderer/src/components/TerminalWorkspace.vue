@@ -420,9 +420,12 @@ import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBott
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
-import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext } from '@shared/preload'
+import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalKillResult } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const isTerminalKillSuccess = (result: TerminalKillResult | null | undefined, sessionId: string) =>
+  result?.ok === true && isRecord(result.data) && result.data.id === sessionId
 const search = ref('')
 const command = ref('')
 const globalCommand = ref('')
@@ -1260,9 +1263,15 @@ const disconnectTerminalPanel = async (panel: TerminalPanel) => {
     return false
   }
   const sessionId = panel.sessionId
-  const result = await window.aiops.killTerminal(sessionId)
-  if (!result?.ok) {
-    workspace.setTopNotice(result?.errorMessage || '终端断开失败')
+  let result: TerminalKillResult
+  try {
+    result = await window.aiops.killTerminal(sessionId)
+  } catch (error) {
+    workspace.setTopNotice(error instanceof Error ? error.message : '终端断开失败')
+    return false
+  }
+  if (!result?.ok || !isTerminalKillSuccess(result, sessionId)) {
+    workspace.setTopNotice(result?.ok ? '终端断开失败' : result?.errorMessage || '终端断开失败')
     return false
   }
   if (panel.sessionId === sessionId) {

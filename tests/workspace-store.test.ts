@@ -3279,6 +3279,22 @@ describe('workspace store', () => {
     expect(store.activePanel.status).toBe('connecting')
     expect(store.activePanel.output).not.toContain('[aiopsterm] shell started')
 
+    const localLifecycleBeforeMalformed = { ...store.activePanel.terminalLifecycle }
+    expect(
+      store.applyTerminalLifecycle({
+        id: 'terminal-life-local',
+        kind: 'local',
+        stage: 'shell-ready',
+        shell: '/bin/bash',
+        cwd: '/tmp/forged',
+        at: '1717200003005'
+      } as any)
+    ).toBeNull()
+    expect(store.activePanel.status).toBe('connecting')
+    expect(store.activePanel.cwd).toBe('/home/unit')
+    expect(store.activePanel.sessionId).toBe('terminal-life-local')
+    expect(store.activePanel.terminalLifecycle).toEqual(localLifecycleBeforeMalformed)
+
     store.applyTerminalLifecycle({
       id: 'terminal-life-local',
       kind: 'local',
@@ -3289,6 +3305,19 @@ describe('workspace store', () => {
     })
     expect(store.activePanel.status).toBe('running')
     expect(store.activePanel.sessionId).toBe('terminal-life-local')
+
+    const localOutputBeforeMalformedExit = store.activePanel.output
+    expect(
+      store.applyTerminalExit({
+        id: 'terminal-life-local',
+        code: '0',
+        kind: 'local',
+        reason: 'manual'
+      } as any)
+    ).toBeNull()
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.sessionId).toBe('terminal-life-local')
+    expect(store.activePanel.output).toBe(localOutputBeforeMalformedExit)
 
     store.applyTerminalLifecycle({
       id: 'terminal-life-local',
@@ -3318,6 +3347,24 @@ describe('workspace store', () => {
         createdAt: 1717200003100
       }
     })
+    const sshSessionBeforeMalformedLifecycle = { ...store.activePanel.sshSession }
+    expect(
+      store.applyTerminalLifecycle({
+        id: 'terminal-life-ssh',
+        kind: 'ssh',
+        stage: 'shell-ready',
+        host: '',
+        port: 22,
+        username: 'deploy',
+        connectionId: 'ssh-terminal-life-ssh',
+        at: 1717200003105
+      } as any)
+    ).toBeNull()
+    expect(store.activePanel.status).toBe('connecting')
+    expect(store.activePanel.sessionId).toBe('terminal-life-ssh')
+    expect(store.activePanel.sshSession).toEqual(sshSessionBeforeMalformedLifecycle)
+    expect(store.activePanel.terminalLifecycle?.id).not.toBe('terminal-life-ssh')
+
     store.applyTerminalLifecycle({
       id: 'terminal-life-ssh',
       kind: 'ssh',
@@ -3354,6 +3401,21 @@ describe('workspace store', () => {
       })
     )
     expect(store.activePanel.output).not.toContain('[connection disconnected]')
+
+    const sshOutputBeforeMalformedExit = store.activePanel.output
+    const sshExitBeforeMalformed = { ...store.activePanel.terminalExit }
+    expect(
+      store.applyTerminalExit({
+        id: 'terminal-life-ssh',
+        code: '1',
+        kind: 'ssh',
+        reason: 'network',
+        isNetworkDisconnect: true
+      } as any)
+    ).toBeNull()
+    expect(store.activePanel.status).toBe('error')
+    expect(store.activePanel.output).toBe(sshOutputBeforeMalformedExit)
+    expect(store.activePanel.terminalExit).toEqual(sshExitBeforeMalformed)
 
     store.applyTerminalExit({
       id: 'terminal-life-ssh',
