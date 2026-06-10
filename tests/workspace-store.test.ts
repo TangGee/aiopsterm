@@ -4661,6 +4661,65 @@ describe('workspace store', () => {
     }
   })
 
+  it('fails closed on malformed successful AI catalog and todo backend results', async () => {
+    const store = useWorkspaceStore()
+    const originalAiops = {
+      listAiContextCatalog: window.aiops.listAiContextCatalog,
+      listAiCommandCatalog: window.aiops.listAiCommandCatalog,
+      listAiTodoSnapshot: window.aiops.listAiTodoSnapshot
+    }
+
+    try {
+      await expect(store.refreshAiContextCatalog()).resolves.toBe(true)
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(true)
+      await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
+      const contextBefore = JSON.stringify(store.aiContextCatalog)
+      const selectedContextsBefore = JSON.stringify(store.selectedContexts)
+      const commandsBefore = JSON.stringify(store.aiCommandOptions)
+      const todosBefore = JSON.stringify(store.todoItems)
+
+      vi.mocked(window.aiops.listAiContextCatalog!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          categories: [{ id: 'hosts', label: '主机', options: [{ id: 'broken-host', label: 'missing kind' }] }],
+          openedHosts: [{ id: 'opened-local', kind: 'hosts', label: '' }],
+          selectedDefaults: []
+        }
+      } as any)
+      await expect(store.refreshAiContextCatalog()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 服务返回数据无效')
+      expect(JSON.stringify(store.aiContextCatalog)).toBe(contextBefore)
+      expect(JSON.stringify(store.selectedContexts)).toBe(selectedContextsBefore)
+
+      vi.mocked(window.aiops.listAiCommandCatalog!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          commands: [{ id: 'commands/broken.md', label: '/broken', path: 'commands/broken.md', command: '/broken' }]
+        }
+      } as any)
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 服务返回数据无效')
+      expect(JSON.stringify(store.aiCommandOptions)).toBe(commandsBefore)
+
+      vi.mocked(window.aiops.listAiTodoSnapshot!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          todos: [{ id: 'todo-broken', content: 'broken todo', status: 'done' }],
+          focusedTodoId: 'todo-broken',
+          totalTodos: 1,
+          completedTodos: 0,
+          source: 'backend',
+          updatedAt: '刚刚'
+        }
+      } as any)
+      await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 服务返回数据无效')
+      expect(JSON.stringify(store.todoItems)).toBe(todosBefore)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('persists External reference-style knowledge base create, rename, paste, delete, and import completion state', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.saveConfig).mockClear()

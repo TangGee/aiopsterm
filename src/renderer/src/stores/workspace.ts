@@ -1,5 +1,11 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import {
+  isAiCommandCatalogData,
+  isAiContextCatalogData,
+  isAiTodoSnapshotData,
+  malformedAiBackendResultMessage
+} from '@/services/aiBackendGuards'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
 import {
@@ -3502,7 +3508,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = {}) => {
     if (!window.aiops?.listAiContextCatalog) return false
     const result = await window.aiops.listAiContextCatalog()
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok) return false
+    if (!isAiContextCatalogData(result.data)) {
+      setTopNotice(malformedAiBackendResultMessage)
+      return false
+    }
     aiContextCatalog.value = {
       categories: result.data.categories.map((category) => ({
         ...category,
@@ -3523,8 +3533,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const result = await window.aiops.listAiCommandCatalog()
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       aiCommandOptions.value = []
+      return false
+    }
+    if (!isAiCommandCatalogData(result.data)) {
+      setTopNotice(malformedAiBackendResultMessage)
       return false
     }
     aiCommandOptions.value = result.data.commands.map((command) => ({ ...command }))
@@ -3541,8 +3555,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const result = await window.aiops.listAiTodoSnapshot()
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       todoItems.value = []
+      return false
+    }
+    if (!isAiTodoSnapshotData(result.data)) {
+      setTopNotice(malformedAiBackendResultMessage)
       return false
     }
     todoItems.value = result.data.todos.map((todo) => ({

@@ -2997,11 +2997,130 @@ describe('AppShell', () => {
       await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
-      expect(wrapper.find('.input-placeholder-notice').text()).toContain('File staging result is missing refPath')
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
       expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
     } finally {
       ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
       ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
+      wrapper.unmount()
+    }
+  })
+
+  it('fails closed on malformed successful AI input and export backend results', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.selectedConversationId = 'conv-malformed-ai-boundary'
+    store.conversations = [
+      {
+        id: 'conv-malformed-ai-boundary',
+        title: 'Malformed AI boundary',
+        summary: '',
+        updatedAt: '刚刚',
+        ts: 1
+      }
+    ]
+    store.chatMessages = [{ id: 'malformed-export-user', role: 'user', text: '导出这条消息', state: 'done' }]
+
+    const originalVoiceBlobArrayBuffer = Blob.prototype.arrayBuffer
+
+    try {
+      vi.mocked(window.aiops.exportChat).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          exported: 1
+        }
+      } as any)
+      await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('导出失败：AI 服务返回数据无效')
+
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/malformed-image.png'] })
+      vi.mocked(window.aiops.prepareChatImageAttachmentFromFile).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          type: 'image',
+          mediaType: 'image/png',
+          data: '',
+          name: 'malformed-image.png',
+          size: 16
+        }
+      } as any)
+      await wrapper.find('[title="上传图片"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(false)
+
+      vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          type: 'image',
+          mediaType: 'image/png',
+          name: 'clipboard-malformed.png',
+          size: 16
+        }
+      } as any)
+      const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+      Object.defineProperty(pasteEvent, 'clipboardData', {
+        configurable: true,
+        value: {
+          getData: vi.fn(() => ''),
+          items: [{ type: 'image/png', getAsFile: () => null }]
+        }
+      })
+      wrapper.find('[data-testid="ai-message-input"]').element.dispatchEvent(pasteEvent)
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(window.aiops.prepareChatImageAttachmentFromClipboard).toHaveBeenCalledWith()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/malformed-attachment.log'] })
+      vi.mocked(window.aiops.stageChatAttachment).mockResolvedValueOnce({
+        mode: 'local',
+        refPath: 'aiopsterm://chat-attachment/conv-malformed-ai-boundary/malformed-attachment.log',
+        name: '',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/conv-malformed-ai-boundary/malformed-attachment.log'
+      } as any)
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      vi.mocked(window.aiops.transcribeVoiceInput).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          text: 'malformed transcript must not be inserted',
+          provider: 'unknown-provider'
+        }
+      } as any)
+      Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+        configurable: true,
+        writable: true,
+        value: vi.fn(async function (this: Blob) {
+          return Uint8Array.from({ length: this.size }, (_value, index) => index % 255).buffer
+        })
+      })
+      await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+      await wrapper.vm.$nextTick()
+      await new Promise((resolve) => window.setTimeout(resolve, 240))
+      await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+      await flushPromises()
+      await waitForMockCall(vi.mocked(window.aiops.transcribeVoiceInput), 'transcribeVoiceInput')
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音识别失败：AI 服务返回数据无效')
+      expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).not.toContain('malformed transcript')
+    } finally {
+      Object.defineProperty(Blob.prototype, 'arrayBuffer', { configurable: true, writable: true, value: originalVoiceBlobArrayBuffer })
       wrapper.unmount()
     }
   })

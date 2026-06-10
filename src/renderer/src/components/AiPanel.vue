@@ -1123,6 +1123,13 @@ import {
   Zap
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  isAiChatExportData,
+  isChatAttachmentStageData,
+  isChatImageAttachmentPrepareData,
+  isVoiceTranscriptionData,
+  malformedAiBackendResultMessage
+} from '@/services/aiBackendGuards'
 import type {
   AiChatChipContentPart,
   AiChipContentPart,
@@ -1504,8 +1511,12 @@ const exportCurrentChat = async () => {
       title: getCurrentConversationTitle(),
       messages: workspace.chatMessages.map(chatExportMessage)
     })
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       showChatExportNotice(`导出失败：${result?.errorMessage || '聊天导出失败。'}`)
+      return
+    }
+    if (!isAiChatExportData(result.data)) {
+      showChatExportNotice(`导出失败：${malformedAiBackendResultMessage}`)
       return
     }
     if (result.data.canceled) return
@@ -2334,8 +2345,12 @@ const preparePastedImagePart = async (): Promise<AiImageContentPart | null> => {
   }
   try {
     const result = await prepareClipboardImage()
-    if (!result.ok || !result.data) {
-      showInputPlaceholderNotice(`图片上传失败：${result.errorMessage || result.errorCode || '图片处理失败'}`)
+    if (!result?.ok) {
+      showInputPlaceholderNotice(`图片上传失败：${result?.errorMessage || result?.errorCode || '图片处理失败'}`)
+      return null
+    }
+    if (!isChatImageAttachmentPrepareData(result.data)) {
+      showInputPlaceholderNotice(`图片上传失败：${malformedAiBackendResultMessage}`)
       return null
     }
     return {
@@ -3082,8 +3097,12 @@ const processImageFilePath = async (filePath: string): Promise<AiImageContentPar
   }
   try {
     const result = await prepareImageFromFile({ filePath })
-    if (!result.ok || !result.data) {
-      showInputPlaceholderNotice(`图片上传失败：${result.errorMessage || result.errorCode || '图片处理失败'}`)
+    if (!result?.ok) {
+      showInputPlaceholderNotice(`图片上传失败：${result?.errorMessage || result?.errorCode || '图片处理失败'}`)
+      return null
+    }
+    if (!isChatImageAttachmentPrepareData(result.data)) {
+      showInputPlaceholderNotice(`图片上传失败：${malformedAiBackendResultMessage}`)
       return null
     }
     return {
@@ -3170,8 +3189,8 @@ const handleFileUpload = async () => {
     if (!result || result.canceled || !result.filePaths?.length) return
     const srcAbsPath = result.filePaths[0]
     const staged = await stageAttachment({ taskId, srcAbsPath })
-    if (!staged?.refPath) {
-      throw new Error('File staging result is missing refPath')
+    if (!isChatAttachmentStageData(staged)) {
+      throw new Error(malformedAiBackendResultMessage)
     }
     const displayName = staged.name || srcAbsPath.split(/[/\\]/).pop() || 'file'
     const part: AiDocChipContentPart = {
@@ -3255,8 +3274,12 @@ const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
   voiceTranscribing.value = true
   try {
     const result = await window.aiops.transcribeVoiceInput(input)
-    if (!result.ok || !result.data?.text) {
-      showInputPlaceholderNotice(`语音识别失败：${result.errorMessage || result.errorCode || '识别结果为空'}`)
+    if (!result?.ok) {
+      showInputPlaceholderNotice(`语音识别失败：${result?.errorMessage || result?.errorCode || '识别结果为空'}`)
+      return
+    }
+    if (!isVoiceTranscriptionData(result.data)) {
+      showInputPlaceholderNotice(`语音识别失败：${malformedAiBackendResultMessage}`)
       return
     }
     await handleVoiceTranscriptionComplete(result.data.text)
