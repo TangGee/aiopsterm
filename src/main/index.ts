@@ -281,7 +281,6 @@ import type {
   QuickCommandSnippetSaveInput,
   QuickCommandsUserConfig,
   SecurityUserConfig,
-  SettingsPreferencesSeedInput,
   SettingsRuleSaveInput,
   SettingsShortcutSaveInput,
   ShortcutUserConfig,
@@ -2618,8 +2617,8 @@ const registerIpc = () => {
     store.set('config', next)
     return next
   })
-  ipcMain.handle('settings-preferences:get', (_event, seed?: SettingsPreferencesSeedInput) => {
-    const result = getSettingsPreferences(seed || getConfig())
+  ipcMain.handle('settings-preferences:get', () => {
+    const result = getSettingsPreferences(getConfig())
     if (result.ok && result.data) {
       store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts, rules: result.data.rules, customInstructions: '' }))
     }

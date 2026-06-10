@@ -78,7 +78,7 @@ const api: AiopsPreloadApi = {
   },
   getConfig: () => ipcRenderer.invoke('config:get') as Promise<UserConfig>,
   saveConfig: (patch: Partial<UserConfig>) => ipcRenderer.invoke('config:save', patch) as Promise<UserConfig>,
-  getSettingsPreferences: (seed) => ipcRenderer.invoke('settings-preferences:get', seed),
+  getSettingsPreferences: () => ipcRenderer.invoke('settings-preferences:get'),
   saveSettingsRule: (input) => ipcRenderer.invoke('settings-preferences:save-rule', input),
   deleteSettingsRule: (id: string) => ipcRenderer.invoke('settings-preferences:delete-rule', id),
   saveSettingsShortcut: (input) => ipcRenderer.invoke('settings-preferences:save-shortcut', input),

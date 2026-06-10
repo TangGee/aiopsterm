@@ -695,11 +695,7 @@ describe('workspace store', () => {
       })
     )
     expectNoBusinessDataConfigWrites()
-    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith({
-      shortcuts: undefined,
-      rules: undefined,
-      customInstructions: undefined
-    })
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
   it('migrates missing persisted terminal and workspace preferences to aiopsterm defaults', async () => {
@@ -770,11 +766,7 @@ describe('workspace store', () => {
       })
     )
     expectNoBusinessDataConfigWrites()
-    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith({
-      shortcuts: undefined,
-      rules: undefined,
-      customInstructions: undefined
-    })
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
   it('hydrates and migrates External reference-style editor settings', async () => {
@@ -1329,6 +1321,15 @@ describe('workspace store', () => {
       }
     })
 
+    ;(globalThis as any).__setSettingsPreferencesStoreMock?.({
+      shortcuts: defaultShortcuts,
+      rules: [
+        { id: 'rule-a', content: '  release must include rollback  ', enabled: false, isEditing: true },
+        { id: 'rule-a', content: 'inspect logs first' },
+        { id: '', content: '   ' }
+      ],
+      customInstructions: '  legacy global instruction  '
+    })
     await store.hydrateConfig()
 
     expect(store.settingsRules).toEqual([
@@ -1336,16 +1337,7 @@ describe('workspace store', () => {
       { id: 'rule-a', content: 'release must include rollback', enabled: false, isEditing: false },
       { id: 'rule-a-2', content: 'inspect logs first', enabled: true, isEditing: false }
     ])
-    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customInstructions: '  legacy global instruction  ',
-        rules: [
-          { id: 'rule-a', content: '  release must include rollback  ', enabled: false, isEditing: true },
-          { id: 'rule-a', content: 'inspect logs first' },
-          { id: '', content: '   ' }
-        ]
-      })
-    )
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
   it('hydrates and migrates External reference-style MCP server list and tool states', async () => {
@@ -1719,6 +1711,15 @@ describe('workspace store', () => {
       }
     })
 
+    ;(globalThis as any).__setSettingsPreferencesStoreMock?.({
+      shortcuts: {
+        newTerminal: 'Ctrl+Alt+T',
+        toggleAi: ' Ctrl+Alt+A ',
+        switchToSpecificTab: 'Alt+1',
+        unknownAction: 'Ctrl+Alt+X'
+      },
+      rules: defaultRules
+    })
     await store.hydrateConfig()
 
     expect(store.settingsShortcuts).toEqual([
@@ -1727,16 +1728,7 @@ describe('workspace store', () => {
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
     ])
-    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith(
-      expect.objectContaining({
-        shortcuts: expect.objectContaining({
-          newTerminal: 'Ctrl+Alt+T',
-          toggleAi: ' Ctrl+Alt+A ',
-          switchToSpecificTab: 'Alt+1',
-          unknownAction: 'Ctrl+Alt+X'
-        })
-      })
-    )
+    expect(window.aiops.getSettingsPreferences).toHaveBeenCalledWith()
   })
 
   it('hydrates and migrates External reference-style model settings', async () => {

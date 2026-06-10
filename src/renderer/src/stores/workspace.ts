@@ -4193,11 +4193,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       rules: normalizeRulesConfig(savedConfig.rules, savedConfig.customInstructions).normalized
     }
     try {
-      const result = await window.aiops.getSettingsPreferences?.({
-        shortcuts: savedConfig.shortcuts,
-        rules: savedConfig.rules,
-        customInstructions: savedConfig.customInstructions
-      })
+      const result = await window.aiops.getSettingsPreferences?.()
       if (result?.ok && isSettingsPreferencesSnapshot(result.data)) {
         bridgeSettingsPreferences = result.data
       } else if (result?.ok) {

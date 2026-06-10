@@ -2911,6 +2911,15 @@ const normalizeSettingsPreferencesMock = (seed?: { shortcuts?: unknown; rules?: 
   rules: normalizeSettingsRulesMock(seed?.rules, seed?.customInstructions)
 })
 
+Object.assign(globalThis, {
+  __setSettingsPreferencesStoreMock: (seed?: { shortcuts?: unknown; rules?: unknown; customInstructions?: unknown }) => {
+    settingsPreferencesStoreMock = normalizeSettingsPreferencesMock(seed)
+  },
+  __resetSettingsPreferencesStoreMock: () => {
+    settingsPreferencesStoreMock = null
+  }
+})
+
 const defaultSkills = [
   {
     name: 'incident-triage',
@@ -5008,9 +5017,9 @@ Object.defineProperty(window, 'aiops', {
       },
       ...patch
     })),
-    getSettingsPreferences: vi.fn(async (seed?: { shortcuts?: unknown; rules?: unknown; customInstructions?: unknown }) => {
+    getSettingsPreferences: vi.fn(async () => {
       if (!settingsPreferencesStoreMock) {
-        settingsPreferencesStoreMock = normalizeSettingsPreferencesMock(seed)
+        settingsPreferencesStoreMock = normalizeSettingsPreferencesMock()
       }
       return { ok: true, data: cloneSettingsPreferencesMock(settingsPreferencesStoreMock) }
     }),

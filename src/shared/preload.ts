@@ -1058,12 +1058,6 @@ export type UserRuleConfig = {
   enabled: boolean
 }
 
-export type SettingsPreferencesSeedInput = {
-  shortcuts?: unknown
-  rules?: unknown
-  customInstructions?: unknown
-}
-
 export type SettingsPreferencesSnapshot = {
   shortcuts: ShortcutUserConfig[]
   rules: UserRuleConfig[]
@@ -2496,7 +2490,7 @@ export type AiopsPreloadApi = {
   onUnmaximized: (listener: () => void) => () => void
   getConfig: () => Promise<UserConfig>
   saveConfig: (patch: Partial<UserConfig>) => Promise<UserConfig>
-  getSettingsPreferences: (seed?: SettingsPreferencesSeedInput) => Promise<SettingsPreferencesResult>
+  getSettingsPreferences: () => Promise<SettingsPreferencesResult>
   saveSettingsRule: (input: SettingsRuleSaveInput) => Promise<SettingsPreferencesMutationResult>
   deleteSettingsRule: (id: string) => Promise<SettingsRuleDeleteResult>
   saveSettingsShortcut: (input: SettingsShortcutSaveInput) => Promise<SettingsPreferencesMutationResult>

@@ -5,7 +5,6 @@ import { join } from 'path'
 import type {
   AiopsMutationResult,
   SettingsPreferencesResult,
-  SettingsPreferencesSeedInput,
   SettingsPreferencesSnapshot,
   SettingsRuleDeleteResult,
   SettingsRuleSaveInput,
@@ -17,6 +16,12 @@ import type {
 
 type SettingsPreferencesStoreShape = {
   preferences?: SettingsPreferencesSnapshot
+}
+
+type SettingsPreferencesSeedInput = {
+  shortcuts?: unknown
+  rules?: unknown
+  customInstructions?: unknown
 }
 
 type SqliteDatabase = {
