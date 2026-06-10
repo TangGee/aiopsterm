@@ -2,13 +2,17 @@ import { randomUUID } from 'crypto'
 import type {
   AiChatCancelInput,
   AiChatCancelResult,
+  AiChatCommandInput,
+  AiChatContextInput,
   AiChatExchangeRequestInput,
   AiChatExchangeRequestResult,
   AiChatHistoryHostContext,
   AiChatMessageInput,
   AiChatResponseInput,
   AiChatResponseResult,
+  AiChatSkillInput,
   ModelProviderCheckKey,
+  SkillUserConfig,
   UserConfig
 } from '@shared/preload'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
@@ -20,6 +24,7 @@ const AI_CHAT_CANCELLED_TEXT = '已停止生成。'
 
 type AiChatRuntimeConfig = {
   getConfig?: () => UserConfig
+  listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -169,9 +174,101 @@ const normalizeHostContexts = (hosts?: AiChatExchangeRequestInput['hosts']): AiC
   return normalized.length ? normalized : undefined
 }
 
-export const createAiChatExchangeRequest = (input: AiChatExchangeRequestInput): AiChatExchangeRequestResult => {
+const normalizeMode = (mode: unknown): AiChatResponseInput['mode'] | undefined => (mode === 'agent' || mode === 'command' || mode === 'chat' ? mode : undefined)
+
+const normalizeChatContexts = (contexts?: AiChatExchangeRequestInput['contexts']): AiChatContextInput[] =>
+  (contexts || [])
+    .map((context): AiChatContextInput | null => {
+      const label = normalizeText(context.label)
+      const kind = normalizeText(context.kind)
+      if (!label || !kind) return null
+      return {
+        id: normalizeText(context.id) || `${kind}-${randomUUID()}`,
+        kind,
+        label,
+        detail: normalizeText(context.detail) || undefined,
+        relPath: normalizeText(context.relPath) || undefined,
+        mediaType: normalizeText(context.mediaType) || undefined
+      }
+    })
+    .filter(Boolean) as AiChatContextInput[]
+
+const normalizeCommand = (command?: AiChatCommandInput | null): AiChatCommandInput | null => {
+  if (!command) return null
+  const normalized: AiChatCommandInput = {
+    id: normalizeText(command.id) || undefined,
+    label: normalizeText(command.label) || undefined,
+    command: normalizeText(command.command) || undefined,
+    path: normalizeText(command.path) || undefined
+  }
+  return normalized.id || normalized.label || normalized.command ? normalized : null
+}
+
+const skillNameFromContext = (context: AiChatContextInput) => {
+  const id = normalizeText(context.id)
+  if (id.startsWith('skill:')) return id.slice('skill:'.length)
+  return normalizeText(context.label) || id
+}
+
+const resolveSelectedSkills = async (contexts: AiChatContextInput[]): Promise<AiChatSkillInput[]> => {
+  const selectedNames = new Set(contexts.filter((context) => context.kind === 'skills').map(skillNameFromContext).filter(Boolean))
+  if (!selectedNames.size || !runtimeConfig.listSkills) return []
+  try {
+    const skills = await runtimeConfig.listSkills()
+    return skills
+      .filter((skill) => skill.enabled && selectedNames.has(skill.name))
+      .map((skill) => ({
+        name: skill.name,
+        description: normalizeText(skill.description) || undefined,
+        content: normalizeText(skill.content) || undefined
+      }))
+  } catch {
+    return []
+  }
+}
+
+const commandDisplay = (command?: AiChatCommandInput | null) => normalizeText(command?.label || command?.command || command?.id)
+
+const buildExchangePrompt = (text: string, contexts: AiChatContextInput[], skills: AiChatSkillInput[], command: AiChatCommandInput | null) => {
+  const contextLabel = contexts.length ? `\n\n上下文：${contexts.map((item) => `${item.kind}:${item.label}`).join('、')}` : ''
+  const commandLabel = commandDisplay(command) ? `\n命令：${commandDisplay(command)}` : ''
+  const selectedKnowledgeDocs = contexts.filter((item) => item.kind === 'docs' && item.relPath)
+  const selectedKnowledgeImages = contexts.filter((item) => item.kind === 'images' && item.relPath)
+  const knowledgeContext =
+    selectedKnowledgeDocs.length || selectedKnowledgeImages.length
+      ? `\n\nKnowledge Context:\n${[
+          ...selectedKnowledgeDocs.map((doc) => `- doc: ${doc.label} (${doc.relPath})`),
+          ...selectedKnowledgeImages.map((image) => `- image: ${image.label} (${image.relPath}, ${image.mediaType || 'image'})`)
+        ].join('\n')}`
+      : ''
+  const skillContext = skills.length
+    ? `\n\nSkill Instructions:\n${skills
+        .map((skill) => `# Skill Activated: ${skill.name}\nDescription: ${skill.description || ''}\n\n${skill.content || ''}`.trimEnd())
+        .join('\n\n')}`
+    : ''
+  return `${text}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}`.trim()
+}
+
+const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, prompt: string): AiChatMessageInput[] => {
+  const history = (messages || [])
+    .slice(-12)
+    .map((message): AiChatMessageInput | null => {
+      const text = normalizeText(message.text)
+      if (!text) return null
+      return { role: message.role, text }
+    })
+    .filter(Boolean) as AiChatMessageInput[]
+  const last = history[history.length - 1]
+  return last?.role === 'user' && last.text === prompt ? history : [...history, { role: 'user', text: prompt }]
+}
+
+export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestInput): Promise<AiChatExchangeRequestResult> => {
   const text = normalizeText(input.text)
-  if (!text) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
+  const contexts = normalizeChatContexts(input.contexts)
+  const command = normalizeCommand(input.command)
+  const skills = await resolveSelectedSkills(contexts)
+  const prompt = buildExchangePrompt(text, contexts, skills, command)
+  if (!prompt) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
   const requestId = `aichat-request-${randomUUID()}`
   const assistantMessage = {
     id: `${requestId}-assistant`,
@@ -179,7 +276,18 @@ export const createAiChatExchangeRequest = (input: AiChatExchangeRequestInput): 
     text: '正在请求 aiopsterm AI 后端...',
     state: 'streaming' as const
   }
-  recordAiTodoExchangeRequest(input, requestId, assistantMessage.id)
+  const responseInput: AiChatResponseInput = {
+    requestId,
+    assistantMessageId: assistantMessage.id,
+    prompt,
+    messages: buildResponseMessages(input.messages, prompt),
+    contexts,
+    skills,
+    command,
+    model: normalizeText(input.model) || undefined,
+    mode: normalizeMode(input.mode)
+  }
+  recordAiTodoExchangeRequest({ ...input, text: prompt, contexts, command, model: responseInput.model, mode: responseInput.mode }, requestId, assistantMessage.id)
   return {
     ok: true,
     data: {
@@ -187,10 +295,11 @@ export const createAiChatExchangeRequest = (input: AiChatExchangeRequestInput): 
       userMessage: {
         id: `${requestId}-user`,
         role: 'user',
-        text,
+        text: prompt,
         hosts: normalizeHostContexts(input.hosts)
       },
-      assistantMessage
+      assistantMessage,
+      responseInput
     }
   }
 }

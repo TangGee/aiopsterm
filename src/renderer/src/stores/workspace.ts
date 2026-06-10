@@ -9830,33 +9830,33 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
     if (!prompt && !hasStructuredParts) return false
     const messageContexts = overrideHosts ? [...overrideHosts, ...selectedContexts.value.filter((item) => item.kind !== 'hosts')] : selectedContexts.value
-    const selectedSkillNames = new Set(messageContexts.filter((item) => item.kind === 'skills').map((item) => item.label))
-    const selectedSkills = settingsSkills.value.filter((skill) => skill.enabled && selectedSkillNames.has(skill.name))
-    const selectedKnowledgeDocs = messageContexts.filter((item) => item.kind === 'docs' && item.relPath)
-    const selectedKnowledgeImages = messageContexts.filter((item) => item.kind === 'images' && item.relPath)
-    const skillContext = selectedSkills.length
-      ? `\n\nSkill Instructions:\n${selectedSkills
-          .map((skill) => `# Skill Activated: ${skill.name}\nDescription: ${skill.description}\n\n${skill.content}`)
-          .join('\n\n')}`
-      : ''
-    const knowledgeContext =
-      selectedKnowledgeDocs.length || selectedKnowledgeImages.length
-        ? `\n\nKnowledge Context:\n${[
-            ...selectedKnowledgeDocs.map((doc) => `- doc: ${doc.label} (${doc.relPath})`),
-            ...selectedKnowledgeImages.map((image) => `- image: ${image.label} (${image.relPath}, ${image.mediaType || 'image'})`)
-          ].join('\n')}`
-        : ''
-    const contextLabel = messageContexts.length
-      ? `\n\n上下文：${messageContexts.map((item) => `${item.kind}:${item.label}`).join('、')}`
-      : ''
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
-    const commandLabel = commandDisplay ? `\n命令：${commandDisplay}` : ''
-    const userText = `${prompt}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}`
     const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
     const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
     const request = await window.aiops.createAiChatExchangeRequest({
-      text: userText,
-      hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts']
+      text: prompt,
+      hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts'],
+      messages: historyForBackend,
+      contexts: messageContexts.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        label: item.label,
+        detail: item.detail,
+        relPath: item.relPath,
+        mediaType: item.mediaType
+      })),
+      command: selectedCommandRef.value
+        ? {
+            id: selectedCommandId.value || undefined,
+            label: selectedCommandRef.value.label,
+            command: selectedCommandRef.value.command,
+            path: selectedCommandRef.value.path
+          }
+        : commandDisplay
+          ? { id: selectedCommandId.value || undefined, label: commandDisplay }
+          : null,
+      model: config.value.modelName,
+      mode: mode.value === 'agents' ? 'agent' : 'command'
     })
     if (!request.ok || !request.data) return false
     const userMessage = chatHistoryMessageToChatMessage(request.data.userMessage)
@@ -9867,19 +9867,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     chatMessages.value.push(assistantMessage)
     void refreshAiTodoSnapshot()
     void generateAiResponseForMessage(assistantMessage.id, {
-      requestId: request.data.requestId,
-      assistantMessageId: assistantMessage.id,
-      prompt: userText,
-      messages: [...historyForBackend, { role: 'user', text: userText }],
-      contexts: messageContexts.map((item) => ({ id: item.id, kind: item.kind, label: item.label })),
-      skills: selectedSkills.map((skill) => ({ name: skill.name, description: skill.description, content: skill.content })),
-      command: selectedCommandRef.value
-        ? { id: selectedCommandId.value || undefined, label: selectedCommandRef.value.label, command: selectedCommandRef.value.command }
-        : commandDisplay
-          ? { id: selectedCommandId.value || undefined, label: commandDisplay }
-          : null,
-      model: config.value.modelName,
-      mode: mode.value === 'agents' ? 'agent' : 'command'
+      ...request.data.responseInput,
+      requestId: request.data.responseInput.requestId || request.data.requestId,
+      assistantMessageId: request.data.responseInput.assistantMessageId || assistantMessage.id
     })
     await updateCurrentConversationSnapshot(prompt, { notifyFailure: true, notifyUnavailable: true })
     return true

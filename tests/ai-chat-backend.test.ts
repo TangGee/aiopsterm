@@ -2,16 +2,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { UserConfig } from '../src/shared/preload'
+import type { SkillUserConfig, UserConfig } from '../src/shared/preload'
 
 let generateAiChatResponse: (input: Record<string, unknown>) => Promise<any>
-let createAiChatExchangeRequest: (input: Record<string, unknown>) => any
+let createAiChatExchangeRequest: (input: Record<string, unknown>) => Promise<any>
 let cancelAiChatResponse: (input: Record<string, unknown>) => any
 let configureAiTodoBackendRuntime: (config?: { stateFilePath?: string; useSeedData?: boolean }) => void
 let resetAiTodosForTests: () => void
 let listAiTodoSnapshot: () => any
 let configureAiChatRuntime: (config?: {
   getConfig?: () => UserConfig
+  listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -48,8 +49,8 @@ afterEach(async () => {
 })
 
 describe('ai chat backend response boundary', () => {
-  it('creates backend-owned chat exchange message records before response generation', () => {
-    const result = createAiChatExchangeRequest({
+  it('creates backend-owned chat exchange message records before response generation', async () => {
+    const result = await createAiChatExchangeRequest({
       text: '检查生产磁盘',
       hosts: [{ id: 'host-prod-1', kind: 'hosts', label: 'prod-1', detail: 'production' }]
     })
@@ -68,6 +69,12 @@ describe('ai chat backend response boundary', () => {
       text: '正在请求 aiopsterm AI 后端...',
       state: 'streaming'
     })
+    expect(result.data?.responseInput).toMatchObject({
+      requestId: result.data?.requestId,
+      assistantMessageId: result.data?.assistantMessage.id,
+      prompt: '检查生产磁盘',
+      messages: [{ role: 'user', text: '检查生产磁盘' }]
+    })
 
     const todoSnapshot = listAiTodoSnapshot()
     expect(todoSnapshot.ok).toBe(true)
@@ -82,6 +89,86 @@ describe('ai chat backend response boundary', () => {
       isFocused: true,
       description: expect.stringContaining('检查生产磁盘')
     })
+  })
+
+  it('assembles contexts, command, and enabled skill instructions inside the backend exchange boundary', async () => {
+    configureAiChatRuntime({
+      listSkills: () => [
+        {
+          name: 'incident-triage',
+          description: 'Collect symptoms',
+          enabled: true,
+          editable: true,
+          content: 'Collect scope first.'
+        },
+        {
+          name: 'disabled-skill',
+          description: 'hidden',
+          enabled: false,
+          editable: true,
+          content: 'hidden'
+        }
+      ]
+    })
+
+    const result = await createAiChatExchangeRequest({
+      text: '检查生产磁盘',
+      messages: [
+        { role: 'system', text: '忽略空白之前的系统说明' },
+        { role: 'user', text: '上一轮输入' },
+        { role: 'assistant', text: '上一轮响应' }
+      ],
+      contexts: [
+        { id: 'kb-doc:Runbooks/Linux.md', kind: 'docs', label: 'Linux 巡检手册', relPath: 'Runbooks/Linux.md' },
+        { id: 'kb-image:images/interface.png', kind: 'images', label: 'interface.png', relPath: 'images/interface.png', mediaType: 'image/png' },
+        { id: 'skill:incident-triage', kind: 'skills', label: 'Incident Triage Display' },
+        { id: 'skill:disabled-skill', kind: 'skills', label: 'disabled-skill' }
+      ],
+      command: {
+        id: 'commands/rollback-plan.md',
+        label: '/rollback-plan',
+        command: '/rollback-plan',
+        path: 'commands/rollback-plan.md'
+      },
+      model: 'aiopsterm-local-agent',
+      mode: 'agent'
+    })
+
+    expect(result.ok).toBe(true)
+    const prompt = result.data?.userMessage.text || ''
+    expect(prompt).toContain('检查生产磁盘')
+    expect(prompt).toContain('上下文：docs:Linux 巡检手册、images:interface.png、skills:Incident Triage Display、skills:disabled-skill')
+    expect(prompt).toContain('命令：/rollback-plan')
+    expect(prompt).toContain('Knowledge Context:')
+    expect(prompt).toContain('- doc: Linux 巡检手册 (Runbooks/Linux.md)')
+    expect(prompt).toContain('- image: interface.png (images/interface.png, image/png)')
+    expect(prompt).toContain('Skill Instructions:')
+    expect(prompt).toContain('# Skill Activated: incident-triage')
+    expect(prompt).toContain('Description: Collect symptoms')
+    expect(prompt).toContain('Collect scope first.')
+    expect(prompt).not.toContain('# Skill Activated: disabled-skill')
+
+    expect(result.data?.responseInput).toMatchObject({
+      requestId: result.data?.requestId,
+      assistantMessageId: result.data?.assistantMessage.id,
+      prompt,
+      contexts: [
+        expect.objectContaining({ id: 'kb-doc:Runbooks/Linux.md', kind: 'docs', label: 'Linux 巡检手册', relPath: 'Runbooks/Linux.md' }),
+        expect.objectContaining({ id: 'kb-image:images/interface.png', kind: 'images', label: 'interface.png', relPath: 'images/interface.png', mediaType: 'image/png' }),
+        expect.objectContaining({ id: 'skill:incident-triage', kind: 'skills', label: 'Incident Triage Display' }),
+        expect.objectContaining({ id: 'skill:disabled-skill', kind: 'skills', label: 'disabled-skill' })
+      ],
+      skills: [expect.objectContaining({ name: 'incident-triage', description: 'Collect symptoms', content: 'Collect scope first.' })],
+      command: expect.objectContaining({ label: '/rollback-plan', command: '/rollback-plan', path: 'commands/rollback-plan.md' }),
+      model: 'aiopsterm-local-agent',
+      mode: 'agent'
+    })
+    expect(result.data?.responseInput.messages).toEqual([
+      { role: 'system', text: '忽略空白之前的系统说明' },
+      { role: 'user', text: '上一轮输入' },
+      { role: 'assistant', text: '上一轮响应' },
+      { role: 'user', text: prompt }
+    ])
   })
 
   it('generates local backend assistant text with a backend-owned loading window', async () => {

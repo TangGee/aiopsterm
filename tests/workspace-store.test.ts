@@ -369,11 +369,14 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-2)?.contentParts).toBeUndefined()
     expect(store.chatMessages.at(-1)?.text).toContain('正在请求 aiopsterm AI 后端')
     expect(store.chatMessages.at(-1)?.state).toBe('streaming')
-    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining('检查生产磁盘')
-      })
-    )
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(exchangeInput).toMatchObject({
+      text: '检查生产磁盘',
+      contexts: expect.arrayContaining([expect.objectContaining({ id: 'skill:incident-triage', kind: 'skills', label: 'incident-triage' })])
+    })
+    expect(exchangeInput.text).not.toContain('Skill Instructions')
+    expect(exchangeInput.text).not.toContain('上下文：')
+    expect(exchangeInput.text).not.toContain('Knowledge Context:')
     expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining('检查生产磁盘'),
@@ -4714,6 +4717,15 @@ describe('workspace store', () => {
     expect(userMessage?.text).toContain('Knowledge Context:')
     expect(userMessage?.text).toContain('- doc: Markdown语法指南.md (Markdown语法指南.md)')
     expect(userMessage?.text).toContain(`- image: interface.png (images/interface.png, ${DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME})`)
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(exchangeInput.text).toBe('生成知识库摘要')
+    expect(exchangeInput.text).not.toContain('Knowledge Context:')
+    expect(exchangeInput.contexts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'kb-doc:Markdown语法指南.md', kind: 'docs', relPath: 'Markdown语法指南.md' }),
+        expect.objectContaining({ id: 'kb-image:images/interface.png', kind: 'images', relPath: 'images/interface.png', mediaType: DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME })
+      ])
+    )
   })
 
   it('preserves ai rich input parts on user messages', async () => {
@@ -4754,6 +4766,12 @@ describe('workspace store', () => {
     expect(userMessage?.text).toContain('检查回滚计划')
     expect(userMessage?.text).toContain('上下文：')
     expect(userMessage?.text).toContain('命令：rollback')
+    const richInputExchange = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(richInputExchange).toMatchObject({
+      text: '检查回滚计划',
+      command: expect.objectContaining({ id: 'rollback', label: 'rollback' })
+    })
+    expect(richInputExchange.text).not.toContain('命令：')
 
     store.selectCommandPreset('commands/rollback-plan.md', {
       command: '/rollback-plan',
@@ -4762,6 +4780,11 @@ describe('workspace store', () => {
     })
     await store.sendChat('按知识库命令执行')
     expect(store.chatMessages.at(-2)?.text).toContain('命令：/rollback-plan')
+    const catalogCommandExchange = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(catalogCommandExchange).toMatchObject({
+      text: '按知识库命令执行',
+      command: expect.objectContaining({ id: 'commands/rollback-plan.md', label: '/rollback-plan', command: '/rollback-plan', path: 'commands/rollback-plan.md' })
+    })
   })
 
   it('truncates a user message and resends edited ai content parts', async () => {

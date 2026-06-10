@@ -1222,7 +1222,6 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
 configureTerminalSuggestionsRuntime({ getConfig })
-configureAiChatRuntime({ getConfig })
 configureAssetConnectionRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('userData'), 'database-workspace.json') })
 configureVoiceBackendRuntime({ getConfig })
@@ -1886,6 +1885,10 @@ configureAiContextBackendRuntime({
 })
 configureAiCommandBackendRuntime({
   listKnowledgeDir: (relDir) => listKnowledgeDir(relDir)
+})
+configureAiChatRuntime({
+  getConfig,
+  listSkills: () => loadSkillsFromDisk()
 })
 
 const findSkillByName = async (skillName: string) => {

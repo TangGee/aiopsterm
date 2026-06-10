@@ -1528,15 +1528,43 @@ export type AiChatMessageInput = {
   text: string
 }
 
+export type AiChatContextInput = {
+  id: string
+  kind: AiContextKind | string
+  label: string
+  detail?: string
+  relPath?: string
+  mediaType?: string
+}
+
+export type AiChatCommandInput = {
+  id?: string
+  label?: string
+  command?: string
+  path?: string
+}
+
+export type AiChatSkillInput = {
+  name: string
+  description?: string
+  content?: string
+}
+
 export type AiChatExchangeRequestInput = {
   text: string
   hosts?: AiChatHistoryHostContext[]
+  messages?: AiChatMessageInput[]
+  contexts?: AiChatContextInput[]
+  command?: AiChatCommandInput | null
+  model?: string
+  mode?: 'agent' | 'command' | 'chat'
 }
 
 export type AiChatExchangeRequestResult = AiopsMutationResult<{
   requestId: string
   userMessage: AiChatHistoryMessage
   assistantMessage: AiChatHistoryMessage
+  responseInput: AiChatResponseInput
 }>
 
 export type AiChatResponseInput = {
@@ -1544,9 +1572,9 @@ export type AiChatResponseInput = {
   assistantMessageId?: string
   prompt: string
   messages?: AiChatMessageInput[]
-  contexts?: Array<{ id: string; kind: AiContextKind | string; label: string }>
-  skills?: Array<{ name: string; description?: string; content?: string }>
-  command?: { id?: string; label?: string; command?: string } | null
+  contexts?: AiChatContextInput[]
+  skills?: AiChatSkillInput[]
+  command?: AiChatCommandInput | null
   model?: string
   mode?: 'agent' | 'command' | 'chat'
 }

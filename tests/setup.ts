@@ -3107,6 +3107,27 @@ type TestChatHistoryHostContext = {
   detail?: string
 }
 
+type TestAiChatMessageInput = {
+  role: 'user' | 'assistant' | 'system'
+  text: string
+}
+
+type TestAiChatContextInput = {
+  id: string
+  kind: string
+  label: string
+  detail?: string
+  relPath?: string
+  mediaType?: string
+}
+
+type TestAiChatCommandInput = {
+  id?: string
+  label?: string
+  command?: string
+  path?: string
+}
+
 type TestChatHistoryMessage = {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -3260,6 +3281,92 @@ const promptSummaryMock = (value: unknown) => {
   const text = String(value || '').trim()
   if (!text) return '根据当前请求生成运维步骤'
   return text.length > 48 ? `${text.slice(0, 48)}...` : text
+}
+
+const normalizeAiChatTextMock = (value: unknown) => String(value || '').trim()
+
+const normalizeAiChatContextsMock = (contexts?: TestAiChatContextInput[]) =>
+  (contexts || [])
+    .map((context): TestAiChatContextInput | null => {
+      const label = normalizeAiChatTextMock(context.label)
+      const kind = normalizeAiChatTextMock(context.kind)
+      if (!label || !kind) return null
+      return {
+        id: normalizeAiChatTextMock(context.id) || `${kind}:${label}`,
+        kind,
+        label,
+        detail: normalizeAiChatTextMock(context.detail) || undefined,
+        relPath: normalizeAiChatTextMock(context.relPath) || undefined,
+        mediaType: normalizeAiChatTextMock(context.mediaType) || undefined
+      }
+    })
+    .filter(Boolean) as TestAiChatContextInput[]
+
+const normalizeAiChatCommandMock = (command?: TestAiChatCommandInput | null): TestAiChatCommandInput | null => {
+  if (!command) return null
+  const normalized = {
+    id: normalizeAiChatTextMock(command.id) || undefined,
+    label: normalizeAiChatTextMock(command.label) || undefined,
+    command: normalizeAiChatTextMock(command.command) || undefined,
+    path: normalizeAiChatTextMock(command.path) || undefined
+  }
+  return normalized.id || normalized.label || normalized.command ? normalized : null
+}
+
+const selectedAiChatSkillsMock = (contexts: TestAiChatContextInput[]) => {
+  const selectedNames = new Set(
+    contexts
+      .filter((context) => context.kind === 'skills')
+      .map((context) => (context.id.startsWith('skill:') ? context.id.slice('skill:'.length) : context.label))
+      .filter(Boolean)
+  )
+  return cloneSkills()
+    .filter((skill) => skill.enabled && selectedNames.has(skill.name))
+    .map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+      content: skill.content
+    }))
+}
+
+const commandDisplayMock = (command?: TestAiChatCommandInput | null) => normalizeAiChatTextMock(command?.label || command?.command || command?.id)
+
+const buildAiChatExchangePromptMock = (
+  text: string,
+  contexts: TestAiChatContextInput[],
+  skills: Array<{ name: string; description?: string; content?: string }>,
+  command: TestAiChatCommandInput | null
+) => {
+  const contextLabel = contexts.length ? `\n\n上下文：${contexts.map((item) => `${item.kind}:${item.label}`).join('、')}` : ''
+  const commandLabel = commandDisplayMock(command) ? `\n命令：${commandDisplayMock(command)}` : ''
+  const selectedDocs = contexts.filter((item) => item.kind === 'docs' && item.relPath)
+  const selectedImages = contexts.filter((item) => item.kind === 'images' && item.relPath)
+  const knowledgeContext =
+    selectedDocs.length || selectedImages.length
+      ? `\n\nKnowledge Context:\n${[
+          ...selectedDocs.map((doc) => `- doc: ${doc.label} (${doc.relPath})`),
+          ...selectedImages.map((image) => `- image: ${image.label} (${image.relPath}, ${image.mediaType || 'image'})`)
+        ].join('\n')}`
+      : ''
+  const skillContext = skills.length
+    ? `\n\nSkill Instructions:\n${skills
+        .map((skill) => `# Skill Activated: ${skill.name}\nDescription: ${skill.description || ''}\n\n${skill.content || ''}`.trimEnd())
+        .join('\n\n')}`
+    : ''
+  return `${text}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}`.trim()
+}
+
+const buildAiChatResponseMessagesMock = (messages: TestAiChatMessageInput[] | undefined, prompt: string): TestAiChatMessageInput[] => {
+  const history = (messages || [])
+    .slice(-12)
+    .map((message): TestAiChatMessageInput | null => {
+      const text = normalizeAiChatTextMock(message.text)
+      if (!text) return null
+      return { role: message.role, text }
+    })
+    .filter(Boolean) as TestAiChatMessageInput[]
+  const last = history[history.length - 1]
+  return last?.role === 'user' && last.text === prompt ? history : [...history, { role: 'user', text: prompt }]
 }
 
 const recordAiTodoRequestMock = (input: { text: string; hosts?: TestChatHistoryHostContext[] }, requestId: string, assistantMessageId: string) => {
@@ -4440,31 +4547,57 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     }),
-    createAiChatExchangeRequest: vi.fn(async (input: { text: string; hosts?: TestChatHistoryHostContext[] }) => {
-      const text = String(input.text || '').trim()
-      if (!text) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
-      const requestId = `aichat-request-test-${aiChatExchangeRequestSequenceMock++}`
-      const assistantMessageId = `${requestId}-assistant`
-      recordAiTodoRequestMock(input, requestId, assistantMessageId)
-      return {
-        ok: true,
-        data: {
+    createAiChatExchangeRequest: vi.fn(
+      async (input: {
+        text: string
+        hosts?: TestChatHistoryHostContext[]
+        messages?: TestAiChatMessageInput[]
+        contexts?: TestAiChatContextInput[]
+        command?: TestAiChatCommandInput | null
+        model?: string
+        mode?: 'agent' | 'command' | 'chat'
+      }) => {
+        const text = normalizeAiChatTextMock(input.text)
+        const contexts = normalizeAiChatContextsMock(input.contexts)
+        const command = normalizeAiChatCommandMock(input.command)
+        const skills = selectedAiChatSkillsMock(contexts)
+        const prompt = buildAiChatExchangePromptMock(text, contexts, skills, command)
+        if (!prompt) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
+        const requestId = `aichat-request-test-${aiChatExchangeRequestSequenceMock++}`
+        const assistantMessageId = `${requestId}-assistant`
+        const responseInput = {
           requestId,
-          userMessage: {
-            id: `${requestId}-user`,
-            role: 'user' as const,
-            text,
-            hosts: input.hosts?.map((host) => ({ ...host }))
-          },
-          assistantMessage: {
-            id: assistantMessageId,
-            role: 'assistant' as const,
-            text: '正在请求 aiopsterm AI 后端...',
-            state: 'streaming' as const
+          assistantMessageId,
+          prompt,
+          messages: buildAiChatResponseMessagesMock(input.messages, prompt),
+          contexts,
+          skills,
+          command,
+          model: normalizeAiChatTextMock(input.model) || undefined,
+          mode: input.mode
+        }
+        recordAiTodoRequestMock({ ...input, text: prompt }, requestId, assistantMessageId)
+        return {
+          ok: true,
+          data: {
+            requestId,
+            userMessage: {
+              id: `${requestId}-user`,
+              role: 'user' as const,
+              text: prompt,
+              hosts: input.hosts?.map((host) => ({ ...host }))
+            },
+            assistantMessage: {
+              id: assistantMessageId,
+              role: 'assistant' as const,
+              text: '正在请求 aiopsterm AI 后端...',
+              state: 'streaming' as const
+            },
+            responseInput
           }
         }
       }
-    }),
+    ),
     getUserAccount: vi.fn(async () => ({
       ok: true as const,
       data: userAccountSnapshotMock()
