@@ -201,6 +201,10 @@ type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['exe
 type K8sBackendResourceRefreshData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['refreshKubernetesResources']>>['data']>
 type K8sBackendResourceActionPlanData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['planKubernetesResourceAction']>>['data']>
 type K8sBackendResourceActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesResourceAction']>>['data']>
+type K8sKubeconfigImportData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['importKubernetesKubeconfig']>>['data']>
+type K8sClusterTestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['testKubernetesClusterConnection']>>['data']>
+type K8sProxyConfigData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveKubernetesAgentProxyConfig']>>['data']>
+type K8sTerminalCloseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['closeKubernetesTerminal']>>['data']>
 type AiChatHistorySnapshotData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['listChatConversations']>>['data']>
 type AiChatConversationMutationData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createChatConversation']>>['data']>
 type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['deleteChatConversation']>>['data']>
@@ -1928,9 +1932,18 @@ const k8sResourceKinds: K8sResourceKind[] = ['pods', 'deployments', 'services', 
 const k8sResourceActions: K8sResourceAction[] = ['get', 'describe', 'logs']
 const k8sRefreshKinds: Array<K8sResourceKind | 'all'> = [...k8sResourceKinds, 'all']
 const k8sCommandSources: Array<K8sBackendCommandData['source']> = ['terminal', 'agent', 'resource']
+const k8sConnectionStatuses: K8sConnectionStatus[] = ['connected', 'connecting', 'disconnected', 'error']
+const k8sClusterSources: Array<K8sCluster['source_type']> = ['local', 'jumpserver']
+const k8sTerminalStatuses: K8sTerminalStatus[] = ['connecting', 'connected', 'ended', 'error']
 
 const isNonNegativeFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string'
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+const isPositiveFiniteNumber = (value: unknown): value is number => isFiniteNumber(value) && value > 0
+const isK8sNumberFlag = (value: unknown) => value === 0 || value === 1
+const isK8sOptionalString = (value: unknown) => value === undefined || typeof value === 'string'
+const isK8sOptionalNonNegativeNumber = (value: unknown) => value === undefined || isNonNegativeFiniteNumber(value)
+const isNumberOrNull = (value: unknown): value is number | null => value === null || isFiniteNumber(value)
 
 const isK8sAgentProxyConfig = (source: unknown): source is K8sProxyConfig =>
   isRecord(source) &&
@@ -1943,17 +1956,172 @@ const isK8sAgentProxyConfig = (source: unknown): source is K8sProxyConfig =>
   typeof source.password === 'string' &&
   typeof source.updatedAt === 'string'
 
-const isK8sCatalogSnapshot = (source: unknown): source is KubernetesCatalog =>
+const isK8sContextInfo = (source: unknown): source is K8sContextInfo =>
+  isRecord(source) &&
+  typeof source.name === 'string' &&
+  typeof source.cluster === 'string' &&
+  typeof source.namespace === 'string' &&
+  typeof source.server === 'string' &&
+  typeof source.isActive === 'boolean'
+
+const isK8sClusterRecord = (source: unknown): source is K8sCluster =>
+  isRecord(source) &&
+  typeof source.id === 'string' &&
+  source.id.trim() !== '' &&
+  typeof source.name === 'string' &&
+  source.name.trim() !== '' &&
+  isStringOrNull(source.kubeconfig_path) &&
+  isStringOrNull(source.kubeconfig_content) &&
+  typeof source.context_name === 'string' &&
+  source.context_name.trim() !== '' &&
+  typeof source.server_url === 'string' &&
+  typeof source.auth_type === 'string' &&
+  isK8sNumberFlag(source.is_active) &&
+  k8sConnectionStatuses.includes(source.connection_status as K8sConnectionStatus) &&
+  isK8sNumberFlag(source.auto_connect) &&
+  typeof source.default_namespace === 'string' &&
+  typeof source.created_at === 'string' &&
+  typeof source.updated_at === 'string' &&
+  k8sClusterSources.includes(source.source_type as K8sCluster['source_type']) &&
+  isStringOrNull(source.bastion_uuid) &&
+  isStringOrNull(source.bastion_asset_address) &&
+  isStringOrNull(source.bastion_asset_name) &&
+  isNumberOrNull(source.bastion_asset_id_last)
+
+const isK8sBastionGroup = (source: unknown): source is K8sBastionGroup =>
+  isRecord(source) && typeof source.uuid === 'string' && source.uuid.trim() !== '' && typeof source.label === 'string' && typeof source.ip === 'string'
+
+const isK8sNamespaceInfo = (source: unknown): source is K8sNamespaceInfo =>
+  isRecord(source) &&
+  typeof source.id === 'string' &&
+  source.id.trim() !== '' &&
+  typeof source.clusterId === 'string' &&
+  source.clusterId.trim() !== '' &&
+  typeof source.name === 'string' &&
+  typeof source.status === 'string' &&
+  typeof source.age === 'string'
+
+const isK8sResource = (source: unknown): source is K8sResource =>
+  isRecord(source) &&
+  typeof source.id === 'string' &&
+  source.id.trim() !== '' &&
+  typeof source.clusterId === 'string' &&
+  source.clusterId.trim() !== '' &&
+  k8sResourceKinds.includes(source.kind as K8sResourceKind) &&
+  typeof source.name === 'string' &&
+  typeof source.namespace === 'string' &&
+  typeof source.status === 'string' &&
+  typeof source.ready === 'string' &&
+  typeof source.age === 'string' &&
+  typeof source.detail === 'string' &&
+  isK8sOptionalString(source.node) &&
+  isK8sOptionalString(source.image) &&
+  isK8sOptionalString(source.ports) &&
+  isK8sOptionalNonNegativeNumber(source.restarts) &&
+  isK8sOptionalString(source.selector)
+
+const isK8sImportContextInfo = (source: unknown): source is K8sImportContextInfo =>
+  isRecord(source) &&
+  typeof source.name === 'string' &&
+  source.name.trim() !== '' &&
+  typeof source.cluster === 'string' &&
+  typeof source.server === 'string' &&
+  typeof source.namespace === 'string'
+
+const isK8sCatalogSnapshot = (source: unknown): source is KubernetesCatalog => {
+  if (
+    !isRecord(source) ||
+    !Array.isArray(source.contexts) ||
+    !Array.isArray(source.clusters) ||
+    !Array.isArray(source.bastions) ||
+    !Array.isArray(source.namespaces) ||
+    !Array.isArray(source.resources) ||
+    !Array.isArray(source.importContexts) ||
+    typeof source.currentContext !== 'string' ||
+    !isStringOrNull(source.activeClusterId) ||
+    !isStringOrNull(source.selectedClusterId) ||
+    !isK8sAgentProxyConfig(source.agentProxyConfig)
+  ) {
+    return false
+  }
+  if (!source.contexts.every(isK8sContextInfo)) return false
+  if (!source.clusters.every(isK8sClusterRecord)) return false
+  if (!source.bastions.every(isK8sBastionGroup)) return false
+  if (!source.namespaces.every(isK8sNamespaceInfo)) return false
+  if (!source.resources.every(isK8sResource)) return false
+  if (!source.importContexts.every(isK8sImportContextInfo)) return false
+  const clusterIds = new Set(source.clusters.map((cluster) => cluster.id))
+  if (source.activeClusterId && !clusterIds.has(source.activeClusterId)) return false
+  if (source.selectedClusterId && !clusterIds.has(source.selectedClusterId)) return false
+  return source.namespaces.every((namespace) => clusterIds.has(namespace.clusterId)) && source.resources.every((resource) => clusterIds.has(resource.clusterId))
+}
+
+const isK8sTerminalRecord = (source: unknown): source is KubernetesTerminalRecord =>
+  isRecord(source) &&
+  typeof source.id === 'string' &&
+  source.id.trim() !== '' &&
+  typeof source.sessionId === 'string' &&
+  source.sessionId.trim() !== '' &&
+  typeof source.clusterId === 'string' &&
+  source.clusterId.trim() !== '' &&
+  typeof source.name === 'string' &&
+  typeof source.namespace === 'string' &&
+  typeof source.output === 'string' &&
+  k8sTerminalStatuses.includes(source.status as KubernetesTerminalStatus) &&
+  isPositiveFiniteNumber(source.cols) &&
+  isPositiveFiniteNumber(source.rows) &&
+  typeof source.createdAt === 'string' &&
+  typeof source.updatedAt === 'string'
+
+const isK8sTerminalCloseData = (source: unknown): source is K8sTerminalCloseData => {
+  if (!isK8sTerminalRecord(source) || !isRecord(source)) return false
+  return isFiniteNumber((source as Record<string, unknown>).exitCode)
+}
+
+const isK8sProxyConfigData = (source: unknown): source is K8sProxyConfigData =>
+  isRecord(source) && isK8sAgentProxyConfig(source.proxyConfig) && typeof source.message === 'string'
+
+const isK8sContextSwitchData = (source: unknown, expectedContextName: string): source is KubernetesCatalog =>
+  isK8sCatalogSnapshot(source) && isRecord(source) && source.currentContext === expectedContextName && source.contexts.some((context) => context.name === expectedContextName && context.isActive)
+
+const isK8sClusterMutationData = (source: unknown, expectedClusterId?: string, expectedStatus?: K8sConnectionStatus): source is KubernetesCatalog & { cluster: KubernetesClusterRecord } => {
+  if (!isRecord(source)) return false
+  const record = source as Record<string, unknown>
+  if (!isK8sCatalogSnapshot(source) || !isK8sClusterRecord(record.cluster)) return false
+  const cluster = record.cluster
+  if (expectedClusterId && cluster.id !== expectedClusterId) return false
+  if (expectedStatus && cluster.connection_status !== expectedStatus) return false
+  return source.clusters.some((item) => item.id === cluster.id)
+}
+
+const isK8sClusterDeleteData = (source: unknown, deletedClusterId: string): source is KubernetesCatalog =>
+  isK8sCatalogSnapshot(source) && !source.clusters.some((cluster) => cluster.id === deletedClusterId)
+
+const isK8sBastionSyncData = (source: unknown): source is KubernetesCatalog & { syncedCount: number; updatedCount: number } => {
+  if (!isRecord(source) || !isK8sCatalogSnapshot(source)) return false
+  const record = source as Record<string, unknown>
+  return isNonNegativeFiniteNumber(record.syncedCount) && isNonNegativeFiniteNumber(record.updatedCount)
+}
+
+const isK8sKubeconfigImportData = (source: unknown): source is K8sKubeconfigImportData =>
   isRecord(source) &&
   Array.isArray(source.contexts) &&
-  Array.isArray(source.clusters) &&
-  Array.isArray(source.bastions) &&
-  Array.isArray(source.namespaces) &&
-  Array.isArray(source.resources) &&
-  Array.isArray(source.importContexts) &&
-  isStringOrNull(source.activeClusterId) &&
-  isStringOrNull(source.selectedClusterId) &&
-  isK8sAgentProxyConfig(source.agentProxyConfig)
+  source.contexts.every(isK8sImportContextInfo) &&
+  typeof source.kubeconfigPath === 'string' &&
+  typeof source.kubeconfigContent === 'string' &&
+  typeof source.currentContext === 'string'
+
+const isK8sClusterTestData = (source: unknown): source is K8sClusterTestData =>
+  isRecord(source) &&
+  typeof source.success === 'boolean' &&
+  typeof source.isValid === 'boolean' &&
+  typeof source.contextName === 'string' &&
+  typeof source.serverUrl === 'string' &&
+  typeof source.message === 'string' &&
+  isK8sOptionalString(source.command) &&
+  isK8sOptionalString(source.output) &&
+  isK8sOptionalString(source.error) &&
+  isK8sOptionalNonNegativeNumber(source.durationMs)
 
 const isK8sBackendCommandData = (source: unknown): source is K8sBackendCommandData =>
   isRecord(source) &&
@@ -8829,8 +8997,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshKubernetesCatalog = async () => {
     if (!window.aiops?.listKubernetesCatalog) return null
     const result = await window.aiops.listKubernetesCatalog()
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       setK8sNotice(result?.errorMessage || 'Kubernetes 配置加载失败')
+      return null
+    }
+    if (!isK8sCatalogSnapshot(result.data)) {
+      setK8sNotice('Kubernetes catalog backend returned malformed result data.')
       return null
     }
     return applyKubernetesCatalog(result.data)
@@ -8842,8 +9014,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const result = await window.aiops.switchKubernetesContext(name)
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       setK8sNotice(result?.errorMessage || 'Kubernetes Context 切换失败')
+      return false
+    }
+    if (!isK8sContextSwitchData(result.data, name)) {
+      setK8sNotice('Kubernetes context backend returned malformed result data.')
       return false
     }
     applyKubernetesCatalog(result.data)
@@ -8916,8 +9092,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const draft = cloneK8sProxyConfig(k8sProxyConfig.value)
     try {
       const result = await window.aiops.saveKubernetesAgentProxyConfig(draft)
-      if (!result?.ok || !result.data?.proxyConfig) {
+      if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes Agent 代理配置保存失败')
+        return false
+      }
+      if (!isK8sProxyConfigData(result.data)) {
+        setK8sNotice('Kubernetes Agent proxy backend returned malformed result data.')
         return false
       }
       savedK8sProxyConfig.value = cloneK8sProxyConfig(result.data.proxyConfig)
@@ -8949,14 +9129,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setK8sActionMenu(null)
     setK8sConnecting(id, true)
+    const previousStatus = cluster.connection_status
     cluster.connection_status = 'connecting'
     setK8sNotice(`正在连接 ${cluster.name}`)
     void window.aiops
       .connectKubernetesCluster(id)
       .then((result) => {
-        if (!result?.ok || !result.data) {
+        if (!result?.ok) {
           cluster.connection_status = 'error'
           setK8sNotice(result?.errorMessage || `${cluster.name} 连接失败`)
+          return false
+        }
+        if (!isK8sClusterMutationData(result.data, id, 'connected')) {
+          cluster.connection_status = previousStatus
+          setK8sNotice('Kubernetes cluster backend returned malformed result data.')
           return false
         }
         applyKubernetesCatalog(result.data)
@@ -8997,8 +9183,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     void window.aiops
       .disconnectKubernetesCluster(id)
       .then((result) => {
-        if (!result?.ok || !result.data) {
+        if (!result?.ok) {
           setK8sNotice(result?.errorMessage || `${cluster.name} 断开失败`)
+          return false
+        }
+        if (!isK8sClusterMutationData(result.data, id, 'disconnected')) {
+          setK8sNotice('Kubernetes cluster backend returned malformed result data.')
           return false
         }
         applyKubernetesCatalog(result.data)
@@ -9053,8 +9243,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         cols: options.cols,
         rows: options.rows
       })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端创建失败')
+        return null
+      }
+      if (!isK8sTerminalRecord(result.data) || result.data.clusterId !== clusterId) {
+        setK8sNotice('Kubernetes terminal backend returned malformed result data.')
         return null
       }
       tab = k8sTerminalTabFromRecord(result.data)
@@ -9085,6 +9279,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端关闭失败')
         return
       }
+      if (!isK8sTerminalCloseData(result.data) || result.data.sessionId !== tab.sessionId) {
+        setK8sNotice('Kubernetes terminal backend returned malformed result data.')
+        return
+      }
     }
     k8sTerminalTabs.value[index].status = 'ended'
     k8sTerminalTabs.value[index].exitCode = 0
@@ -9106,8 +9304,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!tab) return false
     if (window.aiops?.resizeKubernetesTerminal) {
       const result = await window.aiops.resizeKubernetesTerminal(tab.sessionId, cols, rows)
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端尺寸同步失败')
+        return false
+      }
+      if (!isK8sTerminalRecord(result.data) || result.data.sessionId !== tab.sessionId) {
+        setK8sNotice('Kubernetes terminal backend returned malformed result data.')
         return false
       }
       tab.cols = result.data.cols
@@ -9198,8 +9400,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!tab) return false
     if (window.aiops?.closeKubernetesTerminal) {
       const result = await window.aiops.closeKubernetesTerminal(tab.sessionId, exitCode)
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端会话结束失败')
+        return false
+      }
+      if (!isK8sTerminalCloseData(result.data) || result.data.sessionId !== tab.sessionId) {
+        setK8sNotice('Kubernetes terminal backend returned malformed result data.')
         return false
       }
       tab.updatedAt = result.data.updatedAt
@@ -9521,7 +9727,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       kubeconfigPath: input.kubeconfigPath,
       kubeconfigContent: input.kubeconfigContent
     })
-    const ok = Boolean(result?.ok && result.data?.isValid)
+    if (result?.ok && !isK8sClusterTestData(result.data)) {
+      k8sTestResult.value = false
+      setK8sNotice('Kubernetes cluster test backend returned malformed result data.')
+      return false
+    }
+    const ok = Boolean(result?.ok && isK8sClusterTestData(result.data) && result.data.isValid)
     k8sTestResult.value = ok
     setK8sNotice(ok ? result.data?.message || '连接测试成功' : result?.errorMessage || result?.data?.message || '连接测试失败，请确认 Context 和 Server URL')
     return ok
@@ -9532,7 +9743,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const normalizeK8sKubeconfigImportResult = (result: Awaited<ReturnType<AiopsPreloadApi['importKubernetesKubeconfig']>>): K8sKubeconfigImportResult => {
-    if (result?.ok && result.data) {
+    if (result?.ok) {
+      if (!isK8sKubeconfigImportData(result.data)) {
+        return {
+          success: false,
+          contexts: [],
+          kubeconfigPath: '',
+          kubeconfigContent: '',
+          currentContext: '',
+          error: 'Kubeconfig backend returned malformed result data.'
+        }
+      }
       return {
         success: true,
         contexts: result.data.contexts,
@@ -9655,8 +9876,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       sourceType: payload.sourceType,
       bastionUuid: payload.bastionUuid
     })
-    if (!result?.ok || !result.data?.cluster) {
+    if (!result?.ok) {
       setK8sNotice(result?.errorMessage || 'Kubernetes 集群添加失败')
+      return null
+    }
+    if (!isK8sClusterMutationData(result.data)) {
+      setK8sNotice('Kubernetes cluster backend returned malformed result data.')
       return null
     }
     applyKubernetesCatalog(result.data)
@@ -9675,8 +9900,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     const result = await window.aiops.updateKubernetesCluster(id, patch)
-    if (!result?.ok || !result.data?.cluster) {
+    if (!result?.ok) {
       setK8sNotice(result?.errorMessage || `${cluster.name} 更新失败`)
+      return null
+    }
+    if (!isK8sClusterMutationData(result.data, id)) {
+      setK8sNotice('Kubernetes cluster backend returned malformed result data.')
       return null
     }
     applyKubernetesCatalog(result.data)
@@ -9709,8 +9938,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const result = await window.aiops.deleteKubernetesCluster(id)
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       setK8sNotice(result?.errorMessage || `${cluster?.name || '集群'} 删除失败`)
+      return false
+    }
+    if (!isK8sClusterDeleteData(result.data, id)) {
+      setK8sNotice('Kubernetes cluster backend returned malformed result data.')
       return false
     }
     applyKubernetesCatalog(result.data)
@@ -9739,8 +9972,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     void window.aiops
       .syncKubernetesBastion(bastionUuid)
       .then((result) => {
-        if (!result?.ok || !result.data) {
+        if (!result?.ok) {
           setK8sNotice(result?.errorMessage || `${bastion.label} Kubernetes 资产同步失败`)
+          return false
+        }
+        if (!isK8sBastionSyncData(result.data)) {
+          setK8sNotice('Kubernetes bastion backend returned malformed result data.')
           return false
         }
         applyKubernetesCatalog(result.data)

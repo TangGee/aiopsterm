@@ -6014,8 +6014,267 @@ describe('workspace store', () => {
     await store.refreshKubernetesCatalog()
     store.k8sActiveClusterId = 'k8s-1'
 
+    const cloneRows = <T extends Record<string, unknown>>(rows: T[]) => rows.map((row) => ({ ...row }))
+    const catalogFromStore = (extra?: Record<string, unknown>) => ({
+      contexts: cloneRows(store.k8sContexts as unknown as Record<string, unknown>[]),
+      currentContext: store.k8sContexts.find((context) => context.isActive)?.name || '',
+      clusters: cloneRows(store.k8sClusters as unknown as Record<string, unknown>[]),
+      bastions: cloneRows(store.k8sBastions as unknown as Record<string, unknown>[]),
+      namespaces: cloneRows(store.k8sNamespaces as unknown as Record<string, unknown>[]),
+      resources: cloneRows(store.k8sResources as unknown as Record<string, unknown>[]),
+      importContexts: cloneRows(store.k8sImportContexts as unknown as Record<string, unknown>[]),
+      activeClusterId: store.k8sActiveClusterId,
+      selectedClusterId: store.k8sSelectedClusterId,
+      agentProxyConfig: { ...store.k8sProxyConfig },
+      ...extra
+    })
+    const catalogStateSnapshot = () =>
+      JSON.stringify({
+        contexts: store.k8sContexts,
+        clusters: store.k8sClusters,
+        bastions: store.k8sBastions,
+        namespaces: store.k8sNamespaces,
+        resources: store.k8sResources,
+        importContexts: store.k8sImportContexts,
+        activeClusterId: store.k8sActiveClusterId,
+        selectedClusterId: store.k8sSelectedClusterId,
+        proxyConfig: store.k8sProxyConfig,
+        terminalTabs: store.k8sTerminalTabs,
+        activeTerminalId: store.k8sActiveTerminalId
+      })
+    const flushK8sAsync = async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+
+    const initialCatalogSnapshot = catalogStateSnapshot()
+    vi.mocked(window.aiops.listKubernetesCatalog).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        clusters: [{ id: 'malformed-cluster' }]
+      }
+    } as any)
+    await expect(store.refreshKubernetesCatalog()).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes catalog backend returned malformed result data.')
+    expect(catalogStateSnapshot()).toBe(initialCatalogSnapshot)
+
+    vi.mocked(window.aiops.switchKubernetesContext).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        currentContext: 42
+      }
+    } as any)
+    await expect(store.switchK8sContext('staging/devops')).resolves.toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes context backend returned malformed result data.')
+    expect(catalogStateSnapshot()).toBe(initialCatalogSnapshot)
+
+    const k8s2StatusBeforeConnect = store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status
+    vi.mocked(window.aiops.connectKubernetesCluster).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        cluster: {
+          ...store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')!,
+          connection_status: 'disconnected'
+        }
+      }
+    } as any)
+    expect(store.connectK8sCluster('k8s-2')).toBe(true)
+    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connecting')
+    await flushK8sAsync()
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
+    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe(k8s2StatusBeforeConnect)
+    expect(store.k8sActiveClusterId).toBe('k8s-1')
+
+    store.openK8sProxyConfig()
+    store.updateK8sProxyConfig({ enabled: true, type: 'HTTPS', host: 'malformed.proxy', port: 8443 })
+    vi.mocked(window.aiops.saveKubernetesAgentProxyConfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        proxyConfig: { enabled: true },
+        message: 'malformed proxy'
+      }
+    } as any)
+    await expect(store.saveK8sProxyConfig()).resolves.toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes Agent proxy backend returned malformed result data.')
+    expect(store.k8sProxyConfigOpen).toBe(true)
+    expect(store.k8sProxyConfig.host).toBe('malformed.proxy')
+    store.closeK8sProxyConfig()
+    expect(store.k8sProxyConfig.host).not.toBe('malformed.proxy')
+
+    const importContextsBefore = JSON.stringify(store.k8sImportContexts)
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        contexts: [{ name: 'broken/import' }],
+        kubeconfigPath: '/tmp/broken-kubeconfig.yaml',
+        kubeconfigContent: 'broken kubeconfig',
+        currentContext: 'broken/import'
+      }
+    } as any)
+    const malformedImport = await store.importK8sKubeconfigContent('broken kubeconfig')
+    expect(malformedImport).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: 'Kubeconfig backend returned malformed result data.'
+      })
+    )
+    expect(store.k8sClusterNotice).toBe('Kubeconfig backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sImportContexts)).toBe(importContextsBefore)
+
+    vi.mocked(window.aiops.testKubernetesClusterConnection).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        isValid: true,
+        message: 'malformed test result'
+      }
+    } as any)
+    await expect(store.testK8sClusterConnection({ contextName: 'prod/admin' })).resolves.toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster test backend returned malformed result data.')
+    expect(store.k8sTestResult).toBe(false)
+
+    const clustersBeforeAdd = JSON.stringify(store.k8sClusters)
+    const selectedBeforeAdd = store.k8sSelectedClusterId
+    store.k8sAddModalOpen = true
+    vi.mocked(window.aiops.addKubernetesCluster).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        cluster: { id: 'bad-added-cluster' }
+      }
+    } as any)
+    await expect(
+      store.addK8sCluster({
+        name: 'bad-cluster',
+        contextName: 'bad/context',
+        serverUrl: 'https://bad.k8s.local:6443'
+      })
+    ).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeAdd)
+    expect(store.k8sSelectedClusterId).toBe(selectedBeforeAdd)
+    expect(store.k8sAddModalOpen).toBe(true)
+    store.k8sAddModalOpen = false
+
+    store.k8sEditModalOpen = true
+    store.k8sEditingClusterId = 'k8s-1'
+    vi.mocked(window.aiops.updateKubernetesCluster).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        cluster: {
+          ...store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')!,
+          id: 'wrong-cluster'
+        }
+      }
+    } as any)
+    await expect(store.updateK8sCluster('k8s-1', { name: 'bad-update' })).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeAdd)
+    expect(store.k8sEditModalOpen).toBe(true)
+    expect(store.k8sEditingClusterId).toBe('k8s-1')
+    store.k8sEditModalOpen = false
+    store.k8sEditingClusterId = null
+
+    vi.mocked(window.aiops.deleteKubernetesCluster).mockResolvedValueOnce({
+      ok: true,
+      data: catalogFromStore()
+    } as any)
+    await expect(store.deleteK8sCluster('k8s-2')).resolves.toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeAdd)
+
+    store.k8sConfigTab = 'local'
+    vi.mocked(window.aiops.syncKubernetesBastion).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        syncedCount: '1',
+        updatedCount: 0
+      }
+    } as any)
+    expect(store.syncK8sBastion('org-prod')).toBe(true)
+    expect(store.k8sSyncingBastionIds).toContain('org-prod')
+    await flushK8sAsync()
+    expect(store.k8sClusterNotice).toBe('Kubernetes bastion backend returned malformed result data.')
+    expect(store.k8sSyncingBastionIds).not.toContain('org-prod')
+    expect(store.k8sConfigTab).toBe('local')
+    expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeAdd)
+
     const terminal = await store.openK8sTerminal('k8s-1')
     if (!terminal) throw new Error('Expected Kubernetes terminal to open for malformed result coverage.')
+    const terminalTabsBeforeCreate = JSON.stringify(store.k8sTerminalTabs)
+    vi.mocked(window.aiops.createKubernetesTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        id: 'malformed-terminal',
+        sessionId: 'malformed-session',
+        clusterId: 'k8s-1'
+      }
+    } as any)
+    await expect(store.openK8sTerminal('k8s-1', { forceNew: true })).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sTerminalTabs)).toBe(terminalTabsBeforeCreate)
+
+    const terminalBeforeResize = JSON.stringify(store.k8sActiveTerminal)
+    vi.mocked(window.aiops.resizeKubernetesTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...terminal,
+        sessionId: 'wrong-session',
+        cols: 120
+      }
+    } as any)
+    await expect(store.resizeK8sTerminal(terminal.sessionId, 120, 40)).resolves.toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sActiveTerminal)).toBe(terminalBeforeResize)
+
+    const terminalBeforeEnd = JSON.stringify(store.k8sActiveTerminal)
+    vi.mocked(window.aiops.closeKubernetesTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...terminal,
+        sessionId: terminal.sessionId,
+        status: 'ended'
+      }
+    } as any)
+    await expect(store.endK8sTerminalSession(terminal.id)).resolves.toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sActiveTerminal)).toBe(terminalBeforeEnd)
+
+    const terminalTabsBeforeClose = JSON.stringify(store.k8sTerminalTabs)
+    vi.mocked(window.aiops.closeKubernetesTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...terminal,
+        sessionId: 'wrong-session',
+        status: 'ended',
+        exitCode: 0
+      }
+    } as any)
+    await store.closeK8sTerminalTab(terminal.id)
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sTerminalTabs)).toBe(terminalTabsBeforeClose)
+
+    vi.mocked(window.aiops.disconnectKubernetesCluster).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        cluster: {
+          ...store.k8sClusters.find((cluster) => cluster.id === 'k8s-1')!,
+          connection_status: 'connected'
+        }
+      }
+    } as any)
+    expect(store.disconnectK8sCluster('k8s-1')).toBe(true)
+    await flushK8sAsync()
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sTerminalTabs)).toBe(terminalTabsBeforeClose)
+    expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeAdd)
+
     const terminalOutputBefore = terminal.output
     const terminalHistoryBefore = [...terminal.commandHistory]
     const terminalLastOutputBefore = terminal.lastCommandOutput
