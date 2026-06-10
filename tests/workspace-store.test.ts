@@ -6307,7 +6307,7 @@ describe('workspace store', () => {
         startedAt: '刚刚',
         clusterId: 'k8s-1',
         contextName: 'prod/admin',
-        namespace: 'default',
+        namespace: store.k8sResourceNamespace,
         source: 'resource',
         refreshedResources: 0,
         refreshedNamespaces: 0,
@@ -6445,6 +6445,21 @@ describe('workspace store', () => {
       await Promise.resolve()
       await Promise.resolve()
     }
+    const k8sCommandResult = (patch: Record<string, unknown> = {}) => ({
+      runId: 'k8s-run-shape-valid',
+      command: 'kubectl get pods',
+      output: 'shape-valid output',
+      terminalOutput: '[aiopsterm kubectl] shape-valid output',
+      success: true,
+      error: '',
+      durationMs: 1,
+      startedAt: '刚刚',
+      clusterId: 'k8s-1',
+      contextName: 'prod/admin',
+      namespace: 'default',
+      source: 'terminal',
+      ...patch
+    })
 
     const initialCatalogSnapshot = catalogStateSnapshot()
     vi.mocked(window.aiops.listKubernetesCatalog).mockResolvedValueOnce({
@@ -6680,6 +6695,22 @@ describe('workspace store', () => {
     const terminalLastOutputBefore = terminal.lastCommandOutput
     vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
       ok: true,
+      data: k8sCommandResult({
+        runId: 'mismatched-terminal-run',
+        command: 'kubectl get services',
+        output: 'MISMATCHED POD OUTPUT',
+        terminalOutput: '[aiopsterm kubectl] mismatched pod output'
+      })
+    } as any)
+    await expect(store.sendK8sTerminalCommand('kubectl get pods')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+    expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
+    expect(store.k8sActiveTerminal?.output).not.toContain('mismatched pod output')
+    expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
+    expect(store.k8sActiveTerminal?.lastCommandOutput).toBe(terminalLastOutputBefore)
+
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
       data: {
         command: 'kubectl get pods',
         output: 'MALFORMED POD OUTPUT',
@@ -6708,6 +6739,23 @@ describe('workspace store', () => {
     const agentRunsBefore = store.k8sAgentRuns.map((run) => ({ ...run }))
     vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
       ok: true,
+      data: k8sCommandResult({
+        runId: 'mismatched-agent-run',
+        command: 'kubectl get namespaces',
+        output: 'MISMATCHED AGENT OUTPUT',
+        terminalOutput: '[aiopsterm kubectl] mismatched agent output',
+        source: 'terminal'
+      })
+    } as any)
+    await expect(store.runK8sAgentKubectl('kubectl get namespaces')).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+    expect(store.k8sAgentStatus).toBe('error')
+    expect(store.k8sAgentRuns).toEqual(agentRunsBefore)
+    expect(store.k8sResourceOutput).toBe('kubectl get namespaces')
+    expect(store.k8sResourceOutput).not.toContain('MISMATCHED AGENT OUTPUT')
+
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
       data: {
         runId: 'malformed-agent-run',
         command: 'kubectl get namespaces',
@@ -6728,6 +6776,25 @@ describe('workspace store', () => {
       ok: true,
       data: {
         resourceId: 'k8s-pod-worker-1',
+        resourceName: 'billing-worker-7f9d6f9dd9-rx8mm',
+        resourceKind: 'pods',
+        action: 'logs',
+        title: 'Logs billing-worker-7f9d6f9dd9-rx8mm',
+        command: 'kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120',
+        clusterId: 'k8s-1',
+        clusterName: 'prod-cluster',
+        contextName: 'prod/admin',
+        namespace: 'ops'
+      }
+    } as any)
+    await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource action backend returned malformed plan data.')
+    expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+
+    vi.mocked(window.aiops.planKubernetesResourceAction).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        resourceId: 'k8s-pod-worker-1',
         action: 'describe',
         command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops'
       }
@@ -6738,6 +6805,31 @@ describe('workspace store', () => {
 
     store.k8sResourceOutputTitle = 'Stable resource output'
     store.k8sResourceOutput = 'stable backend output'
+    vi.mocked(window.aiops.executeKubernetesResourceAction).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...k8sCommandResult({
+          runId: 'mismatched-resource-action-run',
+          command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops',
+          output: 'MISMATCHED LOG OUTPUT',
+          terminalOutput: '[aiopsterm kubectl] mismatched log output',
+          clusterId: 'k8s-1',
+          namespace: 'ops',
+          source: 'resource'
+        }),
+        resourceId: 'k8s-pod-worker-1',
+        resourceName: 'billing-worker-7f9d6f9dd9-rx8mm',
+        resourceKind: 'pods',
+        action: 'describe',
+        title: 'Describe / billing-worker-7f9d6f9dd9-rx8mm'
+      }
+    } as any)
+    await expect(store.showK8sPodLogs('k8s-pod-worker-1')).resolves.toBeUndefined()
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource action backend returned malformed result data.')
+    expect(store.k8sResourceOutputTitle).toBe('Stable resource output')
+    expect(store.k8sResourceOutput).toBe('stable backend output')
+    expect(store.k8sResourceOutput).not.toContain('MISMATCHED LOG OUTPUT')
+
     vi.mocked(window.aiops.executeKubernetesResourceAction).mockResolvedValueOnce({
       ok: true,
       data: {
@@ -6758,6 +6850,35 @@ describe('workspace store', () => {
     const resourcesBeforeRefresh = JSON.stringify(store.k8sResources)
     const agentRunsBeforeRefresh = store.k8sAgentRuns.map((run) => ({ ...run }))
     const resourceOutputBeforeRefresh = store.k8sResourceOutput
+    vi.mocked(window.aiops.refreshKubernetesResources).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...catalogFromStore(),
+        ...k8sCommandResult({
+          runId: 'mismatched-refresh-run',
+          command: 'kubectl get pods --all-namespaces',
+          output: 'MISMATCHED REFRESH OUTPUT',
+          terminalOutput: '[aiopsterm kubectl] mismatched refresh output',
+          clusterId: 'k8s-2',
+          contextName: 'staging/devops',
+          namespace: store.k8sResourceNamespace,
+          source: 'resource'
+        }),
+        refreshedClusterId: 'k8s-2',
+        refreshedKind: store.k8sResourceKind,
+        refreshedResources: 1,
+        refreshedNamespaces: 1,
+        message: 'mismatched refresh'
+      }
+    } as any)
+    await expect(store.refreshK8sResources()).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource refresh backend returned malformed result data.')
+    expect(store.k8sResourceLoading).toBe(false)
+    expect(JSON.stringify(store.k8sResources)).toBe(resourcesBeforeRefresh)
+    expect(store.k8sAgentRuns).toEqual(agentRunsBeforeRefresh)
+    expect(store.k8sResourceOutput).toBe(resourceOutputBeforeRefresh)
+    expect(store.k8sResourceOutput).not.toContain('MISMATCHED REFRESH OUTPUT')
+
     vi.mocked(window.aiops.refreshKubernetesResources).mockResolvedValueOnce({
       ok: true,
       data: {

@@ -2073,6 +2073,9 @@ const isK8sClusterTestData = (source: unknown): source is K8sClusterTestData =>
   isK8sOptionalString(source.error) &&
   isK8sOptionalNonNegativeNumber(source.durationMs)
 
+const normalizeK8sCommandText = (value: string) => value.trim().replace(/\s+/g, ' ')
+const expectedK8sResourceNamespace = (resource: K8sResource) => (resource.kind === 'nodes' ? 'all' : resource.namespace)
+
 const isK8sBackendCommandData = (source: unknown): source is K8sBackendCommandData =>
   isRecord(source) &&
   typeof source.runId === 'string' &&
@@ -2089,28 +2092,64 @@ const isK8sBackendCommandData = (source: unknown): source is K8sBackendCommandDa
   typeof source.namespace === 'string' &&
   k8sCommandSources.includes(source.source as K8sBackendCommandData['source'])
 
-const isK8sResourceActionPlanData = (source: unknown): source is K8sBackendResourceActionPlanData =>
-  isRecord(source) &&
-  typeof source.resourceId === 'string' &&
-  source.resourceId.trim() !== '' &&
-  typeof source.resourceName === 'string' &&
-  source.resourceName.trim() !== '' &&
-  k8sResourceKinds.includes(source.resourceKind as K8sResourceKind) &&
-  k8sResourceActions.includes(source.action as K8sResourceAction) &&
-  typeof source.title === 'string' &&
-  source.title.trim() !== '' &&
-  typeof source.command === 'string' &&
-  source.command.trim() !== '' &&
-  typeof source.clusterId === 'string' &&
-  source.clusterId.trim() !== '' &&
-  typeof source.clusterName === 'string' &&
-  typeof source.contextName === 'string' &&
-  typeof source.namespace === 'string'
+const isK8sBackendCommandForRequest = (
+  source: unknown,
+  expected: { command?: string; clusterId?: string; namespace?: string; source?: K8sBackendCommandData['source'] } = {}
+): source is K8sBackendCommandData => {
+  if (!isK8sBackendCommandData(source)) return false
+  if (expected.command !== undefined) {
+    const expectedCommand = normalizeK8sCommandText(expected.command)
+    const actualCommand = normalizeK8sCommandText(source.command)
+    if (expectedCommand ? actualCommand !== expectedCommand : actualCommand !== '<empty>') return false
+  }
+  if (expected.clusterId !== undefined && source.clusterId !== expected.clusterId) return false
+  if (expected.namespace !== undefined && source.namespace !== expected.namespace) return false
+  if (expected.source !== undefined && source.source !== expected.source) return false
+  return true
+}
 
-const isK8sBackendResourceActionData = (source: unknown): source is K8sBackendResourceActionData => {
-  if (!isK8sBackendCommandData(source) || !isRecord(source)) return false
+const isK8sResourceActionPlanData = (
+  source: unknown,
+  expected: { resourceId?: string; action?: K8sResourceAction; resource?: K8sResource } = {}
+): source is K8sBackendResourceActionPlanData => {
+  if (
+    !isRecord(source) ||
+    typeof source.resourceId !== 'string' ||
+    source.resourceId.trim() === '' ||
+    typeof source.resourceName !== 'string' ||
+    source.resourceName.trim() === '' ||
+    !k8sResourceKinds.includes(source.resourceKind as K8sResourceKind) ||
+    !k8sResourceActions.includes(source.action as K8sResourceAction) ||
+    typeof source.title !== 'string' ||
+    source.title.trim() === '' ||
+    typeof source.command !== 'string' ||
+    source.command.trim() === '' ||
+    typeof source.clusterId !== 'string' ||
+    source.clusterId.trim() === '' ||
+    typeof source.clusterName !== 'string' ||
+    typeof source.contextName !== 'string' ||
+    typeof source.namespace !== 'string'
+  ) {
+    return false
+  }
+  if (expected.resourceId !== undefined && source.resourceId !== expected.resourceId) return false
+  if (expected.action !== undefined && source.action !== expected.action) return false
+  if (expected.resource) {
+    if (source.clusterId !== expected.resource.clusterId) return false
+    if (source.resourceName !== expected.resource.name) return false
+    if (source.resourceKind !== expected.resource.kind) return false
+    if (source.namespace !== expectedK8sResourceNamespace(expected.resource)) return false
+  }
+  return true
+}
+
+const isK8sBackendResourceActionData = (
+  source: unknown,
+  expected: { resourceId?: string; action?: K8sResourceAction; resource?: K8sResource } = {}
+): source is K8sBackendResourceActionData => {
+  if (!isK8sBackendCommandForRequest(source, { clusterId: expected.resource?.clusterId, namespace: expected.resource ? expectedK8sResourceNamespace(expected.resource) : undefined, source: 'resource' }) || !isRecord(source)) return false
   const record = source as Record<string, unknown>
-  return (
+  const valid =
     typeof record.resourceId === 'string' &&
     record.resourceId.trim() !== '' &&
     typeof record.resourceName === 'string' &&
@@ -2119,20 +2158,34 @@ const isK8sBackendResourceActionData = (source: unknown): source is K8sBackendRe
     k8sResourceActions.includes(record.action as K8sResourceAction) &&
     typeof record.title === 'string' &&
     record.title.trim() !== ''
-  )
+  if (!valid) return false
+  if (expected.resourceId !== undefined && record.resourceId !== expected.resourceId) return false
+  if (expected.action !== undefined && record.action !== expected.action) return false
+  if (expected.resource) {
+    if (record.resourceName !== expected.resource.name) return false
+    if (record.resourceKind !== expected.resource.kind) return false
+  }
+  return true
 }
 
-const isK8sBackendResourceRefreshData = (source: unknown): source is K8sBackendResourceRefreshData => {
+const isK8sBackendResourceRefreshData = (
+  source: unknown,
+  expected: { clusterId?: string; kind?: K8sResourceKind | 'all'; namespace?: string } = {}
+): source is K8sBackendResourceRefreshData => {
   if (!isK8sBackendCommandData(source) || !isK8sCatalogSnapshot(source) || !isRecord(source)) return false
   const record = source as Record<string, unknown>
-  return (
+  const valid =
     source.source === 'resource' &&
     typeof record.refreshedClusterId === 'string' &&
     k8sRefreshKinds.includes(record.refreshedKind as K8sResourceKind | 'all') &&
     isNonNegativeFiniteNumber(record.refreshedResources) &&
     isNonNegativeFiniteNumber(record.refreshedNamespaces) &&
     typeof record.message === 'string'
-  )
+  if (!valid) return false
+  if (expected.clusterId !== undefined && (source.clusterId !== expected.clusterId || record.refreshedClusterId !== expected.clusterId)) return false
+  if (expected.kind !== undefined && record.refreshedKind !== expected.kind) return false
+  if (expected.namespace !== undefined && source.namespace !== expected.namespace) return false
+  return true
 }
 
 const aiChatHistoryMessageRoles: AiChatHistoryMessage['role'][] = ['user', 'assistant', 'system']
@@ -9434,7 +9487,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         defaultNamespace: cluster?.default_namespace,
         source
       })
-      if (result.ok && isK8sBackendCommandData(result.data)) return result.data
+      if (result.ok && isK8sBackendCommandForRequest(result.data, { command, clusterId, namespace, source })) return result.data
       if (result.ok) {
         setK8sNotice('Kubernetes command backend returned malformed result data.')
         return null
@@ -9527,7 +9580,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.planKubernetesResourceAction({ resourceId, action })
-      if (result.ok && isK8sResourceActionPlanData(result.data)) return result.data
+      const resource = k8sResources.value.find((item) => item.id === resourceId)
+      if (result.ok && isK8sResourceActionPlanData(result.data, { resourceId, action, resource })) return result.data
       if (result.ok) {
         setK8sNotice('Kubernetes resource action backend returned malformed plan data.')
         return null
@@ -9547,7 +9601,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.executeKubernetesResourceAction({ resourceId, action })
-      if (result.ok && isK8sBackendResourceActionData(result.data)) return result.data
+      const resource = k8sResources.value.find((item) => item.id === resourceId)
+      if (result.ok && isK8sBackendResourceActionData(result.data, { resourceId, action, resource })) return result.data
       if (result.ok) {
         setK8sNotice('Kubernetes resource action backend returned malformed result data.')
         return null
@@ -9710,7 +9765,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         k8sResourceLoading.value = false
         return null
       }
-      if (!isK8sBackendResourceRefreshData(result.data)) {
+      if (!isK8sBackendResourceRefreshData(result.data, { clusterId: cluster.id, kind: k8sResourceKind.value, namespace: k8sResourceNamespace.value })) {
         setK8sNotice('Kubernetes resource refresh backend returned malformed result data.')
         k8sResourceLoading.value = false
         return null
