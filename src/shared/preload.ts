@@ -752,6 +752,24 @@ export type AiChatMessageMetadataResult = AiopsMutationResult<{
   messages: AiChatHistoryMessage[]
 }>
 
+export type AiMcpToolCallActionInput = {
+  conversationId: string
+  messageId: string
+  autoApprove?: boolean
+}
+
+export type AiMcpToolCallActionResult = AiopsMutationResult<{
+  status: 'approved' | 'rejected'
+  conversation: AiChatConversationRecord
+  messages: AiChatHistoryMessage[]
+  toolCall?: NonNullable<McpToolCallResult['data']>
+  toolCallError?: {
+    errorCode?: string
+    errorMessage: string
+  }
+  mcpConfig?: NonNullable<McpConfigWriteResult['data']>
+}>
+
 export type AiTodoStatus = 'pending' | 'in_progress' | 'completed'
 
 export type AiTodoSubtask = {
@@ -1807,6 +1825,7 @@ export type AiChatResponseResult = AiopsMutationResult<{
   status?: Extract<AiChatMessageState, 'done' | 'cancelled'>
   requestId?: string
   assistantMessageId?: string
+  message?: AiChatHistoryMessage
 }>
 
 export type AiChatCancelInput = {
@@ -2541,6 +2560,8 @@ export type AiopsPreloadApi = {
   deleteChatConversation: (id: string) => Promise<AiChatConversationDeleteResult>
   restoreChatConversation: (id: string) => Promise<AiChatConversationRestoreResult>
   saveChatMessageMetadata: (input: AiChatMessageMetadataInput) => Promise<AiChatMessageMetadataResult>
+  approveAiMcpToolCall: (input: AiMcpToolCallActionInput) => Promise<AiMcpToolCallActionResult>
+  rejectAiMcpToolCall: (input: AiMcpToolCallActionInput) => Promise<AiMcpToolCallActionResult>
   exportChat: (input: AiChatExportInput) => Promise<AiChatExportResult>
   listAiTodoSnapshot: () => Promise<AiTodoSnapshotResult>
   listAiContextCatalog: () => Promise<AiContextCatalogResult>

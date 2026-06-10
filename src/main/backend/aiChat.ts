@@ -7,10 +7,13 @@ import type {
   AiChatExchangeRequestInput,
   AiChatExchangeRequestResult,
   AiChatHistoryHostContext,
+  AiChatHistoryMessage,
   AiChatMessageInput,
   AiChatResponseInput,
   AiChatResponseResult,
   AiChatSkillInput,
+  McpToolCallInput,
+  McpToolCallResult,
   ModelProviderCheckKey,
   SkillUserConfig,
   UserConfig
@@ -25,6 +28,7 @@ const AI_CHAT_CANCELLED_TEXT = '已停止生成。'
 type AiChatRuntimeConfig = {
   getConfig?: () => UserConfig
   listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
+  callMcpTool?: (input: McpToolCallInput) => Promise<McpToolCallResult>
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -359,6 +363,190 @@ const mapConversationForProvider = (messages: AiChatMessageInput[] | undefined, 
   return normalized
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
+const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (!isRecord(value)) return undefined
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+}
+
+const decodeMcpToolTagValue = (value: string) =>
+  value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim()
+
+const readMcpToolTag = (body: string, tagName: string) => {
+  const match = body.match(new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>`, 'i'))
+  return match ? decodeMcpToolTagValue(match[1]) : ''
+}
+
+const parseMcpToolUseBlock = (text: string): McpToolCallInput | null => {
+  const block = text.match(/<use_mcp_tool>\s*([\s\S]*?)\s*<\/use_mcp_tool>/i)
+  if (!block) return null
+  const serverName = readMcpToolTag(block[1], 'server_name')
+  const toolName = readMcpToolTag(block[1], 'tool_name')
+  const argumentsText = readMcpToolTag(block[1], 'arguments')
+  if (!serverName || !toolName) return null
+  let parsedArguments: Record<string, unknown> = {}
+  if (argumentsText) {
+    const parsed = JSON.parse(argumentsText) as unknown
+    if (!isRecord(parsed)) {
+      throw new Error('MCP tool arguments must be a JSON object.')
+    }
+    parsedArguments = cloneJsonRecord(parsed) || {}
+  }
+  return {
+    serverName,
+    toolName,
+    arguments: parsedArguments
+  }
+}
+
+const formatMcpToolCallContent = (content: NonNullable<McpToolCallResult['data']>['content']) => {
+  if (!content.length) return '[]'
+  return content
+    .map((item) => {
+      if (typeof item.text === 'string') return item.text
+      if (typeof item.data === 'string') return item.data
+      return JSON.stringify(item, null, 2)
+    })
+    .join('\n\n')
+}
+
+const createMcpToolCallSummary = (toolCall: McpToolCallInput) => `MCP Tool ${toolCall.serverName}/${toolCall.toolName}`
+
+const createMcpToolAskMessage = (toolCall: McpToolCallInput, control: AiChatResponseControl): AiChatHistoryMessage => ({
+  id: control.assistantMessageId || `aichat-mcp-${randomUUID()}`,
+  role: 'assistant',
+  text: `请求执行 ${createMcpToolCallSummary(toolCall)}。`,
+  state: 'done',
+  ask: 'mcp_tool_call',
+  mcpToolCall: {
+    serverName: toolCall.serverName,
+    toolName: toolCall.toolName,
+    arguments: cloneJsonRecord(toolCall.arguments)
+  }
+})
+
+const createMcpToolOutputMessage = (
+  toolCall: McpToolCallInput,
+  text: string,
+  state: Extract<AiChatHistoryMessage['state'], 'done' | 'error'>,
+  control: AiChatResponseControl
+): AiChatHistoryMessage => ({
+  id: control.assistantMessageId || `aichat-mcp-${randomUUID()}`,
+  role: 'assistant',
+  text,
+  state,
+  say: 'command_output',
+  action: 'approved',
+  mcpToolCall: {
+    serverName: toolCall.serverName,
+    toolName: toolCall.toolName,
+    arguments: cloneJsonRecord(toolCall.arguments)
+  }
+})
+
+const resolveConfiguredMcpTool = (config: UserConfig, toolCall: McpToolCallInput) => {
+  const server = (config.mcpServers || []).find((item) => item.name === toolCall.serverName)
+  if (!server) return { ok: false as const, reason: `MCP server not found: ${toolCall.serverName}` }
+  if (server.disabled || server.status === 'disabled') return { ok: false as const, reason: `MCP server "${server.name}" is disabled.` }
+  if (server.status !== 'connected') return { ok: false as const, reason: `MCP server "${server.name}" is not connected.` }
+  const tool = server.tools.find((item) => item.name === toolCall.toolName)
+  if (!tool) return { ok: false as const, reason: `MCP tool not found: ${server.name}:${toolCall.toolName}` }
+  const stateKey = `${server.name}:${tool.name}`
+  const enabled = typeof config.mcpToolStates?.[stateKey] === 'boolean' ? config.mcpToolStates[stateKey] : tool.enabled
+  if (!enabled) return { ok: false as const, reason: `MCP tool "${stateKey}" is disabled.` }
+  return { ok: true as const, server, tool }
+}
+
+const resolveMcpToolResponse = async (
+  text: string,
+  config: UserConfig | undefined,
+  modelName: string,
+  startedAt: number,
+  control: AiChatResponseControl
+): Promise<AiChatResponseResult | null> => {
+  let toolCall: McpToolCallInput | null = null
+  try {
+    toolCall = parseMcpToolUseBlock(text)
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: 'AI_MCP_TOOL_ARGUMENTS_INVALID',
+      errorMessage: error instanceof Error ? error.message : 'MCP tool arguments are invalid.'
+    }
+  }
+  if (!toolCall) return null
+  if (!config) {
+    return {
+      ok: false,
+      errorCode: 'AI_MCP_CONFIG_UNAVAILABLE',
+      errorMessage: 'MCP config is unavailable.'
+    }
+  }
+  const configured = resolveConfiguredMcpTool(config, toolCall)
+  if (!configured.ok) {
+    const message = createMcpToolOutputMessage(toolCall, configured.reason, 'error', control)
+    return {
+      ok: true,
+      data: {
+        text: message.text,
+        provider: 'aiopsterm-local',
+        model: modelName,
+        durationMs: Math.max(1, now() - startedAt),
+        status: 'done',
+        requestId: control.requestId,
+        assistantMessageId: control.assistantMessageId,
+        message
+      }
+    }
+  }
+  if (!configured.tool.autoApprove) {
+    const message = createMcpToolAskMessage(toolCall, control)
+    return {
+      ok: true,
+      data: {
+        text: message.text,
+        provider: 'aiopsterm-local',
+        model: modelName,
+        durationMs: Math.max(1, now() - startedAt),
+        status: 'done',
+        requestId: control.requestId,
+        assistantMessageId: control.assistantMessageId,
+        message
+      }
+    }
+  }
+  if (!runtimeConfig.callMcpTool) {
+    return {
+      ok: false,
+      errorCode: 'AI_MCP_TOOL_CALL_UNAVAILABLE',
+      errorMessage: 'MCP tool call service is unavailable.'
+    }
+  }
+  const result = await runtimeConfig.callMcpTool(toolCall)
+  const output = result.ok && result.data ? formatMcpToolCallContent(result.data.content) : result.errorMessage || `${createMcpToolCallSummary(toolCall)} 调用失败。`
+  const message = createMcpToolOutputMessage(toolCall, output, result.ok && result.data && !result.data.isError ? 'done' : 'error', control)
+  return {
+    ok: true,
+    data: {
+      text: message.text,
+      provider: 'aiopsterm-local',
+      model: modelName,
+      durationMs: Math.max(1, now() - startedAt),
+      status: 'done',
+      requestId: control.requestId,
+      assistantMessageId: control.assistantMessageId,
+      message
+    }
+  }
+}
+
 async function generateProviderAiChatResponse(
   input: AiChatResponseInput,
   config: UserConfig,
@@ -391,6 +579,8 @@ async function generateProviderAiChatResponse(
       errorMessage: response.errorMessage
     }
   }
+  const mcpResponse = await resolveMcpToolResponse(response.text, config, modelName, startedAt, control)
+  if (mcpResponse) return mcpResponse
   return {
     ok: true,
     data: {

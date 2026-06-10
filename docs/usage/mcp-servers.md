@@ -55,6 +55,8 @@ Example:
 
 The renderer does not flip Auto Approve locally before the backend confirms the write. Missing bridges, failed writes, or malformed successful envelopes preserve the last backend-confirmed MCP rows and show an error. The stored flag is available for agent/tool approval policy; the Settings Run button remains an explicit user action.
 
+AI chat also consumes the same stored flag. When a configured model returns a External reference-style `<use_mcp_tool>` block, the main process parses the requested server, tool, and JSON arguments. If the discovered tool is not Auto Approved, the assistant message becomes an `mcp_tool_call` approval card. Approve, Reject, and Auto Approve actions go through `window.aiops.approveAiMcpToolCall()` or `rejectAiMcpToolCall()`; the backend reads the saved conversation message, executes the tool only after approval, persists the updated message snapshot, and returns the result for rendering. If the tool is already Auto Approved, the backend executes it directly and returns a command-output message. The renderer never fabricates MCP approval state or tool output.
+
 ## Tool Calls And Resource Reads
 
 The main process now exposes real runtime operations for discovered `stdio` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. Each operation starts the configured MCP server command, sends MCP `initialize`, calls `tools/call` or `resources/read`, returns the server response in an `ok` envelope, and closes the process.

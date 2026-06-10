@@ -463,6 +463,80 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('AI 生成取消失败')
   })
 
+  it('approves and rejects AI MCP tool calls through the backend bridge', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.chatMessages = [
+      { id: 'mcp-user', role: 'user', text: '读取 README' },
+      {
+        id: 'mcp-ask',
+        role: 'assistant',
+        text: '请求执行 MCP Tool filesystem/read_file。',
+        state: 'done',
+        ask: 'mcp_tool_call',
+        mcpToolCall: {
+          serverName: 'filesystem',
+          toolName: 'read_file',
+          arguments: { path: '/tmp/readme.md' }
+        }
+      }
+    ]
+
+    vi.mocked(window.aiops.updateChatConversation).mockClear()
+    vi.mocked(window.aiops.approveAiMcpToolCall).mockClear()
+    const approved = await store.approveAiMcpToolCall('mcp-ask', { autoApprove: true })
+
+    expect(approved).toBe('approved')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'conv-1',
+        messages: expect.arrayContaining([expect.objectContaining({ id: 'mcp-ask', ask: 'mcp_tool_call' })])
+      })
+    )
+    expect(window.aiops.approveAiMcpToolCall).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      messageId: 'mcp-ask',
+      autoApprove: true
+    })
+    expect(store.chatMessages.find((message) => message.id === 'mcp-ask')).toMatchObject({
+      action: 'approved',
+      say: 'command_output',
+      state: 'done',
+      text: 'MCP tool filesystem:read_file executed.'
+    })
+    expect(store.mcpServers[0].tools[0].autoApprove).toBe(true)
+
+    store.chatMessages = [
+      { id: 'mcp-user-2', role: 'user', text: '再次读取' },
+      {
+        id: 'mcp-reject',
+        role: 'assistant',
+        text: '请求执行 MCP Tool filesystem/read_file。',
+        state: 'done',
+        ask: 'mcp_tool_call',
+        mcpToolCall: {
+          serverName: 'filesystem',
+          toolName: 'read_file',
+          arguments: { path: '/tmp/secret.md' }
+        }
+      }
+    ]
+    vi.mocked(window.aiops.rejectAiMcpToolCall).mockClear()
+    const rejected = await store.rejectAiMcpToolCall('mcp-reject')
+
+    expect(rejected).toBe('rejected')
+    expect(window.aiops.rejectAiMcpToolCall).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      messageId: 'mcp-reject',
+      autoApprove: undefined
+    })
+    expect(store.chatMessages.find((message) => message.id === 'mcp-reject')).toMatchObject({
+      action: 'rejected',
+      ask: 'mcp_tool_call',
+      state: 'done'
+    })
+  })
+
   it('keeps configuration changes in local state before bridge persistence', async () => {
     const store = useWorkspaceStore()
 

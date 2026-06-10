@@ -237,6 +237,7 @@ type AiChatConversationMutationData = NonNullable<Awaited<ReturnType<AiopsPreloa
 type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['deleteChatConversation']>>['data']>
 type AiChatConversationRestoreData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['restoreChatConversation']>>['data']>
 type AiChatMessageMetadataData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveChatMessageMetadata']>>['data']>
+type AiMcpToolCallActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['approveAiMcpToolCall']>>['data']>
 type AiChatExchangeRequestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createAiChatExchangeRequest']>>['data']>
 type AiChatResponseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['generateAiChatResponse']>>['data']>
 type AiChatCancelData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['cancelAiChatResponse']>>['data']>
@@ -2465,7 +2466,20 @@ const isAiChatResponseData = (source: unknown): source is AiChatResponseData =>
   isNonNegativeFiniteNumber(source.durationMs) &&
   (source.status === undefined || source.status === 'done' || source.status === 'cancelled') &&
   isOptionalString(source.requestId) &&
-  isOptionalString(source.assistantMessageId)
+  isOptionalString(source.assistantMessageId) &&
+  (source.message === undefined || isAiChatHistoryMessage(source.message))
+
+const isAiMcpToolCallActionData = (source: unknown): source is AiMcpToolCallActionData =>
+  isRecord(source) &&
+  (source.status === 'approved' || source.status === 'rejected') &&
+  isAiChatConversationRecord(source.conversation) &&
+  Array.isArray(source.messages) &&
+  source.messages.every(isAiChatHistoryMessage) &&
+  (source.mcpConfig === undefined ||
+    (isRecord(source.mcpConfig) &&
+      isRecord(source.mcpConfig.mcpConfig) &&
+      Array.isArray(source.mcpConfig.mcpServers) &&
+      isRecord(source.mcpConfig.mcpToolStates)))
 
 const isAiChatCancelData = (source: unknown): source is AiChatCancelData =>
   isRecord(source) &&
@@ -11056,6 +11070,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } else if (data.status === 'cancelled') {
       message.state = 'cancelled'
       message.text = data.text
+    } else if (data.message) {
+      Object.assign(message, chatHistoryMessageToChatMessage(data.message))
     } else {
       message.state = 'done'
       message.text = data.text
@@ -11284,6 +11300,55 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     message.feedback = snapshot.feedback
     return true
   }
+
+  const applyChatMessageSnapshot = (messages: AiChatHistoryMessage[]) => {
+    chatMessages.value = messages.map(chatHistoryMessageToChatMessage)
+  }
+
+  const applyAiMcpToolCallResult = (data: AiMcpToolCallActionData) => {
+    const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
+    const nextConversation = cloneConversationRecord(data.conversation)
+    conversations.value = existing
+      ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
+      : [nextConversation, ...conversations.value]
+    selectedConversationId.value = nextConversation.id
+    applyChatMessageSnapshot(data.messages)
+    if (data.mcpConfig) {
+      applyMcpServersSnapshot(normalizeMcpServersConfig(data.mcpConfig.mcpServers, data.mcpConfig.mcpToolStates))
+      mcpConfigEditorContent.value = JSON.stringify(data.mcpConfig.mcpConfig, null, 2)
+    }
+  }
+
+  const runAiMcpToolCallAction = async (messageId: string, action: 'approve' | 'reject', options: { autoApprove?: boolean } = {}) => {
+    const message = chatMessages.value.find((item) => item.id === messageId)
+    if (!message?.mcpToolCall || message.ask !== 'mcp_tool_call') return false
+    if (!selectedConversationId.value) {
+      setTopNotice('会话历史写入服务不可用')
+      return false
+    }
+    const bridge = action === 'approve' ? window.aiops?.approveAiMcpToolCall : window.aiops?.rejectAiMcpToolCall
+    if (typeof bridge !== 'function') {
+      setTopNotice('AI MCP 工具审批服务不可用')
+      return false
+    }
+    const synced = await updateCurrentConversationSnapshot(undefined, { notifyUnavailable: true, notifyFailure: true })
+    if (!synced) return false
+    const result = await bridge({
+      conversationId: selectedConversationId.value,
+      messageId,
+      autoApprove: options.autoApprove
+    })
+    if (!result?.ok || !isAiMcpToolCallActionData(result.data)) {
+      setTopNotice(result?.errorMessage || 'AI MCP 工具审批失败')
+      return false
+    }
+    applyAiMcpToolCallResult(result.data)
+    return result.data.status
+  }
+
+  const approveAiMcpToolCall = (messageId: string, options: { autoApprove?: boolean } = {}) => runAiMcpToolCallAction(messageId, 'approve', options)
+
+  const rejectAiMcpToolCall = (messageId: string) => runAiMcpToolCallAction(messageId, 'reject')
 
   const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
     const message = chatMessages.value.find((item) => item.id === id)
@@ -11957,6 +12022,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeContext,
     applyCommandPreset,
     selectCommandPreset,
+    approveAiMcpToolCall,
+    rejectAiMcpToolCall,
     setMessageFeedback,
     toggleMessageFavorite,
     retryAssistantMessage,

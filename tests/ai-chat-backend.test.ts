@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { SkillUserConfig, UserConfig } from '../src/shared/preload'
+import type { McpToolCallInput, McpToolCallResult, SkillUserConfig, UserConfig } from '../src/shared/preload'
 
 let generateAiChatResponse: (input: Record<string, unknown>) => Promise<any>
 let createAiChatExchangeRequest: (input: Record<string, unknown>) => Promise<any>
@@ -13,6 +13,7 @@ let listAiTodoSnapshot: () => any
 let configureAiChatRuntime: (config?: {
   getConfig?: () => UserConfig
   listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
+  callMcpTool?: (input: McpToolCallInput) => Promise<McpToolCallResult>
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -248,7 +249,7 @@ describe('ai chat backend response boundary', () => {
               }
             }
           }
-        }) as UserConfig
+        }) as unknown as UserConfig
     })
 
     const result = await generateAiChatResponse({
@@ -284,6 +285,170 @@ describe('ai chat backend response boundary', () => {
     expect(body.messages[0].content).toContain('Selected context: hosts:prod-1')
     expect(body.messages[0].content).toContain('Skill: incident-triage')
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: '检查生产磁盘' })
+  })
+
+  it('turns provider MCP tool blocks into backend-owned approval messages', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '<use_mcp_tool><server_name>filesystem</server_name><tool_name>read_file</tool_name><arguments>{"path":"/tmp/readme.md"}</arguments></use_mcp_tool>'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+    const callMcpTool = vi.fn(async (): Promise<McpToolCallResult> => {
+      throw new Error('tool should require approval')
+    })
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 70_000,
+      callMcpTool,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          mcpServers: [
+            {
+              name: 'filesystem',
+              status: 'connected',
+              disabled: false,
+              tools: [{ name: 'read_file', description: 'Read file', enabled: true, parameters: [] }],
+              resources: []
+            }
+          ],
+          mcpToolStates: { 'filesystem:read_file': true },
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-mcp-ask',
+      assistantMessageId: 'aichat-request-mcp-ask-assistant',
+      prompt: '读取文件',
+      model: 'ops-chat'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(callMcpTool).not.toHaveBeenCalled()
+    expect(result.data).toMatchObject({
+      text: '请求执行 MCP Tool filesystem/read_file。',
+      message: {
+        id: 'aichat-request-mcp-ask-assistant',
+        role: 'assistant',
+        state: 'done',
+        ask: 'mcp_tool_call',
+        mcpToolCall: {
+          serverName: 'filesystem',
+          toolName: 'read_file',
+          arguments: { path: '/tmp/readme.md' }
+        }
+      }
+    })
+  })
+
+  it('auto-executes provider MCP tool blocks when the tool is configured for auto approve', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '<use_mcp_tool><server_name>filesystem</server_name><tool_name>read_file</tool_name><arguments>{"path":"/tmp/readme.md"}</arguments></use_mcp_tool>'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+    const callMcpTool = vi.fn(async (input: McpToolCallInput): Promise<McpToolCallResult> => ({
+      ok: true,
+      data: {
+        serverName: input.serverName,
+        toolName: input.toolName,
+        arguments: input.arguments,
+        content: [{ type: 'text', text: 'README contents' }],
+        isError: false,
+        durationMs: 2
+      }
+    }))
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 80_000,
+      callMcpTool,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          mcpServers: [
+            {
+              name: 'filesystem',
+              status: 'connected',
+              disabled: false,
+              tools: [{ name: 'read_file', description: 'Read file', enabled: true, autoApprove: true, parameters: [] }],
+              resources: []
+            }
+          ],
+          mcpToolStates: { 'filesystem:read_file': true },
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-mcp-auto',
+      assistantMessageId: 'aichat-request-mcp-auto-assistant',
+      prompt: '读取文件',
+      model: 'ops-chat'
+    })
+
+    expect(callMcpTool).toHaveBeenCalledWith({
+      serverName: 'filesystem',
+      toolName: 'read_file',
+      arguments: { path: '/tmp/readme.md' }
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        text: 'README contents',
+        message: {
+          id: 'aichat-request-mcp-auto-assistant',
+          say: 'command_output',
+          action: 'approved',
+          state: 'done',
+          text: 'README contents'
+        }
+      }
+    })
   })
 
   it('rejects non-local models when no provider configuration is available', async () => {

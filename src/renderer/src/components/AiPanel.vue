@@ -397,6 +397,60 @@
         <em v-else-if="message.state === 'cancelled'">cancelled</em>
         <em v-else-if="message.state === 'error'">error</em>
         <div
+          v-if="message.ask === 'mcp_tool_call' && message.mcpToolCall"
+          class="ai-mcp-tool-call"
+          data-testid="ai-mcp-tool-call"
+        >
+          <div class="ai-mcp-tool-call-grid">
+            <span>MCP Server</span>
+            <strong>{{ message.mcpToolCall.serverName }}</strong>
+            <span>Tool</span>
+            <strong>{{ message.mcpToolCall.toolName }}</strong>
+          </div>
+          <pre v-if="message.mcpToolCall.arguments && Object.keys(message.mcpToolCall.arguments).length">{{ formatMcpToolArguments(message) }}</pre>
+          <div
+            v-if="!message.action"
+            class="message-command-actions ai-mcp-approval-actions"
+          >
+            <button
+              type="button"
+              class="secondary"
+              data-testid="ai-mcp-tool-reject"
+              @click.stop="void rejectMcpToolCall(message.id)"
+            >
+              <X />
+              <span>拒绝</span>
+            </button>
+            <button
+              type="button"
+              class="secondary"
+              data-testid="ai-mcp-tool-auto-approve"
+              @click.stop="void approveMcpToolCall(message.id, true)"
+            >
+              <CheckCircle />
+              <span>自动批准并执行</span>
+            </button>
+            <button
+              type="button"
+              class="primary"
+              data-testid="ai-mcp-tool-approve"
+              @click.stop="void approveMcpToolCall(message.id)"
+            >
+              <Play />
+              <span>批准</span>
+            </button>
+          </div>
+          <div
+            v-else
+            class="ai-mcp-tool-call-status"
+            :class="message.action"
+          >
+            <Check v-if="message.action === 'approved'" />
+            <X v-else />
+            <span>{{ message.action === 'approved' ? '已批准' : '已拒绝' }}</span>
+          </div>
+        </div>
+        <div
           v-if="isCommandSuggestionMessage(message)"
           class="message-command-actions"
         >
@@ -1087,6 +1141,7 @@ import {
   Brain,
   BookOpen,
   Check,
+  CheckCircle,
   CheckSquare,
   ChevronDown,
   ChevronLeft,
@@ -1464,6 +1519,24 @@ const runMessageCommand = async (message: { text: string; contentParts?: AiConte
   }
   message.executedCommand = command
   showChatExportNotice('命令已写入终端输入区。')
+}
+
+const formatMcpToolArguments = (message: Pick<ChatMessage, 'mcpToolCall'>) => {
+  try {
+    return JSON.stringify(message.mcpToolCall?.arguments || {}, null, 2)
+  } catch {
+    return String(message.mcpToolCall?.arguments || '')
+  }
+}
+
+const approveMcpToolCall = async (id: string, autoApprove = false) => {
+  const result = await workspace.approveAiMcpToolCall(id, { autoApprove })
+  showChatExportNotice(result === 'approved' ? 'MCP 工具已执行。' : 'MCP 工具审批失败。')
+}
+
+const rejectMcpToolCall = async (id: string) => {
+  const result = await workspace.rejectAiMcpToolCall(id)
+  showChatExportNotice(result === 'rejected' ? 'MCP 工具调用已拒绝。' : 'MCP 工具拒绝失败。')
 }
 
 const toggleMessageFavorite = async (id: string) => {

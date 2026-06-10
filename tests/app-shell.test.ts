@@ -3329,6 +3329,82 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('renders and approves AI MCP tool calls through the backend bridge', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: '请求执行 MCP Tool filesystem/read_file。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: 'aichat-request-test-1-assistant',
+        message: {
+          id: 'aichat-request-test-1-assistant',
+          role: 'assistant',
+          text: '请求执行 MCP Tool filesystem/read_file。',
+          state: 'done',
+          ask: 'mcp_tool_call',
+          mcpToolCall: {
+            serverName: 'filesystem',
+            toolName: 'read_file',
+            arguments: { path: '/tmp/readme.md' }
+          }
+        }
+      }
+    } as any)
+
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('读取 README'))
+    const range = document.createRange()
+    range.selectNodeContents(input.element)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await waitForMockCall(vi.mocked(window.aiops.generateAiChatResponse), 'generateAiChatResponse')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-mcp-tool-call"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-mcp-tool-call"]').text()).toContain('filesystem')
+    expect(wrapper.find('[data-testid="ai-mcp-tool-call"]').text()).toContain('read_file')
+    expect(wrapper.find('[data-testid="ai-mcp-tool-call"]').text()).toContain('/tmp/readme.md')
+
+    vi.mocked(window.aiops.approveAiMcpToolCall).mockClear()
+    await wrapper.find('[data-testid="ai-mcp-tool-approve"]').trigger('click')
+    await waitForMockCall(vi.mocked(window.aiops.approveAiMcpToolCall), 'approveAiMcpToolCall')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.approveAiMcpToolCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'aichat-request-test-1-assistant',
+        autoApprove: false
+      })
+    )
+    expect(store.chatMessages.at(-1)).toMatchObject({
+      action: 'approved',
+      say: 'command_output',
+      text: 'MCP tool filesystem:read_file executed.'
+    })
+    expect(wrapper.text()).toContain('MCP tool filesystem:read_file executed.')
+
+    wrapper.unmount()
+  })
+
   it('opens External reference-style context and command popups in the AI panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

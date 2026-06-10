@@ -3138,6 +3138,14 @@ type TestChatHistoryMessage = {
   state?: 'streaming' | 'done' | 'cancelled' | 'error'
   favorite?: boolean
   feedback?: 'up' | 'down'
+  ask?: 'command' | 'mcp_tool_call' | 'followup'
+  say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
+  action?: 'approved' | 'rejected'
+  mcpToolCall?: {
+    serverName: string
+    toolName: string
+    arguments?: Record<string, unknown>
+  }
 }
 
 type TestChatConversationRecord = {
@@ -3217,7 +3225,13 @@ let chatHistoryStateMock = defaultChatHistoryState()
 const cloneChatConversation = (conversation: TestChatConversationRecord): TestChatConversationRecord => ({ ...conversation })
 const cloneChatMessage = (message: TestChatHistoryMessage): TestChatHistoryMessage => ({
   ...message,
-  hosts: message.hosts?.map((host) => ({ ...host }))
+  hosts: message.hosts?.map((host) => ({ ...host })),
+  mcpToolCall: message.mcpToolCall
+    ? {
+        ...message.mcpToolCall,
+        arguments: message.mcpToolCall.arguments ? { ...message.mcpToolCall.arguments } : undefined
+      }
+    : undefined
 })
 const cloneChatMessages = (messages: TestChatHistoryMessage[]) => messages.map(cloneChatMessage)
 const chatHistoryListResultMock = () => ({
@@ -4408,6 +4422,77 @@ const applyMcpConfigContentMock = (content: string) => {
   }
 }
 
+const callMcpToolMock = async (serverName: string, toolName: string, args?: Record<string, unknown>) => {
+  const server = mcpServersMock.find((item) => item.name === serverName)
+  if (!server) return { ok: false, errorCode: 'MCP_TOOL_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
+  if (server.disabled) return { ok: false, errorCode: 'MCP_TOOL_SERVER_DISABLED', errorMessage: `MCP server "${serverName}" is disabled.` }
+  const tool = server.tools.find((item) => item.name === toolName)
+  if (!tool) return { ok: false, errorCode: 'MCP_TOOL_NOT_FOUND', errorMessage: `MCP tool not found: ${serverName}:${toolName}` }
+  if (!tool.enabled) return { ok: false, errorCode: 'MCP_TOOL_DISABLED', errorMessage: `MCP tool "${serverName}:${toolName}" is disabled.` }
+  return {
+    ok: true,
+    data: {
+      serverName,
+      toolName,
+      ...(args ? { arguments: { ...args } } : {}),
+      content: [{ type: 'text', text: `MCP tool ${serverName}:${toolName} executed.` }],
+      isError: false,
+      durationMs: 1
+    }
+  }
+}
+
+const handleAiMcpToolCallActionMock = async (input: { conversationId: string; messageId: string; autoApprove?: boolean }, approve: boolean) => {
+  const conversation = chatHistoryStateMock.conversations.find((item) => item.id === input.conversationId)
+  if (!conversation) return { ok: false, errorCode: 'CHAT_HISTORY_NOT_FOUND', errorMessage: 'Conversation not found.' }
+  const messages = cloneChatMessages(chatHistoryStateMock.messagesByConversationId[input.conversationId] || [])
+  const message = messages.find((item) => item.id === input.messageId)
+  if (!message?.mcpToolCall || message.ask !== 'mcp_tool_call') {
+    return { ok: false, errorCode: 'AI_MCP_TOOL_CALL_NOT_FOUND', errorMessage: 'AI MCP tool call message was not found.' }
+  }
+  if (!approve) {
+    message.action = 'rejected'
+    message.state = 'done'
+    chatHistoryStateMock.messagesByConversationId[input.conversationId] = cloneChatMessages(messages)
+    return {
+      ok: true,
+      data: {
+        status: 'rejected' as const,
+        conversation: cloneChatConversation(conversation),
+        messages: cloneChatMessages(messages)
+      }
+    }
+  }
+  let mcpConfig: ReturnType<typeof applyMcpConfigContentMock> | undefined
+  if (input.autoApprove) {
+    const parsed = JSON.parse(mcpConfigContentMock) as { mcpServers?: Record<string, { autoApprove?: unknown }> }
+    const serverConfig = parsed.mcpServers?.[message.mcpToolCall.serverName]
+    if (!serverConfig) return { ok: false, errorCode: 'MCP_CONFIG_INVALID', errorMessage: 'MCP server config not found.' }
+    const approved = new Set(Array.isArray(serverConfig.autoApprove) ? serverConfig.autoApprove.filter((item): item is string => typeof item === 'string') : [])
+    approved.add(message.mcpToolCall.toolName)
+    serverConfig.autoApprove = [...approved]
+    mcpConfig = applyMcpConfigContentMock(JSON.stringify(parsed, null, 2))
+  }
+  const toolResult = await callMcpToolMock(message.mcpToolCall.serverName, message.mcpToolCall.toolName, message.mcpToolCall.arguments)
+  message.action = 'approved'
+  message.say = 'command_output'
+  message.state = toolResult.ok && toolResult.data && !toolResult.data.isError ? 'done' : 'error'
+  message.text = toolResult.ok && toolResult.data ? String(toolResult.data.content[0]?.text || '') : toolResult.errorMessage || 'MCP tool call failed.'
+  chatHistoryStateMock.messagesByConversationId[input.conversationId] = cloneChatMessages(messages)
+  return {
+    ok: true,
+    data: {
+      status: 'approved' as const,
+      conversation: cloneChatConversation(conversation),
+      messages: cloneChatMessages(messages),
+      ...(toolResult.ok && toolResult.data
+        ? { toolCall: toolResult.data }
+        : { toolCallError: { errorCode: toolResult.errorCode, errorMessage: toolResult.errorMessage || 'MCP tool call failed.' } }),
+      ...(mcpConfig ? { mcpConfig } : {})
+    }
+  }
+}
+
 let systemTheme: 'dark' | 'light' = 'light'
 const matchMediaListeners = new Set<(event: MediaQueryListEvent) => void>()
 
@@ -5133,25 +5218,9 @@ Object.defineProperty(window, 'aiops', {
       }
       return { ok: true, data: applyMcpConfigContentMock(JSON.stringify(parsed, null, 2)) }
     }),
-    callMcpTool: vi.fn(async (serverName: string, toolName: string, args?: Record<string, unknown>) => {
-      const server = mcpServersMock.find((item) => item.name === serverName)
-      if (!server) return { ok: false, errorCode: 'MCP_TOOL_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
-      if (server.disabled) return { ok: false, errorCode: 'MCP_TOOL_SERVER_DISABLED', errorMessage: `MCP server "${serverName}" is disabled.` }
-      const tool = server.tools.find((item) => item.name === toolName)
-      if (!tool) return { ok: false, errorCode: 'MCP_TOOL_NOT_FOUND', errorMessage: `MCP tool not found: ${serverName}:${toolName}` }
-      if (!tool.enabled) return { ok: false, errorCode: 'MCP_TOOL_DISABLED', errorMessage: `MCP tool "${serverName}:${toolName}" is disabled.` }
-      return {
-        ok: true,
-        data: {
-          serverName,
-          toolName,
-          ...(args ? { arguments: { ...args } } : {}),
-          content: [{ type: 'text', text: `MCP tool ${serverName}:${toolName} executed.` }],
-          isError: false,
-          durationMs: 1
-        }
-      }
-    }),
+    callMcpTool: vi.fn(callMcpToolMock),
+    approveAiMcpToolCall: vi.fn((input: { conversationId: string; messageId: string; autoApprove?: boolean }) => handleAiMcpToolCallActionMock(input, true)),
+    rejectAiMcpToolCall: vi.fn((input: { conversationId: string; messageId: string; autoApprove?: boolean }) => handleAiMcpToolCallActionMock(input, false)),
     readMcpResource: vi.fn(async (serverName: string, uri: string) => {
       const server = mcpServersMock.find((item) => item.name === serverName)
       if (!server) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }

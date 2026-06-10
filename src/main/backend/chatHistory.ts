@@ -10,7 +10,8 @@ import type {
   AiChatHistoryListResult,
   AiChatHistoryMessage,
   AiChatMessageMetadataInput,
-  AiChatMessageMetadataResult
+  AiChatMessageMetadataResult,
+  AiopsMutationResult
 } from '@shared/preload'
 
 type ChatHistoryBackendRuntimeConfig = {
@@ -289,6 +290,55 @@ const errorResult = <T>(errorCode: string, errorMessage: string): { ok: false; e
   errorCode,
   errorMessage
 })
+
+export const replaceChatConversationMessages = (conversationIdInput: string, messagesInput: AiChatHistoryMessage[]): AiChatMessageMetadataResult => {
+  const conversationId = normalizeText(conversationIdInput)
+  if (!conversationId) return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiChatMessageMetadataResult
+  const messages = normalizeMessages(messagesInput)
+  if (!messages.length) return errorResult('CHAT_HISTORY_MESSAGES_REQUIRED', 'Conversation messages are required.') as AiChatMessageMetadataResult
+  const state = getState()
+  const conversation = state.conversations.find((item) => item.id === conversationId)
+  if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatMessageMetadataResult
+  state.messagesByConversationId[conversationId] = messages
+  state.selectedConversationId = conversationId
+  conversation.updatedAt = nowText()
+  conversation.ts = Math.max(Date.now(), ...state.conversations.map((item) => item.ts), 0) + 1
+  saveState(state)
+  return {
+    ok: true,
+    data: {
+      conversation: cloneConversation(conversation),
+      messages: cloneMessages(messages)
+    }
+  }
+}
+
+export const getChatConversationMessages = (
+  conversationIdInput: string
+): AiopsMutationResult<{ conversation: AiChatConversationRecord; messages: AiChatHistoryMessage[] }> => {
+  const conversationId = normalizeText(conversationIdInput)
+  if (!conversationId) {
+    return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiopsMutationResult<{
+      conversation: AiChatConversationRecord
+      messages: AiChatHistoryMessage[]
+    }>
+  }
+  const state = getState()
+  const conversation = state.conversations.find((item) => item.id === conversationId)
+  if (!conversation) {
+    return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiopsMutationResult<{
+      conversation: AiChatConversationRecord
+      messages: AiChatHistoryMessage[]
+    }>
+  }
+  return {
+    ok: true,
+    data: {
+      conversation: cloneConversation(conversation),
+      messages: cloneMessages(state.messagesByConversationId[conversationId] || [])
+    }
+  }
+}
 
 export const configureChatHistoryBackendRuntime = (config: ChatHistoryBackendRuntimeConfig = {}) => {
   runtimeConfig = {
