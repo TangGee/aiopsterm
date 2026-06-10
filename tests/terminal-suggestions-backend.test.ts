@@ -276,10 +276,11 @@ describe('terminal command backend boundary', () => {
     )
   })
 
-  it('returns no AI suggestion when local backend model is selected', async () => {
+  it('returns local backend AI suggestions when the local backend model is selected', async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
     backend.configureTerminalSuggestionsRuntime({
       databasePath: ':memory:',
-      fetch: vi.fn() as unknown as typeof fetch,
+      fetch: fetchMock,
       getConfig: () =>
         ({
           modelName: 'aiopsterm-local-agent',
@@ -292,6 +293,38 @@ describe('terminal command backend boundary', () => {
         }) as UserConfig
     })
 
-    await expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai' })).resolves.toEqual([])
+    await expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai' })).resolves.toEqual([
+      {
+        command: 'kubectl get pods -A',
+        source: 'ai',
+        explanation: 'local backend: list Kubernetes pods'
+      }
+    ])
+    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(backend.getTerminalCommandSuggestions('rm ', { mode: 'ai' })).resolves.toEqual([])
+  })
+
+  it('does not silently fall back to local AI suggestions for unknown non-local models', async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    backend.configureTerminalSuggestionsRuntime({
+      databasePath: ':memory:',
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'aiopsterm-local-agent',
+          modelProvider: 'local',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [
+              { name: 'aiopsterm-local-agent', locked: false, checked: true, apiProvider: 'default' },
+              { name: 'ops-missing', locked: false, checked: false, apiProvider: 'openai' }
+            ],
+            providers: {}
+          }
+        }) as UserConfig
+    })
+
+    await expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai', modelName: 'ops-missing' })).resolves.toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

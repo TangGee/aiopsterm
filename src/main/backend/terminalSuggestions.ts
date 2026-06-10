@@ -545,11 +545,54 @@ function parseAiSuggestResponse(response: string, partialCommand: string): Termi
   return { command, source: 'ai', explanation: explanation || 'AI suggestion' }
 }
 
+const localAiSuggestionCandidates: Array<{ command: string; explanation: string }> = [
+  { command: 'df -h', explanation: 'show filesystem usage' },
+  { command: 'du -sh .', explanation: 'summarize current directory size' },
+  { command: 'free -h', explanation: 'show memory usage' },
+  { command: 'uptime', explanation: 'show load average' },
+  { command: 'top -o %CPU', explanation: 'rank processes by CPU' },
+  { command: 'ps aux --sort=-%mem | head -n 12', explanation: 'rank processes by memory' },
+  { command: 'ss -tulpn', explanation: 'list listening sockets' },
+  { command: 'ip addr', explanation: 'show network addresses' },
+  { command: 'ip route', explanation: 'show routing table' },
+  { command: 'journalctl -n 120 --no-pager', explanation: 'show recent system logs' },
+  { command: 'systemctl status', explanation: 'show systemd status' },
+  { command: 'kubectl get pods -A', explanation: 'list Kubernetes pods' },
+  { command: 'kubectl get events -A --sort-by=.lastTimestamp', explanation: 'list recent Kubernetes events' },
+  { command: 'docker ps', explanation: 'list running containers' },
+  { command: 'git status --short', explanation: 'show Git working tree status' },
+  { command: 'git log --oneline -10', explanation: 'show recent commits' },
+  { command: 'find . -maxdepth 2 -type f', explanation: 'list nearby files' },
+  { command: 'grep -R "TODO" .', explanation: 'search files recursively' }
+]
+
+function inferLocalAiSuggestion(partialCommand: string): TerminalCommandSuggestion | null {
+  const partial = partialCommand.trim()
+  const lower = partial.toLowerCase()
+  if (lower.length < 3) return null
+  const candidate = localAiSuggestionCandidates.find((item) => {
+    const command = item.command.toLowerCase()
+    return command.startsWith(lower) && command !== lower && isValidTerminalCommandForHistory(item.command)
+  })
+  if (!candidate) return null
+  return {
+    command: candidate.command,
+    source: 'ai',
+    explanation: `local backend: ${candidate.explanation}`
+  }
+}
+
 async function fetchAiSuggestion(query: string, context?: TerminalCommandSuggestionContext): Promise<TerminalCommandSuggestion[]> {
   const getConfig = runtimeConfig.getConfig
   if (!getConfig || query.trim().length < 3) return []
-  const provider = resolveModelProvider(getConfig(), context?.modelName)
-  if (!provider) return []
+  const config = getConfig()
+  const requestedModel = normalizeText(context?.modelName) || normalizeText(config.modelName) || 'aiopsterm-local-agent'
+  const provider = resolveModelProvider(config, context?.modelName)
+  if (!provider) {
+    if (requestedModel !== 'aiopsterm-local-agent') return []
+    const localSuggestion = inferLocalAiSuggestion(query)
+    return localSuggestion ? [localSuggestion] : []
+  }
   const request = createAiSuggestRequest(provider, query.trim(), context)
   if (!request) return []
   const response = await fetchProviderText(request, { fetch: runtimeConfig.fetch, timeoutMs: defaultAiSuggestTimeoutMs, errorCodePrefix: 'TERMINAL_SUGGESTION_PROVIDER' })
