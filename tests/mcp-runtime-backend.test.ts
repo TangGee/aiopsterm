@@ -179,6 +179,7 @@ describe('mcp runtime backend boundary', () => {
             name: 'inspect_service',
             description: 'Inspect a backend service.',
             enabled: true,
+            autoApprove: false,
             parameters: [
               { name: 'name', description: 'Service name.', required: true },
               { name: 'namespace', description: 'Namespace.' }
@@ -188,6 +189,7 @@ describe('mcp runtime backend boundary', () => {
             name: 'tail_logs',
             description: 'Tail recent service logs.',
             enabled: true,
+            autoApprove: false,
             parameters: [{ name: 'lines', description: 'Line count.' }]
           }
         ],
@@ -198,6 +200,17 @@ describe('mcp runtime backend boundary', () => {
       'fixture:inspect_service': true,
       'fixture:tail_logs': true
     })
+  })
+
+  it('maps config-file auto approve entries onto discovered tool rows', async () => {
+    const config = fixtureConfig()
+    config.mcpServers.fixture.autoApprove = ['tail_logs']
+    const snapshot = await discover(config)
+
+    expect(snapshot.mcpServers[0].tools.map((tool) => [tool.name, tool.autoApprove])).toEqual([
+      ['inspect_service', false],
+      ['tail_logs', true]
+    ])
   })
 
   it('preserves backend-owned tool enable state across rediscovery', async () => {
@@ -248,9 +261,41 @@ describe('mcp runtime backend boundary', () => {
         name: 'fixture',
         status: 'disabled',
         disabled: true,
-        tools: previous.tools,
+        tools: [{ ...previous.tools[0], autoApprove: false, parameters: [] }],
         resources: previous.resources
       }
+    ])
+  })
+
+  it('overlays auto approve onto cached rows when discovery is skipped', async () => {
+    await loadBackend()
+    const previous: McpServerUserConfig = {
+      name: 'fixture',
+      status: 'connected',
+      disabled: false,
+      tools: [
+        { name: 'inspect_service', description: 'Inspect a backend service.', enabled: true, autoApprove: false, parameters: [] },
+        { name: 'tail_logs', description: 'Tail recent service logs.', enabled: true, autoApprove: false, parameters: [] }
+      ],
+      resources: []
+    }
+
+    const snapshot = await backend.discoverMcpServerSnapshot(
+      {
+        mcpServers: {
+          fixture: {
+            type: 'stdio',
+            command: 'missing-command-that-should-not-run',
+            autoApprove: ['inspect_service']
+          }
+        }
+      },
+      { existingServers: [previous], runDiscovery: false }
+    )
+
+    expect(snapshot.mcpServers[0].tools.map((tool) => [tool.name, tool.autoApprove])).toEqual([
+      ['inspect_service', true],
+      ['tail_logs', false]
     ])
   })
 

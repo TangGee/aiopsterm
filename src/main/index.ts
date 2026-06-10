@@ -966,16 +966,20 @@ const mcpConfigFromUserConfig = (config: UserConfig): McpConfigFile => {
   const servers = config.mcpServers || []
   return {
     mcpServers: Object.fromEntries(
-      servers.map((server) => [
-        server.name,
-        {
-          type: 'stdio' as const,
-          disabled: server.disabled,
-          command: server.name === 'filesystem' ? 'npx' : server.name,
-          args: server.name === 'filesystem' ? ['-y', '@modelcontextprotocol/server-filesystem', app.getPath('home')] : [],
-          timeout: 60
-        }
-      ])
+      servers.map((server) => {
+        const autoApprove = server.tools.filter((tool) => tool.autoApprove).map((tool) => tool.name)
+        return [
+          server.name,
+          {
+            type: 'stdio' as const,
+            disabled: server.disabled,
+            ...(autoApprove.length ? { autoApprove } : {}),
+            command: server.name === 'filesystem' ? 'npx' : server.name,
+            args: server.name === 'filesystem' ? ['-y', '@modelcontextprotocol/server-filesystem', app.getPath('home')] : [],
+            timeout: 60
+          }
+        ]
+      })
     )
   }
 }
@@ -2187,6 +2191,48 @@ const setMcpToolState = (serverName: string, toolName: string, enabled: boolean)
   )
 }
 
+const setMcpToolAutoApprove = async (serverName: string, toolName: string, autoApprove: boolean) => {
+  const normalizedServerName = serverName.trim()
+  const normalizedToolName = toolName.trim()
+  if (!normalizedServerName || !normalizedToolName) {
+    throw new Error('MCP server and tool names are required')
+  }
+  const current = getConfig()
+  const existingServer = current.mcpServers?.find((server) => server.name === normalizedServerName)
+  if (!existingServer) {
+    throw new Error(`MCP server not found: ${normalizedServerName}`)
+  }
+  if (!existingServer.tools.some((tool) => tool.name === normalizedToolName)) {
+    throw new Error(`MCP tool not found: ${normalizedServerName}:${normalizedToolName}`)
+  }
+
+  const configPath = await ensureMcpConfigFile()
+  const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
+  const server = parsed.mcpServers[normalizedServerName]
+  if (!server) {
+    throw new Error(`MCP server config not found: ${normalizedServerName}`)
+  }
+
+  const approved = new Set((server.autoApprove || []).filter(Boolean))
+  if (autoApprove) {
+    approved.add(normalizedToolName)
+  } else {
+    approved.delete(normalizedToolName)
+  }
+  const nextAutoApprove = [...approved]
+  if (nextAutoApprove.length) {
+    server.autoApprove = nextAutoApprove
+  } else {
+    delete server.autoApprove
+  }
+
+  const nextContent = JSON.stringify(parsed, null, 2)
+  await writeFile(configPath, nextContent, 'utf-8')
+  const snapshot = await applyMcpConfigFileSnapshot(parsed)
+  broadcastMcpConfigChanged(nextContent)
+  return { ok: true, data: snapshot }
+}
+
 const broadcastMcpConfigChanged = (content: string) => {
   BrowserWindow.getAllWindows().forEach((window) => {
     if (!window.isDestroyed()) {
@@ -2758,6 +2804,17 @@ const registerIpc = () => {
   })
   ipcMain.handle('mcp:set-tool-state', async (_event, serverName: string, toolName: string, enabled: boolean) => {
     setMcpToolState(serverName, toolName, Boolean(enabled))
+  })
+  ipcMain.handle('mcp:set-tool-auto-approve', async (_event, serverName: string, toolName: string, autoApprove: boolean) => {
+    try {
+      return await setMcpToolAutoApprove(serverName, toolName, Boolean(autoApprove))
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: 'MCP_TOOL_AUTO_APPROVE_FAILED',
+        errorMessage: error instanceof Error ? error.message : 'MCP tool auto approve update failed.'
+      }
+    }
   })
   ipcMain.handle('mcp:tool-call', async (_event, input: McpToolCallInput) => {
     try {

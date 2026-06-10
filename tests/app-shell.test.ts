@@ -9079,6 +9079,16 @@ describe('AppShell', () => {
     expect(store.mcpServers[0].tools[0].enabled).toBe(false)
     expect(window.aiops.setMcpToolState).toHaveBeenCalledWith('filesystem', 'read_file', false)
 
+    vi.mocked(window.aiops.setMcpToolAutoApprove).mockClear()
+    const autoApproveInput = workspace.find('.mcp-auto-approve-row input')
+    expect((autoApproveInput.element as HTMLInputElement).checked).toBe(false)
+    await autoApproveInput.setValue(true)
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(window.aiops.setMcpToolAutoApprove).toHaveBeenCalledWith('filesystem', 'read_file', true)
+    expect(store.mcpServers[0].tools[0].autoApprove).toBe(true)
+    expect((workspace.find('.mcp-auto-approve-row input').element as HTMLInputElement).checked).toBe(true)
+
     await clickNav('Skills')
     expect(workspace.text()).toContain('incident-triage')
     await workspace.findAll('.settings-action-row button').find((button) => button.text() === 'Create')!.trigger('click')

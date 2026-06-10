@@ -8671,6 +8671,24 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.aboutSettings.newVersion).toBe('0.1.1')
   })
 
+  it('persists MCP tool auto approve through the preload config mutation bridge', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+    const readFileTool = () => store.mcpServers.find((server) => server.name === 'filesystem')?.tools.find((tool) => tool.name === 'read_file')
+
+    expect(Boolean(readFileTool()?.autoApprove)).toBe(false)
+    vi.mocked(window.aiops.setMcpToolAutoApprove).mockClear()
+    await expect(store.toggleMcpToolAutoApprove('filesystem', 'read_file')).resolves.toBe(true)
+    expect(window.aiops.setMcpToolAutoApprove).toHaveBeenCalledWith('filesystem', 'read_file', true)
+    expect(Boolean(readFileTool()?.autoApprove)).toBe(true)
+    expect(JSON.parse(store.mcpConfigEditorContent).mcpServers.filesystem.autoApprove).toEqual(['read_file'])
+
+    await expect(store.toggleMcpToolAutoApprove('filesystem', 'read_file')).resolves.toBe(true)
+    expect(window.aiops.setMcpToolAutoApprove).toHaveBeenLastCalledWith('filesystem', 'read_file', false)
+    expect(Boolean(readFileTool()?.autoApprove)).toBe(false)
+    expect(JSON.parse(store.mcpConfigEditorContent).mcpServers.filesystem.autoApprove).toBeUndefined()
+  })
+
   it('does not fabricate Settings external action success when the preload bridge is unavailable or fails', async () => {
     const store = useWorkspaceStore()
     store.setActiveModule('settings')
@@ -9669,6 +9687,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       writeMcpConfig: window.aiops.writeMcpConfig,
       toggleMcpServer: window.aiops.toggleMcpServer,
       setMcpToolState: window.aiops.setMcpToolState,
+      setMcpToolAutoApprove: window.aiops.setMcpToolAutoApprove,
       deleteMcpServer: window.aiops.deleteMcpServer
     }
 
@@ -9707,6 +9726,11 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.mcpServers.find((server) => server.name === 'filesystem')?.tools.find((tool) => tool.name === 'read_file')?.enabled).toBe(true)
       expect(store.settingsNotice).toBe('MCP Tool 状态服务不可用')
 
+      ;(window.aiops as any).setMcpToolAutoApprove = undefined
+      await expect(store.toggleMcpToolAutoApprove('filesystem', 'read_file')).resolves.toBe(false)
+      expect(Boolean(store.mcpServers.find((server) => server.name === 'filesystem')?.tools.find((tool) => tool.name === 'read_file')?.autoApprove)).toBe(false)
+      expect(store.settingsNotice).toBe('MCP Auto Approve 服务不可用')
+
       ;(window.aiops as any).deleteMcpServer = undefined
       await expect(store.deleteMcpServer('ops-inventory')).resolves.toBe(false)
       expect(store.mcpServers.some((server) => server.name === 'ops-inventory')).toBe(true)
@@ -9715,6 +9739,20 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
+  })
+
+  it('does not fabricate MCP auto approve when the backend mutation result is malformed', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+    const originalServers = JSON.stringify(store.mcpServers)
+    const originalConfigServers = JSON.stringify(store.config.mcpServers)
+
+    vi.mocked(window.aiops.setMcpToolAutoApprove).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await expect(store.toggleMcpToolAutoApprove('filesystem', 'read_file')).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('MCP 配置服务返回数据无效')
+    expect(store.mcpConfigEditorError).toBe('Auto Approve failed: MCP 配置服务返回数据无效')
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+    expect(JSON.stringify(store.config.mcpServers)).toBe(originalConfigServers)
   })
 
   it('runs MCP tools and reads resources only through preload operation bridges', async () => {

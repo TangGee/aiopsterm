@@ -1164,6 +1164,18 @@ const McpSettingsPage = defineComponent({
                                         h('em', { class: ['mcp-tool-state', tool.enabled ? 'success' : 'default'] }, tool.enabled ? 'success' : 'default')
                                       ]),
                                       tool.description ? h('small', tool.description) : null,
+                                      h('div', { class: 'mcp-auto-approve-row' }, [
+                                        h('span', { title: 'Auto-approved tools run without confirmation.' }, 'Auto Approve'),
+                                        h('label', { class: 'settings-switch' }, [
+                                          h('input', {
+                                            type: 'checkbox',
+                                            checked: Boolean(tool.autoApprove),
+                                            disabled: operationRunning,
+                                            onChange: () => workspace.toggleMcpToolAutoApprove(server.name, tool.name)
+                                          }),
+                                          h('span')
+                                        ])
+                                      ]),
                                       tool.parameters.length
                                         ? h('div', { class: 'mcp-parameters' }, [
                                             h('strong', `PARAMETERS (${tool.parameters.length})`),

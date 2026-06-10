@@ -4378,19 +4378,25 @@ const resetMcpStoreMock = () => {
 
 const applyMcpConfigContentMock = (content: string) => {
   const parsed = JSON.parse(content) as {
-    mcpServers?: Record<string, { disabled?: boolean }>
+    mcpServers?: Record<string, { disabled?: boolean; autoApprove?: unknown }>
   }
   const entries = Object.entries(parsed.mcpServers || {})
   const existing = new Map(mcpServersMock.map((server) => [server.name, server]))
   mcpServersMock = entries.map(([name, config]) => {
     const fallback = defaultMcpServers.find((server) => server.name === name)
     const source = existing.get(name) || (fallback ? cloneMcpServerMock(fallback) : null)
+    const approved = new Set(Array.isArray(config.autoApprove) ? config.autoApprove.filter((item): item is string => typeof item === 'string') : [])
     return {
       name,
       status: config.disabled ? 'disabled' : source?.status && source.status !== 'disabled' ? source.status : 'connected',
       disabled: Boolean(config.disabled),
       ...(source?.error && !config.disabled ? { error: source.error } : {}),
-      tools: source?.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })) || [],
+      tools:
+        source?.tools.map((tool) => ({
+          ...tool,
+          autoApprove: approved.has(tool.name),
+          parameters: tool.parameters.map((parameter) => ({ ...parameter }))
+        })) || [],
       resources: source?.resources.map((resource) => ({ ...resource })) || []
     }
   })
@@ -5107,6 +5113,25 @@ Object.defineProperty(window, 'aiops', {
       const tool = mcpServersMock.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
       if (!tool) throw new Error(`MCP tool not found: ${serverName}:${toolName}`)
       tool.enabled = enabled
+    }),
+    setMcpToolAutoApprove: vi.fn(async (serverName: string, toolName: string, autoApprove: boolean) => {
+      const tool = mcpServersMock.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
+      if (!tool) throw new Error(`MCP tool not found: ${serverName}:${toolName}`)
+      const parsed = JSON.parse(mcpConfigContentMock) as { mcpServers?: Record<string, { autoApprove?: unknown }> }
+      const serverConfig = parsed.mcpServers?.[serverName]
+      if (!serverConfig) throw new Error(`MCP server config not found: ${serverName}`)
+      const approved = new Set(Array.isArray(serverConfig.autoApprove) ? serverConfig.autoApprove.filter((item): item is string => typeof item === 'string') : [])
+      if (autoApprove) {
+        approved.add(toolName)
+      } else {
+        approved.delete(toolName)
+      }
+      if (approved.size) {
+        serverConfig.autoApprove = [...approved]
+      } else {
+        delete serverConfig.autoApprove
+      }
+      return { ok: true, data: applyMcpConfigContentMock(JSON.stringify(parsed, null, 2)) }
     }),
     callMcpTool: vi.fn(async (serverName: string, toolName: string, args?: Record<string, unknown>) => {
       const server = mcpServersMock.find((item) => item.name === serverName)

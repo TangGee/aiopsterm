@@ -289,12 +289,29 @@ const toolParameters = (schema: unknown): McpToolConfig['parameters'] => {
   })
 }
 
-const normalizeTools = (serverName: string, result: unknown, existing: McpServerUserConfig | undefined, toolStates: McpToolStatesUserConfig): McpToolConfig[] => {
+const autoApproveSet = (source?: string[]) => new Set((source || []).map(cleanText).filter(Boolean))
+
+const cloneToolsWithAutoApprove = (tools: McpToolConfig[] | undefined, autoApprove?: string[]): McpToolConfig[] => {
+  const approved = autoApproveSet(autoApprove)
+  return (tools || []).map((tool) => ({
+    ...tool,
+    autoApprove: approved.has(tool.name),
+    parameters: tool.parameters.map((parameter) => ({ ...parameter }))
+  }))
+}
+
+const normalizeTools = (
+  serverName: string,
+  result: unknown,
+  existing: McpServerUserConfig | undefined,
+  toolStates: McpToolStatesUserConfig,
+  autoApproveTools = new Set<string>()
+): McpToolConfig[] => {
   const existingTools = new Map((existing?.tools || []).map((tool) => [tool.name, tool]))
   const tools = isRecord(result) && Array.isArray(result.tools) ? result.tools : []
   return tools
     .filter(isRecord)
-    .map((tool) => {
+    .map((tool): McpToolConfig | null => {
       const name = cleanText(tool.name)
       if (!name) return null
       const stateKey = `${serverName}:${name}`
@@ -302,6 +319,7 @@ const normalizeTools = (serverName: string, result: unknown, existing: McpServer
         name,
         description: cleanText(tool.description),
         enabled: typeof toolStates[stateKey] === 'boolean' ? toolStates[stateKey] : existingTools.get(name)?.enabled ?? true,
+        autoApprove: autoApproveTools.has(name),
         parameters: toolParameters(tool.inputSchema)
       }
     })
@@ -369,7 +387,7 @@ const discoverStdioServer = async (
       name,
       status: 'connected',
       disabled: false,
-      tools: normalizeTools(name, toolResult, existing, toolStates),
+      tools: normalizeTools(name, toolResult, existing, toolStates, autoApproveSet(config.autoApprove)),
       resources: normalizeResources(resourceResult)
     }
   } finally {
@@ -532,7 +550,7 @@ export const discoverMcpServerSnapshot = async (config: McpConfigFile, options: 
         name,
         status: 'disabled',
         disabled: true,
-        tools: existing?.tools || [],
+        tools: cloneToolsWithAutoApprove(existing?.tools, serverConfig.autoApprove),
         resources: existing?.resources || []
       })
       continue
@@ -543,7 +561,7 @@ export const discoverMcpServerSnapshot = async (config: McpConfigFile, options: 
         status: existing?.status && existing.status !== 'disabled' ? existing.status : 'connected',
         disabled: false,
         ...(existing?.error ? { error: existing.error } : {}),
-        tools: existing?.tools || [],
+        tools: cloneToolsWithAutoApprove(existing?.tools, serverConfig.autoApprove),
         resources: existing?.resources || []
       })
       continue

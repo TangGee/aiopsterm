@@ -491,6 +491,7 @@ type SettingsShortcut = ShortcutUserConfig
 type SettingsRule = UserRuleConfig & { isEditing?: boolean; isDraft?: boolean }
 type SettingsSkill = SkillUserConfig
 type SettingsMcpServer = McpServerUserConfig
+type McpConfigMutationResult = Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeMcpConfig']>>>
 type McpOperationStatus = 'idle' | 'running' | 'success' | 'error'
 type McpOperationRecord = {
   status: McpOperationStatus
@@ -523,6 +524,7 @@ const cloneMcpServerConfig = (servers: SettingsMcpServer[]): McpServerUserConfig
       name: tool.name,
       description: tool.description,
       enabled: tool.enabled,
+      ...(tool.autoApprove ? { autoApprove: true } : {}),
       parameters: tool.parameters.map((parameter) => ({ ...parameter }))
     })),
     resources: server.resources.map((resource) => ({ ...resource }))
@@ -851,16 +853,20 @@ const mcpStatusValues: McpServerUserConfig['status'][] = ['connected', 'connecti
 
 const defaultMcpConfigFile = (): McpConfigFile => ({
   mcpServers: Object.fromEntries(
-    defaultMcpServers.map((server) => [
-      server.name,
-      {
-        type: 'stdio' as const,
-        disabled: server.disabled,
-        command: server.name === 'filesystem' ? 'npx' : server.name,
-        args: server.name === 'filesystem' ? ['-y', '@modelcontextprotocol/server-filesystem', '~'] : [],
-        timeout: 60
-      }
-    ])
+    defaultMcpServers.map((server) => {
+      const autoApprove = server.tools.filter((tool) => tool.autoApprove).map((tool) => tool.name)
+      return [
+        server.name,
+        {
+          type: 'stdio' as const,
+          disabled: server.disabled,
+          ...(autoApprove.length ? { autoApprove } : {}),
+          command: server.name === 'filesystem' ? 'npx' : server.name,
+          args: server.name === 'filesystem' ? ['-y', '@modelcontextprotocol/server-filesystem', '~'] : [],
+          timeout: 60
+        }
+      ]
+    })
   )
 })
 const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi'] as const
@@ -1566,12 +1572,21 @@ const mcpConfigFileToServers = (file: McpConfigFile, existingServers: SettingsMc
   const existingByName = new Map(existingServers.map((server) => [server.name, server]))
   return Object.entries(file.mcpServers).map(([name, serverConfig]) => {
     const existing = existingByName.get(name)
+    const approved = new Set((serverConfig.autoApprove || []).filter(Boolean))
     return {
       name,
       status: serverConfig.disabled ? 'disabled' : existing?.status && existing.status !== 'disabled' ? existing.status : 'connected',
       disabled: Boolean(serverConfig.disabled),
       ...(existing?.error && !serverConfig.disabled ? { error: existing.error } : {}),
-      tools: existing?.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })) || [],
+      tools:
+        existing?.tools.map((tool) => {
+          const { autoApprove: _autoApprove, ...toolWithoutAutoApprove } = tool
+          return {
+            ...toolWithoutAutoApprove,
+            ...(approved.has(tool.name) ? { autoApprove: true } : {}),
+            parameters: tool.parameters.map((parameter) => ({ ...parameter }))
+          }
+        }) || [],
       resources: existing?.resources.map((resource) => ({ ...resource })) || []
     }
   })
@@ -2812,9 +2827,17 @@ const normalizeMcpServersConfig = (source?: unknown, toolStatesSource?: unknown)
           name: toolName,
           description: typeof tool.description === 'string' ? tool.description : '',
           enabled,
+          ...(tool.autoApprove === true ? { autoApprove: true } : {}),
           parameters
         }
-        if (tool.name !== normalizedTool.name || tool.description !== normalizedTool.description || tool.enabled !== normalizedTool.enabled) changed = true
+        if (
+          tool.name !== normalizedTool.name ||
+          tool.description !== normalizedTool.description ||
+          tool.enabled !== normalizedTool.enabled ||
+          Boolean(tool.autoApprove) !== Boolean(normalizedTool.autoApprove)
+        ) {
+          changed = true
+        }
         return normalizedTool
       })
       .filter(Boolean) as McpServerUserConfig['tools']
@@ -4898,25 +4921,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
   }
 
-  const applySavedMcpConfig = (
-    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeMcpConfig']>>>,
-    expected: McpConfigFile
-  ) => {
+  const readMcpConfigMutationSnapshot = (result: McpConfigMutationResult, errorPrefix: string, invalidMessage = 'MCP 配置服务返回数据无效') => {
     if (!result?.ok || !result.data || !isRecord(result.data.mcpConfig) || !Array.isArray(result.data.mcpServers) || !isRecord(result.data.mcpToolStates)) {
-      mcpConfigEditorError.value = `Save failed: ${result?.errorMessage || 'MCP config write did not return saved settings'}`
-      mcpConfigEditorLastSaved.value = false
-      return false
+      const message = result?.errorMessage || invalidMessage
+      mcpConfigEditorError.value = `${errorPrefix}: ${message}`
+      if (mcpConfigEditorOpen.value) mcpConfigEditorLastSaved.value = false
+      setSettingsNotice(message)
+      return null
     }
     const savedConfig = normalizeMcpConfigFile(result.data.mcpConfig)
-    if (!mcpConfigFilesMatch(savedConfig, expected)) {
+    const snapshot = normalizeMcpServersConfig(result.data.mcpServers, result.data.mcpToolStates)
+    return { savedConfig, snapshot }
+  }
+
+  const applySavedMcpConfig = (result: McpConfigMutationResult, expected: McpConfigFile) => {
+    const saved = readMcpConfigMutationSnapshot(result, 'Save failed', 'MCP config write did not return saved settings')
+    if (!saved) {
+      return false
+    }
+    if (!mcpConfigFilesMatch(saved.savedConfig, expected)) {
       mcpConfigEditorError.value = 'Save failed: MCP config write returned different settings'
       mcpConfigEditorLastSaved.value = false
       return false
     }
-    applyMcpServersSnapshot(normalizeMcpServersConfig(result.data.mcpServers, result.data.mcpToolStates))
-    mcpConfigEditorContent.value = JSON.stringify(savedConfig, null, 2)
+    applyMcpServersSnapshot(saved.snapshot)
+    mcpConfigEditorContent.value = JSON.stringify(saved.savedConfig, null, 2)
     mcpConfigEditorError.value = ''
     mcpConfigEditorLastSaved.value = true
+    return true
+  }
+
+  const applyMcpConfigMutationResult = (result: McpConfigMutationResult, errorPrefix: string) => {
+    const saved = readMcpConfigMutationSnapshot(result, errorPrefix)
+    if (!saved) return false
+    applyMcpServersSnapshot(saved.snapshot)
+    mcpConfigEditorContent.value = JSON.stringify(saved.savedConfig, null, 2)
+    mcpConfigEditorError.value = ''
+    if (mcpConfigEditorOpen.value) mcpConfigEditorLastSaved.value = true
     return true
   }
 
@@ -7024,6 +7065,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     setSettingsNotice(`${toolName} ${nextEnabled ? '已启用' : '已禁用'}`)
+    return true
+  }
+
+  const toggleMcpToolAutoApprove = async (serverName: string, toolName: string) => {
+    const tool = mcpServers.value.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
+    if (!tool) return false
+    if (!window.aiops?.setMcpToolAutoApprove) {
+      setSettingsNotice('MCP Auto Approve 服务不可用')
+      return false
+    }
+    const nextAutoApprove = !tool.autoApprove
+    try {
+      const result = await window.aiops.setMcpToolAutoApprove(serverName, toolName, nextAutoApprove)
+      if (!applyMcpConfigMutationResult(result, 'Auto Approve failed')) return false
+    } catch {
+      setSettingsNotice(`${toolName} Auto Approve 更新失败`)
+      return false
+    }
+    setSettingsNotice(`${toolName} Auto Approve ${nextAutoApprove ? '已启用' : '已关闭'}`)
     return true
   }
 
@@ -11712,6 +11772,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     toggleMcpServerDisabled,
     deleteMcpServer,
     toggleMcpTool,
+    toggleMcpToolAutoApprove,
     getMcpToolOperationKey,
     getMcpResourceOperationKey,
     getMcpToolArgumentDraft,

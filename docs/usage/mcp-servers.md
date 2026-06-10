@@ -34,6 +34,27 @@ Example:
 
 Per-tool enabled state is stored separately by aiopsterm, so editing a server command does not force disabled tools back on.
 
+## Tool Auto Approve
+
+Settings -> MCP tool rows include an Auto Approve switch. The switch writes the tool name to the server's `autoApprove` array in `setting/mcp_settings.json` through the preload/main MCP config bridge, then refreshes the visible tool row from the backend-returned MCP snapshot.
+
+Example:
+
+```json
+{
+  "mcpServers": {
+    "local-tools": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/server.js"],
+      "autoApprove": ["read_status"]
+    }
+  }
+}
+```
+
+The renderer does not flip Auto Approve locally before the backend confirms the write. Missing bridges, failed writes, or malformed successful envelopes preserve the last backend-confirmed MCP rows and show an error. The stored flag is available for agent/tool approval policy; the Settings Run button remains an explicit user action.
+
 ## Tool Calls And Resource Reads
 
 The main process now exposes real runtime operations for discovered `stdio` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. Each operation starts the configured MCP server command, sends MCP `initialize`, calls `tools/call` or `resources/read`, returns the server response in an `ok` envelope, and closes the process.

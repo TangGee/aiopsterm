@@ -1126,6 +1126,7 @@ export type McpToolConfig = {
   name: string
   description: string
   enabled: boolean
+  autoApprove?: boolean
   parameters: Array<{
     name: string
     description: string
@@ -2591,6 +2592,7 @@ export type AiopsPreloadApi = {
   toggleMcpServer: (serverName: string, disabled: boolean) => Promise<void>
   deleteMcpServer: (serverName: string) => Promise<void>
   setMcpToolState: (serverName: string, toolName: string, enabled: boolean) => Promise<void>
+  setMcpToolAutoApprove: (serverName: string, toolName: string, autoApprove: boolean) => Promise<McpConfigWriteResult>
   callMcpTool: (serverName: string, toolName: string, args?: Record<string, unknown>) => Promise<McpToolCallResult>
   readMcpResource: (serverName: string, uri: string) => Promise<McpResourceReadResult>
   onMcpConfigFileChanged: (listener: (content: string) => void) => () => void

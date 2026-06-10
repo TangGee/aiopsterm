@@ -106,6 +106,8 @@ const api: AiopsPreloadApi = {
   toggleMcpServer: (serverName: string, disabled: boolean) => ipcRenderer.invoke('mcp-config:toggle-server', serverName, disabled),
   deleteMcpServer: (serverName: string) => ipcRenderer.invoke('mcp-config:delete-server', serverName),
   setMcpToolState: (serverName: string, toolName: string, enabled: boolean) => ipcRenderer.invoke('mcp:set-tool-state', serverName, toolName, enabled),
+  setMcpToolAutoApprove: (serverName: string, toolName: string, autoApprove: boolean) =>
+    ipcRenderer.invoke('mcp:set-tool-auto-approve', serverName, toolName, autoApprove) as Promise<McpConfigWriteResult>,
   callMcpTool: (serverName: string, toolName: string, args?: Record<string, unknown>) =>
     ipcRenderer.invoke('mcp:tool-call', { serverName, toolName, arguments: args }),
   readMcpResource: (serverName: string, uri: string) => ipcRenderer.invoke('mcp:resource-read', { serverName, uri }),
