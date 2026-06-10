@@ -6817,6 +6817,56 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('fails closed when Database backend success envelopes are malformed', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    const findOrdersTable = () => wrapper.findAll('.db-tree-row.table').find((row) => row.text().trim().includes('orders'))!
+
+    vi.mocked(window.aiops.getDatabaseTableDdl).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await findOrdersTable().trigger('contextmenu')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('View DDL'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.db-ddl-error').text()).toContain('Database DDL backend returned malformed result data.')
+    expect(wrapper.find('.db-ddl-modal textarea').exists()).toBe(false)
+    expect(wrapper.find('.db-ddl-toolbar').findAll('button').find((button) => button.text().includes('Copy'))!.attributes('disabled')).toBeDefined()
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+    await wrapper.find('.db-ddl-modal header button').trigger('click')
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
+    vi.mocked(window.aiops.executeDatabaseSql).mockResolvedValueOnce({ ok: true } as any)
+    await wrapper.find('button[title="Run all"]').trigger('click')
+    await waitForDatabaseSqlResult()
+
+    expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor returned malformed result data.')
+    expect(wrapper.find('.db-status-bar').text()).toContain('Backend SQL executor returned malformed result data.')
+    expect(wrapper.find('.db-status-bar').text()).not.toContain('Execution OK')
+    await wrapper.find('.db-result-tabs [role="tab"]').trigger('click')
+    expect(wrapper.find('.db-sql-overview').text()).toContain('Backend SQL executor returned malformed result data.')
+    expect(wrapper.find('.db-sql-overview').text()).not.toContain('Execution OK')
+
+    await findOrdersTable().trigger('dblclick')
+    await waitForDatabaseTableData(wrapper)
+    expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
+    expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('Execution OK')
+
+    vi.mocked(window.aiops.queryDatabaseTable).mockResolvedValueOnce({ ok: true } as any)
+    await wrapper.find('.db-data-workspace .db-toolbar button[title="Refresh"]').trigger('click')
+    await waitForDatabaseTableData(wrapper)
+
+    expect(wrapper.find('.db-data-workspace .db-result-error').text()).toContain('Backend table query returned malformed result data.')
+    expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('Backend table query returned malformed result data.')
+    expect(wrapper.find('.db-data-workspace .db-status-bar').text()).not.toContain('Execution OK')
+
+    wrapper.unmount()
+  })
+
   it('supports Monaco-like SQL editor indentation, run shortcut, and find/replace controls', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

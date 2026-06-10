@@ -3656,6 +3656,44 @@ function cloneDatabaseCatalog<T>(value: T): T {
   return structuredClone(value)
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isDatabaseRows(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every(isRecord)
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function isDatabaseSqlExecuteData(value: unknown): value is NonNullable<DatabaseSqlExecuteResult['data']> {
+  return (
+    isRecord(value) &&
+    isStringArray(value.columns) &&
+    isDatabaseRows(value.rows) &&
+    isNonNegativeNumber(value.rowCount) &&
+    isNonNegativeNumber(value.durationMs)
+  )
+}
+
+function isDatabaseTableQueryData(value: unknown): value is NonNullable<DatabaseTableQueryResult['data']> {
+  return (
+    isRecord(value) &&
+    isStringArray(value.columns) &&
+    isDatabaseRows(value.rows) &&
+    isNonNegativeNumber(value.rowCount) &&
+    isNonNegativeNumber(value.durationMs) &&
+    (value.total === null || isNonNegativeNumber(value.total)) &&
+    isStringArray(value.knownColumns)
+  )
+}
+
 function tableNodeExists(tableId: string) {
   return connections.value.some((connection) =>
     connection.catalogs.some((catalog) => {
@@ -4401,14 +4439,16 @@ function sqlPayloadFromBackendResult(result: DatabaseSqlExecuteResult | undefine
   if (!result.ok) {
     return createSqlErrorPayload(result.errorMessage || 'Backend SQL executor failed.')
   }
-  const rows = result.data?.rows ?? []
-  const columns = result.data?.columns ?? Object.keys(rows[0] ?? {})
+  if (!isDatabaseSqlExecuteData(result.data)) {
+    return createSqlErrorPayload('Backend SQL executor returned malformed result data.')
+  }
+  const data = result.data
   return {
     status: 'ok',
-    columns,
-    rows,
-    rowCount: result.data?.rowCount ?? rows.length,
-    durationMs: result.data?.durationMs ?? 0,
+    columns: data.columns,
+    rows: data.rows,
+    rowCount: data.rowCount,
+    durationMs: data.durationMs,
     error: null
   }
 }
@@ -5139,7 +5179,12 @@ async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, optio
       tab.error = result.errorMessage || 'Backend table query failed.'
       return
     }
-    const total = result.data?.total
+    if (!isDatabaseTableQueryData(result.data)) {
+      tab.error = 'Backend table query returned malformed result data.'
+      return
+    }
+    const data = result.data
+    const total = data.total
     if (typeof total === 'number') {
       const maxPage = Math.max(1, Math.ceil(total / tab.pageSize))
       if (tab.page > maxPage) {
@@ -5148,13 +5193,13 @@ async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, optio
       }
       tab.total = total
     }
-    const rows = result.data?.rows ?? []
+    const rows = data.rows
     tab.rows = rows
     tab.sourceRows = rows.map((row) => ({ ...row }))
-    tab.rowCount = result.data?.rowCount ?? rows.length
-    tab.durationMs = result.data?.durationMs ?? 0
-    tab.knownColumns = result.data?.knownColumns ?? tab.columns.slice()
-    tab.columns = result.data?.columns?.length ? result.data.columns : tab.columns
+    tab.rowCount = data.rowCount
+    tab.durationMs = data.durationMs
+    tab.knownColumns = data.knownColumns
+    tab.columns = data.columns
     if (!preserveDirty) {
       tab.dirtyState = makeDirtyState(tab.rows, tab.primaryKey)
       tab.undoStack = []
@@ -5823,7 +5868,11 @@ function fetchTableDdl(ctx: {
 }
 
 function normalizeTableDdlResult(result: DatabaseTableDdlResult): TableDdlResult {
-  if (result.ok) return { ok: true, ddl: result.data?.ddl ?? '' }
+  if (result.ok) {
+    const ddl = typeof result.data?.ddl === 'string' ? result.data.ddl : ''
+    if (!ddl.trim()) return { ok: false, errorCode: 'other', errorMessage: 'Database DDL backend returned malformed result data.' }
+    return { ok: true, ddl }
+  }
   return { ok: false, errorCode: result.errorCode || 'other', errorMessage: result.errorMessage || 'DDL fetch failed.' }
 }
 
