@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 vi.mock('electron', () => ({
   app: {
@@ -35,6 +38,17 @@ const loadBackend = async () => {
   vi.resetModules()
   const modulePath = '../src/main/backend/assets'
   return import(modulePath)
+}
+
+const withAssetImportFile = async <T>(rows: unknown[], run: (filePath: string) => Promise<T>): Promise<T> => {
+  const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-assets-import-'))
+  try {
+    const filePath = join(dir, 'external-reference-assets.json')
+    await writeFile(filePath, JSON.stringify(rows, null, 2), 'utf-8')
+    return await run(filePath)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 }
 
 const createSshRuntime = (options: { fail?: Error } = {}) => {
@@ -385,5 +399,108 @@ describe('assets backend boundary', () => {
     const refreshedAgain = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
     expect(refreshedAgain.data).toMatchObject({ refreshed: 1, created: 0, updated: 1 })
     expect(refreshedAgain.data?.assets.filter((asset: { id: string }) => asset.id === 'asset-5-synced')).toHaveLength(1)
+  })
+
+  it('previews asset imports in the backend without exposing imported secrets', async () => {
+    const backend = await loadBackend()
+    await withAssetImportFile(
+      [
+        { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22, password: 'imported-secret' },
+        { username: 'deploy', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200, password: 'new-secret' }
+      ],
+      async (filePath) => {
+        const preview = await backend.previewAssetImport({ filePath })
+
+        expect(preview.ok).toBe(true)
+        expect(preview.data).toMatchObject({
+          filePath,
+          fileName: 'external-reference-assets.json',
+          duplicateCount: 1
+        })
+        expect(preview.data?.assets).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              title: 'prod-bastion-imported',
+              host: '10.24.8.12',
+              username: 'ops',
+              duplicateId: 'asset-1',
+              duplicateTitle: 'prod-bastion'
+            }),
+            expect.objectContaining({
+              title: 'imported-json',
+              host: '10.55.0.9',
+              username: 'deploy',
+              duplicateId: undefined
+            })
+          ])
+        )
+        expect(preview.data?.assets.some((asset: Record<string, unknown>) => 'password' in asset || 'privateKey' in asset)).toBe(false)
+      }
+    )
+  })
+
+  it('confirms asset imports by re-reading the file and skipping duplicates in the backend', async () => {
+    const backend = await loadBackend()
+    await withAssetImportFile(
+      [
+        { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22, password: 'imported-secret' },
+        { username: 'deploy', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200, password: 'new-secret' }
+      ],
+      async (filePath) => {
+        const result = await backend.confirmAssetImport({ filePath, overwrite: false })
+
+        expect(result.ok).toBe(true)
+        expect(result.data).toMatchObject({
+          imported: 1,
+          skipped: 1,
+          created: 1,
+          updated: 0,
+          filePath,
+          fileName: 'external-reference-assets.json'
+        })
+        expect(result.data?.assets).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: 'asset-1', title: 'prod-bastion' }),
+            expect.objectContaining({ title: 'imported-json', host: '10.55.0.9', username: 'deploy', hasPassword: true })
+          ])
+        )
+        expect(result.data?.assets.some((asset: { title: string }) => asset.title === 'prod-bastion-imported')).toBe(false)
+      }
+    )
+  })
+
+  it('confirms asset imports by re-reading the file and overwriting duplicates in the backend', async () => {
+    const backend = await loadBackend()
+    await withAssetImportFile(
+      [
+        { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22, password: 'imported-secret' },
+        { username: 'deploy', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200, password: 'new-secret' }
+      ],
+      async (filePath) => {
+        const result = await backend.confirmAssetImport({ filePath, overwrite: true })
+
+        expect(result.ok).toBe(true)
+        expect(result.data).toMatchObject({
+          imported: 2,
+          skipped: 0,
+          created: 1,
+          updated: 1,
+          filePath,
+          fileName: 'external-reference-assets.json'
+        })
+        expect(result.data?.assets).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'asset-1',
+              title: 'prod-bastion-imported',
+              host: '10.24.8.12',
+              username: 'ops',
+              hasPassword: true
+            }),
+            expect.objectContaining({ title: 'imported-json', host: '10.55.0.9', username: 'deploy', hasPassword: true })
+          ])
+        )
+      }
+    )
   })
 })

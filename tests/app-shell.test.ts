@@ -904,6 +904,9 @@ describe('AppShell', () => {
     try {
       vi.mocked(window.aiops.showOpenDialog).mockClear()
       vi.mocked(window.aiops.readLocalFile).mockClear()
+      vi.mocked(window.aiops.previewAssetImport).mockClear()
+      vi.mocked(window.aiops.confirmAssetImport).mockClear()
+      vi.mocked(window.aiops.saveAsset).mockClear()
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
       await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
       await flushPromises()
@@ -913,30 +916,33 @@ describe('AppShell', () => {
           filters: expect.arrayContaining([expect.objectContaining({ name: 'Asset Import Files' })])
         })
       )
-      expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/external-reference-assets.json')
+      expect(window.aiops.previewAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/external-reference-assets.json' })
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').text()).toContain('其中 1 个与现有主机重复')
       expect(assets.find('.import-assets-modal').text()).toContain('imported-json')
-      vi.mocked(window.aiops.saveAsset).mockClear()
       await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('跳过重复'))!.trigger('click')
       await flushPromises()
-      expect(vi.mocked(window.aiops.saveAsset).mock.calls).toEqual([
-        [expect.objectContaining({ host: '10.55.0.9' })]
-      ])
-      expect(vi.mocked(window.aiops.saveAsset).mock.calls[0]?.[0]).not.toHaveProperty('id')
+      expect(window.aiops.confirmAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/external-reference-assets.json', overwrite: false })
+      expect(window.aiops.saveAsset).not.toHaveBeenCalled()
       expect(assets.text()).toContain('imported-json')
       expect(assets.findAll('.host-card').some((card) => card.text().includes('prod-bastion-imported'))).toBe(false)
 
       vi.mocked(window.aiops.showOpenDialog).mockClear()
       vi.mocked(window.aiops.readLocalFile).mockClear()
+      vi.mocked(window.aiops.previewAssetImport).mockClear()
+      vi.mocked(window.aiops.confirmAssetImport).mockClear()
+      vi.mocked(window.aiops.saveAsset).mockClear()
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/MobaXterm.mxtsessions'] })
       await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
       await flushPromises()
-      expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/MobaXterm.mxtsessions')
+      expect(window.aiops.previewAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/MobaXterm.mxtsessions' })
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').text()).toContain('moba-prod')
       expect(assets.find('.import-assets-modal').text()).toContain('10.88.1.5')
-      vi.mocked(window.aiops.saveAsset).mockClear()
       await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
-      expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
+      await flushPromises()
+      expect(window.aiops.confirmAssetImport).toHaveBeenCalledWith({ filePath: '/tmp/MobaXterm.mxtsessions', overwrite: true })
+      expect(window.aiops.saveAsset).not.toHaveBeenCalled()
       expect(assets.text()).toContain('moba-prod')
       expect(assets.text()).toContain('mobauser')
     } finally {
@@ -1153,7 +1159,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('does not fabricate Assets import preview when file picker or read bridges fail', async () => {
+  it('does not fabricate Assets import preview or confirmation when import bridges fail', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const assets = mount(AssetsPanel, {
@@ -1165,33 +1171,76 @@ describe('AppShell', () => {
     const importButton = () => assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!
     const originalAiops = {
       showOpenDialog: window.aiops.showOpenDialog,
-      readLocalFile: window.aiops.readLocalFile
+      readLocalFile: window.aiops.readLocalFile,
+      previewAssetImport: window.aiops.previewAssetImport,
+      confirmAssetImport: window.aiops.confirmAssetImport,
+      saveAsset: window.aiops.saveAsset
     }
 
     try {
       vi.mocked(window.aiops.readLocalFile).mockClear()
+      vi.mocked(window.aiops.previewAssetImport).mockClear()
       ;(window.aiops as any).showOpenDialog = undefined
       await importButton().trigger('click')
       await flushPromises()
       expect(assets.text()).toContain('导入文件选择服务不可用。')
+      expect(window.aiops.previewAssetImport).not.toHaveBeenCalled()
       expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').exists()).toBe(false)
 
       ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
-      ;(window.aiops as any).readLocalFile = undefined
+      ;(window.aiops as any).previewAssetImport = undefined
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
       await importButton().trigger('click')
       await flushPromises()
-      expect(assets.text()).toContain('导入文件读取服务不可用。')
+      expect(assets.text()).toContain('导入文件预览服务不可用。')
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').exists()).toBe(false)
 
-      ;(window.aiops as any).readLocalFile = originalAiops.readLocalFile
+      ;(window.aiops as any).previewAssetImport = originalAiops.previewAssetImport
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
-      vi.mocked(window.aiops.readLocalFile).mockRejectedValueOnce(new Error('asset read denied'))
+      vi.mocked(window.aiops.previewAssetImport).mockRejectedValueOnce(new Error('asset preview denied'))
       await importButton().trigger('click')
       await flushPromises()
-      expect(assets.text()).toContain('asset read denied')
+      expect(assets.text()).toContain('asset preview denied')
+      expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
       expect(assets.find('.import-assets-modal').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+      vi.mocked(window.aiops.previewAssetImport).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'ASSET_IMPORT_PARSE_FAILED',
+        errorMessage: 'asset parse denied'
+      })
+      await importButton().trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('asset parse denied')
+      expect(assets.find('.import-assets-modal').exists()).toBe(false)
+
+      vi.mocked(window.aiops.saveAsset).mockClear()
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/MobaXterm.mxtsessions'] })
+      await importButton().trigger('click')
+      await flushPromises()
+      expect(assets.find('.import-assets-modal').exists()).toBe(true)
+
+      ;(window.aiops as any).confirmAssetImport = undefined
+      await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('资产导入确认服务不可用。')
+      expect(assets.find('.import-assets-modal').exists()).toBe(true)
+      expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+
+      ;(window.aiops as any).confirmAssetImport = originalAiops.confirmAssetImport
+      vi.mocked(window.aiops.confirmAssetImport).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'ASSET_IMPORT_FAILED',
+        errorMessage: 'asset confirm denied'
+      })
+      await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('asset confirm denied')
+      expect(assets.find('.import-assets-modal').exists()).toBe(true)
+      expect(window.aiops.saveAsset).not.toHaveBeenCalled()
     } finally {
       Object.assign(window.aiops, originalAiops)
     }

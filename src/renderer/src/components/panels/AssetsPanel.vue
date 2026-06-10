@@ -894,6 +894,7 @@ import { assetManagementEntries } from '@/config/assets'
 import type {
   AiopsAssetAuthType,
   AiopsAssetGroupRecord,
+  AiopsAssetImportPreviewRecord,
   AiopsAssetInput,
   AiopsAssetRecord,
   AiopsAssetType,
@@ -901,7 +902,6 @@ import type {
   AiopsKeychainRecord,
   AiopsKeychainType
 } from '@shared/preload'
-import { parseAssetImportContent, type ImportedAssetDraft } from '@/services/assetImportRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 defineProps<{ query: string }>()
@@ -990,24 +990,9 @@ const confirmState = reactive<{
   action: null
 })
 
-type ImportPreviewAsset = {
-  previewId: string
-  duplicateId?: string
-  title: string
-  host: string
-  username: string
-  group: string
-  port: number
-  auth_type: AiopsAssetAuthType
-  asset_type: AiopsAssetType
-  comment: string
-  password?: string
-  needProxy?: boolean
-  proxyName?: string
-}
-
 const importPreviewOpen = ref(false)
-const importPreviewAssets = ref<ImportPreviewAsset[]>([])
+const importPreviewFilePath = ref('')
+const importPreviewAssets = ref<AiopsAssetImportPreviewRecord[]>([])
 const managedEditorOpen = ref(false)
 const managedEditMode = ref(false)
 const managedCommentOnly = ref(false)
@@ -1662,40 +1647,31 @@ const confirmExport = async () => {
   exportModalOpen.value = false
 }
 
-const localFileName = (filePath: string) => filePath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || filePath
-
-const readLocalTextFile = async (filePath: string, unavailableMessage: string) => {
-  const readLocalFile = window.aiops?.readLocalFile
-  if (typeof readLocalFile !== 'function') {
-    throw new Error(unavailableMessage)
-  }
-  const result = await readLocalFile(filePath)
-  return result.content
-}
-
 const loadAssetImportPreviewFromPath = async (filePath: string) => {
   if (!filePath) {
     importNotice.value = '没有选择导入文件。'
     return
   }
-  const fileName = localFileName(filePath)
-  let content = ''
-  try {
-    content = await readLocalTextFile(filePath, '导入文件读取服务不可用。')
-  } catch (error) {
-    importNotice.value = error instanceof Error ? error.message : '导入文件读取失败。'
+  const previewAssetImport = window.aiops?.previewAssetImport
+  if (typeof previewAssetImport !== 'function') {
+    importNotice.value = '导入文件预览服务不可用。'
     return
   }
   try {
-    const preview = parseAssetImportContent(content, fileName).map(toImportPreviewAsset)
-    if (!preview.length) {
+    const result = await previewAssetImport({ filePath })
+    if (!result?.ok || !result.data) {
+      importNotice.value = result?.errorMessage || '导入文件预览失败。'
+      return
+    }
+    if (!result.data.assets.length) {
       importNotice.value = '导入文件没有可识别的主机。'
       return
     }
-    importPreviewAssets.value = preview
+    importPreviewFilePath.value = result.data.filePath
+    importPreviewAssets.value = result.data.assets
     importPreviewOpen.value = true
-  } catch {
-    importNotice.value = '导入文件解析失败。'
+  } catch (error) {
+    importNotice.value = error instanceof Error ? error.message : '导入文件预览失败。'
   }
 }
 
@@ -1726,67 +1702,37 @@ const openImportDialog = async () => {
   await loadAssetImportPreviewFromPath(result?.filePaths?.[0] || '')
 }
 
-const toImportPreviewAsset = (draft: ImportedAssetDraft, index: number): ImportPreviewAsset => {
-  const duplicate = assets.value.find((asset) => asset.host === draft.host && asset.username === draft.username && asset.port === draft.port)
-  return {
-    previewId: `import-${index}-${draft.host}-${draft.port}`,
-    duplicateId: duplicate?.id,
-    title: draft.title,
-    host: draft.host,
-    username: draft.username,
-    group: draft.group,
-    port: draft.port,
-    auth_type: draft.auth_type,
-    asset_type: draft.asset_type,
-    comment: draft.comment,
-    password: draft.password,
-    needProxy: draft.needProxy,
-    proxyName: draft.proxyName
-  }
-}
-
 const closeImportPreview = () => {
   importPreviewOpen.value = false
+  importPreviewFilePath.value = ''
   importPreviewAssets.value = []
 }
 
-const importPreviewToAsset = (item: ImportPreviewAsset, existing?: AssetRecord): AiopsAssetInput => {
-  return {
-    ...(existing ? { id: existing.id } : {}),
-    name: item.title,
-    title: item.title,
-    host: item.host,
-    ip: item.host,
-    group: item.group,
-    group_name: item.group,
-    status: 'online',
-    tags: ['imported'],
-    username: item.username,
-    port: item.port,
-    asset_type: item.asset_type,
-    auth_type: item.auth_type,
-    comment: item.comment,
-    password: item.password,
-    needProxy: item.needProxy,
-    proxyName: item.proxyName,
-    data_source: 'manual'
-  }
-}
-
 const confirmImportAssets = async (overwrite: boolean) => {
-  let imported = 0
-  let skipped = 0
-  for (const item of importPreviewAssets.value) {
-    const existing = item.duplicateId ? assets.value.find((asset) => asset.id === item.duplicateId) : undefined
-    if (existing && !overwrite) {
-      skipped++
-      continue
-    }
-    await saveAssetRecord(importPreviewToAsset(item, existing))
-    imported++
+  if (!importPreviewFilePath.value) {
+    importNotice.value = '导入文件路径缺失。'
+    return
   }
-  importNotice.value = skipped ? `已导入 ${imported} 个主机，跳过 ${skipped} 个重复主机。` : `已导入 ${imported} 个主机。`
-  closeImportPreview()
+  const confirmAssetImport = window.aiops?.confirmAssetImport
+  if (typeof confirmAssetImport !== 'function') {
+    importNotice.value = '资产导入确认服务不可用。'
+    return
+  }
+  try {
+    const result = await confirmAssetImport({ filePath: importPreviewFilePath.value, overwrite })
+    if (!result?.ok || !result.data) {
+      importNotice.value = result?.errorMessage || '资产导入失败。'
+      return
+    }
+    applyAssetSnapshot(result.data)
+    await refreshAssetGroupOptions()
+    importNotice.value = result.data.skipped
+      ? `已导入 ${result.data.imported} 个主机，跳过 ${result.data.skipped} 个重复主机。`
+      : `已导入 ${result.data.imported} 个主机。`
+    closeImportPreview()
+  } catch (error) {
+    importNotice.value = error instanceof Error ? error.message : '资产导入失败。'
+  }
 }
 
 const openNewKeyPanel = () => {
@@ -1959,6 +1905,15 @@ const applyImportedKeyFile = (fileName: string, content: string) => {
   keyFormError.value = ''
   const type = detectKeyType(keyForm.privateKey, keyForm.publicKey).toUpperCase()
   keyImportNotice.value = `已导入 ${fileName}，识别为 ${type}。`
+}
+
+const localFileName = (filePath: string) => filePath.split(/[/\\]/).filter(Boolean).at(-1) || filePath
+
+const readLocalTextFile = async (filePath: string, unavailableMessage: string) => {
+  const readLocalFile = window.aiops?.readLocalFile
+  if (typeof readLocalFile !== 'function') throw new Error(unavailableMessage)
+  const result = await readLocalFile(filePath)
+  return result.content
 }
 
 const importKeyFileFromPath = async (filePath: string) => {

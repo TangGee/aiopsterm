@@ -1,12 +1,18 @@
 import { app } from 'electron'
 import Store from 'electron-store'
 import { createHash, randomUUID } from 'crypto'
-import { join } from 'path'
+import { basename, join } from 'path'
+import { readFile } from 'fs/promises'
 import type { Client, ConnectConfig } from 'ssh2'
 import type {
   AiopsAssetConnectionTestInfo,
   AiopsAssetConnectionTestInput,
   AiopsAssetConnectionTestResult,
+  AiopsAssetImportConfirmInput,
+  AiopsAssetImportConfirmResult,
+  AiopsAssetImportPreviewInput,
+  AiopsAssetImportPreviewRecord,
+  AiopsAssetImportPreviewResult,
   AiopsAssetInput,
   AiopsAssetGroupDeleteInput,
   AiopsAssetGroupListInput,
@@ -25,6 +31,7 @@ import type {
   SshAgentKeychainOption,
   UserConfig
 } from '@shared/preload'
+import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { createConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
@@ -932,6 +939,92 @@ const asResult = <T>(fn: () => T): AiopsMutationResult<T> => {
   }
 }
 
+class AssetImportError extends Error {
+  constructor(
+    public errorCode: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'AssetImportError'
+  }
+}
+
+const assetImportFileName = (filePath: string) => basename(filePath.replace(/\\/g, '/')) || filePath
+
+const assetImportErrorResult = <T>(error: unknown, fallbackCode = 'ASSET_IMPORT_FAILED', fallbackMessage = '资产导入失败。'): AiopsMutationResult<T> => {
+  if (error instanceof AssetImportError) {
+    return { ok: false, errorCode: error.errorCode, errorMessage: error.message }
+  }
+  return {
+    ok: false,
+    errorCode: fallbackCode,
+    errorMessage: error instanceof Error ? error.message : String(error || fallbackMessage)
+  }
+}
+
+const readAssetImportDrafts = async (input: AiopsAssetImportPreviewInput) => {
+  const filePath = text(input?.filePath)
+  if (!filePath) throw new AssetImportError('ASSET_IMPORT_FILE_REQUIRED', '导入文件路径不能为空。')
+  const fileName = assetImportFileName(filePath)
+  let content = ''
+  try {
+    content = await readFile(filePath, 'utf-8')
+  } catch (error) {
+    throw new AssetImportError('ASSET_IMPORT_READ_FAILED', error instanceof Error ? error.message : '导入文件读取失败。')
+  }
+  let drafts: ImportedAssetDraft[] = []
+  try {
+    drafts = parseAssetImportContent(content, fileName)
+  } catch {
+    throw new AssetImportError('ASSET_IMPORT_PARSE_FAILED', '导入文件解析失败。')
+  }
+  if (!drafts.length) throw new AssetImportError('ASSET_IMPORT_EMPTY', '导入文件没有可识别的主机。')
+  return { filePath, fileName, drafts }
+}
+
+const findAssetImportDuplicate = (assets: AiopsAssetRecord[], draft: ImportedAssetDraft) =>
+  assets.find((asset) => !asset.isLocalShell && asset.host === draft.host && asset.username === draft.username && Number(asset.port) === Number(draft.port))
+
+const assetImportPreviewRecord = (draft: ImportedAssetDraft, index: number, assets: AiopsAssetRecord[]): AiopsAssetImportPreviewRecord => {
+  const duplicate = findAssetImportDuplicate(assets, draft)
+  return {
+    previewId: `import-${index}-${draft.host}-${draft.port}`,
+    duplicateId: duplicate?.id,
+    duplicateTitle: duplicate?.title,
+    title: draft.title,
+    host: draft.host,
+    username: draft.username,
+    group: draft.group,
+    port: draft.port,
+    auth_type: draft.auth_type,
+    asset_type: draft.asset_type,
+    comment: draft.comment,
+    needProxy: draft.needProxy,
+    proxyName: draft.proxyName
+  }
+}
+
+const assetImportInput = (draft: ImportedAssetDraft, existing?: AiopsAssetRecord): AiopsAssetInput => ({
+  ...(existing ? { id: existing.id } : {}),
+  name: draft.title,
+  title: draft.title,
+  host: draft.host,
+  ip: draft.host,
+  group: draft.group,
+  group_name: draft.group,
+  status: 'online',
+  tags: ['imported'],
+  username: draft.username,
+  port: draft.port,
+  asset_type: draft.asset_type,
+  auth_type: draft.auth_type,
+  comment: draft.comment,
+  password: draft.password,
+  needProxy: draft.needProxy,
+  proxyName: draft.proxyName,
+  data_source: existing?.data_source || 'manual'
+})
+
 const assertUserEditableAsset = (id?: string) => {
   if (id === LOCAL_SHELL_ASSET_ID) throw new Error('本地连接是系统资产，不能编辑或删除')
 }
@@ -1118,6 +1211,61 @@ export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshIn
       updated
     }
   })
+export const previewAssetImport = async (input: AiopsAssetImportPreviewInput): Promise<AiopsAssetImportPreviewResult> => {
+  try {
+    const { filePath, fileName, drafts } = await readAssetImportDrafts(input)
+    const snapshot = getStore().list()
+    const assets = drafts.map((draft, index) => assetImportPreviewRecord(draft, index, snapshot.assets))
+    return {
+      ok: true,
+      data: {
+        filePath,
+        fileName,
+        assets,
+        duplicateCount: assets.filter((asset) => asset.duplicateId).length
+      }
+    }
+  } catch (error) {
+    return assetImportErrorResult(error)
+  }
+}
+export const confirmAssetImport = async (input: AiopsAssetImportConfirmInput): Promise<AiopsAssetImportConfirmResult> => {
+  try {
+    const { filePath, fileName, drafts } = await readAssetImportDrafts(input)
+    const store = getStore()
+    let imported = 0
+    let skipped = 0
+    let created = 0
+    let updated = 0
+
+    for (const draft of drafts) {
+      const existing = findAssetImportDuplicate(store.list().assets, draft)
+      if (existing && !input.overwrite) {
+        skipped += 1
+        continue
+      }
+      store.save(assetImportInput(draft, existing))
+      imported += 1
+      if (existing) updated += 1
+      else created += 1
+    }
+
+    return {
+      ok: true,
+      data: {
+        ...store.list(),
+        imported,
+        skipped,
+        created,
+        updated,
+        filePath,
+        fileName
+      }
+    }
+  } catch (error) {
+    return assetImportErrorResult(error)
+  }
+}
 export const listKeychains = (): AiopsKeychainRecord[] => getStore().listKeychains()
 export const listSshAgentKeychainOptions = (): SshAgentKeychainOption[] =>
   listKeychains().filter((keychain) => keychain.hasPrivateKey).map(keychainToSshAgentOption)

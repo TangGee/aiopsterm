@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { parseAssetImportContent } from '@/services/assetImportRuntime'
+import { parseAssetImportContent } from '../src/shared/assetImport'
 
-describe('assetImportRuntime', () => {
+describe('assetImport shared parser', () => {
   it('parses External reference JSON and CSV host rows', () => {
     expect(
       parseAssetImportContent(

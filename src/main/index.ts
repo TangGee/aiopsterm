@@ -10,6 +10,7 @@ import Store from 'electron-store'
 import AdmZip from 'adm-zip'
 import {
   configureAssetConnectionRuntime,
+  confirmAssetImport,
   deleteAsset,
   deleteAssetGroup,
   deleteAssetFolder,
@@ -22,6 +23,7 @@ import {
   listAssetGroups,
   listKeychains,
   listSshAgentKeychainOptions,
+  previewAssetImport,
   refreshOrganizationAssets,
   renameAssetGroup,
   saveAsset,
@@ -2810,6 +2812,8 @@ const registerIpc = () => {
   ipcMain.handle('assets:test-connection', (_event, input) => testAssetConnection(input))
   ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
   ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))
+  ipcMain.handle('assets:import:preview', (_event, input) => previewAssetImport(input))
+  ipcMain.handle('assets:import:confirm', (_event, input) => confirmAssetImport(input))
   ipcMain.handle('ssh:tunnel:start', (_event, input: AiopsSshTunnelStartInput) => startSshTunnel(input))
   ipcMain.handle('ssh:tunnel:stop', (_event, input: AiopsSshTunnelStopInput) => stopSshTunnel(input))
   ipcMain.handle('assets:folder:save', (_event, folder: AiopsCustomFolderSaveInput) => saveAssetFolder(folder))

@@ -279,6 +279,48 @@ export type AiopsOrganizationAssetRefreshResult = AiopsMutationResult<
   }
 >
 
+export type AiopsAssetImportPreviewInput = {
+  filePath: string
+}
+
+export type AiopsAssetImportConfirmInput = AiopsAssetImportPreviewInput & {
+  overwrite?: boolean
+}
+
+export type AiopsAssetImportPreviewRecord = {
+  previewId: string
+  duplicateId?: string
+  duplicateTitle?: string
+  title: string
+  host: string
+  username: string
+  group: string
+  port: number
+  auth_type: AiopsAssetAuthType
+  asset_type: AiopsAssetType
+  comment: string
+  needProxy?: boolean
+  proxyName?: string
+}
+
+export type AiopsAssetImportPreviewResult = AiopsMutationResult<{
+  filePath: string
+  fileName: string
+  assets: AiopsAssetImportPreviewRecord[]
+  duplicateCount: number
+}>
+
+export type AiopsAssetImportConfirmResult = AiopsMutationResult<
+  AiopsAssetSnapshot & {
+    imported: number
+    skipped: number
+    created: number
+    updated: number
+    filePath: string
+    fileName: string
+  }
+>
+
 export type AiopsMutationResult<T> = {
   ok: boolean
   data?: T
@@ -2410,6 +2452,8 @@ export type AiopsPreloadApi = {
   testAssetConnection: (input: AiopsAssetConnectionTestInput) => Promise<AiopsAssetConnectionTestResult>
   deleteAsset: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
   refreshOrganizationAssets: (input?: AiopsOrganizationAssetRefreshInput) => Promise<AiopsOrganizationAssetRefreshResult>
+  previewAssetImport: (input: AiopsAssetImportPreviewInput) => Promise<AiopsAssetImportPreviewResult>
+  confirmAssetImport: (input: AiopsAssetImportConfirmInput) => Promise<AiopsAssetImportConfirmResult>
   startSshTunnel: (input: AiopsSshTunnelStartInput) => Promise<AiopsSshTunnelMutationResult>
   stopSshTunnel: (input: AiopsSshTunnelStopInput) => Promise<AiopsSshTunnelMutationResult>
   saveAssetFolder: (folder: AiopsCustomFolderSaveInput) => Promise<AiopsMutationResult<AiopsCustomFolderRecord>>

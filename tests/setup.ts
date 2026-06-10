@@ -23,6 +23,7 @@ import type {
   McpServerUserConfig,
   SshAgentKeychainOption
 } from '@shared/preload'
+import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
 import {
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64,
@@ -4166,6 +4167,103 @@ const assetSnapshotMock = () => ({
   folders: assetFolderStoreMock.map(cloneAssetFolder)
 })
 
+const localFileContentMock = (filePath: string) => {
+  const localPath = String(filePath || '')
+  if (localPath.endsWith('external-reference-assets.json')) {
+    return JSON.stringify([
+      { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
+      { username: 'ops', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200 }
+    ])
+  }
+  if (localPath.endsWith('MobaXterm.mxtsessions')) {
+    return [
+      '[Bookmarks]',
+      'moba-prod=#109#0%10.88.1.5%22%mobauser%%-1%10.88.1.1%2200%jumpuser%-1%2224%-1%_ProfileDir_/keys/moba.pem'
+    ].join('\n')
+  }
+  if (localPath.endsWith('unit-rsa.pem')) {
+    return '-----BEGIN RSA PRIVATE KEY-----\nunit import\n-----END RSA PRIVATE KEY-----'
+  }
+  if (localPath.endsWith('drop-ed25519.key')) {
+    return '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----'
+  }
+  return [
+    'apiVersion: v1',
+    'kind: Config',
+    'current-context: prod/admin',
+    'clusters:',
+    '- name: prod-cluster',
+    '  cluster:',
+    '    server: https://prod.k8s.local:6443',
+    '- name: staging-cluster',
+    '  cluster:',
+    '    server: https://staging.k8s.local:6443',
+    'contexts:',
+    '- name: prod/admin',
+    '  context:',
+    '    cluster: prod-cluster',
+    '    namespace: default',
+    '- name: staging/devops',
+    '  context:',
+    '    cluster: staging-cluster',
+    '    namespace: staging'
+  ].join('\n')
+}
+
+const assetImportFileNameMock = (filePath: string) => filePath.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || filePath
+
+const readAssetImportDraftsMock = (input?: { filePath?: string }) => {
+  const filePath = String(input?.filePath || '').trim()
+  if (!filePath) throw new Error('导入文件路径不能为空。')
+  const fileName = assetImportFileNameMock(filePath)
+  const drafts = parseAssetImportContent(localFileContentMock(filePath), fileName)
+  if (!drafts.length) throw new Error('导入文件没有可识别的主机。')
+  return { filePath, fileName, drafts }
+}
+
+const findAssetImportDuplicateMock = (draft: ImportedAssetDraft) =>
+  assetStoreMock.find((asset) => !asset.isLocalShell && asset.host === draft.host && asset.username === draft.username && Number(asset.port) === Number(draft.port))
+
+const assetImportPreviewRecordMock = (draft: ImportedAssetDraft, index: number) => {
+  const duplicate = findAssetImportDuplicateMock(draft)
+  return {
+    previewId: `import-${index}-${draft.host}-${draft.port}`,
+    duplicateId: duplicate?.id,
+    duplicateTitle: duplicate?.title,
+    title: draft.title,
+    host: draft.host,
+    username: draft.username,
+    group: draft.group,
+    port: draft.port,
+    auth_type: draft.auth_type,
+    asset_type: draft.asset_type,
+    comment: draft.comment,
+    needProxy: draft.needProxy,
+    proxyName: draft.proxyName
+  }
+}
+
+const assetImportInputMock = (draft: ImportedAssetDraft, existing?: TestAssetRecord): TestAssetInput => ({
+  ...(existing ? { id: existing.id } : {}),
+  name: draft.title,
+  title: draft.title,
+  host: draft.host,
+  ip: draft.host,
+  group: draft.group,
+  group_name: draft.group,
+  status: 'online',
+  tags: ['imported'],
+  username: draft.username,
+  port: draft.port,
+  asset_type: draft.asset_type,
+  auth_type: draft.auth_type,
+  comment: draft.comment,
+  password: draft.password,
+  needProxy: draft.needProxy,
+  proxyName: draft.proxyName,
+  data_source: existing?.data_source || 'manual'
+})
+
 const normalizeSshTunnelTypeMock = (type?: TestSshTunnelType): TestSshTunnelType =>
   type === 'local_forward' || type === 'remote_forward' || type === 'dynamic_socks' ? type : 'local_forward'
 
@@ -5071,42 +5169,7 @@ Object.defineProperty(window, 'aiops', {
     }),
     readLocalFile: vi.fn(async (filePath: string) => {
       const localPath = String(filePath || '')
-      let content = [
-        'apiVersion: v1',
-        'kind: Config',
-        'current-context: prod/admin',
-        'clusters:',
-        '- name: prod-cluster',
-        '  cluster:',
-        '    server: https://prod.k8s.local:6443',
-        '- name: staging-cluster',
-        '  cluster:',
-        '    server: https://staging.k8s.local:6443',
-        'contexts:',
-        '- name: prod/admin',
-        '  context:',
-        '    cluster: prod-cluster',
-        '    namespace: default',
-        '- name: staging/devops',
-        '  context:',
-        '    cluster: staging-cluster',
-        '    namespace: staging'
-      ].join('\n')
-      if (localPath.endsWith('external-reference-assets.json')) {
-        content = JSON.stringify([
-          { username: 'ops', ip: '10.24.8.12', label: 'prod-bastion-imported', group_name: '生产', port: 22 },
-          { username: 'ops', ip: '10.55.0.9', label: 'imported-json', group_name: 'Imported', port: 2200 }
-        ])
-      } else if (localPath.endsWith('MobaXterm.mxtsessions')) {
-        content = [
-          '[Bookmarks]',
-          'moba-prod=#109#0%10.88.1.5%22%mobauser%%-1%10.88.1.1%2200%jumpuser%-1%2224%-1%_ProfileDir_/keys/moba.pem'
-        ].join('\n')
-      } else if (localPath.endsWith('unit-rsa.pem')) {
-        content = '-----BEGIN RSA PRIVATE KEY-----\nunit import\n-----END RSA PRIVATE KEY-----'
-      } else if (localPath.endsWith('drop-ed25519.key')) {
-        content = '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----'
-      }
+      const content = localFileContentMock(localPath)
       return {
         content,
         mtimeMs: 1717200000000,
@@ -5362,6 +5425,68 @@ Object.defineProperty(window, 'aiops', {
           refreshed: created + updated,
           created,
           updated
+        }
+      }
+    }),
+    previewAssetImport: vi.fn(async (input: { filePath: string }) => {
+      try {
+        const { filePath, fileName, drafts } = readAssetImportDraftsMock(input)
+        const assets = drafts.map(assetImportPreviewRecordMock)
+        return {
+          ok: true,
+          data: {
+            filePath,
+            fileName,
+            assets,
+            duplicateCount: assets.filter((asset) => asset.duplicateId).length
+          }
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: 'ASSET_IMPORT_FAILED',
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }),
+    confirmAssetImport: vi.fn(async (input: { filePath: string; overwrite?: boolean }) => {
+      try {
+        const { filePath, fileName, drafts } = readAssetImportDraftsMock(input)
+        let imported = 0
+        let skipped = 0
+        let created = 0
+        let updated = 0
+
+        drafts.forEach((draft) => {
+          const existing = findAssetImportDuplicateMock(draft)
+          if (existing && !input.overwrite) {
+            skipped += 1
+            return
+          }
+          const asset = normalizeAssetInputMock(assetImportInputMock(draft, existing), existing)
+          assetStoreMock = existing ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
+          imported += 1
+          if (existing) updated += 1
+          else created += 1
+        })
+
+        return {
+          ok: true,
+          data: {
+            ...assetSnapshotMock(),
+            imported,
+            skipped,
+            created,
+            updated,
+            filePath,
+            fileName
+          }
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: 'ASSET_IMPORT_FAILED',
+          errorMessage: error instanceof Error ? error.message : String(error)
         }
       }
     }),
