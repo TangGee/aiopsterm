@@ -1508,9 +1508,10 @@ export type TerminalCommandGenerationRecord = {
 export type TerminalCommandGenerationResult = AiopsMutationResult<TerminalCommandGenerationRecord>
 
 export type VoiceTranscriptionInput = {
-  audioData: string
-  audioFormat: string
-  audioSize: number
+  audioData?: string
+  audioBytes?: ArrayBuffer | Uint8Array | number[]
+  audioFormat?: string
+  audioSize?: number
   durationMs?: number
   source?: 'browser'
 }

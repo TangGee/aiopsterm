@@ -37,6 +37,52 @@ let voiceTranscriptionRuntime: VoiceTranscriptionRuntime = {}
 
 const normalizeText = (value: unknown) => String(value || '').trim()
 
+const audioBytesFromInput = (value: unknown): Uint8Array | null => {
+  if (!value) return null
+  if (value instanceof Uint8Array) return value
+  if (value instanceof ArrayBuffer || Object.prototype.toString.call(value) === '[object ArrayBuffer]') return new Uint8Array(value as ArrayBuffer)
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView
+    return new Uint8Array(view.buffer as ArrayBuffer, view.byteOffset, view.byteLength)
+  }
+  if (!Array.isArray(value)) return null
+  if (!value.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)) return null
+  return new Uint8Array(value)
+}
+
+const bytesToBase64 = (bytes: Uint8Array) => {
+  const bufferCtor = (globalThis as typeof globalThis & {
+    Buffer?: { from: (value: Uint8Array) => { toString: (encoding: 'base64') => string } }
+  }).Buffer
+  if (bufferCtor?.from) return bufferCtor.from(bytes).toString('base64')
+  const btoaImpl = (globalThis as typeof globalThis & { btoa?: (value: string) => string }).btoa
+  if (!btoaImpl) return ''
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  }
+  return btoaImpl(binary)
+}
+
+const normalizeAudioPayload = (input: Partial<VoiceTranscriptionInput>) => {
+  const audioBytes = audioBytesFromInput(input.audioBytes)
+  if (audioBytes) {
+    return {
+      audioData: audioBytes.byteLength <= maxAudioBytes ? bytesToBase64(audioBytes) : '',
+      audioSize: audioBytes.byteLength,
+      hasAudioPayload: true
+    }
+  }
+  const audioData = normalizeText(input.audioData)
+  const metadataAudioSize = Number(input.audioSize || 0)
+  return {
+    audioData,
+    audioSize: Number.isFinite(metadataAudioSize) ? metadataAudioSize : 0,
+    hasAudioPayload: Boolean(audioData)
+  }
+}
+
 const normalizeAudioFormat = (value?: string) => {
   const normalized = normalizeText(value).toLowerCase()
   if (!normalized) return 'wav'
@@ -54,9 +100,8 @@ export function configureVoiceTranscriptionRuntime(config?: VoiceTranscriptionRu
 }
 
 export const transcribeVoiceInput = async (input: Partial<VoiceTranscriptionInput> = {}): Promise<VoiceTranscriptionResult> => {
-  const audioData = normalizeText(input.audioData)
-  const audioSize = Number(input.audioSize || 0)
-  if (!audioData || audioSize <= 0) {
+  const { audioData, audioSize, hasAudioPayload } = normalizeAudioPayload(input)
+  if (!hasAudioPayload || audioSize <= 0) {
     return {
       ok: false,
       errorCode: 'VOICE_AUDIO_REQUIRED',
@@ -75,6 +120,13 @@ export const transcribeVoiceInput = async (input: Partial<VoiceTranscriptionInpu
       ok: false,
       errorCode: 'VOICE_AUDIO_TOO_LARGE',
       errorMessage: 'Audio file exceeds 50 MiB.'
+    }
+  }
+  if (!audioData) {
+    return {
+      ok: false,
+      errorCode: 'VOICE_AUDIO_INVALID',
+      errorMessage: 'Recorded audio data could not be encoded for transcription.'
     }
   }
 

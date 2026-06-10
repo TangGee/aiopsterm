@@ -3088,24 +3088,61 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.chat-editable .mention-chip-doc').some((chip) => chip.text().includes('ai-attachment.log'))).toBe(true)
     expect(wrapper.find('.input-placeholder-notice').text()).toContain('已添加文件：ai-attachment.log')
     vi.mocked(window.aiops.transcribeVoiceInput).mockClear()
-    await voiceButton.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).toContain('recording')
-    expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('停止语音录制')
-    await new Promise((resolve) => window.setTimeout(resolve, 240))
-    await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    await waitForMockCall(vi.mocked(window.aiops.transcribeVoiceInput), 'transcribeVoiceInput')
-    expect(window.aiops.transcribeVoiceInput).toHaveBeenCalledWith(
+    const originalVoiceBlobArrayBuffer = Blob.prototype.arrayBuffer
+    const originalVoiceFileReader = window.FileReader
+    const originalGlobalVoiceFileReader = globalThis.FileReader
+    class ForbiddenVoiceFileReader {
+      readAsArrayBuffer() {
+        throw new Error('renderer FileReader must not read voice audio')
+      }
+
+      readAsDataURL() {
+        throw new Error('renderer FileReader must not read voice audio')
+      }
+    }
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(async function (this: Blob) {
+        return Uint8Array.from({ length: this.size }, (_value, index) => index % 255).buffer
+      })
+    })
+    Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: ForbiddenVoiceFileReader })
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: ForbiddenVoiceFileReader })
+    try {
+      await voiceButton.trigger('click')
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).toContain('recording')
+      expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('停止语音录制')
+      await new Promise((resolve) => window.setTimeout(resolve, 240))
+      await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      await waitForMockCall(vi.mocked(window.aiops.transcribeVoiceInput), 'transcribeVoiceInput')
+    } finally {
+      Object.defineProperty(Blob.prototype, 'arrayBuffer', { configurable: true, writable: true, value: originalVoiceBlobArrayBuffer })
+      Object.defineProperty(window, 'FileReader', { configurable: true, writable: true, value: originalVoiceFileReader })
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalVoiceFileReader })
+    }
+    const voiceTranscriptionInput = vi.mocked(window.aiops.transcribeVoiceInput).mock.calls.at(-1)?.[0] as {
+      audioData?: string
+      audioBytes?: ArrayBuffer
+      audioFormat?: string
+      audioSize?: number
+      durationMs?: number
+      source?: string
+    }
+    expect(voiceTranscriptionInput).toEqual(
       expect.objectContaining({
         source: 'browser',
         durationMs: expect.any(Number),
-        audioData: expect.any(String),
-        audioFormat: 'ogg-opus',
+        audioBytes: expect.any(ArrayBuffer),
+        audioFormat: 'audio/webm',
         audioSize: 4096
       })
     )
+    expect(voiceTranscriptionInput.audioData).toBeUndefined()
+    expect(voiceTranscriptionInput.audioBytes?.byteLength).toBe(4096)
     expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
     expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('title')).toBe('开始语音输入')
     expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音转写完成')

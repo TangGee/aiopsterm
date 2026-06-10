@@ -6128,23 +6128,32 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     }),
-    transcribeVoiceInput: vi.fn(async (input?: { audioData?: string; audioFormat?: string; audioSize?: number; durationMs?: number; source?: 'browser' }) => {
-      if (!input?.audioData || !input.audioSize) {
+    transcribeVoiceInput: vi.fn(
+      async (input?: {
+        audioData?: string
+        audioBytes?: ArrayBuffer | Uint8Array | number[]
+        audioFormat?: string
+        audioSize?: number
+        durationMs?: number
+        source?: 'browser'
+      }) => {
+        if ((!input?.audioData && !input?.audioBytes) || !input.audioSize) {
+          return {
+            ok: false,
+            errorCode: 'VOICE_AUDIO_REQUIRED',
+            errorMessage: 'Audio data is required for voice transcription.'
+          }
+        }
         return {
-          ok: false,
-          errorCode: 'VOICE_AUDIO_REQUIRED',
-          errorMessage: 'Audio data is required for voice transcription.'
+          ok: true,
+          data: {
+            text: 'Provider transcript from test voice backend',
+            provider: 'openai' as const,
+            model: 'test-voice-provider'
+          }
         }
       }
-      return {
-        ok: true,
-        data: {
-          text: 'Provider transcript from test voice backend',
-          provider: 'openai' as const,
-          model: 'test-voice-provider'
-        }
-      }
-    }),
+    ),
     listDatabaseCatalog: vi.fn(async () => ({ ok: true, data: databaseWorkspaceCatalogMock() })),
     getDatabaseAiPaneState: vi.fn(async () => ({ ok: true as const, data: cloneDatabaseAiPaneStateMock(databaseAiPaneStateMock) })),
     saveDatabaseAiPaneState: vi.fn(async (input: DatabaseAiPaneStateSnapshot) => {

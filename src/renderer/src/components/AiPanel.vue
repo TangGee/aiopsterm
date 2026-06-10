@@ -3309,39 +3309,6 @@ const handleVoiceTranscriptionComplete = async (text: string) => {
   }
 }
 
-const audioBlobToBase64 = async (blob: Blob) => {
-  const blobWithArrayBuffer = blob as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> }
-  const arrayBuffer =
-    typeof blobWithArrayBuffer.arrayBuffer === 'function'
-      ? await blobWithArrayBuffer.arrayBuffer()
-      : await new Promise<ArrayBuffer>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => {
-            if (reader.result instanceof ArrayBuffer) resolve(reader.result)
-            else reject(new Error('Failed to read recorded audio data.'))
-          }
-          reader.onerror = () => reject(reader.error || new Error('Failed to read recorded audio data.'))
-          reader.readAsArrayBuffer(blob)
-        })
-  const bytes = new Uint8Array(arrayBuffer)
-  let binary = ''
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte)
-  })
-  return btoa(binary)
-}
-
-const audioFormatFromMimeType = (mimeType = '') => {
-  const normalized = mimeType.toLowerCase()
-  if (normalized.includes('mp3') || normalized.includes('mpeg')) return 'mp3'
-  if (normalized.includes('m4a')) return 'm4a'
-  if (normalized.includes('aac')) return 'aac'
-  if (normalized.includes('ogg') || normalized.includes('opus') || normalized.includes('webm')) return 'ogg-opus'
-  if (normalized.includes('wav')) return 'wav'
-  if (normalized.includes('pcm')) return 'pcm'
-  return 'wav'
-}
-
 const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
   voiceTranscribing.value = true
   try {
@@ -3375,11 +3342,18 @@ const processVoiceRecording = async (elapsed: number, options: { reachedLimit?: 
     showInputPlaceholderNotice('音频文件超过 50 MiB，无法识别。')
     return
   }
+  let audioBytes: ArrayBuffer
+  try {
+    audioBytes = await options.audioBlob.arrayBuffer()
+  } catch (error) {
+    showInputPlaceholderNotice(`语音识别失败：${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
   const transcriptionInput: VoiceTranscriptionInput = {
     durationMs: elapsed,
     source: 'browser',
-    audioData: await audioBlobToBase64(options.audioBlob),
-    audioFormat: audioFormatFromMimeType(options.audioBlob.type),
+    audioBytes,
+    audioFormat: options.audioBlob.type,
     audioSize: options.audioBlob.size
   }
   await transcribeVoiceInput(transcriptionInput)

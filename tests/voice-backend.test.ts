@@ -12,6 +12,14 @@ const browserAudioInput = {
   source: 'browser'
 }
 
+const browserAudioBytesInput = {
+  audioBytes: Uint8Array.from({ length: 2048 }, (_value, index) => index % 255).buffer,
+  audioFormat: 'audio/webm;codecs=opus',
+  audioSize: 64,
+  durationMs: 1500,
+  source: 'browser'
+}
+
 const openAiVoiceConfig = (provider: 'openai-compatible' | 'litellm' = 'openai-compatible') =>
   ({
     modelName: 'whisper-ops',
@@ -70,7 +78,7 @@ describe('voice transcription backend', () => {
     )
   })
 
-  it('normalizes browser audio metadata and calls an OpenAI-compatible transcription provider', async () => {
+  it('normalizes browser audio bytes and calls an OpenAI-compatible transcription provider', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -81,7 +89,7 @@ describe('voice transcription backend', () => {
       getConfig: () => openAiVoiceConfig()
     })
 
-    const result = await transcribeVoiceInput(browserAudioInput)
+    const result = await transcribeVoiceInput(browserAudioBytesInput)
 
     expect(result).toEqual({
       ok: true,
@@ -103,7 +111,31 @@ describe('voice transcription backend', () => {
     expect(body.get('model')).toBe('whisper-1')
     expect(body.get('language')).toBe('zh')
     expect(body.get('response_format')).toBe('json')
-    expect(body.get('file')).toBeInstanceOf(Blob)
+    const file = body.get('file') as Blob
+    expect(file).toBeInstanceOf(Blob)
+    expect(file.type).toBe('audio/ogg')
+    expect(file.size).toBe(2048)
+  })
+
+  it('keeps compatibility with legacy base64 audio data requests', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ text: '旧协议转写' })
+    })) as unknown as typeof fetch
+    configureVoiceBackendRuntime({
+      fetch: fetchMock,
+      getConfig: () => openAiVoiceConfig()
+    })
+
+    const result = await transcribeVoiceInput(browserAudioInput)
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({ text: '旧协议转写', provider: 'openai', model: 'whisper-ops' })
+    const body = vi.mocked(fetchMock).mock.calls[0]?.[1]?.body as FormData
+    const file = body.get('file') as Blob
+    expect(file).toBeInstanceOf(Blob)
+    expect(file.size).toBe(2048)
   })
 
   it('uses the LiteLLM speech endpoint when the selected model provider is LiteLLM', async () => {
