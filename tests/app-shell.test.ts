@@ -7323,6 +7323,165 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('fails closed when Database catalog mutation success envelopes are malformed', async () => {
+    vi.mocked(window.aiops.listDatabaseCatalog).mockResolvedValueOnce({ ok: true, data: { groups: [] } } as any)
+    const malformedCatalogWrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    expect(malformedCatalogWrapper.text()).toContain('Database catalog backend returned malformed result data.')
+    expect(malformedCatalogWrapper.text()).not.toContain('Default Group')
+    expect(malformedCatalogWrapper.text()).not.toContain('orders-postgres')
+    malformedCatalogWrapper.unmount()
+
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    const connectionRow = (label: string) => wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes(label))!
+    const groupRow = (label: string) => wrapper.findAll('.db-tree-row.group').find((row) => row.text().includes(label))!
+    const tableRow = (label: string) => wrapper.findAll('.db-tree-row.table').find((row) => row.text().trim().includes(label))!
+    const contextButton = (label: string) => wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes(label))!
+    const validConnectionTestData = {
+      dbType: 'postgresql' as const,
+      serverVersion: 'PostgreSQL 16 local backend validation',
+      endpoint: 'test-backend',
+      durationMs: 1
+    }
+
+    await wrapper.find('button[title="Add"]').trigger('click')
+    await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('PostgreSQL'))!.trigger('click')
+    await wrapper.findAll('.db-connection-modal input').at(0)!.setValue('malformed-pg')
+
+    vi.mocked(window.aiops.testDatabaseConnection).mockResolvedValueOnce({ ok: true, data: { serverVersion: 'partial' } } as any)
+    await wrapper.find('.db-connection-modal footer button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-modal-feedback').text()).toContain('Database connection test backend returned malformed result data.')
+    expect(wrapper.find('.db-modal-feedback').text()).not.toContain('Connection successful')
+
+    vi.mocked(window.aiops.saveDatabaseConnection).mockClear()
+    vi.mocked(window.aiops.testDatabaseConnection).mockResolvedValueOnce({ ok: true, data: { serverVersion: 'partial' } } as any)
+    await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.saveDatabaseConnection).not.toHaveBeenCalled()
+    expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
+
+    vi.mocked(window.aiops.testDatabaseConnection).mockResolvedValueOnce({ ok: true, data: validConnectionTestData })
+    vi.mocked(window.aiops.saveDatabaseConnection).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.db-modal-feedback').text()).toContain('Database connection save backend returned malformed result data.')
+    expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('malformed-pg'))).toBe(false)
+    await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
+
+    vi.mocked(window.aiops.createDatabaseGroup).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await groupRow('Default Group').trigger('contextmenu')
+    await contextButton('New Group').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database group backend returned malformed result data.')
+    expect(wrapper.find('.db-tree-edit').exists()).toBe(false)
+
+    vi.mocked(window.aiops.connectDatabaseConnection).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await connectionRow('metrics-mysql').trigger('contextmenu')
+    await contextButton('Open Connection').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database connection backend returned malformed result data.')
+    await connectionRow('metrics-mysql').trigger('contextmenu')
+    expect(wrapper.find('.db-context-menu').text()).toContain('Open Connection')
+    expect(wrapper.find('.db-context-menu').text()).not.toContain('Close Connection')
+
+    vi.mocked(window.aiops.refreshDatabaseConnection).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await connectionRow('orders-postgres').trigger('contextmenu')
+    await contextButton('Refresh').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database connection backend returned malformed result data.')
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('orders-postgres'))).toBe(true)
+
+    const tabCountBeforeRemove = wrapper.findAll('.db-workspace-tab').length
+    vi.mocked(window.aiops.removeDatabaseConnection).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await connectionRow('orders-postgres').trigger('contextmenu')
+    await contextButton('Remove').trigger('click')
+    await wrapper.find('.db-operation-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database connection backend returned malformed result data.')
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('orders-postgres'))).toBe(true)
+    expect(wrapper.findAll('.db-workspace-tab')).toHaveLength(tabCountBeforeRemove)
+
+    vi.mocked(window.aiops.createDatabaseCatalog).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await connectionRow('orders-postgres').trigger('contextmenu')
+    await contextButton('Create Database').trigger('click')
+    await wrapper.find('.db-create-modal input').setValue('malformed_catalog')
+    await wrapper.find('.db-create-modal').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.db-create-modal').exists()).toBe(true)
+    expect(wrapper.find('.db-create-modal .db-modal-feedback').text()).toContain('Create database backend returned malformed result data.')
+    expect(wrapper.findAll('.db-tree-row.database').some((row) => row.text().includes('malformed_catalog'))).toBe(false)
+    await wrapper.find('.db-create-modal footer button[type="button"]').trigger('click')
+
+    await tableRow('orders').trigger('dblclick')
+    await waitForDatabaseTableData(wrapper)
+    expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
+
+    vi.mocked(window.aiops.planDatabaseTableMutation).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await wrapper.find('.db-result-table tbody tr').trigger('click')
+    await wrapper.find('.db-result-table tbody tr').findAll('td').at(4)!.trigger('dblclick')
+    const editInput = wrapper.find('.db-result-table td input')
+    await editInput.setValue('malformed-owner')
+    await editInput.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.find('.db-edit-summary').text()).toContain('Backend table mutation returned malformed result data.')
+
+    vi.mocked(window.aiops.mutateDatabaseTable).mockClear()
+    vi.mocked(window.aiops.planDatabaseTableMutation).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateDatabaseTable).not.toHaveBeenCalled()
+    expect(wrapper.find('.db-edit-summary').text()).toContain('Backend table mutation returned malformed result data.')
+
+    vi.mocked(window.aiops.mutateDatabaseTable).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateDatabaseTable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      })
+    )
+    expect(wrapper.find('.db-edit-summary').text()).toContain('Backend table mutation returned malformed result data.')
+    expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
+
+    vi.mocked(window.aiops.mutateDatabaseTable).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await tableRow('orders').trigger('contextmenu')
+    await contextButton('Truncate').trigger('click')
+    await wrapper.find('.db-danger-confirm input').setValue('orders')
+    await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Backend table mutation returned malformed result data.')
+    expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
+    expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
+    await wrapper.find('.db-danger-confirm footer button').trigger('click')
+
+    vi.mocked(window.aiops.mutateDatabaseTable).mockResolvedValueOnce({ ok: true, data: { affected: 1, durationMs: 1 } } as any)
+    await tableRow('orders').trigger('contextmenu')
+    await contextButton('Drop').trigger('click')
+    await wrapper.find('.db-danger-confirm input').setValue('orders')
+    await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Backend table mutation returned malformed result data.')
+    expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
+    expect(wrapper.findAll('.db-tree-row.table').some((row) => row.text().trim().includes('orders'))).toBe(true)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('supports Monaco-like SQL editor indentation, run shortcut, and find/replace controls', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

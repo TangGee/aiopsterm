@@ -2209,6 +2209,8 @@ import type {
   DatabaseTableDdlResult,
   DatabaseTableInfo,
   DatabaseTableMutation,
+  DatabaseTableMutationPlanResult,
+  DatabaseTableMutationResult,
   DatabaseTableQueryResult,
   DatabaseWorkspaceCatalog
 } from '@shared/preload'
@@ -2285,6 +2287,31 @@ const DB_AI_PANE_MAX_WIDTH = 720
 const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
 const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql']
 const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'postgresql', 'sqlite', 'oracle']
+const DB_ENGINE_OPTION_CODES = [
+  'mysql',
+  'h2',
+  'oracle',
+  'postgresql',
+  'sqlserver',
+  'sqlite',
+  'mariadb',
+  'clickhouse',
+  'dm',
+  'presto',
+  'db2',
+  'oceanbase',
+  'hive',
+  'kingbase',
+  'mongodb',
+  'timeplus'
+] as const
+const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
+const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
+const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
+const DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE = 'Database group backend returned malformed result data.'
+const DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE = 'Database connection backend returned malformed result data.'
+const DATABASE_CREATE_DATABASE_MALFORMED_MESSAGE = 'Create database backend returned malformed result data.'
+const DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE = 'Backend table mutation returned malformed result data.'
 const workspaceStore = useWorkspaceStore()
 
 type SqlResult = {
@@ -3417,7 +3444,7 @@ async function updateSqlTabConnection(event: Event) {
   }
   if (connection.status !== 'connected' && connection.status !== 'testing') {
     const result = await connectDatabaseConnectionViaBackend(connection.id)
-    if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.')) return
+    if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
     connection = findConnection(connectionId)
     if (!connection) return
     expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
@@ -3691,6 +3718,210 @@ function isDatabaseEngineCode(value: unknown): value is DatabaseEngineCode {
   return typeof value === 'string' && DB_ENGINE_CODES.includes(value as DatabaseEngineCode)
 }
 
+function isDatabaseEngineOptionCode(value: unknown): value is DatabaseEngineInfo['code'] {
+  return typeof value === 'string' && (DB_ENGINE_OPTION_CODES as readonly string[]).includes(value)
+}
+
+function isDatabaseEngineInfo(value: unknown): value is DatabaseEngineInfo {
+  return (
+    isRecord(value) &&
+    isDatabaseEngineOptionCode(value.code) &&
+    (value.connectionCode === undefined || isDatabaseEngineCode(value.connectionCode)) &&
+    typeof value.name === 'string' &&
+    typeof value.enabled === 'boolean' &&
+    typeof value.accent === 'string'
+  )
+}
+
+function isDatabaseColumnInfo(value: unknown): value is DatabaseColumnInfo {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    typeof value.type === 'string' &&
+    typeof value.nullable === 'boolean' &&
+    (value.key === undefined || value.key === 'PK' || value.key === 'FK')
+  )
+}
+
+function isDatabaseTableInfo(value: unknown): value is DatabaseTableInfo {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    Array.isArray(value.columns) &&
+    value.columns.every(isDatabaseColumnInfo) &&
+    isStringArray(value.primaryKey)
+  )
+}
+
+function isDatabaseSchemaInfo(value: unknown): value is { name: string; tables: DatabaseTableInfo[]; views?: DatabaseTableInfo[]; functions?: string[]; procedures?: string[] } {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    Array.isArray(value.tables) &&
+    value.tables.every(isDatabaseTableInfo) &&
+    (value.views === undefined || (Array.isArray(value.views) && value.views.every(isDatabaseTableInfo))) &&
+    (value.functions === undefined || isStringArray(value.functions)) &&
+    (value.procedures === undefined || isStringArray(value.procedures))
+  )
+}
+
+function isDatabaseCatalogInfo(value: unknown): value is DatabaseCatalogInfo {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    (value.schemas === undefined || (Array.isArray(value.schemas) && value.schemas.every(isDatabaseSchemaInfo))) &&
+    (value.tables === undefined || (Array.isArray(value.tables) && value.tables.every(isDatabaseTableInfo)))
+  )
+}
+
+function isDatabaseConnectionEnv(value: unknown): value is DatabaseConnectionInfo['env'] {
+  return value === 'Development' || value === 'TEST' || value === 'Staging' || value === 'Production'
+}
+
+function isDatabaseConnectionStatus(value: unknown): value is DatabaseConnectionInfo['status'] {
+  return value === 'idle' || value === 'testing' || value === 'connected' || value === 'failed'
+}
+
+function isDatabaseConnectionInfo(value: unknown): value is DatabaseConnectionInfo {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    isDatabaseEngineCode(value.dbType) &&
+    isDatabaseConnectionEnv(value.env) &&
+    typeof value.groupId === 'string' &&
+    typeof value.host === 'string' &&
+    (value.port === null || (typeof value.port === 'number' && Number.isFinite(value.port))) &&
+    value.authentication === 'UserAndPassword' &&
+    typeof value.user === 'string' &&
+    (value.hasPassword === undefined || typeof value.hasPassword === 'boolean') &&
+    typeof value.database === 'string' &&
+    (value.filePath === undefined || typeof value.filePath === 'string') &&
+    (value.readonly === undefined || typeof value.readonly === 'boolean') &&
+    (value.sslMode === undefined ||
+      value.sslMode === '' ||
+      value.sslMode === 'disable' ||
+      value.sslMode === 'require' ||
+      value.sslMode === 'verify-ca' ||
+      value.sslMode === 'verify-full') &&
+    (value.url === undefined || typeof value.url === 'string') &&
+    isDatabaseConnectionStatus(value.status) &&
+    Array.isArray(value.catalogs) &&
+    value.catalogs.every(isDatabaseCatalogInfo)
+  )
+}
+
+function isDatabaseGroupInfo(value: unknown): value is DatabaseGroupInfo {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string'
+}
+
+function isStringNullRecord(value: unknown): value is Record<string, string | null> {
+  return isRecord(value) && Object.values(value).every((item) => item === null || typeof item === 'string')
+}
+
+function isDatabaseCatalogDefaults(value: unknown): value is DatabaseWorkspaceCatalog['defaults'] {
+  return (
+    isRecord(value) &&
+    (value.selectedNodeId === null || typeof value.selectedNodeId === 'string') &&
+    isStringArray(value.expandedGroupIds) &&
+    isStringArray(value.expandedConnectionIds) &&
+    isStringArray(value.expandedCatalogIds) &&
+    isStringArray(value.expandedSchemaIds) &&
+    isStringArray(value.expandedSchemaObjectFolderIds)
+  )
+}
+
+function isDatabaseWorkspaceCatalog(value: unknown): value is DatabaseWorkspaceCatalog {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.engines) &&
+    value.engines.every(isDatabaseEngineInfo) &&
+    Array.isArray(value.groups) &&
+    value.groups.every(isDatabaseGroupInfo) &&
+    isStringNullRecord(value.groupParents) &&
+    Array.isArray(value.connections) &&
+    value.connections.every(isDatabaseConnectionInfo) &&
+    isDatabaseCatalogDefaults(value.defaults)
+  )
+}
+
+function isDatabaseConnectionTestData(value: unknown): value is NonNullable<DatabaseConnectionTestResult['data']> {
+  return (
+    isRecord(value) &&
+    isDatabaseEngineCode(value.dbType) &&
+    typeof value.serverVersion === 'string' &&
+    typeof value.endpoint === 'string' &&
+    isNonNegativeNumber(value.durationMs)
+  )
+}
+
+function isDatabaseConnectionSaveData(value: unknown): value is NonNullable<DatabaseConnectionSaveResult['data']> {
+  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
+  const record: Record<string, unknown> = value
+  return isDatabaseConnectionInfo(record.connection) && typeof record.message === 'string'
+}
+
+function isDatabaseGroupMutationData(value: unknown): value is NonNullable<DatabaseGroupMutationResult['data']> {
+  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
+  const record: Record<string, unknown> = value
+  return isDatabaseGroupInfo(record.group) && typeof record.message === 'string'
+}
+
+function isDatabaseGroupDeleteData(value: unknown): value is NonNullable<DatabaseGroupDeleteResult['data']> {
+  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
+  const record: Record<string, unknown> = value
+  return typeof record.deletedGroupId === 'string' && typeof record.message === 'string'
+}
+
+function isDatabaseConnectionMutationData(value: unknown): value is NonNullable<DatabaseConnectionMutationResult['data']> {
+  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
+  const record: Record<string, unknown> = value
+  return isDatabaseConnectionInfo(record.connection) && typeof record.message === 'string'
+}
+
+function isDatabaseConnectionDeleteData(value: unknown): value is NonNullable<DatabaseConnectionDeleteResult['data']> {
+  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
+  const record: Record<string, unknown> = value
+  return typeof record.connectionId === 'string' && typeof record.message === 'string'
+}
+
+function isDatabaseCreateDatabaseData(value: unknown): value is NonNullable<DatabaseCreateDatabaseResult['data']> {
+  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
+  const record: Record<string, unknown> = value
+  return isDatabaseConnectionInfo(record.connection) && isDatabaseCatalogInfo(record.catalog) && typeof record.message === 'string'
+}
+
+function isDatabaseTableMutationData(value: unknown, options: { requireCatalog?: boolean } = {}): value is NonNullable<DatabaseTableMutationResult['data']> {
+  return (
+    isRecord(value) &&
+    isNonNegativeNumber(value.affected) &&
+    isNonNegativeNumber(value.durationMs) &&
+    (value.catalog === undefined ? !options.requireCatalog : isDatabaseWorkspaceCatalog(value.catalog))
+  )
+}
+
+function isDatabaseTableMutationPlanStatement(value: unknown): value is NonNullable<DatabaseTableMutationPlanResult['data']>['statements'][number] {
+  return (
+    isRecord(value) &&
+    (value.kind === 'delete' || value.kind === 'update' || value.kind === 'insert' || value.kind === 'truncate' || value.kind === 'drop') &&
+    typeof value.sql === 'string' &&
+    Array.isArray(value.params) &&
+    typeof value.preview === 'string'
+  )
+}
+
+function isDatabaseTableMutationPlanData(value: unknown): value is NonNullable<DatabaseTableMutationPlanResult['data']> {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.statements) &&
+    value.statements.every(isDatabaseTableMutationPlanStatement) &&
+    isNonNegativeNumber(value.statementCount) &&
+    typeof value.preview === 'string' &&
+    typeof value.warning === 'string'
+  )
+}
+
 function isDbAiBackendContext(value: unknown): value is DbAiBackendContext {
   if (!isRecord(value)) return false
   if (value.connectionId !== undefined && typeof value.connectionId !== 'string') return false
@@ -3884,8 +4115,12 @@ function applyDatabaseCatalog(catalog: DatabaseWorkspaceCatalog) {
 async function loadDatabaseCatalog() {
   try {
     const result = await window.aiops.listDatabaseCatalog()
-    if (!result.ok || !result.data) {
+    if (!result.ok) {
       showNotice(result.errorMessage || 'Database catalog backend is unavailable')
+      return
+    }
+    if (!isDatabaseWorkspaceCatalog(result.data)) {
+      showNotice(DATABASE_CATALOG_MALFORMED_MESSAGE)
       return
     }
     applyDatabaseCatalog(result.data)
@@ -3894,12 +4129,34 @@ async function loadDatabaseCatalog() {
   }
 }
 
-function applyDatabaseCatalogMutationResult(result: { ok: boolean; data?: DatabaseWorkspaceCatalog; errorMessage?: string }, fallbackError: string) {
-  if (!result.ok || !result.data) {
+type DatabaseCatalogMutationEnvelope = { ok: boolean; data?: unknown; errorMessage?: string }
+
+function databaseCatalogMutationData<T extends DatabaseWorkspaceCatalog>(
+  result: DatabaseCatalogMutationEnvelope,
+  fallbackError: string,
+  isData: (value: unknown) => value is T = isDatabaseWorkspaceCatalog as (value: unknown) => value is T,
+  malformedError = DATABASE_CATALOG_MALFORMED_MESSAGE
+) {
+  if (!result.ok) {
     showNotice(result.errorMessage || fallbackError)
-    return false
+    return null
   }
-  applyDatabaseCatalog(result.data)
+  if (!isData(result.data)) {
+    showNotice(malformedError)
+    return null
+  }
+  return result.data
+}
+
+function applyDatabaseCatalogMutationResult<T extends DatabaseWorkspaceCatalog>(
+  result: { ok: boolean; data?: unknown; errorMessage?: string },
+  fallbackError: string,
+  isData?: (value: unknown) => value is T,
+  malformedError?: string
+) {
+  const data = databaseCatalogMutationData(result, fallbackError, isData, malformedError)
+  if (!data) return false
+  applyDatabaseCatalog(data)
   return true
 }
 
@@ -4183,7 +4440,7 @@ async function connectDbAiPaneConnection() {
   const connection = dbAiPaneConnection.value
   if (!connection) return
   const result = await connectDatabaseConnectionViaBackend(connection.id)
-  if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.')) return
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
   expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
   showNotice('DB AI context connection opened')
 }
@@ -5099,10 +5356,17 @@ async function refreshDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data'
   try {
     const result = await window.aiops.planDatabaseTableMutation(input)
     if (tab.mutationPlan.key !== key) return tab.mutationPlan
-    if (!result.ok || !result.data) {
+    if (!result.ok) {
       tab.mutationPlan = makeDataMutationPlanState({
         key,
         error: result.errorMessage || 'Backend table mutation planning failed.'
+      })
+      return tab.mutationPlan
+    }
+    if (!isDatabaseTableMutationPlanData(result.data)) {
+      tab.mutationPlan = makeDataMutationPlanState({
+        key,
+        error: DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
       })
       return tab.mutationPlan
     }
@@ -5269,6 +5533,12 @@ async function saveDataChanges() {
   const backendResult = await mutateDataTabThroughBackend(tab)
   if (!backendResult.ok) {
     tab.saveError = backendResult.errorMessage || 'Backend table mutation failed.'
+    tab.saving = false
+    showNotice(tab.saveError)
+    return
+  }
+  if (!isDatabaseTableMutationData(backendResult.data)) {
+    tab.saveError = DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
     tab.saving = false
     showNotice(tab.saveError)
     return
@@ -5657,12 +5927,12 @@ async function toggleConnectionStatus(id: string) {
   if (!connection) return
   if (connection.status === 'connected') {
     const result = await disconnectDatabaseConnectionViaBackend(id)
-    if (!applyDatabaseCatalogMutationResult(result, 'Database disconnect failed.')) return
+    if (!applyDatabaseCatalogMutationResult(result, 'Database disconnect failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
     expandedConnections.value = expandedConnections.value.filter((item) => item !== id)
     return
   }
   const result = await connectDatabaseConnectionViaBackend(id)
-  if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.')) return
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
   expandedConnections.value = Array.from(new Set([...expandedConnections.value, id]))
 }
 
@@ -5670,14 +5940,9 @@ async function refreshConnected() {
   const connected = connections.value.filter((connection) => connection.status === 'connected')
   for (const connection of connected) {
     const result = await refreshDatabaseConnectionViaBackend(connection.id)
-    if (result.ok && result.data) {
-      const wasExpanded = expandedConnections.value.includes(connection.id)
-      applyDatabaseCatalog(result.data)
-      if (wasExpanded) expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
-    } else {
-      showNotice(result.errorMessage || 'Database connection refresh failed.')
-      return
-    }
+    const wasExpanded = expandedConnections.value.includes(connection.id)
+    if (!applyDatabaseCatalogMutationResult(result, 'Database connection refresh failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
+    if (wasExpanded) expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
   }
   showNotice('Connected database schemas refreshed')
 }
@@ -5725,10 +5990,12 @@ function openConnectionModalFromEngine(engine: DatabaseEngineInfo, groupId?: str
 
 async function addGroup(parentGroupId: string | null = null) {
   const result = await createDatabaseGroupViaBackend({ name: 'New Group', parentId: parentGroupId })
-  if (!applyDatabaseCatalogMutationResult(result, 'Database group create failed.') || !result.data) return
-  expandedGroups.value = Array.from(new Set([...expandedGroups.value, result.data.group.id, ...(parentGroupId ? [parentGroupId] : [])]))
-  selectedNodeId.value = result.data.group.id
-  editingGroupId.value = result.data.group.id
+  const data = databaseCatalogMutationData(result, 'Database group create failed.', isDatabaseGroupMutationData, DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE)
+  if (!data) return
+  applyDatabaseCatalog(data)
+  expandedGroups.value = Array.from(new Set([...expandedGroups.value, data.group.id, ...(parentGroupId ? [parentGroupId] : [])]))
+  selectedNodeId.value = data.group.id
+  editingGroupId.value = data.group.id
   editingGroupName.value = 'New Group'
   closeMenus()
 }
@@ -5749,7 +6016,7 @@ async function commitGroupRename() {
   editingGroupName.value = ''
   if (name) {
     const result = await renameDatabaseGroupViaBackend({ id, name })
-    applyDatabaseCatalogMutationResult(result, 'Database group rename failed.')
+    applyDatabaseCatalogMutationResult(result, 'Database group rename failed.', isDatabaseGroupMutationData, DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE)
   }
 }
 
@@ -5778,7 +6045,7 @@ function requestDeleteGroup(groupId: string) {
 
 async function deleteGroup(groupId: string) {
   const result = await deleteDatabaseGroupViaBackend(groupId)
-  if (!applyDatabaseCatalogMutationResult(result, 'Database group delete failed.')) return
+  if (!applyDatabaseCatalogMutationResult(result, 'Database group delete failed.', isDatabaseGroupDeleteData, DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE)) return
   selectedNodeId.value = groups.value.find((group) => group.id === DEFAULT_GROUP_ID)?.id ?? groups.value[0]?.id ?? null
   closeMenus()
 }
@@ -5791,7 +6058,7 @@ async function moveGroupTo(groupId: string, parentId: string | null) {
   }
   if (parentId === groupId || (parentId && collectDescendantGroupIds(groupId).has(parentId))) return
   const result = await moveDatabaseGroupViaBackend({ id: groupId, parentId })
-  if (!applyDatabaseCatalogMutationResult(result, 'Database group move failed.')) return
+  if (!applyDatabaseCatalogMutationResult(result, 'Database group move failed.', isDatabaseGroupMutationData, DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE)) return
   if (parentId) expandedGroups.value = Array.from(new Set([...expandedGroups.value, parentId]))
   showNotice(parentId ? `Group moved to ${groupPathLabel(parentId)}` : 'Group moved to root')
   closeMenus()
@@ -5810,7 +6077,16 @@ async function connectFromMenu(connectionId: string) {
   if (!connectionBefore) return
   const result =
     connectionBefore.status === 'connected' ? await disconnectDatabaseConnectionViaBackend(connectionId) : await connectDatabaseConnectionViaBackend(connectionId)
-  if (!applyDatabaseCatalogMutationResult(result, connectionBefore.status === 'connected' ? 'Database disconnect failed.' : 'Database connection failed.')) return
+  if (
+    !applyDatabaseCatalogMutationResult(
+      result,
+      connectionBefore.status === 'connected' ? 'Database disconnect failed.' : 'Database connection failed.',
+      isDatabaseConnectionMutationData,
+      DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE
+    )
+  ) {
+    return
+  }
   const connection = findConnection(connectionId)
   if (connection?.status === 'connected') {
     expandedConnections.value = Array.from(new Set([...expandedConnections.value, connectionId]))
@@ -5825,7 +6101,7 @@ async function moveConnectionToGroup(connectionId: string, groupId: string) {
   const connection = findConnection(connectionId)
   if (!connection || connection.groupId === groupId) return
   const result = await moveDatabaseConnectionViaBackend({ connectionId, groupId })
-  if (!applyDatabaseCatalogMutationResult(result, 'Database connection move failed.')) return
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection move failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
   expandedGroups.value = Array.from(new Set([...expandedGroups.value, groupId]))
   showNotice(groupId === DEFAULT_GROUP_ID ? 'Connection moved to root group' : `Connection moved to ${groupPathLabel(groupId)}`)
   closeMenus()
@@ -5867,7 +6143,7 @@ async function refreshConnectionFromMenu(connectionId: string) {
   if (!connection) return
   const wasExpanded = expandedConnections.value.includes(connectionId)
   const result = await refreshDatabaseConnectionViaBackend(connectionId)
-  if (!applyDatabaseCatalogMutationResult(result, 'Database connection refresh failed.')) return
+  if (!applyDatabaseCatalogMutationResult(result, 'Database connection refresh failed.', isDatabaseConnectionMutationData, DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)) return
   applyConnectionRefreshUi(connectionId, { preserveExpanded: wasExpanded, notice: 'Connection schema refreshed' })
   closeMenus()
 }
@@ -5921,8 +6197,12 @@ function requestRemoveConnection(connectionId: string) {
 async function removeConnection(connectionId: string) {
   const removedTabIds = new Set(tabs.value.filter((tab) => tab.kind !== 'overview' && tab.connectionId === connectionId).map((tab) => tab.id))
   const result = await removeDatabaseConnectionViaBackend(connectionId)
-  if (!result.ok || !result.data) {
+  if (!result.ok) {
     showNotice(result.errorMessage || 'Database connection remove failed.')
+    return
+  }
+  if (!isDatabaseConnectionDeleteData(result.data)) {
+    showNotice(DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE)
     return
   }
   applyDatabaseCatalog(result.data)
@@ -6116,6 +6396,10 @@ async function applyBackendTableTruncate() {
     showNotice(result.errorMessage || 'Backend table truncate failed')
     return false
   }
+  if (!isDatabaseTableMutationData(result.data)) {
+    showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
+    return false
+  }
   tabs.value.forEach((tab) => {
     if (
       tab.kind === 'data' &&
@@ -6166,8 +6450,12 @@ async function applyBackendTableDrop() {
     showNotice(result.errorMessage || 'Backend table drop failed')
     return false
   }
-  if (!result.data?.catalog) {
-    showNotice('Backend table drop did not return refreshed catalog')
+  if (!isDatabaseTableMutationData(result.data, { requireCatalog: true })) {
+    showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
+    return false
+  }
+  if (!result.data.catalog) {
+    showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
     return false
   }
   applyDatabaseCatalog(result.data.catalog)
@@ -6334,6 +6622,11 @@ async function testConnectionDraft() {
     connectionFeedback.value = databaseConnectionResultMessage(result)
     return
   }
+  if (!isDatabaseConnectionTestData(result.data)) {
+    connectionFeedbackKind.value = 'error'
+    connectionFeedback.value = DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE
+    return
+  }
   connectionFeedbackKind.value = 'info'
   connectionFeedback.value = `Connection successful. (${databaseConnectionResultMessage(result)})`
 }
@@ -6356,7 +6649,8 @@ function databaseConnectionTestInput(): DatabaseConnectionTestInput {
 
 function databaseConnectionResultMessage(result: DatabaseConnectionTestResult) {
   if (!result.ok) return result.errorMessage || 'Database connection test failed.'
-  return result.data?.serverVersion || 'ok'
+  if (!isDatabaseConnectionTestData(result.data)) return DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE
+  return result.data.serverVersion
 }
 
 async function testConnectionDraftViaBackend(): Promise<DatabaseConnectionTestResult> {
@@ -6384,11 +6678,22 @@ async function saveConnectionDraft() {
     connectionFeedback.value = databaseConnectionResultMessage(testResult)
     return
   }
+  if (!isDatabaseConnectionTestData(testResult.data)) {
+    connectionSaving.value = false
+    connectionFeedbackKind.value = 'error'
+    connectionFeedback.value = DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE
+    return
+  }
   const saveResult = await saveConnectionDraftViaBackend()
   connectionSaving.value = false
-  if (!saveResult.ok || !saveResult.data) {
+  if (!saveResult.ok) {
     connectionFeedbackKind.value = 'error'
     connectionFeedback.value = saveResult.errorMessage || 'Database connection save failed.'
+    return
+  }
+  if (!isDatabaseConnectionSaveData(saveResult.data)) {
+    connectionFeedbackKind.value = 'error'
+    connectionFeedback.value = DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE
     return
   }
   applyDatabaseCatalog(saveResult.data)
@@ -6526,9 +6831,14 @@ async function createDatabase() {
   createDatabaseModal.submitting = true
   const result = await createDatabaseViaBackend(createDatabaseModal.connectionId, createDatabaseModal.sql, name)
   createDatabaseModal.submitting = false
-  if (!result.ok || !result.data) {
+  if (!result.ok) {
     createDatabaseModal.feedbackKind = 'error'
     createDatabaseModal.feedback = result.errorMessage || 'Create database failed.'
+    return
+  }
+  if (!isDatabaseCreateDatabaseData(result.data)) {
+    createDatabaseModal.feedbackKind = 'error'
+    createDatabaseModal.feedback = DATABASE_CREATE_DATABASE_MALFORMED_MESSAGE
     return
   }
   applyDatabaseCatalog(result.data)
