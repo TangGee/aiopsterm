@@ -4523,6 +4523,124 @@ describe('AppShell', () => {
     expect((window.aiops as any).recordFileTransferTask).toBeUndefined()
   })
 
+  it('fails closed on malformed Files backend transfer and mutation success envelopes', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+
+    const remoteSession = await loadTestFileSession('folder_asset-2')
+    const remoteBrowser = mount(FileBrowser, {
+      props: {
+        session: remoteSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    const remoteListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/backend-missing-task.log'] })
+    vi.mocked(window.aiops.transferFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'success',
+        source: '/tmp/backend-missing-task.log',
+        target: '/home/staging/backend-missing-task.log',
+        bytes: 128,
+        files: 1,
+        mtimeMs: Date.now()
+      }
+    } as any)
+    await remoteBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传文件')!.trigger('click')
+    await flushPromises()
+    expect(remoteBrowser.text()).toContain('上传失败')
+    expect(remoteBrowser.text()).not.toContain('backend-missing-task.log 上传成功')
+    expect(store.fileTransferTasks.some((task) => task.source === '/tmp/backend-missing-task.log')).toBe(false)
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(remoteListCallsBefore)
+    remoteBrowser.unmount()
+
+    const localSession = await loadTestFileSession('local')
+    const renameBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const renameRow = renameBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await renameRow.find('.file-row-actions button[title="重命名"]').trigger('click')
+    await renameRow.find('.file-rename-row input').setValue('release-note-v2.md')
+    const renameListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({ ok: true } as any)
+    await renameRow.find('.file-rename-row button[title="确认"]').trigger('click')
+    await flushPromises()
+    expect(renameBrowser.text()).toContain('重命名失败')
+    expect(renameBrowser.text()).not.toContain('重命名成功')
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(renameListCallsBefore)
+    renameBrowser.unmount()
+
+    const deleteBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const deleteRow = deleteBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await deleteRow.find('.file-row-actions button[title="更多"]').trigger('click')
+    await deleteBrowser.find('.file-more-menu').findAll('button').find((button) => button.text().includes('删除'))!.trigger('click')
+    const deleteListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        affected: 1,
+        path: '/release-note.md',
+        mtimeMs: Date.now()
+      }
+    } as any)
+    await deleteBrowser.find('.file-delete-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(deleteBrowser.text()).toContain('删除失败')
+    expect(deleteBrowser.text()).not.toContain('删除成功')
+    expect(deleteBrowser.text()).toContain('release-note.md')
+    expect(store.fileTransferTasks.some((task) => task.source === '/release-note.md')).toBe(false)
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(deleteListCallsBefore)
+    deleteBrowser.unmount()
+  })
+
+  it('keeps Files editor dirty when save succeeds without a backend-owned task', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(FilesWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    await waitForSelector(wrapper, 'tbody tr')
+
+    const fileRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await fileRow.trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.find('.files-floating-editor').exists()).toBe(true)
+
+    await wrapper.find('.files-editor-body').setValue('changed without backend task')
+    vi.mocked(window.aiops.writeFileContent).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        size: 28,
+        mtimeMs: Date.now()
+      }
+    } as any)
+    const tasksBefore = store.fileTransferTasks.length
+    await wrapper.find('.files-editor-toolbar .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('保存文件失败')
+    expect(store.fileTransferTasks).toHaveLength(tasksBefore)
+    await wrapper.find('.files-editor-toolbar button[title="关闭"]').trigger('click')
+    expect(wrapper.find('.file-modal-card.small').text()).toContain('保存确认')
+  })
+
   it('does not silently ignore Files open/upload/download dialog bridge failures', async () => {
     const originalAiops = {
       showOpenDialog: window.aiops.showOpenDialog,

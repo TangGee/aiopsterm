@@ -461,7 +461,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileEntryMutation, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult } from '@shared/preload'
+import type { FileEntryMutation, FileEntryMutationResult, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult, FileTransferTask } from '@shared/preload'
 
 type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
   mode: string
@@ -602,14 +602,40 @@ const getSessionListOptions = (session: FileSessionInfo | undefined, overrides: 
       }
     : getListOptions(overrides)
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const hasBackendTaskIdentity = (value: unknown): value is FileTransferTask => isRecord(value) && typeof value.id === 'string' && value.id.trim().length > 0
+
+const pushBackendTransferTask = (task: unknown, fallbackError: string) => {
+  if (!hasBackendTaskIdentity(task)) throw new Error(fallbackError)
+  const normalized = workspace.pushFileTransferTask(task)
+  if (!normalized) throw new Error(fallbackError)
+  return normalized
+}
+
+const isFiniteNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value)
+
 const applyTransferResult = (transfer: FileTransferOperationResult, fallbackError: string, cancelledNotice: string, skippedNotice: string) => {
-  if (!transfer.ok) throw new Error(transfer.errorMessage || fallbackError)
-  if (transfer.data?.task) workspace.pushFileTransferTask(transfer.data.task)
-  if (transfer.data?.status === 'cancelled') {
+  if (!transfer?.ok) throw new Error(transfer?.errorMessage || fallbackError)
+  const data = transfer.data
+  const status = data?.status
+  if (
+    !data ||
+    (status !== 'success' && status !== 'cancelled' && status !== 'skipped') ||
+    typeof data.source !== 'string' ||
+    typeof data.target !== 'string' ||
+    !isFiniteNumber(data.bytes) ||
+    !isFiniteNumber(data.files) ||
+    !isFiniteNumber(data.mtimeMs)
+  ) {
+    throw new Error(fallbackError)
+  }
+  pushBackendTransferTask(data.task, fallbackError)
+  if (status === 'cancelled') {
     fileNotice.value = cancelledNotice
     return false
   }
-  if (transfer.data?.status === 'skipped') {
+  if (status === 'skipped') {
     fileNotice.value = skippedNotice
     return false
   }
@@ -638,10 +664,19 @@ const listDirectoryEntries = async (path: string) => {
   return loadDirectoryEntries(normalized)
 }
 
-const mutateEntry = async (mutation: FileEntryMutation) => {
+const applyMutationResult = (result: FileEntryMutationResult, mutation: FileEntryMutation, fallbackError: string) => {
+  if (!result?.ok) throw new Error(result?.errorMessage || fallbackError)
+  const data = result.data
+  if (!data || !isFiniteNumber(data.affected) || !isFiniteNumber(data.mtimeMs) || typeof data.path !== 'string' || !data.path.trim()) {
+    throw new Error(fallbackError)
+  }
+  if (mutation.kind !== 'rename') pushBackendTransferTask(data.task, fallbackError)
+  return data
+}
+
+const mutateEntry = async (mutation: FileEntryMutation, fallbackError = '文件操作失败') => {
   const result = await window.aiops.mutateFileEntry(mutation, getListOptions())
-  if (!result.ok) throw new Error(result.errorMessage || '文件操作失败')
-  return result.data
+  return applyMutationResult(result, mutation, fallbackError)
 }
 
 type AiopsBridge = NonNullable<typeof window.aiops>
@@ -969,7 +1004,7 @@ const confirmRename = async (entry: FileBrowserEntry) => {
   }
   loading.value = true
   try {
-    await mutateEntry({ kind: 'rename', oldPath: entry.path, newPath })
+    await mutateEntry({ kind: 'rename', oldPath: entry.path, newPath }, '重命名失败')
     cancelRename()
     await loadEntries()
     fileNotice.value = '重命名成功'
@@ -1013,8 +1048,7 @@ const confirmPermissions = async () => {
   const target = permissionsTarget.value
   loading.value = true
   try {
-    const result = await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value })
-    if (result?.task) workspace.pushFileTransferTask(result.task)
+    await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value }, '权限更新失败')
     await loadEntries()
     fileNotice.value = `权限已更新为 ${permissionCode.value}`
     permissionsTarget.value = null
@@ -1164,8 +1198,10 @@ const queueMoveTarget = async (name: string, overwrite = false) => {
   const targetPath = `${moveDialog.targetPath}/${name}`.replace(/\/+/g, '/')
   loading.value = true
   try {
-    const result = await mutateEntry({ kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite })
-    if (result?.task) workspace.pushFileTransferTask(result.task)
+    await mutateEntry(
+      { kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite },
+      moveDialog.type === 'copy' ? '复制失败' : '移动失败'
+    )
     if (dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await loadEntries()
     fileNotice.value = moveDialog.type === 'copy' ? '复制成功' : '移动成功'
     closeMoveDialog()
@@ -1209,8 +1245,7 @@ const confirmDeleteEntry = async () => {
   if (!entry) return
   loading.value = true
   try {
-    const result = await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' })
-    if (result?.task) workspace.pushFileTransferTask(result.task)
+    await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' }, '删除失败')
     await loadEntries()
     fileNotice.value = '删除成功'
     closeDeleteDialog()

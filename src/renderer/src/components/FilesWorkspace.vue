@@ -230,7 +230,7 @@ import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import TransferSide from '@/components/files/TransferSide.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileContentOptions } from '@shared/preload'
+import type { FileContentOptions, FileTransferTask } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const expandedDefault = ref(['local'])
@@ -364,6 +364,17 @@ const fileContentOptions = (payload: { sessionId: string; host: string }): FileC
     host: payload.host,
     rootPath: session?.rootPath
   }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const hasBackendTaskIdentity = (value: unknown): value is FileTransferTask => isRecord(value) && typeof value.id === 'string' && value.id.trim().length > 0
+
+const pushBackendTransferTask = (task: unknown, fallbackError: string) => {
+  if (!hasBackendTaskIdentity(task)) throw new Error(fallbackError)
+  const normalized = workspace.pushFileTransferTask(task)
+  if (!normalized) throw new Error(fallbackError)
+  return normalized
 }
 
 const openFileEditor = async (payload: { filePath: string; sessionId: string; sessionLabel: string; host: string }) => {
@@ -503,11 +514,15 @@ const saveFileEditor = async (key: string, needClose: boolean) => {
       editor.error = result.errorMessage || '保存文件失败'
       return
     }
+    if (!result.data || typeof result.data.size !== 'number' || !Number.isFinite(result.data.size) || !Number.isFinite(result.data.mtimeMs)) {
+      editor.error = '保存文件失败'
+      return
+    }
+    pushBackendTransferTask(result.data.task, '保存文件失败')
     editor.originContent = editor.content
     editor.action = 'edit'
     editor.dirty = false
     editor.saved = true
-    if (result.data?.task) workspace.pushFileTransferTask(result.data.task)
   } catch (error) {
     editor.error = error instanceof Error ? error.message : '保存文件失败'
     return
