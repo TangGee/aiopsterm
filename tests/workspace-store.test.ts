@@ -417,6 +417,50 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
   })
 
+  it('fails closed on malformed AI exchange, response, and cancel result envelopes', async () => {
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        requestId: 'malformed-request'
+      }
+    } as any)
+    await expect(store.sendChat('客户端不能伪造 AI 交换')).resolves.toBe(false)
+    expect(store.chatMessages).toEqual([])
+    expect(store.topNotice).toBe('AI 请求创建失败')
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: '客户端不能接受缺少 provider/model/duration 的响应'
+      }
+    } as any)
+    await expect(store.sendChat('生成一条坏响应')).resolves.toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.chatMessages.at(-1)?.role).toBe('assistant')
+    expect(store.chatMessages.at(-1)?.state).toBe('error')
+    expect(store.chatMessages.at(-1)?.text).toBe('AI 响应生成结果无效')
+    expect(store.chatMessages.at(-1)?.text).not.toContain('provider/model')
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
+    await expect(store.sendChat('取消一条坏响应')).resolves.toBe(true)
+    const streamingAssistant = store.chatMessages.at(-1)
+    expect(streamingAssistant?.state).toBe('streaming')
+    vi.mocked(window.aiops.cancelAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'cancelled',
+        active: true
+      }
+    } as any)
+    await expect(store.cancelStreamingAiChatResponse()).resolves.toBe(false)
+    expect(streamingAssistant?.state).toBe('streaming')
+    expect(streamingAssistant?.text).toContain('正在请求 aiopsterm AI 后端')
+    expect(store.topNotice).toBe('AI 生成取消失败')
+  })
+
   it('keeps configuration changes in local state before bridge persistence', async () => {
     const store = useWorkspaceStore()
 
@@ -3713,6 +3757,113 @@ describe('workspace store', () => {
     })
     await expect(store.setMessageFeedback(assistant!.id, 'down')).resolves.toBe(false)
     expect(assistant!.feedback).toBeUndefined()
+  })
+
+  it('fails closed on malformed AI history, message metadata, and terminal command envelopes', async () => {
+    const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+
+    const conversationsBeforeList = JSON.stringify(store.conversations)
+    const selectedBeforeList = store.selectedConversationId
+    vi.mocked(window.aiops.listChatConversations).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversations: [{ id: 'client-fake-conversation', title: '缺字段' }],
+        selectedConversationId: 'client-fake-conversation'
+      }
+    } as any)
+    await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(false)
+    expect(JSON.stringify(store.conversations)).toBe(conversationsBeforeList)
+    expect(store.selectedConversationId).toBe(selectedBeforeList)
+
+    vi.mocked(window.aiops.restoreChatConversation).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversation: { id: 'conv-2', title: '坏恢复' },
+        messages: [{ id: 'bad-message', role: 'assistant' }]
+      }
+    } as any)
+    vi.mocked(window.aiops.listChatConversations).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversations: [{ id: 'conv-2' }],
+        selectedConversationId: 'conv-2'
+      }
+    } as any)
+    await expect(store.restoreConversation('conv-2')).resolves.toBe(false)
+    expect(JSON.stringify(store.conversations)).toBe(conversationsBeforeList)
+    expect(store.chatMessages).toEqual([])
+
+    vi.mocked(window.aiops.createChatConversation).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversation: { id: 'client-created' },
+        conversations: [{ id: 'client-created' }],
+        selectedConversationId: 'client-created'
+      }
+    } as any)
+    await expect(store.createConversation()).resolves.toBeNull()
+    expect(JSON.stringify(store.conversations)).toBe(conversationsBeforeList)
+
+    vi.mocked(window.aiops.deleteChatConversation).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        deletedId: 'conv-2',
+        conversations: [{ id: 'conv-1' }],
+        selectedConversationId: 'conv-1'
+      }
+    } as any)
+    await expect(store.deleteConversation('conv-2')).resolves.toBe(false)
+    expect(JSON.stringify(store.conversations)).toBe(conversationsBeforeList)
+
+    const originalConversation = store.conversations.find((conversation) => conversation.id === 'conv-2')
+    expect(originalConversation).toBeTruthy()
+    vi.mocked(window.aiops.updateChatConversation).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversation: { ...originalConversation, title: '客户端伪造标题' },
+        conversations: [{ ...originalConversation, title: '客户端伪造标题', ts: 'bad-ts' }],
+        selectedConversationId: 'conv-2'
+      }
+    } as any)
+    await expect(store.renameConversation('conv-2', '客户端伪造标题')).resolves.toBe(false)
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.title).toBe(originalConversation!.title)
+
+    vi.mocked(window.aiops.updateChatConversation).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversation: { ...originalConversation, favorite: true },
+        conversations: [{ ...originalConversation, favorite: true, updatedAt: 123 }],
+        selectedConversationId: 'conv-2'
+      }
+    } as any)
+    await expect(store.toggleConversationFavorite('conv-2')).resolves.toBe(false)
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-2')?.favorite).toBe(originalConversation!.favorite)
+
+    await expect(store.restoreConversation('conv-2')).resolves.toBe(true)
+    const assistant = store.chatMessages.find((message) => message.id === 'hist-conv-2-assistant')
+    expect(assistant).toBeTruthy()
+    vi.mocked(window.aiops.saveChatMessageMetadata).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversation: originalConversation,
+        messages: [{ id: assistant!.id, role: 'assistant', favorite: true }]
+      }
+    } as any)
+    await expect(store.toggleMessageFavorite(assistant!.id)).resolves.toBe(false)
+    expect(assistant!.favorite).toBeUndefined()
+
+    vi.mocked(window.aiops.generateTerminalCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        id: 'client-fake-command',
+        command: 'df -h'
+      }
+    } as any)
+    const generated = await store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')
+    expect(generated).toBeNull()
+    expect(store.terminalCommandGenerationRecords.some((record) => record.id === 'client-fake-command')).toBe(false)
+    expect(store.topNotice).toBe('终端命令生成失败')
   })
 
   it('manages External reference-style context chips, command presets, message actions, and todos', async () => {

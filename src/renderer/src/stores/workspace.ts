@@ -178,6 +178,14 @@ type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['exe
 type K8sBackendResourceRefreshData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['refreshKubernetesResources']>>['data']>
 type K8sBackendResourceActionPlanData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['planKubernetesResourceAction']>>['data']>
 type K8sBackendResourceActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesResourceAction']>>['data']>
+type AiChatHistorySnapshotData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['listChatConversations']>>['data']>
+type AiChatConversationMutationData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createChatConversation']>>['data']>
+type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['deleteChatConversation']>>['data']>
+type AiChatConversationRestoreData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['restoreChatConversation']>>['data']>
+type AiChatMessageMetadataData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveChatMessageMetadata']>>['data']>
+type AiChatExchangeRequestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createAiChatExchangeRequest']>>['data']>
+type AiChatResponseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['generateAiChatResponse']>>['data']>
+type AiChatCancelData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['cancelAiChatResponse']>>['data']>
 const defaultK8sProxyConfig: K8sProxyConfig = {
   enabled: false,
   type: 'SOCKS5',
@@ -1986,6 +1994,212 @@ const isK8sBackendResourceRefreshData = (source: unknown): source is K8sBackendR
   )
 }
 
+const aiChatHistoryMessageRoles: AiChatHistoryMessage['role'][] = ['user', 'assistant', 'system']
+const aiChatMessageStates: AiChatMessageState[] = ['streaming', 'done', 'cancelled', 'error']
+const aiChatFeedbackValues: NonNullable<AiChatHistoryMessage['feedback']>[] = ['up', 'down']
+const aiChatAskValues: NonNullable<AiChatHistoryMessage['ask']>[] = ['command', 'mcp_tool_call', 'followup']
+const aiChatSayValues: NonNullable<AiChatHistoryMessage['say']>[] = ['command', 'command_output', 'search_result', 'context_truncated']
+const aiChatActionValues: NonNullable<AiChatHistoryMessage['action']>[] = ['approved', 'rejected']
+const aiChatModes: NonNullable<AiChatResponseInput['mode']>[] = ['agent', 'command', 'chat']
+const aiSupportedImageTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
+const aiProviderKeys = ['aiopsterm-local', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama']
+
+const isOptionalString = (value: unknown) => value === undefined || typeof value === 'string'
+const isOptionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean'
+const isOptionalFiniteNumber = (value: unknown) => value === undefined || (typeof value === 'number' && Number.isFinite(value))
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
+const isAiProviderKey = (value: unknown) => typeof value === 'string' && aiProviderKeys.includes(value)
+
+const isAiHistoryHostContext = (source: unknown): source is AiChatHistoryHost =>
+  isRecord(source) &&
+  isNonEmptyString(source.id) &&
+  source.kind === 'hosts' &&
+  isNonEmptyString(source.label) &&
+  isOptionalString(source.detail)
+
+const isAiDocChipRef = (source: unknown): source is AiDocChipRef =>
+  isRecord(source) &&
+  isNonEmptyString(source.absPath) &&
+  isOptionalString(source.relPath) &&
+  isOptionalString(source.name) &&
+  (source.type === undefined || source.type === 'file' || source.type === 'dir') &&
+  isOptionalFiniteNumber(source.startLine) &&
+  isOptionalFiniteNumber(source.endLine)
+
+const isAiChatChipRef = (source: unknown): source is AiChatChipRef =>
+  isRecord(source) && isNonEmptyString(source.taskId) && isOptionalString(source.title)
+
+const isAiCommandChipRef = (source: unknown): source is AiCommandChipRef =>
+  isRecord(source) &&
+  isNonEmptyString(source.command) &&
+  isOptionalString(source.label) &&
+  isOptionalFiniteNumber(source.summarizeUpToTs) &&
+  isOptionalString(source.path)
+
+const isAiSkillChipRef = (source: unknown): source is AiSkillChipRef =>
+  isRecord(source) && isNonEmptyString(source.skillName) && isOptionalString(source.description)
+
+const isAiContentPart = (source: unknown): source is AiContentPart => {
+  if (!isRecord(source)) return false
+  if (source.type === 'text') return typeof source.text === 'string'
+  if (source.type === 'image') {
+    return aiSupportedImageTypes.includes(source.mediaType as AiSupportedImageType) && isNonEmptyString(source.data) && isOptionalString(source.name)
+  }
+  if (source.type !== 'chip') return false
+  if (source.chipType === 'doc') return isAiDocChipRef(source.ref)
+  if (source.chipType === 'chat') return isAiChatChipRef(source.ref)
+  if (source.chipType === 'command') return isAiCommandChipRef(source.ref)
+  if (source.chipType === 'skill') return isAiSkillChipRef(source.ref)
+  return false
+}
+
+const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage =>
+  isRecord(source) &&
+  isNonEmptyString(source.id) &&
+  aiChatHistoryMessageRoles.includes(source.role as AiChatHistoryMessage['role']) &&
+  typeof source.text === 'string' &&
+  (source.contentParts === undefined || (Array.isArray(source.contentParts) && source.contentParts.every(isAiContentPart))) &&
+  (source.hosts === undefined || (Array.isArray(source.hosts) && source.hosts.every(isAiHistoryHostContext))) &&
+  (source.state === undefined || aiChatMessageStates.includes(source.state as AiChatMessageState)) &&
+  isOptionalBoolean(source.favorite) &&
+  (source.feedback === undefined || aiChatFeedbackValues.includes(source.feedback as NonNullable<AiChatHistoryMessage['feedback']>)) &&
+  isOptionalString(source.executedCommand) &&
+  (source.ask === undefined || aiChatAskValues.includes(source.ask as NonNullable<AiChatHistoryMessage['ask']>)) &&
+  (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatHistoryMessage['say']>)) &&
+  (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatHistoryMessage['action']>)) &&
+  (source.mcpToolCall === undefined ||
+    (isRecord(source.mcpToolCall) &&
+      isNonEmptyString(source.mcpToolCall.serverName) &&
+      isNonEmptyString(source.mcpToolCall.toolName) &&
+      (source.mcpToolCall.arguments === undefined || isRecord(source.mcpToolCall.arguments)))) &&
+  (source.followupOptions === undefined || (Array.isArray(source.followupOptions) && source.followupOptions.every((item) => typeof item === 'string'))) &&
+  isOptionalString(source.selectedOption) &&
+  isOptionalBoolean(source.partial)
+
+const isAiChatConversationRecord = (source: unknown): source is AiChatConversationRecord =>
+  isRecord(source) &&
+  isNonEmptyString(source.id) &&
+  typeof source.title === 'string' &&
+  typeof source.summary === 'string' &&
+  typeof source.updatedAt === 'string' &&
+  isNonNegativeFiniteNumber(source.ts) &&
+  isOptionalString(source.ipAddress) &&
+  isOptionalBoolean(source.favorite)
+
+const isAiChatHistorySnapshotData = (source: unknown): source is AiChatHistorySnapshotData =>
+  isRecord(source) &&
+  Array.isArray(source.conversations) &&
+  source.conversations.every(isAiChatConversationRecord) &&
+  typeof source.selectedConversationId === 'string'
+
+const isAiChatConversationMutationData = (source: unknown): source is AiChatConversationMutationData =>
+  isRecord(source) &&
+  isAiChatConversationRecord(source.conversation) &&
+  Array.isArray(source.conversations) &&
+  source.conversations.every(isAiChatConversationRecord) &&
+  typeof source.selectedConversationId === 'string' &&
+  source.conversations.some((conversation) => conversation.id === (source.conversation as AiChatConversationRecord).id)
+
+const isAiChatConversationDeleteData = (source: unknown): source is AiChatConversationDeleteData =>
+  isRecord(source) && isNonEmptyString(source.deletedId) && isAiChatHistorySnapshotData(source)
+
+const isAiChatConversationRestoreData = (source: unknown): source is AiChatConversationRestoreData =>
+  isRecord(source) &&
+  isAiChatConversationRecord(source.conversation) &&
+  Array.isArray(source.messages) &&
+  source.messages.every(isAiChatHistoryMessage)
+
+const isAiChatMessageMetadataData = (source: unknown): source is AiChatMessageMetadataData =>
+  isRecord(source) &&
+  isAiChatConversationRecord(source.conversation) &&
+  Array.isArray(source.messages) &&
+  source.messages.every(isAiChatHistoryMessage)
+
+const isAiChatMessageInput = (source: unknown): source is AiChatMessageInput =>
+  isRecord(source) && aiChatHistoryMessageRoles.includes(source.role as AiChatMessageInput['role']) && typeof source.text === 'string'
+
+const isAiChatContextInput = (source: unknown): source is NonNullable<AiChatResponseInput['contexts']>[number] =>
+  isRecord(source) &&
+  isNonEmptyString(source.id) &&
+  isNonEmptyString(source.kind) &&
+  isNonEmptyString(source.label) &&
+  isOptionalString(source.detail) &&
+  isOptionalString(source.relPath) &&
+  isOptionalString(source.mediaType)
+
+const isAiChatCommandInput = (source: unknown): source is NonNullable<AiChatResponseInput['command']> => {
+  if (!isRecord(source)) return false
+  return (
+    isOptionalString(source.id) &&
+    isOptionalString(source.label) &&
+    isOptionalString(source.command) &&
+    isOptionalString(source.path) &&
+    [source.id, source.label, source.command].some(isNonEmptyString)
+  )
+}
+
+const isAiChatSkillInput = (source: unknown): source is NonNullable<AiChatResponseInput['skills']>[number] =>
+  isRecord(source) && isNonEmptyString(source.name) && isOptionalString(source.description) && isOptionalString(source.content)
+
+const isAiChatResponseInput = (source: unknown): source is AiChatResponseInput =>
+  isRecord(source) &&
+  isOptionalString(source.requestId) &&
+  isOptionalString(source.assistantMessageId) &&
+  isNonEmptyString(source.prompt) &&
+  (source.messages === undefined || (Array.isArray(source.messages) && source.messages.every(isAiChatMessageInput))) &&
+  (source.contexts === undefined || (Array.isArray(source.contexts) && source.contexts.every(isAiChatContextInput))) &&
+  (source.skills === undefined || (Array.isArray(source.skills) && source.skills.every(isAiChatSkillInput))) &&
+  (source.command === undefined || source.command === null || isAiChatCommandInput(source.command)) &&
+  isOptionalString(source.model) &&
+  (source.mode === undefined || aiChatModes.includes(source.mode as NonNullable<AiChatResponseInput['mode']>))
+
+const isAiChatExchangeRequestData = (source: unknown): source is AiChatExchangeRequestData =>
+  isRecord(source) &&
+  isNonEmptyString(source.requestId) &&
+  isAiChatHistoryMessage(source.userMessage) &&
+  source.userMessage.role === 'user' &&
+  isAiChatHistoryMessage(source.assistantMessage) &&
+  source.assistantMessage.role === 'assistant' &&
+  isAiChatResponseInput(source.responseInput)
+
+const isAiChatResponseData = (source: unknown): source is AiChatResponseData =>
+  isRecord(source) &&
+  isNonEmptyString(source.text) &&
+  isAiProviderKey(source.provider) &&
+  isNonEmptyString(source.model) &&
+  isNonNegativeFiniteNumber(source.durationMs) &&
+  (source.status === undefined || source.status === 'done' || source.status === 'cancelled') &&
+  isOptionalString(source.requestId) &&
+  isOptionalString(source.assistantMessageId)
+
+const isAiChatCancelData = (source: unknown): source is AiChatCancelData =>
+  isRecord(source) &&
+  source.status === 'cancelled' &&
+  isOptionalString(source.requestId) &&
+  isOptionalString(source.assistantMessageId) &&
+  isNonEmptyString(source.text) &&
+  typeof source.active === 'boolean'
+
+const isTerminalCommandGenerationContext = (source: unknown): source is TerminalCommandGenerationContext =>
+  isRecord(source) &&
+  isNonEmptyString(source.host) &&
+  isNonEmptyString(source.username) &&
+  typeof source.cwd === 'string' &&
+  isNonEmptyString(source.shell) &&
+  (source.connectionType === 'local' || source.connectionType === 'ssh')
+
+const isTerminalCommandGenerationRecord = (source: unknown): source is TerminalCommandGenerationRecord =>
+  isRecord(source) &&
+  isNonEmptyString(source.id) &&
+  isNonEmptyString(source.panelId) &&
+  isNonEmptyString(source.instruction) &&
+  isNonEmptyString(source.command) &&
+  isNonEmptyString(source.modelName) &&
+  isTerminalCommandGenerationContext(source.context) &&
+  source.status === 'done' &&
+  isNonNegativeFiniteNumber(source.createdAt) &&
+  isAiProviderKey(source.provider)
+
 const normalizeKnowledgeNodes = (source: unknown, parentRelDir = '', seen = new Set<string>()): KnowledgeNode[] => {
   const rawNodes = Array.isArray(source) ? source : []
   const nodes: KnowledgeNode[] = []
@@ -3245,21 +3459,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const restoreChatMessagesFromBackend = async (id: string) => {
     if (!window.aiops?.restoreChatConversation) return false
     const result = await window.aiops.restoreChatConversation(id)
-    if (!result?.ok || !result.data) return false
-    const existing = conversations.value.find((conversation) => conversation.id === result.data!.conversation.id)
-    const nextConversation = cloneConversationRecord(result.data.conversation)
+    if (!result?.ok || !isAiChatConversationRestoreData(result.data)) return false
+    const data = result.data
+    const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
+    const nextConversation = cloneConversationRecord(data.conversation)
     conversations.value = existing
       ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
       : [nextConversation, ...conversations.value]
     selectedConversationId.value = nextConversation.id
-    chatMessages.value = result.data.messages.map(chatHistoryMessageToChatMessage)
+    chatMessages.value = data.messages.map(chatHistoryMessageToChatMessage)
     return true
   }
 
   const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean } = {}) => {
     if (!window.aiops?.listChatConversations) return false
     const result = await window.aiops.listChatConversations()
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok || !isAiChatHistorySnapshotData(result.data)) return false
     applyChatHistorySnapshot(result.data)
     if (options.restoreIfEmpty !== false && chatMessages.value.length === 0 && selectedConversationId.value) {
       await restoreChatMessagesFromBackend(selectedConversationId.value)
@@ -3332,7 +3547,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       const created = await window.aiops.createChatConversation()
-      if (!created?.ok || !created.data) {
+      if (!created?.ok || !isAiChatConversationMutationData(created.data)) {
         if (options.notifyFailure) setTopNotice(created?.errorMessage || '会话历史写入失败')
         return false
       }
@@ -3351,7 +3566,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       favorite: conversation.favorite,
       messages: currentChatHistoryMessages()
     })
-    if (!result?.ok || !result.data) {
+    if (!result?.ok || !isAiChatConversationMutationData(result.data)) {
       if (options.notifyFailure) setTopNotice(result?.errorMessage || '会话历史写入失败')
       return false
     }
@@ -9979,7 +10194,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       modelName: selectedModel,
       context: buildTerminalCommandContext(panel)
     })
-    if (!result.ok || !result.data) return null
+    if (!result.ok || !isTerminalCommandGenerationRecord(result.data)) {
+      setTopNotice(result.errorMessage || '终端命令生成失败')
+      return null
+    }
     const record = result.data
     terminalCommandGenerationRecords.value = [record, ...terminalCommandGenerationRecords.value].slice(0, 20)
     return record
@@ -10014,15 +10232,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       void refreshAiTodoSnapshot()
       return
     }
-    if (result.ok && result.data?.status === 'cancelled') {
-      message.state = 'cancelled'
-      message.text = result.data.text || '已停止生成。'
-    } else if (result.ok && result.data?.text) {
-      message.state = 'done'
-      message.text = result.data.text
-    } else {
+    const data = result.data
+    if (!result.ok) {
       message.state = 'error'
       message.text = result.errorMessage || 'AI 响应生成失败'
+    } else if (!isAiChatResponseData(data)) {
+      message.state = 'error'
+      message.text = 'AI 响应生成结果无效'
+    } else if (data.status === 'cancelled') {
+      message.state = 'cancelled'
+      message.text = data.text
+    } else {
+      message.state = 'done'
+      message.text = data.text
     }
     void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
@@ -10041,7 +10263,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       assistantMessageId: message.id,
       requestId
     })
-    if (!result?.ok || !result.data) {
+    if (!result?.ok || !isAiChatCancelData(result.data)) {
       setTopNotice(result?.errorMessage || 'AI 生成取消失败')
       return false
     }
@@ -10097,7 +10319,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       model: config.value.modelName,
       mode: mode.value === 'agents' ? 'agent' : 'command'
     })
-    if (!request.ok || !request.data) return false
+    if (!request.ok || !isAiChatExchangeRequestData(request.data)) {
+      setTopNotice(request.errorMessage || 'AI 请求创建失败')
+      return false
+    }
     const userMessage = chatHistoryMessageToChatMessage(request.data.userMessage)
     userMessage.contentParts = safeContentParts.length || hasStructuredParts ? safeContentParts : undefined
     userMessage.hosts = hostContexts
@@ -10132,7 +10357,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const createConversation = async () => {
     if (!window.aiops?.createChatConversation) return null
     const result = await window.aiops.createChatConversation()
-    if (!result?.ok || !result.data) return null
+    if (!result?.ok || !isAiChatConversationMutationData(result.data)) return null
     applyChatHistorySnapshot({
       conversations: result.data.conversations,
       selectedConversationId: result.data.selectedConversationId
@@ -10144,7 +10369,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const deleteConversation = async (id: string) => {
     if (!window.aiops?.deleteChatConversation) return false
     const result = await window.aiops.deleteChatConversation(id)
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok || !isAiChatConversationDeleteData(result.data)) return false
     applyChatHistorySnapshot({
       conversations: result.data.conversations,
       selectedConversationId: result.data.selectedConversationId
@@ -10176,7 +10401,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       favorite: conversation.favorite,
       messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
     })
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok || !isAiChatConversationMutationData(result.data)) return false
     applyChatHistorySnapshot({
       conversations: result.data.conversations,
       selectedConversationId: result.data.selectedConversationId
@@ -10199,7 +10424,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       favorite: nextFavorite,
       messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
     })
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok || !isAiChatConversationMutationData(result.data)) return false
     applyChatHistorySnapshot({
       conversations: result.data.conversations,
       selectedConversationId: result.data.selectedConversationId
@@ -10259,7 +10484,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       messageId: id,
       feedback: nextFeedback
     })
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok || !isAiChatMessageMetadataData(result.data)) return false
     return applyMessageMetadataSnapshot(id, result.data.messages)
   }
 
@@ -10275,7 +10500,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       messageId: id,
       favorite: !message.favorite
     })
-    if (!result?.ok || !result.data) return false
+    if (!result?.ok || !isAiChatMessageMetadataData(result.data)) return false
     return applyMessageMetadataSnapshot(id, result.data.messages)
   }
 
