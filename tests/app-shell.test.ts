@@ -2188,9 +2188,9 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
+    vi.mocked(window.aiops.exportChat).mockClear()
     vi.mocked(window.aiops.showSaveDialog).mockClear()
     vi.mocked(window.aiops.writeLocalFile).mockClear()
-    vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/ai-chat-export.md' })
     const historyConversations = Array.from({ length: 23 }, (_, index) => ({
       id: `history-${index + 1}`,
       title: index === 0 ? '生产巡检' : index === 1 ? '发布回滚会话' : `历史会话 ${index + 1}`,
@@ -2401,13 +2401,19 @@ describe('AppShell', () => {
 
     await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
     await flushPromises()
-    expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({
-      defaultPath: '生产巡检复盘.md',
-      filters: [{ name: 'Markdown Files', extensions: ['md'] }]
-    })
-    const exportCall = vi.mocked(window.aiops.writeLocalFile).mock.calls.at(-1)
-    const exportMarkdown = String(exportCall?.[1])
-    expect(exportCall?.[0]).toBe('/tmp/ai-chat-export.md')
+    const exportInput = vi.mocked(window.aiops.exportChat).mock.calls.at(-1)?.[0]
+    expect(exportInput).toEqual(
+      expect.objectContaining({
+        title: '生产巡检复盘',
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: 'search-user', role: 'user' }),
+          expect.objectContaining({ id: 'export-command', ask: 'command' })
+        ])
+      })
+    )
+    expect(window.aiops.showSaveDialog).not.toHaveBeenCalled()
+    expect(window.aiops.writeLocalFile).not.toHaveBeenCalled()
+    const exportMarkdown = String((await vi.mocked(window.aiops.exportChat).mock.results.at(-1)?.value)?.data?.markdown)
     expect(exportMarkdown).toContain('from aiopsterm')
     expect(exportMarkdown).toContain('**User:**')
     expect(exportMarkdown).toContain('rollback 计划')

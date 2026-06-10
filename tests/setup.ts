@@ -1,4 +1,5 @@
 import type {
+  AiChatExportInput,
   DatabaseCatalogInfo,
   DatabaseColumnInfo,
   DatabaseConnectionInfo,
@@ -24,6 +25,7 @@ import type {
   SshAgentKeychainOption
 } from '@shared/preload'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
+import { buildChatExportMarkdown, sanitizeChatExportFileName } from '@shared/chatExport'
 import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
 import {
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64,
@@ -5158,6 +5160,15 @@ Object.defineProperty(window, 'aiops', {
     getPathForFile: vi.fn((file: File & { path?: string }) => String(file?.path || '')),
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/tmp/imported-note.md'] })),
     showSaveDialog: vi.fn(async (options?: { defaultPath?: string }) => ({ canceled: false, filePath: `/tmp/${options?.defaultPath || 'downloaded-file'}` })),
+    exportChat: vi.fn(async (input: AiChatExportInput) => ({
+      ok: true,
+      data: {
+        exported: input.messages.length,
+        fileName: sanitizeChatExportFileName(input.title),
+        filePath: '/tmp/ai-chat-export.md',
+        markdown: buildChatExportMarkdown(input, new Date('2026-06-04T12:00:00+08:00'))
+      }
+    })),
     saveCustomBackground: vi.fn(async (srcAbsPath: string) => {
       const name = srcAbsPath.split(/[/\\]/).pop() || 'custom-bg.png'
       return {

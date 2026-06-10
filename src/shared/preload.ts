@@ -568,15 +568,95 @@ export type AiChatHistoryHostContext = {
   detail?: string
 }
 
+export type AiTextContentPart = {
+  type: 'text'
+  text: string
+}
+
+export type AiDocChipRef = {
+  absPath: string
+  relPath?: string
+  name?: string
+  type?: 'file' | 'dir'
+  startLine?: number
+  endLine?: number
+}
+
+export type AiChatChipRef = {
+  taskId: string
+  title?: string
+}
+
+export type AiCommandChipRef = {
+  command: string
+  label?: string
+  summarizeUpToTs?: number
+  path?: string
+}
+
+export type AiSkillChipRef = {
+  skillName: string
+  description?: string
+}
+
+export type AiDocChipContentPart = { type: 'chip'; chipType: 'doc'; ref: AiDocChipRef }
+export type AiChatChipContentPart = { type: 'chip'; chipType: 'chat'; ref: AiChatChipRef }
+export type AiCommandChipContentPart = { type: 'chip'; chipType: 'command'; ref: AiCommandChipRef }
+export type AiSkillChipContentPart = { type: 'chip'; chipType: 'skill'; ref: AiSkillChipRef }
+export type AiChipContentPart =
+  | AiDocChipContentPart
+  | AiChatChipContentPart
+  | AiCommandChipContentPart
+  | AiSkillChipContentPart
+
+export type AiSupportedImageType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' | 'image/bmp' | 'image/svg+xml'
+
+export type AiImageContentPart = {
+  type: 'image'
+  mediaType: AiSupportedImageType
+  data: string
+  name?: string
+}
+
+export type AiContentPart = AiTextContentPart | AiChipContentPart | AiImageContentPart
+
 export type AiChatHistoryMessage = {
   id: string
   role: AiChatHistoryMessageRole
   text: string
+  contentParts?: AiContentPart[]
   hosts?: AiChatHistoryHostContext[]
   state?: AiChatMessageState
   favorite?: boolean
   feedback?: 'up' | 'down'
+  executedCommand?: string
+  ask?: 'command' | 'mcp_tool_call' | 'followup'
+  say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
+  action?: 'approved' | 'rejected'
+  mcpToolCall?: {
+    serverName: string
+    toolName: string
+    arguments?: Record<string, unknown>
+  }
+  followupOptions?: string[]
+  selectedOption?: string
+  partial?: boolean
 }
+
+export type AiChatExportMessage = AiChatHistoryMessage
+
+export type AiChatExportInput = {
+  title: string
+  messages: AiChatExportMessage[]
+}
+
+export type AiChatExportResult = AiopsMutationResult<{
+  exported: number
+  fileName: string
+  filePath?: string
+  canceled?: boolean
+  markdown?: string
+}>
 
 export type AiChatConversationRecord = {
   id: string
@@ -2377,6 +2457,7 @@ export type AiopsPreloadApi = {
   deleteChatConversation: (id: string) => Promise<AiChatConversationDeleteResult>
   restoreChatConversation: (id: string) => Promise<AiChatConversationRestoreResult>
   saveChatMessageMetadata: (input: AiChatMessageMetadataInput) => Promise<AiChatMessageMetadataResult>
+  exportChat: (input: AiChatExportInput) => Promise<AiChatExportResult>
   listAiTodoSnapshot: () => Promise<AiTodoSnapshotResult>
   listAiContextCatalog: () => Promise<AiContextCatalogResult>
   listAiCommandCatalog: () => Promise<AiCommandCatalogResult>

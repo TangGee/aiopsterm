@@ -29,11 +29,16 @@ type ChatHistoryHostContext = NonNullable<AiChatHistoryMessage['hosts']>[number]
 
 const nowText = () => '刚刚'
 
+const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
 const cloneConversation = (conversation: AiChatConversationRecord): AiChatConversationRecord => ({ ...conversation })
 
 const cloneMessage = (message: AiChatHistoryMessage): AiChatHistoryMessage => ({
   ...message,
-  hosts: message.hosts ? message.hosts.map((host) => ({ ...host })) : undefined
+  hosts: message.hosts ? message.hosts.map((host) => ({ ...host })) : undefined,
+  contentParts: message.contentParts ? cloneJson(message.contentParts) : undefined,
+  mcpToolCall: message.mcpToolCall ? cloneJson(message.mcpToolCall) : undefined,
+  followupOptions: message.followupOptions ? [...message.followupOptions] : undefined
 })
 
 const cloneMessages = (messages: AiChatHistoryMessage[]) => messages.map(cloneMessage)
@@ -141,14 +146,38 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
             })
             .filter(Boolean) as AiChatHistoryMessage['hosts']
         : undefined
+      const ask = item.ask === 'command' || item.ask === 'mcp_tool_call' || item.ask === 'followup' ? item.ask : undefined
+      const say =
+        item.say === 'command' || item.say === 'command_output' || item.say === 'search_result' || item.say === 'context_truncated'
+          ? item.say
+          : undefined
+      const action = item.action === 'approved' || item.action === 'rejected' ? item.action : undefined
+      const contentParts = Array.isArray(item.contentParts) ? cloneJson(item.contentParts) : undefined
+      const mcpToolCall = isRecord(item.mcpToolCall)
+        ? {
+            serverName: normalizeText(item.mcpToolCall.serverName),
+            toolName: normalizeText(item.mcpToolCall.toolName),
+            arguments: isRecord(item.mcpToolCall.arguments) ? cloneJson(item.mcpToolCall.arguments) : undefined
+          }
+        : undefined
+      const followupOptions = Array.isArray(item.followupOptions) ? item.followupOptions.map(normalizeText).filter(Boolean) : undefined
       return {
         id: normalizeText(item.id) || `history-message-${index + 1}`,
         role,
         text,
+        contentParts: contentParts?.length ? contentParts : undefined,
         hosts: hosts?.length ? hosts : undefined,
-        state: item.state === 'streaming' || item.state === 'done' ? item.state : undefined,
+        state: item.state === 'streaming' || item.state === 'done' || item.state === 'cancelled' || item.state === 'error' ? item.state : undefined,
         favorite: item.favorite === true ? true : undefined,
-        feedback: item.feedback === 'up' || item.feedback === 'down' ? item.feedback : undefined
+        feedback: item.feedback === 'up' || item.feedback === 'down' ? item.feedback : undefined,
+        executedCommand: normalizeText(item.executedCommand) || undefined,
+        ask,
+        say,
+        action,
+        mcpToolCall: mcpToolCall?.serverName && mcpToolCall.toolName ? mcpToolCall : undefined,
+        followupOptions: followupOptions?.length ? followupOptions : undefined,
+        selectedOption: normalizeText(item.selectedOption) || undefined,
+        partial: item.partial === true ? true : undefined
       }
     })
     .filter(Boolean) as AiChatHistoryMessage[]

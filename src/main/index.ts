@@ -36,6 +36,7 @@ import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeReque
 import { configureAiCommandBackendRuntime, listAiCommandCatalog } from './backend/aiCommands'
 import { configureAiContextBackendRuntime, listAiContextCatalog } from './backend/aiContext'
 import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
+import { exportChat } from './backend/chatExport'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
@@ -207,6 +208,7 @@ import type {
   AliasCommandSaveInput,
   AiChatCancelInput,
   AiChatExchangeRequestInput,
+  AiChatExportInput,
   AiChatMessageMetadataInput,
   AiChatResponseInput,
   AppUpdateProgressEvent,
@@ -2544,6 +2546,20 @@ const registerIpc = () => {
   ipcMain.handle('chat-history:delete', (_event, id: string) => deleteChatConversation(id))
   ipcMain.handle('chat-history:restore', (_event, id: string) => restoreChatConversation(id))
   ipcMain.handle('chat-history:message-metadata', (_event, input: AiChatMessageMetadataInput) => saveChatMessageMetadata(input))
+  ipcMain.handle('chat:export', async (event, input: AiChatExportInput) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    return exportChat(input, {
+      showSaveDialog: (options) => {
+        if (process.env.NODE_ENV === 'test') {
+          return Promise.resolve({
+            canceled: false,
+            filePath: join(app.getPath('downloads'), basename(options.defaultPath))
+          })
+        }
+        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+      }
+    })
+  })
   ipcMain.handle('ai:todo-snapshot', () => listAiTodoSnapshot())
   ipcMain.handle('ai:context-catalog', () => listAiContextCatalog())
   ipcMain.handle('ai:command-catalog', () => listAiCommandCatalog())

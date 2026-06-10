@@ -13,7 +13,11 @@ import { settingsLanguageOptions, type SettingSectionKey } from '@/config/settin
 import type {
   AppUpdateCheckResult,
   AppUpdateProgressEvent,
+  AiChatChipContentPart,
+  AiChatChipRef,
   AiCommandCatalogOption,
+  AiCommandChipContentPart,
+  AiCommandChipRef,
   AiContextCatalog,
   AiContextOption,
   AiPreferencesUserConfig,
@@ -23,6 +27,15 @@ import type {
   AiChatMessageState,
   AiChatMessageInput,
   AiChatResponseInput,
+  AiChipContentPart,
+  AiContentPart,
+  AiDocChipContentPart,
+  AiDocChipRef,
+  AiImageContentPart,
+  AiSkillChipContentPart,
+  AiSkillChipRef,
+  AiSupportedImageType,
+  AiTextContentPart,
   AiTodoItem,
   AiModelCatalog,
   AiModelCatalogOption,
@@ -99,6 +112,22 @@ import type {
   UserConfig,
   UserRuleConfig,
   WorkspaceUserConfig
+} from '@shared/preload'
+
+export type {
+  AiChatChipContentPart,
+  AiChatChipRef,
+  AiChipContentPart,
+  AiCommandChipContentPart,
+  AiCommandChipRef,
+  AiContentPart,
+  AiDocChipContentPart,
+  AiDocChipRef,
+  AiImageContentPart,
+  AiSkillChipContentPart,
+  AiSkillChipRef,
+  AiSupportedImageType,
+  AiTextContentPart
 } from '@shared/preload'
 
 type PanelDirection = 'right' | 'below'
@@ -290,58 +319,6 @@ export type ChatMessage = {
   selectedOption?: string
   partial?: boolean
 }
-
-export type AiTextContentPart = {
-  type: 'text'
-  text: string
-}
-
-export type AiDocChipRef = {
-  absPath: string
-  relPath?: string
-  name?: string
-  type?: 'file' | 'dir'
-  startLine?: number
-  endLine?: number
-}
-
-export type AiChatChipRef = {
-  taskId: string
-  title?: string
-}
-
-export type AiCommandChipRef = {
-  command: string
-  label?: string
-  summarizeUpToTs?: number
-  path?: string
-}
-
-export type AiSkillChipRef = {
-  skillName: string
-  description?: string
-}
-
-export type AiDocChipContentPart = { type: 'chip'; chipType: 'doc'; ref: AiDocChipRef }
-export type AiChatChipContentPart = { type: 'chip'; chipType: 'chat'; ref: AiChatChipRef }
-export type AiCommandChipContentPart = { type: 'chip'; chipType: 'command'; ref: AiCommandChipRef }
-export type AiSkillChipContentPart = { type: 'chip'; chipType: 'skill'; ref: AiSkillChipRef }
-export type AiChipContentPart =
-  | AiDocChipContentPart
-  | AiChatChipContentPart
-  | AiCommandChipContentPart
-  | AiSkillChipContentPart
-
-export type AiSupportedImageType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' | 'image/bmp' | 'image/svg+xml'
-
-export type AiImageContentPart = {
-  type: 'image'
-  mediaType: AiSupportedImageType
-  data: string
-  name?: string
-}
-
-export type AiContentPart = AiTextContentPart | AiChipContentPart | AiImageContentPart
 
 type K8sKubeconfigImportResult = {
   success: boolean
@@ -2595,6 +2572,8 @@ const createEmptyTerminalPanel = (
   ...(split ? { split } : {})
 })
 
+const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
 export const useWorkspaceStore = defineStore('workspace', () => {
   const mode = ref<'terminal' | 'agents'>('terminal')
   const activeModule = ref<ModuleKey>('workspace')
@@ -3015,10 +2994,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     id: message.id,
     role: message.role,
     text: message.text,
+    contentParts: message.contentParts ? cloneStructuredValue(message.contentParts) : undefined,
     hosts: message.hosts?.map(historyHostToContext),
     state: message.state,
     favorite: message.favorite,
-    feedback: message.feedback
+    feedback: message.feedback,
+    executedCommand: message.executedCommand,
+    ask: message.ask,
+    say: message.say,
+    action: message.action,
+    mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
+    followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
+    selectedOption: message.selectedOption,
+    partial: message.partial
   })
 
   const chatMessageToHistoryMessage = (message: ChatMessage): AiChatHistoryMessage | null => {
@@ -3039,7 +3027,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       hosts: hosts?.length ? hosts : undefined,
       state: message.state,
       favorite: message.favorite,
-      feedback: message.feedback
+      feedback: message.feedback,
+      contentParts: message.contentParts ? cloneStructuredValue(message.contentParts) : undefined,
+      executedCommand: message.executedCommand,
+      ask: message.ask,
+      say: message.say,
+      action: message.action,
+      mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
+      followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
+      selectedOption: message.selectedOption,
+      partial: message.partial
     }
   }
 

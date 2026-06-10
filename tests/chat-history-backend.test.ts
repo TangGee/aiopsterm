@@ -106,8 +106,57 @@ describe('AI chat history backend boundary', () => {
         id: created.conversation.id,
         summary: '检查发布状态',
         messages: [
-          { id: 'history-user', role: 'user', text: '检查发布状态', hosts: [{ id: 'history-host', kind: 'hosts', label: 'prod-cluster' }] },
-          { id: 'history-assistant', role: 'assistant', text: '发布状态检查完成。', state: 'done' }
+          {
+            id: 'history-user',
+            role: 'user',
+            text: '检查发布状态',
+            contentParts: [
+              { type: 'text', text: '检查 ' },
+              {
+                type: 'chip',
+                chipType: 'doc',
+                ref: { absPath: '/kb/runbooks/release.md', relPath: 'runbooks/release.md', name: 'release.md', type: 'file' }
+              },
+              { type: 'text', text: ' 和拓扑图 ' },
+              { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=', name: 'topology.png' }
+            ],
+            hosts: [{ id: 'history-host', kind: 'hosts', label: 'prod-cluster' }]
+          },
+          {
+            id: 'history-command',
+            role: 'assistant',
+            text: 'kubectl rollout status deploy/web',
+            state: 'done',
+            ask: 'command',
+            executedCommand: 'kubectl rollout status deploy/web'
+          },
+          {
+            id: 'history-assistant',
+            role: 'assistant',
+            text: '调用部署巡检工具',
+            state: 'error',
+            ask: 'mcp_tool_call',
+            mcpToolCall: {
+              serverName: 'prod-agent',
+              toolName: 'inspect_deployment',
+              arguments: { namespace: 'prod', name: 'web' }
+            }
+          },
+          {
+            id: 'history-followup',
+            role: 'assistant',
+            text: '请选择下一步',
+            ask: 'followup',
+            followupOptions: ['继续观察', '执行回滚'],
+            selectedOption: '执行回滚'
+          },
+          {
+            id: 'history-truncated',
+            role: 'assistant',
+            text: '{"status":"completed"}',
+            say: 'context_truncated',
+            partial: true
+          }
         ]
       })
     )
@@ -116,19 +165,83 @@ describe('AI chat history backend boundary', () => {
     let persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
       selectedConversationId: string
       conversations: Array<{ id: string; summary: string }>
-      messagesByConversationId: Record<string, Array<{ id: string; text: string }>>
+      messagesByConversationId: Record<string, Array<Record<string, any>>>
     }
     expect(persisted.conversations[0]).toMatchObject({ id: created.conversation.id, summary: '检查发布状态' })
     expect(persisted.messagesByConversationId[created.conversation.id]).toEqual([
-      expect.objectContaining({ id: 'history-user', text: '检查发布状态' }),
-      expect.objectContaining({ id: 'history-assistant', text: '发布状态检查完成。' })
+      expect.objectContaining({
+        id: 'history-user',
+        text: '检查发布状态',
+        contentParts: expect.arrayContaining([
+          expect.objectContaining({ type: 'chip', chipType: 'doc' }),
+          expect.objectContaining({ type: 'image', name: 'topology.png' })
+        ])
+      }),
+      expect.objectContaining({ id: 'history-command', ask: 'command', executedCommand: 'kubectl rollout status deploy/web' }),
+      expect.objectContaining({
+        id: 'history-assistant',
+        ask: 'mcp_tool_call',
+        state: 'error',
+        mcpToolCall: expect.objectContaining({ serverName: 'prod-agent', toolName: 'inspect_deployment' })
+      }),
+      expect.objectContaining({ id: 'history-followup', ask: 'followup', followupOptions: ['继续观察', '执行回滚'], selectedOption: '执行回滚' }),
+      expect.objectContaining({ id: 'history-truncated', say: 'context_truncated', partial: true })
     ])
 
     backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
     const restored = expectOkData(backend.restoreChatConversation(created.conversation.id))
     expect(restored.messages).toEqual([
-      { id: 'history-user', role: 'user', text: '检查发布状态', hosts: [{ id: 'history-host', kind: 'hosts', label: 'prod-cluster' }] },
-      { id: 'history-assistant', role: 'assistant', text: '发布状态检查完成。', state: 'done' }
+      {
+        id: 'history-user',
+        role: 'user',
+        text: '检查发布状态',
+        contentParts: [
+          { type: 'text', text: '检查 ' },
+          {
+            type: 'chip',
+            chipType: 'doc',
+            ref: { absPath: '/kb/runbooks/release.md', relPath: 'runbooks/release.md', name: 'release.md', type: 'file' }
+          },
+          { type: 'text', text: ' 和拓扑图 ' },
+          { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=', name: 'topology.png' }
+        ],
+        hosts: [{ id: 'history-host', kind: 'hosts', label: 'prod-cluster' }]
+      },
+      {
+        id: 'history-command',
+        role: 'assistant',
+        text: 'kubectl rollout status deploy/web',
+        state: 'done',
+        executedCommand: 'kubectl rollout status deploy/web',
+        ask: 'command'
+      },
+      {
+        id: 'history-assistant',
+        role: 'assistant',
+        text: '调用部署巡检工具',
+        state: 'error',
+        ask: 'mcp_tool_call',
+        mcpToolCall: {
+          serverName: 'prod-agent',
+          toolName: 'inspect_deployment',
+          arguments: { namespace: 'prod', name: 'web' }
+        }
+      },
+      {
+        id: 'history-followup',
+        role: 'assistant',
+        text: '请选择下一步',
+        ask: 'followup',
+        followupOptions: ['继续观察', '执行回滚'],
+        selectedOption: '执行回滚'
+      },
+      {
+        id: 'history-truncated',
+        role: 'assistant',
+        text: '{"status":"completed"}',
+        say: 'context_truncated',
+        partial: true
+      }
     ])
 
     const metadata = expectOkData(
@@ -156,11 +269,24 @@ describe('AI chat history backend boundary', () => {
     })
     expect(clearedFeedback.messages.find((message: { id: string }) => message.id === 'history-assistant')?.feedback).toBeUndefined()
     expect(expectOkData(backend.restoreChatConversation(created.conversation.id)).messages.at(-1)).toEqual({
+      id: 'history-truncated',
+      role: 'assistant',
+      text: '{"status":"completed"}',
+      say: 'context_truncated',
+      partial: true
+    })
+    expect(expectOkData(backend.restoreChatConversation(created.conversation.id)).messages.find((message: { id: string }) => message.id === 'history-assistant')).toEqual({
       id: 'history-assistant',
       role: 'assistant',
-      text: '发布状态检查完成。',
-      state: 'done',
-      favorite: true
+      text: '调用部署巡检工具',
+      state: 'error',
+      ask: 'mcp_tool_call',
+      favorite: true,
+      mcpToolCall: {
+        serverName: 'prod-agent',
+        toolName: 'inspect_deployment',
+        arguments: { namespace: 'prod', name: 'web' }
+      }
     })
 
     const deleted = expectOkData(backend.deleteChatConversation(created.conversation.id))
