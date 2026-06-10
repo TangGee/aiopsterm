@@ -5643,6 +5643,102 @@ describe('workspace store', () => {
     }
   })
 
+  it('fails closed on malformed successful Kubernetes backend result envelopes', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    store.k8sActiveClusterId = 'k8s-1'
+
+    const terminal = await store.openK8sTerminal('k8s-1')
+    if (!terminal) throw new Error('Expected Kubernetes terminal to open for malformed result coverage.')
+    const terminalOutputBefore = terminal.output
+    const terminalHistoryBefore = [...terminal.commandHistory]
+    const terminalLastOutputBefore = terminal.lastCommandOutput
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        command: 'kubectl get pods',
+        output: 'MALFORMED POD OUTPUT',
+        terminalOutput: 'MALFORMED TERMINAL TEXT'
+      }
+    } as any)
+    await expect(store.sendK8sTerminalCommand('kubectl get pods')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+    expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
+    expect(store.k8sActiveTerminal?.output).not.toContain('MALFORMED TERMINAL TEXT')
+    expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
+    expect(store.k8sActiveTerminal?.lastCommandOutput).toBe(terminalLastOutputBefore)
+
+    expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
+    const agentRunsBefore = store.k8sAgentRuns.map((run) => ({ ...run }))
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'malformed-agent-run',
+        command: 'kubectl get namespaces',
+        output: 'MALFORMED AGENT OUTPUT',
+        terminalOutput: 'MALFORMED AGENT TERMINAL TEXT',
+        success: true
+      }
+    } as any)
+    await expect(store.runK8sAgentKubectl('kubectl get namespaces')).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+    expect(store.k8sAgentStatus).toBe('error')
+    expect(store.k8sAgentRuns).toEqual(agentRunsBefore)
+    expect(store.k8sResourceOutput).toBe('kubectl get namespaces')
+    expect(store.k8sResourceOutput).not.toContain('MALFORMED AGENT OUTPUT')
+
+    store.k8sCopiedCommand = 'kubectl get pods -n stable'
+    vi.mocked(window.aiops.planKubernetesResourceAction).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        resourceId: 'k8s-pod-worker-1',
+        action: 'describe',
+        command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops'
+      }
+    } as any)
+    await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource action backend returned malformed plan data.')
+    expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+
+    store.k8sResourceOutputTitle = 'Stable resource output'
+    store.k8sResourceOutput = 'stable backend output'
+    vi.mocked(window.aiops.executeKubernetesResourceAction).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        command: 'kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120',
+        output: 'MALFORMED LOG OUTPUT',
+        terminalOutput: 'MALFORMED LOG TERMINAL TEXT',
+        resourceId: 'k8s-pod-worker-1',
+        action: 'logs',
+        title: 'Logs / billing-worker-7f9d6f9dd9-rx8mm'
+      }
+    } as any)
+    await expect(store.showK8sPodLogs('k8s-pod-worker-1')).resolves.toBeUndefined()
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource action backend returned malformed result data.')
+    expect(store.k8sResourceOutputTitle).toBe('Stable resource output')
+    expect(store.k8sResourceOutput).toBe('stable backend output')
+    expect(store.k8sResourceOutput).not.toContain('MALFORMED LOG OUTPUT')
+
+    const resourcesBeforeRefresh = JSON.stringify(store.k8sResources)
+    const agentRunsBeforeRefresh = store.k8sAgentRuns.map((run) => ({ ...run }))
+    const resourceOutputBeforeRefresh = store.k8sResourceOutput
+    vi.mocked(window.aiops.refreshKubernetesResources).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'malformed-refresh',
+        output: 'MALFORMED REFRESH OUTPUT',
+        resources: []
+      }
+    } as any)
+    await expect(store.refreshK8sResources()).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource refresh backend returned malformed result data.')
+    expect(store.k8sResourceLoading).toBe(false)
+    expect(JSON.stringify(store.k8sResources)).toBe(resourcesBeforeRefresh)
+    expect(store.k8sAgentRuns).toEqual(agentRunsBeforeRefresh)
+    expect(store.k8sResourceOutput).toBe(resourceOutputBeforeRefresh)
+    expect(store.k8sResourceOutput).not.toContain('MALFORMED REFRESH OUTPUT')
+  })
+
   it('does not fabricate Kubernetes Agent proxy save success without backend acknowledgement', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()

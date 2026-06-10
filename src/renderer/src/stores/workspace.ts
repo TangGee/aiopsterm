@@ -168,6 +168,10 @@ type K8sResourceKind = KubernetesResourceKind
 type K8sResourceAction = 'get' | 'describe' | 'logs'
 type K8sConnectionStatus = KubernetesConnectionStatus
 type K8sProxyConfig = KubernetesAgentProxyConfig
+type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesCommand']>>['data']>
+type K8sBackendResourceRefreshData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['refreshKubernetesResources']>>['data']>
+type K8sBackendResourceActionPlanData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['planKubernetesResourceAction']>>['data']>
+type K8sBackendResourceActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesResourceAction']>>['data']>
 const defaultK8sProxyConfig: K8sProxyConfig = {
   enabled: false,
   type: 'SOCKS5',
@@ -1783,6 +1787,99 @@ const isQuickCommandScriptPlan = (source: unknown): source is QuickCommandScript
     const delayBeforeMs = segment.delayBeforeMs
     return typeof delayBeforeMs === 'number' && Number.isFinite(delayBeforeMs) && delayBeforeMs >= 0
   })
+}
+
+const k8sResourceKinds: K8sResourceKind[] = ['pods', 'deployments', 'services', 'nodes']
+const k8sResourceActions: K8sResourceAction[] = ['get', 'describe', 'logs']
+const k8sRefreshKinds: Array<K8sResourceKind | 'all'> = [...k8sResourceKinds, 'all']
+const k8sCommandSources: Array<K8sBackendCommandData['source']> = ['terminal', 'agent', 'resource']
+
+const isNonNegativeFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string'
+
+const isK8sAgentProxyConfig = (source: unknown): source is K8sProxyConfig =>
+  isRecord(source) &&
+  typeof source.enabled === 'boolean' &&
+  sshProxyTypes.includes(source.type as SshProxyType) &&
+  typeof source.host === 'string' &&
+  isNonNegativeFiniteNumber(source.port) &&
+  typeof source.enableProxyIdentity === 'boolean' &&
+  typeof source.username === 'string' &&
+  typeof source.password === 'string' &&
+  typeof source.updatedAt === 'string'
+
+const isK8sCatalogSnapshot = (source: unknown): source is KubernetesCatalog =>
+  isRecord(source) &&
+  Array.isArray(source.contexts) &&
+  Array.isArray(source.clusters) &&
+  Array.isArray(source.bastions) &&
+  Array.isArray(source.namespaces) &&
+  Array.isArray(source.resources) &&
+  Array.isArray(source.importContexts) &&
+  isStringOrNull(source.activeClusterId) &&
+  isStringOrNull(source.selectedClusterId) &&
+  isK8sAgentProxyConfig(source.agentProxyConfig)
+
+const isK8sBackendCommandData = (source: unknown): source is K8sBackendCommandData =>
+  isRecord(source) &&
+  typeof source.runId === 'string' &&
+  source.runId.trim() !== '' &&
+  typeof source.command === 'string' &&
+  typeof source.output === 'string' &&
+  typeof source.terminalOutput === 'string' &&
+  typeof source.success === 'boolean' &&
+  typeof source.error === 'string' &&
+  isNonNegativeFiniteNumber(source.durationMs) &&
+  typeof source.startedAt === 'string' &&
+  typeof source.clusterId === 'string' &&
+  typeof source.contextName === 'string' &&
+  typeof source.namespace === 'string' &&
+  k8sCommandSources.includes(source.source as K8sBackendCommandData['source'])
+
+const isK8sResourceActionPlanData = (source: unknown): source is K8sBackendResourceActionPlanData =>
+  isRecord(source) &&
+  typeof source.resourceId === 'string' &&
+  source.resourceId.trim() !== '' &&
+  typeof source.resourceName === 'string' &&
+  source.resourceName.trim() !== '' &&
+  k8sResourceKinds.includes(source.resourceKind as K8sResourceKind) &&
+  k8sResourceActions.includes(source.action as K8sResourceAction) &&
+  typeof source.title === 'string' &&
+  source.title.trim() !== '' &&
+  typeof source.command === 'string' &&
+  source.command.trim() !== '' &&
+  typeof source.clusterId === 'string' &&
+  source.clusterId.trim() !== '' &&
+  typeof source.clusterName === 'string' &&
+  typeof source.contextName === 'string' &&
+  typeof source.namespace === 'string'
+
+const isK8sBackendResourceActionData = (source: unknown): source is K8sBackendResourceActionData => {
+  if (!isK8sBackendCommandData(source) || !isRecord(source)) return false
+  const record = source as Record<string, unknown>
+  return (
+    typeof record.resourceId === 'string' &&
+    record.resourceId.trim() !== '' &&
+    typeof record.resourceName === 'string' &&
+    record.resourceName.trim() !== '' &&
+    k8sResourceKinds.includes(record.resourceKind as K8sResourceKind) &&
+    k8sResourceActions.includes(record.action as K8sResourceAction) &&
+    typeof record.title === 'string' &&
+    record.title.trim() !== ''
+  )
+}
+
+const isK8sBackendResourceRefreshData = (source: unknown): source is K8sBackendResourceRefreshData => {
+  if (!isK8sBackendCommandData(source) || !isK8sCatalogSnapshot(source) || !isRecord(source)) return false
+  const record = source as Record<string, unknown>
+  return (
+    source.source === 'resource' &&
+    typeof record.refreshedClusterId === 'string' &&
+    k8sRefreshKinds.includes(record.refreshedKind as K8sResourceKind | 'all') &&
+    isNonNegativeFiniteNumber(record.refreshedResources) &&
+    isNonNegativeFiniteNumber(record.refreshedNamespaces) &&
+    typeof record.message === 'string'
+  )
 }
 
 const normalizeKnowledgeNodes = (source: unknown, parentRelDir = '', seen = new Set<string>()): KnowledgeNode[] => {
@@ -8565,11 +8662,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  type K8sBackendCommandData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesCommand']>>['data']>
-  type K8sBackendResourceRefreshData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['refreshKubernetesResources']>>['data']>
-  type K8sBackendResourceActionPlanData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['planKubernetesResourceAction']>>['data']>
-  type K8sBackendResourceActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['executeKubernetesResourceAction']>>['data']>
-
   const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData | null> => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
     if (!window.aiops?.executeKubernetesCommand) {
@@ -8586,7 +8678,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         defaultNamespace: cluster?.default_namespace,
         source
       })
-      if (result.ok && result.data) return result.data
+      if (result.ok && isK8sBackendCommandData(result.data)) return result.data
+      if (result.ok) {
+        setK8sNotice('Kubernetes command backend returned malformed result data.')
+        return null
+      }
       setK8sNotice(result.errorMessage || 'Kubernetes command failed.')
       return null
     } catch (error) {
@@ -8668,7 +8764,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.planKubernetesResourceAction({ resourceId, action })
-      if (result.ok && result.data) return result.data
+      if (result.ok && isK8sResourceActionPlanData(result.data)) return result.data
+      if (result.ok) {
+        setK8sNotice('Kubernetes resource action backend returned malformed plan data.')
+        return null
+      }
       setK8sNotice(result.errorMessage || 'Kubernetes 资源命令生成失败')
       return null
     } catch (error) {
@@ -8684,7 +8784,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.executeKubernetesResourceAction({ resourceId, action })
-      if (result.ok && result.data) return result.data
+      if (result.ok && isK8sBackendResourceActionData(result.data)) return result.data
+      if (result.ok) {
+        setK8sNotice('Kubernetes resource action backend returned malformed result data.')
+        return null
+      }
       setK8sNotice(result.errorMessage || 'Kubernetes 资源操作失败')
       return null
     } catch (error) {
@@ -8834,8 +8938,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         namespace: k8sResourceNamespace.value,
         kind: k8sResourceKind.value
       })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 资源刷新失败')
+        k8sResourceLoading.value = false
+        return null
+      }
+      if (!isK8sBackendResourceRefreshData(result.data)) {
+        setK8sNotice('Kubernetes resource refresh backend returned malformed result data.')
         k8sResourceLoading.value = false
         return null
       }
