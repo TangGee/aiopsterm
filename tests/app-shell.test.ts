@@ -594,6 +594,29 @@ describe('AppShell', () => {
     expect(store.selectedContexts.some((context) => context.label === '10.10.10.10')).toBe(false)
     expect(assets.text()).toContain('unit ssh refused')
 
+    vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+      id: 'terminal-malformed-asset-ssh',
+      shell: 'ssh',
+      cwd: '/home/ops',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-terminal-malformed-asset',
+        host: '',
+        port: 2222,
+        username: 'ops',
+        assetName: '',
+        createdAt: 1717200006000
+      }
+    } as any)
+    await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.trigger('dblclick')
+    await flushPromises()
+    expect(store.panels).toHaveLength(assetConnectedPanelCount)
+    expect(store.activePanelId).toBe(assetConnectedPanelId)
+    expect(store.activePanel.title).toBe('unit-host')
+    expect(store.activePanel.sessionId).not.toBe('terminal-malformed-asset-ssh')
+    expect(store.selectedContexts.some((context) => context.label === '10.10.10.10')).toBe(false)
+    expect(assets.text()).toContain('SSH 终端启动失败')
+
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.find('button[title="删除"]').trigger('click')
     expect(assets.find('.asset-confirm-modal').text()).toContain('删除主机')
     expect(assets.find('.asset-confirm-modal footer .danger').attributes('disabled')).toBeDefined()
@@ -1779,6 +1802,28 @@ describe('AppShell', () => {
       expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
       expect(store.selectedContexts.some((context) => context.label === '10.44.0.9')).toBe(false)
       expect(wrapper.text()).toContain('workspace ssh refused')
+
+      vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+        id: 'terminal-malformed-workspace-ssh',
+        shell: 'ssh',
+        cwd: '/home/ops',
+        kind: 'ssh',
+        connection: {
+          connectionId: 'ssh-terminal-malformed-workspace',
+          host: '10.44.0.9',
+          port: 2201,
+          username: '',
+          assetName: 'workspace-unit-edited',
+          createdAt: 1717200006100
+        }
+      } as any)
+      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
+      await flushPromises()
+      expect(store.panels).toHaveLength(workspaceConnectedPanelCount)
+      expect(store.activePanelId).toBe(workspaceConnectedPanelId)
+      expect(store.activePanel.sessionId).not.toBe('terminal-malformed-workspace-ssh')
+      expect(store.selectedContexts.some((context) => context.label === '10.44.0.9')).toBe(false)
+      expect(wrapper.text()).toContain('SSH 终端启动失败')
 
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('生产'))!.trigger('contextmenu', {
         clientX: 260,
@@ -3963,6 +4008,29 @@ describe('AppShell', () => {
     expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit')).toBe(false)
     expect(store.topNotice).toBe('fork ssh refused')
 
+    vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+      id: 'terminal-malformed-fork-ssh',
+      shell: 'ssh',
+      cwd: '/home/ops',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-terminal-malformed-fork',
+        host: '10.8.0.6',
+        port: 2222,
+        username: 'ops',
+        assetName: '',
+        createdAt: 1717200006200
+      }
+    } as any)
+    await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
+    await flushPromises()
+    expect(store.panels).toHaveLength(connectedForkPanelCount)
+    expect(store.activePanelId).toBe(connectedForkPanelId)
+    expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
+    expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit')).toBe(false)
+    expect(store.topNotice).toBe('SSH 终端启动失败')
+
     vi.mocked(window.aiops.killTerminal).mockClear()
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('断开连接'))!.trigger('click')
@@ -3989,6 +4057,34 @@ describe('AppShell', () => {
     expect(store.activePanel.status).toBe('running')
     expect(store.activePanel.output).not.toContain('[connection reconnected]')
     expect(store.topNotice).toBe('终端已重新连接')
+
+    const reconnectedSessionId = store.activePanel.sessionId
+    vi.mocked(window.aiops.killTerminal).mockClear()
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('断开连接'))!.trigger('click')
+    await flushPromises()
+    vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+      id: 'terminal-malformed-reconnect-ssh',
+      shell: 'ssh',
+      cwd: '/home/ops',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-terminal-malformed-reconnect',
+        host: '10.8.0.6',
+        port: 2222,
+        username: '',
+        assetName: 'fork-source',
+        createdAt: 1717200006300
+      }
+    } as any)
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('重新连接'))!.trigger('click')
+    await flushPromises()
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.sessionId).not.toBe('terminal-malformed-reconnect-ssh')
+    expect(store.activePanel.status).toBe('closed')
+    expect(store.topNotice).toBe('SSH 终端启动失败')
+    expect(reconnectedSessionId).toBe('test-session-asset-fork-unit')
 
     wrapper.unmount()
   })
@@ -4038,6 +4134,31 @@ describe('AppShell', () => {
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
     expect(store.activePanel.status).toBe('running')
     expect(store.activePanel.sessionId).toBe('test-session-local')
+
+    lifecycleListener?.({
+      id: 'test-session-local',
+      kind: 'local',
+      stage: 'closed',
+      shell: '/bin/bash',
+      cwd: '/',
+      code: 0,
+      reason: 'manual',
+      isNetworkDisconnect: false,
+      at: 1717200005010
+    })
+    await wrapper.vm.$nextTick()
+    vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+      id: 'terminal-malformed-local-reconnect',
+      shell: '',
+      cwd: '/',
+      kind: 'local'
+    } as any)
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('重新连接'))!.trigger('click')
+    await flushPromises()
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.status).toBe('closed')
+    expect(store.topNotice).toBe('本地终端启动失败')
 
     wrapper.unmount()
   })

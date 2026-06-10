@@ -150,8 +150,10 @@ import type {
   TerminalCommandGenerationRecord,
   TerminalExitEvent,
   TerminalLifecycleEvent,
+  TerminalLifecycleStage,
   TerminalSessionInfo,
   TerminalMouseEventAction,
+  TerminalSshConnectionInfo,
   TerminalUserConfig,
   UserConfig,
   UserRuleConfig,
@@ -323,6 +325,7 @@ type QuickCommandScriptPlanResolution =
 
 type TerminalWriteBridgeResult = Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>
 type TerminalWriteValidation = { ok: true } | { ok: false; reason: string }
+const terminalLifecycleStages: TerminalLifecycleStage[] = ['starting', 'connecting', 'proxy-opening', 'connected', 'shell-ready', 'error', 'closed']
 
 export type TerminalOutputSegment = {
   text: string
@@ -3093,6 +3096,8 @@ const mediaTypeFromKnowledgePath = (relPath: string) => {
 
 const createTerminalSegments = (text: string, scope: TerminalOutputScope = 'output'): TerminalOutputSegment[] => (text ? [{ text, scope }] : [])
 
+const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
+
 const appendTerminalSegment = (panel: TerminalPanel, text: string, scope: TerminalOutputScope = 'output') => {
   if (!text) return
   panel.output += text
@@ -3121,6 +3126,41 @@ const createEmptyTerminalPanel = (
   status: 'ready',
   ...(split ? { split } : {})
 })
+
+const isTerminalLifecycleEvent = (value: unknown, expectedId: string, expectedKind: 'local' | 'ssh'): value is TerminalLifecycleEvent =>
+  isRecord(value) &&
+  value.id === expectedId &&
+  value.kind === expectedKind &&
+  terminalLifecycleStages.includes(value.stage as TerminalLifecycleStage) &&
+  typeof value.at === 'number' &&
+  Number.isFinite(value.at)
+
+const isLocalTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo =>
+  isRecord(value) &&
+  isNonEmptyText(value.id) &&
+  value.kind === 'local' &&
+  isNonEmptyText(value.shell) &&
+  isNonEmptyText(value.cwd) &&
+  (value.lifecycle === undefined || isTerminalLifecycleEvent(value.lifecycle, value.id, 'local'))
+
+const isSshTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo & { connection: TerminalSshConnectionInfo } => {
+  if (!isRecord(value) || !isNonEmptyText(value.id) || value.kind !== 'ssh' || !isNonEmptyText(value.shell) || !isNonEmptyText(value.cwd)) return false
+  if (value.lifecycle !== undefined && !isTerminalLifecycleEvent(value.lifecycle, value.id, 'ssh')) return false
+  const connection = value.connection
+  return (
+    isRecord(connection) &&
+    isNonEmptyText(connection.connectionId) &&
+    isNonEmptyText(connection.host) &&
+    typeof connection.port === 'number' &&
+    Number.isInteger(connection.port) &&
+    connection.port >= 1 &&
+    connection.port <= 65535 &&
+    isNonEmptyText(connection.username) &&
+    isNonEmptyText(connection.assetName) &&
+    typeof connection.createdAt === 'number' &&
+    Number.isFinite(connection.createdAt)
+  )
+}
 
 const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -3247,9 +3287,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   ) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    if (!panel || !terminalSession?.id || terminalSession.kind !== 'ssh' || !terminalSession.connection) return null
+    if (!panel || !isSshTerminalSessionInfo(terminalSession)) return null
     const connection = terminalSession.connection
-    if (!String(connection.connectionId || '').trim()) return null
     const previous = panel.sshSession
     const session: TerminalSshSession = {
       connectionId: connection.connectionId,
@@ -3280,7 +3319,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const applyLocalTerminalSession = (panelId: string, terminalSession?: TerminalSessionInfo | null) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    if (!panel || !terminalSession?.id) return null
+    if (!panel || !isLocalTerminalSessionInfo(terminalSession)) return null
     panel.sessionId = terminalSession.id
     panel.cwd = terminalSession.cwd || panel.cwd
     panel.title = terminalShellTitle(terminalSession.shell)

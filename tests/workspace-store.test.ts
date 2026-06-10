@@ -3374,6 +3374,32 @@ describe('workspace store', () => {
     const originalPanelCount = store.panels.length
     const originalActivePanel = { ...store.activePanel }
 
+    const malformedLocal = store.applyLocalTerminalSession(store.activePanelId, {
+      id: 'terminal-malformed-local',
+      shell: '',
+      cwd: '/home/local',
+      kind: 'local'
+    } as any)
+    expect(malformedLocal).toBeNull()
+    expect(store.activePanel.sessionId).toBe(originalActivePanel.sessionId)
+    expect(store.activePanel.title).toBe(originalActivePanel.title)
+    expect(store.activePanel.status).toBe(originalActivePanel.status)
+
+    const malformedLocalLifecycle = store.applyLocalTerminalSession(store.activePanelId, {
+      id: 'terminal-malformed-local-lifecycle',
+      shell: '/bin/bash',
+      cwd: '/home/local',
+      kind: 'local',
+      lifecycle: {
+        id: 'different-terminal',
+        kind: 'local',
+        stage: 'shell-ready',
+        at: 1717200003190
+      }
+    } as any)
+    expect(malformedLocalLifecycle).toBeNull()
+    expect(store.activePanel.sessionId).toBe(originalActivePanel.sessionId)
+
     store.createPanel()
     store.renamePanel(store.activePanelId, 'pending ssh')
     const pendingPanelId = store.activePanelId
@@ -3408,6 +3434,27 @@ describe('workspace store', () => {
     expect(store.activePanel.sessionId).toBeUndefined()
     expect(store.activePanel.status).toBe('ready')
     expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.8.0.10', username: 'ops' }))
+
+    const malformedConnection = store.applySshTerminalSession(pendingPanelId, {
+      id: 'terminal-malformed-ssh-connection',
+      shell: 'ssh',
+      cwd: '/home/ops',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-terminal-malformed-ssh-connection',
+        host: '',
+        port: 70000,
+        username: '',
+        assetId: 'asset-pending-ssh',
+        assetName: '',
+        createdAt: Number.NaN
+      }
+    } as any)
+    expect(malformedConnection).toBeNull()
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.status).toBe('ready')
+    expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.8.0.10', username: 'ops' }))
+
     expect(store.discardPendingTerminalPanel(pendingPanelId, originalPanelId)).toBe(true)
     expect(store.panels).toHaveLength(originalPanelCount)
     expect(store.activePanelId).toBe(originalPanelId)
