@@ -620,6 +620,36 @@ describe('database backend boundary', () => {
     expect(result.data?.rows[0]).toMatchObject({ operation: 'Seq Scan', relation: 'orders' })
   })
 
+  it('fails closed for unknown seed SQL tables instead of returning generic success rows', async () => {
+    const result = await executeDatabaseSql({
+      connectionId: 'conn-prod-pg',
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      sql: 'select * from public.audit_events'
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'DB_TABLE_NOT_FOUND',
+      errorMessage: 'Table not found: audit_events'
+    })
+  })
+
+  it('keeps backend-owned constant SQL results without using sample message rows', async () => {
+    const result = await executeDatabaseSql({
+      connectionId: 'conn-prod-pg',
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      sql: 'select 1'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.columns).toEqual(['result'])
+    expect(result.data?.rows).toEqual([{ result: 1 }])
+  })
+
   it('rejects empty SQL before execution', async () => {
     const result = await executeDatabaseSql({
       connectionId: 'conn-prod-pg',

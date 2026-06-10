@@ -601,7 +601,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.db-workspace-add-tab').click()
     await expect(page.locator('.db-workspace-tab').filter({ hasText: 'Query 1' })).toBeVisible()
     await expect(page.getByTitle('Save As')).toBeDisabled()
-    await page.locator('.db-sql-editor').fill("select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from public.audit_events;")
+    await page.locator('.db-sql-editor').fill("select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from ops.ops_incidents;")
     await page.getByTitle('Format').click()
     await expect(page.locator('.db-sql-editor')).toHaveValue(/SELECT\n  id/)
     await page.getByTitle('Run all').click()
@@ -623,12 +623,12 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.db-sql-overview tbody tr').first().click()
     await expect(page.locator('.db-result-table').filter({ hasText: 'payment-api' })).toBeVisible()
     await page.locator('.db-sql-editor').evaluate((node: HTMLTextAreaElement) => {
-      const offset = node.value.indexOf('audit_events')
+      const offset = node.value.indexOf('ops_incidents')
       node.setSelectionRange(offset, offset)
     })
     await page.getByTitle('Run current statement').click()
-    await expect(page.locator('.db-result-table').filter({ hasText: 'backend query ok' })).toBeVisible()
-    await page.locator('.db-sql-editor').fill('select id from "public"."orders" where status = \'open\';\nselect * from public.audit_events;')
+    await expect(page.locator('.db-result-table').filter({ hasText: 'checkout' })).toBeVisible()
+    await page.locator('.db-sql-editor').fill('select id from "public"."orders" where status = \'open\';\nselect * from ops.ops_incidents;')
     await page.locator('.db-sql-editor').evaluate((node: HTMLTextAreaElement) => {
       const selected = 'select id from "public"."orders" where status = \'open\''
       node.setSelectionRange(0, selected.length)

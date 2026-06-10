@@ -4063,9 +4063,40 @@ const findRowsForSql = (input: DatabaseSqlExecuteInput, sql: string) => {
   })
 }
 
-const fallbackRowsForSql = (sql: string) => {
-  if (/^\s*select\s+1\b/i.test(sql)) return [{ result: 1, message: 'backend query ok' }]
-  return [{ result: 1, message: 'backend query ok' }]
+const constantRowsForSql = (sql: string) => {
+  const normalized = normalizeSql(sql).replace(/;$/, '')
+  const match = normalized.match(/^select\s+1(?:\s+as\s+([A-Za-z_][\w$]*))?$/i)
+  if (!match) return null
+  return [{ [match[1] || 'result']: 1 }]
+}
+
+const resolveSeedSqlRows = (input: DatabaseSqlExecuteInput, sql: string) => {
+  const explained = /^explain\b/i.test(sql)
+  const tableName = tableNameFromSql(sql)
+  const tableRows = tableName ? findRowsForSql(input, sql) : null
+  if (explained) {
+    if (tableName && !tableRows) {
+      return { ok: false as const, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${tableName}` }
+    }
+    return {
+      ok: true as const,
+      rows: [
+        { step: 1, operation: tableName ? 'Seq Scan' : 'Result', relation: tableName || 'derived', cost: '0.00..12.40', rows: tableRows?.length ?? 1 },
+        { step: 2, operation: 'Limit', relation: 'result', cost: '0.00..1.00', rows: 1 }
+      ]
+    }
+  }
+  if (tableRows) return { ok: true as const, rows: tableRows }
+  const constantRows = constantRowsForSql(sql)
+  if (constantRows) return { ok: true as const, rows: constantRows }
+  if (/\bfrom\b/i.test(sql)) {
+    return { ok: false as const, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${tableName || 'unknown'}` }
+  }
+  return {
+    ok: false as const,
+    errorCode: 'DB_SQL_UNSUPPORTED',
+    errorMessage: 'Seed database SQL execution supports backend-known tables or SELECT 1 only.'
+  }
 }
 
 const normalizeFilterValue = (value: unknown) => {
@@ -4393,13 +4424,15 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine execution is not wired in this aiopsterm backend yet.' }
   }
 
-  const explained = /^explain\b/i.test(sql)
-  const rows = explained
-    ? [
-        { step: 1, operation: 'Seq Scan', relation: tableNameFromSql(sql) || 'derived', cost: '0.00..12.40', rows: 4 },
-        { step: 2, operation: 'Limit', relation: 'result', cost: '0.00..1.00', rows: 1 }
-      ]
-    : (findRowsForSql(input, sql) ?? fallbackRowsForSql(sql))
+  const resolved = resolveSeedSqlRows(input, sql)
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      errorCode: resolved.errorCode,
+      errorMessage: resolved.errorMessage
+    }
+  }
+  const rows = resolved.rows
 
   return {
     ok: true,

@@ -6755,7 +6755,7 @@ describe('AppShell', () => {
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('SELECT\n  id')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('\nFROM\n  public.orders')
     expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('2')
-    await workbenchEditor.setValue('select id from public.orders;\nselect * from public.audit_events;')
+    await workbenchEditor.setValue('select id from public.orders;\nselect * from ops.ops_incidents;')
     const formatEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const formatSelectionEnd = 'select id from public.orders'.length
     formatEditorElement.setSelectionRange(0, formatSelectionEnd)
@@ -6765,7 +6765,7 @@ describe('AppShell', () => {
     await flushPromises()
     const selectionFormattedSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(selectionFormattedSql).toContain('SELECT\n  id')
-    expect(selectionFormattedSql).toContain('select * from public.audit_events;')
+    expect(selectionFormattedSql).toContain('select * from ops.ops_incidents;')
     await wrapper.find('button[title="Run all"]').trigger('click')
     expect(wrapper.find('.db-result-running').text()).toContain('Running query')
     expect(wrapper.find('.db-status-bar').text()).toContain('Running')
@@ -6855,15 +6855,15 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-sql-overview-open').exists()).toBe(false)
     await wrapper.find('.db-sql-overview tbody tr').trigger('click')
     expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
-    await workbenchEditor.setValue('select * from public.orders; select * from public.audit_events;')
+    await workbenchEditor.setValue('select * from public.orders; select * from ops.ops_incidents;')
     const editorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
-    const secondStatementOffset = editorElement.value.indexOf('select * from public.audit_events')
+    const secondStatementOffset = editorElement.value.indexOf('select * from ops.ops_incidents')
     editorElement.setSelectionRange(secondStatementOffset, secondStatementOffset)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
-    expect(wrapper.find('.db-result-running').text()).toContain('select * from public.audit_events')
+    expect(wrapper.find('.db-result-running').text()).toContain('select * from ops.ops_incidents')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-sql-overview').exists()).toBe(false)
-    expect(wrapper.find('.db-result-table').text()).toContain('backend query ok')
+    expect(wrapper.find('.db-result-table').text()).toContain('checkout')
     expect(wrapper.find('.db-result-tabs').text()).toContain('#2-1')
     editorElement.setSelectionRange(0, 'select * from public.orders'.length)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
@@ -6873,9 +6873,9 @@ describe('AppShell', () => {
     await wrapper.find('button[title="Explain"]').trigger('click')
     await waitForDatabaseSqlResult()
     await wrapper.find('.db-result-tabs [role="tab"]').trigger('click')
-    expect(wrapper.find('.db-sql-overview').text()).toContain('EXPLAIN select * from public.audit_events')
+    expect(wrapper.find('.db-sql-overview').text()).toContain('EXPLAIN select * from ops.ops_incidents')
 
-    await workbenchEditor.setValue('select id from "public"."orders" where status = \'open\';\nselect * from public.audit_events;')
+    await workbenchEditor.setValue('select id from "public"."orders" where status = \'open\';\nselect * from ops.ops_incidents;')
     const convertEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const selectedConvertSql = 'select id from "public"."orders" where status = \'open\''
     convertEditorElement.setSelectionRange(0, selectedConvertSql.length)
@@ -6951,7 +6951,7 @@ describe('AppShell', () => {
     await flushPromises()
     const replacedConvertSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(replacedConvertSql).toContain('LIMIT 100;')
-    expect(replacedConvertSql).toContain('select * from public.audit_events;')
+    expect(replacedConvertSql).toContain('select * from ops.ops_incidents;')
     expect(replacedConvertSql).not.toBe(wrapper.find('.db-ai-sql-actions pre').text())
     await workbenchEditor.setValue('select 1;\n-- marker')
     const insertEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
@@ -6982,14 +6982,14 @@ describe('AppShell', () => {
     await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain("where status = 'open'")
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('LIMIT 100')
-    await workbenchEditor.setValue('select 1;\nselect * from public.audit_events;\n-- after cursor')
+    await workbenchEditor.setValue('select 1;\nselect * from ops.ops_incidents;\n-- after cursor')
     const prefixEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
-    const prefixOffset = prefixEditorElement.value.indexOf('select * from public.audit_events') + 'select * from public.audit_events'.length
+    const prefixOffset = prefixEditorElement.value.indexOf('select * from ops.ops_incidents') + 'select * from ops.ops_incidents'.length
     prefixEditorElement.setSelectionRange(prefixOffset, prefixOffset)
     await wrapper.find('button[title="AI Complete SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
     expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select 1;')
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select * from public.audit_events')
+    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select * from ops.ops_incidents')
     expect(wrapper.find('.db-ai-sql-actions pre').text()).not.toContain('after cursor')
     await wrapper.find('button[title="AI Optimize SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()

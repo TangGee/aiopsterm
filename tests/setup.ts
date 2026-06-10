@@ -1134,6 +1134,53 @@ function databaseCatalogTableExistsMock(input: { connectionId: string; databaseN
   return Object.prototype.hasOwnProperty.call(databaseTableRowsMock, key) || Object.prototype.hasOwnProperty.call(databaseTableDdlMock, key)
 }
 
+const unquoteDatabaseSqlIdentifierMock = (value: string) =>
+  value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
+
+const databaseTableNameFromSqlMock = (sql: string) => {
+  const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?(?:\s*\.\s*[`"\[]?[\w.-]+[`"\]]?)?)/i)
+  if (!match) return ''
+  return (
+    match[1]
+      .split('.')
+      .map((part) => unquoteDatabaseSqlIdentifierMock(part.trim()))
+      .filter(Boolean)
+      .at(-1) || ''
+  )
+}
+
+const databaseSchemaNameFromSqlMock = (sql: string) => {
+  const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?)\s*\.\s*([`"\[]?[\w.-]+[`"\]]?)/i)
+  return match ? unquoteDatabaseSqlIdentifierMock(match[1].trim()) : ''
+}
+
+const databaseRowsForSqlMock = (input: { sql: string; connectionId: string; databaseName?: string; schemaName?: string }) => {
+  const tableName = databaseTableNameFromSqlMock(input.sql)
+  const schemaName = databaseSchemaNameFromSqlMock(input.sql) || input.schemaName || ''
+  const rows = tableName
+    ? databaseTableRowsMock[databaseTableKey({ connectionId: input.connectionId, databaseName: input.databaseName || '', schemaName, tableName })]
+    : null
+  if (/^explain\b/i.test(input.sql)) {
+    if (tableName && !rows) return { ok: false as const, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${tableName}` }
+    return {
+      ok: true as const,
+      rows: [
+        { step: 1, operation: tableName ? 'Seq Scan' : 'Result', relation: tableName || 'derived', cost: '0.00..12.40', rows: rows?.length ?? 1 },
+        { step: 2, operation: 'Limit', relation: 'result', cost: '0.00..1.00', rows: 1 }
+      ]
+    }
+  }
+  if (rows) return { ok: true as const, rows: rows.map((row) => ({ ...row })) }
+  const constant = input.sql.replace(/\s+/g, ' ').trim().replace(/;$/, '').match(/^select\s+1(?:\s+as\s+([A-Za-z_][\w$]*))?$/i)
+  if (constant) return { ok: true as const, rows: [{ [constant[1] || 'result']: 1 }] }
+  if (/\bfrom\b/i.test(input.sql)) return { ok: false as const, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${tableName || 'unknown'}` }
+  return {
+    ok: false as const,
+    errorCode: 'DB_SQL_UNSUPPORTED',
+    errorMessage: 'Seed database SQL execution supports backend-known tables or SELECT 1 only.'
+  }
+}
+
 const cloneDatabaseCatalogColumnMock = (column: DatabaseColumnInfo): DatabaseColumnInfo => ({ ...column })
 
 const cloneDatabaseCatalogTableMock = (table: DatabaseTableInfo): DatabaseTableInfo => ({
@@ -6493,22 +6540,9 @@ Object.defineProperty(window, 'aiops', {
       if (/drop\s+database|syntax_error/i.test(sql)) {
         return { ok: false, errorCode: 'DB_SQL_REJECTED', errorMessage: 'Backend SQL executor rejected this statement.' }
       }
-      const rows = /^explain\b/i.test(sql)
-        ? [
-            { step: 1, operation: 'Seq Scan', relation: 'audit_events', cost: '0.00..12.40', rows: 4 },
-            { step: 2, operation: 'Limit', relation: 'result', cost: '0.00..1.00', rows: 1 }
-          ]
-        : /\bopen_orders_v\b/i.test(sql)
-          ? [{ id: 1001, service: 'payment-api', status: 'investigating', owner: 'alice', updated_at: '2026-06-03 10:12:00' }]
-          : /\borders\b/i.test(sql)
-            ? [
-                { id: 1001, service: 'payment-api', status: 'investigating', owner: 'alice', updated_at: '2026-06-03 10:12:00' },
-                { id: 1002, service: 'orders-worker', status: 'mitigated', owner: 'bob', updated_at: '2026-06-03 09:44:00' },
-                { id: 1003, service: 'k8s-ingress', status: 'watching', owner: null, updated_at: '2026-06-02 22:01:00' },
-                { id: 1004, service: 'billing-sync', status: 'closed', owner: 'carol', updated_at: '2026-06-02 18:22:00' }
-              ]
-            : [{ result: 1, message: 'backend query ok' }]
-      return { ok: true, data: { columns: Object.keys(rows[0] || {}), rows, rowCount: rows.length, durationMs: 1 } }
+      const resolved = databaseRowsForSqlMock({ ...input, sql })
+      if (!resolved.ok) return { ok: false, errorCode: resolved.errorCode, errorMessage: resolved.errorMessage }
+      return { ok: true, data: { columns: Object.keys(resolved.rows[0] || {}), rows: resolved.rows, rowCount: resolved.rows.length, durationMs: 1 } }
     }),
     getDatabaseTableDdl: vi.fn(
       async (input: { connectionId: string; databaseName: string; schemaName?: string; tableName: string }) => {
