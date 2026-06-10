@@ -2245,6 +2245,10 @@ export type KubernetesClusterTestResult = AiopsMutationResult<{
   contextName: string
   serverUrl: string
   message: string
+  command?: string
+  output?: string
+  error?: string
+  durationMs?: number
 }>
 
 export type KubernetesImportContextInfo = {

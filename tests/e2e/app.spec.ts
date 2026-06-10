@@ -1,22 +1,50 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer } from 'http'
-import { mkdir, rm, writeFile } from 'fs/promises'
+import { chmod, mkdir, rm, writeFile } from 'fs/promises'
 import type { AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
 
-const launchApp = async (name: string) => {
+const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
   const userDataDir = path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
   await mkdir(userDataDir, { recursive: true })
   return electron.launch({
     args: ['.'],
     env: {
       ...process.env,
+      ...env,
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'
     }
   })
+}
+
+const createFakeKubectl = async () => {
+  const dir = path.join(os.tmpdir(), `aiopsterm-e2e-kubectl-${Date.now()}`)
+  await mkdir(dir, { recursive: true })
+  const filePath = path.join(dir, 'kubectl')
+  await writeFile(
+    filePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      'case "$1:$2" in',
+      '  get:namespaces)',
+      '    echo "NAME STATUS AGE"',
+      '    echo "e2e Active 1d"',
+      '    echo "default Active 1d"',
+      '    ;;',
+      '  *)',
+      '    echo "unexpected kubectl args: $*" >&2',
+      '    exit 17',
+      '    ;;',
+      'esac'
+    ].join('\n'),
+    'utf-8'
+  )
+  await chmod(filePath, 0o755)
+  return { dir, filePath }
 }
 
 const startVoiceTranscriptionServer = async () => {
@@ -163,8 +191,9 @@ test('aiopsterm primary desktop flows', async () => {
   await mkdir(filesFixtureDir, { recursive: true })
   await writeFile(path.join(filesFixtureDir, 'e2e-visible.txt'), 'E2E visible local file\n', 'utf-8')
   await writeFile(path.join(filesFixtureDir, '.hidden-e2e.env'), 'AIOPSTERM_E2E=1\n', 'utf-8')
+  const fakeKubectl = await createFakeKubectl()
   const voiceServer = await startVoiceTranscriptionServer()
-  const app = await launchApp('primary')
+  const app = await launchApp('primary', { AIOPSTERM_KUBECTL_PATH: fakeKubectl.filePath })
 
   try {
     const page = await app.firstWindow()
@@ -524,6 +553,22 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'e2e-cluster' })).toBeVisible()
     await page.locator('.k8s-action-button').click()
     await page.locator('.k8s-modal-tabs button').filter({ hasText: '手动配置' }).click()
+    await page.locator('.k8s-add-cluster-modal textarea').fill(
+      [
+        'apiVersion: v1',
+        'kind: Config',
+        'current-context: new/context',
+        'clusters:',
+        '- name: new-cluster',
+        '  cluster:',
+        '    server: https://new.k8s.local:6443',
+        'contexts:',
+        '- name: new/context',
+        '  context:',
+        '    cluster: new-cluster',
+        '    namespace: default'
+      ].join('\n')
+    )
     await page.locator('.k8s-test-connection button').click()
     await expect(page.getByText('连接成功')).toBeVisible()
     await page.locator('.k8s-add-cluster-modal footer button').filter({ hasText: '保存' }).click()
@@ -912,6 +957,7 @@ test('aiopsterm primary desktop flows', async () => {
     await app.close()
     await voiceServer.close()
     await rm(filesFixtureDir, { recursive: true, force: true })
+    await rm(fakeKubectl.dir, { recursive: true, force: true })
   }
 })
 

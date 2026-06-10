@@ -827,16 +827,20 @@ const cloneCatalog = (): KubernetesCatalog => {
   }
 }
 
+const toMutationError = <T>(error: unknown, fallbackCode = 'K8S_BACKEND_ERROR'): AiopsMutationResult<T> => {
+  const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : fallbackCode
+  return {
+    ok: false,
+    errorCode: code,
+    errorMessage: error instanceof Error ? error.message : String(error)
+  }
+}
+
 const asResult = <T>(fn: () => T, fallbackCode = 'K8S_BACKEND_ERROR'): AiopsMutationResult<T> => {
   try {
     return { ok: true, data: fn() }
   } catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : fallbackCode
-    return {
-      ok: false,
-      errorCode: code,
-      errorMessage: error instanceof Error ? error.message : String(error)
-    }
+    return toMutationError(error, fallbackCode)
   }
 }
 
@@ -1051,8 +1055,8 @@ export const switchKubernetesContext = async (contextName: string): Promise<Kube
     }
   })
 
-export const testKubernetesClusterConnection = async (input: KubernetesClusterTestInput): Promise<KubernetesClusterTestResult> =>
-  asResult(() => {
+export async function testKubernetesClusterConnection(input: KubernetesClusterTestInput): Promise<KubernetesClusterTestResult> {
+  try {
     ensureKubernetesCatalogStateLoaded()
     const contextName = input.contextName?.trim() || ''
     const requestedServerUrl = input.serverUrl?.trim() || ''
@@ -1074,14 +1078,50 @@ export const testKubernetesClusterConnection = async (input: KubernetesClusterTe
       throw Object.assign(new Error('Kubernetes server URL does not match the selected context.'), { code: 'K8S_TEST_SERVER_MISMATCH' })
     }
 
-    return {
-      success: true,
-      isValid: true,
-      contextName,
-      serverUrl,
-      message: '连接测试成功'
+    const kubeconfigPath = input.kubeconfigPath?.trim() || ''
+    const defaultNamespace = context?.namespace || 'default'
+    if (!content && !kubeconfigPath && shouldUseKubernetesSeedData() && context) {
+      return {
+        ok: true,
+        data: {
+          success: true,
+          isValid: true,
+          contextName,
+          serverUrl,
+          message: '连接测试成功'
+        }
+      }
     }
-  }, 'K8S_TEST_FAILED')
+
+    const probeCluster: KubernetesClusterRecord = {
+      id: `k8s-test-${randomUUID()}`,
+      name: context?.cluster || contextName,
+      kubeconfig_path: kubeconfigPath || null,
+      kubeconfig_content: content || null,
+      context_name: contextName,
+      server_url: serverUrl,
+      auth_type: 'kubeconfig',
+      is_active: 0,
+      connection_status: 'disconnected',
+      auto_connect: 0,
+      default_namespace: defaultNamespace,
+      created_at: nowLabel(),
+      updated_at: nowLabel(),
+      source_type: 'local',
+      bastion_uuid: null,
+      bastion_asset_address: null,
+      bastion_asset_name: null,
+      bastion_asset_id_last: null
+    }
+    const probe = await probeKubernetesClusterConnection(probeCluster)
+    return {
+      ok: true,
+      data: probe
+    }
+  } catch (error) {
+    return toMutationError(error, 'K8S_TEST_FAILED')
+  }
+}
 
 export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImportInput): Promise<KubernetesKubeconfigImportResult> {
   try {
@@ -1196,9 +1236,32 @@ export const deleteKubernetesCluster = async (id: string): Promise<KubernetesClu
     return cloneCatalog()
   })
 
-export const connectKubernetesCluster = async (id: string): Promise<KubernetesClusterMutationResult> =>
-  asResult(() => {
+export async function connectKubernetesCluster(id: string): Promise<KubernetesClusterMutationResult> {
+  try {
     const current = requireCluster(id)
+    if (!(shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(current.id))) {
+      const probe = await probeKubernetesClusterConnection(current)
+      if (!probe.success) {
+        const failed: KubernetesClusterRecord = {
+          ...current,
+          is_active: 0,
+          connection_status: 'error',
+          updated_at: nowLabel()
+        }
+        clusters = clusters.map((cluster) => (cluster.id === id ? failed : cluster))
+        contexts = contexts.map((context) => (context.name === current.context_name ? { ...context, isActive: false } : context))
+        persistKubernetesCatalogState()
+        return {
+          ok: false,
+          data: {
+            ...cloneCatalog(),
+            cluster: { ...failed }
+          },
+          errorCode: 'K8S_CONNECT_PROBE_FAILED',
+          errorMessage: probe.error || probe.message || 'Kubernetes connection probe failed.'
+        }
+      }
+    }
     clusters = clusters.map((cluster) => ({
       ...cluster,
       is_active: cluster.id === id ? 1 : 0,
@@ -1209,10 +1272,16 @@ export const connectKubernetesCluster = async (id: string): Promise<KubernetesCl
     const connected = requireCluster(id)
     persistKubernetesCatalogState()
     return {
-      ...cloneCatalog(),
-      cluster: { ...connected }
+      ok: true,
+      data: {
+        ...cloneCatalog(),
+        cluster: { ...connected }
+      }
     }
-  })
+  } catch (error) {
+    return toMutationError(error, 'K8S_CONNECT_FAILED')
+  }
+}
 
 export const disconnectKubernetesCluster = async (id: string): Promise<KubernetesClusterMutationResult> =>
   asResult(() => {
@@ -1584,6 +1653,58 @@ const runLocalKubectl = async (
     })
   } finally {
     await cleanup()
+  }
+}
+
+const kubernetesConnectionProbeCommand = 'kubectl get namespaces'
+
+const probeKubernetesClusterConnection = async (
+  cluster: KubernetesClusterRecord
+): Promise<NonNullable<KubernetesClusterTestResult['data']>> => {
+  const startedAt = Date.now()
+  const command = kubernetesConnectionProbeCommand
+  const namespace = cluster.default_namespace || 'default'
+  const nonRunnableReason = canRunLocalKubectl(cluster) ? '' : nonRunnableKubernetesReason(cluster)
+  if (nonRunnableReason) {
+    return {
+      success: false,
+      isValid: false,
+      contextName: cluster.context_name,
+      serverUrl: cluster.server_url,
+      message: nonRunnableReason,
+      command,
+      output: nonRunnableReason,
+      error: nonRunnableReason,
+      durationMs: Math.max(1, Date.now() - startedAt)
+    }
+  }
+
+  if (!canRunLocalKubectl(cluster)) {
+    return {
+      success: true,
+      isValid: true,
+      contextName: cluster.context_name,
+      serverUrl: cluster.server_url,
+      message: '连接测试成功',
+      command,
+      output: renderCommand({ command, clusterId: cluster.id, namespace }),
+      error: '',
+      durationMs: Math.max(1, Date.now() - startedAt)
+    }
+  }
+
+  const result = await runLocalKubectl(cluster, command, namespace, 15_000)
+  const output = result.output || result.error
+  return {
+    success: result.success,
+    isValid: result.success,
+    contextName: cluster.context_name,
+    serverUrl: cluster.server_url,
+    message: result.success ? '连接测试成功' : result.error || 'Kubernetes connection probe failed.',
+    command,
+    output,
+    error: result.success ? '' : result.error || output,
+    durationMs: Math.max(1, Date.now() - startedAt)
   }
 }
 

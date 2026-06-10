@@ -442,6 +442,13 @@ describe('kubernetes backend boundary', () => {
       }
     })
 
+    await createFakeKubectl(
+      [
+        'echo "NAME STATUS AGE"',
+        'echo "qa Active 12d"',
+        'echo "PROBE_ARGS=$*"'
+      ].join('\n')
+    )
     const fromContent = await testKubernetesClusterConnection({
       contextName: 'qa/dev',
       serverUrl: 'https://qa.k8s.local:6443',
@@ -450,11 +457,16 @@ describe('kubernetes backend boundary', () => {
     expect(fromContent).toMatchObject({
       ok: true,
       data: {
+        success: true,
         isValid: true,
         contextName: 'qa/dev',
-        serverUrl: 'https://qa.k8s.local:6443'
+        serverUrl: 'https://qa.k8s.local:6443',
+        command: 'kubectl get namespaces',
+        message: '连接测试成功'
       }
     })
+    expect(fromContent.data?.output).toContain('PROBE_ARGS=get namespaces --context=qa/dev')
+    expect(fromContent.data?.durationMs).toBeGreaterThan(0)
 
     await expect(testKubernetesClusterConnection({ contextName: 'qa/dev', serverUrl: 'https://wrong.k8s.local:6443', kubeconfigContent: qaKubeconfigContent })).resolves.toMatchObject({
       ok: false,
@@ -464,6 +476,35 @@ describe('kubernetes backend boundary', () => {
       ok: false,
       errorCode: 'K8S_TEST_CONTEXT_REQUIRED'
     })
+  })
+
+  it('returns a failed add-cluster test result when kubectl cannot reach the cluster', async () => {
+    await createFakeKubectl(
+      [
+        'echo "dial tcp 10.0.0.1:6443: i/o timeout" >&2',
+        'exit 28'
+      ].join('\n')
+    )
+
+    const result = await testKubernetesClusterConnection({
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      kubeconfigContent: qaKubeconfigContent
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        success: false,
+        isValid: false,
+        contextName: 'qa/dev',
+        serverUrl: 'https://qa.k8s.local:6443',
+        command: 'kubectl get namespaces',
+        error: 'dial tcp 10.0.0.1:6443: i/o timeout'
+      }
+    })
+    expect(result.data?.message).toContain('dial tcp')
+    expect(result.data?.output).toContain('dial tcp')
   })
 
   it('imports kubeconfig contexts behind the backend boundary', async () => {
@@ -634,6 +675,49 @@ describe('kubernetes backend boundary', () => {
       ])
     )
     expect(restored.data?.importContexts.map((context) => context.name)).toContain('qa/dev')
+  })
+
+  it('fails closed when non-seed cluster connect probe fails', async () => {
+    await createFakeKubectl(
+      [
+        'echo "forbidden: user cannot list namespaces" >&2',
+        'exit 43'
+      ].join('\n')
+    )
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    __resetKubernetesCatalogForTests()
+
+    const added = await addKubernetesCluster({
+      name: 'qa-cluster',
+      contextName: 'qa/dev',
+      serverUrl: 'https://qa.k8s.local:6443',
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent,
+      authType: 'kubeconfig',
+      sourceType: 'local'
+    })
+    expect(added.ok).toBe(true)
+    const clusterId = added.data!.cluster!.id
+
+    const connected = await connectKubernetesCluster(clusterId)
+
+    expect(connected).toMatchObject({
+      ok: false,
+      errorCode: 'K8S_CONNECT_PROBE_FAILED',
+      errorMessage: 'forbidden: user cannot list namespaces',
+      data: {
+        cluster: expect.objectContaining({
+          id: clusterId,
+          connection_status: 'error',
+          is_active: 0
+        })
+      }
+    })
+    const catalog = await listKubernetesCatalog()
+    expect(catalog.data?.clusters.find((cluster) => cluster.id === clusterId)).toMatchObject({
+      connection_status: 'error',
+      is_active: 0
+    })
   })
 
   it('returns pod logs with backend status details', async () => {
