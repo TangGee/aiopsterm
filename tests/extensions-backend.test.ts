@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { deflateRawSync } from 'zlib'
@@ -20,6 +20,7 @@ type ExtensionPlugin = {
   source?: 'preinstalled' | 'store' | 'local'
   installedAt?: string
   packagePath?: string
+  storePackagePath?: string
   readme?: string
   size?: number
   categories?: string[]
@@ -47,7 +48,7 @@ let installExtensionPackage: (
 let uninstallExtensionPlugin: (input: { plugin: ExtensionPlugin }) => Promise<any>
 let listExtensionPlugins: () => Promise<any>
 let resetExtensionPluginCatalogForTests: () => void
-let configureExtensionBackendRuntime: (config?: { extensionRootDir?: string }) => void
+let configureExtensionBackendRuntime: (config?: { extensionRootDir?: string; storePackageDir?: string }) => void
 let cancelExtensionInstall: (pluginId: string) => any
 let openExtensionSubscription: (input: { plugin: ExtensionPlugin }, openExternal?: (url: string) => Promise<void> | void) => Promise<any>
 let EXTENSION_SUBSCRIPTION_URL: string
@@ -209,6 +210,39 @@ describe('extension plugin backend boundary', () => {
     return extensionRootDir
   }
 
+  const configureStorePackageDir = (storePackageDir: string) => {
+    configureExtensionBackendRuntime({ extensionRootDir, storePackageDir })
+  }
+
+  const createStorePackage = async (
+    storePackageDir: string,
+    patch: Record<string, unknown> = {},
+    options: { includeManifest?: boolean; includeMain?: boolean; readme?: string } = {}
+  ) => {
+    const manifest = {
+      id: 'cloud-assets',
+      displayName: 'Cloud Assets',
+      version: '0.9.1',
+      description: 'Store package from manifest.',
+      main: 'main.js',
+      categories: ['Cloud', 'Assets'],
+      functions: [{ title: 'Cloud sync', desc: 'Sync cloud hosts from a real package.' }],
+      contributes: { views: [{ id: 'cloudAssets', name: 'Cloud Assets' }] },
+      ...patch
+    }
+    const fileName = `${String(manifest.id)}-${String(manifest.version)}.external-reference`
+    const filePath = join(storePackageDir, fileName)
+    const entries: Array<{ name: string; content: string }> = []
+    if (options.includeManifest !== false) entries.push({ name: 'plugin.json', content: JSON.stringify(manifest) })
+    if (options.includeMain !== false) entries.push({ name: String(manifest.main || 'main.js'), content: 'module.exports = {}' })
+    if (options.readme !== undefined) entries.push({ name: 'README.md', content: options.readme })
+    await writeFile(filePath, createZipFixture(entries))
+    return {
+      fileName,
+      filePath
+    }
+  }
+
   const cleanupExtensionRoot = async () => {
     if (!extensionRootDir) return
     const rootToRemove = extensionRootDir
@@ -229,6 +263,13 @@ describe('extension plugin backend boundary', () => {
       source: 'preinstalled',
       isPlugin: false
     })
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')).toMatchObject({
+      source: 'store',
+      installed: false,
+      hasUpdate: false
+    })
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'local-shell-tools')).toBeUndefined()
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')?.description).not.toContain('占位')
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'jumpserverSupport')).toMatchObject({
       detailSummary: expect.stringContaining('资产同步'),
       guideSteps: expect.arrayContaining(['同步资产并确认主机分组。']),
@@ -238,52 +279,282 @@ describe('extension plugin backend boundary', () => {
     })
   })
 
-  it('installs a store plugin with backend-owned progress events', async () => {
+  it('fails closed when a store plugin has no real package source', async () => {
     const progress: ExtensionProgress[] = []
     const result = await installExtensionPlugin({ plugin: basePlugin() }, (event) => progress.push(event), { stepDelayMs: 0 })
 
-    expect(result.ok).toBe(true)
-    expect(result.data.plugin).toMatchObject({
-      pluginId: 'cloud-assets',
-      installed: true,
-      hasUpdate: false,
-      installedVersion: '0.9.1'
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
+      errorMessage: 'Cloud Assets requires a real .external-reference package before it can be installed.'
     })
-    expect(progress.map((event) => event.stage)).toEqual(['downloading', 'downloading', 'downloading', 'verifying', 'installing', 'done'])
-    expect(progress.every((event) => event.operation === 'install')).toBe(true)
-
+    expect(progress).toEqual([])
     const catalog = await listExtensionPlugins()
     expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toMatchObject({
-      installed: true,
-      installedVersion: '0.9.1'
+      installed: false,
+      installedVersion: ''
     })
   })
 
-  it('updates an installed plugin to the backend-returned latest version', async () => {
+  it('installs a store plugin from a configured real package', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     const progress: ExtensionProgress[] = []
-    const result = await updateExtensionPlugin(
-      {
-        plugin: basePlugin({
-          pluginId: 'ops-runbook',
-          name: 'Ops Runbook',
-          iconKey: 'runbook',
-          installed: true,
-          hasUpdate: true,
-          installedVersion: '1.2.0',
-          latestVersion: '1.3.0'
-        })
-      },
-      (event) => progress.push(event),
-      { stepDelayMs: 0 }
-    )
+    try {
+      const storePackage = await createStorePackage(storePackageDir, {}, { readme: '# Cloud Assets\n\nReal store package.' })
+      configureStorePackageDir(storePackageDir)
 
-    expect(result.ok).toBe(true)
-    expect(result.data.plugin).toMatchObject({
-      pluginId: 'ops-runbook',
-      installedVersion: '1.3.0',
-      hasUpdate: false
+      const result = await installExtensionPlugin({ plugin: basePlugin() }, (event) => progress.push(event), { stepDelayMs: 0 })
+
+      expect(result.ok).toBe(true)
+      expect(result.data.plugin).toMatchObject({
+        pluginId: 'cloud-assets',
+        name: 'Cloud Assets',
+        source: 'store',
+        installed: true,
+        hasUpdate: false,
+        installedVersion: '0.9.1',
+        latestVersion: '0.9.1',
+        storePackagePath: storePackage.filePath,
+        packagePath: expect.stringContaining(extensionRootDir),
+        readme: expect.stringContaining('Real store package.'),
+        categories: ['Cloud', 'Assets'],
+        functions: [{ title: 'Cloud sync', desc: 'Sync cloud hosts from a real package.' }]
+      })
+      expect(progress.map((event) => event.stage)).toEqual(['verifying', 'installing', 'done'])
+      expect(progress.every((event) => event.operation === 'install')).toBe(true)
+      await access(join(result.data.plugin.packagePath, 'plugin.json'))
+      await access(join(result.data.plugin.packagePath, 'main.js'))
+      const catalog = await listExtensionPlugins()
+      expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toMatchObject({
+        installed: true,
+        installedVersion: '0.9.1'
+      })
+      const registry = JSON.parse(await readFile(join(extensionRootDir, 'registry.json'), 'utf8')) as { plugins: ExtensionPlugin[] }
+      expect(registry.plugins).toHaveLength(1)
+      expect(registry.plugins[0]).toMatchObject({
+        pluginId: 'cloud-assets',
+        source: 'store',
+        installedVersion: '0.9.1',
+        packagePath: result.data.plugin.packagePath
+      })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('installs a store plugin from an explicit package path returned by the backend catalog row', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
+    try {
+      const storePackage = await createStorePackage(storePackageDir)
+
+      const result = await installExtensionPlugin(
+        {
+          plugin: basePlugin({
+            storePackagePath: storePackage.filePath
+          })
+        },
+        undefined,
+        { stepDelayMs: 0 }
+      )
+
+      expect(result.ok).toBe(true)
+      expect(result.data.plugin).toMatchObject({
+        pluginId: 'cloud-assets',
+        installed: true,
+        installedVersion: '0.9.1',
+        storePackagePath: storePackage.filePath
+      })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a store package whose manifest id does not match the catalog plugin', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
+    try {
+      await writeFile(
+        join(storePackageDir, 'cloud-assets-0.9.1.external-reference'),
+        createZipFixture([
+          {
+            name: 'plugin.json',
+            content: JSON.stringify({
+              id: 'wrong-plugin',
+              displayName: 'Cloud Assets',
+              version: '0.9.1',
+              main: 'main.js'
+            })
+          },
+          { name: 'main.js', content: 'module.exports = {}' }
+        ])
+      )
+      configureStorePackageDir(storePackageDir)
+
+      const result = await installExtensionPlugin({ plugin: basePlugin() }, undefined, { stepDelayMs: 0 })
+
+      expect(result).toEqual({
+        ok: false,
+        errorCode: 'EXTENSION_STORE_PACKAGE_MANIFEST_MISMATCH',
+        errorMessage: 'Store package id "wrong-plugin" does not match catalog plugin "cloud-assets".'
+      })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('updates an installed store plugin from a configured real package', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
+    const oldPackagePath = join(extensionRootDir, 'installed', 'ops-runbook', '1.2.0')
+    const progress: ExtensionProgress[] = []
+    try {
+      await mkdir(oldPackagePath, { recursive: true })
+      await writeFile(
+        join(extensionRootDir, 'registry.json'),
+        JSON.stringify(
+          {
+            plugins: [
+              {
+                pluginId: 'ops-runbook',
+                name: 'Ops Runbook',
+                description: 'Installed runbook package.',
+                iconKey: 'runbook',
+                tabName: 'Ops Runbook',
+                show: true,
+                isPlugin: true,
+                installed: true,
+                hasUpdate: false,
+                installedVersion: '1.2.0',
+                latestVersion: '1.2.0',
+                installable: true,
+                source: 'store',
+                packagePath: oldPackagePath,
+                categories: ['Tools', 'Runbook']
+              }
+            ]
+          },
+          null,
+          2
+        ),
+        'utf8'
+      )
+      await createStorePackage(
+        storePackageDir,
+        {
+          id: 'ops-runbook',
+          displayName: 'Ops Runbook',
+          version: '1.3.0',
+          description: 'Updated runbook package.',
+          categories: ['Tools', 'Runbook'],
+          functions: [{ title: '发布守卫', desc: 'Updated release guard.' }]
+        },
+        { readme: '# Ops Runbook\n\nUpdated package.' }
+      )
+      configureStorePackageDir(storePackageDir)
+      const catalogBefore = await listExtensionPlugins()
+      const opsRunbook = catalogBefore.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')
+      expect(opsRunbook).toMatchObject({ installed: true, hasUpdate: true, installedVersion: '1.2.0', latestVersion: '1.3.0' })
+
+      const result = await updateExtensionPlugin({ plugin: opsRunbook }, (event) => progress.push(event), { stepDelayMs: 0 })
+
+      expect(result.ok).toBe(true)
+      expect(result.data.plugin).toMatchObject({
+        pluginId: 'ops-runbook',
+        source: 'store',
+        installedVersion: '1.3.0',
+        latestVersion: '1.3.0',
+        hasUpdate: false,
+        packagePath: expect.stringContaining(join('ops-runbook', '1.3.0'))
+      })
+      expect(progress.map((event) => event.stage)).toEqual(['verifying', 'installing', 'done'])
+      expect(progress.every((event) => event.operation === 'update')).toBe(true)
+      const registry = JSON.parse(await readFile(join(extensionRootDir, 'registry.json'), 'utf8')) as { plugins: ExtensionPlugin[] }
+      expect(registry.plugins).toHaveLength(1)
+      expect(registry.plugins[0]).toMatchObject({ pluginId: 'ops-runbook', installedVersion: '1.3.0' })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a store package whose version does not match the catalog version', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
+    try {
+      await writeFile(join(storePackageDir, 'cloud-assets.external-reference'), createZipFixture([
+        {
+          name: 'plugin.json',
+          content: JSON.stringify({
+            id: 'cloud-assets',
+            displayName: 'Cloud Assets',
+            version: '0.8.0',
+            main: 'main.js'
+          })
+        },
+        { name: 'main.js', content: 'module.exports = {}' }
+      ]))
+      configureStorePackageDir(storePackageDir)
+
+      const result = await installExtensionPlugin({ plugin: basePlugin() }, undefined, { stepDelayMs: 0 })
+
+      expect(result).toEqual({
+        ok: false,
+        errorCode: 'EXTENSION_STORE_PACKAGE_VERSION_MISMATCH',
+        errorMessage: 'Cloud Assets package version 0.8.0 does not match expected version 0.9.1.'
+      })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed when an installed store plugin update has no real package source', async () => {
+    const oldPackagePath = join(extensionRootDir, 'installed', 'ops-runbook', '1.2.0')
+    const progress: ExtensionProgress[] = []
+    await mkdir(oldPackagePath, { recursive: true })
+    await writeFile(
+      join(extensionRootDir, 'registry.json'),
+      JSON.stringify(
+        {
+          plugins: [
+            {
+              pluginId: 'ops-runbook',
+              name: 'Ops Runbook',
+              description: 'Installed runbook package.',
+              iconKey: 'runbook',
+              tabName: 'Ops Runbook',
+              show: true,
+              isPlugin: true,
+              installed: true,
+              hasUpdate: false,
+              installedVersion: '1.2.0',
+              latestVersion: '1.2.0',
+              installable: true,
+              source: 'store',
+              packagePath: oldPackagePath,
+              categories: ['Tools', 'Runbook']
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      'utf8'
+    )
+    configureExtensionBackendRuntime({ extensionRootDir })
+    const catalogBefore = await listExtensionPlugins()
+    const opsRunbook = catalogBefore.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')
+    expect(opsRunbook).toMatchObject({ installed: true, hasUpdate: true, installedVersion: '1.2.0', latestVersion: '1.3.0' })
+
+    const result = await updateExtensionPlugin({ plugin: opsRunbook }, (event) => progress.push(event), { stepDelayMs: 0 })
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
+      errorMessage: 'Ops Runbook requires a real .external-reference package before it can be installed.'
     })
-    expect(progress.at(-1)).toMatchObject({ operation: 'update', stage: 'done', percent: 100 })
+    expect(progress).toEqual([])
+    const catalogAfter = await listExtensionPlugins()
+    expect(catalogAfter.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')).toMatchObject({
+      installed: true,
+      hasUpdate: true,
+      installedVersion: '1.2.0'
+    })
   })
 
   it('rejects invalid local package formats before adding plugin metadata', async () => {
@@ -446,17 +717,24 @@ describe('extension plugin backend boundary', () => {
   })
 
   it('marks an active operation as cancelled', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     const progress: ExtensionProgress[] = []
-    const pending = installExtensionPlugin({ plugin: basePlugin({ pluginId: 'cancel-me' }) }, (event) => progress.push(event), { stepDelayMs: 30 })
+    try {
+      await createStorePackage(storePackageDir)
+      configureStorePackageDir(storePackageDir)
+      const pending = installExtensionPlugin({ plugin: basePlugin() }, (event) => progress.push(event), { stepDelayMs: 30 })
 
-    await new Promise((resolve) => setTimeout(resolve, 5))
-    const cancelResult = cancelExtensionInstall('cancel-me')
-    const result = await pending
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      const cancelResult = cancelExtensionInstall('cloud-assets')
+      const result = await pending
 
-    expect(cancelResult.ok).toBe(true)
-    expect(result.ok).toBe(false)
-    expect(result.errorCode).toBe('EXTENSION_PLUGIN_OPERATION_CANCELLED')
-    expect(progress.at(-1)).toMatchObject({ pluginId: 'cancel-me', stage: 'cancelled', percent: 0 })
+      expect(cancelResult.ok).toBe(true)
+      expect(result.ok).toBe(false)
+      expect(result.errorCode).toBe('EXTENSION_PLUGIN_OPERATION_CANCELLED')
+      expect(progress.at(-1)).toMatchObject({ pluginId: 'cloud-assets', stage: 'cancelled', percent: 0 })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
   })
 
   it('opens the private plugin subscription entry behind the backend boundary', async () => {

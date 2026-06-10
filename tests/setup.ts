@@ -594,9 +594,9 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
     tabName: 'Ops Runbook',
     show: true,
     isPlugin: true,
-    installed: true,
-    hasUpdate: true,
-    installedVersion: '1.2.0',
+    installed: false,
+    hasUpdate: false,
+    installedVersion: '',
     latestVersion: '1.3.0',
     installable: true,
     source: 'store',
@@ -610,29 +610,9 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
     ]
   },
   {
-    pluginId: 'local-shell-tools',
-    name: 'Local Shell Tools',
-    description: '本地 shell 辅助工具集合。',
-    iconKey: 'local',
-    tabName: 'Local Shell Tools',
-    show: true,
-    isPlugin: true,
-    installed: true,
-    hasUpdate: false,
-    installedVersion: '0.5.2',
-    latestVersion: '',
-    installable: true,
-    source: 'local',
-    lastUpdated: '2026-05-30',
-    size: 702464,
-    readme: '从本地 .external-reference 包安装的工具插件，当前不在插件商店内。',
-    categories: ['Tools', 'Local'],
-    functions: [{ title: '本地工具', desc: '提供路径检查、环境变量快照和日志定位入口。' }]
-  },
-  {
     pluginId: 'cloud-assets',
     name: 'Cloud Assets',
-    description: '云资产发现和同步能力占位。',
+    description: '云资产发现和同步插件，需要真实 .external-reference 包后安装。',
     iconKey: 'cloud',
     tabName: 'Cloud Assets',
     show: true,
@@ -645,7 +625,7 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
     source: 'store',
     lastUpdated: '2026-05-28',
     size: 2310144,
-    readme: 'Cloud Assets 用于同步云主机、标签和连接入口，安装后可在资产管理中启用。',
+    readme: 'Cloud Assets 需要来自插件仓库或本地拖入的真实 .external-reference 包。未配置真实包时，后端不会模拟安装成功。',
     categories: ['Cloud', 'Assets'],
     functions: [
       { title: '云资产同步', desc: '按账号和地域拉取云主机列表。' },
@@ -712,6 +692,10 @@ const resetExtensionPluginStoreMock = () => {
   cancelledExtensionOperationIds.clear()
 }
 
+const setExtensionPluginStoreMock = (plugins: TestExtensionPlugin[]) => {
+  extensionPluginStoreMock = plugins.map(cloneTestExtensionPlugin)
+}
+
 const emitExtensionProgressMock = (event: TestExtensionProgress) => {
   extensionProgressListeners.forEach((listener) => listener(event))
 }
@@ -757,6 +741,12 @@ const finishExtensionOperationMock = (
       })
     }, delayMs)
   })
+
+const storePackageUnavailableMock = (plugin: TestExtensionPlugin) => ({
+  ok: false,
+  errorCode: 'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
+  errorMessage: `${plugin.name} requires a real .external-reference package before it can be installed.`
+})
 
 const createPackagePluginMock = (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[] }): TestExtensionPlugin => {
   const pluginName = input.fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
@@ -4441,6 +4431,7 @@ Object.assign(globalThis, {
   __resetFileSessionCatalogMock: resetFileSessionCatalogMock,
   __resetDatabaseTableRowsMock: resetDatabaseTableRowsMock,
   __resetExtensionPluginStoreMock: resetExtensionPluginStoreMock,
+  __setExtensionPluginStoreMock: setExtensionPluginStoreMock,
   __resetUserAccountStoreMock: resetUserAccountStoreMock,
   __resetSkillsStoreMock: resetSkillsStoreMock,
   __setUserAccountProfileMock: (patch: Partial<TestUserProfile>) => applyUserProfileMock(patch),
@@ -6156,8 +6147,8 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: extensionPluginStoreMock.map(cloneTestExtensionPlugin)
     })),
-    installExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => finishExtensionOperationMock('install', input.plugin)),
-    updateExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => finishExtensionOperationMock('update', input.plugin)),
+    installExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => storePackageUnavailableMock(input.plugin)),
+    updateExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => storePackageUnavailableMock(input.plugin)),
     installExtensionPackage: vi.fn(async (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[] }) => {
       if (!input.fileName.toLowerCase().endsWith('.external-reference')) {
         return { ok: false, errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID', errorMessage: 'Plugin package must use the .external-reference extension.' }

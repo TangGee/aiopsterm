@@ -845,6 +845,7 @@ export type ExtensionPluginRuntimeConfig = {
   lastUpdated?: string
   installedAt?: string
   packagePath?: string
+  storePackagePath?: string
   size?: number
   readme?: string
   categories?: string[]

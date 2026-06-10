@@ -4806,21 +4806,19 @@ describe('workspace store', () => {
 
     const installPromise = store.installExtensionPlugin('cloud-assets')
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBe(true)
-    await vi.runOnlyPendingTimersAsync()
     await installPromise
     expect(window.aiops.installExtensionPlugin).toHaveBeenCalledWith({
       plugin: expect.objectContaining({ pluginId: 'cloud-assets', installed: false, latestVersion: '0.9.1' })
     })
-    expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(true)
-
-    const updatePromise = store.updateExtensionPlugin('ops-runbook')
-    expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
-    await vi.runOnlyPendingTimersAsync()
-    await updatePromise
-    expect(window.aiops.updateExtensionPlugin).toHaveBeenCalledWith({
-      plugin: expect.objectContaining({ pluginId: 'ops-runbook', installed: true, hasUpdate: true })
+    expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(false)
+    expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
+    expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
+    expect(store.extensionNotice).toContain('requires a real .external-reference package')
+    expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'ops-runbook')).toMatchObject({
+      installed: false,
+      hasUpdate: false
     })
-    expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'ops-runbook')?.hasUpdate).toBe(false)
+    expect(window.aiops.updateExtensionPlugin).not.toHaveBeenCalled()
 
     await store.subscribeExtensionPlugin('private-automation-pack')
     expect(window.aiops.openExtensionSubscription).toHaveBeenCalledWith({
@@ -4889,6 +4887,31 @@ describe('workspace store', () => {
   it('does not fabricate extension plugin writes when bridges are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshExtensionPlugins()
+    Object.assign(store.extensionPlugins.find((item) => item.pluginId === 'ops-runbook')!, {
+      installed: true,
+      hasUpdate: true,
+      installedVersion: '1.2.0'
+    })
+    store.extensionPlugins.push({
+      pluginId: 'local-shell-tools',
+      name: 'Local Shell Tools',
+      description: '本地 shell 辅助工具集合。',
+      iconKey: 'local',
+      tabName: 'Local Shell Tools',
+      show: true,
+      isPlugin: true,
+      installed: true,
+      hasUpdate: false,
+      installedVersion: '0.5.2',
+      latestVersion: '',
+      installable: true,
+      source: 'local',
+      lastUpdated: '2026-05-30',
+      size: 702464,
+      readme: '从本地 .external-reference 包安装的工具插件，当前不在插件商店内。',
+      categories: ['Tools', 'Local'],
+      functions: [{ title: '本地工具', desc: '提供路径检查、环境变量快照和日志定位入口。' }]
+    })
 
     const originalAiops = {
       listExtensionPlugins: window.aiops.listExtensionPlugins,
@@ -4904,7 +4927,23 @@ describe('workspace store', () => {
     const plugin = (pluginId: string) => store.extensionPlugins.find((item) => item.pluginId === pluginId)
     const expectCatalogUnchanged = () => expect(catalogSnapshot()).toBe(initialCatalogSnapshot)
 
-    const cancelPendingUpdate = async (pendingUpdate: Promise<void>) => {
+    const startPendingUpdate = () => {
+      vi.mocked(window.aiops.updateExtensionPlugin!).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            window.setTimeout(() => {
+              resolve({
+                ok: false,
+                errorCode: 'EXTENSION_PLUGIN_OPERATION_CANCELLED',
+                errorMessage: 'Plugin operation cancelled.'
+              })
+            }, 120)
+          }) as any
+      )
+      return store.updateExtensionPlugin('ops-runbook')
+    }
+
+    const finishPendingUpdate = async (pendingUpdate: Promise<void>) => {
       ;(window.aiops as any).cancelExtensionInstall = originalAiops.cancelExtensionInstall
       await store.cancelExtensionInstall('ops-runbook')
       await vi.runOnlyPendingTimersAsync()
@@ -5017,29 +5056,29 @@ describe('workspace store', () => {
       expect(store.extensionNotice).toBe('subscribe rejected by backend')
       expectCatalogUnchanged()
 
-      const missingCancelUpdate = store.updateExtensionPlugin('ops-runbook')
+      const missingCancelUpdate = startPendingUpdate()
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
       ;(window.aiops as any).cancelExtensionInstall = undefined
       await store.cancelExtensionInstall('ops-runbook')
       expect(store.extensionNotice).toBe('Ops Runbook 取消服务不可用')
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
-      await cancelPendingUpdate(missingCancelUpdate)
+      await finishPendingUpdate(missingCancelUpdate)
 
-      const rejectedCancelUpdate = store.updateExtensionPlugin('ops-runbook')
+      const rejectedCancelUpdate = startPendingUpdate()
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
       vi.mocked(window.aiops.cancelExtensionInstall!).mockRejectedValueOnce(new Error('cancel offline'))
       await store.cancelExtensionInstall('ops-runbook')
       expect(store.extensionNotice).toBe('cancel offline')
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
-      await cancelPendingUpdate(rejectedCancelUpdate)
+      await finishPendingUpdate(rejectedCancelUpdate)
 
-      const backendRejectedCancelUpdate = store.updateExtensionPlugin('ops-runbook')
+      const backendRejectedCancelUpdate = startPendingUpdate()
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
       vi.mocked(window.aiops.cancelExtensionInstall!).mockResolvedValueOnce({ ok: false, errorMessage: 'cancel rejected by backend' } as any)
       await store.cancelExtensionInstall('ops-runbook')
       expect(store.extensionNotice).toBe('cancel rejected by backend')
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
-      await cancelPendingUpdate(backendRejectedCancelUpdate)
+      await finishPendingUpdate(backendRejectedCancelUpdate)
 
       const selectedBeforePackage = store.selectedExtensionId
       const clientLocalPackage = { name: 'client-local.external-reference', path: '/tmp/client-local.external-reference', size: 2048 }
