@@ -4228,6 +4228,37 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
 
+  it('does not fabricate or clear AI model catalog rows when the model bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    const originalListAiModels = window.aiops.listAiModels
+
+    try {
+      ;(window.aiops as any).listAiModels = undefined
+      await expect(store.refreshAiModelCatalog()).resolves.toBeNull()
+      expect(store.settingsNotice).toBe('模型列表加载服务不可用')
+      expect(store.aiModelOptions).toEqual([])
+      expect(store.lockedAiModelOptions).toEqual([])
+      expect(store.settingModelOptions).toEqual([])
+      expect(store.terminalCommandModelOptions).toEqual([])
+
+      ;(window.aiops as any).listAiModels = originalListAiModels
+      await store.refreshAiModelCatalog()
+      const loadedAiModels = store.aiModelOptions.map((model) => ({ ...model }))
+      const loadedLockedModels = store.lockedAiModelOptions.map((model) => ({ ...model }))
+      const loadedSettingModels = store.settingModelOptions.map((model) => ({ ...model }))
+
+      vi.mocked(window.aiops.listAiModels!).mockRejectedValueOnce(new Error('models offline'))
+      await expect(store.refreshAiModelCatalog({ replaceSettingsOptions: true })).resolves.toBeNull()
+      expect(store.settingsNotice).toBe('模型列表加载失败：models offline')
+      expect(store.aiModelOptions).toEqual(loadedAiModels)
+      expect(store.lockedAiModelOptions).toEqual(loadedLockedModels)
+      expect(store.settingModelOptions).toEqual(loadedSettingModels)
+      expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
+    } finally {
+      ;(window.aiops as any).listAiModels = originalListAiModels
+    }
+  })
+
   it('does not fabricate AI model selection when config persistence is unavailable or malformed', async () => {
     const store = useWorkspaceStore()
     await store.refreshAiModelCatalog()

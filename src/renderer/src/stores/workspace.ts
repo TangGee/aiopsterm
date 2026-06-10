@@ -1561,7 +1561,7 @@ const normalizeModelProviderConfig = (source: unknown, fallback: ModelProviderSe
   }
 }
 
-const normalizeModelSettingsConfig = (source?: unknown) => {
+const normalizeModelSettingsConfig = (source?: unknown, fallbackOptions: ModelOptionUserConfig[] = defaultModelSettingsConfig.options) => {
   const incoming = isRecord(source) ? source : {}
   const incomingProviders = isRecord(incoming.providers) ? incoming.providers : {}
   const providers: ModelSettingsUserConfig['providers'] = {
@@ -1573,7 +1573,7 @@ const normalizeModelSettingsConfig = (source?: unknown) => {
     ollama: normalizeModelProviderConfig(incomingProviders.ollama, defaultModelSettingsConfig.providers.ollama)
   }
 
-  const { normalized: options, changed: optionsChanged } = normalizeModelSettingsOptions(incoming.options, defaultModelSettingsConfig.options)
+  const { normalized: options, changed: optionsChanged } = normalizeModelSettingsOptions(incoming.options, fallbackOptions)
   let changed = !isRecord(source) || !isRecord(incoming.providers) || optionsChanged
 
   const normalized: ModelSettingsUserConfig = {
@@ -3195,13 +3195,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return catalog
   }
   const refreshAiModelCatalog = async (options: { replaceSettingsOptions?: boolean } = {}) => {
-    if (!window.aiops?.listAiModels) {
-      return applyAiModelCatalog(defaultAiModelCatalog, {
-        replaceSettingsOptions: options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
-      })
+    const replaceSettingsOptions = options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
+    const listAiModelsBridge = window.aiops?.listAiModels
+    if (typeof listAiModelsBridge !== 'function') {
+      setSettingsNoticeText('模型列表加载服务不可用')
+      return null
     }
-    aiModelCatalogLoadPromise ||= window.aiops
-      .listAiModels()
+    aiModelCatalogLoadPromise ||= listAiModelsBridge()
       .then((catalog) => normalizeAiModelCatalog(catalog))
       .finally(() => {
         aiModelCatalogLoadPromise = null
@@ -3209,13 +3209,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const catalog = await aiModelCatalogLoadPromise
       return applyAiModelCatalog(catalog, {
-        replaceSettingsOptions: options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
+        replaceSettingsOptions
       })
     } catch (error) {
       setSettingsNoticeText(`模型列表加载失败：${error instanceof Error ? error.message : String(error)}`)
-      return applyAiModelCatalog(defaultAiModelCatalog, {
-        replaceSettingsOptions: options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
-      })
+      return null
     }
   }
   const filteredQuickCommands = computed(() => {
@@ -3429,14 +3427,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       proxy: { ...normalizedAiPreferences.proxy }
     }
     const modelCatalog = await refreshAiModelCatalog({ replaceSettingsOptions: false })
+    const modelCatalogSettingsOptions = modelCatalog?.settingsModels || []
     const modelSettingsSource =
-      missingModelSettings || missingModelOptions
+      (missingModelSettings || missingModelOptions) && modelCatalog
         ? {
             ...savedModelSettings,
-            options: modelCatalog.settingsModels
+            options: modelCatalogSettingsOptions
           }
         : savedConfig.modelSettings
-    const { changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource)
+    const { changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource, modelCatalogSettingsOptions)
     const normalizedModelSettings = applyModelSettingsSnapshot(modelSettingsSource)
     let normalizedQuickCommands = normalizeQuickCommandsConfig().normalized
     let quickCommandsLoadedFromBridge = false
