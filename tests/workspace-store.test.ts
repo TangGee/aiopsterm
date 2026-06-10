@@ -5830,11 +5830,14 @@ describe('workspace store', () => {
     )
     expect(store.k8sProxyConfigOpen).toBe(false)
 
-    store.connectK8sCluster('k8s-2')
-    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connecting')
+    const connectPromise = store.connectK8sCluster('k8s-2')
+    expect(store.k8sConnectingClusterIds).toContain('k8s-2')
+    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('disconnected')
     await vi.advanceTimersByTimeAsync(280)
+    await expect(connectPromise).resolves.toBe(true)
     expect(store.k8sActiveClusterId).toBe('k8s-2')
     expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connected')
+    expect(store.k8sConnectingClusterIds).not.toContain('k8s-2')
     expect(store.k8sClusterNotice).toContain('proxy.internal:8443')
 
     vi.mocked(window.aiops.createKubernetesTerminal).mockClear()
@@ -5892,7 +5895,7 @@ describe('workspace store', () => {
     await expect(store.endK8sTerminalSession(newTerminal.id)).resolves.toBe(true)
     expect(window.aiops.closeKubernetesTerminal).toHaveBeenCalledWith(newTerminal.sessionId, 0)
     expect(store.k8sActiveTerminal?.status).toBe('ended')
-    expect(store.k8sActiveTerminal?.output).toContain('[Terminal session ended]')
+    expect(store.k8sActiveTerminal?.output).not.toContain('[Terminal session ended]')
 
     store.k8sActiveClusterId = 'k8s-1'
     vi.mocked(window.aiops.executeKubernetesResourceAction).mockClear()
@@ -6139,6 +6142,17 @@ describe('workspace store', () => {
       expect(store.k8sClusterNotice).toBe('cleanup bridge offline')
       expect(store.k8sAgentCurrentCluster.clusterId).toBe('k8s-1')
       expect(store.k8sAgentStatus).toBe('ready')
+
+      vi.mocked(window.aiops.cleanupKubernetesAgent!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          cleared: true
+        }
+      } as any)
+      await expect(store.cleanupK8sAgent()).resolves.toBe(false)
+      expect(store.k8sClusterNotice).toBe('Kubernetes Agent cleanup backend returned malformed result data.')
+      expect(store.k8sAgentCurrentCluster.clusterId).toBe('k8s-1')
+      expect(store.k8sAgentStatus).toBe('ready')
     } finally {
       ;(window.aiops as any).cleanupKubernetesAgent = originalCleanup
     }
@@ -6262,11 +6276,14 @@ describe('workspace store', () => {
         }
       }
     } as any)
-    expect(store.connectK8sCluster('k8s-2')).toBe(true)
-    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe('connecting')
+    const malformedConnectPromise = store.connectK8sCluster('k8s-2')
+    expect(store.k8sConnectingClusterIds).toContain('k8s-2')
+    expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe(k8s2StatusBeforeConnect)
     await flushK8sAsync()
+    await expect(malformedConnectPromise).resolves.toBe(false)
     expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
     expect(store.k8sClusters.find((cluster) => cluster.id === 'k8s-2')?.connection_status).toBe(k8s2StatusBeforeConnect)
+    expect(store.k8sConnectingClusterIds).not.toContain('k8s-2')
     expect(store.k8sActiveClusterId).toBe('k8s-1')
 
     store.openK8sProxyConfig()
@@ -6449,8 +6466,7 @@ describe('workspace store', () => {
         }
       }
     } as any)
-    expect(store.disconnectK8sCluster('k8s-1')).toBe(true)
-    await flushK8sAsync()
+    await expect(store.disconnectK8sCluster('k8s-1')).resolves.toBe(false)
     expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')
     expect(JSON.stringify(store.k8sTerminalTabs)).toBe(terminalTabsBeforeClose)
     expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeAdd)
@@ -6472,6 +6488,17 @@ describe('workspace store', () => {
     expect(store.k8sActiveTerminal?.output).not.toContain('MALFORMED TERMINAL TEXT')
     expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
     expect(store.k8sActiveTerminal?.lastCommandOutput).toBe(terminalLastOutputBefore)
+
+    const activeTerminal = store.k8sActiveTerminal
+    if (!activeTerminal) throw new Error('Expected active Kubernetes terminal for disconnected command coverage.')
+    activeTerminal.status = 'error'
+    vi.mocked(window.aiops.executeKubernetesCommand).mockClear()
+    await expect(store.sendK8sTerminalCommand('kubectl get pods -A')).resolves.toBe('')
+    expect(window.aiops.executeKubernetesCommand).not.toHaveBeenCalled()
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal is not connected.')
+    expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
+    expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
+    activeTerminal.status = 'connected'
 
     expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
     const agentRunsBefore = store.k8sAgentRuns.map((run) => ({ ...run }))
@@ -6572,8 +6599,9 @@ describe('workspace store', () => {
       expect(store.k8sProxyConfigOpen).toBe(true)
       expect(store.k8sClusterNotice).toBe('proxy bridge offline')
 
-      store.connectK8sCluster('k8s-2')
+      const connectAfterFailedProxySave = store.connectK8sCluster('k8s-2')
       await vi.advanceTimersByTimeAsync(280)
+      await connectAfterFailedProxySave
       expect(store.k8sClusterNotice).not.toContain('unsaved.proxy')
     } finally {
       ;(window.aiops as any).saveKubernetesAgentProxyConfig = originalSaveProxy

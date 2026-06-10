@@ -84,7 +84,7 @@
           </button>
           <button
             title="采集命令输出到 AI"
-            :disabled="workspace.k8sActiveTerminal.status === 'ended'"
+            :disabled="workspace.k8sActiveTerminal.status !== 'connected'"
             @click="sendAiCommand"
           >
             AI Command
@@ -114,7 +114,7 @@
           <input
             v-model="command"
             placeholder="输入 kubectl 命令"
-            :disabled="workspace.k8sActiveTerminal?.status === 'ended'"
+            :disabled="workspace.k8sActiveTerminal?.status !== 'connected'"
           />
         </form>
         <div
@@ -305,7 +305,7 @@
                   >
                     <LoaderCircle v-if="workspace.k8sConnectingClusterIds.includes(workspace.k8sSelectedCluster.id)" />
                     <Link v-else />
-                    {{ workspace.k8sSelectedCluster.connection_status === 'connecting' ? '连接中' : '连接' }}
+                    {{ workspace.k8sConnectingClusterIds.includes(workspace.k8sSelectedCluster.id) ? '连接中' : '连接' }}
                   </button>
                   <button
                     v-else

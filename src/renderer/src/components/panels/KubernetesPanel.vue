@@ -48,7 +48,7 @@
         :class="{
           active: cluster.id === workspace.k8sActiveClusterId,
           connected: cluster.connection_status === 'connected',
-          connecting: cluster.connection_status === 'connecting'
+          connecting: workspace.k8sConnectingClusterIds.includes(cluster.id)
         }"
         @click="void workspace.openK8sTerminal(cluster.id)"
       >
@@ -84,7 +84,7 @@
               @click="workspace.connectK8sCluster(cluster.id)"
             >
               <Link />
-              <span>{{ cluster.connection_status === 'connecting' ? '连接中' : '连接' }}</span>
+              <span>{{ workspace.k8sConnectingClusterIds.includes(cluster.id) ? '连接中' : '连接' }}</span>
             </button>
             <button
               v-else

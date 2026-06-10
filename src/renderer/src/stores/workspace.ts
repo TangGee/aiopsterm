@@ -2002,12 +2002,15 @@ const isK8sTerminalRecord = (source: unknown): source is KubernetesTerminalRecor
   typeof source.updatedAt === 'string'
 
 const isK8sTerminalCloseData = (source: unknown): source is K8sTerminalCloseData => {
-  if (!isK8sTerminalRecord(source) || !isRecord(source)) return false
+  if (!isK8sTerminalRecord(source) || source.status !== 'ended' || !isRecord(source)) return false
   return isFiniteNumber((source as Record<string, unknown>).exitCode)
 }
 
 const isK8sProxyConfigData = (source: unknown): source is K8sProxyConfigData =>
   isRecord(source) && isK8sAgentProxyConfig(source.proxyConfig) && typeof source.message === 'string'
+
+const isK8sAgentCleanupData = (source: unknown): source is NonNullable<Awaited<ReturnType<AiopsPreloadApi['cleanupKubernetesAgent']>>['data']> =>
+  isRecord(source) && source.cleared === true && typeof source.cleanedAt === 'string'
 
 const isK8sContextSwitchData = (source: unknown, expectedContextName: string): source is KubernetesCatalog =>
   isK8sCatalogSnapshot(source) && isRecord(source) && source.currentContext === expectedContextName && source.contexts.some((context) => context.name === expectedContextName && context.isActive)
@@ -9117,7 +9120,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return Boolean(cluster)
   }
 
-  const connectK8sCluster = (id: string) => {
+  const connectK8sCluster = async (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return false
     if (!window.aiops?.connectKubernetesCluster) {
@@ -9126,49 +9129,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setK8sActionMenu(null)
     setK8sConnecting(id, true)
-    const previousStatus = cluster.connection_status
-    cluster.connection_status = 'connecting'
     setK8sNotice(`正在连接 ${cluster.name}`)
-    void window.aiops
-      .connectKubernetesCluster(id)
-      .then((result) => {
-        if (!result?.ok) {
-          cluster.connection_status = 'error'
-          setK8sNotice(result?.errorMessage || `${cluster.name} 连接失败`)
-          return false
-        }
-        if (!isK8sClusterMutationData(result.data, id, 'connected')) {
-          cluster.connection_status = previousStatus
-          setK8sNotice('Kubernetes cluster backend returned malformed result data.')
-          return false
-        }
-        applyKubernetesCatalog(result.data)
-        const latest = result.data.cluster || result.data.clusters.find((item) => item.id === id)
-        if (latest) {
-          k8sAgentClusterId.value = latest.id
-          k8sAgentContextName.value = latest.context_name
-          k8sAgentStatus.value = 'ready'
-        }
-        completeK8sTerminalConnect(id)
-        const appliedProxyConfig = savedK8sProxyConfig.value
-        setK8sNotice(
-          appliedProxyConfig.enabled
-            ? `${latest?.name || cluster.name} 连接成功，K8s Agent 代理 ${appliedProxyConfig.type} ${appliedProxyConfig.host}:${appliedProxyConfig.port} 已应用`
-            : `${latest?.name || cluster.name} 连接成功`
-        )
-        return true
-      })
-      .catch((error) => {
-        cluster.connection_status = 'error'
-        setK8sNotice(error instanceof Error ? error.message : `${cluster.name} 连接失败`)
-      })
-      .finally(() => {
-        setK8sConnecting(id, false)
-      })
-    return true
+    try {
+      const result = await window.aiops.connectKubernetesCluster(id)
+      if (!result?.ok) {
+        setK8sNotice(result?.errorMessage || `${cluster.name} 连接失败`)
+        return false
+      }
+      if (!isK8sClusterMutationData(result.data, id, 'connected')) {
+        setK8sNotice('Kubernetes cluster backend returned malformed result data.')
+        return false
+      }
+      applyKubernetesCatalog(result.data)
+      const latest = result.data.cluster || result.data.clusters.find((item) => item.id === id)
+      if (latest) {
+        k8sAgentClusterId.value = latest.id
+        k8sAgentContextName.value = latest.context_name
+        k8sAgentStatus.value = 'ready'
+      }
+      completeK8sTerminalConnect(id)
+      const appliedProxyConfig = savedK8sProxyConfig.value
+      setK8sNotice(
+        appliedProxyConfig.enabled
+          ? `${latest?.name || cluster.name} 连接成功，K8s Agent 代理 ${appliedProxyConfig.type} ${appliedProxyConfig.host}:${appliedProxyConfig.port} 已应用`
+          : `${latest?.name || cluster.name} 连接成功`
+      )
+      return true
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : `${cluster.name} 连接失败`)
+      return false
+    } finally {
+      setK8sConnecting(id, false)
+    }
   }
 
-  const disconnectK8sCluster = (id: string) => {
+  const disconnectK8sCluster = async (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return false
     if (!window.aiops?.disconnectKubernetesCluster) {
@@ -9177,38 +9172,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setK8sActionMenu(null)
     setK8sConnecting(id, false)
-    void window.aiops
-      .disconnectKubernetesCluster(id)
-      .then((result) => {
-        if (!result?.ok) {
-          setK8sNotice(result?.errorMessage || `${cluster.name} 断开失败`)
-          return false
-        }
-        if (!isK8sClusterMutationData(result.data, id, 'disconnected')) {
-          setK8sNotice('Kubernetes cluster backend returned malformed result data.')
-          return false
-        }
-        applyKubernetesCatalog(result.data)
-        if (k8sAgentClusterId.value === id) {
-          k8sAgentClusterId.value = null
-          k8sAgentContextName.value = ''
-          k8sAgentStatus.value = 'idle'
-        }
-        k8sTerminalTabs.value
-          .filter((tab) => tab.clusterId === id && tab.status !== 'ended')
-          .forEach((tab) => {
-            tab.status = 'ended'
-            tab.exitCode = 0
-            tab.collectingAiOutput = false
-            appendK8sTerminalOutput(tab, `[Terminal session ended]`)
-          })
-        setK8sNotice(`${cluster.name} 已断开`)
-        return true
-      })
-      .catch((error) => {
-        setK8sNotice(error instanceof Error ? error.message : `${cluster.name} 断开失败`)
-      })
-    return true
+    try {
+      const result = await window.aiops.disconnectKubernetesCluster(id)
+      if (!result?.ok) {
+        setK8sNotice(result?.errorMessage || `${cluster.name} 断开失败`)
+        return false
+      }
+      if (!isK8sClusterMutationData(result.data, id, 'disconnected')) {
+        setK8sNotice('Kubernetes cluster backend returned malformed result data.')
+        return false
+      }
+      applyKubernetesCatalog(result.data)
+      if (k8sAgentClusterId.value === id) {
+        k8sAgentClusterId.value = null
+        k8sAgentContextName.value = ''
+        k8sAgentStatus.value = 'idle'
+      }
+      k8sTerminalTabs.value
+        .filter((tab) => tab.clusterId === id && tab.status !== 'ended')
+        .forEach((tab) => {
+          tab.status = 'ended'
+          tab.exitCode = 0
+          tab.collectingAiOutput = false
+          tab.updatedAt = '刚刚'
+        })
+      setK8sNotice(`${cluster.name} 已断开`)
+      return true
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : `${cluster.name} 断开失败`)
+      return false
+    }
   }
 
   const appendK8sTerminalOutput = (tab: K8sTerminalTab, text: string) => {
@@ -9252,8 +9245,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       k8sTerminalTabs.value.push(tab)
     }
     activateK8sTerminal(tab.id)
-    if (cluster.connection_status !== 'connected') connectK8sCluster(clusterId)
-    else if (tab.status === 'connecting') completeK8sTerminalConnect(clusterId)
+    if (cluster.connection_status !== 'connected') {
+      const connected = await connectK8sCluster(clusterId)
+      if (!connected && tab.status === 'connecting') tab.status = 'error'
+    } else if (tab.status === 'connecting') completeK8sTerminalConnect(clusterId)
     return tab
   }
 
@@ -9280,9 +9275,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice('Kubernetes terminal backend returned malformed result data.')
         return
       }
+      k8sTerminalTabs.value[index] = {
+        ...k8sTerminalTabs.value[index],
+        status: result.data.status,
+        exitCode: result.data.exitCode,
+        updatedAt: result.data.updatedAt
+      }
     }
-    k8sTerminalTabs.value[index].status = 'ended'
-    k8sTerminalTabs.value[index].exitCode = 0
     k8sTerminalTabs.value.splice(index, 1)
     if (k8sActiveTerminalId.value === id) {
       const next = k8sTerminalTabs.value[Math.min(index, k8sTerminalTabs.value.length - 1)]
@@ -9354,7 +9353,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = k8sActiveTerminal.value
     const text = command.trim()
     if (!tab || !text || tab.status === 'ended') return ''
-    if (tab.status === 'connecting') tab.status = 'connected'
+    if (tab.status !== 'connected') {
+      setK8sNotice('Kubernetes terminal is not connected.')
+      tab.collectingAiOutput = false
+      return ''
+    }
     const result = await executeK8sBackendCommand(text, tab.clusterId, tab.namespace, 'terminal')
     if (!result) {
       tab.collectingAiOutput = false
@@ -9388,8 +9391,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activateK8sTerminal(target.id)
     target.collectingAiOutput = true
     target.aiCommandTabId = tabId || target.id
-    await sendK8sTerminalCommand(command)
-    return true
+    const terminalOutput = await sendK8sTerminalCommand(command)
+    return Boolean(terminalOutput)
   }
 
   const endK8sTerminalSession = async (id: string, exitCode = 0) => {
@@ -9406,14 +9409,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       tab.updatedAt = result.data.updatedAt
+      tab.status = result.data.status
+      tab.exitCode = result.data.exitCode
     } else {
       setK8sNotice('Kubernetes terminal API 不可用')
       return false
     }
-    tab.status = 'ended'
-    tab.exitCode = exitCode
     tab.collectingAiOutput = false
-    appendK8sTerminalOutput(tab, `[Terminal session ended]`)
     setK8sNotice(`${tab.name} 终端会话已结束`)
     return true
   }
@@ -9567,8 +9569,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.cleanupKubernetesAgent()
-      if (!result?.ok || !result.data?.cleared) {
+      if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes Agent 清理失败')
+        return false
+      }
+      if (!isK8sAgentCleanupData(result.data)) {
+        setK8sNotice('Kubernetes Agent cleanup backend returned malformed result data.')
         return false
       }
     } catch (error) {
