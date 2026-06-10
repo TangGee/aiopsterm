@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 let createSshTerminalConnectionInfo: (terminalId: string, target: any, options?: any, createdAt?: number) => any
+let createTerminalBinaryWriteResult: (id: string, bytes: number, exists: boolean) => any
+let createTerminalDataEvent: (id: string, chunk: string | Buffer) => any
 let createTerminalErrorLifecycleEvent: (id: string, kind: any, error: unknown, event?: any, at?: number) => any
 let createTerminalKillResult: (id: string, exists: boolean) => any
 let createTerminalLifecycleEvent: (id: string, event: any, at?: number) => any
@@ -10,6 +12,8 @@ beforeAll(async () => {
   const modulePath = '../src/main/backend/terminal'
   const backend = await import(modulePath)
   createSshTerminalConnectionInfo = backend.createSshTerminalConnectionInfo
+  createTerminalBinaryWriteResult = backend.createTerminalBinaryWriteResult
+  createTerminalDataEvent = backend.createTerminalDataEvent
   createTerminalErrorLifecycleEvent = backend.createTerminalErrorLifecycleEvent
   createTerminalKillResult = backend.createTerminalKillResult
   createTerminalLifecycleEvent = backend.createTerminalLifecycleEvent
@@ -95,6 +99,36 @@ describe('terminal backend boundary', () => {
     })
 
     expect(createTerminalWriteResult('missing-session', 'uptime\n', false)).toEqual({
+      ok: false,
+      errorCode: 'TERMINAL_SESSION_NOT_FOUND',
+      errorMessage: 'Terminal session is not available.'
+    })
+  })
+
+  it('carries raw terminal bytes for ZMODEM detection while preserving display text', () => {
+    expect(createTerminalDataEvent('terminal-raw-unit', Buffer.from([0x2a, 0x2a, 0x18, 0x42, 0xff]))).toEqual({
+      id: 'terminal-raw-unit',
+      data: '**\u0018B�',
+      raw: [42, 42, 24, 66, 255]
+    })
+
+    expect(createTerminalDataEvent('terminal-text-unit', 'uptime\n')).toEqual({
+      id: 'terminal-text-unit',
+      data: 'uptime\n',
+      raw: [117, 112, 116, 105, 109, 101, 10]
+    })
+  })
+
+  it('reports terminal binary write success and missing-session failures for protocol payloads', () => {
+    expect(createTerminalBinaryWriteResult('terminal-binary-unit', 20, true)).toEqual({
+      ok: true,
+      data: {
+        id: 'terminal-binary-unit',
+        bytes: 20
+      }
+    })
+
+    expect(createTerminalBinaryWriteResult('missing-session', 20, false)).toEqual({
       ok: false,
       errorCode: 'TERMINAL_SESSION_NOT_FOUND',
       errorMessage: 'Terminal session is not available.'

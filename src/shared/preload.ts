@@ -59,7 +59,13 @@ export type TerminalKillResult = AiopsMutationResult<{
 export type TerminalDataEvent = {
   id: string
   data: string
+  raw?: number[]
 }
+
+export type TerminalBinaryWriteResult = AiopsMutationResult<{
+  id: string
+  bytes: number
+}>
 
 export type TerminalLifecycleStage = 'starting' | 'connecting' | 'proxy-opening' | 'connected' | 'shell-ready' | 'error' | 'closed'
 
@@ -353,6 +359,40 @@ export type AiopsMutationResult<T> = {
   errorCode?: string
   errorMessage?: string
 }
+
+export type ZmodemUploadFile = {
+  name: string
+  size: number
+  lastModified: number
+  data: number[]
+}
+
+export type ZmodemUploadPickResult = AiopsMutationResult<{
+  files: ZmodemUploadFile[]
+  canceled?: boolean
+}>
+
+export type ZmodemSavePathPickResult = AiopsMutationResult<{
+  filePath?: string
+  canceled?: boolean
+}>
+
+export type ZmodemStreamOpenResult = AiopsMutationResult<{
+  streamId: string
+  filePath: string
+}>
+
+export type ZmodemStreamWriteResult = AiopsMutationResult<{
+  streamId: string
+  bytes: number
+  totalBytes: number
+}>
+
+export type ZmodemStreamCloseResult = AiopsMutationResult<{
+  streamId: string
+  filePath: string
+  bytes: number
+}>
 
 export type AiopsSshTunnelMutationResult = AiopsMutationResult<
   AiopsAssetSnapshot & {
@@ -2586,8 +2626,14 @@ export type AiopsPreloadApi = {
   deleteAliasCommand: (input: AliasCommandDeleteInput) => Promise<AliasCommandDeleteResult>
   createTerminal: (options?: TerminalCreateOptions) => Promise<TerminalSessionInfo>
   writeTerminal: (id: string, data: string) => Promise<TerminalWriteResult>
+  writeTerminalBinary: (id: string, data: number[] | Uint8Array | ArrayBuffer) => Promise<TerminalBinaryWriteResult>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
+  pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>
+  pickZmodemSavePath: (name: string) => Promise<ZmodemSavePathPickResult>
+  openZmodemStream: (savePath: string) => Promise<ZmodemStreamOpenResult>
+  writeZmodemChunk: (streamId: string, chunk: number[] | Uint8Array | ArrayBuffer) => Promise<ZmodemStreamWriteResult>
+  closeZmodemStream: (streamId: string) => Promise<ZmodemStreamCloseResult>
   getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => Promise<TerminalCommandSuggestion[]>
   generateTerminalCommand: (input: TerminalCommandGenerationInput) => Promise<TerminalCommandGenerationResult>
   listAiModels: () => Promise<AiModelCatalog>

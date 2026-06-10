@@ -1,6 +1,8 @@
 import type {
   AiopsAssetRecord,
   TerminalCreateOptions,
+  TerminalBinaryWriteResult,
+  TerminalDataEvent,
   TerminalDisconnectReason,
   TerminalKillResult,
   TerminalLifecycleEvent,
@@ -147,6 +149,33 @@ export const createTerminalWriteResult = (id: string, data: string, exists: bool
       id: sessionId,
       bytes: Buffer.byteLength(String(data || ''), 'utf8')
     }
+  }
+}
+
+export const createTerminalBinaryWriteResult = (id: string, bytes: number, exists: boolean): TerminalBinaryWriteResult => {
+  const sessionId = cleanOptional(id) || ''
+  if (!sessionId || !exists) {
+    return {
+      ok: false,
+      errorCode: 'TERMINAL_SESSION_NOT_FOUND',
+      errorMessage: 'Terminal session is not available.'
+    }
+  }
+  return {
+    ok: true,
+    data: {
+      id: sessionId,
+      bytes: Math.max(0, Math.floor(Number(bytes) || 0))
+    }
+  }
+}
+
+export const createTerminalDataEvent = (id: string, chunk: string | Buffer): TerminalDataEvent => {
+  const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8')
+  return {
+    id: cleanOptional(id) || '',
+    data: Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || ''),
+    raw: Array.from(raw)
   }
 }
 

@@ -6468,6 +6468,70 @@ code {
   font-size: 11px;
 }
 
+.terminal-zmodem-progress {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) 30px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent));
+  padding: 8px 14px;
+}
+
+.terminal-zmodem-progress > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.terminal-zmodem-progress strong,
+.terminal-zmodem-progress span,
+.terminal-zmodem-progress small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-zmodem-progress strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.terminal-zmodem-progress span,
+.terminal-zmodem-progress small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.terminal-zmodem-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.terminal-zmodem-progress button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.terminal-zmodem-progress button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.terminal-zmodem-progress.error {
+  background: color-mix(in srgb, var(--surface) 90%, var(--danger));
+}
+
 .terminal-grid {
   min-height: 0;
   display: grid;

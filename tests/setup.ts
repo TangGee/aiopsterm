@@ -5812,11 +5812,40 @@ Object.defineProperty(window, 'aiops', {
         bytes: Buffer.byteLength(String(data || ''), 'utf8')
       }
     })),
+    writeTerminalBinary: vi.fn(async (id: string, data: number[] | Uint8Array | ArrayBuffer) => {
+      const bytes =
+        data instanceof ArrayBuffer
+          ? data.byteLength
+          : ArrayBuffer.isView(data)
+            ? data.byteLength
+            : Array.isArray(data)
+              ? data.length
+              : 0
+      return {
+        ok: true,
+        data: { id, bytes }
+      }
+    }),
     resizeTerminal: vi.fn(async () => undefined),
     killTerminal: vi.fn(async (id: string) => ({
       ok: true,
       data: { id }
     })),
+    pickZmodemUploadFiles: vi.fn(async () => ({ ok: true, data: { files: [] as any[], canceled: true } })),
+    pickZmodemSavePath: vi.fn(async (name: string) => ({ ok: true, data: { filePath: `/tmp/${name || 'zmodem-download'}` } })),
+    openZmodemStream: vi.fn(async (savePath: string) => ({ ok: true, data: { streamId: 'zmodem-stream-test', filePath: savePath } })),
+    writeZmodemChunk: vi.fn(async (streamId: string, chunk: number[] | Uint8Array | ArrayBuffer) => {
+      const bytes =
+        chunk instanceof ArrayBuffer
+          ? chunk.byteLength
+          : ArrayBuffer.isView(chunk)
+            ? chunk.byteLength
+            : Array.isArray(chunk)
+              ? chunk.length
+              : 0
+      return { ok: true, data: { streamId, bytes, totalBytes: bytes } }
+    }),
+    closeZmodemStream: vi.fn(async (streamId: string) => ({ ok: true, data: { streamId, filePath: '/tmp/zmodem-download', bytes: 0 } })),
     getTerminalCommandSuggestions: vi.fn(async (query: string, context?: { mode?: 'base' | 'ai' }) => {
       const trimmed = query.trim()
       const normalized = trimmed.toLowerCase()

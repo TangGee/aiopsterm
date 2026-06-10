@@ -169,6 +169,8 @@ import {
 } from './backend/terminalSuggestions'
 import {
   createSshTerminalConnectionInfo,
+  createTerminalBinaryWriteResult,
+  createTerminalDataEvent,
   createTerminalErrorLifecycleEvent,
   createTerminalKillResult,
   createTerminalLifecycleEvent,
@@ -190,6 +192,13 @@ import {
   updateUserProfile
 } from './backend/userAccount'
 import { configureVoiceBackendRuntime, transcribeVoiceInput } from './backend/voice'
+import {
+  closeZmodemStream,
+  openZmodemStream,
+  pickZmodemSavePath,
+  pickZmodemUploadFiles,
+  writeZmodemChunk
+} from './backend/zmodem'
 import {
   aiopstermProtocolPrefix,
   aiopstermProtocolScheme,
@@ -334,7 +343,7 @@ type TerminalSession = {
 }
 
 type SshShellSession = {
-  write(data: string): void
+  write(data: string | Buffer): void
   resize(cols: number, rows: number): void
   kill(reason?: TerminalDisconnectReason): void
 }
@@ -727,6 +736,29 @@ const sendTerminalExit = (owner: BrowserWindow, lifecycle: TerminalLifecycleEven
     errorCode: lifecycle.errorCode,
     errorMessage: lifecycle.errorMessage
   })
+}
+
+const terminalDataPayload = (id: string, chunk: string | Buffer) => {
+  return createTerminalDataEvent(id, chunk)
+}
+
+const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buffer) => {
+  owner.webContents.send('terminal:data', terminalDataPayload(id, chunk))
+}
+
+const terminalBinaryPayload = (payload: unknown): Buffer => {
+  if (payload instanceof ArrayBuffer) return Buffer.from(payload)
+  if (ArrayBuffer.isView(payload)) return Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength)
+  if (Array.isArray(payload)) return Buffer.from(payload)
+  return Buffer.alloc(0)
+}
+
+const writeTerminalBuffer = (session: TerminalSession, buffer: Buffer) => {
+  if (session.kind === 'ssh') {
+    ;(session.process as SshShellSession).write(buffer)
+  } else {
+    ;(session.process as ChildProcessWithoutNullStreams).stdin.write(buffer)
+  }
 }
 
 const cloneKnowledgeBaseNodes = (nodes: KnowledgeBaseNodeConfig[] = []): KnowledgeBaseNodeConfig[] =>
@@ -2315,7 +2347,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
       code: 1,
       message: 'SSH runtime is not available.'
     })
-    owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] ${error.message}\n` })
+    sendTerminalData(owner, id, `\n[aiopsterm] ${error.message}\n`)
     sendTerminalExit(owner, lifecycle, 1)
     return {
       shell: 'ssh',
@@ -2333,7 +2365,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
       code: 1,
       message: 'SSH target is invalid.'
     })
-    owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] ${error.message}\n` })
+    sendTerminalData(owner, id, `\n[aiopsterm] ${error.message}\n`)
     sendTerminalExit(owner, lifecycle, 1)
     return {
       shell: 'ssh',
@@ -2350,7 +2382,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
   let closed = false
   let cols = options.cols || 100
   let rows = options.rows || 30
-  const pendingWrites: string[] = []
+  const pendingWrites: Array<string | Buffer> = []
 
   let lifecycle = sendTerminalLifecycle(owner, id, {
     ...lifecycleBase,
@@ -2405,7 +2437,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
   }
 
   const session: SshShellSession = {
-    write(data: string) {
+    write(data: string | Buffer) {
       if (closed) return
       if (stream) {
         stream.write(data)
@@ -2434,10 +2466,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
     }
   }
 
-  owner.webContents.send('terminal:data', {
-    id,
-    data: `[aiopsterm] connecting ${target.username}@${target.host}:${target.port}\n`
-  })
+  sendTerminalData(owner, id, `[aiopsterm] connecting ${target.username}@${target.host}:${target.port}\n`)
 
   client
     .on('ready', () => {
@@ -2449,7 +2478,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
       })
       client.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
         if (error) {
-          owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] SSH shell failed: ${error.message}\n` })
+          sendTerminalData(owner, id, `\n[aiopsterm] SSH shell failed: ${error.message}\n`)
           fail(error, 'SSH shell failed.', 1)
           return
         }
@@ -2459,17 +2488,17 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
           stage: 'shell-ready',
           message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
         })
-        owner.webContents.send('terminal:data', { id, data: `[aiopsterm] connected ${target.username}@${target.host}:${target.port}\n` })
+        sendTerminalData(owner, id, `[aiopsterm] connected ${target.username}@${target.host}:${target.port}\n`)
         while (pendingWrites.length) {
           stream.write(pendingWrites.shift() || '')
         }
-        channel.on('data', (chunk: Buffer | string) => owner.webContents.send('terminal:data', { id, data: chunk.toString() }))
-        channel.stderr.on('data', (chunk: Buffer | string) => owner.webContents.send('terminal:data', { id, data: chunk.toString() }))
+        channel.on('data', (chunk: Buffer | string) => sendTerminalData(owner, id, chunk))
+        channel.stderr.on('data', (chunk: Buffer | string) => sendTerminalData(owner, id, chunk))
         channel.on('close', () => finish(0, 'process'))
       })
     })
     .on('error', (error) => {
-      owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] SSH connection failed: ${error.message}\n` })
+      sendTerminalData(owner, id, `\n[aiopsterm] SSH connection failed: ${error.message}\n`)
       fail(error, 'SSH connection failed.', 1)
     })
     .on('close', () => finish(null, 'unknown'))
@@ -2501,7 +2530,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
           proxyName: proxy.config.name,
           message: `Opening SSH proxy ${proxy.config.name}`
         })
-        owner.webContents.send('terminal:data', { id, data: `[aiopsterm] opening SSH proxy ${proxy.config.name}\n` })
+        sendTerminalData(owner, id, `[aiopsterm] opening SSH proxy ${proxy.config.name}\n`)
         proxySocket = proxy.socket
         connectConfig.sock = proxy.socket
         delete connectConfig.host
@@ -2513,10 +2542,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
       }
       client.connect(connectConfig)
     } catch (error) {
-      owner.webContents.send('terminal:data', {
-        id,
-        data: `\n[aiopsterm] SSH proxy tunnel failed: ${error instanceof Error ? error.message : String(error)}\n`
-      })
+      sendTerminalData(owner, id, `\n[aiopsterm] SSH proxy tunnel failed: ${error instanceof Error ? error.message : String(error)}\n`)
       fail(error, 'SSH proxy tunnel failed.', 1)
     }
   })()
@@ -3335,7 +3361,7 @@ const registerIpc = () => {
         stage: 'shell-ready',
         message: `Local shell ready ${terminalShell}`
       })
-      ptyProcess.onData((data) => owner.webContents.send('terminal:data', { id, data }))
+      ptyProcess.onData((data) => sendTerminalData(owner, id, data))
       ptyProcess.onExit((event) => {
         finishLocal(event.exitCode, 'process', 'Local shell exited.')
       })
@@ -3362,22 +3388,19 @@ const registerIpc = () => {
       })
 
       child.stdout.on('data', (chunk: Buffer) => {
-        owner.webContents.send('terminal:data', { id, data: chunk.toString('utf8') })
+        sendTerminalData(owner, id, chunk)
       })
       child.stderr.on('data', (chunk: Buffer) => {
-        owner.webContents.send('terminal:data', { id, data: chunk.toString('utf8') })
+        sendTerminalData(owner, id, chunk)
       })
       child.on('exit', (code) => {
         finishLocal(code, 'process', 'Local shell exited.')
       })
       child.on('error', (childError) => {
-        owner.webContents.send('terminal:data', { id, data: `\n[aiopsterm] failed to start shell: ${childError.message}\n` })
+        sendTerminalData(owner, id, `\n[aiopsterm] failed to start shell: ${childError.message}\n`)
         failLocal(childError, 'Local shell failed to start.')
       })
-      owner.webContents.send('terminal:data', {
-        id,
-        data: '\n[aiopsterm] pty unavailable, using subprocess fallback.\n'
-      })
+      sendTerminalData(owner, id, '\n[aiopsterm] pty unavailable, using subprocess fallback.\n')
     }
 
     return { id, shell: terminalShell, cwd, kind: 'local' as const, lifecycle }
@@ -3395,6 +3418,28 @@ const registerIpc = () => {
     }
     terminalHistoryLinesFromWrite(data).forEach((command) => recordTerminalCommandHistory(command, { host: session.host }))
     return createTerminalWriteResult(id, data, true)
+  })
+
+  ipcMain.handle('terminal:write-binary', (_event, id: string, payload: unknown) => {
+    const session = sessions.get(id)
+    const buffer = terminalBinaryPayload(payload)
+    if (!session) return createTerminalBinaryWriteResult(id, buffer.byteLength, false)
+    if (session.kind === 'pty') {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_BINARY_UNSUPPORTED',
+        errorMessage: 'This terminal runtime does not support binary writes.'
+      }
+    }
+    if (!buffer.byteLength) {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_BINARY_EMPTY',
+        errorMessage: 'Terminal binary payload is empty.'
+      }
+    }
+    writeTerminalBuffer(session, buffer)
+    return createTerminalBinaryWriteResult(id, buffer.byteLength, true)
   })
 
   ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) => {
@@ -3418,6 +3463,28 @@ const registerIpc = () => {
     }
     return createTerminalKillResult(id, true)
   })
+
+  ipcMain.handle('zmodem:pick-upload-files', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    return pickZmodemUploadFiles({
+      showOpenDialog: () => {
+        const options = { properties: ['openFile', 'multiSelections'] as Electron.OpenDialogOptions['properties'] }
+        return owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
+      }
+    })
+  })
+  ipcMain.handle('zmodem:pick-save-path', async (event, name: string) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    return pickZmodemSavePath(name, {
+      showSaveDialog: (defaultName) => {
+        const options = { defaultPath: defaultName }
+        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+      }
+    })
+  })
+  ipcMain.handle('zmodem:open-stream', (_event, savePath: string) => openZmodemStream(savePath))
+  ipcMain.handle('zmodem:write-chunk', (_event, streamId: string, chunk: unknown) => writeZmodemChunk(streamId, chunk))
+  ipcMain.handle('zmodem:close-stream', (_event, streamId: string) => closeZmodemStream(streamId))
 
   ipcMain.handle('terminal:suggestions', (_event, query: string, context?: TerminalCommandSuggestionContext) =>
     getTerminalCommandSuggestions(query, context)

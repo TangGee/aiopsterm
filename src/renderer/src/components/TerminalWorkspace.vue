@@ -165,6 +165,29 @@
     </div>
 
     <div
+      v-if="zmodemProgress.visible"
+      class="terminal-zmodem-progress"
+      :class="[zmodemProgress.type, zmodemProgress.status]"
+    >
+      <div>
+        <strong>{{ zmodemProgress.type === 'upload' ? 'ZMODEM Upload' : 'ZMODEM Download' }}</strong>
+        <span>{{ zmodemProgress.fileName || 'transfer' }}</span>
+        <small>{{ zmodemProgress.message }} · {{ formatZmodemBytes(zmodemProgress.transferred) }} / {{ formatZmodemBytes(zmodemProgress.total) }}</small>
+      </div>
+      <progress
+        :value="zmodemPercent"
+        max="100"
+      ></progress>
+      <button
+        title="取消传输"
+        :disabled="zmodemProgress.status !== 'running'"
+        @click="cancelZmodemTransfer"
+      >
+        <X />
+      </button>
+    </div>
+
+    <div
       ref="terminalGrid"
       class="terminal-grid"
       :class="{ split: workspace.panels.length > 1 }"
@@ -420,7 +443,8 @@ import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBott
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
-import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalKillResult } from '@shared/preload'
+import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
+import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -451,6 +475,7 @@ const aiSuggestLoading = ref(false)
 let offData: (() => void) | null = null
 let offLifecycle: (() => void) | null = null
 let offExit: (() => void) | null = null
+let zmodemProgressHideTimer: number | null = null
 const fontSize = ref(12)
 const terminalElements = new Map<string, HTMLElement>()
 const terminalViews = new Map<string, { terminal: XtermTerminal; fit: FitAddon; search: SearchAddon; lastOutput: string }>()
@@ -477,6 +502,50 @@ let suggestionRequestId = 0
 let commandGenerationRequestId = 0
 
 const showDashboard = ref(true)
+
+const emptyZmodemProgress = (): TerminalZmodemProgress => ({
+  visible: false,
+  type: 'download',
+  fileName: '',
+  transferred: 0,
+  total: 0,
+  status: 'running',
+  message: ''
+})
+
+const zmodemSessionId = ref('')
+const zmodemProgress = reactive<TerminalZmodemProgress>(emptyZmodemProgress())
+const zmodemPercent = computed(() =>
+  zmodemProgress.total > 0 ? Math.max(0, Math.min(100, Math.round((zmodemProgress.transferred / zmodemProgress.total) * 100))) : 0
+)
+
+const formatZmodemBytes = (bytes: number) => {
+  const value = Math.max(0, Number(bytes) || 0)
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${value} B`
+}
+
+const terminalZmodemRuntime = createTerminalZmodemRuntime({
+  getApi: () => window.aiops,
+  appendData: (sessionId, data) => workspace.appendTerminalOutput(sessionId, data),
+  onProgress: (sessionId, progress) => {
+    if (zmodemProgressHideTimer !== null) {
+      window.clearTimeout(zmodemProgressHideTimer)
+      zmodemProgressHideTimer = null
+    }
+    zmodemSessionId.value = sessionId
+    Object.assign(zmodemProgress, progress)
+    if (progress.status !== 'running') {
+      zmodemProgressHideTimer = window.setTimeout(() => {
+        Object.assign(zmodemProgress, emptyZmodemProgress())
+        zmodemSessionId.value = ''
+        zmodemProgressHideTimer = null
+      }, 1800)
+    }
+  },
+  onNotice: (message) => workspace.setTopNotice(message)
+})
 
 const syncTerminalView = (panel: TerminalPanel) => {
   if (panel.kind === 'knowledge') return
@@ -1315,6 +1384,17 @@ const openFileManagerFromMenu = () => {
   termMenu.visible = false
 }
 
+const handleTerminalData = (event: TerminalDataEvent) => {
+  if (!terminalZmodemRuntime.handleTerminalData(event)) {
+    workspace.appendTerminalOutput(event.id, event.data)
+  }
+}
+
+const cancelZmodemTransfer = () => {
+  if (!zmodemSessionId.value || zmodemProgress.status !== 'running') return
+  void terminalZmodemRuntime.cancel(zmodemSessionId.value)
+}
+
 const handleTerminalMouseUp = (panelId: string, event: MouseEvent) => {
   if (event.button !== 0 || termMenu.visible || searchOverlayPanelId.value === panelId) {
     aiButtonPanelId.value = ''
@@ -1358,7 +1438,7 @@ const startRealShell = async () => {
 }
 
 onMounted(() => {
-  offData = window.aiops?.onTerminalData((event) => workspace.appendTerminalOutput(event.id, event.data)) || null
+  offData = window.aiops?.onTerminalData(handleTerminalData) || null
   offLifecycle = window.aiops?.onTerminalLifecycle((event) => workspace.applyTerminalLifecycle(event)) || null
   offExit = window.aiops?.onTerminalExit((event) => workspace.applyTerminalExit(event)) || null
   document.addEventListener('click', () => {
@@ -1372,6 +1452,11 @@ onUnmounted(() => {
   offData?.()
   offLifecycle?.()
   offExit?.()
+  terminalZmodemRuntime.dispose()
+  if (zmodemProgressHideTimer !== null) {
+    window.clearTimeout(zmodemProgressHideTimer)
+    zmodemProgressHideTimer = null
+  }
   terminalViews.forEach((view) => view.terminal.dispose())
   terminalViews.clear()
   window.removeEventListener('keydown', handleShortcut)
