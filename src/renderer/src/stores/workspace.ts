@@ -2,6 +2,17 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
+import {
+  isAliasCommandDeleteData,
+  isAliasCommandListData,
+  isAliasCommandMutationData,
+  isExtensionInstallProgressData,
+  isExtensionPluginListData,
+  isExtensionPluginOperationData,
+  isExtensionSubscriptionData,
+  malformedAliasBackendResultMessage,
+  malformedExtensionBackendResultMessage
+} from '@/services/extensionBackendGuards'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
@@ -4152,7 +4163,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const loadAliasCommandsFromBackend = async () => {
     if (!hasAliasListBridge()) throw new Error('Alias 服务不可用')
     const result = await window.aiops.listAliasCommands()
-    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || 'Alias 加载失败')
+    if (!result?.ok) throw new Error(result?.errorMessage || 'Alias 加载失败')
+    if (!isAliasCommandListData(result.data)) throw new Error(malformedAliasBackendResultMessage)
     return result.data
   }
 
@@ -8286,6 +8298,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const handleExtensionInstallProgress = (event: BackendExtensionInstallProgress) => {
+    if (!isExtensionInstallProgressData(event)) {
+      setExtensionNotice(malformedExtensionBackendResultMessage)
+      return
+    }
     if (event.operation === 'update') {
       setExtensionUpdateLoading(event.pluginId, !['done', 'error', 'cancelled'].includes(event.stage))
     } else {
@@ -8348,8 +8364,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await listExtensionPluginsBridge()
-      if (!result?.ok || !Array.isArray(result.data)) {
+      if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || '插件列表加载失败')
+        return false
+      }
+      if (!isExtensionPluginListData(result.data)) {
+        setExtensionNotice(malformedExtensionBackendResultMessage)
         return false
       }
       extensionPlugins.value = result.data.map((plugin) => ({
@@ -8386,10 +8406,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setExtensionNotice(`正在安装 ${plugin.name}`)
     try {
       const result = await installExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
         setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
         setExtensionNotice(cancelled ? `${plugin.name} 安装已取消` : result?.errorMessage || `${plugin.name} 安装失败`)
+        clearExtensionInstallProgressLater(pluginId)
+        return
+      }
+      if (!isExtensionPluginOperationData(result.data, 'install') || result.data.plugin.pluginId !== pluginId) {
+        setExtensionInstallProgress(pluginId, 'error', 0)
+        setExtensionNotice(malformedExtensionBackendResultMessage)
         clearExtensionInstallProgressLater(pluginId)
         return
       }
@@ -8419,10 +8445,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setExtensionNotice(`正在更新 ${plugin.name}`)
     try {
       const result = await updateExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
         setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
         setExtensionNotice(cancelled ? `${plugin.name} 安装已取消` : result?.errorMessage || `${plugin.name} 更新失败`)
+        clearExtensionInstallProgressLater(pluginId)
+        return
+      }
+      if (!isExtensionPluginOperationData(result.data, 'update') || result.data.plugin.pluginId !== pluginId) {
+        setExtensionInstallProgress(pluginId, 'error', 0)
+        setExtensionNotice(malformedExtensionBackendResultMessage)
         clearExtensionInstallProgressLater(pluginId)
         return
       }
@@ -8449,8 +8481,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await uninstallExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || `${plugin.name} 卸载失败`)
+        return
+      }
+      if (!isExtensionPluginOperationData(result.data, 'uninstall') || result.data.plugin.pluginId !== pluginId) {
+        setExtensionNotice(malformedExtensionBackendResultMessage)
         return
       }
       applyExtensionPluginFromBackend(result.data.plugin)
@@ -8470,8 +8506,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await openExtensionSubscriptionBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || `${plugin.name} 订阅入口打开失败`)
+        return
+      }
+      if (!isExtensionSubscriptionData(result.data) || result.data.pluginId !== pluginId) {
+        setExtensionNotice(malformedExtensionBackendResultMessage)
         return
       }
       setExtensionNotice(`${plugin.name} 已打开订阅入口`)
@@ -8537,8 +8577,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         size,
         existingPluginIds: extensionPlugins.value.map((plugin) => plugin.pluginId)
       })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setExtensionNotice(result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED' ? `${packageName} 安装已取消` : result?.errorMessage || `${packageName} 安装失败`)
+        return false
+      }
+      if (!isExtensionPluginOperationData(result.data, 'package')) {
+        setExtensionNotice(malformedExtensionBackendResultMessage)
         return false
       }
       pendingPluginId = result.data.plugin.pluginId
@@ -8614,12 +8658,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.saveAliasCommand(payload)
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         if (result?.errorCode === 'ALIAS_DUPLICATE') {
           setExtensionNotice('Alias 已存在')
           return { ok: false, reason: 'duplicate' as const }
         }
         setExtensionNotice(result?.errorMessage || 'Alias 保存失败')
+        return { ok: false, reason: 'backend' as const }
+      }
+      if (!isAliasCommandMutationData(result.data)) {
+        setExtensionNotice(malformedAliasBackendResultMessage)
         return { ok: false, reason: 'backend' as const }
       }
       await syncAliasConfigFromBackend(result.data.commands)
@@ -8658,8 +8706,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.deleteAliasCommand({ id: target.id, alias: target.alias })
-      if (!result?.ok || !result.data) {
+      if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || 'Alias 删除失败')
+        return { ok: false, reason: 'backend' as const }
+      }
+      if (!isAliasCommandDeleteData(result.data)) {
+        setExtensionNotice(malformedAliasBackendResultMessage)
         return { ok: false, reason: 'backend' as const }
       }
       await syncAliasConfigFromBackend(result.data.commands)

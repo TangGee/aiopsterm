@@ -5410,6 +5410,162 @@ describe('workspace store', () => {
     }
   })
 
+  it('fails closed on malformed successful extension and alias backend envelopes', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshExtensionPlugins()
+    await store.refreshAliasCommands()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    const malformedExtensionMessage = '扩展服务返回数据无效'
+    const malformedAliasMessage = 'Alias 服务返回数据无效'
+    Object.assign(store.extensionPlugins.find((item) => item.pluginId === 'ops-runbook')!, {
+      installed: true,
+      hasUpdate: true,
+      installedVersion: '1.2.0'
+    })
+    store.extensionPlugins.push({
+      pluginId: 'local-shell-tools',
+      name: 'Local Shell Tools',
+      description: '本地 shell 辅助工具集合。',
+      iconKey: 'local',
+      tabName: 'Local Shell Tools',
+      show: true,
+      isPlugin: true,
+      installed: true,
+      hasUpdate: false,
+      installedVersion: '0.5.2',
+      latestVersion: '',
+      installable: true,
+      source: 'local',
+      lastUpdated: '2026-05-30',
+      size: 702464,
+      readme: '从本地 .external-reference 包安装的工具插件，当前不在插件商店内。',
+      categories: ['Tools', 'Local'],
+      functions: [{ title: '本地工具', desc: '提供路径检查、环境变量快照和日志定位入口。' }]
+    })
+
+    const originalAiops = {
+      listExtensionPlugins: window.aiops.listExtensionPlugins,
+      installExtensionPlugin: window.aiops.installExtensionPlugin,
+      updateExtensionPlugin: window.aiops.updateExtensionPlugin,
+      installExtensionPackage: window.aiops.installExtensionPackage,
+      uninstallExtensionPlugin: window.aiops.uninstallExtensionPlugin,
+      openExtensionSubscription: window.aiops.openExtensionSubscription,
+      listAliasCommands: window.aiops.listAliasCommands,
+      saveAliasCommand: window.aiops.saveAliasCommand,
+      deleteAliasCommand: window.aiops.deleteAliasCommand
+    }
+    const catalogSnapshot = () => JSON.stringify(store.extensionPlugins)
+    const persistedAliasSnapshot = () => JSON.stringify(store.aliasCommands.filter((alias) => alias.id !== 'new').map(({ edit, ...alias }) => alias))
+    const initialCatalogSnapshot = catalogSnapshot()
+    const initialAliasSnapshot = persistedAliasSnapshot()
+    const plugin = (pluginId: string) => store.extensionPlugins.find((item) => item.pluginId === pluginId)
+    const expectCatalogUnchanged = () => expect(catalogSnapshot()).toBe(initialCatalogSnapshot)
+    const expectAliasesUnchanged = () => expect(persistedAliasSnapshot()).toBe(initialAliasSnapshot)
+
+    try {
+      vi.mocked(window.aiops.listExtensionPlugins!).mockResolvedValueOnce({ ok: true, data: [{ pluginId: 'broken-plugin' }] } as any)
+      await expect(store.refreshExtensionPlugins()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.installExtensionPlugin!).mockResolvedValueOnce({
+        ok: true,
+        data: { operation: 'install', plugin: { pluginId: 'cloud-assets' }, message: 'malformed install success' }
+      } as any)
+      await store.installExtensionPlugin('cloud-assets')
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(plugin('cloud-assets')?.installed).toBe(false)
+      expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.updateExtensionPlugin!).mockResolvedValueOnce({
+        ok: true,
+        data: { operation: 'update', plugin: { ...plugin('ops-runbook')!, pluginId: 'ops-runbook-shadow' }, message: 'wrong plugin id' }
+      } as any)
+      await store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(plugin('ops-runbook')?.hasUpdate).toBe(true)
+      expect(plugin('ops-runbook-shadow')).toBeUndefined()
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
+      expect(store.extensionInstallProgressMap['ops-runbook']?.stage).toBe('error')
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.uninstallExtensionPlugin!).mockResolvedValueOnce({
+        ok: true,
+        data: { operation: 'uninstall', plugin: { pluginId: 'local-shell-tools' }, message: 'malformed uninstall success' }
+      } as any)
+      await store.uninstallExtensionPlugin('local-shell-tools')
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(plugin('local-shell-tools')?.installed).toBe(true)
+      expectCatalogUnchanged()
+
+      vi.mocked(window.aiops.openExtensionSubscription!).mockResolvedValueOnce({
+        ok: true,
+        data: { pluginId: 'other-plugin', url: 'https://example.test/subscription', message: 'opened' }
+      } as any)
+      await store.subscribeExtensionPlugin('private-automation-pack')
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expectCatalogUnchanged()
+
+      const selectedBeforePackage = store.selectedExtensionId
+      vi.mocked(window.aiops.installExtensionPackage!).mockResolvedValueOnce({
+        ok: true,
+        data: { operation: 'package', plugin: { pluginId: 'local-malformed-pack' }, message: 'malformed package success' }
+      } as any)
+      await expect(store.dropExtensionPackage({ name: 'malformed-pack.external-reference', path: '/tmp/malformed-pack.external-reference', size: 512 })).resolves.toBe(false)
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(store.extensionInstallingPackageName).toBe('')
+      expect(store.selectedExtensionId).toBe(selectedBeforePackage)
+      expect(plugin('local-malformed-pack')).toBeUndefined()
+      expectCatalogUnchanged()
+
+      const progressListener = vi.mocked(window.aiops.onExtensionInstallProgress!).mock.calls.at(-1)?.[0] as ((event: any) => void) | undefined
+      expect(progressListener).toBeTypeOf('function')
+      const progressSnapshot = JSON.stringify(store.extensionInstallProgressMap)
+      progressListener?.({ pluginId: 'cloud-assets', operation: 'install', stage: 'done' })
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(JSON.stringify(store.extensionInstallProgressMap)).toBe(progressSnapshot)
+
+      vi.mocked(window.aiops.listAliasCommands!).mockResolvedValueOnce({ ok: true, data: [{ id: 'alias-broken', alias: 'broken' }] } as any)
+      await expect(store.refreshAliasCommands()).resolves.toBe(false)
+      expect(store.extensionNotice).toBe(malformedAliasMessage)
+      expectAliasesUnchanged()
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      store.createAliasCommand()
+      store.updateAliasDraft('new', { alias: 'malformed-alias', command: 'echo malformed' })
+      vi.mocked(window.aiops.saveAliasCommand!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          command: { id: 'alias-malformed' },
+          commands: [{ id: 'alias-malformed', alias: 'malformed-alias', command: 'echo malformed', createdAt: 1 }]
+        }
+      } as any)
+      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: false, reason: 'backend' })
+      expect(store.extensionNotice).toBe(malformedAliasMessage)
+      expectAliasesUnchanged()
+      expect(store.aliasCommands.some((alias) => alias.id !== 'new' && alias.alias === 'malformed-alias')).toBe(false)
+      expect(store.aliasCommands.some((alias) => alias.id === 'new' && alias.alias === 'malformed-alias')).toBe(true)
+
+      const existingAlias = store.aliasCommands.find((alias) => alias.id !== 'new')!
+      vi.mocked(window.aiops.deleteAliasCommand!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          deleted: { id: existingAlias.id, alias: existingAlias.alias, command: existingAlias.command, createdAt: existingAlias.createdAt },
+          commands: [{ id: 'alias-broken', alias: 'broken' }]
+        }
+      } as any)
+      await expect(store.deleteAliasCommand(existingAlias.id)).resolves.toEqual({ ok: false, reason: 'backend' })
+      expect(store.extensionNotice).toBe(malformedAliasMessage)
+      expectAliasesUnchanged()
+      expect(store.aliasCommands.some((alias) => alias.id === existingAlias.id)).toBe(true)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('manages External reference-style Kubernetes contexts, clusters, terminals, and bastion sync', async () => {
     vi.useFakeTimers()
     const store = useWorkspaceStore()
