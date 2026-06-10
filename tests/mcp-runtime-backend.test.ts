@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/preload'
+import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/preload'
 
 let backend: {
   discoverMcpServerSnapshot: (
@@ -17,6 +17,52 @@ let backend: {
     mcpConfig: McpConfigFile
     mcpServers: McpServerUserConfig[]
     mcpToolStates: McpToolStatesUserConfig
+  }>
+  callMcpTool: (
+    config: McpConfigFile,
+    input: McpToolCallInput,
+    options?: {
+      servers?: McpServerUserConfig[]
+      toolStates?: McpToolStatesUserConfig
+      clientName?: string
+      clientVersion?: string
+      timeoutMs?: number
+      maxTimeoutMs?: number
+    }
+  ) => Promise<{
+    ok: boolean
+    data?: {
+      serverName: string
+      toolName: string
+      arguments?: Record<string, unknown>
+      content: Array<Record<string, unknown> & { type: string }>
+      isError: boolean
+      durationMs: number
+    }
+    errorCode?: string
+    errorMessage?: string
+  }>
+  readMcpResource: (
+    config: McpConfigFile,
+    input: McpResourceReadInput,
+    options?: {
+      servers?: McpServerUserConfig[]
+      toolStates?: McpToolStatesUserConfig
+      clientName?: string
+      clientVersion?: string
+      timeoutMs?: number
+      maxTimeoutMs?: number
+    }
+  ) => Promise<{
+    ok: boolean
+    data?: {
+      serverName: string
+      uri: string
+      contents: Array<Record<string, unknown> & { uri: string }>
+      durationMs: number
+    }
+    errorCode?: string
+    errorMessage?: string
   }>
 }
 
@@ -45,6 +91,25 @@ const handle = (message) => {
   }
   if (message.method === 'resources/list') {
     send({ id: message.id, result: { resources: [{ name: 'runbook', description: 'Incident runbook.', uri: 'file:///runbook.md' }] } })
+    return
+  }
+  if (message.method === 'tools/call') {
+    const params = message.params || {}
+    const args = params.arguments || {}
+    if (params.name !== 'inspect_service') {
+      send({ id: message.id, error: { code: -32602, message: 'unknown tool: ' + params.name } })
+      return
+    }
+    send({ id: message.id, result: { content: [{ type: 'text', text: 'service=' + args.name + ';namespace=' + (args.namespace || 'default') }], isError: false } })
+    return
+  }
+  if (message.method === 'resources/read') {
+    const uri = message.params && message.params.uri
+    if (uri !== 'file:///runbook.md') {
+      send({ id: message.id, error: { code: -32002, message: 'resource not found: ' + uri } })
+      return
+    }
+    send({ id: message.id, result: { contents: [{ uri, mimeType: 'text/markdown', text: '# Runbook\\nCheck service health.' }] } })
     return
   }
   if (message.id !== undefined) {
@@ -81,18 +146,28 @@ const discover = async (config: McpConfigFile, options: { existingServers?: McpS
   })
 }
 
+const fixtureConfig = (): McpConfigFile => ({
+  mcpServers: {
+    fixture: {
+      type: 'stdio',
+      command: process.execPath,
+      args: ['-e', mcpFixtureScript],
+      timeout: 1
+    }
+  }
+})
+
+const operationOptions = (options: { servers?: McpServerUserConfig[]; toolStates?: McpToolStatesUserConfig } = {}) => ({
+  ...options,
+  timeoutMs: 1000,
+  maxTimeoutMs: 1000,
+  clientName: 'aiopsterm-test',
+  clientVersion: '0.1.0-test'
+})
+
 describe('mcp runtime backend boundary', () => {
   it('discovers tools and resources from a real stdio MCP server process', async () => {
-    const snapshot = await discover({
-      mcpServers: {
-        fixture: {
-          type: 'stdio',
-          command: process.execPath,
-          args: ['-e', mcpFixtureScript],
-          timeout: 1
-        }
-      }
-    })
+    const snapshot = await discover(fixtureConfig())
 
     expect(snapshot.mcpServers).toEqual([
       {
@@ -127,16 +202,7 @@ describe('mcp runtime backend boundary', () => {
 
   it('preserves backend-owned tool enable state across rediscovery', async () => {
     const snapshot = await discover(
-      {
-        mcpServers: {
-          fixture: {
-            type: 'stdio',
-            command: process.execPath,
-            args: ['-e', mcpFixtureScript],
-            timeout: 1
-          }
-        }
-      },
+      fixtureConfig(),
       {
         toolStates: {
           'fixture:inspect_service': false
@@ -224,5 +290,124 @@ describe('mcp runtime backend boundary', () => {
       }
     ])
     expect(snapshot.mcpToolStates).toEqual({})
+  })
+
+  it('calls stdio MCP tools through the backend boundary', async () => {
+    await loadBackend()
+
+    const result = await backend.callMcpTool(
+      fixtureConfig(),
+      {
+        serverName: 'fixture',
+        toolName: 'inspect_service',
+        arguments: { name: 'api', namespace: 'prod' }
+      },
+      operationOptions()
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        serverName: 'fixture',
+        toolName: 'inspect_service',
+        arguments: { name: 'api', namespace: 'prod' },
+        content: [{ type: 'text', text: 'service=api;namespace=prod' }],
+        isError: false,
+        durationMs: expect.any(Number)
+      }
+    })
+  })
+
+  it('reads stdio MCP resources through the backend boundary', async () => {
+    await loadBackend()
+
+    const result = await backend.readMcpResource(
+      fixtureConfig(),
+      {
+        serverName: 'fixture',
+        uri: 'file:///runbook.md'
+      },
+      operationOptions()
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        serverName: 'fixture',
+        uri: 'file:///runbook.md',
+        contents: [{ uri: 'file:///runbook.md', mimeType: 'text/markdown', text: '# Runbook\nCheck service health.' }],
+        durationMs: expect.any(Number)
+      }
+    })
+  })
+
+  it('fails closed for disabled MCP servers and tools during operations', async () => {
+    await loadBackend()
+
+    await expect(
+      backend.callMcpTool(
+        {
+          mcpServers: {
+            fixture: {
+              type: 'stdio',
+              disabled: true,
+              command: process.execPath,
+              args: ['-e', mcpFixtureScript]
+            }
+          }
+        },
+        { serverName: 'fixture', toolName: 'inspect_service', arguments: { name: 'api' } },
+        operationOptions()
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'MCP_TOOL_SERVER_DISABLED'
+    })
+
+    await expect(
+      backend.callMcpTool(
+        fixtureConfig(),
+        { serverName: 'fixture', toolName: 'inspect_service', arguments: { name: 'api' } },
+        operationOptions({ toolStates: { 'fixture:inspect_service': false } })
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'MCP_TOOL_DISABLED'
+    })
+  })
+
+  it('returns structured MCP operation failures instead of throwing IPC errors', async () => {
+    await loadBackend()
+
+    await expect(backend.callMcpTool({ mcpServers: {} }, { serverName: 'missing', toolName: 'inspect_service' }, operationOptions())).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'MCP_TOOL_SERVER_NOT_FOUND'
+    })
+
+    await expect(
+      backend.readMcpResource(
+        {
+          mcpServers: {
+            remote: {
+              type: 'streamableHttp',
+              url: 'http://127.0.0.1:65535/mcp'
+            }
+          }
+        },
+        { serverName: 'remote', uri: 'file:///runbook.md' },
+        operationOptions()
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'MCP_RESOURCE_TRANSPORT_UNSUPPORTED'
+    })
+
+    await expect(
+      backend.callMcpTool(fixtureConfig(), { serverName: 'fixture', toolName: 'missing_tool' }, operationOptions())
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'MCP_TOOL_CALL_FAILED',
+      errorMessage: expect.stringContaining('unknown tool')
+    })
   })
 })

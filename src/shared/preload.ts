@@ -1173,6 +1173,47 @@ export type McpConfigWriteResult = AiopsMutationResult<{
   mcpToolStates: McpToolStatesUserConfig
 }>
 
+export type McpToolCallContent = Record<string, unknown> & {
+  type: string
+  text?: string
+  data?: string
+  mimeType?: string
+}
+
+export type McpResourceReadContent = Record<string, unknown> & {
+  uri: string
+  mimeType?: string
+  text?: string
+  blob?: string
+}
+
+export type McpToolCallInput = {
+  serverName: string
+  toolName: string
+  arguments?: Record<string, unknown>
+}
+
+export type McpResourceReadInput = {
+  serverName: string
+  uri: string
+}
+
+export type McpToolCallResult = AiopsMutationResult<{
+  serverName: string
+  toolName: string
+  arguments?: Record<string, unknown>
+  content: McpToolCallContent[]
+  isError: boolean
+  durationMs: number
+}>
+
+export type McpResourceReadResult = AiopsMutationResult<{
+  serverName: string
+  uri: string
+  contents: McpResourceReadContent[]
+  durationMs: number
+}>
+
 export type QuickCommandGroupConfig = {
   id: number
   uuid: string
@@ -2550,6 +2591,8 @@ export type AiopsPreloadApi = {
   toggleMcpServer: (serverName: string, disabled: boolean) => Promise<void>
   deleteMcpServer: (serverName: string) => Promise<void>
   setMcpToolState: (serverName: string, toolName: string, enabled: boolean) => Promise<void>
+  callMcpTool: (serverName: string, toolName: string, args?: Record<string, unknown>) => Promise<McpToolCallResult>
+  readMcpResource: (serverName: string, uri: string) => Promise<McpResourceReadResult>
   onMcpConfigFileChanged: (listener: (content: string) => void) => () => void
   getSkills: () => Promise<SkillUserConfig[]>
   getEnabledSkills: () => Promise<SkillUserConfig[]>

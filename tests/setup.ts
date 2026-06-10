@@ -5108,6 +5108,41 @@ Object.defineProperty(window, 'aiops', {
       if (!tool) throw new Error(`MCP tool not found: ${serverName}:${toolName}`)
       tool.enabled = enabled
     }),
+    callMcpTool: vi.fn(async (serverName: string, toolName: string, args?: Record<string, unknown>) => {
+      const server = mcpServersMock.find((item) => item.name === serverName)
+      if (!server) return { ok: false, errorCode: 'MCP_TOOL_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
+      if (server.disabled) return { ok: false, errorCode: 'MCP_TOOL_SERVER_DISABLED', errorMessage: `MCP server "${serverName}" is disabled.` }
+      const tool = server.tools.find((item) => item.name === toolName)
+      if (!tool) return { ok: false, errorCode: 'MCP_TOOL_NOT_FOUND', errorMessage: `MCP tool not found: ${serverName}:${toolName}` }
+      if (!tool.enabled) return { ok: false, errorCode: 'MCP_TOOL_DISABLED', errorMessage: `MCP tool "${serverName}:${toolName}" is disabled.` }
+      return {
+        ok: true,
+        data: {
+          serverName,
+          toolName,
+          ...(args ? { arguments: { ...args } } : {}),
+          content: [{ type: 'text', text: `MCP tool ${serverName}:${toolName} executed.` }],
+          isError: false,
+          durationMs: 1
+        }
+      }
+    }),
+    readMcpResource: vi.fn(async (serverName: string, uri: string) => {
+      const server = mcpServersMock.find((item) => item.name === serverName)
+      if (!server) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
+      if (server.disabled) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_DISABLED', errorMessage: `MCP server "${serverName}" is disabled.` }
+      const resource = server.resources.find((item) => item.uri === uri)
+      if (!resource) return { ok: false, errorCode: 'MCP_RESOURCE_NOT_FOUND', errorMessage: `MCP resource not found: ${serverName}:${uri}` }
+      return {
+        ok: true,
+        data: {
+          serverName,
+          uri,
+          contents: [{ uri, mimeType: 'text/plain', text: `MCP resource ${uri}` }],
+          durationMs: 1
+        }
+      }
+    }),
     onMcpConfigFileChanged: vi.fn(() => () => undefined),
     getSkills: vi.fn(async () => cloneSkills()),
     getEnabledSkills: vi.fn(async () => cloneSkills().filter((skill) => skill.enabled)),

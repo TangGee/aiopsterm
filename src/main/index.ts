@@ -115,7 +115,7 @@ import {
   configureFilesBackendRuntime,
   writeFileContent
 } from './backend/files'
-import { discoverMcpServerSnapshot } from './backend/mcpRuntime'
+import { callMcpTool, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
 import {
   addKubernetesCluster,
   cleanupKubernetesAgent,
@@ -281,7 +281,9 @@ import type {
   KubernetesTerminalCreateInput,
   KnowledgeBaseUserConfig,
   McpConfigFile,
+  McpResourceReadInput,
   McpServerUserConfig,
+  McpToolCallInput,
   McpToolStatesUserConfig,
   ModelProviderCheckInput,
   ModelSettingsUserConfig,
@@ -2151,6 +2153,11 @@ const syncMcpConfigFromContent = async (content: string) => {
   return applyMcpConfigFileSnapshot(normalizeMcpConfigFile(JSON.parse(content)))
 }
 
+const loadCurrentMcpConfigFile = async () => {
+  const configPath = await ensureMcpConfigFile()
+  return normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
+}
+
 const setMcpToolState = (serverName: string, toolName: string, enabled: boolean) => {
   const normalizedServerName = serverName.trim()
   const normalizedToolName = toolName.trim()
@@ -2751,6 +2758,38 @@ const registerIpc = () => {
   })
   ipcMain.handle('mcp:set-tool-state', async (_event, serverName: string, toolName: string, enabled: boolean) => {
     setMcpToolState(serverName, toolName, Boolean(enabled))
+  })
+  ipcMain.handle('mcp:tool-call', async (_event, input: McpToolCallInput) => {
+    try {
+      const current = getConfig()
+      return callMcpTool(await loadCurrentMcpConfigFile(), input, {
+        servers: current.mcpServers || [],
+        toolStates: current.mcpToolStates || {},
+        clientName: 'aiopsterm',
+        clientVersion: app.getVersion()
+      })
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: 'MCP_CONFIG_INVALID',
+        errorMessage: error instanceof Error ? error.message : 'MCP config could not be read.'
+      }
+    }
+  })
+  ipcMain.handle('mcp:resource-read', async (_event, input: McpResourceReadInput) => {
+    try {
+      return readMcpResource(await loadCurrentMcpConfigFile(), input, {
+        servers: getConfig().mcpServers || [],
+        clientName: 'aiopsterm',
+        clientVersion: app.getVersion()
+      })
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: 'MCP_CONFIG_INVALID',
+        errorMessage: error instanceof Error ? error.message : 'MCP config could not be read.'
+      }
+    }
   })
   ipcMain.handle('skills:get-all', async () => syncSkillsConfigFromDisk())
   ipcMain.handle('skills:get-enabled', async () => {
