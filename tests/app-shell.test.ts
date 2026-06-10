@@ -1256,6 +1256,92 @@ describe('AppShell', () => {
     }
   })
 
+  it('fails closed on malformed successful Assets asset result envelopes', async () => {
+    const malformedMessage = '资产服务返回数据无效'
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+
+    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    const assetFormInputs = () => assets.findAll('.asset-form-panel input')
+    await assetFormInputs().at(0)!.setValue('malformed-save-host')
+    await assetFormInputs().at(1)!.setValue('10.77.77.77')
+    await assetFormInputs().at(2)!.setValue('ops')
+    await assetFormInputs().at(4)!.setValue('测试')
+    await assetFormInputs().at(5)!.setValue('2222')
+
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    vi.mocked(window.aiops.testAssetConnection).mockResolvedValueOnce({ ok: true, data: { endpoint: 'ops@10.77.77.77:2222' } } as any)
+    await assets.find('[data-testid="asset-test-connection"]').trigger('click')
+    await flushPromises()
+    expect(assets.text()).toContain(malformedMessage)
+    expect(assets.find('.asset-connection-test-result').classes()).not.toContain('success')
+    expect(assets.text()).not.toContain('连接成功 ops@10.77.77.77:2222')
+    expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.saveAsset).mockResolvedValueOnce({ ok: true, data: { id: 'asset-malformed' } } as any)
+    await assets.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+    await flushPromises()
+    expect(assets.text()).toContain(malformedMessage)
+    expect(assets.findAll('.host-card').some((card) => card.text().includes('malformed-save-host'))).toBe(false)
+
+    await assets.findAll('.asset-action-button').find((button) => button.text().includes('导出'))!.trigger('click')
+    await assets.findAll('.export-assets-modal .export-leaf-row').find((row) => row.text().includes('prod-bastion'))!.find('input').setValue(true)
+    vi.mocked(window.aiops.exportAssets).mockResolvedValueOnce({ ok: true, data: { fileName: 'broken-export.json' } } as any)
+    await assets.find('.export-assets-modal footer button:last-child').trigger('click')
+    await flushPromises()
+    expect(assets.text()).toContain(malformedMessage)
+    expect(assets.find('.export-assets-modal').exists()).toBe(true)
+    expect(assets.text()).not.toContain('已导出')
+
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
+    vi.mocked(window.aiops.previewAssetImport).mockResolvedValueOnce({
+      ok: true,
+      data: { filePath: '/tmp/external-reference-assets.json', fileName: 'external-reference-assets.json', assets: [{ previewId: 'missing-host' }], duplicateCount: 0 }
+    } as any)
+    await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
+    await flushPromises()
+    expect(assets.text()).toContain(malformedMessage)
+    expect(assets.find('.import-assets-modal').exists()).toBe(false)
+
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/MobaXterm.mxtsessions'] })
+    await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('click')
+    await flushPromises()
+    expect(assets.find('.import-assets-modal').exists()).toBe(true)
+    vi.mocked(window.aiops.confirmAssetImport).mockResolvedValueOnce({
+      ok: true,
+      data: { assets: [{ id: 'broken-import' }], folders: [], imported: 1, skipped: 0, created: 1, updated: 0, filePath: '/tmp/MobaXterm.mxtsessions', fileName: 'MobaXterm.mxtsessions' }
+    } as any)
+    await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+    await flushPromises()
+    expect(assets.text()).toContain(malformedMessage)
+    expect(assets.find('.import-assets-modal').exists()).toBe(true)
+    expect(assets.text()).not.toContain('broken-import')
+
+    const managed = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await managed.findAll('.asset-management-item').find((button) => button.text().includes('组织资产管理'))!.trigger('click')
+    await managed.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('prod-bastion'))!.find('input[type="checkbox"]').setValue(true)
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: { assets: [{ id: 'malformed-refresh' }], folders: [], refreshed: 1, created: 1, updated: 0 }
+    } as any)
+    await managed.find('.asset-table-toolbar button[title="刷新"]').trigger('click')
+    await flushPromises()
+    expect(managed.text()).toContain(malformedMessage)
+    expect(managed.text()).toContain('prod-bastion')
+    expect(managed.text()).not.toContain('malformed-refresh')
+    expect((managed.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('prod-bastion'))!.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+  })
+
   it('does not fabricate Workspace host favorite, comment, or tunnel state before asset writes succeed', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -1345,6 +1431,92 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.find('.workspace-comment-edit').exists()).toBe(false)
     expect(wrapper.text()).toContain('(后端备注)')
+  })
+
+  it('fails closed on malformed successful Workspace asset result envelopes', async () => {
+    const malformedMessage = '资产服务返回数据无效'
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    const hostRow = (name: string) => {
+      const row = wrapper.findAll('.workspace-host-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace host row not found: ${name}`)
+      return row
+    }
+    const groupRow = (name: string) => {
+      const row = wrapper.findAll('.workspace-folder-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace group row not found: ${name}`)
+      return row
+    }
+    const menuButton = (label: string) => {
+      const button = wrapper.find('.workspace-node-menu').findAll('button').find((item) => item.text().includes(label))
+      if (!button) throw new Error(`Workspace menu button not found: ${label}`)
+      return button
+    }
+
+    await wrapper.find('.workspace-button[title="主机"]').trigger('click')
+    const hostFormInputs = () => wrapper.findAll('.workspace-host-form input')
+    await hostFormInputs().at(0)!.setValue('workspace-malformed-host')
+    await hostFormInputs().at(1)!.setValue('10.66.0.8')
+    await hostFormInputs().at(2)!.setValue('ops')
+    await hostFormInputs().at(4)!.setValue('Workspace')
+    await hostFormInputs().at(5)!.setValue('2208')
+    await wrapper.find('.workspace-host-form textarea').setValue('malformed host draft')
+
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    vi.mocked(window.aiops.testAssetConnection).mockResolvedValueOnce({ ok: true, data: { endpoint: 'ops@10.66.0.8:2208' } } as any)
+    await wrapper.find('[data-testid="workspace-host-test-connection"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(wrapper.find('.asset-connection-test-result').classes()).not.toContain('success')
+    expect(wrapper.text()).not.toContain('连接成功 ops@10.66.0.8:2208')
+    expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.saveAsset).mockResolvedValueOnce({ ok: true, data: { id: 'workspace-malformed-host' } } as any)
+    await wrapper.find('.workspace-host-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(wrapper.find('.workspace-host-modal').exists()).toBe(true)
+    expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('workspace-malformed-host'))).toBe(false)
+    await wrapper.find('.workspace-host-modal header button').trigger('click')
+
+    await groupRow('生产').trigger('contextmenu')
+    await menuButton('编辑文件夹').trigger('click')
+    await wrapper.find('.workspace-folder-modal .files-folder-form input').setValue('生产坏响应')
+    vi.mocked(window.aiops.renameAssetGroup).mockResolvedValueOnce({ ok: true, data: { assets: [{ id: 'broken-group' }], folders: [] } } as any)
+    await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产坏响应'))).toBe(false)
+    expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产'))).toBe(true)
+    await wrapper.find('.workspace-folder-modal header button').trigger('click')
+
+    await hostRow('staging-api').trigger('contextmenu')
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
+    vi.mocked(window.aiops.stopSshTunnel).mockResolvedValueOnce({ ok: true, data: { message: '隧道已停止 staging-api' } } as any)
+    await menuButton('隧道').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
+
+    await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+    expect(wrapper.text()).toContain('jumpserver-org')
+    expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
+    await groupRow('jumpserver-org').trigger('contextmenu')
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: { assets: [{ id: 'workspace-malformed-refresh' }], folders: [], refreshed: 1, created: 1, updated: 0 }
+    } as any)
+    await menuButton('刷新').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(wrapper.text()).toContain('jumpserver-org')
+    expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
+    expect(wrapper.text()).not.toContain('workspace-malformed-refresh')
   })
 
   it('does not visually commit Workspace and Files resource tree preferences before config saves return matching snapshots', async () => {

@@ -701,13 +701,20 @@ import type {
   AiopsAssetGroupRecord,
   AiopsAssetInput,
   AiopsAssetRecord,
-  AiopsAssetSnapshot,
   AiopsAssetType,
   AiopsCustomFolderRecord,
   AiopsCustomFolderSaveInput,
   AiopsSshTunnelMutationResult
 } from '@shared/preload'
 import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  isAiopsAssetConnectionTestInfo,
+  isAiopsAssetRecord,
+  isAiopsAssetSnapshot,
+  isAiopsCustomFolderRecord,
+  isAiopsSshTunnelMutationData,
+  malformedAssetBackendResultMessage
+} from '@/services/assetBackendGuards'
 
 const workspace = useWorkspaceStore()
 type WorkspaceTabKey = 'direct' | 'bastion'
@@ -951,11 +958,12 @@ const toAssetInput = (asset: WorkspaceAsset, patch: Partial<AiopsAssetInput> = {
   ...patch
 })
 
-const applyWorkspaceAssetSnapshot = (snapshot?: AiopsAssetSnapshot) => {
-  if (!snapshot) return
+const applyWorkspaceAssetSnapshot = (snapshot: unknown) => {
+  if (!isAiopsAssetSnapshot(snapshot)) return false
   workspaceAssets.value = snapshot.assets.map((asset) => ({ ...asset, tags: [...asset.tags] }))
   customFolders.value = snapshot.folders.map((folder) => ({ ...folder }))
   assetBackendReady.value = true
+  return true
 }
 
 const refreshDirectGroupOptions = async () => {
@@ -966,9 +974,10 @@ const refreshDirectGroupOptions = async () => {
 }
 
 const refreshAssets = async () => {
-  if (!window.aiops?.listAssets) return
-  const snapshot = await window.aiops.listAssets()
-  applyWorkspaceAssetSnapshot(snapshot)
+  const listAssets = window.aiops?.listAssets
+  if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用')
+  const snapshot = await listAssets()
+  if (!applyWorkspaceAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
   await refreshDirectGroupOptions()
 }
 
@@ -984,9 +993,8 @@ const saveAssetRecord = async (input: AiopsAssetInput) => {
     throw new Error('资产保存服务不可用')
   }
   const result = await saveAsset(input)
-  if (!result?.ok || !result.data) {
-    throw new Error(result?.errorMessage || '资产保存失败')
-  }
+  if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
+  if (!isAiopsAssetRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
   await refreshAssets()
   return result.data
 }
@@ -999,7 +1007,8 @@ const deleteAssetRecord = async (assetId: string) => {
 
 const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
   const result = await window.aiops?.saveAssetFolder?.(folder)
-  if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '文件夹保存失败')
+  if (!result?.ok) throw new Error(result?.errorMessage || '文件夹保存失败')
+  if (!isAiopsCustomFolderRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
   await refreshAssets()
   return result.data
 }
@@ -1230,8 +1239,8 @@ const saveFolderForm = async () => {
       newName: name,
       assetTypes: ['person', 'switch']
     })
-    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '分组保存失败')
-    applyWorkspaceAssetSnapshot(result.data)
+    if (!result?.ok) throw new Error(result?.errorMessage || '分组保存失败')
+    if (!applyWorkspaceAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
     await refreshDirectGroupOptions()
     await replaceExpandedGroup(oldKey, newKey)
     notice.value = `已更新分组 ${name}`
@@ -1395,7 +1404,8 @@ const cancelComment = () => {
 }
 
 const applyTunnelResult = (result: AiopsSshTunnelMutationResult, fallbackMessage: string) => {
-  if (!result.ok || !result.data) throw new Error(result.errorMessage || fallbackMessage)
+  if (!result.ok) throw new Error(result.errorMessage || fallbackMessage)
+  if (!isAiopsSshTunnelMutationData(result.data)) throw new Error(malformedAssetBackendResultMessage)
   applyWorkspaceAssetSnapshot(result.data)
   notice.value = result.data.message || fallbackMessage
 }
@@ -1472,8 +1482,8 @@ const refreshGroup = async (groupKey: string) => {
   const organization = organizationAssets.value.find((asset) => asset.uuid === groupKey)
   try {
     const result = await window.aiops?.refreshOrganizationAssets?.(organization ? { organizationId: organization.id } : undefined)
-    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
-    applyWorkspaceAssetSnapshot(result.data)
+    if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
+    if (!applyWorkspaceAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
     await refreshDirectGroupOptions()
     if (organization) await expandGroup(organization.uuid)
     notice.value = organization ? `${organization.name} 资源已刷新` : '堡垒机资源已刷新'
@@ -1554,8 +1564,8 @@ const confirmDeleteGroup = () => {
         assetTypes: ['person', 'switch']
       })
       .then(async (result) => {
-        if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '删除分组失败')
-        applyWorkspaceAssetSnapshot(result.data)
+        if (!result?.ok) throw new Error(result?.errorMessage || '删除分组失败')
+        if (!applyWorkspaceAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
         await refreshDirectGroupOptions()
         await removeExpandedGroup(group.key)
         notice.value = `已删除分组 ${group.title}`
@@ -1673,6 +1683,9 @@ const testHostFormConnection = async () => {
     })
     if (!result?.ok || !result.data) {
       throw new Error(result?.errorMessage || '连接测试失败')
+    }
+    if (!isAiopsAssetConnectionTestInfo(result.data)) {
+      throw new Error(malformedAssetBackendResultMessage)
     }
     hostTestOk.value = true
     hostTestMessage.value = `连接成功 ${result.data.endpoint} · ${result.data.durationMs}ms`

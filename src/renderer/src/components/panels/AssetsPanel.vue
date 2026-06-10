@@ -81,7 +81,6 @@
                 导出
               </button>
             </div>
-            <small v-if="importNotice">{{ importNotice }}</small>
           </div>
 
           <div class="asset-list-container">
@@ -868,6 +867,13 @@
         </footer>
       </div>
     </div>
+
+    <small
+      v-if="importNotice"
+      class="asset-panel-notice"
+    >
+      {{ importNotice }}
+    </small>
   </div>
 </template>
 
@@ -903,6 +909,15 @@ import type {
   AiopsKeychainType
 } from '@shared/preload'
 import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  isAiopsAssetConnectionTestInfo,
+  isAiopsAssetExportData,
+  isAiopsAssetImportConfirmData,
+  isAiopsAssetImportPreviewData,
+  isAiopsAssetRecord,
+  isAiopsAssetSnapshot,
+  malformedAssetBackendResultMessage
+} from '@/services/assetBackendGuards'
 
 defineProps<{ query: string }>()
 
@@ -1016,8 +1031,10 @@ const filteredManagementEntries = computed(() => {
 const firstAssetGroupName = computed(() => assetGroupOptions.value[0]?.name || '')
 
 const refreshAssets = async () => {
-  const snapshot = await window.aiops?.listAssets?.()
-  applyAssetSnapshot(snapshot)
+  const listAssets = window.aiops?.listAssets
+  if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用。')
+  const snapshot = await listAssets()
+  if (!applyAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
   await refreshAssetGroupOptions()
 }
 
@@ -1075,13 +1092,16 @@ const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}):
 
 const saveAssetRecord = async (input: AiopsAssetInput) => {
   const result = await window.aiops?.saveAsset?.(input)
-  if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '资产保存失败')
+  if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
+  if (!isAiopsAssetRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
   await refreshAssets()
   return result.data
 }
 
-const applyAssetSnapshot = (snapshot?: { assets: AiopsAssetRecord[] }) => {
-  assets.value = (snapshot?.assets || []).filter((asset) => !asset.isLocalShell).map((asset) => ({ ...asset, tags: [...asset.tags] }))
+const applyAssetSnapshot = (snapshot: unknown) => {
+  if (!isAiopsAssetSnapshot(snapshot)) return false
+  assets.value = snapshot.assets.filter((asset) => !asset.isLocalShell).map((asset) => ({ ...asset, tags: [...asset.tags] }))
+  return true
 }
 
 const deleteAssetRecords = async (assetIds: string[]) => {
@@ -1467,7 +1487,8 @@ const testAssetFormConnection = async () => {
       ...(form.id ? { assetId: form.id } : {}),
       asset: draft.asset
     })
-    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '连接测试失败。')
+    if (!result?.ok) throw new Error(result?.errorMessage || '连接测试失败。')
+    if (!isAiopsAssetConnectionTestInfo(result.data)) throw new Error(malformedAssetBackendResultMessage)
     assetTestOk.value = true
     assetTestMessage.value = `连接成功 ${result.data.endpoint} · ${result.data.durationMs}ms`
   } catch (error) {
@@ -1498,8 +1519,8 @@ const refreshOrganizationAsset = async () => {
   if (contextAsset.value) {
     try {
       const result = await window.aiops?.refreshOrganizationAssets?.({ organizationId: contextAsset.value.id })
-      if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
-      applyAssetSnapshot(result.data)
+      if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
+      if (!applyAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
       importNotice.value = `已刷新堡垒机资源 ${contextAsset.value.title}。`
     } catch (error) {
       importNotice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败。'
@@ -1587,10 +1608,12 @@ const refreshManagedAssets = async () => {
     const result = await window.aiops?.refreshOrganizationAssets?.(
       managedOrganization.value ? { organizationId: managedOrganization.value.id } : undefined
     )
-    if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '刷新资产表失败。')
-    applyAssetSnapshot(result.data)
-    selectedRows.value = selectedRows.value.filter((id) => result.data?.assets.some((asset) => asset.id === id))
-    importNotice.value = `已刷新资产表，共 ${result.data.assets.filter((asset) => asset.asset_type !== 'organization').length} 条。`
+    if (!result?.ok) throw new Error(result?.errorMessage || '刷新资产表失败。')
+    if (!isAiopsAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+    const data = result.data
+    applyAssetSnapshot(data)
+    selectedRows.value = selectedRows.value.filter((id) => data.assets.some((asset) => asset.id === id))
+    importNotice.value = `已刷新资产表，共 ${data.assets.filter((asset) => asset.asset_type !== 'organization').length} 条。`
   } catch (error) {
     importNotice.value = error instanceof Error ? error.message : '刷新资产表失败。'
   }
@@ -1626,8 +1649,12 @@ const confirmExport = async () => {
   }
   try {
     const result = await exportAssets({ assetIds: resolvedExportIds.value })
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       importNotice.value = result?.errorMessage || '导出文件失败。'
+      return
+    }
+    if (!isAiopsAssetExportData(result.data)) {
+      importNotice.value = malformedAssetBackendResultMessage
       return
     }
     if (result.data.canceled) {
@@ -1654,8 +1681,12 @@ const loadAssetImportPreviewFromPath = async (filePath: string) => {
   }
   try {
     const result = await previewAssetImport({ filePath })
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       importNotice.value = result?.errorMessage || '导入文件预览失败。'
+      return
+    }
+    if (!isAiopsAssetImportPreviewData(result.data)) {
+      importNotice.value = malformedAssetBackendResultMessage
       return
     }
     if (!result.data.assets.length) {
@@ -1715,8 +1746,12 @@ const confirmImportAssets = async (overwrite: boolean) => {
   }
   try {
     const result = await confirmAssetImport({ filePath: importPreviewFilePath.value, overwrite })
-    if (!result?.ok || !result.data) {
+    if (!result?.ok) {
       importNotice.value = result?.errorMessage || '资产导入失败。'
+      return
+    }
+    if (!isAiopsAssetImportConfirmData(result.data)) {
+      importNotice.value = malformedAssetBackendResultMessage
       return
     }
     applyAssetSnapshot(result.data)
