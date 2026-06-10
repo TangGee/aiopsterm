@@ -2,12 +2,15 @@ import { app } from 'electron'
 import Store from 'electron-store'
 import { createHash, randomUUID } from 'crypto'
 import { basename, join } from 'path'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import type { Client, ConnectConfig } from 'ssh2'
 import type {
   AiopsAssetConnectionTestInfo,
   AiopsAssetConnectionTestInput,
   AiopsAssetConnectionTestResult,
+  AiopsAssetExportInput,
+  AiopsAssetExportPayload,
+  AiopsAssetExportResult,
   AiopsAssetImportConfirmInput,
   AiopsAssetImportConfirmResult,
   AiopsAssetImportPreviewInput,
@@ -69,6 +72,12 @@ type AssetConnectionRuntimeConfig = {
   timeoutMs?: number
 }
 
+type AssetExportRuntime = {
+  showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
+  writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
+  now?: () => Date
+}
+
 type ResolvedAssetConnectionTarget = {
   assetId?: string
   host: string
@@ -92,6 +101,16 @@ class AssetConnectionTestError extends Error {
   ) {
     super(message)
     this.name = 'AssetConnectionTestError'
+  }
+}
+
+class AssetExportError extends Error {
+  constructor(
+    public errorCode: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'AssetExportError'
   }
 }
 
@@ -1025,6 +1044,40 @@ const assetImportInput = (draft: ImportedAssetDraft, existing?: AiopsAssetRecord
   data_source: existing?.data_source || 'manual'
 })
 
+const assetExportErrorResult = (error: unknown): AiopsAssetExportResult => ({
+  ok: false,
+  errorCode: error instanceof AssetExportError ? error.errorCode : 'ASSET_EXPORT_FAILED',
+  errorMessage: error instanceof Error ? error.message : String(error || '导出文件失败。')
+})
+
+const assetExportFileName = (now = new Date()) => `external-reference-assets-${now.toISOString().slice(0, 10)}.json`
+
+const assetExportPayload = (asset: AiopsAssetRecord): AiopsAssetExportPayload => ({
+  username: asset.username,
+  password: '',
+  ip: asset.host || asset.ip,
+  label: asset.title || asset.name || asset.host,
+  group_name: asset.group_name || asset.group || '',
+  auth_type: asset.auth_type || 'password',
+  ...(asset.keychainId ? { keyChain: asset.keychainId } : {}),
+  port: asset.port || 22,
+  asset_type: asset.asset_type || 'person',
+  needProxy: Boolean(asset.needProxy),
+  proxyName: asset.proxyName || '',
+  ...(asset.comment ? { comment: asset.comment } : {})
+})
+
+const resolveAssetExportSelection = (input: AiopsAssetExportInput): AiopsAssetRecord[] => {
+  const selectedIds = Array.from(new Set((Array.isArray(input?.assetIds) ? input.assetIds : []).map(text).filter(Boolean)))
+  if (!selectedIds.length) throw new AssetExportError('ASSET_EXPORT_EMPTY', '请选择要导出的主机。')
+  const selectedSet = new Set(selectedIds)
+  const assets = getStore()
+    .list()
+    .assets.filter((asset) => selectedSet.has(asset.id) && !asset.isLocalShell && asset.asset_type !== 'organization' && asset.host && asset.username)
+  if (!assets.length) throw new AssetExportError('ASSET_EXPORT_EMPTY', '没有可导出的主机。')
+  return assets
+}
+
 const assertUserEditableAsset = (id?: string) => {
   if (id === LOCAL_SHELL_ASSET_ID) throw new Error('本地连接是系统资产，不能编辑或删除')
 }
@@ -1264,6 +1317,39 @@ export const confirmAssetImport = async (input: AiopsAssetImportConfirmInput): P
     }
   } catch (error) {
     return assetImportErrorResult(error)
+  }
+}
+export const exportAssets = async (input: AiopsAssetExportInput, runtime: AssetExportRuntime): Promise<AiopsAssetExportResult> => {
+  try {
+    if (!runtime?.showSaveDialog) throw new AssetExportError('ASSET_EXPORT_SAVE_DIALOG_UNAVAILABLE', '导出保存对话框服务不可用。')
+    const assets = resolveAssetExportSelection(input)
+    const payload = assets.map(assetExportPayload)
+    const fileName = assetExportFileName(runtime.now?.() || new Date())
+    const saveResult = await runtime.showSaveDialog({
+      defaultPath: fileName,
+      filters: [{ name: 'JSON Files', extensions: ['json'] }]
+    })
+    if (saveResult?.canceled || !saveResult?.filePath) {
+      return {
+        ok: true,
+        data: {
+          exported: 0,
+          fileName,
+          canceled: true
+        }
+      }
+    }
+    await (runtime.writeFile || writeFile)(saveResult.filePath, JSON.stringify(payload, null, 2), 'utf-8')
+    return {
+      ok: true,
+      data: {
+        exported: payload.length,
+        fileName,
+        filePath: saveResult.filePath
+      }
+    }
+  } catch (error) {
+    return assetExportErrorResult(error)
   }
 }
 export const listKeychains = (): AiopsKeychainRecord[] => getStore().listKeychains()

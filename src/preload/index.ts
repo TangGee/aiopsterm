@@ -171,6 +171,7 @@ const api: AiopsPreloadApi = {
   refreshOrganizationAssets: (input) => ipcRenderer.invoke('assets:organization:refresh', input),
   previewAssetImport: (input) => ipcRenderer.invoke('assets:import:preview', input),
   confirmAssetImport: (input) => ipcRenderer.invoke('assets:import:confirm', input),
+  exportAssets: (input) => ipcRenderer.invoke('assets:export', input),
   startSshTunnel: (input) => ipcRenderer.invoke('ssh:tunnel:start', input),
   stopSshTunnel: (input) => ipcRenderer.invoke('ssh:tunnel:stop', input),
   saveAssetFolder: (folder) => ipcRenderer.invoke('assets:folder:save', folder),

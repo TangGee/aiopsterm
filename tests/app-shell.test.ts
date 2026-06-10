@@ -855,9 +855,9 @@ describe('AppShell', () => {
   it('supports External reference-style asset import/export and organization asset table management', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    vi.mocked(window.aiops.exportAssets).mockClear()
     vi.mocked(window.aiops.showSaveDialog).mockClear()
     vi.mocked(window.aiops.writeLocalFile).mockClear()
-    vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/assets-export.json' })
 
     const assets = mount(AssetsPanel, {
       props: { query: '' },
@@ -873,23 +873,10 @@ describe('AppShell', () => {
     await assets.findAll('.export-assets-modal .export-leaf-row').find((row) => row.text().includes('prod-bastion'))!.find('input').setValue(true)
     await assets.find('.export-assets-modal footer button:last-child').trigger('click')
     await flushPromises()
-    expect(window.aiops.showSaveDialog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        defaultPath: expect.stringMatching(/^external-reference-assets-\d{4}-\d{2}-\d{2}\.json$/)
-      })
-    )
-    const exportCall = vi.mocked(window.aiops.writeLocalFile).mock.calls.at(-1)
-    expect(exportCall?.[0]).toBe('/tmp/assets-export.json')
-    expect(JSON.parse(String(exportCall?.[1]))).toEqual([
-      expect.objectContaining({
-        username: 'ops',
-        ip: '10.24.8.12',
-        label: 'prod-bastion',
-        group_name: '生产',
-        auth_type: 'keyBased',
-        port: 22
-      })
-    ])
+    expect(window.aiops.exportAssets).toHaveBeenCalledWith({ assetIds: ['asset-1'] })
+    expect(window.aiops.showSaveDialog).not.toHaveBeenCalled()
+    expect(window.aiops.writeLocalFile).not.toHaveBeenCalled()
+    expect(assets.text()).toContain('已导出 1 个主机到 external-reference-assets-2024-06-01.json')
     expect(assets.find('.export-assets-modal').exists()).toBe(false)
 
     const originalFileReader = window.FileReader
@@ -1113,7 +1100,7 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
   })
 
-  it('does not fabricate Assets export success when save or file write bridges are unavailable or fail', async () => {
+  it('does not fabricate Assets export success when the backend export bridge is unavailable, fails, or is canceled', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const assets = mount(AssetsPanel, {
@@ -1126,32 +1113,48 @@ describe('AppShell', () => {
     await assets.findAll('.export-assets-modal .export-leaf-row').find((row) => row.text().includes('prod-bastion'))!.find('input').setValue(true)
 
     const originalAiops = {
-      showSaveDialog: window.aiops.showSaveDialog,
-      writeLocalFile: window.aiops.writeLocalFile
+      exportAssets: window.aiops.exportAssets
     }
+    vi.mocked(window.aiops.showSaveDialog).mockClear()
+    vi.mocked(window.aiops.writeLocalFile).mockClear()
 
     try {
-      ;(window.aiops as any).showSaveDialog = undefined
+      ;(window.aiops as any).exportAssets = undefined
       await assets.find('.export-assets-modal footer button:last-child').trigger('click')
       await flushPromises()
-      expect(assets.text()).toContain('导出保存对话框服务不可用')
+      expect(assets.text()).toContain('资产导出服务不可用')
       expect(assets.find('.export-assets-modal').exists()).toBe(true)
+      expect(window.aiops.showSaveDialog).not.toHaveBeenCalled()
       expect(window.aiops.writeLocalFile).not.toHaveBeenCalled()
 
-      ;(window.aiops as any).showSaveDialog = originalAiops.showSaveDialog
-      ;(window.aiops as any).writeLocalFile = undefined
-      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/assets-export-missing-write.json' })
+      ;(window.aiops as any).exportAssets = originalAiops.exportAssets
+      vi.mocked(window.aiops.exportAssets!).mockRejectedValueOnce(new Error('asset export bridge failed'))
       await assets.find('.export-assets-modal footer button:last-child').trigger('click')
       await flushPromises()
-      expect(assets.text()).toContain('导出文件写入服务不可用')
+      expect(assets.text()).toContain('导出文件失败')
       expect(assets.find('.export-assets-modal').exists()).toBe(true)
 
-      ;(window.aiops as any).writeLocalFile = originalAiops.writeLocalFile
-      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/assets-export-write-failed.json' })
-      vi.mocked(window.aiops.writeLocalFile!).mockRejectedValueOnce(new Error('disk full'))
+      vi.mocked(window.aiops.exportAssets!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'ASSET_EXPORT_FAILED',
+        errorMessage: 'backend disk full'
+      })
       await assets.find('.export-assets-modal footer button:last-child').trigger('click')
       await flushPromises()
-      expect(assets.text()).toContain('导出文件写入失败')
+      expect(assets.text()).toContain('backend disk full')
+      expect(assets.find('.export-assets-modal').exists()).toBe(true)
+
+      vi.mocked(window.aiops.exportAssets!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          exported: 0,
+          fileName: 'external-reference-assets-2024-06-01.json',
+          canceled: true
+        }
+      })
+      await assets.find('.export-assets-modal footer button:last-child').trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain('已取消导出')
       expect(assets.find('.export-assets-modal').exists()).toBe(true)
       expect(assets.text()).not.toContain('已导出 1 个主机')
     } finally {

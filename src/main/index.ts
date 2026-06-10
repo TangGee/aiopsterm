@@ -15,6 +15,7 @@ import {
   deleteAssetGroup,
   deleteAssetFolder,
   deleteKeychain,
+  exportAssets,
   getAsset,
   getAssetSecret,
   getKeychain,
@@ -302,6 +303,7 @@ import type {
   AiopsAssetGroupDeleteInput,
   AiopsAssetGroupListInput,
   AiopsAssetGroupRenameInput,
+  AiopsAssetExportInput,
   AiopsSshTunnelStartInput,
   AiopsSshTunnelStopInput
 } from '@shared/preload'
@@ -2814,6 +2816,20 @@ const registerIpc = () => {
   ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))
   ipcMain.handle('assets:import:preview', (_event, input) => previewAssetImport(input))
   ipcMain.handle('assets:import:confirm', (_event, input) => confirmAssetImport(input))
+  ipcMain.handle('assets:export', async (event, input: AiopsAssetExportInput) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    return exportAssets(input, {
+      showSaveDialog: (options) => {
+        if (process.env.NODE_ENV === 'test') {
+          return Promise.resolve({
+            canceled: false,
+            filePath: join(app.getPath('downloads'), basename(options.defaultPath))
+          })
+        }
+        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+      }
+    })
+  })
   ipcMain.handle('ssh:tunnel:start', (_event, input: AiopsSshTunnelStartInput) => startSshTunnel(input))
   ipcMain.handle('ssh:tunnel:stop', (_event, input: AiopsSshTunnelStopInput) => stopSshTunnel(input))
   ipcMain.handle('assets:folder:save', (_event, folder: AiopsCustomFolderSaveInput) => saveAssetFolder(folder))

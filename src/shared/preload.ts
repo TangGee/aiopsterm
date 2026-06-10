@@ -321,6 +321,32 @@ export type AiopsAssetImportConfirmResult = AiopsMutationResult<
   }
 >
 
+export type AiopsAssetExportInput = {
+  assetIds: string[]
+}
+
+export type AiopsAssetExportPayload = {
+  username: string
+  password: string
+  ip: string
+  label: string
+  group_name: string
+  auth_type: AiopsAssetAuthType
+  keyChain?: string
+  port: number
+  asset_type: AiopsAssetType
+  needProxy: boolean
+  proxyName: string
+  comment?: string
+}
+
+export type AiopsAssetExportResult = AiopsMutationResult<{
+  exported: number
+  fileName: string
+  filePath?: string
+  canceled?: boolean
+}>
+
 export type AiopsMutationResult<T> = {
   ok: boolean
   data?: T
@@ -2454,6 +2480,7 @@ export type AiopsPreloadApi = {
   refreshOrganizationAssets: (input?: AiopsOrganizationAssetRefreshInput) => Promise<AiopsOrganizationAssetRefreshResult>
   previewAssetImport: (input: AiopsAssetImportPreviewInput) => Promise<AiopsAssetImportPreviewResult>
   confirmAssetImport: (input: AiopsAssetImportConfirmInput) => Promise<AiopsAssetImportConfirmResult>
+  exportAssets: (input: AiopsAssetExportInput) => Promise<AiopsAssetExportResult>
   startSshTunnel: (input: AiopsSshTunnelStartInput) => Promise<AiopsSshTunnelMutationResult>
   stopSshTunnel: (input: AiopsSshTunnelStopInput) => Promise<AiopsSshTunnelMutationResult>
   saveAssetFolder: (folder: AiopsCustomFolderSaveInput) => Promise<AiopsMutationResult<AiopsCustomFolderRecord>>

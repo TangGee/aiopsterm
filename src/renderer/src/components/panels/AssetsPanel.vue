@@ -1128,8 +1128,17 @@ const sshProxyOptions = computed(() =>
     .filter((config) => config.name)
 )
 const configuredSshProxyNames = computed(() => new Set(sshProxyOptions.value.map((proxy) => proxy.name)))
-const filteredExportGroups = computed(() => filterGroups(assetGroups.value, exportQuery.value))
-const resolvedExportIds = computed(() => exportCheckedIds.value.filter((id) => assets.value.some((asset) => asset.id === id)))
+const exportableAssets = computed(() => assets.value.filter((asset) => asset.asset_type !== 'organization'))
+const exportAssetGroups = computed<AssetGroup[]>(() => {
+  const groupNames = Array.from(new Set(exportableAssets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
+  return groupNames.map((group) => ({
+    key: `export-group-${group}`,
+    title: group,
+    children: exportableAssets.value.filter((asset) => (asset.group || asset.group_name) === group)
+  }))
+})
+const filteredExportGroups = computed(() => filterGroups(exportAssetGroups.value, exportQuery.value))
+const resolvedExportIds = computed(() => exportCheckedIds.value.filter((id) => exportableAssets.value.some((asset) => asset.id === id)))
 const managedSourceAssets = computed(() => {
   const nonOrganizationAssets = assets.value.filter((asset) => asset.asset_type !== 'organization')
   if (!managedOrganization.value) return nonOrganizationAssets
@@ -1584,7 +1593,7 @@ const toggleExportGroup = (children: AssetRecord[], checked: boolean) => {
 }
 
 const openExportModal = () => {
-  if (!assets.value.length) {
+  if (!exportableAssets.value.length) {
     importNotice.value = '暂无可导出的主机。'
     return
   }
@@ -1594,57 +1603,32 @@ const openExportModal = () => {
 }
 
 const selectAllExportKeys = () => {
-  exportCheckedIds.value = assets.value.map((asset) => asset.id)
+  exportCheckedIds.value = exportableAssets.value.map((asset) => asset.id)
 }
-
-const toExportPayload = (asset: AssetRecord) => ({
-  username: asset.username,
-  ip: asset.host,
-  label: asset.title,
-  group_name: asset.group_name,
-  auth_type: asset.auth_type,
-  port: asset.port,
-  asset_type: asset.asset_type,
-  comment: asset.comment || ''
-})
 
 const confirmExport = async () => {
   if (!resolvedExportIds.value.length) return
-  const date = new Date().toISOString().slice(0, 10)
-  const fileName = `external-reference-assets-${date}.json`
-  const selected = assets.value.filter((asset) => resolvedExportIds.value.includes(asset.id)).map(toExportPayload)
-  const showSaveDialog = window.aiops?.showSaveDialog
-  if (typeof showSaveDialog !== 'function') {
-    importNotice.value = '导出保存对话框服务不可用。'
-    return
-  }
-  let result: Awaited<ReturnType<typeof showSaveDialog>>
-  try {
-    result = await showSaveDialog({
-      defaultPath: fileName,
-      filters: [{ name: 'JSON Files', extensions: ['json'] }]
-    })
-  } catch {
-    importNotice.value = '导出保存对话框打开失败。'
-    return
-  }
-  if (result?.canceled || !result?.filePath) {
-    importNotice.value = '已取消导出。'
-    return
-  }
-  const writeLocalFile = window.aiops?.writeLocalFile
-  if (typeof writeLocalFile !== 'function') {
-    importNotice.value = '导出文件写入服务不可用。'
+  const exportAssets = window.aiops?.exportAssets
+  if (typeof exportAssets !== 'function') {
+    importNotice.value = '资产导出服务不可用。'
     return
   }
   try {
-    await writeLocalFile(result.filePath, JSON.stringify(selected, null, 2))
+    const result = await exportAssets({ assetIds: resolvedExportIds.value })
+    if (!result?.ok || !result.data) {
+      importNotice.value = result?.errorMessage || '导出文件失败。'
+      return
+    }
+    if (result.data.canceled) {
+      importNotice.value = '已取消导出。'
+      return
+    }
+    importNotice.value = `已导出 ${result.data.exported} 个主机到 ${result.data.fileName}。`
+    exportModalOpen.value = false
   } catch {
-    importNotice.value = '导出文件写入失败。'
+    importNotice.value = '导出文件失败。'
     return
   }
-  importNotice.value = `已导出 ${selected.length} 个主机到 ${fileName}。`
-  exportModalOpen.value = false
 }
 
 const loadAssetImportPreviewFromPath = async (filePath: string) => {

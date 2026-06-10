@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
-import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -437,6 +437,85 @@ describe('assets backend boundary', () => {
         expect(preview.data?.assets.some((asset: Record<string, unknown>) => 'password' in asset || 'privateKey' in asset)).toBe(false)
       }
     )
+  })
+
+  it('exports selected assets through the backend file boundary without renderer-owned payloads or secrets', async () => {
+    const backend = await loadBackend()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-assets-export-'))
+    const filePath = join(dir, 'selected-assets.json')
+    try {
+      const result = await backend.exportAssets(
+        { assetIds: ['local-127-1', 'asset-1', 'asset-5'] },
+        {
+          now: () => new Date('2026-06-10T00:00:00.000Z'),
+          showSaveDialog: async (options: { defaultPath: string }) => {
+            expect(options.defaultPath).toBe('external-reference-assets-2026-06-10.json')
+            return { canceled: false, filePath }
+          }
+        }
+      )
+
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          exported: 1,
+          fileName: 'external-reference-assets-2026-06-10.json',
+          filePath
+        }
+      })
+      const exported = JSON.parse(await readFile(filePath, 'utf-8'))
+      expect(exported).toEqual([
+        {
+          username: 'ops',
+          password: '',
+          ip: '10.24.8.12',
+          label: 'prod-bastion',
+          group_name: '生产',
+          auth_type: 'keyBased',
+          keyChain: 'key-1',
+          port: 22,
+          asset_type: 'person',
+          needProxy: false,
+          proxyName: '',
+          comment: '生产入口'
+        }
+      ])
+      expect(JSON.stringify(exported)).not.toContain('PRIVATE KEY')
+      expect(JSON.stringify(exported)).not.toContain('jumpserver-org')
+      expect(JSON.stringify(exported)).not.toContain('127.0.0.1')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps asset export modal cancellation and empty selections backend-owned', async () => {
+    const backend = await loadBackend()
+    const canceled = await backend.exportAssets(
+      { assetIds: ['asset-1'] },
+      {
+        now: () => new Date('2026-06-10T00:00:00.000Z'),
+        showSaveDialog: async () => ({ canceled: true })
+      }
+    )
+    expect(canceled).toEqual({
+      ok: true,
+      data: {
+        exported: 0,
+        fileName: 'external-reference-assets-2026-06-10.json',
+        canceled: true
+      }
+    })
+
+    const empty = await backend.exportAssets(
+      { assetIds: ['local-127-1', 'asset-5'] },
+      {
+        showSaveDialog: async () => {
+          throw new Error('save dialog must not open for empty export')
+        }
+      }
+    )
+    expect(empty.ok).toBe(false)
+    expect(empty.errorCode).toBe('ASSET_EXPORT_EMPTY')
   })
 
   it('confirms asset imports by re-reading the file and skipping duplicates in the backend', async () => {

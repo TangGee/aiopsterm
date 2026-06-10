@@ -5490,6 +5490,27 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     }),
+    exportAssets: vi.fn(async (input: { assetIds: string[] }) => {
+      const selectedIds = new Set((Array.isArray(input.assetIds) ? input.assetIds : []).map((id) => String(id || '').trim()).filter(Boolean))
+      const exportable = assetStoreMock.filter(
+        (asset) => selectedIds.has(asset.id) && !asset.isLocalShell && asset.asset_type !== 'organization' && asset.host && asset.username
+      )
+      if (!exportable.length) {
+        return {
+          ok: false,
+          errorCode: 'ASSET_EXPORT_EMPTY',
+          errorMessage: '没有可导出的主机。'
+        }
+      }
+      return {
+        ok: true,
+        data: {
+          exported: exportable.length,
+          fileName: 'external-reference-assets-2024-06-01.json',
+          filePath: '/tmp/assets-export.json'
+        }
+      }
+    }),
     startSshTunnel: vi.fn(
       async (input: { assetId: string; type?: TestSshTunnelType; localPort?: number; remoteHost?: string; remotePort?: number; tunnelId?: string }) => {
         try {
