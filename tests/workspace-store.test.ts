@@ -9717,6 +9717,163 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('runs MCP tools and reads resources only through preload operation bridges', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+
+    const toolKey = store.getMcpToolOperationKey('filesystem', 'read_file')
+    store.updateMcpToolArgumentDraft('filesystem', 'read_file', '{"path":"/tmp/readme.md","encoding":"utf-8"}')
+    vi.mocked(window.aiops.callMcpTool).mockClear()
+    await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(true)
+    expect(window.aiops.callMcpTool).toHaveBeenCalledWith('filesystem', 'read_file', {
+      path: '/tmp/readme.md',
+      encoding: 'utf-8'
+    })
+    expect(store.mcpOperationResults[toolKey]).toMatchObject({
+      status: 'success',
+      error: '',
+      isError: false
+    })
+    expect(store.mcpOperationResults[toolKey].output).toContain('MCP tool filesystem:read_file executed.')
+    expect(store.settingsNotice).toBe('read_file 调用完成')
+
+    const resourceKey = store.getMcpResourceOperationKey('filesystem', 'file:///workspace')
+    vi.mocked(window.aiops.readMcpResource).mockClear()
+    await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(true)
+    expect(window.aiops.readMcpResource).toHaveBeenCalledWith('filesystem', 'file:///workspace')
+    expect(store.mcpOperationResults[resourceKey]).toMatchObject({
+      status: 'success',
+      error: ''
+    })
+    expect(store.mcpOperationResults[resourceKey].output).toContain('MCP resource file:///workspace')
+    expect(store.settingsNotice).toBe('workspace-root 读取完成')
+  })
+
+  it('does not fabricate MCP operation results when arguments, bridges, or envelopes are invalid', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+    const toolKey = store.getMcpToolOperationKey('filesystem', 'read_file')
+    const resourceKey = store.getMcpResourceOperationKey('filesystem', 'file:///workspace')
+    const originalAiops = {
+      callMcpTool: window.aiops.callMcpTool,
+      readMcpResource: window.aiops.readMcpResource
+    }
+
+    try {
+      store.updateMcpToolArgumentDraft('filesystem', 'read_file', '{invalid')
+      vi.mocked(window.aiops.callMcpTool).mockClear()
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(window.aiops.callMcpTool).not.toHaveBeenCalled()
+      expect(store.mcpOperationResults[toolKey].status).toBe('error')
+      expect(store.mcpOperationResults[toolKey].error).toContain('MCP Tool 参数 JSON 无效')
+
+      store.updateMcpToolArgumentDraft('filesystem', 'read_file', '["not-object"]')
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(window.aiops.callMcpTool).not.toHaveBeenCalled()
+      expect(store.mcpOperationResults[toolKey].error).toBe('MCP Tool 参数必须是 JSON object')
+
+      store.updateMcpToolArgumentDraft('filesystem', 'read_file', '{}')
+      ;(window.aiops as any).callMcpTool = undefined
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('MCP Tool 调用服务不可用')
+      expect(store.mcpOperationResults[toolKey]).toMatchObject({
+        status: 'error',
+        output: '',
+        error: 'MCP Tool 调用服务不可用'
+      })
+
+      ;(window.aiops as any).callMcpTool = originalAiops.callMcpTool
+      vi.mocked(window.aiops.callMcpTool!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'MCP_TOOL_FAILED',
+        errorMessage: 'backend tool failure'
+      })
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(store.mcpOperationResults[toolKey]).toMatchObject({
+        status: 'error',
+        output: '',
+        error: 'backend tool failure'
+      })
+
+      vi.mocked(window.aiops.callMcpTool!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          serverName: 'filesystem',
+          toolName: 'read_file',
+          content: [{ type: 'text', text: 'permission denied' }],
+          isError: true,
+          durationMs: 4
+        }
+      })
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(store.mcpOperationResults[toolKey]).toMatchObject({
+        status: 'error',
+        output: 'permission denied',
+        error: 'permission denied',
+        isError: true
+      })
+
+      vi.mocked(window.aiops.callMcpTool!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          serverName: 'other-server',
+          toolName: 'read_file',
+          content: [],
+          isError: false,
+          durationMs: 1
+        }
+      } as any)
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('MCP Tool 服务返回数据无效')
+      expect(store.mcpOperationResults[toolKey]).toMatchObject({
+        status: 'error',
+        output: '',
+        error: 'MCP Tool 服务返回数据无效'
+      })
+
+      ;(window.aiops as any).readMcpResource = undefined
+      await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('MCP Resource 读取服务不可用')
+      expect(store.mcpOperationResults[resourceKey]).toMatchObject({
+        status: 'error',
+        output: '',
+        error: 'MCP Resource 读取服务不可用'
+      })
+
+      ;(window.aiops as any).readMcpResource = originalAiops.readMcpResource
+      vi.mocked(window.aiops.readMcpResource!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'MCP_RESOURCE_FAILED',
+        errorMessage: 'backend resource failure'
+      })
+      await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(false)
+      expect(store.mcpOperationResults[resourceKey]).toMatchObject({
+        status: 'error',
+        output: '',
+        error: 'backend resource failure'
+      })
+
+      vi.mocked(window.aiops.readMcpResource!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          serverName: 'filesystem',
+          uri: 'file:///other',
+          contents: [],
+          durationMs: 1
+        }
+      } as any)
+      await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('MCP Resource 服务返回数据无效')
+      expect(store.mcpOperationResults[resourceKey]).toMatchObject({
+        status: 'error',
+        output: '',
+        error: 'MCP Resource 服务返回数据无效'
+      })
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not fabricate MCP config editor writes when the write result is malformed or mismatched', async () => {
     const store = useWorkspaceStore()
     await store.refreshMcpServersFromBridge()

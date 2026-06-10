@@ -2711,6 +2711,11 @@ em {
   min-width: 0;
 }
 
+.mcp-resource-header .settings-button {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
 .mcp-tool-icon {
   width: 58px;
   flex: 0 0 58px;
@@ -2749,6 +2754,79 @@ em {
   margin-top: 5px;
   color: var(--accent);
   overflow-wrap: anywhere;
+}
+
+.mcp-operation-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.mcp-operation-input {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-1);
+  color: var(--text);
+  padding: 9px 10px;
+  font-family: var(--mono-font, 'Menlo', 'Monaco', 'Courier New', monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mcp-operation-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mcp-operation-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mcp-operation-result {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.mcp-operation-result.success {
+  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+}
+
+.mcp-operation-result.error {
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+}
+
+.mcp-operation-result-header {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mcp-operation-result-header strong {
+  color: var(--text);
+}
+
+.mcp-operation-result pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  color: var(--text);
+  font-family: var(--mono-font, 'Menlo', 'Monaco', 'Courier New', monospace);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .skill-main,

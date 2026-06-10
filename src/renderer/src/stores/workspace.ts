@@ -126,7 +126,11 @@ import type {
   KubernetesResourceKind,
   KubernetesTerminalRecord,
   KubernetesTerminalStatus,
+  McpResourceReadContent,
+  McpResourceReadResult,
   McpServerUserConfig,
+  McpToolCallContent,
+  McpToolCallResult,
   McpToolStatesUserConfig,
   McpConfigFile,
   ModelProviderCheckKey,
@@ -487,6 +491,15 @@ type SettingsShortcut = ShortcutUserConfig
 type SettingsRule = UserRuleConfig & { isEditing?: boolean; isDraft?: boolean }
 type SettingsSkill = SkillUserConfig
 type SettingsMcpServer = McpServerUserConfig
+type McpOperationStatus = 'idle' | 'running' | 'success' | 'error'
+type McpOperationRecord = {
+  status: McpOperationStatus
+  output: string
+  error: string
+  updatedAt: number
+  durationMs?: number
+  isError?: boolean
+}
 
 const cloneSkillConfig = (skills: SettingsSkill[]): SkillUserConfig[] =>
   skills
@@ -860,6 +873,79 @@ const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
+const malformedMcpToolResultMessage = 'MCP Tool 服务返回数据无效'
+const malformedMcpResourceResultMessage = 'MCP Resource 服务返回数据无效'
+
+const createMcpOperationKey = (kind: 'tool' | 'resource', serverName: string, operationName: string) => JSON.stringify([kind, serverName, operationName])
+
+const isMcpToolCallContentList = (value: unknown): value is McpToolCallContent[] =>
+  Array.isArray(value) &&
+  value.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.type === 'string' &&
+      (item.text === undefined || typeof item.text === 'string') &&
+      (item.data === undefined || typeof item.data === 'string') &&
+      (item.mimeType === undefined || typeof item.mimeType === 'string')
+  )
+
+const isMcpResourceReadContentList = (value: unknown): value is McpResourceReadContent[] =>
+  Array.isArray(value) &&
+  value.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.uri === 'string' &&
+      (item.text === undefined || typeof item.text === 'string') &&
+      (item.blob === undefined || typeof item.blob === 'string') &&
+      (item.mimeType === undefined || typeof item.mimeType === 'string')
+  )
+
+const isMcpToolCallResultData = (value: unknown, serverName: string, toolName: string): value is NonNullable<McpToolCallResult['data']> =>
+  isRecord(value) &&
+  value.serverName === serverName &&
+  value.toolName === toolName &&
+  isMcpToolCallContentList(value.content) &&
+  typeof value.isError === 'boolean' &&
+  typeof value.durationMs === 'number' &&
+  Number.isFinite(value.durationMs)
+
+const isMcpResourceReadResultData = (value: unknown, serverName: string, uri: string): value is NonNullable<McpResourceReadResult['data']> =>
+  isRecord(value) &&
+  value.serverName === serverName &&
+  value.uri === uri &&
+  isMcpResourceReadContentList(value.contents) &&
+  typeof value.durationMs === 'number' &&
+  Number.isFinite(value.durationMs)
+
+const stringifyMcpPayload = (value: unknown) => {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+const formatMcpToolCallContent = (content: McpToolCallContent[]) => {
+  if (!content.length) return '[]'
+  return content
+    .map((item) => {
+      if (typeof item.text === 'string') return item.text
+      if (typeof item.data === 'string') return item.data
+      return stringifyMcpPayload(item)
+    })
+    .join('\n\n')
+}
+
+const formatMcpResourceReadContent = (contents: McpResourceReadContent[]) => {
+  if (!contents.length) return '[]'
+  return contents
+    .map((item) => {
+      if (typeof item.text === 'string') return item.text
+      if (typeof item.blob === 'string') return item.blob
+      return stringifyMcpPayload(item)
+    })
+    .join('\n\n')
+}
 
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && (max === undefined || value <= max) ? value : fallback
@@ -3595,6 +3681,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const mcpServers = ref<SettingsMcpServer[]>([])
   const expandedMcpServerNames = ref<string[]>([])
   const activeMcpServerTab = ref<Record<string, 'tools' | 'resources'>>({})
+  const mcpToolArgumentDrafts = ref<Record<string, string>>({})
+  const mcpOperationResults = ref<Record<string, McpOperationRecord>>({})
   const settingsSkills = ref<SettingsSkill[]>([])
   const skillsUserPath = ref('~/.config/aiopsterm/skills')
   const skillModal = ref<{ mode: 'create' | 'edit' | null; name: string; description: string; content: string }>({
@@ -6937,6 +7025,153 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setSettingsNotice(`${toolName} ${nextEnabled ? '已启用' : '已禁用'}`)
     return true
+  }
+
+  const getMcpToolOperationKey = (serverName: string, toolName: string) => createMcpOperationKey('tool', serverName, toolName)
+
+  const getMcpResourceOperationKey = (serverName: string, uri: string) => createMcpOperationKey('resource', serverName, uri)
+
+  const getMcpToolArgumentDraft = (serverName: string, toolName: string) => mcpToolArgumentDrafts.value[getMcpToolOperationKey(serverName, toolName)] || ''
+
+  const updateMcpToolArgumentDraft = (serverName: string, toolName: string, content: string) => {
+    mcpToolArgumentDrafts.value = {
+      ...mcpToolArgumentDrafts.value,
+      [getMcpToolOperationKey(serverName, toolName)]: content
+    }
+  }
+
+  const setMcpOperationResult = (key: string, record: Omit<McpOperationRecord, 'updatedAt'>) => {
+    mcpOperationResults.value = {
+      ...mcpOperationResults.value,
+      [key]: {
+        ...record,
+        updatedAt: Date.now()
+      }
+    }
+  }
+
+  const parseMcpToolArguments = (serverName: string, toolName: string) => {
+    const draft = getMcpToolArgumentDraft(serverName, toolName).trim()
+    if (!draft) return { ok: true as const, arguments: {} as Record<string, unknown> }
+    try {
+      const parsed = JSON.parse(draft)
+      if (!isRecord(parsed)) {
+        return { ok: false as const, message: 'MCP Tool 参数必须是 JSON object' }
+      }
+      return { ok: true as const, arguments: parsed }
+    } catch (error) {
+      return {
+        ok: false as const,
+        message: `MCP Tool 参数 JSON 无效：${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+  }
+
+  const runMcpTool = async (serverName: string, toolName: string) => {
+    const key = getMcpToolOperationKey(serverName, toolName)
+    const server = mcpServers.value.find((item) => item.name === serverName)
+    const tool = server?.tools.find((item) => item.name === toolName)
+    if (!server || !tool) return false
+    if (server.disabled || server.status !== 'connected') {
+      const message = server.disabled ? `MCP ${serverName} 已禁用` : `MCP ${serverName} 未连接`
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
+    if (!tool.enabled) {
+      const message = `MCP Tool ${toolName} 已禁用`
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
+    if (!window.aiops?.callMcpTool) {
+      const message = 'MCP Tool 调用服务不可用'
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
+    const parsed = parseMcpToolArguments(serverName, toolName)
+    if (!parsed.ok) {
+      setMcpOperationResult(key, { status: 'error', output: '', error: parsed.message })
+      setSettingsNotice(parsed.message)
+      return false
+    }
+    setMcpOperationResult(key, { status: 'running', output: '', error: '' })
+    try {
+      const result = await window.aiops.callMcpTool(serverName, toolName, parsed.arguments)
+      if (!result?.ok) {
+        const message = result?.errorMessage || `${toolName} 调用失败`
+        setMcpOperationResult(key, { status: 'error', output: '', error: message })
+        setSettingsNotice(message)
+        return false
+      }
+      if (!isMcpToolCallResultData(result.data, serverName, toolName)) {
+        setMcpOperationResult(key, { status: 'error', output: '', error: malformedMcpToolResultMessage })
+        setSettingsNotice(malformedMcpToolResultMessage)
+        return false
+      }
+      setMcpOperationResult(key, {
+        status: result.data.isError ? 'error' : 'success',
+        output: formatMcpToolCallContent(result.data.content),
+        error: result.data.isError ? formatMcpToolCallContent(result.data.content) : '',
+        durationMs: result.data.durationMs,
+        isError: result.data.isError
+      })
+      setSettingsNotice(result.data.isError ? `${toolName} 返回错误` : `${toolName} 调用完成`)
+      return !result.data.isError
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${toolName} 调用失败`
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
+  }
+
+  const readMcpResource = async (serverName: string, uri: string) => {
+    const key = getMcpResourceOperationKey(serverName, uri)
+    const server = mcpServers.value.find((item) => item.name === serverName)
+    const resource = server?.resources.find((item) => item.uri === uri)
+    if (!server || !resource) return false
+    if (server.disabled || server.status !== 'connected') {
+      const message = server.disabled ? `MCP ${serverName} 已禁用` : `MCP ${serverName} 未连接`
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
+    if (!window.aiops?.readMcpResource) {
+      const message = 'MCP Resource 读取服务不可用'
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
+    setMcpOperationResult(key, { status: 'running', output: '', error: '' })
+    try {
+      const result = await window.aiops.readMcpResource(serverName, uri)
+      if (!result?.ok) {
+        const message = result?.errorMessage || `${resource.name} 读取失败`
+        setMcpOperationResult(key, { status: 'error', output: '', error: message })
+        setSettingsNotice(message)
+        return false
+      }
+      if (!isMcpResourceReadResultData(result.data, serverName, uri)) {
+        setMcpOperationResult(key, { status: 'error', output: '', error: malformedMcpResourceResultMessage })
+        setSettingsNotice(malformedMcpResourceResultMessage)
+        return false
+      }
+      setMcpOperationResult(key, {
+        status: 'success',
+        output: formatMcpResourceReadContent(result.data.contents),
+        error: '',
+        durationMs: result.data.durationMs
+      })
+      setSettingsNotice(`${resource.name} 读取完成`)
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${resource.name} 读取失败`
+      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      setSettingsNotice(message)
+      return false
+    }
   }
 
   const openSkillModal = async (mode: 'create' | 'edit', skillName?: string) => {
@@ -11349,6 +11584,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     mcpServers,
     expandedMcpServerNames,
     activeMcpServerTab,
+    mcpToolArgumentDrafts,
+    mcpOperationResults,
     settingsSkills,
     skillsUserPath,
     skillModal,
@@ -11475,6 +11712,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     toggleMcpServerDisabled,
     deleteMcpServer,
     toggleMcpTool,
+    getMcpToolOperationKey,
+    getMcpResourceOperationKey,
+    getMcpToolArgumentDraft,
+    updateMcpToolArgumentDraft,
+    runMcpTool,
+    readMcpResource,
     openSkillModal,
     closeSkillModal,
     saveSkillModal,

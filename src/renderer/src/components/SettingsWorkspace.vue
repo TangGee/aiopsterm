@@ -160,7 +160,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h } from 'vue'
-import { Brain, ExternalLink, FolderOpen, LockKeyhole, MessageSquare, Monitor, Trash2, Upload, X } from 'lucide-vue-next'
+import { BookOpen, Brain, ExternalLink, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   settingsBackgroundPresets,
   settingsLanguageOptions,
@@ -219,6 +219,22 @@ const awsRegionOptions = [
   'us-gov-east-1',
   'us-gov-west-1'
 ]
+
+const mcpToolArgumentsPlaceholder = (parameters: Array<{ name: string; required?: boolean }>) => {
+  const sample = Object.fromEntries(parameters.filter((parameter) => parameter.required).map((parameter) => [parameter.name, '']))
+  return JSON.stringify(sample, null, 2)
+}
+
+const renderMcpOperationResult = (record: (typeof workspace.mcpOperationResults)[string] | undefined) => {
+  if (!record) return null
+  return h('div', { class: ['mcp-operation-result', record.status] }, [
+    h('div', { class: 'mcp-operation-result-header' }, [
+      h('strong', record.status === 'running' ? 'Running' : record.status === 'success' ? 'Result' : 'Error'),
+      record.durationMs !== undefined ? h('span', `${Math.round(record.durationMs)} ms`) : null
+    ]),
+    record.status === 'running' ? h('pre', 'Waiting for MCP response...') : h('pre', record.error || record.output || '[]')
+  ])
+}
 
 type PersistResult = void | boolean | Promise<void | boolean>
 
@@ -1136,8 +1152,12 @@ const McpSettingsPage = defineComponent({
                               'div',
                               { class: 'mcp-tool-list' },
                               server.tools.length
-                                ? server.tools.map((tool) =>
-                                    h('div', { class: ['mcp-tool-item', { disabled: !tool.enabled }] }, [
+                                ? server.tools.map((tool) => {
+                                    const operationKey = workspace.getMcpToolOperationKey(server.name, tool.name)
+                                    const operationResult = workspace.mcpOperationResults[operationKey]
+                                    const operationRunning = operationResult?.status === 'running'
+                                    const operationDisabled = server.disabled || server.status !== 'connected' || !tool.enabled || operationRunning
+                                    return h('div', { key: `${server.name}:${tool.name}`, class: ['mcp-tool-item', { disabled: !tool.enabled }] }, [
                                       h('div', { class: 'mcp-tool-header' }, [
                                         h('span', { class: 'mcp-tool-icon' }, 'tool'),
                                         h('button', { onClick: () => workspace.toggleMcpTool(server.name, tool.name) }, tool.name),
@@ -1155,22 +1175,62 @@ const McpSettingsPage = defineComponent({
                                               ])
                                             )
                                           ])
-                                        : null
+                                        : null,
+                                      h('div', { class: 'mcp-operation-panel' }, [
+                                        h('textarea', {
+                                          class: 'mcp-operation-input',
+                                          rows: 4,
+                                          spellcheck: 'false',
+                                          disabled: operationDisabled,
+                                          value: workspace.getMcpToolArgumentDraft(server.name, tool.name),
+                                          placeholder: mcpToolArgumentsPlaceholder(tool.parameters),
+                                          onInput: (event: Event) => workspace.updateMcpToolArgumentDraft(server.name, tool.name, (event.target as HTMLTextAreaElement).value)
+                                        }),
+                                        h('div', { class: 'mcp-operation-actions' }, [
+                                          h(
+                                            'button',
+                                            {
+                                              class: 'settings-button primary',
+                                              disabled: operationDisabled,
+                                              onClick: () => workspace.runMcpTool(server.name, tool.name)
+                                            },
+                                            [h(Play), operationRunning ? 'Running' : 'Run']
+                                          )
+                                        ]),
+                                        renderMcpOperationResult(operationResult)
+                                      ])
                                     ])
-                                  )
+                                  })
                                 : [h('div', { class: 'settings-empty-state' }, 'No Tools')]
                             )
                           : h(
                               'div',
                               { class: 'mcp-tool-list' },
                               server.resources.length
-                                ? server.resources.map((resource) =>
-                                    h('div', { class: 'mcp-resource-item' }, [
-                                      h('div', { class: 'mcp-resource-header' }, [h('span', { class: 'mcp-tool-icon' }, 'resource'), h('strong', resource.name)]),
+                                ? server.resources.map((resource) => {
+                                    const operationKey = workspace.getMcpResourceOperationKey(server.name, resource.uri)
+                                    const operationResult = workspace.mcpOperationResults[operationKey]
+                                    const operationRunning = operationResult?.status === 'running'
+                                    const operationDisabled = server.disabled || server.status !== 'connected' || operationRunning
+                                    return h('div', { key: `${server.name}:${resource.uri}`, class: 'mcp-resource-item' }, [
+                                      h('div', { class: 'mcp-resource-header' }, [
+                                        h('span', { class: 'mcp-tool-icon' }, 'resource'),
+                                        h('strong', resource.name),
+                                        h(
+                                          'button',
+                                          {
+                                            class: 'settings-button primary',
+                                            disabled: operationDisabled,
+                                            onClick: () => workspace.readMcpResource(server.name, resource.uri)
+                                          },
+                                          [h(BookOpen), operationRunning ? 'Reading' : 'Read']
+                                        )
+                                      ]),
                                       resource.description ? h('small', resource.description) : null,
-                                      h('code', resource.uri)
+                                      h('code', resource.uri),
+                                      renderMcpOperationResult(operationResult)
                                     ])
-                                  )
+                                  })
                                 : [h('div', { class: 'settings-empty-state' }, 'No Resources')]
                             )
                       ])
