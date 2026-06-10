@@ -354,7 +354,6 @@ let listFiles: (directory: string, options?: Record<string, unknown>) => Promise
 let mutateFileEntry: (mutation: Record<string, unknown>, options?: Record<string, unknown>) => Promise<any>
 let transferFileEntry: (operation: Record<string, unknown>, options?: Record<string, unknown>) => Promise<any>
 let listFileTransferTasks: () => Promise<any[]>
-let recordFileTransferTask: (input: Record<string, unknown>) => Promise<any>
 let cancelFileTransferTask: (input: Record<string, unknown>) => Promise<any>
 let listFileSessionCatalog: () => Promise<any>
 let saveFileSession: (session: Record<string, unknown>) => Promise<any>
@@ -369,17 +368,18 @@ let dropFileSessionCatalogCache: () => void
 let configureFilesBackendRuntime: (config?: { getConfig?: () => { sshProxyConfigs?: any[]; sshAgentKeys?: any[]; terminal?: any } }) => void
 let saveAsset: (asset: any) => any
 let saveKeychain: (keychain: any) => any
+let filesBackendExports: Record<string, unknown>
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/files'
   const backend = await import(modulePath)
+  filesBackendExports = backend as Record<string, unknown>
   readFileContent = backend.readFileContent
   writeFileContent = backend.writeFileContent
   listFiles = backend.listFiles
   mutateFileEntry = backend.mutateFileEntry
   transferFileEntry = backend.transferFileEntry
   listFileTransferTasks = backend.listFileTransferTasks
-  recordFileTransferTask = backend.recordFileTransferTask
   cancelFileTransferTask = backend.cancelFileTransferTask
   listFileSessionCatalog = backend.listFileSessionCatalog
   saveFileSession = backend.saveFileSession
@@ -641,77 +641,12 @@ describe('files backend content boundary', () => {
     await expect(listFileTransferTasks()).resolves.toEqual([])
   })
 
-  it('records file transfer task identities behind the main-process boundary', async () => {
-    const recorded = await recordFileTransferTask({
-      id: 'client-transfer-draft',
-      type: 'download',
-      name: 'api.log',
-      source: '/home/deploy/logs/api.log',
-      target: '/tmp/api.log',
-      progress: 160,
-      speed: '1 MB/s',
-      status: 'running',
-      fromHost: 'prod-bastion',
-      toHost: 'local',
-      children: [
-        {
-          id: 'client-transfer-child',
-          type: 'download',
-          name: 'api-part.log',
-          source: '/home/deploy/logs/api-part.log',
-          target: '/tmp/api-part.log',
-          progress: -10,
-          status: 'running'
-        }
-      ]
-    })
-
-    expect(recorded.ok).toBe(true)
-    expect(recorded.data.task).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^transfer-/),
-        type: 'download',
-        name: 'api.log',
-        source: '/home/deploy/logs/api.log',
-        target: '/tmp/api.log',
-        progress: 100,
-        speed: '1 MB/s',
-        status: 'running',
-        fromHost: 'prod-bastion',
-        toHost: 'local',
-        children: [
-          expect.objectContaining({
-            id: expect.stringMatching(/^transfer-/),
-            type: 'download',
-            name: 'api-part.log',
-            progress: 0,
-            status: 'running'
-          })
-        ]
-      })
-    )
-    expect(recorded.data.task.id).not.toBe('client-transfer-draft')
-    expect(recorded.data.task.children[0].id).not.toBe('client-transfer-child')
-    await expect(listFileTransferTasks()).resolves.toEqual([expect.objectContaining({ id: recorded.data.task.id, status: 'running' })])
-
-    const cancelled = await cancelFileTransferTask({ id: recorded.data.task.children[0].id })
-    expect(cancelled).toEqual({
-      ok: true,
-      data: {
-        id: recorded.data.task.children[0].id,
-        taskIds: [recorded.data.task.id, recorded.data.task.children[0].id],
-        status: 'aborted'
-      }
-    })
+  it('does not expose a manual transfer-task recorder at the backend boundary', async () => {
+    expect(filesBackendExports.recordFileTransferTask).toBeUndefined()
     await expect(listFileTransferTasks()).resolves.toEqual([])
-    await expect(cancelFileTransferTask({ id: recorded.data.task.id })).resolves.toMatchObject({
+    await expect(cancelFileTransferTask({ id: 'client-transfer-draft' })).resolves.toMatchObject({
       ok: true,
-      data: { id: recorded.data.task.id, taskIds: [], status: 'not_found' }
-    })
-
-    await expect(recordFileTransferTask({ type: 'download', name: '', source: '', target: '' })).resolves.toMatchObject({
-      ok: false,
-      errorCode: 'FILES_TRANSFER_TASK_INVALID'
+      data: { id: 'client-transfer-draft', taskIds: [], status: 'not_found' }
     })
   })
 

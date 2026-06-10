@@ -59,7 +59,6 @@ import type {
   FileSessionPatch,
   FileSessionTerminalContext,
   FileTransferTask,
-  FileTransferTaskRecordInput,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseEntry,
@@ -7072,26 +7071,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return normalized
   }
 
-  const recordFileTransferTask = async (input: FileTransferTaskRecordInput) => {
-    const recordFileTransferTaskBridge = window.aiops?.recordFileTransferTask
-    if (typeof recordFileTransferTaskBridge !== 'function') {
-      setTopNotice('文件传输任务记录服务不可用')
-      return null
-    }
-    let result
-    try {
-      result = await recordFileTransferTaskBridge(input)
-    } catch {
-      setTopNotice('文件传输任务记录失败')
-      return null
-    }
-    if (!result?.ok || !result.data?.task) {
-      setTopNotice(result?.errorMessage || '文件传输任务记录失败')
-      return null
-    }
-    return pushFileTransferTask(result.data.task)
-  }
-
   const affectedFileTransferTaskIds = (id: string) => {
     const taskIds = new Set<string>([id])
     fileTransferTasks.value.forEach((item) => {
@@ -10527,7 +10506,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveFileSessionFolder,
     deleteFileSessionFolder,
     pushFileTransferTask,
-    recordFileTransferTask,
     cancelFileTransferTask,
     createSnippetGroup,
     renameSnippetGroup,

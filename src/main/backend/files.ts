@@ -26,8 +26,6 @@ import type {
   FileTransferTaskCancelResult,
   FileTransferOperation,
   FileTransferOperationResult,
-  FileTransferTaskRecordInput,
-  FileTransferTaskRecordResult,
   FileWriteContentResult,
   UserConfig
 } from '@shared/preload'
@@ -685,11 +683,24 @@ const normalizeTransferProgress = (progress: unknown, status: FileTransferTask['
   return status === 'success' ? 100 : 0
 }
 
-type FileTransferTaskRecordPayload = Omit<FileTransferTaskRecordInput, 'children'> & {
-  children?: FileTransferTaskRecordPayload[]
+type BackendFileTransferTaskPayload = {
+  type: FileTransferTask['type']
+  name: string
+  source: string
+  target: string
+  progress?: number
+  speed?: string
+  status?: FileTransferTask['status']
+  stage?: FileTransferTask['stage']
+  isGroup?: boolean
+  fromHost?: string
+  toHost?: string
+  totalFiles?: number
+  finishedFiles?: number
+  children?: BackendFileTransferTaskPayload[]
 }
 
-const createFileTransferTaskRecord = (input: FileTransferTaskRecordPayload): FileTransferTask => {
+const createBackendFileTransferTask = (input: BackendFileTransferTaskPayload): FileTransferTask => {
   const type = input.type === 'download' || input.type === 'upload' || input.type === 'r2r' ? input.type : 'r2r'
   const name = String(input.name || '').trim()
   const source = String(input.source || '').trim()
@@ -713,14 +724,9 @@ const createFileTransferTaskRecord = (input: FileTransferTaskRecordPayload): Fil
     ...(typeof input.finishedFiles === 'number' && Number.isFinite(input.finishedFiles)
       ? { finishedFiles: Math.max(0, Math.round(input.finishedFiles)) }
       : {}),
-    ...(input.children?.length ? { children: input.children.map((child) => createFileTransferTaskRecord(child)) } : {})
+    ...(input.children?.length ? { children: input.children.map((child) => createBackendFileTransferTask(child)) } : {})
   }
 }
-
-const taskRecordPayload = (input: FileTransferTaskRecordInput): FileTransferTaskRecordPayload => ({
-  ...input,
-  ...(input.children?.length ? { children: input.children.map((child) => taskRecordPayload(child)) } : {})
-})
 
 const transferFromHost = (options: FileListOptions) => options.fromHost || options.host
 const transferToHost = (options: FileListOptions) => options.toHost || options.host
@@ -819,7 +825,8 @@ const fileTransferCancelledResult = (
   }
 })
 
-const createCompletedFileTransferTask = (input: FileTransferTaskRecordPayload) => cloneFileTransferTask(createFileTransferTaskRecord({ progress: 100, status: 'success', speed: '完成', ...input }))
+const createCompletedBackendFileTransferTask = (input: BackendFileTransferTaskPayload) =>
+  cloneFileTransferTask(createBackendFileTransferTask({ progress: 100, status: 'success', speed: '完成', ...input }))
 
 const fileTransferTaskHosts = (options: FileListOptions) => ({
   ...(transferFromHost(options) ? { fromHost: transferFromHost(options) } : {}),
@@ -830,12 +837,12 @@ type RemoteCopyTransferStats = {
   bytes: number
   fileCount: number
   itemKind: 'file' | 'directory'
-  children: FileTransferTaskRecordPayload[]
+  children: BackendFileTransferTaskPayload[]
 }
 
 const remoteCopyResultFileCount = (stats: RemoteCopyTransferStats) => (stats.itemKind === 'directory' ? Math.max(stats.fileCount, 1) : 1)
 
-const remoteCopyChildTask = (name: string, source: string, target: string, options: FileListOptions): FileTransferTaskRecordPayload => ({
+const remoteCopyChildTask = (name: string, source: string, target: string, options: FileListOptions): BackendFileTransferTaskPayload => ({
   type: 'r2r',
   name,
   source,
@@ -848,7 +855,7 @@ const remoteCopyChildTask = (name: string, source: string, target: string, optio
 })
 
 const createRemoteCopyTransferTask = (source: string, target: string, stats: RemoteCopyTransferStats, options: FileListOptions) =>
-  createFileTransferTaskRecord({
+  createBackendFileTransferTask({
     type: 'r2r',
     name: basename(source),
     source,
@@ -872,7 +879,7 @@ const taskBasename = (path: string, options: FileListOptions) => (options.kind =
 const taskDirname = (path: string, options: FileListOptions) => (options.kind === 'remote' ? dirname(path) : getLocalDirname(path))
 
 const writeContentTask = (path: string, options: FileContentOptions) =>
-  createCompletedFileTransferTask({
+  createCompletedBackendFileTransferTask({
     type: 'r2r',
     name: `save ${taskBasename(path, options)}`,
     source: path,
@@ -884,7 +891,7 @@ const writeContentTask = (path: string, options: FileContentOptions) =>
 const mutationTask = (mutation: FileEntryMutation, resultPath: string, options: FileListOptions): FileTransferTask | undefined => {
   if (mutation.kind === 'rename') return undefined
   if (mutation.kind === 'chmod') {
-    return createCompletedFileTransferTask({
+    return createCompletedBackendFileTransferTask({
       type: 'r2r',
       name: `chmod ${taskBasename(resultPath, options)}`,
       source: resultPath,
@@ -893,7 +900,7 @@ const mutationTask = (mutation: FileEntryMutation, resultPath: string, options: 
     })
   }
   if (mutation.kind === 'delete') {
-    return createCompletedFileTransferTask({
+    return createCompletedBackendFileTransferTask({
       type: 'r2r',
       name: `delete ${taskBasename(resultPath, options)}`,
       source: resultPath,
@@ -902,23 +909,13 @@ const mutationTask = (mutation: FileEntryMutation, resultPath: string, options: 
     })
   }
   const source = mutation.srcPath
-  return createCompletedFileTransferTask({
+  return createCompletedBackendFileTransferTask({
     type: 'r2r',
     name: taskBasename(resultPath, options),
     source,
     target: resultPath,
     ...fileTransferTaskHosts(options)
   })
-}
-
-export const recordFileTransferTask = async (input: FileTransferTaskRecordInput): Promise<FileTransferTaskRecordResult> => {
-  try {
-    const task = createFileTransferTaskRecord(taskRecordPayload(input))
-    registerActiveFileTransferTask(task)
-    return { ok: true, data: { task: cloneFileTransferTask(task) } }
-  } catch (error) {
-    return { ok: false, errorCode: 'FILES_TRANSFER_TASK_INVALID', errorMessage: error instanceof Error ? error.message : 'Invalid transfer task.' }
-  }
 }
 
 const findActiveFileTransferTaskIds = (id: string) => {
@@ -1414,7 +1411,7 @@ const downloadRemoteFileViaSftp = async (remotePath: string, localPath: string, 
       const content = await sftpReadFile(sftp, source)
       await mkdir(getLocalDirname(destination), { recursive: true })
       await writeFile(destination, content)
-      const task = createFileTransferTaskRecord({
+      const task = createBackendFileTransferTask({
         type: 'download',
         name: basename(source),
         source,
@@ -1497,7 +1494,7 @@ const downloadRemoteDirectoryViaSftp = async (
       let bytes = 0
       let fileCount = 0
       const control = createFileTransferAbortControl()
-      const task = createFileTransferTaskRecord({
+      const task = createBackendFileTransferTask({
         type: 'download',
         name: remoteDirectoryDownloadName(source),
         source,
@@ -1528,7 +1525,7 @@ const downloadRemoteDirectoryViaSftp = async (
             await downloadDirectory(remoteChild, localChild)
             continue
           }
-          const child = createFileTransferTaskRecord({
+          const child = createBackendFileTransferTask({
             type: 'download',
             name: row.filename,
             source: remoteChild,
@@ -1600,7 +1597,7 @@ const uploadRemoteFileViaSftp = async (
       const content = await readFile(source)
       await ensureRemoteParentDirs(sftp, dirname(destination))
       await sftpWriteFile(sftp, destination, content)
-      const task = createFileTransferTaskRecord({
+      const task = createBackendFileTransferTask({
         type: 'upload',
         name,
         source,
@@ -1645,7 +1642,7 @@ const uploadRemoteDirectoryViaSftp = async (
       let bytes = 0
       let fileCount = 0
       const control = createFileTransferAbortControl()
-      const task = createFileTransferTaskRecord({
+      const task = createBackendFileTransferTask({
         type: 'upload',
         name,
         source,
@@ -1675,7 +1672,7 @@ const uploadRemoteDirectoryViaSftp = async (
             continue
           }
           if (!row.isFile()) continue
-          const child = createFileTransferTaskRecord({
+          const child = createBackendFileTransferTask({
             type: 'upload',
             name: row.name,
             source: localChild,

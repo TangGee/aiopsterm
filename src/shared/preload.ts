@@ -1596,12 +1596,6 @@ export type FileTransferTask = {
   children?: FileTransferTask[]
 }
 
-export type FileTransferTaskRecordInput = Partial<Omit<FileTransferTask, 'id'>> & Pick<FileTransferTask, 'type' | 'name' | 'source' | 'target'>
-
-export type FileTransferTaskRecordResult = AiopsMutationResult<{
-  task: FileTransferTask
-}>
-
 export type FileTransferTaskCancelInput = {
   id: string
 }
@@ -2677,7 +2671,6 @@ export type AiopsPreloadApi = {
   writeFileContent: (filePath: string, content: string, options?: FileContentOptions) => Promise<FileWriteContentResult>
   mutateFileEntry: (mutation: FileEntryMutation, options?: FileListOptions) => Promise<FileEntryMutationResult>
   transferFileEntry: (operation: FileTransferOperation, options?: FileListOptions) => Promise<FileTransferOperationResult>
-  recordFileTransferTask: (input: FileTransferTaskRecordInput) => Promise<FileTransferTaskRecordResult>
   cancelFileTransferTask: (input: FileTransferTaskCancelInput) => Promise<FileTransferTaskCancelResult>
   listFileTransferTasks: () => Promise<FileTransferTask[]>
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void

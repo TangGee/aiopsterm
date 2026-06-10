@@ -7190,42 +7190,6 @@ Object.defineProperty(window, 'aiops', {
       }
       return { ok: false, errorCode: 'unsupported', errorMessage: 'Unsupported file mutation' }
     }),
-    recordFileTransferTask: vi.fn(async (input: any) => {
-      const status =
-        input.status === 'running' || input.status === 'success' || input.status === 'failed' || input.status === 'error' ? input.status : 'success'
-      const createTaskId = () => `transfer-test-${fileTransferTaskSequenceMock++}`
-      const task = {
-        id: createTaskId(),
-        type: input.type === 'download' || input.type === 'upload' || input.type === 'r2r' ? input.type : 'r2r',
-        name: String(input.name || '').trim(),
-        source: String(input.source || '').trim(),
-        target: String(input.target || '').trim(),
-        progress: typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : status === 'success' ? 100 : 0,
-        speed: String(input.speed || (status === 'success' ? '完成' : 'pending')),
-        status,
-        ...(input.stage === 'scanning' || input.stage === 'pending' ? { stage: input.stage } : {}),
-        ...(input.isGroup ? { isGroup: true } : {}),
-        ...(input.fromHost ? { fromHost: input.fromHost } : {}),
-        ...(input.toHost ? { toHost: input.toHost } : {}),
-        ...(typeof input.totalFiles === 'number' ? { totalFiles: input.totalFiles } : {}),
-        ...(typeof input.finishedFiles === 'number' ? { finishedFiles: input.finishedFiles } : {}),
-        ...(Array.isArray(input.children)
-          ? {
-              children: input.children.map((child: any) => ({
-                ...child,
-                id: createTaskId(),
-                progress: typeof child.progress === 'number' ? Math.max(0, Math.min(100, Math.round(child.progress))) : 0
-              }))
-            }
-          : {})
-      }
-      if (task.name && task.source && task.target && task.status === 'running') {
-        fileTransferTasksMock = [task, ...fileTransferTasksMock.filter((item) => item.id !== task.id)]
-      }
-      return task.name && task.source && task.target
-        ? { ok: true, data: { task } }
-        : { ok: false, errorCode: 'FILES_TRANSFER_TASK_INVALID', errorMessage: 'File transfer task name, source, and target are required.' }
-    }),
     transferFileEntry: vi.fn(async (operation: any, options?: any) => {
       if (operation.kind === 'copy-remote') {
         const sourcePath = normalizeFileDirMock(operation.remotePath)

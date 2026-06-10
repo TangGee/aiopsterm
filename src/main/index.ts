@@ -105,7 +105,6 @@ import {
   listFileTransferTasks,
   listFiles as listBackendFiles,
   mutateFileEntry,
-  recordFileTransferTask,
   readFileContent,
   saveFileSession,
   saveFileSessionFolder,
@@ -256,7 +255,6 @@ import type {
   FileSessionPatch,
   FileSessionTerminalContext,
   FileTransferTaskCancelInput,
-  FileTransferTaskRecordInput,
   FileTransferOperation,
   KeywordHighlightUserConfig,
   KnowledgeBaseNodeConfig,
@@ -3520,7 +3518,6 @@ const registerIpc = () => {
   ipcMain.handle('files:transfer-entry', async (_event, operation: FileTransferOperation, options?: FileListOptions) =>
     transferFileEntry(operation, options)
   )
-  ipcMain.handle('files:transfer-task:record', async (_event, input: FileTransferTaskRecordInput) => recordFileTransferTask(input))
   ipcMain.handle('files:transfer-task:cancel', async (_event, input: FileTransferTaskCancelInput) => cancelFileTransferTask(input))
   ipcMain.handle('files:list-transfer-tasks', async () => listFileTransferTasks())
 }

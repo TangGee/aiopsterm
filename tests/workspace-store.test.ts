@@ -3383,7 +3383,6 @@ describe('workspace store', () => {
       saveFileSessionFolder: window.aiops.saveFileSessionFolder,
       deleteFileSessionFolder: window.aiops.deleteFileSessionFolder,
       listFileTransferTasks: window.aiops.listFileTransferTasks,
-      recordFileTransferTask: window.aiops.recordFileTransferTask,
       cancelFileTransferTask: window.aiops.cancelFileTransferTask
     }
     const foldersBefore = JSON.stringify(store.fileSessionFolders)
@@ -3494,47 +3493,8 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe('文件传输任务加载失败')
       expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
 
-      ;(window.aiops as any).recordFileTransferTask = undefined
-      await expect(
-        store.recordFileTransferTask({
-          type: 'download',
-          name: 'client-fake.log',
-          source: '/home/deploy/client-fake.log',
-          target: '/tmp/client-fake.log',
-          status: 'success'
-        })
-      ).resolves.toBeNull()
-      expect(store.topNotice).toBe('文件传输任务记录服务不可用')
-      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
-
-      ;(window.aiops as any).recordFileTransferTask = originalAiops.recordFileTransferTask
-      vi.mocked(window.aiops.recordFileTransferTask!).mockRejectedValueOnce(new Error('record transfer offline'))
-      await expect(
-        store.recordFileTransferTask({
-          type: 'download',
-          name: 'client-fake.log',
-          source: '/home/deploy/client-fake.log',
-          target: '/tmp/client-fake.log',
-          status: 'success'
-        })
-      ).resolves.toBeNull()
-      expect(store.topNotice).toBe('文件传输任务记录失败')
-      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
-      vi.mocked(window.aiops.recordFileTransferTask!).mockResolvedValueOnce({
-        ok: false,
-        errorCode: 'FILES_TRANSFER_RECORD_DOWN',
-        errorMessage: '传输任务后端记录失败'
-      })
-      await expect(
-        store.recordFileTransferTask({
-          type: 'download',
-          name: 'client-fake.log',
-          source: '/home/deploy/client-fake.log',
-          target: '/tmp/client-fake.log',
-          status: 'success'
-        })
-      ).resolves.toBeNull()
-      expect(store.topNotice).toBe('传输任务后端记录失败')
+      expect((window.aiops as any).recordFileTransferTask).toBeUndefined()
+      expect((store as any).recordFileTransferTask).toBeUndefined()
       expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
 
       ;(window.aiops as any).cancelFileTransferTask = undefined
