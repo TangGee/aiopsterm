@@ -461,6 +461,13 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  isFileEntryMutationData,
+  isFileListEntryData,
+  isFileTransferOperationData,
+  isFileTransferTaskData,
+  malformedFilesBackendResultMessage
+} from '@/services/filesBackendGuards'
 import type { FileEntryMutation, FileEntryMutationResult, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult, FileTransferTask } from '@shared/preload'
 
 type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
@@ -602,40 +609,23 @@ const getSessionListOptions = (session: FileSessionInfo | undefined, overrides: 
       }
     : getListOptions(overrides)
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const hasBackendTaskIdentity = (value: unknown): value is FileTransferTask => isRecord(value) && typeof value.id === 'string' && value.id.trim().length > 0
-
 const pushBackendTransferTask = (task: unknown, fallbackError: string) => {
-  if (!hasBackendTaskIdentity(task)) throw new Error(fallbackError)
-  const normalized = workspace.pushFileTransferTask(task)
+  if (!isFileTransferTaskData(task)) throw new Error(fallbackError)
+  const normalized = workspace.pushFileTransferTask(task as FileTransferTask)
   if (!normalized) throw new Error(fallbackError)
   return normalized
 }
 
-const isFiniteNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value)
-
 const applyTransferResult = (transfer: FileTransferOperationResult, fallbackError: string, cancelledNotice: string, skippedNotice: string) => {
   if (!transfer?.ok) throw new Error(transfer?.errorMessage || fallbackError)
   const data = transfer.data
-  const status = data?.status
-  if (
-    !data ||
-    (status !== 'success' && status !== 'cancelled' && status !== 'skipped') ||
-    typeof data.source !== 'string' ||
-    typeof data.target !== 'string' ||
-    !isFiniteNumber(data.bytes) ||
-    !isFiniteNumber(data.files) ||
-    !isFiniteNumber(data.mtimeMs)
-  ) {
-    throw new Error(fallbackError)
-  }
+  if (!isFileTransferOperationData(data)) throw new Error(malformedFilesBackendResultMessage)
   pushBackendTransferTask(data.task, fallbackError)
-  if (status === 'cancelled') {
+  if (data.status === 'cancelled') {
     fileNotice.value = cancelledNotice
     return false
   }
-  if (status === 'skipped') {
+  if (data.status === 'skipped') {
     fileNotice.value = skippedNotice
     return false
   }
@@ -652,8 +642,9 @@ const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
 })
 
 const loadDirectoryEntries = async (path: string) => {
-  if (!window.aiops) return []
+  if (typeof window.aiops?.listFiles !== 'function') throw new Error('文件列表服务不可用')
   const list = await window.aiops.listFiles(path, getListOptions())
+  if (!Array.isArray(list) || !list.every(isFileListEntryData)) throw new Error(malformedFilesBackendResultMessage)
   const rows = list.map(mapFileEntry)
   if (rows.some((entry) => entry.name === '..') || path === '/') return rows
   return [{ name: '..', path: dirname(path), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '' }, ...rows]
@@ -667,9 +658,7 @@ const listDirectoryEntries = async (path: string) => {
 const applyMutationResult = (result: FileEntryMutationResult, mutation: FileEntryMutation, fallbackError: string) => {
   if (!result?.ok) throw new Error(result?.errorMessage || fallbackError)
   const data = result.data
-  if (!data || !isFiniteNumber(data.affected) || !isFiniteNumber(data.mtimeMs) || typeof data.path !== 'string' || !data.path.trim()) {
-    throw new Error(fallbackError)
-  }
+  if (!isFileEntryMutationData(data, mutation.kind) || typeof data.path !== 'string' || !data.path.trim()) throw new Error(malformedFilesBackendResultMessage)
   if (mutation.kind !== 'rename') pushBackendTransferTask(data.task, fallbackError)
   return data
 }

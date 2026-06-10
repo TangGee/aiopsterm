@@ -21,6 +21,16 @@ import {
 } from '@/services/extensionBackendGuards'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import {
+  isFileSessionCatalogData,
+  isFileSessionFolderDeleteData,
+  isFileSessionFolderMutationData,
+  isFileSessionInfoData,
+  isFileSessionMutationData,
+  isFileTransferTaskCancelData,
+  isFileTransferTaskData,
+  malformedFilesBackendResultMessage
+} from '@/services/filesBackendGuards'
+import {
   isSettingsPreferencesMutationData,
   isSettingsPreferencesSnapshot,
   isSettingsRuleDeleteData,
@@ -7466,7 +7476,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const tasks = await listFileTransferTasksBridge()
-      fileTransferTasks.value = Array.isArray(tasks) ? tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task) : []
+      if (!Array.isArray(tasks) || !tasks.every(isFileTransferTaskData)) {
+        setTopNotice(malformedFilesBackendResultMessage)
+        return false
+      }
+      fileTransferTasks.value = tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task)
       return true
     } catch {
       setTopNotice('文件传输任务加载失败')
@@ -7475,8 +7489,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const applyFileSessionCatalog = (catalog: FileSessionCatalog) => {
-    fileSessions.value = Array.isArray(catalog.sessions) ? catalog.sessions.map((session) => ({ ...session })) : []
-    fileSessionFolders.value = Array.isArray(catalog.folders) ? catalog.folders.map((folder) => ({ ...folder })) : []
+    if (!isFileSessionCatalogData(catalog)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
+    fileSessions.value = catalog.sessions.map((session) => ({ ...session }))
+    fileSessionFolders.value = catalog.folders.map((folder) => ({ ...folder }))
     if (!fileSessions.value.some((session) => session.id === selectedLeftFileSessionId.value)) {
       selectedLeftFileSessionId.value = null
     }
@@ -7505,9 +7523,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const applyFileSessionMutationResult = (result?: { ok?: boolean; data?: FileSessionCatalog; errorMessage?: string }, fallbackNotice = '文件会话写入失败') => {
+  const applyFileSessionRecordMutationResult = (
+    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['saveFileSession']>>> | undefined,
+    fallbackNotice = '文件会话写入失败'
+  ) => {
     if (!result?.ok || !result.data) {
       setTopNotice(result?.errorMessage || fallbackNotice)
+      return null
+    }
+    if (!isFileSessionMutationData(result.data)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
+    return applyFileSessionCatalog(result.data)
+  }
+
+  const applyFileSessionFolderMutationResult = (
+    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['saveFileSessionFolder']>>> | undefined,
+    fallbackNotice = '文件会话文件夹写入失败'
+  ) => {
+    if (!result?.ok || !result.data) {
+      setTopNotice(result?.errorMessage || fallbackNotice)
+      return null
+    }
+    if (!isFileSessionFolderMutationData(result.data)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
+    return applyFileSessionCatalog(result.data)
+  }
+
+  const applyFileSessionFolderDeleteResult = (
+    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['deleteFileSessionFolder']>>> | undefined,
+    uuid: string,
+    fallbackNotice = '文件会话文件夹删除失败'
+  ) => {
+    if (!result?.ok || !result.data) {
+      setTopNotice(result?.errorMessage || fallbackNotice)
+      return null
+    }
+    if (!isFileSessionFolderDeleteData(result.data, uuid)) {
+      setTopNotice(malformedFilesBackendResultMessage)
       return null
     }
     return applyFileSessionCatalog(result.data)
@@ -7520,7 +7576,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     try {
-      return applyFileSessionMutationResult(await saveFileSessionBridge({ ...session }))
+      return applyFileSessionRecordMutationResult(await saveFileSessionBridge({ ...session }))
     } catch {
       setTopNotice('文件会话写入失败')
       return null
@@ -7539,9 +7595,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     Object.assign(session, patch)
     try {
       const result = await updateFileSessionBridge(id, patch)
-      const applied = applyFileSessionMutationResult(result)
+      const applied = applyFileSessionRecordMutationResult(result)
       if (!applied) Object.assign(session, previous)
-      return result?.ok ? result.data?.session || null : null
+      return applied && result?.data && isFileSessionInfoData(result.data.session) ? result.data.session : null
     } catch {
       Object.assign(session, previous)
       setTopNotice('文件会话写入失败')
@@ -7559,8 +7615,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await saveFileSessionFolderBridge(normalized)
-      applyFileSessionMutationResult(result, '文件会话文件夹写入失败')
-      return result?.ok ? result.data?.folder || null : null
+      const applied = applyFileSessionFolderMutationResult(result, '文件会话文件夹写入失败')
+      return applied && result?.data ? result.data.folder : null
     } catch {
       setTopNotice('文件会话文件夹写入失败')
       return null
@@ -7575,8 +7631,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await deleteFileSessionFolderBridge(uuid)
-      applyFileSessionMutationResult(result, '文件会话文件夹删除失败')
-      return Boolean(result?.ok)
+      return Boolean(applyFileSessionFolderDeleteResult(result, uuid, '文件会话文件夹删除失败'))
     } catch {
       setTopNotice('文件会话文件夹删除失败')
       return false
@@ -7662,12 +7717,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('文件会话创建失败')
       return null
     }
-    if (!result?.ok || !result.data?.session) {
+    if (!result?.ok || !result.data) {
       setTopNotice(result?.errorMessage || '文件会话创建失败')
       return null
     }
+    if (!isFileSessionMutationData(result.data)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
 
-    applyFileSessionCatalog(result.data)
+    if (!applyFileSessionCatalog(result.data)) return null
     const session = result.data.session
     setFilesUiMode('transfer')
     openFileSession(session.id, side)
@@ -7704,11 +7763,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('文件会话创建失败')
       return null
     }
-    if (!result?.ok || !result.data?.session) {
+    if (!result?.ok || !result.data) {
       setTopNotice(result?.errorMessage || '文件会话创建失败')
       return null
     }
-    applyFileSessionCatalog(result.data)
+    if (!isFileSessionMutationData(result.data)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
+    if (!applyFileSessionCatalog(result.data)) return null
     const session = result.data.session
     openFileSession(session.id, side)
     return session
@@ -7734,17 +7797,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('文件会话创建失败')
       return null
     }
-    if (!result?.ok || !result.data?.session) {
+    if (!result?.ok || !result.data) {
       setTopNotice(result?.errorMessage || '文件会话创建失败')
       return null
     }
-    applyFileSessionCatalog(result.data)
+    if (!isFileSessionMutationData(result.data)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
+    if (!applyFileSessionCatalog(result.data)) return null
     const session = result.data.session
     openFileSession(session.id, side)
     return session
   }
 
   const pushFileTransferTask = (task: FileTransferTask) => {
+    if (!isFileTransferTaskData(task)) return null
     const normalized = normalizeFileTransferTask(task)
     if (!normalized) return null
     fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== normalized.id)
@@ -7800,6 +7868,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     if (!result?.ok || !result.data) {
       setTopNotice(result?.errorMessage || '取消传输任务失败')
+      return false
+    }
+    if (!isFileTransferTaskCancelData(result.data) || result.data.id !== id) {
+      setTopNotice(malformedFilesBackendResultMessage)
       return false
     }
     if (result.data.status !== 'aborted') {

@@ -229,6 +229,12 @@ import FileBrowser from '@/components/files/FileBrowser.vue'
 import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import TransferSide from '@/components/files/TransferSide.vue'
+import {
+  isFileReadContentData,
+  isFileTransferTaskData,
+  isFileWriteContentData,
+  malformedFilesBackendResultMessage
+} from '@/services/filesBackendGuards'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { FileContentOptions, FileTransferTask } from '@shared/preload'
 
@@ -366,13 +372,9 @@ const fileContentOptions = (payload: { sessionId: string; host: string }): FileC
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const hasBackendTaskIdentity = (value: unknown): value is FileTransferTask => isRecord(value) && typeof value.id === 'string' && value.id.trim().length > 0
-
 const pushBackendTransferTask = (task: unknown, fallbackError: string) => {
-  if (!hasBackendTaskIdentity(task)) throw new Error(fallbackError)
-  const normalized = workspace.pushFileTransferTask(task)
+  if (!isFileTransferTaskData(task)) throw new Error(fallbackError)
+  const normalized = workspace.pushFileTransferTask(task as FileTransferTask)
   if (!normalized) throw new Error(fallbackError)
   return normalized
 }
@@ -385,7 +387,7 @@ const openFileEditor = async (payload: { filePath: string; sessionId: string; se
     activeEditorKey.value = key
     return
   }
-  const editor: FileEditorState = {
+  const draft: FileEditorState = {
     key,
     filePath: payload.filePath,
     sessionId: payload.sessionId,
@@ -406,7 +408,8 @@ const openFileEditor = async (payload: { filePath: string; sessionId: string; se
     width: Math.min(900, Math.max(620, window.innerWidth - 96)),
     height: Math.min(620, Math.max(420, window.innerHeight - 96))
   }
-  fileEditors.value.push(editor)
+  fileEditors.value.push(draft)
+  const editor = fileEditors.value[fileEditors.value.length - 1]
   activeEditorKey.value = key
   try {
     const result = await window.aiops.readFileContent(payload.filePath, fileContentOptions(payload))
@@ -414,10 +417,14 @@ const openFileEditor = async (payload: { filePath: string; sessionId: string; se
       editor.error = result.errorMessage || '读取文件失败'
       return
     }
-    const content = result.data?.content ?? ''
-    editor.content = content
-    editor.originContent = content
-    editor.action = result.data?.action ?? 'edit'
+    const data = result.data
+    if (!isFileReadContentData(data)) {
+      editor.error = malformedFilesBackendResultMessage
+      return
+    }
+    editor.content = data.content
+    editor.originContent = data.content
+    editor.action = data.action
   } catch (error) {
     editor.error = error instanceof Error ? error.message : '读取文件失败'
   } finally {
@@ -514,11 +521,12 @@ const saveFileEditor = async (key: string, needClose: boolean) => {
       editor.error = result.errorMessage || '保存文件失败'
       return
     }
-    if (!result.data || typeof result.data.size !== 'number' || !Number.isFinite(result.data.size) || !Number.isFinite(result.data.mtimeMs)) {
-      editor.error = '保存文件失败'
+    const data = result.data
+    if (!isFileWriteContentData(data)) {
+      editor.error = malformedFilesBackendResultMessage
       return
     }
-    pushBackendTransferTask(result.data.task, '保存文件失败')
+    pushBackendTransferTask(data.task, '保存文件失败')
     editor.originContent = editor.content
     editor.action = 'edit'
     editor.dirty = false

@@ -174,6 +174,7 @@ import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
 import AssetsPanel from '@/components/panels/AssetsPanel.vue'
 import FileBrowser from '@/components/files/FileBrowser.vue'
+import TransferSide from '@/components/files/TransferSide.vue'
 import FilesWorkspace from '@/components/FilesWorkspace.vue'
 import TerminalWorkspace from '@/components/TerminalWorkspace.vue'
 import ExtensionsWorkspace from '@/components/ExtensionsWorkspace.vue'
@@ -222,6 +223,7 @@ const loadTestFileSession = async (id = 'local'): Promise<FileSessionInfo> => {
 }
 
 type TestWrapperLike = { find: (selector: string) => { exists: () => boolean; text: () => string } }
+type TextWrapperLike = { text: () => string }
 type WrapperSelectorLike = { find: (selector: string) => { exists: () => boolean } }
 
 const waitForSelector = async (wrapper: WrapperSelectorLike, selector: string) => {
@@ -232,6 +234,16 @@ const waitForSelector = async (wrapper: WrapperSelectorLike, selector: string) =
     if (wrapper.find(selector).exists()) return
   }
   throw new Error(`Selector did not appear: ${selector}`)
+}
+
+const waitForText = async (wrapper: TextWrapperLike, text: string) => {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await flushPromises()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await flushPromises()
+    if (wrapper.text().includes(text)) return
+  }
+  throw new Error(`Text did not appear: ${text}`)
 }
 
 const waitForDatabaseTableData = async (wrapper?: TestWrapperLike) => {
@@ -4878,6 +4890,27 @@ describe('AppShell', () => {
     setActivePinia(pinia)
     const store = useWorkspaceStore()
 
+    const localSessionForMalformedList = await loadTestFileSession('local')
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      {
+        name: 'backend-missing-path.txt',
+        type: 'file',
+        size: 128,
+        modifiedAt: Date.now()
+      }
+    ] as any)
+    const malformedListBrowser = mount(FileBrowser, {
+      props: {
+        session: localSessionForMalformedList,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    expect(malformedListBrowser.text()).toContain('文件服务返回数据无效')
+    expect(malformedListBrowser.text()).not.toContain('backend-missing-path.txt')
+    malformedListBrowser.unmount()
+
     const remoteSession = await loadTestFileSession('folder_asset-2')
     const remoteBrowser = mount(FileBrowser, {
       props: {
@@ -4903,7 +4936,7 @@ describe('AppShell', () => {
     } as any)
     await remoteBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传文件')!.trigger('click')
     await flushPromises()
-    expect(remoteBrowser.text()).toContain('上传失败')
+    expect(remoteBrowser.text()).toContain('文件服务返回数据无效')
     expect(remoteBrowser.text()).not.toContain('backend-missing-task.log 上传成功')
     expect(store.fileTransferTasks.some((task) => task.source === '/tmp/backend-missing-task.log')).toBe(false)
     expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(remoteListCallsBefore)
@@ -4925,7 +4958,7 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({ ok: true } as any)
     await renameRow.find('.file-rename-row button[title="确认"]').trigger('click')
     await flushPromises()
-    expect(renameBrowser.text()).toContain('重命名失败')
+    expect(renameBrowser.text()).toContain('文件服务返回数据无效')
     expect(renameBrowser.text()).not.toContain('重命名成功')
     expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(renameListCallsBefore)
     renameBrowser.unmount()
@@ -4952,7 +4985,7 @@ describe('AppShell', () => {
     } as any)
     await deleteBrowser.find('.file-delete-confirm footer .danger').trigger('click')
     await flushPromises()
-    expect(deleteBrowser.text()).toContain('删除失败')
+    expect(deleteBrowser.text()).toContain('文件服务返回数据无效')
     expect(deleteBrowser.text()).not.toContain('删除成功')
     expect(deleteBrowser.text()).toContain('release-note.md')
     expect(store.fileTransferTasks.some((task) => task.source === '/release-note.md')).toBe(false)
@@ -4985,10 +5018,41 @@ describe('AppShell', () => {
     const tasksBefore = store.fileTransferTasks.length
     await wrapper.find('.files-editor-toolbar .primary').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('保存文件失败')
+    expect(wrapper.text()).toContain('文件服务返回数据无效')
     expect(store.fileTransferTasks).toHaveLength(tasksBefore)
     await wrapper.find('.files-editor-toolbar button[title="关闭"]').trigger('click')
     expect(wrapper.find('.file-modal-card.small').text()).toContain('保存确认')
+  })
+
+  it('fails closed when Files editor read succeeds with malformed backend data', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(FilesWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    await waitForSelector(wrapper, 'tbody tr')
+
+    vi.mocked(window.aiops.readFileContent).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        action: 'edit',
+        size: 28,
+        mtimeMs: Date.now()
+      }
+    } as any)
+    wrapper.findComponent(TransferSide).vm.$emit('openFile', {
+      filePath: '/release-note.md',
+      sessionId: 'local',
+      sessionLabel: 'Local',
+      host: '127.0.0.1'
+    })
+    await flushPromises()
+    expect(window.aiops.readFileContent).toHaveBeenCalledWith('/release-note.md', expect.objectContaining({ kind: 'local', sessionId: 'local' }))
+    expect(wrapper.find('.files-floating-editor').exists()).toBe(true)
+    await vi.mocked(window.aiops.readFileContent).mock.results.at(-1)?.value
+    await flushPromises()
+    await waitForText(wrapper, '文件服务返回数据无效')
+    expect((wrapper.find('.files-editor-body').element as HTMLTextAreaElement).value).toBe('')
   })
 
   it('does not silently ignore Files open/upload/download dialog bridge failures', async () => {

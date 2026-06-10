@@ -2048,17 +2048,7 @@ describe('workspace store', () => {
             status: 'running'
           }
         ]
-      },
-      {
-        id: 'invalid-transfer',
-        type: 'download',
-        name: '',
-        source: '',
-        target: '',
-        progress: 20,
-        speed: 'pending',
-        status: 'running'
-      } as any
+      }
     ])
 
     await store.hydrateConfig()
@@ -2076,6 +2066,23 @@ describe('workspace store', () => {
         children: [expect.objectContaining({ id: 'backend-transfer-child', progress: 40 })]
       })
     ])
+
+    const transfersBefore = JSON.stringify(store.fileTransferTasks)
+    vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([
+      {
+        id: 'invalid-transfer',
+        type: 'download',
+        name: '',
+        source: '',
+        target: '',
+        progress: 20,
+        speed: 'pending',
+        status: 'running'
+      } as any
+    ])
+    await expect(store.refreshFileTransferTasks()).resolves.toBe(false)
+    expect(store.topNotice).toBe('文件服务返回数据无效')
+    expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
   })
 
   it('cancels file transfer tasks through the backend boundary', async () => {
@@ -3495,6 +3502,17 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe('文件会话加载失败')
       expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
       expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+      vi.mocked(window.aiops.listFileSessionCatalog!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          sessions: [{ id: 'client-fake-session', label: 'client fake', kind: 'remote', rootPath: '/home/fake', status: 'active' }],
+          folders: []
+        }
+      } as any)
+      await expect(store.refreshFileSessionCatalog()).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件服务返回数据无效')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
 
       ;(window.aiops as any).saveFileSession = undefined
       await expect(
@@ -3526,12 +3544,52 @@ describe('workspace store', () => {
       ).resolves.toBeNull()
       expect(store.topNotice).toBe('文件会话写入失败')
       expect(store.fileSessions.some((session) => session.id === 'client-fake-session')).toBe(false)
+      vi.mocked(window.aiops.saveFileSession!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          sessions: [
+            {
+              id: 'client-fake-session',
+              label: 'client fake',
+              host: '10.10.10.10',
+              group: '主机',
+              kind: 'remote',
+              rootPath: '/home/fake',
+              status: 'active'
+            }
+          ],
+          folders: []
+        }
+      } as any)
+      await expect(
+        store.persistFileSession({
+          id: 'client-fake-session',
+          label: 'client fake',
+          host: '10.10.10.10',
+          group: '主机',
+          kind: 'remote',
+          rootPath: '/home/fake',
+          status: 'active'
+        })
+      ).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件服务返回数据无效')
+      expect(store.fileSessions.some((session) => session.id === 'client-fake-session')).toBe(false)
 
       ;(window.aiops as any).updateFileSession = originalAiops.updateFileSession
       vi.mocked(window.aiops.updateFileSession!).mockRejectedValueOnce(new Error('update session offline'))
       await expect(store.updateFileSession('asset-1', { comment: '客户端伪造更新' })).resolves.toBeNull()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.comment).toBe(originalComment)
       expect(store.topNotice).toBe('文件会话写入失败')
+      vi.mocked(window.aiops.updateFileSession!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          sessions: JSON.parse(sessionsBefore),
+          folders: JSON.parse(foldersBefore)
+        }
+      } as any)
+      await expect(store.updateFileSession('asset-1', { comment: '客户端伪造更新' })).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件服务返回数据无效')
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.comment).toBe(originalComment)
 
       ;(window.aiops as any).saveFileSessionFolder = undefined
       await expect(store.saveFileSessionFolder({ name: '客户端伪造文件夹', description: 'fake' })).resolves.toBeNull()
@@ -3550,6 +3608,17 @@ describe('workspace store', () => {
       })
       await expect(store.saveFileSessionFolder({ name: '客户端伪造文件夹', description: 'fake' })).resolves.toBeNull()
       expect(store.topNotice).toBe('文件夹后端写入失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      vi.mocked(window.aiops.saveFileSessionFolder!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          sessions: JSON.parse(sessionsBefore),
+          folders: JSON.parse(foldersBefore),
+          folder: { uuid: 'client-fake-folder', name: '客户端伪造文件夹', description: 'fake' }
+        }
+      } as any)
+      await expect(store.saveFileSessionFolder({ name: '客户端伪造文件夹', description: 'fake' })).resolves.toBeNull()
+      expect(store.topNotice).toBe('文件服务返回数据无效')
       expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
 
       ;(window.aiops as any).deleteFileSessionFolder = undefined
@@ -3571,6 +3640,18 @@ describe('workspace store', () => {
       })
       await expect(store.deleteFileSessionFolder('files-folder-a')).resolves.toBe(false)
       expect(store.topNotice).toBe('文件夹后端删除失败')
+      expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
+      expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
+      vi.mocked(window.aiops.deleteFileSessionFolder!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          sessions: JSON.parse(sessionsBefore),
+          folders: JSON.parse(foldersBefore),
+          folderUuid: 'files-folder-a'
+        }
+      } as any)
+      await expect(store.deleteFileSessionFolder('files-folder-a')).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件服务返回数据无效')
       expect(JSON.stringify(store.fileSessionFolders)).toBe(foldersBefore)
       expect(JSON.stringify(store.fileSessions)).toBe(sessionsBefore)
 
@@ -3617,6 +3698,17 @@ describe('workspace store', () => {
       })
       await expect(store.cancelFileTransferTask('files-bridge-transfer-child')).resolves.toBe(false)
       expect(store.topNotice).toBe('传输任务已结束或不存在')
+      expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
+      vi.mocked(window.aiops.cancelFileTransferTask!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          id: 'files-bridge-transfer-other',
+          taskIds: ['files-bridge-transfer-child'],
+          status: 'aborted'
+        }
+      } as any)
+      await expect(store.cancelFileTransferTask('files-bridge-transfer-child')).resolves.toBe(false)
+      expect(store.topNotice).toBe('文件服务返回数据无效')
       expect(JSON.stringify(store.fileTransferTasks)).toBe(transfersBefore)
     } finally {
       Object.assign(window.aiops, originalAiops)
