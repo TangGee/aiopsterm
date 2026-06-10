@@ -115,6 +115,7 @@ import {
   configureFilesBackendRuntime,
   writeFileContent
 } from './backend/files'
+import { discoverMcpServerSnapshot } from './backend/mcpRuntime'
 import {
   addKubernetesCluster,
   cleanupKubernetesAgent,
@@ -626,51 +627,57 @@ const defaultConfig: UserConfig = {
       content: 'Prefer kubectl describe, events, image pull checks, and rollback safety checks.'
     }
   ],
-  mcpServers: [
-    {
-      name: 'filesystem',
-      status: 'connected',
-      disabled: false,
-      tools: [
-        {
-          name: 'read_file',
-          description: 'Read a workspace file for agent context.',
-          enabled: true,
-          parameters: [
-            { name: 'path', description: 'Absolute file path.', required: true },
-            { name: 'encoding', description: 'Optional text encoding.' }
-          ]
-        },
-        {
-          name: 'list_directory',
-          description: 'List files under a directory.',
-          enabled: true,
-          parameters: [{ name: 'path', description: 'Directory path.', required: true }]
+  mcpServers:
+    process.env.NODE_ENV === 'test'
+      ? [
+          {
+            name: 'filesystem',
+            status: 'connected',
+            disabled: false,
+            tools: [
+              {
+                name: 'read_file',
+                description: 'Read a workspace file for agent context.',
+                enabled: true,
+                parameters: [
+                  { name: 'path', description: 'Absolute file path.', required: true },
+                  { name: 'encoding', description: 'Optional text encoding.' }
+                ]
+              },
+              {
+                name: 'list_directory',
+                description: 'List files under a directory.',
+                enabled: true,
+                parameters: [{ name: 'path', description: 'Directory path.', required: true }]
+              }
+            ],
+            resources: [{ name: 'workspace-root', description: 'Current aiopsterm workspace.', uri: 'file:///workspace' }]
+          },
+          {
+            name: 'ops-inventory',
+            status: 'error',
+            disabled: false,
+            error: 'Token expired',
+            tools: [
+              {
+                name: 'lookup_asset',
+                description: 'Find a host by name, tag, or IP.',
+                enabled: false,
+                parameters: [{ name: 'query', description: 'Asset search query.', required: true }]
+              }
+            ],
+            resources: []
+          }
+        ]
+      : [],
+  mcpToolStates:
+    process.env.NODE_ENV === 'test'
+      ? {
+          'filesystem:read_file': true,
+          'filesystem:list_directory': true,
+          'ops-inventory:lookup_asset': false
         }
-      ],
-      resources: [{ name: 'workspace-root', description: 'Current aiopsterm workspace.', uri: 'file:///workspace' }]
-    },
-    {
-      name: 'ops-inventory',
-      status: 'error',
-      disabled: false,
-      error: 'Token expired',
-      tools: [
-        {
-          name: 'lookup_asset',
-          description: 'Find a host by name, tag, or IP.',
-          enabled: false,
-          parameters: [{ name: 'query', description: 'Asset search query.', required: true }]
-        }
-      ],
-      resources: []
-    }
-  ],
-  mcpToolStates: {
-    'filesystem:read_file': true,
-    'filesystem:list_directory': true,
-    'ops-inventory:lookup_asset': false
-  },
+      : {},
   knowledgeBase: defaultKnowledgeBaseConfig,
   onboarding: {
     version: 2,
@@ -2119,28 +2126,18 @@ const ensureMcpConfigFile = async () => {
   return configPath
 }
 
-const applyMcpConfigFileSnapshot = (parsed: McpConfigFile) => {
-  const serverEntries = Object.entries(parsed.mcpServers)
+const shouldRunMcpDiscovery = () => process.env.NODE_ENV !== 'test' || process.env.AIOPSTERM_ENABLE_MCP_DISCOVERY === '1'
+
+const applyMcpConfigFileSnapshot = async (parsed: McpConfigFile) => {
   const current = getConfig()
-  const byName = new Map((current.mcpServers || []).map((server) => [server.name, server]))
-  const nextServers: McpServerUserConfig[] = serverEntries.map(([name, serverConfig]) => {
-    const existing = byName.get(name)
-    return {
-      name,
-      status: serverConfig.disabled ? 'disabled' : existing?.status && existing.status !== 'disabled' ? existing.status : 'connected',
-      disabled: Boolean(serverConfig.disabled),
-      ...(existing?.error && !serverConfig.disabled ? { error: existing.error } : {}),
-      tools: existing?.tools || [],
-      resources: existing?.resources || []
-    }
+  const snapshot = await discoverMcpServerSnapshot(parsed, {
+    existingServers: current.mcpServers || [],
+    toolStates: current.mcpToolStates || {},
+    clientName: 'aiopsterm',
+    clientVersion: app.getVersion(),
+    runDiscovery: shouldRunMcpDiscovery()
   })
-  const nextToolStates: McpToolStatesUserConfig = {}
-  nextServers.forEach((server) => {
-    server.tools.forEach((tool) => {
-      nextToolStates[`${server.name}:${tool.name}`] = tool.enabled
-    })
-  })
-  const next = mergeConfig(current, { mcpServers: nextServers, mcpToolStates: nextToolStates })
+  const next = mergeConfig(current, { mcpServers: snapshot.mcpServers, mcpToolStates: snapshot.mcpToolStates })
   store.set('config', next)
   return {
     mcpConfig: parsed,
@@ -2149,7 +2146,7 @@ const applyMcpConfigFileSnapshot = (parsed: McpConfigFile) => {
   }
 }
 
-const syncMcpConfigFromContent = (content: string) => {
+const syncMcpConfigFromContent = async (content: string) => {
   if (!content.trim()) return
   return applyMcpConfigFileSnapshot(normalizeMcpConfigFile(JSON.parse(content)))
 }
@@ -2262,7 +2259,7 @@ const startMcpConfigWatcher = async () => {
   mcpConfigWatcher = watch(configPath, async () => {
     try {
       const content = await readFile(configPath, 'utf-8')
-      syncMcpConfigFromContent(content)
+      await syncMcpConfigFromContent(content)
       broadcastMcpConfigChanged(content)
     } catch {
       // External editors can briefly replace the file; the next watch event or read call will recover.
@@ -2714,7 +2711,8 @@ const registerIpc = () => {
   })
   ipcMain.handle('mcp-config:path', async () => ensureMcpConfigFile())
   ipcMain.handle('mcp:get-servers', async () => {
-    await ensureMcpConfigFile()
+    const configPath = await ensureMcpConfigFile()
+    await syncMcpConfigFromContent(await readFile(configPath, 'utf-8'))
     return cloneMcpServers(getConfig().mcpServers) || []
   })
   ipcMain.handle('mcp-config:read', async () => {
@@ -2726,7 +2724,7 @@ const registerIpc = () => {
     const normalized = normalizeMcpConfigFile(JSON.parse(content))
     const nextContent = JSON.stringify(normalized, null, 2)
     await writeFile(configPath, nextContent, 'utf-8')
-    const snapshot = applyMcpConfigFileSnapshot(normalized)
+    const snapshot = await applyMcpConfigFileSnapshot(normalized)
     broadcastMcpConfigChanged(nextContent)
     return { ok: true, data: snapshot }
   })
@@ -2739,7 +2737,7 @@ const registerIpc = () => {
     parsed.mcpServers[serverName].disabled = disabled
     const nextContent = JSON.stringify(parsed, null, 2)
     await writeFile(configPath, nextContent, 'utf-8')
-    syncMcpConfigFromContent(nextContent)
+    await syncMcpConfigFromContent(nextContent)
     broadcastMcpConfigChanged(nextContent)
   })
   ipcMain.handle('mcp-config:delete-server', async (_event, serverName: string) => {
@@ -2748,7 +2746,7 @@ const registerIpc = () => {
     delete parsed.mcpServers[serverName]
     const nextContent = JSON.stringify(parsed, null, 2)
     await writeFile(configPath, nextContent, 'utf-8')
-    syncMcpConfigFromContent(nextContent)
+    await syncMcpConfigFromContent(nextContent)
     broadcastMcpConfigChanged(nextContent)
   })
   ipcMain.handle('mcp:set-tool-state', async (_event, serverName: string, toolName: string, enabled: boolean) => {
