@@ -1792,8 +1792,12 @@ const isQuickCommandSnippetDeleteData = (source: unknown, id: number) => {
   return record.id === id && !record.snippets.some((snippet) => snippet.id === id)
 }
 
-const isQuickCommandReorderData = (source: unknown, expectedOrder: number[]) =>
-  isQuickCommandsSnapshot(source) && source.snippets.map((snippet) => snippet.id).join(',') === expectedOrder.join(',')
+const isQuickCommandReorderData = (source: unknown, expectedOrder: number[], groupUuid: string | null) =>
+  isQuickCommandsSnapshot(source) &&
+  source.snippets
+    .filter((snippet) => quickCommandSnippetGroupUuid(snippet) === groupUuid)
+    .map((snippet) => snippet.id)
+    .join(',') === expectedOrder.join(',')
 
 const isQuickCommandScriptPlan = (source: unknown): source is QuickCommandScriptPlan => {
   if (!isRecord(source) || !Array.isArray(source.segments) || typeof source.shellText !== 'string' || typeof source.securityCommand !== 'string') return false
@@ -7304,9 +7308,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return false
     const [moved] = currentList.splice(sourceIndex, 1)
     currentList.splice(targetIndex, 0, moved)
-    const otherCommandIds = quickCommands.value.filter((command) => !currentList.some((item) => item.id === command.id)).map((command) => command.id)
-    const orderedIds = [...otherCommandIds, ...currentList.map((command) => command.id)]
-    const result = await window.aiops.reorderQuickCommands({ orderedIds }).catch(() => null)
+    const groupUuid = selectedSnippetGroupUuid.value || null
+    const orderedIds = currentList.map((command) => command.id)
+    const result = await window.aiops.reorderQuickCommands({ orderedIds, groupUuid }).catch(() => null)
     if (!result) {
       setTopNotice('快捷命令排序失败')
       return false
@@ -7315,7 +7319,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令排序失败')
       return false
     }
-    if (!isQuickCommandReorderData(result.data, orderedIds)) {
+    if (!isQuickCommandReorderData(result.data, orderedIds, groupUuid)) {
       setTopNotice('快捷命令排序失败')
       return false
     }

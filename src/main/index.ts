@@ -135,6 +135,7 @@ import {
 } from './backend/kubernetes'
 import { checkModelProvider, listAiModels } from './backend/modelProviders'
 import {
+  configureQuickCommandBackendRuntime,
   deleteQuickCommandGroup,
   deleteQuickCommandSnippet,
   getQuickCommands,
@@ -1231,6 +1232,7 @@ configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kub
 configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
 configureAiTodoBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'ai-todos.json') })
 configureChatHistoryBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'chat-history.json') })
+configureQuickCommandBackendRuntime({ databasePath: join(app.getPath('userData'), 'aiopsterm-state.db') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

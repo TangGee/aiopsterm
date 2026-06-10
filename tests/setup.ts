@@ -5311,15 +5311,28 @@ Object.defineProperty(window, 'aiops', {
       const snapshot = cloneQuickCommandSnapshot(quickCommandStoreMock)
       return { ok: true, data: { ...snapshot, id } }
     }),
-    reorderQuickCommands: vi.fn(async (input: { orderedIds: number[] }) => {
-      const orderedIds = new Set(input.orderedIds)
-      const ordered = input.orderedIds
-        .map((id) => quickCommandStoreMock.snippets.find((snippet) => snippet.id === id))
-        .filter((snippet): snippet is (typeof quickCommandStoreMock.snippets)[number] => Boolean(snippet))
-      const rest = quickCommandStoreMock.snippets.filter((snippet) => !orderedIds.has(snippet.id))
+    reorderQuickCommands: vi.fn(async (input: { orderedIds: number[]; groupUuid?: string | null }) => {
+      const orderedIds = (Array.isArray(input.orderedIds) ? input.orderedIds : []).map(Number)
+      if (!orderedIds.length) return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command reorder ids are required' }
+      if (new Set(orderedIds).size !== orderedIds.length) {
+        return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command reorder ids must be unique' }
+      }
+      const groupUuid = input.groupUuid || null
+      const groupSnippets = quickCommandStoreMock.snippets.filter((snippet) => (snippet.group_uuid || null) === groupUuid)
+      if (orderedIds.length !== groupSnippets.length) {
+        return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command reorder list is stale' }
+      }
+      const snippetsById = new Map(groupSnippets.map((snippet) => [snippet.id, snippet]))
+      const ordered = orderedIds.map((id) => snippetsById.get(id))
+      if (ordered.some((snippet) => !snippet)) {
+        return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command reorder list is stale' }
+      }
       quickCommandStoreMock = {
         groups: quickCommandStoreMock.groups.map((group) => ({ ...group })),
-        snippets: [...rest, ...ordered].map((snippet) => ({ ...snippet }))
+        snippets: [
+          ...quickCommandStoreMock.snippets.filter((snippet) => (snippet.group_uuid || null) !== groupUuid),
+          ...(ordered as (typeof quickCommandStoreMock.snippets)[number][])
+        ].map((snippet) => ({ ...snippet }))
       }
       return { ok: true, data: cloneQuickCommandSnapshot(quickCommandStoreMock) }
     }),

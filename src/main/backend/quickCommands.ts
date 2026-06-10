@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { isAbsolute, join, resolve } from 'path'
 import type {
   AiopsMutationResult,
   QuickCommandGroupConfig,
@@ -23,6 +23,12 @@ import type {
 
 type QuickCommandStoreShape = {
   quickCommands: QuickCommandsUserConfig
+}
+
+type QuickCommandBackendRuntimeConfig = {
+  databasePath?: string
+  useSeedData?: boolean
+  forceFallbackStore?: boolean
 }
 
 type SqliteDatabase = {
@@ -187,10 +193,30 @@ const cloneQuickCommands = (config: QuickCommandsUserConfig): QuickCommandsUserC
   snippets: config.snippets.map(cloneSnippet)
 })
 
-const defaultQuickCommands = (): QuickCommandsUserConfig => ({
+const seedQuickCommands = (): QuickCommandsUserConfig => ({
   groups: defaultGroups.map(cloneGroup),
   snippets: defaultSnippets.map(cloneSnippet)
 })
+
+const emptyQuickCommands = (): QuickCommandsUserConfig => ({
+  groups: [],
+  snippets: []
+})
+
+const defaultQuickCommandSeedMode = () =>
+  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED || '').trim() === '1'
+
+const defaultQuickCommandDatabasePath = () => {
+  const envPath = String(process.env.AIOPSTERM_QUICK_COMMANDS_DB_PATH || '').trim()
+  if (envPath) return isAbsolute(envPath) ? envPath : resolve(envPath)
+  return join(app.getPath('userData'), 'aiopsterm-state.db')
+}
+
+let runtimeConfig: Required<QuickCommandBackendRuntimeConfig> = {
+  databasePath: defaultQuickCommandDatabasePath(),
+  useSeedData: defaultQuickCommandSeedMode(),
+  forceFallbackStore: false
+}
 
 const nowText = () => '刚刚'
 const nextGroupId = (groups: QuickCommandGroupConfig[]) => Math.max(0, ...groups.map((group) => group.id)) + 1
@@ -198,10 +224,13 @@ const nextSnippetId = (snippets: QuickCommandSnippetConfig[]) => Math.max(0, ...
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
+const quickCommandsEqual = (left: QuickCommandsUserConfig, right: QuickCommandsUserConfig) => JSON.stringify(left) === JSON.stringify(right)
+
 const normalizeQuickCommands = (source?: Partial<QuickCommandsUserConfig>): QuickCommandsUserConfig => {
   const incoming = isRecord(source) ? source : {}
-  const rawGroups = Array.isArray(incoming.groups) ? incoming.groups : defaultGroups
-  const rawSnippets = Array.isArray(incoming.snippets) ? incoming.snippets : defaultSnippets
+  const fallback = runtimeConfig.useSeedData ? seedQuickCommands() : emptyQuickCommands()
+  const rawGroups = Array.isArray(incoming.groups) ? incoming.groups : fallback.groups
+  const rawSnippets = Array.isArray(incoming.snippets) ? incoming.snippets : fallback.snippets
   const groupUuids = new Set<string>()
   const snippetIds = new Set<number>()
   const snippetUuids = new Set<string>()
@@ -249,16 +278,58 @@ const normalizeQuickCommands = (source?: Partial<QuickCommandsUserConfig>): Quic
   return { groups, snippets }
 }
 
+const stripLegacySeedQuickCommands = (config: QuickCommandsUserConfig): QuickCommandsUserConfig => {
+  if (runtimeConfig.useSeedData) return config
+  const seed = seedQuickCommands()
+  const seedSnippets = new Map(seed.snippets.map((snippet) => [snippet.uuid, snippet]))
+  const snippets = config.snippets.filter((snippet) => {
+    const seedSnippet = seedSnippets.get(snippet.uuid)
+    if (!seedSnippet) return true
+    return JSON.stringify(snippet) !== JSON.stringify(seedSnippet)
+  })
+  const usedGroupUuids = new Set(snippets.map((snippet) => snippet.group_uuid).filter(Boolean))
+  const seedGroups = new Map(seed.groups.map((group) => [group.uuid, group]))
+  const groups = config.groups.filter((group) => {
+    const seedGroup = seedGroups.get(group.uuid)
+    if (!seedGroup) return true
+    return usedGroupUuids.has(group.uuid) || JSON.stringify(group) !== JSON.stringify(seedGroup)
+  })
+  return { groups, snippets }
+}
+
+const reorderQuickCommandSnapshot = (current: QuickCommandsUserConfig, input: QuickCommandReorderInput): QuickCommandsUserConfig => {
+  const orderedIds = Array.isArray(input.orderedIds) ? input.orderedIds.map(Number) : []
+  if (!orderedIds.length) throw new Error('Quick command reorder ids are required')
+  if (!orderedIds.every((id) => Number.isInteger(id) && id > 0)) throw new Error('Quick command reorder ids are invalid')
+  if (new Set(orderedIds).size !== orderedIds.length) throw new Error('Quick command reorder ids must be unique')
+
+  const groupUuid = typeof input.groupUuid === 'string' && input.groupUuid.trim() ? input.groupUuid.trim() : null
+  if (groupUuid && !current.groups.some((group) => group.uuid === groupUuid)) throw new Error('Quick command reorder group not found')
+
+  const groupSnippets = current.snippets.filter((snippet) => (snippet.group_uuid || null) === groupUuid)
+  if (orderedIds.length !== groupSnippets.length) throw new Error('Quick command reorder list is stale')
+
+  const snippetsById = new Map(groupSnippets.map((snippet) => [snippet.id, snippet]))
+  const ordered = orderedIds.map((id) => snippetsById.get(id))
+  if (ordered.some((snippet) => !snippet)) throw new Error('Quick command reorder list is stale')
+
+  const orderedIdSet = new Set(orderedIds)
+  return {
+    groups: current.groups,
+    snippets: [...current.snippets.filter((snippet) => (snippet.group_uuid || null) !== groupUuid || !orderedIdSet.has(snippet.id)), ...(ordered as QuickCommandSnippetConfig[])]
+  }
+}
+
 class FallbackQuickCommandStore {
   private store = new Store<QuickCommandStoreShape>({
     name: 'aiopsterm-quick-commands',
     defaults: {
-      quickCommands: defaultQuickCommands()
+      quickCommands: runtimeConfig.useSeedData ? seedQuickCommands() : emptyQuickCommands()
     }
   })
 
   get(): QuickCommandsUserConfig {
-    const normalized = normalizeQuickCommands(this.store.get('quickCommands'))
+    const normalized = stripLegacySeedQuickCommands(normalizeQuickCommands(this.store.get('quickCommands')))
     this.store.set('quickCommands', normalized)
     return cloneQuickCommands(normalized)
   }
@@ -322,12 +393,7 @@ class FallbackQuickCommandStore {
 
   reorder(input: QuickCommandReorderInput): QuickCommandsUserConfig {
     const current = this.get()
-    const orderedIds = new Set(input.orderedIds)
-    const ordered = input.orderedIds
-      .map((id) => current.snippets.find((snippet) => snippet.id === id))
-      .filter((snippet): snippet is QuickCommandSnippetConfig => Boolean(snippet))
-    const rest = current.snippets.filter((snippet) => !orderedIds.has(snippet.id))
-    return this.save({ groups: current.groups, snippets: [...rest, ...ordered] })
+    return this.save(reorderQuickCommandSnapshot(current, input))
   }
 }
 
@@ -345,7 +411,7 @@ class SqliteQuickCommandStore {
         sort_order INTEGER NOT NULL DEFAULT 0
       );
     `)
-    this.seed()
+    if (runtimeConfig.useSeedData) this.seed()
   }
 
   private seed() {
@@ -364,16 +430,29 @@ class SqliteQuickCommandStore {
     }
   }
 
+  private parseRecord<T>(row: unknown): T | null {
+    try {
+      const data = (row as { data?: unknown })?.data
+      return typeof data === 'string' ? (JSON.parse(data) as T) : null
+    } catch {
+      return null
+    }
+  }
+
   get(): QuickCommandsUserConfig {
     const groups = this.db
-      .prepare('SELECT data FROM quick_command_groups ORDER BY json_extract(data, "$.id") ASC')
+      .prepare("SELECT data FROM quick_command_groups ORDER BY json_extract(data, '$.id') ASC")
       .all()
-      .map((row) => JSON.parse((row as { data: string }).data) as QuickCommandGroupConfig)
+      .map((row) => this.parseRecord<QuickCommandGroupConfig>(row))
+      .filter((item): item is QuickCommandGroupConfig => Boolean(item))
     const snippets = this.db
       .prepare('SELECT data FROM quick_command_snippets ORDER BY sort_order ASC, id ASC')
       .all()
-      .map((row) => JSON.parse((row as { data: string }).data) as QuickCommandSnippetConfig)
-    return normalizeQuickCommands({ groups, snippets })
+      .map((row) => this.parseRecord<QuickCommandSnippetConfig>(row))
+      .filter((item): item is QuickCommandSnippetConfig => Boolean(item))
+    const normalized = stripLegacySeedQuickCommands(normalizeQuickCommands({ groups, snippets }))
+    if (!quickCommandsEqual(normalized, { groups, snippets })) return this.save(normalized)
+    return normalized
   }
 
   save(config: QuickCommandsUserConfig): QuickCommandsUserConfig {
@@ -441,12 +520,7 @@ class SqliteQuickCommandStore {
 
   reorder(input: QuickCommandReorderInput): QuickCommandsUserConfig {
     const current = this.get()
-    const orderedIds = new Set(input.orderedIds)
-    const ordered = input.orderedIds
-      .map((id) => current.snippets.find((snippet) => snippet.id === id))
-      .filter((snippet): snippet is QuickCommandSnippetConfig => Boolean(snippet))
-    const rest = current.snippets.filter((snippet) => !orderedIds.has(snippet.id))
-    return this.save({ groups: current.groups, snippets: [...rest, ...ordered] })
+    return this.save(reorderQuickCommandSnapshot(current, input))
   }
 }
 
@@ -454,9 +528,10 @@ let quickCommandStore: FallbackQuickCommandStore | SqliteQuickCommandStore | nul
 
 const createStore = () => {
   try {
+    if (runtimeConfig.forceFallbackStore) throw new Error('force fallback quick-command store')
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
-    return new SqliteQuickCommandStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+    return new SqliteQuickCommandStore(new Database(runtimeConfig.databasePath))
   } catch {
     return new FallbackQuickCommandStore()
   }
@@ -501,3 +576,16 @@ export const planQuickCommandScript = (input: QuickCommandScriptPlanInput): Quic
     if (typeof input.snippetContent !== 'string') throw new Error('Quick command script content is required')
     return buildQuickCommandScriptPlan(input.snippetContent, autoExecute)
   })
+
+export const configureQuickCommandBackendRuntime = (config: QuickCommandBackendRuntimeConfig = {}) => {
+  runtimeConfig = {
+    databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultQuickCommandDatabasePath(),
+    useSeedData: config.useSeedData ?? defaultQuickCommandSeedMode(),
+    forceFallbackStore: Boolean(config.forceFallbackStore)
+  }
+  quickCommandStore = null
+}
+
+export const resetQuickCommandsForTests = () => {
+  quickCommandStore = null
+}

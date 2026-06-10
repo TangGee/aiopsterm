@@ -1011,6 +1011,7 @@ export type QuickCommandSnippetSaveInput = {
 
 export type QuickCommandReorderInput = {
   orderedIds: number[]
+  groupUuid?: string | null
 }
 
 export type QuickCommandScriptPlanInput = {

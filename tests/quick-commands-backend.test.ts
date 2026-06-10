@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import Database from 'better-sqlite3'
+import { mkdtemp, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import type {
   AiopsMutationResult,
   QuickCommandGroupDeleteResult,
@@ -16,7 +20,7 @@ import type {
 
 vi.mock('electron', () => ({
   app: {
-    getPath: () => '/tmp/aiopsterm-quick-commands-test'
+    getPath: () => tmpdir()
   }
 }))
 
@@ -40,11 +44,9 @@ vi.mock('electron-store', () => {
   return { default: MockStore }
 })
 
-vi.mock('better-sqlite3', () => {
-  throw new Error('force electron-store quick-command backend in tests')
-})
-
 type QuickCommandsBackend = {
+  configureQuickCommandBackendRuntime: (config?: { databasePath?: string; useSeedData?: boolean; forceFallbackStore?: boolean }) => void
+  resetQuickCommandsForTests: () => void
   getQuickCommands: () => QuickCommandsUserConfig
   saveQuickCommands: (config: QuickCommandsUserConfig) => AiopsMutationResult<QuickCommandsUserConfig>
   saveQuickCommandGroup: (input: QuickCommandGroupSaveInput) => QuickCommandGroupMutationResult
@@ -55,25 +57,93 @@ type QuickCommandsBackend = {
   planQuickCommandScript: (input: QuickCommandScriptPlanInput) => QuickCommandScriptPlanResult
 }
 
+let backend: QuickCommandsBackend
+const tempDirs: string[] = []
+
 const loadBackend = async () => {
   vi.resetModules()
   const modulePath = '../src/main/backend/quickCommands'
-  return import(modulePath) as Promise<QuickCommandsBackend>
+  backend = (await import(modulePath)) as QuickCommandsBackend
+}
+
+const useTempRuntime = async (options: { useSeedData: boolean; forceFallbackStore?: boolean; prefix?: string }) => {
+  const dir = await mkdtemp(join(tmpdir(), options.prefix || 'aiopsterm-quick-commands-'))
+  tempDirs.push(dir)
+  const databasePath = join(dir, 'quick-commands.sqlite3')
+  backend.configureQuickCommandBackendRuntime({
+    databasePath,
+    useSeedData: options.useSeedData,
+    forceFallbackStore: options.forceFallbackStore
+  })
+  backend.resetQuickCommandsForTests()
+  return databasePath
+}
+
+const expectOkData = <T>(result: AiopsMutationResult<T>) => {
+  expect(result.ok).toBe(true)
+  expect(result.data).toBeDefined()
+  return result.data as T
+}
+
+const readSqliteCount = (databasePath: string, table: string) => {
+  const db = new Database(databasePath, { readonly: true })
+  try {
+    return (db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number }).count
+  } finally {
+    db.close()
+  }
 }
 
 describe('quick commands backend boundary', () => {
-  beforeEach(() => {
-    vi.resetModules()
+  beforeEach(async () => {
+    await loadBackend()
+    await useTempRuntime({ useSeedData: true })
+  })
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+  })
+
+  it('lists backend-owned seed commands only when seed mode is enabled', async () => {
+    let snapshot = backend.getQuickCommands()
+
+    expect(snapshot.groups.map((group) => group.uuid)).toEqual(['snippet-group-inspection'])
+    expect(snapshot.snippets.map((snippet) => snippet.uuid)).toEqual(['snippet-disk-check', 'snippet-nginx-status', 'snippet-root-pwd'])
+
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-nonseed-' })
+    snapshot = backend.getQuickCommands()
+
+    expect(snapshot.groups).toEqual([])
+    expect(snapshot.snippets).toEqual([])
+  })
+
+  it('keeps non-seed fallback storage empty instead of exposing development commands', async () => {
+    await useTempRuntime({ useSeedData: false, forceFallbackStore: true, prefix: 'aiopsterm-quick-commands-fallback-' })
+
+    expect(backend.getQuickCommands()).toEqual({ groups: [], snippets: [] })
+
+    const group = expectOkData(backend.saveQuickCommandGroup({ group_name: 'Fallback Group' })).group
+    const snippet = expectOkData(
+      backend.saveQuickCommandSnippet({
+        snippet_name: 'Fallback Command',
+        snippet_content: 'echo fallback',
+        group_uuid: group.uuid
+      })
+    ).snippet
+
+    expect(group.id).toBe(1)
+    expect(snippet.id).toBe(1)
+    expect(backend.getQuickCommands().snippets).toEqual([expect.objectContaining({ id: 1, snippet_name: 'Fallback Command' })])
   })
 
   it('owns group and snippet identity for new quick-command rows', async () => {
-    const backend = await loadBackend()
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-identity-' })
     const groupResult = backend.saveQuickCommandGroup({ group_name: '发布命令' })
 
     expect(groupResult.ok).toBe(true)
     expect(groupResult.data?.group).toEqual(
       expect.objectContaining({
-        id: 2,
+        id: 1,
         uuid: expect.stringMatching(/^snippet-group-/),
         group_name: '发布命令'
       })
@@ -88,7 +158,7 @@ describe('quick commands backend boundary', () => {
     expect(snippetResult.ok).toBe(true)
     expect(snippetResult.data?.snippet).toEqual(
       expect.objectContaining({
-        id: 4,
+        id: 1,
         uuid: expect.stringMatching(/^snippet-/),
         snippet_name: '回滚确认',
         snippet_content: 'echo rollback',
@@ -100,13 +170,72 @@ describe('quick commands backend boundary', () => {
     expect(snippetResult.data?.snippets.some((snippet) => snippet.uuid === snippetResult.data?.snippet.uuid)).toBe(true)
   })
 
+  it('persists SQLite quick commands and restores saved script plans after runtime reset', async () => {
+    const databasePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-sqlite-' })
+    const group = expectOkData(backend.saveQuickCommandGroup({ group_name: '发布命令' })).group
+    const snippet = expectOkData(
+      backend.saveQuickCommandSnippet({
+        snippet_name: '发布检查',
+        snippet_content: 'echo persisted\nsleep==100\necho done',
+        group_uuid: group.uuid
+      })
+    ).snippet
+
+    expect(readSqliteCount(databasePath, 'quick_command_groups')).toBe(1)
+    expect(readSqliteCount(databasePath, 'quick_command_snippets')).toBe(1)
+
+    backend.configureQuickCommandBackendRuntime({ databasePath, useSeedData: false })
+    const restored = backend.getQuickCommands()
+
+    expect(restored.groups).toEqual([expect.objectContaining({ uuid: group.uuid, group_name: '发布命令' })])
+    expect(restored.snippets).toEqual([expect.objectContaining({ id: snippet.id, snippet_name: '发布检查' })])
+
+    const planned = expectOkData(backend.planQuickCommandScript({ snippetId: snippet.id, autoExecute: true }))
+    expect(planned.securityCommand).toBe('echo persisted')
+    expect(planned.segments).toEqual([
+      { text: 'echo persisted\n', delayBeforeMs: 0 },
+      { text: 'echo done\n', delayBeforeMs: 100 }
+    ])
+  })
+
+  it('removes unmodified legacy seed rows from non-seed runtime while preserving user-edited rows', async () => {
+    const databasePath = await useTempRuntime({ useSeedData: true, prefix: 'aiopsterm-quick-commands-legacy-seed-' })
+    expect(backend.getQuickCommands().snippets).toHaveLength(3)
+
+    expectOkData(backend.saveQuickCommandGroup({ uuid: 'snippet-group-inspection', group_name: '我的巡检命令' }))
+    expectOkData(
+      backend.saveQuickCommandSnippet({
+        id: 1,
+        snippet_name: '我的磁盘巡检',
+        snippet_content: 'df -h',
+        group_uuid: 'snippet-group-inspection'
+      })
+    )
+
+    backend.configureQuickCommandBackendRuntime({ databasePath, useSeedData: false })
+    const nonSeedSnapshot = backend.getQuickCommands()
+
+    expect(nonSeedSnapshot.groups).toEqual([expect.objectContaining({ uuid: 'snippet-group-inspection', group_name: '我的巡检命令' })])
+    expect(nonSeedSnapshot.snippets).toEqual([
+      expect.objectContaining({
+        id: 1,
+        uuid: 'snippet-disk-check',
+        snippet_name: '我的磁盘巡检',
+        snippet_content: 'df -h'
+      })
+    ])
+    expect(readSqliteCount(databasePath, 'quick_command_snippets')).toBe(1)
+  })
+
   it('updates and deletes through backend snapshots', async () => {
-    const backend = await loadBackend()
-    const created = backend.saveQuickCommandSnippet({
-      snippet_name: '临时命令',
-      snippet_content: 'uptime',
-      group_uuid: null
-    }).data!.snippet
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-update-' })
+    const created = expectOkData(
+      backend.saveQuickCommandSnippet({
+        snippet_name: '临时命令',
+        snippet_content: 'uptime',
+        group_uuid: null
+      })
+    ).snippet
 
     const updated = backend.saveQuickCommandSnippet({
       id: created.id,
@@ -132,13 +261,15 @@ describe('quick commands backend boundary', () => {
   })
 
   it('deletes groups with their grouped commands to mirror the panel flow', async () => {
-    const backend = await loadBackend()
-    const group = backend.saveQuickCommandGroup({ group_name: '待删除组' }).data!.group
-    const grouped = backend.saveQuickCommandSnippet({
-      snippet_name: '组内命令',
-      snippet_content: 'date',
-      group_uuid: group.uuid
-    }).data!.snippet
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-delete-group-' })
+    const group = expectOkData(backend.saveQuickCommandGroup({ group_name: '待删除组' })).group
+    const grouped = expectOkData(
+      backend.saveQuickCommandSnippet({
+        snippet_name: '组内命令',
+        snippet_content: 'date',
+        group_uuid: group.uuid
+      })
+    ).snippet
 
     const deletedGroup = backend.deleteQuickCommandGroup(group.uuid)
     expect(deletedGroup.ok).toBe(true)
@@ -146,24 +277,51 @@ describe('quick commands backend boundary', () => {
     expect(deletedGroup.data?.snippets.some((item) => item.id === grouped.id)).toBe(false)
   })
 
-  it('persists reorder as a backend-owned snapshot', async () => {
-    const backend = await loadBackend()
+  it('persists group-scoped reorder as a backend-owned snapshot and rejects stale order lists', async () => {
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-reorder-' })
     backend.saveQuickCommands({
-      groups: [],
+      groups: [
+        { id: 1, uuid: 'group-a', group_name: 'A' },
+        { id: 2, uuid: 'group-b', group_name: 'B' }
+      ],
       snippets: [
-        { id: 1, uuid: 'snippet-first', snippet_name: 'first', snippet_content: 'echo first', group_uuid: null },
-        { id: 2, uuid: 'snippet-second', snippet_name: 'second', snippet_content: 'echo second', group_uuid: null }
+        { id: 1, uuid: 'snippet-a1', snippet_name: 'a1', snippet_content: 'echo a1', group_uuid: 'group-a' },
+        { id: 2, uuid: 'snippet-a2', snippet_name: 'a2', snippet_content: 'echo a2', group_uuid: 'group-a' },
+        { id: 3, uuid: 'snippet-root', snippet_name: 'root', snippet_content: 'echo root', group_uuid: null },
+        { id: 4, uuid: 'snippet-b1', snippet_name: 'b1', snippet_content: 'echo b1', group_uuid: 'group-b' }
       ]
     })
 
-    const reordered = backend.reorderQuickCommands({ orderedIds: [2, 1] })
+    const reordered = backend.reorderQuickCommands({ orderedIds: [2, 1], groupUuid: 'group-a' })
     expect(reordered.ok).toBe(true)
-    expect(reordered.data?.snippets.map((snippet) => snippet.id)).toEqual([2, 1])
+    expect(reordered.data?.snippets.filter((snippet) => snippet.group_uuid === 'group-a').map((snippet) => snippet.id)).toEqual([2, 1])
+    expect(reordered.data?.snippets.filter((snippet) => snippet.group_uuid === 'group-b').map((snippet) => snippet.id)).toEqual([4])
+    expect(reordered.data?.snippets.filter((snippet) => !snippet.group_uuid).map((snippet) => snippet.id)).toEqual([3])
+
+    expect(backend.reorderQuickCommands({ orderedIds: [2], groupUuid: 'group-a' })).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command reorder list is stale'
+      })
+    )
+    expect(backend.reorderQuickCommands({ orderedIds: [2, 2], groupUuid: 'group-a' })).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command reorder ids must be unique'
+      })
+    )
+    expect(backend.reorderQuickCommands({ orderedIds: [3, 1], groupUuid: 'group-a' })).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command reorder list is stale'
+      })
+    )
   })
 
   it('returns mutation errors instead of renderer-side validation results', async () => {
-    const backend = await loadBackend()
-
     const invalidGroup = backend.saveQuickCommandGroup({ group_name: '   ' })
     expect(invalidGroup).toEqual(
       expect.objectContaining({
@@ -188,8 +346,6 @@ describe('quick commands backend boundary', () => {
   })
 
   it('builds backend-owned script plans with External reference syntax semantics', async () => {
-    const backend = await loadBackend()
-
     const planned = backend.planQuickCommandScript({
       snippetContent: `
         # ignored
@@ -213,27 +369,7 @@ describe('quick commands backend boundary', () => {
     })
   })
 
-  it('plans saved snippets from backend state instead of renderer payloads', async () => {
-    const backend = await loadBackend()
-    const snippet = backend.saveQuickCommandSnippet({
-      snippet_name: '保存脚本',
-      snippet_content: 'echo persisted\nsleep==100\necho done',
-      group_uuid: null
-    }).data!.snippet
-
-    const planned = backend.planQuickCommandScript({ snippetId: snippet.id, autoExecute: true })
-
-    expect(planned.ok).toBe(true)
-    expect(planned.data?.securityCommand).toBe('echo persisted')
-    expect(planned.data?.segments).toEqual([
-      { text: 'echo persisted\n', delayBeforeMs: 0 },
-      { text: 'echo done\n', delayBeforeMs: 100 }
-    ])
-  })
-
   it('returns structured errors for missing script plan inputs', async () => {
-    const backend = await loadBackend()
-
     expect(backend.planQuickCommandScript({ snippetId: 404 })).toEqual(
       expect.objectContaining({
         ok: false,
