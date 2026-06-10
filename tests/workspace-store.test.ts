@@ -215,6 +215,7 @@ const defaultMcpToolStates = {
 }
 
 const businessDataConfigKeys = ['quickCommands', 'knowledgeBase', 'aliasCommands'] as const
+const malformedQuickCommandsBackendResultMessage = '快捷命令服务返回数据无效'
 
 const expectNoBusinessDataConfigWrites = (keys: readonly string[] = businessDataConfigKeys) => {
   const patches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch as Record<string, unknown>)
@@ -2016,12 +2017,37 @@ describe('workspace store', () => {
 
       expect(store.snippetGroups).toEqual([])
       expect(store.quickCommands).toEqual([])
+      expect(store.config.quickCommands).toEqual({ groups: [], snippets: [] })
       expect(store.topNotice).toBe('快捷命令加载服务不可用')
       const saveConfigPatches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch)
       expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'quickCommands'))).toBe(true)
     } finally {
       ;(window.aiops as any).getQuickCommands = originalGetQuickCommands
     }
+  })
+
+  it('fails closed when the quick command backend returns malformed snapshots during hydration', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.getQuickCommands).mockResolvedValueOnce({
+      groups: [{ id: 9, uuid: 'detached-group', group_name: 'Detached' }],
+      snippets: [
+        {
+          id: 9,
+          uuid: 'detached-snippet',
+          snippet_name: 'Detached Command',
+          snippet_content: 'echo detached',
+          group_uuid: 'missing-group'
+        }
+      ]
+    } as any)
+
+    await store.hydrateConfig()
+
+    expect(store.snippetGroups).toEqual([])
+    expect(store.quickCommands).toEqual([])
+    expect(store.config.quickCommands).toEqual({ groups: [], snippets: [] })
+    expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+    expectNoBusinessDataConfigWrites(['quickCommands'])
   })
 
   it('hydrates file transfer task snapshots from the backend boundary', async () => {
@@ -4097,7 +4123,7 @@ describe('workspace store', () => {
     const missingPlannerDecision = await store.runQuickCommand(1, true)
     expect(missingPlannerDecision?.status).toBe('unavailable')
     if (missingPlannerDecision?.status === 'unavailable') {
-      expect(missingPlannerDecision.reason).toBe('快捷命令执行计划生成失败')
+      expect(missingPlannerDecision.reason).toBe('快捷命令执行计划服务不可用')
     }
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
     ;(window.aiops as any).planQuickCommandScript = originalPlanQuickCommandScript
@@ -4108,6 +4134,26 @@ describe('workspace store', () => {
     })
     const failedPlannerDecision = await store.runQuickCommand(1, true)
     expect(failedPlannerDecision?.status).toBe('unavailable')
+    if (failedPlannerDecision?.status === 'unavailable') {
+      expect(failedPlannerDecision.reason).toBe('planner offline')
+    }
+    expect(store.topNotice).toBe('planner offline')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.planQuickCommandScript!).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        segments: [{ text: 'echo forged\n', delayBeforeMs: 0 }],
+        shellText: 'echo different\n',
+        securityCommand: 'echo forged'
+      }
+    } as any)
+    const malformedPlannerDecision = await store.runQuickCommand(1, true)
+    expect(malformedPlannerDecision?.status).toBe('unavailable')
+    if (malformedPlannerDecision?.status === 'unavailable') {
+      expect(malformedPlannerDecision.reason).toBe(malformedQuickCommandsBackendResultMessage)
+    }
+    expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
 
     const dangerousSnippet = await store.createQuickCommand({ snippet_name: '危险删除', snippet_content: 'rm /tmp/file', group_uuid: null })
@@ -4206,6 +4252,30 @@ describe('workspace store', () => {
       })
     )
 
+    const countBeforeMalformedMacro = store.quickCommands.length
+    vi.mocked(window.aiops.saveQuickCommandSnippet).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        groups: store.snippetGroups.map((item) => ({ ...item })),
+        snippets: store.quickCommands.map((item) => ({ ...item })),
+        snippet: {
+          id: 999,
+          uuid: 'detached-macro',
+          snippet_name: 'Detached Macro',
+          snippet_content: 'hostname',
+          group_uuid: null
+        }
+      }
+    } as any)
+    store.startMacroRecording()
+    store.recordMacroCommand('hostname')
+    const malformedMacro = await store.stopMacroRecording()
+    expect(malformedMacro).toBeNull()
+    expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+    expect(store.isMacroRecording).toBe(false)
+    expect(store.quickCommands).toHaveLength(countBeforeMalformedMacro)
+    expect(store.quickCommands.some((command) => command.snippet_content === 'hostname')).toBe(false)
+
     const countBeforeEmptyMacro = store.quickCommands.length
     store.startMacroRecording()
     await store.stopMacroRecording()
@@ -4232,7 +4302,7 @@ describe('workspace store', () => {
     expect(store.macroLimitReason).toBe('count')
   })
 
-  it('does not mutate quick commands when required backend operations are unavailable or fail', async () => {
+  it('does not mutate quick commands when required backend operations are unavailable, malformed, or fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshQuickCommands()
 
@@ -4247,7 +4317,8 @@ describe('workspace store', () => {
     const quickCommandsSnapshot = () =>
       JSON.stringify({
         groups: store.snippetGroups,
-        snippets: store.quickCommands
+        snippets: store.quickCommands,
+        config: store.config.quickCommands
       })
 
     try {
@@ -4261,6 +4332,23 @@ describe('workspace store', () => {
       vi.mocked(window.aiops.getQuickCommands!).mockRejectedValueOnce(new Error('quick commands offline'))
       await expect(store.refreshQuickCommands()).resolves.toBe(false)
       expect(store.topNotice).toBe('快捷命令加载失败')
+      expect(quickCommandsSnapshot()).toBe(initialSnapshot)
+
+      vi.mocked(window.aiops.getQuickCommands!).mockResolvedValueOnce({
+        groups: store.snippetGroups.map((item) => ({ ...item })),
+        snippets: [
+          ...store.quickCommands.map((item) => ({ ...item })),
+          {
+            id: 999,
+            uuid: 'detached-refresh-snippet',
+            snippet_name: 'Detached Refresh',
+            snippet_content: 'echo detached',
+            group_uuid: 'missing-refresh-group'
+          }
+        ]
+      } as any)
+      await expect(store.refreshQuickCommands()).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(initialSnapshot)
 
       ;(window.aiops as any).saveQuickCommandGroup = undefined
@@ -4277,7 +4365,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.createSnippetGroup('Detached Group')).resolves.toBeNull()
-      expect(store.topNotice).toBe('快捷命令分组写入失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(initialSnapshot)
 
       const group = await store.createSnippetGroup('Bridge Group')
@@ -4299,7 +4387,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.renameSnippetGroup(group!.uuid, 'Fake Rename')).resolves.toBe(false)
-      expect(store.topNotice).toBe('快捷命令分组写入失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
 
       vi.mocked(window.aiops.saveQuickCommandGroup!).mockRejectedValueOnce(new Error('group write failed'))
@@ -4322,7 +4410,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.deleteSnippetGroup(group!.uuid)).resolves.toBe(false)
-      expect(store.topNotice).toBe('快捷命令分组删除失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
 
       vi.mocked(window.aiops.deleteQuickCommandGroup!).mockRejectedValueOnce(new Error('group delete failed'))
@@ -4353,7 +4441,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.createQuickCommand({ snippet_name: 'Detached Command', snippet_content: 'echo detached', group_uuid: group!.uuid })).resolves.toBeNull()
-      expect(store.topNotice).toBe('快捷命令写入失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
 
       const command = await store.createQuickCommand({ snippet_name: 'Bridge Command', snippet_content: 'echo bridge', group_uuid: group!.uuid })
@@ -4375,7 +4463,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.updateQuickCommand(command!.id, { snippet_name: 'Fake Update', snippet_content: 'echo fake', group_uuid: null })).resolves.toBe(false)
-      expect(store.topNotice).toBe('快捷命令写入失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
 
       vi.mocked(window.aiops.saveQuickCommandSnippet!).mockRejectedValueOnce(new Error('snippet write failed'))
@@ -4398,7 +4486,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.deleteQuickCommand(command!.id)).resolves.toBe(false)
-      expect(store.topNotice).toBe('快捷命令删除失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
 
       vi.mocked(window.aiops.deleteQuickCommandSnippet!).mockRejectedValueOnce(new Error('snippet delete failed'))
@@ -4418,7 +4506,7 @@ describe('workspace store', () => {
         data: JSON.parse(afterCommandSnapshot)
       })
       await expect(store.reorderQuickCommand(1, 2)).resolves.toBe(false)
-      expect(store.topNotice).toBe('快捷命令排序失败')
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
 
       vi.mocked(window.aiops.reorderQuickCommands!).mockRejectedValueOnce(new Error('reorder failed'))

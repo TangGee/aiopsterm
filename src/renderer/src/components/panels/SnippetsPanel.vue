@@ -474,12 +474,11 @@ const saveCommand = async () => {
     snippet_content: commandForm.content,
     group_uuid: commandForm.groupUuid || null
   }
-  if (isEditMode.value && editingCommandId.value !== null) {
-    await workspace.updateQuickCommand(editingCommandId.value, payload)
-  } else {
-    await workspace.createQuickCommand(payload)
-  }
-  cancelEditCommand()
+  const saved =
+    isEditMode.value && editingCommandId.value !== null
+      ? await workspace.updateQuickCommand(editingCommandId.value, payload)
+      : await workspace.createQuickCommand(payload)
+  if (saved) cancelEditCommand()
 }
 
 const cancelEditCommand = () => {

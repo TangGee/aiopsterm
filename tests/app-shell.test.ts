@@ -5203,6 +5203,48 @@ describe('AppShell', () => {
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-'))).toBe(true)
   })
 
+  it('keeps the quick command edit panel open when the backend save result is malformed', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(SnippetsPanel, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const beforeCount = store.quickCommands.length
+    vi.mocked(window.aiops.saveQuickCommandSnippet).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        groups: store.snippetGroups.map((item) => ({ ...item })),
+        snippets: [
+          ...store.quickCommands.map((item) => ({ ...item })),
+          {
+            id: 999,
+            uuid: 'detached-panel-save',
+            snippet_name: '失败片段',
+            snippet_content: 'echo failed',
+            group_uuid: null
+          }
+        ]
+      }
+    } as any)
+
+    await wrapper.find('button[title="新建片段"]').trigger('click')
+    await wrapper.find('.snippet-edit-panel input').setValue('失败片段')
+    await wrapper.find('.script-editor-container textarea').setValue('echo failed')
+    await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
+    await flushPromises()
+
+    expect(store.topNotice).toBe('快捷命令服务返回数据无效')
+    expect(store.quickCommands).toHaveLength(beforeCount)
+    expect(store.quickCommands.some((command) => command.snippet_name === '失败片段')).toBe(false)
+    expect(wrapper.find('.snippet-edit-panel').exists()).toBe(true)
+    expect((wrapper.find('.snippet-edit-panel input').element as HTMLInputElement).value).toBe('失败片段')
+    expect((wrapper.find('.script-editor-container textarea').element as HTMLTextAreaElement).value).toBe('echo failed')
+  })
+
   it('matches External reference-style quick command macro control keys, sleep threshold, and auto-stop', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

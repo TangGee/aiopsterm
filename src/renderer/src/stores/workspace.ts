@@ -31,6 +31,16 @@ import {
   malformedFilesBackendResultMessage
 } from '@/services/filesBackendGuards'
 import {
+  isQuickCommandGroupDeleteData,
+  isQuickCommandGroupSaveData,
+  isQuickCommandReorderData,
+  isQuickCommandsSnapshotData,
+  isQuickCommandScriptPlanData,
+  isQuickCommandSnippetDeleteData,
+  isQuickCommandSnippetSaveData,
+  malformedQuickCommandsBackendResultMessage
+} from '@/services/quickCommandsBackendGuards'
+import {
   isSettingsPreferencesMutationData,
   isSettingsPreferencesSnapshot,
   isSettingsRuleDeleteData,
@@ -306,6 +316,10 @@ export type TerminalSecurityDecision =
   | { status: 'blocked'; result: CommandSecurityResult }
   | { status: 'needs-approval'; prompt: NonNullable<TerminalSecurityPrompt> }
   | { status: 'unavailable'; command: string; panelIds: string[]; reason: string }
+
+type QuickCommandScriptPlanResolution =
+  | { ok: true; plan: QuickCommandScriptPlan }
+  | { ok: false; reason: string }
 
 export type TerminalOutputSegment = {
   text: string
@@ -1840,102 +1854,6 @@ const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>)
     normalized,
     changed
   }
-}
-
-const isQuickCommandsSnapshot = (source: unknown): source is QuickCommandsUserConfig & Record<string, unknown> =>
-  isRecord(source) && Array.isArray(source.groups) && Array.isArray(source.snippets) && !normalizeQuickCommandsConfig(source).changed
-
-const isQuickCommandGroupSnapshot = (source: unknown): source is SnippetGroup => {
-  if (!isRecord(source)) return false
-  const id = source.id
-  return typeof id === 'number' && Number.isInteger(id) && id > 0 && typeof source.uuid === 'string' && source.uuid.trim() !== '' && typeof source.group_name === 'string' && source.group_name.trim() !== ''
-}
-
-const quickCommandGroupsMatch = (left: SnippetGroup, right: SnippetGroup) => left.id === right.id && left.uuid === right.uuid && left.group_name === right.group_name
-
-const snapshotContainsQuickCommandGroup = (snapshot: QuickCommandsUserConfig, group: SnippetGroup) =>
-  snapshot.groups.some((item) => quickCommandGroupsMatch(item, group))
-
-const isQuickCommandSnippetSnapshot = (source: unknown): source is QuickCommandSnippet => {
-  if (!isRecord(source)) return false
-  const id = source.id
-  const groupUuid = source.group_uuid
-  return (
-    typeof id === 'number' &&
-    Number.isInteger(id) &&
-    id > 0 &&
-    typeof source.uuid === 'string' &&
-    source.uuid.trim() !== '' &&
-    typeof source.snippet_name === 'string' &&
-    source.snippet_name.trim() !== '' &&
-    typeof source.snippet_content === 'string' &&
-    source.snippet_content !== '' &&
-    (groupUuid === undefined || groupUuid === null || typeof groupUuid === 'string')
-  )
-}
-
-const quickCommandSnippetGroupUuid = (snippet: Pick<QuickCommandSnippet, 'group_uuid'>) => snippet.group_uuid ?? null
-
-const quickCommandSnippetsMatch = (left: QuickCommandSnippet, right: QuickCommandSnippet) =>
-  left.id === right.id &&
-  left.uuid === right.uuid &&
-  left.snippet_name === right.snippet_name &&
-  left.snippet_content === right.snippet_content &&
-  quickCommandSnippetGroupUuid(left) === quickCommandSnippetGroupUuid(right) &&
-  (left.create_at || '') === (right.create_at || '') &&
-  (left.update_at || '') === (right.update_at || '')
-
-const snapshotContainsQuickCommandSnippet = (snapshot: QuickCommandsUserConfig, snippet: QuickCommandSnippet) =>
-  snapshot.snippets.some((item) => quickCommandSnippetsMatch(item, snippet))
-
-const isQuickCommandGroupSaveData = (source: unknown, expected: { uuid?: string; groupName: string }) => {
-  if (!isRecord(source)) return false
-  const record = source
-  if (!isQuickCommandsSnapshot(record)) return false
-  const group = record.group
-  if (!isQuickCommandGroupSnapshot(group)) return false
-  if (expected.uuid && group.uuid !== expected.uuid) return false
-  return group.group_name === expected.groupName && snapshotContainsQuickCommandGroup(record, group)
-}
-
-const isQuickCommandGroupDeleteData = (source: unknown, uuid: string) => {
-  if (!isRecord(source)) return false
-  const record = source
-  if (!isQuickCommandsSnapshot(record)) return false
-  return record.groupUuid === uuid && !record.groups.some((group) => group.uuid === uuid) && !record.snippets.some((snippet) => snippet.group_uuid === uuid)
-}
-
-const isQuickCommandSnippetSaveData = (source: unknown, expected: { id?: number; snippetName: string; snippetContent: string }) => {
-  if (!isRecord(source)) return false
-  const record = source
-  if (!isQuickCommandsSnapshot(record)) return false
-  const snippet = record.snippet
-  if (!isQuickCommandSnippetSnapshot(snippet)) return false
-  if (expected.id !== undefined && snippet.id !== expected.id) return false
-  return snippet.snippet_name === expected.snippetName && snippet.snippet_content === expected.snippetContent && snapshotContainsQuickCommandSnippet(record, snippet)
-}
-
-const isQuickCommandSnippetDeleteData = (source: unknown, id: number) => {
-  if (!isRecord(source)) return false
-  const record = source
-  if (!isQuickCommandsSnapshot(record)) return false
-  return record.id === id && !record.snippets.some((snippet) => snippet.id === id)
-}
-
-const isQuickCommandReorderData = (source: unknown, expectedOrder: number[], groupUuid: string | null) =>
-  isQuickCommandsSnapshot(source) &&
-  source.snippets
-    .filter((snippet) => quickCommandSnippetGroupUuid(snippet) === groupUuid)
-    .map((snippet) => snippet.id)
-    .join(',') === expectedOrder.join(',')
-
-const isQuickCommandScriptPlan = (source: unknown): source is QuickCommandScriptPlan => {
-  if (!isRecord(source) || !Array.isArray(source.segments) || typeof source.shellText !== 'string' || typeof source.securityCommand !== 'string') return false
-  return source.segments.every((segment) => {
-    if (!isRecord(segment) || typeof segment.text !== 'string') return false
-    const delayBeforeMs = segment.delayBeforeMs
-    return typeof delayBeforeMs === 'number' && Number.isFinite(delayBeforeMs) && delayBeforeMs >= 0
-  })
 }
 
 const k8sResourceKinds: K8sResourceKind[] = ['pods', 'deployments', 'services', 'nodes']
@@ -4067,13 +3985,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const { changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource, modelCatalogSettingsOptions)
     const normalizedModelSettings = applyModelSettingsSnapshot(modelSettingsSource)
     let normalizedQuickCommands = normalizeQuickCommandsConfig().normalized
-    let quickCommandsLoadedFromBridge = false
     if (window.aiops.getQuickCommands) {
       try {
         const bridgeQuickCommands = await window.aiops.getQuickCommands()
-        const snapshot = normalizeQuickCommandsConfig(bridgeQuickCommands)
-        normalizedQuickCommands = snapshot.normalized
-        quickCommandsLoadedFromBridge = true
+        if (isQuickCommandsSnapshotData(bridgeQuickCommands)) {
+          normalizedQuickCommands = bridgeQuickCommands
+        } else {
+          setTopNotice(malformedQuickCommandsBackendResultMessage)
+        }
       } catch {
         setTopNotice('快捷命令加载失败')
       }
@@ -4167,7 +4086,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       privacy: normalizedPrivacy,
       aiPreferences: normalizedAiPreferences,
       modelSettings: normalizedModelSettings,
-      ...(quickCommandsLoadedFromBridge ? { quickCommands: normalizedQuickCommands } : {}),
+      quickCommands: normalizedQuickCommands,
       knowledgeBase: normalizedKnowledgeBase,
       ...(aliasCommandsLoadedFromBridge ? { aliasCommands: normalizedAliasCommands } : {}),
       shortcuts: normalizedShortcuts,
@@ -4271,12 +4190,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setupThemeBridge()
   }
 
-  const applyQuickCommandsSnapshot = (snapshot: QuickCommandsUserConfig) => {
-    const normalized = normalizeQuickCommandsConfig(snapshot).normalized
-    snippetGroups.value = normalized.groups.map((group) => ({ ...group }))
-    quickCommands.value = normalized.snippets.map((snippet) => ({ ...snippet }))
-    config.value = mergeUserConfig(config.value, { quickCommands: normalized })
-    return normalized
+  const applyQuickCommandsSnapshot = (snapshot: unknown) => {
+    if (!isQuickCommandsSnapshotData(snapshot)) {
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
+      return false
+    }
+    snippetGroups.value = snapshot.groups.map((group) => ({ ...group }))
+    quickCommands.value = snapshot.snippets.map((snippet) => ({ ...snippet }))
+    config.value = mergeUserConfig(config.value, { quickCommands: snapshot })
+    return true
   }
 
   const refreshQuickCommands = async () => {
@@ -7901,7 +7823,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     if (!isQuickCommandGroupSaveData(result.data, { groupName: name })) {
-      setTopNotice('快捷命令分组写入失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return null
     }
     applyQuickCommandsSnapshot(result.data)
@@ -7927,7 +7849,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     if (!isQuickCommandGroupSaveData(result.data, { uuid, groupName: name })) {
-      setTopNotice('快捷命令分组写入失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
     applyQuickCommandsSnapshot(result.data)
@@ -7951,7 +7873,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     if (!isQuickCommandGroupDeleteData(result.data, uuid)) {
-      setTopNotice('快捷命令分组删除失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
     applyQuickCommandsSnapshot(result.data)
@@ -7980,7 +7902,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     if (!isQuickCommandSnippetSaveData(result.data, { snippetName, snippetContent: payload.snippet_content })) {
-      setTopNotice('快捷命令写入失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return null
     }
     applyQuickCommandsSnapshot(result.data)
@@ -8011,7 +7933,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     if (!isQuickCommandSnippetSaveData(result.data, { id, snippetName, snippetContent: payload.snippet_content })) {
-      setTopNotice('快捷命令写入失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
     applyQuickCommandsSnapshot(result.data)
@@ -8033,7 +7955,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     if (!isQuickCommandSnippetDeleteData(result.data, id)) {
-      setTopNotice('快捷命令删除失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
     applyQuickCommandsSnapshot(result.data)
@@ -8063,7 +7985,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     if (!isQuickCommandReorderData(result.data, orderedIds, groupUuid)) {
-      setTopNotice('快捷命令排序失败')
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
     applyQuickCommandsSnapshot(result.data)
@@ -8086,15 +8008,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
   }
 
-  const resolveQuickCommandScriptPlan = async (id: number, autoExecute: boolean) => {
+  const resolveQuickCommandScriptPlan = async (id: number, autoExecute: boolean): Promise<QuickCommandScriptPlanResolution> => {
     const planQuickCommandScriptBridge = window.aiops?.planQuickCommandScript
-    if (typeof planQuickCommandScriptBridge !== 'function') return null
+    if (typeof planQuickCommandScriptBridge !== 'function') return { ok: false, reason: '快捷命令执行计划服务不可用' }
     try {
       const result = await planQuickCommandScriptBridge({ snippetId: id, autoExecute })
-      if (!result?.ok || !isQuickCommandScriptPlan(result.data)) return null
-      return result.data
+      if (!result) return { ok: false, reason: '快捷命令执行计划生成失败' }
+      if (!result.ok) return { ok: false, reason: result.errorMessage || '快捷命令执行计划生成失败' }
+      if (!isQuickCommandScriptPlanData(result.data)) return { ok: false, reason: malformedQuickCommandsBackendResultMessage }
+      return { ok: true, plan: result.data }
     } catch {
-      return null
+      return { ok: false, reason: '快捷命令执行计划生成失败' }
     }
   }
 
@@ -8102,10 +8026,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const command = quickCommands.value.find((item) => item.id === id)
     if (!command) return
     const targetPanelIds = resolveQuickCommandPanelIds(allTabs)
-    const plan = await resolveQuickCommandScriptPlan(id, autoExecute)
-    if (!plan) {
-      return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, '快捷命令执行计划生成失败')
+    const planResolution = await resolveQuickCommandScriptPlan(id, autoExecute)
+    if (!planResolution.ok) {
+      return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, planResolution.reason)
     }
+    const plan = planResolution.plan
     if (!plan.segments.length) {
       return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, '快捷命令内容为空')
     }
