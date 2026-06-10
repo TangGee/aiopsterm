@@ -14,6 +14,12 @@ import {
   malformedExtensionBackendResultMessage
 } from '@/services/extensionBackendGuards'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
+import {
+  isSettingsPreferencesMutationData,
+  isSettingsPreferencesSnapshot,
+  isSettingsRuleDeleteData,
+  malformedSettingsBackendResultMessage
+} from '@/services/settingsBackendGuards'
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import type { AiopstermDeepLinkPayload } from '@shared/deepLink'
@@ -3923,8 +3929,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         rules: savedConfig.rules,
         customInstructions: savedConfig.customInstructions
       })
-      if (result?.ok && result.data) {
+      if (result?.ok && isSettingsPreferencesSnapshot(result.data)) {
         bridgeSettingsPreferences = result.data
+      } else if (result?.ok) {
+        setSettingsNotice(malformedSettingsBackendResultMessage)
       } else if (result && !result.ok) {
         setSettingsNotice(result.errorMessage || '设置偏好加载失败')
       }
@@ -6916,6 +6924,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice(result?.errorMessage || '规则保存失败')
         return false
       }
+      if (!isSettingsPreferencesMutationData(result.data)) {
+        setSettingsNotice(malformedSettingsBackendResultMessage)
+        return false
+      }
       applySettingsPreferencesSnapshot(result.data)
       setSettingsNotice(result.data.message || '规则已保存')
       return true
@@ -6960,6 +6972,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice(result?.errorMessage || '规则更新失败')
         return false
       }
+      if (!isSettingsPreferencesMutationData(result.data)) {
+        setSettingsNotice(malformedSettingsBackendResultMessage)
+        return false
+      }
       applySettingsPreferencesSnapshot(result.data)
       setSettingsNotice(`规则${nextEnabled ? '已启用' : '已禁用'}`)
       return true
@@ -6985,6 +7001,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = await deleteSettingsRuleBridge(id)
       if (!result?.ok || !result.data) {
         setSettingsNotice(result?.errorMessage || '规则删除失败')
+        return false
+      }
+      if (!isSettingsRuleDeleteData(result.data)) {
+        setSettingsNotice(malformedSettingsBackendResultMessage)
         return false
       }
       applySettingsPreferencesSnapshot(result.data)
@@ -7034,6 +7054,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice(result?.errorMessage || '快捷键保存失败')
         return false
       }
+      if (!isSettingsPreferencesMutationData(result.data)) {
+        setSettingsNotice(malformedSettingsBackendResultMessage)
+        return false
+      }
       applySettingsPreferencesSnapshot(result.data)
       shortcutRecording.value = { actionId: null, tempShortcut: '' }
       shortcutRuntime.setRecording(false)
@@ -7060,6 +7084,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = await resetSettingsShortcutsBridge()
       if (!result?.ok || !result.data) {
         setSettingsNotice(result?.errorMessage || '快捷键重置失败')
+        return false
+      }
+      if (!isSettingsPreferencesMutationData(result.data)) {
+        setSettingsNotice(malformedSettingsBackendResultMessage)
         return false
       }
       applySettingsPreferencesSnapshot(result.data)

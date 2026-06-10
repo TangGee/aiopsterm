@@ -8516,6 +8516,132 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
   })
 
+  it('fails closed when Settings preference bridges return malformed successful results', async () => {
+    const store = useWorkspaceStore()
+    const malformedSettingsMessage = '设置服务返回数据无效'
+    const originalAiops = {
+      getSettingsPreferences: window.aiops.getSettingsPreferences,
+      saveSettingsRule: window.aiops.saveSettingsRule,
+      deleteSettingsRule: window.aiops.deleteSettingsRule,
+      saveSettingsShortcut: window.aiops.saveSettingsShortcut,
+      resetSettingsShortcuts: window.aiops.resetSettingsShortcuts
+    }
+    const hydrateFresh = async () => {
+      await store.hydrateConfig()
+      vi.mocked(window.aiops.saveConfig).mockClear()
+    }
+
+    try {
+      vi.mocked(window.aiops.getSettingsPreferences!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          shortcuts: [{ id: 'newTerminal', shortcut: 'Ctrl+Alt+N' }],
+          rules: defaultRules
+        }
+      } as any)
+      await store.hydrateConfig()
+      expect(store.settingsNotice).toBe(malformedSettingsMessage)
+      expect(store.settingsShortcuts).toEqual(defaultShortcuts)
+      expect(store.settingsRules).toEqual(defaultRules.map((rule) => ({ ...rule, isEditing: false })))
+
+      await hydrateFresh()
+      const persistedRulesBeforeSave = JSON.stringify(store.config.rules)
+      store.addSettingsRule()
+      store.updateSettingsRuleDraft('rule-draft-new', 'malformed persisted rule')
+      const rulesBeforeSave = JSON.stringify(store.settingsRules)
+      vi.mocked(window.aiops.saveSettingsRule!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          shortcuts: defaultShortcuts,
+          rules: [{ id: 'rule-malformed', content: 'malformed persisted rule' }],
+          message: '规则已保存'
+        }
+      } as any)
+      await expect(store.saveSettingsRule('rule-draft-new')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSettingsMessage)
+      expect(JSON.stringify(store.settingsRules)).toBe(rulesBeforeSave)
+      expect(JSON.stringify(store.config.rules)).toBe(persistedRulesBeforeSave)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      await hydrateFresh()
+      const rulesBeforeToggle = JSON.stringify(store.settingsRules)
+      const persistedRulesBeforeToggle = JSON.stringify(store.config.rules)
+      vi.mocked(window.aiops.saveSettingsRule!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          shortcuts: defaultShortcuts,
+          rules: [{ ...defaultRules[0], enabled: 'false' }],
+          message: '规则已保存'
+        }
+      } as any)
+      await expect(store.toggleSettingsRule('rule-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSettingsMessage)
+      expect(JSON.stringify(store.settingsRules)).toBe(rulesBeforeToggle)
+      expect(JSON.stringify(store.config.rules)).toBe(persistedRulesBeforeToggle)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      await hydrateFresh()
+      const rulesBeforeDelete = JSON.stringify(store.settingsRules)
+      const persistedRulesBeforeDelete = JSON.stringify(store.config.rules)
+      vi.mocked(window.aiops.deleteSettingsRule!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          shortcuts: defaultShortcuts,
+          rules: [defaultRules[0]],
+          deleted: { id: 'rule-2', content: '', enabled: true }
+        }
+      } as any)
+      await expect(store.deleteSettingsRule('rule-2')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSettingsMessage)
+      expect(JSON.stringify(store.settingsRules)).toBe(rulesBeforeDelete)
+      expect(JSON.stringify(store.config.rules)).toBe(persistedRulesBeforeDelete)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+
+      await hydrateFresh()
+      const shortcutsBeforeSave = JSON.stringify(store.settingsShortcuts)
+      store.startShortcutRecording('newTerminal')
+      store.updateShortcutRecording('Ctrl+Shift+N')
+      const recordingBeforeSave = { ...store.shortcutRecording }
+      vi.mocked(window.aiops.saveSettingsShortcut!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          shortcuts: [{ id: 'newTerminal', action: '新建终端', shortcut: '' }],
+          rules: defaultRules,
+          message: '快捷键已保存'
+        }
+      } as any)
+      await expect(store.saveShortcutRecording()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSettingsMessage)
+      expect(JSON.stringify(store.settingsShortcuts)).toBe(shortcutsBeforeSave)
+      expect(store.shortcutRecording).toEqual(recordingBeforeSave)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+      store.cancelShortcutRecording()
+
+      await hydrateFresh()
+      store.startShortcutRecording('newTerminal')
+      store.updateShortcutRecording('Ctrl+Shift+N')
+      await expect(store.saveShortcutRecording()).resolves.toBe(true)
+      const changedShortcuts = JSON.stringify(store.settingsShortcuts)
+      expect(changedShortcuts).not.toBe(JSON.stringify(defaultShortcuts))
+      vi.mocked(window.aiops.saveConfig).mockClear()
+      vi.mocked(window.aiops.resetSettingsShortcuts!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          shortcuts: defaultShortcuts,
+          rules: defaultRules,
+          message: ''
+        }
+      } as any)
+      await expect(store.resetAllShortcuts()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSettingsMessage)
+      expect(JSON.stringify(store.settingsShortcuts)).toBe(changedShortcuts)
+      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+      store.cancelShortcutRecording()
+    }
+  })
+
   it('does not fabricate Skill operations when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshSkillsFromBridge()
