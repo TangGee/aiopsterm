@@ -7828,6 +7828,153 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.userContactCodeCountdown.mobile).toBe(0)
   })
 
+  it('fails closed on malformed successful user account backend result envelopes', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshUserAccount()
+
+    const profileBefore = JSON.stringify(store.userProfile)
+    const billingBefore = JSON.stringify(store.billingSettings)
+    const trustedDevicesBefore = store.trustedDevices.map((device) => ({ ...device }))
+    const assertUserSnapshotUnchanged = () => {
+      expect(JSON.stringify(store.userProfile)).toBe(profileBefore)
+      expect(JSON.stringify(store.billingSettings)).toBe(billingBefore)
+      expect(store.trustedDevices).toEqual(trustedDevicesBefore)
+    }
+
+    vi.mocked(window.aiops.getUserAccount).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        profile: { uid: 999 },
+        trustedDevices: []
+      }
+    } as any)
+    await expect(store.refreshUserAccount()).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效账号快照')
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.openUserLogin).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'renderer must not treat this as a login snapshot'
+      }
+    } as any)
+    await expect(store.openUserLogin()).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    expect(store.userLoginLoading).toBe(false)
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.loginUserAccount).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'USER_DEVICE_VERIFICATION_REQUIRED',
+      errorMessage: '当前设备需要验证后才能登录',
+      data: {
+        message: 'malformed verification snapshot',
+        profile: { needDeviceVerification: true },
+        trustedDevices: []
+      }
+    } as any)
+    await expect(store.loginWithAccount('verify-device', 'secret')).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    expect(store.userLoginLoading).toBe(false)
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.loginUserAccount).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'malformed account login success',
+        trustedDevices: []
+      }
+    } as any)
+    await expect(store.loginWithAccount('ops_login', 'secret')).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    expect(store.userLoginLoading).toBe(false)
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.logoutUserAccount).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'malformed logout success'
+      }
+    } as any)
+    await expect(store.logoutUser()).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.skipUserLogin).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'malformed guest success'
+      }
+    } as any)
+    await expect(store.skipUserLogin()).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.updateUserProfile).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'malformed profile save',
+        profile: { name: 'Local Fake', username: 'local_fake' },
+        trustedDevices: []
+      }
+    } as any)
+    await expect(store.updateUserProfile({ name: 'Local Fake', username: 'local_fake' })).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.resetUserPassword).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'malformed password reset'
+      }
+    } as any)
+    await expect(store.resetUserPassword('Aa123456!')).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.bindUserContact).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        message: 'malformed contact bind',
+        profile: { email: 'ops@example.local' },
+        trustedDevices: []
+      }
+    } as any)
+    await expect(store.bindUserContact('email', 'ops@example.local', '123456')).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    expect(store.userContactCodeCountdown.email).toBe(0)
+    assertUserSnapshotUnchanged()
+
+    store.openTrustedDeviceRevoke(2)
+    vi.mocked(window.aiops.revokeTrustedDevice).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        deviceId: 2,
+        message: 'malformed trusted-device revoke'
+      }
+    } as any)
+    await expect(store.confirmTrustedDeviceRevoke()).resolves.toBe(false)
+    expect(store.userNotice).toBe('可信设备后端返回了无效结果')
+    expect(store.settingsNotice).toBe('可信设备后端返回了无效结果')
+    expect(store.trustedDeviceModal).toEqual({ open: true, id: 2 })
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.prepareUserAvatarImage).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        filePath: '/tmp/avatar.txt',
+        name: 'avatar.txt',
+        mimeType: 'text/plain',
+        size: 6,
+        dataUrl: 'data:text/plain;base64,avatar',
+        message: 'malformed avatar'
+      }
+    } as any)
+    await expect(store.prepareUserAvatarImage('/tmp/avatar.txt')).resolves.toBeNull()
+    expect(store.userNotice).toBe('头像后端返回了无效结果')
+    assertUserSnapshotUnchanged()
+  })
+
   it('does not fabricate user account writes when bridge operations are unavailable or fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshUserAccount()

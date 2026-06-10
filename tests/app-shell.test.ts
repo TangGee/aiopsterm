@@ -2041,6 +2041,24 @@ describe('AppShell', () => {
       expect(store.userNotice).toBe('请选择图片文件')
       expect(store.userProfile.avatarImageUrl).toBe('')
       expect(panel.find('.avatar-preview-box img').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/avatar.txt'] })
+      vi.mocked(window.aiops.prepareUserAvatarImage!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          filePath: '/tmp/avatar.txt',
+          name: 'avatar.txt',
+          mimeType: 'text/plain',
+          size: 6,
+          dataUrl: 'data:text/plain;base64,avatar',
+          message: 'malformed avatar'
+        }
+      } as any)
+      await panel.find('.avatar-actions-row .settings-button').trigger('click')
+      await flushPromises()
+      expect(store.userNotice).toBe('头像后端返回了无效结果')
+      expect(store.userProfile.avatarImageUrl).toBe('')
+      expect(panel.find('.avatar-preview-box img').exists()).toBe(false)
     } finally {
       ;(window.aiops as any).prepareUserAvatarImage = originalPrepareUserAvatarImage
     }

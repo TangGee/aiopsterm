@@ -43,7 +43,9 @@ import type {
   AliasCommandConfig,
   AliasCommandSaveInput,
   AiopsTrustedDevice,
+  AiopsTrustedDeviceRevokeResult,
   AiopsUserAccountSnapshot,
+  AiopsUserAvatarPrepareResult,
   AiopsUserCodeResult,
   AiopsUserMutationResult,
   AiopsUserProfile,
@@ -149,6 +151,10 @@ type OnboardingAiRequest =
   | 'open-context-hosts'
   | 'prepare-send'
 type OnboardingAssetRequest = 'none' | 'open-host-management' | 'open-create-form'
+type UserMutationData = NonNullable<AiopsUserMutationResult['data']>
+type UserCodeData = NonNullable<AiopsUserCodeResult['data']>
+type UserAvatarPrepareData = NonNullable<AiopsUserAvatarPrepareResult['data']>
+type UserTrustedDeviceRevokeData = NonNullable<AiopsTrustedDeviceRevokeResult['data']>
 
 type TerminalOutputScope = 'output' | 'input'
 type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
@@ -794,6 +800,104 @@ const integerInRange = (value: unknown, fallback: number, min: number) =>
   typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
 
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) => (typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback)
+
+const userRegistrationCodes: AiopsUserProfile['registrationCode'][] = [1, 2, 3, 4, 6, 7, 9]
+const userRegistrationTypes: AiopsUserProfile['registrationType'][] = ['enterprise', 'personal']
+const userAuthProviders: AiopsUserProfile['authProvider'][] = ['local', 'sso', 'oauth']
+const userSubscriptions: AiopsUserProfile['subscription'][] = ['free', 'pro', 'ultra']
+const userLastLoginMethods: AiopsUserProfile['lastLoginMethod'][] = ['account', 'email', 'mobile', 'skip', 'external']
+const userCodeKinds: UserCodeData['kind'][] = ['email', 'mobile']
+const userAvatarMimeTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
+
+const isUserProfileSnapshot = (source: unknown): source is AiopsUserProfile =>
+  isRecord(source) &&
+  typeof source.uid === 'number' &&
+  Number.isInteger(source.uid) &&
+  source.uid >= 0 &&
+  typeof source.name === 'string' &&
+  typeof source.username === 'string' &&
+  typeof source.avatarInitials === 'string' &&
+  typeof source.avatarImageUrl === 'string' &&
+  userRegistrationTypes.includes(source.registrationType as AiopsUserProfile['registrationType']) &&
+  userRegistrationCodes.includes(source.registrationCode as AiopsUserProfile['registrationCode']) &&
+  userAuthProviders.includes(source.authProvider as AiopsUserProfile['authProvider']) &&
+  userSubscriptions.includes(source.subscription as AiopsUserProfile['subscription']) &&
+  typeof source.subscriptionExpiresAt === 'string' &&
+  typeof source.email === 'string' &&
+  typeof source.mobile === 'string' &&
+  typeof source.localIp === 'string' &&
+  typeof source.macAddress === 'string' &&
+  typeof source.isOfficeDevice === 'boolean' &&
+  typeof source.needDeviceVerification === 'boolean' &&
+  typeof source.skippedLogin === 'boolean' &&
+  typeof source.localDatabaseReady === 'boolean' &&
+  userLastLoginMethods.includes(source.lastLoginMethod as AiopsUserProfile['lastLoginMethod']) &&
+  typeof source.lastLoginAt === 'string' &&
+  typeof source.passwordUpdatedAt === 'string' &&
+  typeof source.avatarUpdatedAt === 'string'
+
+const isTrustedDeviceSnapshot = (source: unknown): source is AiopsTrustedDevice =>
+  isRecord(source) &&
+  typeof source.id === 'number' &&
+  Number.isInteger(source.id) &&
+  source.id > 0 &&
+  typeof source.deviceName === 'string' &&
+  source.deviceName.trim() !== '' &&
+  typeof source.macAddress === 'string' &&
+  typeof source.lastLoginIp === 'string' &&
+  typeof source.location === 'string' &&
+  typeof source.lastLoginUserAgent === 'string' &&
+  typeof source.current === 'boolean'
+
+const isUserAccountSnapshot = (source: unknown): source is AiopsUserAccountSnapshot =>
+  isRecord(source) && isUserProfileSnapshot(source.profile) && Array.isArray(source.trustedDevices) && source.trustedDevices.every(isTrustedDeviceSnapshot)
+
+const isUserMutationData = (source: unknown): source is UserMutationData => {
+  if (!isRecord(source) || !isUserAccountSnapshot(source)) return false
+  return typeof (source as Record<string, unknown>).message === 'string'
+}
+
+const isUserCodeData = (source: unknown): source is UserCodeData =>
+  isRecord(source) &&
+  userCodeKinds.includes(source.kind as UserCodeData['kind']) &&
+  typeof source.target === 'string' &&
+  source.target.trim() !== '' &&
+  typeof source.countdownSeconds === 'number' &&
+  Number.isFinite(source.countdownSeconds) &&
+  source.countdownSeconds >= 0 &&
+  typeof source.remainingSeconds === 'number' &&
+  Number.isFinite(source.remainingSeconds) &&
+  source.remainingSeconds >= 0 &&
+  typeof source.expiresAt === 'number' &&
+  Number.isFinite(source.expiresAt) &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== ''
+
+const isUserAvatarPrepareData = (source: unknown): source is UserAvatarPrepareData =>
+  isRecord(source) &&
+  typeof source.filePath === 'string' &&
+  source.filePath.trim() !== '' &&
+  typeof source.name === 'string' &&
+  source.name.trim() !== '' &&
+  typeof source.mimeType === 'string' &&
+  userAvatarMimeTypes.includes(source.mimeType) &&
+  typeof source.size === 'number' &&
+  Number.isFinite(source.size) &&
+  source.size > 0 &&
+  typeof source.dataUrl === 'string' &&
+  /^data:image\/[a-z0-9.+-]+;base64,/i.test(source.dataUrl) &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== ''
+
+const isTrustedDeviceRevokeData = (source: unknown): source is UserTrustedDeviceRevokeData =>
+  isRecord(source) &&
+  typeof source.deviceId === 'number' &&
+  Number.isInteger(source.deviceId) &&
+  source.deviceId > 0 &&
+  Array.isArray(source.trustedDevices) &&
+  source.trustedDevices.every(isTrustedDeviceSnapshot) &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== ''
 
 const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUserConfig[] = []) => {
   const rawOptions = Array.isArray(source) ? source : fallback
@@ -5589,13 +5693,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const applyUserMutationResult = (result: AiopsUserMutationResult | undefined) => {
+    if (result?.data && !isUserAccountSnapshot(result.data)) {
+      setUserNotice('用户后端返回了无效结果')
+      userLoginLoading.value = false
+      return false
+    }
     if (result?.data) applyUserAccountSnapshot(result.data)
     if (!result?.ok) {
       setUserNotice(result?.errorMessage || '用户操作失败')
       userLoginLoading.value = false
       return false
     }
-    setUserNotice(result.data?.message || '用户操作已完成')
+    if (!isUserMutationData(result.data)) {
+      setUserNotice('用户后端返回了无效结果')
+      userLoginLoading.value = false
+      return false
+    }
+    setUserNotice(result.data.message || '用户操作已完成')
     userLoginLoading.value = false
     return true
   }
@@ -5606,6 +5720,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = await window.aiops.getUserAccount()
       if (!result?.ok || !result.data) {
         setUserNotice(result?.errorMessage || '用户信息加载失败')
+        return false
+      }
+      if (!isUserAccountSnapshot(result.data)) {
+        setUserNotice('用户后端返回了无效账号快照')
         return false
       }
       applyUserAccountSnapshot(result.data)
@@ -5754,7 +5872,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setUserNotice(result?.errorMessage || '验证码发送失败')
         return false
       }
-      if (!isValidUserCodeCooldown(result.data)) {
+      if (!isUserCodeData(result.data) || !isValidUserCodeCooldown(result.data)) {
         rejectInvalidUserCodeCooldown('login', kind)
         return false
       }
@@ -5867,7 +5985,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setUserNotice(result?.errorMessage || '验证码发送失败')
         return false
       }
-      if (!isValidUserCodeCooldown(result.data)) {
+      if (!isUserCodeData(result.data) || !isValidUserCodeCooldown(result.data)) {
         rejectInvalidUserCodeCooldown('contact', kind)
         return false
       }
@@ -5893,6 +6011,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch {
       setUserNotice('联系方式绑定失败')
       return false
+    }
+  }
+
+  const prepareUserAvatarImage = async (filePath: string) => {
+    const prepareUserAvatarImageBridge = window.aiops?.prepareUserAvatarImage
+    if (typeof prepareUserAvatarImageBridge !== 'function') {
+      setUserNotice('头像读取服务不可用')
+      return null
+    }
+    try {
+      const result = await prepareUserAvatarImageBridge({ filePath })
+      if (!result?.ok || !result.data) {
+        setUserNotice(result?.errorMessage || '头像图片读取失败')
+        return null
+      }
+      if (!isUserAvatarPrepareData(result.data)) {
+        setUserNotice('头像后端返回了无效结果')
+        return null
+      }
+      setUserNotice(result.data.message || '头像图片已读取')
+      return result.data
+    } catch (error) {
+      setUserNotice(`头像图片读取失败：${error instanceof Error ? error.message : String(error)}`)
+      return null
     }
   }
 
@@ -6771,6 +6913,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!result?.ok || !result.data) {
         setSettingsNotice(result?.errorMessage || '可信设备移除失败')
         setUserNotice(result?.errorMessage || '可信设备移除失败')
+        return false
+      }
+      if (!isTrustedDeviceRevokeData(result.data)) {
+        setSettingsNotice('可信设备后端返回了无效结果')
+        setUserNotice('可信设备后端返回了无效结果')
         return false
       }
       trustedDevices.value = result.data.trustedDevices.map((device) => ({ ...device }))
@@ -10571,6 +10718,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resetUserPassword,
     sendUserContactCode,
     bindUserContact,
+    prepareUserAvatarImage,
     checkAboutUpdate,
     checkTopUpdate,
     handleTopUpdateClick,

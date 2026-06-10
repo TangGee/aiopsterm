@@ -847,28 +847,19 @@ const chooseAvatarImage = async () => {
     workspace.setUserNotice('头像选择服务不可用')
     return
   }
-  const prepareUserAvatarImage = window.aiops?.prepareUserAvatarImage
-  if (typeof prepareUserAvatarImage !== 'function') {
-    workspace.setUserNotice('头像读取服务不可用')
-    return
-  }
   try {
     const result = await showOpenDialog({
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
     })
     if (!result || result.canceled || !result.filePaths.length) return
-    const prepared = await prepareUserAvatarImage({ filePath: result.filePaths[0] })
-    if (!prepared.ok || !prepared.data?.dataUrl) {
-      workspace.setUserNotice(prepared.errorMessage || '头像图片读取失败')
-      return
-    }
-    avatarPreview.value = prepared.data.dataUrl
+    const prepared = await workspace.prepareUserAvatarImage(result.filePaths[0])
+    if (!prepared) return
+    avatarPreview.value = prepared.dataUrl
     avatarZoom.value = 1
     avatarOffset.x = 0
     avatarOffset.y = 0
     avatarDrag.active = false
-    workspace.setUserNotice(prepared.data.message || '头像图片已读取')
   } catch (error) {
     workspace.setUserNotice(`头像图片读取失败：${error instanceof Error ? error.message : String(error)}`)
   }
