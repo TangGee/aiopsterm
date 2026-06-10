@@ -312,10 +312,35 @@ type PostgresClient = {
 type PostgresDriver = {
   Client: new (config: Record<string, unknown>) => PostgresClient
 }
+type OracleExecuteResult = {
+  rows?: unknown[]
+  metaData?: Array<{ name?: string } | string>
+  rowsAffected?: number | null
+}
+type OracleConnection = {
+  execute: (sql: string, params?: unknown[] | Record<string, unknown>, options?: Record<string, unknown>) => Promise<OracleExecuteResult>
+  close: () => Promise<unknown>
+  commit?: () => Promise<unknown>
+  rollback?: () => Promise<unknown>
+}
+type OracleDriver = {
+  getConnection: (config: Record<string, unknown>) => Promise<OracleConnection>
+  OUT_FORMAT_OBJECT?: number
+  CLOB?: unknown
+  NCLOB?: unknown
+  BLOB?: unknown
+  fetchAsString?: unknown[]
+  fetchAsBuffer?: unknown[]
+  initOracleClient?: (config: { libDir?: string; configDir?: string; driverName?: string }) => unknown
+}
 export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
   mysqlDriver?: MySqlDriver
   postgresDriver?: PostgresDriver
+  oracleDriver?: OracleDriver | null
+  oracleClientLibDir?: string
+  oracleClientConfigDir?: string
+  oracleDriverName?: string
   stateFilePath?: string
 }
 type SqliteSchemaTableRow = { name?: string; type?: string }
@@ -328,12 +353,15 @@ let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
 let databaseRuntimeConfig: DatabaseRuntimeConfig = {}
 let mysqlRuntime: MySqlDriver | null | undefined
 let postgresRuntime: PostgresDriver | null | undefined
+let oracleRuntime: OracleDriver | null | undefined
+let oracleClientInitialized = false
 const databaseConnectionSecrets = new Map<string, string>()
 const databaseVerifiedConnections = new Set<string>()
 
 export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
   databaseRuntimeConfig = config ? { ...config } : {}
   databaseLoadedStateFilePath = ''
+  oracleClientInitialized = false
 }
 
 const loadSqliteRuntime = () => {
@@ -392,6 +420,38 @@ const loadPostgresRuntime = () => {
     postgresRuntime = null
   }
   return postgresRuntime
+}
+
+const loadOracleRuntime = () => {
+  if ('oracleDriver' in databaseRuntimeConfig) return databaseRuntimeConfig.oracleDriver ?? null
+  if (oracleRuntime !== undefined) return oracleRuntime
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loaded = require('oracledb') as unknown as OracleDriver & { default?: OracleDriver }
+    const driver = typeof loaded.getConnection === 'function' ? loaded : loaded.default && typeof loaded.default.getConnection === 'function' ? loaded.default : null
+    if (driver) {
+      if (driver.CLOB || driver.NCLOB) driver.fetchAsString = [driver.CLOB, driver.NCLOB].filter(Boolean)
+      if (driver.BLOB) driver.fetchAsBuffer = [driver.BLOB]
+    }
+    oracleRuntime = driver
+  } catch {
+    oracleRuntime = null
+  }
+  return oracleRuntime
+}
+
+const ensureOracleClientInitialized = (driver: OracleDriver) => {
+  if (oracleClientInitialized || !driver.initOracleClient) return
+  const libDir = trim(databaseRuntimeConfig.oracleClientLibDir)
+  const configDir = trim(databaseRuntimeConfig.oracleClientConfigDir)
+  const driverName = trim(databaseRuntimeConfig.oracleDriverName)
+  if (!libDir && !configDir && !driverName) return
+  driver.initOracleClient({
+    ...(libDir ? { libDir } : {}),
+    ...(configDir ? { configDir } : {}),
+    ...(driverName ? { driverName } : {})
+  })
+  oracleClientInitialized = true
 }
 
 const sqliteFilePathFromConnection = (connection: Pick<DatabaseConnectionInfo, 'filePath' | 'url'>) =>
@@ -659,6 +719,7 @@ const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTable
 const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string) =>
   sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
 
+type RelationalDatabaseType = Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'oracle'>
 type DatabaseMutationDialect = DatabaseEngineCode
 type DatabaseMutationStatement = Omit<DatabaseTableMutationPlanStatement, 'preview'>
 type DatabaseRowMutation = Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>
@@ -673,17 +734,22 @@ const databaseMutationPlaceholder = (dialect: DatabaseMutationDialect, index: nu
 }
 
 const databaseMutationTableReference = (
-  connection: Pick<DatabaseConnectionInfo, 'dbType' | 'database'> | null,
+  connection: Pick<DatabaseConnectionInfo, 'dbType' | 'database' | 'user'> | null,
   input: Pick<DatabaseTableMutationInput, 'databaseName' | 'schemaName' | 'tableName'>,
   dialect: DatabaseMutationDialect
 ) => {
-  const table = databaseMutationIdentifier(trim(input.tableName), dialect)
+  const tableName = dialect === 'oracle' ? oracleLookupIdentifier(input.tableName) : trim(input.tableName)
+  const table = databaseMutationIdentifier(tableName, dialect)
   if (dialect === 'mysql') return `${databaseMutationIdentifier(trim(input.databaseName), dialect)}.${table}`
   if (dialect === 'sqlite') {
     const schemaName = connection && connection.dbType === 'sqlite' ? sqliteSchemaNameFor(connection as DatabaseConnectionInfo, input.databaseName) : trim(input.databaseName) || SQLITE_MAIN_SCHEMA
     return `${databaseMutationIdentifier(schemaName, dialect)}.${table}`
   }
-  return `${databaseMutationIdentifier(trim(input.schemaName) || (dialect === 'postgresql' ? 'public' : ''), dialect)}.${table}`
+  if (dialect === 'oracle') {
+    const schemaName = oracleLookupIdentifier(trim(input.schemaName) || trim(connection?.user))
+    return schemaName ? `${databaseMutationIdentifier(schemaName, dialect)}.${table}` : table
+  }
+  return `${databaseMutationIdentifier(trim(input.schemaName) || 'public', dialect)}.${table}`
 }
 
 const decodeDatabaseMutationPrimaryKeyRowKey = (rowKey: string, primaryKey: string[]) => {
@@ -881,7 +947,7 @@ const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTa
 }
 
 const isRelationalConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is DatabaseConnectionInfo =>
-  !!connection && (connection.dbType === 'mysql' || connection.dbType === 'postgresql')
+  !!connection && (connection.dbType === 'mysql' || connection.dbType === 'postgresql' || connection.dbType === 'oracle')
 
 const relationalErrorCode = (error: unknown, fallback: string) => {
   const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
@@ -890,22 +956,48 @@ const relationalErrorCode = (error: unknown, fallback: string) => {
 
 const relationalErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
 
+const relationalEngineCode = (dbType: RelationalDatabaseType) => (dbType === 'postgresql' ? 'POSTGRES' : dbType.toUpperCase())
+
+const relationalFallbackCode = (dbType: RelationalDatabaseType, action: string) => `DB_${relationalEngineCode(dbType)}_${action}`
+
 const normalizeQueryRows = (rows: unknown): Array<Record<string, unknown>> =>
   Array.isArray(rows)
     ? rows.map((row) => (row && typeof row === 'object' && !Array.isArray(row) ? { ...(row as Record<string, unknown>) } : { value: row }))
     : []
 
-const relationalIdentifier = (value: string, dbType: 'mysql' | 'postgresql') =>
+const relationalIdentifier = (value: string, dbType: RelationalDatabaseType) =>
   dbType === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
 
-const relationalPlaceholder = (dbType: 'mysql' | 'postgresql', index: number) => (dbType === 'postgresql' ? `$${index}` : '?')
+const relationalPlaceholder = (dbType: RelationalDatabaseType, index: number) => {
+  if (dbType === 'postgresql') return `$${index}`
+  if (dbType === 'oracle') return `:${index}`
+  return '?'
+}
+
+const oracleLookupIdentifier = (value: string) => {
+  const raw = trim(value)
+  if (!raw) return ''
+  const unquoted = unquoteDatabaseIdentifier(raw)
+  return raw.startsWith('"') && raw.endsWith('"') ? unquoted : unquoted.toUpperCase()
+}
+
+const oracleSchemaNameFor = (
+  connection: Pick<DatabaseConnectionInfo, 'user'>,
+  input: Pick<DatabaseTableDdlInput, 'schemaName'>
+) => oracleLookupIdentifier(trim(input.schemaName) || trim(connection.user))
 
 const relationalTableReference = (
-  connection: Pick<DatabaseConnectionInfo, 'dbType'>,
+  connection: Pick<DatabaseConnectionInfo, 'dbType' | 'user'>,
   input: Pick<DatabaseTableDdlInput, 'databaseName' | 'schemaName' | 'tableName'>
 ) => {
-  const table = relationalIdentifier(trim(input.tableName), connection.dbType as 'mysql' | 'postgresql')
+  const dbType = connection.dbType as RelationalDatabaseType
+  const tableName = dbType === 'oracle' ? oracleLookupIdentifier(input.tableName) : trim(input.tableName)
+  const table = relationalIdentifier(tableName, dbType)
   if (connection.dbType === 'postgresql') return `${relationalIdentifier(trim(input.schemaName) || 'public', 'postgresql')}.${table}`
+  if (connection.dbType === 'oracle') {
+    const schemaName = oracleSchemaNameFor(connection, input)
+    return schemaName ? `${relationalIdentifier(schemaName, 'oracle')}.${table}` : table
+  }
   return `${relationalIdentifier(trim(input.databaseName), 'mysql')}.${table}`
 }
 
@@ -940,6 +1032,29 @@ const postgresConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'po
   database: trim(input.database) || undefined,
   connectionTimeoutMillis: RELATIONAL_TIMEOUT_MS,
   ...(trim(input.sslMode) && trim(input.sslMode) !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {})
+})
+
+const oracleConnectStringFromInput = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'database' | 'url'>) => {
+  const rawUrl = trim(input.url)
+  if (rawUrl) {
+    return rawUrl
+      .replace(/^jdbc:oracle:thin:@\/\//i, '')
+      .replace(/^jdbc:oracle:thin:@/i, '')
+      .replace(/^oracle:\/\//i, '')
+      .replace(/^\/\//, '')
+  }
+  const host = trim(input.host)
+  const port = normalizedDatabasePort(input.port)
+  const database = trim(input.database)
+  const portText = port ? `:${port}` : ''
+  return `${host}${portText}${database ? `/${database}` : ''}`
+}
+
+const oracleConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'url'>) => ({
+  user: trim(input.user),
+  password: input.password || undefined,
+  connectString: oracleConnectStringFromInput(input),
+  callTimeout: RELATIONAL_TIMEOUT_MS
 })
 
 const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): DatabaseConnectionTestInput => ({
@@ -978,6 +1093,17 @@ const openPostgresClient = async (input: Pick<DatabaseConnectionTestInput, 'host
   return client
 }
 
+const openOracleConnection = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'url'>) => {
+  const driver = loadOracleRuntime()
+  if (!driver) {
+    throw Object.assign(new Error('Oracle driver is unavailable. Install oracledb before connecting to Oracle.'), {
+      code: 'DB_ORACLE_DRIVER_UNAVAILABLE'
+    })
+  }
+  ensureOracleClientInitialized(driver)
+  return driver.getConnection(oracleConfigFor(input))
+}
+
 const withMysqlConnection = async <T>(connection: DatabaseConnectionInfo, fn: (client: MySqlConnection) => Promise<T>) => {
   let client: MySqlConnection | null = null
   try {
@@ -1010,6 +1136,22 @@ const withPostgresClient = async <T>(connection: DatabaseConnectionInfo, fn: (cl
   }
 }
 
+const withOracleConnection = async <T>(connection: DatabaseConnectionInfo, fn: (client: OracleConnection) => Promise<T>) => {
+  let client: OracleConnection | null = null
+  try {
+    client = await openOracleConnection(connectionTestInputFromSaved(connection))
+    return await fn(client)
+  } finally {
+    if (client) {
+      try {
+        await client.close()
+      } catch {
+        /* ignore close errors */
+      }
+    }
+  }
+}
+
 const mysqlRows = async <T extends Record<string, unknown>>(client: MySqlConnection, sql: string, params: unknown[] = []) => {
   const [rows] = await client.query<T[]>(sql, params)
   return normalizeQueryRows(rows) as T[]
@@ -1028,6 +1170,56 @@ const postgresRows = async <T extends Record<string, unknown>>(client: PostgresC
 const postgresExec = async (client: PostgresClient, sql: string, params: unknown[] = []) => {
   const result = await client.query(sql, params)
   return relationalRowCount(result, Number(result.rowCount ?? 0))
+}
+
+const oracleExecuteOptions = () => {
+  const driver = loadOracleRuntime()
+  return driver?.OUT_FORMAT_OBJECT ? { outFormat: driver.OUT_FORMAT_OBJECT } : {}
+}
+
+const oracleColumnsFromMetadata = (metaData: OracleExecuteResult['metaData'] | undefined) =>
+  (metaData ?? [])
+    .map((field) => (typeof field === 'string' ? field : trim(field.name)))
+    .filter(Boolean)
+
+const oracleRowsFromResult = <T extends Record<string, unknown>>(result: OracleExecuteResult) => {
+  const columns = oracleColumnsFromMetadata(result.metaData)
+  const rows = Array.isArray(result.rows) ? result.rows : []
+  return rows.map((row) => {
+    if (Array.isArray(row)) {
+      return Object.fromEntries(row.map((value, index) => [columns[index] || `column_${index + 1}`, value])) as T
+    }
+    return row && typeof row === 'object' ? ({ ...(row as Record<string, unknown>) } as T) : ({ value: row } as unknown as T)
+  })
+}
+
+const oracleRows = async <T extends Record<string, unknown>>(client: OracleConnection, sql: string, params: unknown[] = []) => {
+  const result = await client.execute(sql, params, oracleExecuteOptions())
+  return oracleRowsFromResult<T>(result)
+}
+
+const oracleExec = async (client: OracleConnection, sql: string, params: unknown[] = []) => {
+  const result = await client.execute(sql, params, oracleExecuteOptions())
+  return relationalRowCount(result, Number(result.rowsAffected ?? 0))
+}
+
+const oracleCommit = async (client: OracleConnection) => {
+  if (client.commit) return client.commit()
+  return oracleExec(client, 'COMMIT')
+}
+
+const oracleRollback = async (client: OracleConnection) => {
+  if (client.rollback) return client.rollback()
+  return oracleExec(client, 'ROLLBACK')
+}
+
+const rowValue = (row: Record<string, unknown>, ...names: string[]) => {
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(row, name)) return row[name]
+    const found = Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase())
+    if (found) return row[found]
+  }
+  return undefined
 }
 
 const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInput, startedAt: number): Promise<DatabaseConnectionTestResult> => {
@@ -1054,6 +1246,44 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
           await client.end()
         } catch {
           client.destroy?.()
+        }
+      }
+    }
+  }
+
+  if (input.dbType === 'oracle') {
+    let client: OracleConnection | null = null
+    try {
+      client = await openOracleConnection(input)
+      const versionRows = await oracleRows<{ version?: string; BANNER?: string }>(
+        client,
+        "SELECT banner AS version FROM v$version WHERE banner LIKE 'Oracle%' AND ROWNUM = 1"
+      ).catch(() => [])
+      const contextRows = versionRows.length
+        ? []
+        : await oracleRows<{ db_name?: string; service_name?: string; DB_NAME?: string; SERVICE_NAME?: string }>(
+            client,
+            "SELECT SYS_CONTEXT('USERENV', 'DB_NAME') AS db_name, SYS_CONTEXT('USERENV', 'SERVICE_NAME') AS service_name FROM DUAL"
+          ).catch(() => [])
+      const version = trim(rowValue(versionRows[0] ?? {}, 'VERSION', 'version', 'BANNER', 'banner'))
+      const fallbackName = trim(contextRows[0]?.db_name || contextRows[0]?.DB_NAME || contextRows[0]?.service_name || contextRows[0]?.SERVICE_NAME)
+      return {
+        ok: true,
+        data: {
+          dbType: 'oracle',
+          serverVersion: version || (fallbackName ? `Oracle ${fallbackName}` : 'Oracle'),
+          endpoint: endpointFor(input),
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    } catch (error) {
+      return { ok: false, errorCode: relationalErrorCode(error, 'DB_ORACLE_CONNECTION_FAILED'), errorMessage: relationalErrorMessage(error, 'Oracle connection failed.') }
+    } finally {
+      if (client) {
+        try {
+          await client.close()
+        } catch {
+          /* ignore close errors */
         }
       }
     }
@@ -1256,8 +1486,164 @@ const postgresCatalogsForConnection = async (connection: DatabaseConnectionInfo)
     return [{ name: databaseName, schemas }]
   })
 
+const oracleSystemSchemas = [
+  'ANONYMOUS',
+  'APEX_PUBLIC_USER',
+  'APPQOSSYS',
+  'AUDSYS',
+  'CTXSYS',
+  'DBSFWUSER',
+  'DBSNMP',
+  'DIP',
+  'DVF',
+  'DVSYS',
+  'GGSYS',
+  'GSMADMIN_INTERNAL',
+  'GSMCATUSER',
+  'GSMUSER',
+  'LBACSYS',
+  'MDSYS',
+  'OJVMSYS',
+  'OLAPSYS',
+  'ORACLE_OCM',
+  'ORDDATA',
+  'ORDPLUGINS',
+  'ORDSYS',
+  'OUTLN',
+  'REMOTE_SCHEDULER_AGENT',
+  'SI_INFORMTN_SCHEMA',
+  'SYS',
+  'SYS$UMF',
+  'SYSBACKUP',
+  'SYSDG',
+  'SYSKM',
+  'SYSRAC',
+  'SYSTEM',
+  'WMSYS',
+  'XDB',
+  'XS$NULL'
+]
+const oracleSystemSchemaListSql = oracleSystemSchemas.map((schema) => `'${schema}'`).join(', ')
+
+const oracleColumnType = (row: Record<string, unknown>) => {
+  const dataType = trim(rowValue(row, 'DATA_TYPE', 'data_type')).toUpperCase()
+  const length = Number(rowValue(row, 'DATA_LENGTH', 'data_length'))
+  const precision = Number(rowValue(row, 'DATA_PRECISION', 'data_precision'))
+  const scale = Number(rowValue(row, 'DATA_SCALE', 'data_scale'))
+  if ((dataType.includes('CHAR') || dataType === 'RAW') && Number.isFinite(length) && length > 0) return `${dataType}(${length})`
+  if (dataType === 'NUMBER' && Number.isFinite(precision) && precision > 0) {
+    return Number.isFinite(scale) && scale > 0 ? `${dataType}(${precision}, ${scale})` : `${dataType}(${precision})`
+  }
+  return dataType || 'UNKNOWN'
+}
+
+const oracleCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> =>
+  withOracleConnection(connection, async (client) => {
+    const contextRows = await oracleRows<Record<string, unknown>>(
+      client,
+      "SELECT SYS_CONTEXT('USERENV', 'SERVICE_NAME') AS service_name, SYS_CONTEXT('USERENV', 'DB_NAME') AS db_name FROM DUAL"
+    ).catch(() => [])
+    const databaseName =
+      trim(connection.database) ||
+      trim(rowValue(contextRows[0] ?? {}, 'SERVICE_NAME', 'service_name')) ||
+      trim(rowValue(contextRows[0] ?? {}, 'DB_NAME', 'db_name')) ||
+      oracleConnectStringFromInput(connection)
+    const schemaRows = await oracleRows<Record<string, unknown>>(
+      client,
+      `SELECT DISTINCT owner FROM all_objects WHERE owner NOT IN (${oracleSystemSchemaListSql}) ORDER BY owner`
+    )
+    const objectRows = await oracleRows<Record<string, unknown>>(
+      client,
+      `SELECT owner, object_name, object_type FROM all_objects WHERE owner NOT IN (${oracleSystemSchemaListSql}) AND object_type IN ('TABLE', 'VIEW', 'FUNCTION', 'PROCEDURE') ORDER BY owner, object_type, object_name`
+    )
+    const columnRows = await oracleRows<Record<string, unknown>>(
+      client,
+      `SELECT owner, table_name, column_name, data_type, data_length, data_precision, data_scale, nullable FROM all_tab_columns WHERE owner NOT IN (${oracleSystemSchemaListSql}) ORDER BY owner, table_name, column_id`
+    )
+    const primaryKeyRows = await oracleRows<Record<string, unknown>>(
+      client,
+      `SELECT c.owner, c.table_name, cc.column_name FROM all_constraints c JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name AND cc.table_name = c.table_name WHERE c.constraint_type = 'P' AND c.owner NOT IN (${oracleSystemSchemaListSql}) ORDER BY c.owner, c.table_name, cc.position`
+    )
+
+    const pkByTable = new Map<string, string[]>()
+    primaryKeyRows.forEach((row) => {
+      const owner = trim(rowValue(row, 'OWNER', 'owner'))
+      const tableName = trim(rowValue(row, 'TABLE_NAME', 'table_name'))
+      const column = trim(rowValue(row, 'COLUMN_NAME', 'column_name'))
+      const key = `${owner}.${tableName}`
+      if (owner && tableName && column) pkByTable.set(key, [...(pkByTable.get(key) ?? []), column])
+    })
+
+    const columnsByTable = new Map<string, DatabaseColumnInfo[]>()
+    columnRows.forEach((row) => {
+      const owner = trim(rowValue(row, 'OWNER', 'owner'))
+      const tableName = trim(rowValue(row, 'TABLE_NAME', 'table_name'))
+      const name = trim(rowValue(row, 'COLUMN_NAME', 'column_name'))
+      if (!owner || !tableName || !name) return
+      const key = `${owner}.${tableName}`
+      const primaryKey = pkByTable.get(key) ?? []
+      columnsByTable.set(key, [
+        ...(columnsByTable.get(key) ?? []),
+        {
+          name,
+          type: oracleColumnType(row),
+          nullable: trim(rowValue(row, 'NULLABLE', 'nullable')).toUpperCase() !== 'N',
+          ...(primaryKey.includes(name) ? { key: 'PK' as const } : {})
+        }
+      ])
+    })
+
+    const objectOwners = new Set(objectRows.map((row) => trim(rowValue(row, 'OWNER', 'owner'))).filter(Boolean))
+    const orderedSchemas = Array.from(
+      new Set([...schemaRows.map((row) => trim(rowValue(row, 'OWNER', 'owner'))).filter(Boolean), ...Array.from(objectOwners)])
+    ).sort((first, second) => first.localeCompare(second))
+    const schemas = orderedSchemas
+      .map((schemaName): DatabaseSchemaInfo => {
+        const schemaObjects = objectRows.filter((row) => trim(rowValue(row, 'OWNER', 'owner')) === schemaName)
+        const functions = schemaObjects
+          .filter((row) => trim(rowValue(row, 'OBJECT_TYPE', 'object_type')).toUpperCase() === 'FUNCTION')
+          .map((row) => trim(rowValue(row, 'OBJECT_NAME', 'object_name')))
+          .filter(Boolean)
+        const procedures = schemaObjects
+          .filter((row) => trim(rowValue(row, 'OBJECT_TYPE', 'object_type')).toUpperCase() === 'PROCEDURE')
+          .map((row) => trim(rowValue(row, 'OBJECT_NAME', 'object_name')))
+          .filter(Boolean)
+        const tableFor = (row: Record<string, unknown>) => {
+          const name = trim(rowValue(row, 'OBJECT_NAME', 'object_name'))
+          const key = `${schemaName}.${name}`
+          const columns = columnsByTable.get(key) ?? []
+          return {
+            id: databaseColumnId(connection.id, `${databaseName}-${schemaName}-${name}`),
+            name,
+            columns,
+            primaryKey: pkByTable.get(key) ?? []
+          }
+        }
+        return {
+          name: schemaName,
+          tables: schemaObjects
+            .filter((row) => trim(rowValue(row, 'OBJECT_TYPE', 'object_type')).toUpperCase() === 'TABLE')
+            .map(tableFor)
+            .filter((table) => table.name),
+          views: schemaObjects
+            .filter((row) => trim(rowValue(row, 'OBJECT_TYPE', 'object_type')).toUpperCase() === 'VIEW')
+            .map(tableFor)
+            .filter((table) => table.name),
+          functions,
+          procedures
+        }
+      })
+      .filter(schemaHasObjects)
+
+    return [{ name: databaseName, schemas }]
+  })
+
 const relationalCatalogsForConnection = (connection: DatabaseConnectionInfo) =>
-  connection.dbType === 'mysql' ? mysqlCatalogsForConnection(connection) : postgresCatalogsForConnection(connection)
+  connection.dbType === 'mysql'
+    ? mysqlCatalogsForConnection(connection)
+    : connection.dbType === 'oracle'
+      ? oracleCatalogsForConnection(connection)
+      : postgresCatalogsForConnection(connection)
 
 const applyConnectionFailure = (connectionId: string, error: unknown, fallbackCode: string, fallbackMessage: string) => {
   const index = databaseConnections.findIndex((connection) => connection.id === connectionId)
@@ -1295,6 +1681,32 @@ const relationalColumnsForTable = async (
       )
     )
   }
+  if (connection.dbType === 'oracle') {
+    return withOracleConnection(connection, async (client) => {
+      const schemaName = oracleSchemaNameFor(connection, input)
+      const tableName = oracleLookupIdentifier(input.tableName)
+      const primaryKeys = await oracleRows<Record<string, unknown>>(
+        client,
+        "SELECT cc.column_name FROM all_constraints c JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name AND cc.table_name = c.table_name WHERE c.constraint_type = 'P' AND c.owner = :1 AND c.table_name = :2 ORDER BY cc.position",
+        [schemaName, tableName]
+      )
+      const pk = primaryKeys.map((row) => trim(rowValue(row, 'COLUMN_NAME', 'column_name'))).filter(Boolean)
+      const rows = await oracleRows<Record<string, unknown>>(
+        client,
+        'SELECT column_name, data_type, data_length, data_precision, data_scale, nullable FROM all_tab_columns WHERE owner = :1 AND table_name = :2 ORDER BY column_id',
+        [schemaName, tableName]
+      )
+      return rows.map((row) => {
+        const name = trim(rowValue(row, 'COLUMN_NAME', 'column_name'))
+        return {
+          name,
+          type: oracleColumnType(row),
+          nullable: trim(rowValue(row, 'NULLABLE', 'nullable')).toUpperCase() !== 'N',
+          ...(pk.includes(name) ? { key: 'PK' as const } : {})
+        }
+      })
+    })
+  }
   return withPostgresClient(connection, async (client) => {
     const schemaName = trim(input.schemaName) || 'public'
     const primaryKeys = await postgresRows<{ column_name?: string }>(
@@ -1327,7 +1739,7 @@ const relationalColumnsForTable = async (
   })
 }
 
-const relationalWhereForFilters = (dbType: 'mysql' | 'postgresql', filters: DatabaseColumnFilter[], knownColumns: string[]) => {
+const relationalWhereForFilters = (dbType: RelationalDatabaseType, filters: DatabaseColumnFilter[], knownColumns: string[]) => {
   const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
   const clauses: string[] = []
   const params: unknown[] = []
@@ -1375,7 +1787,7 @@ const relationalWhereForFilters = (dbType: 'mysql' | 'postgresql', filters: Data
   }
 }
 
-const relationalOrderByFor = (dbType: 'mysql' | 'postgresql', sort: DatabaseColumnSort | null | undefined, knownColumns: string[]) => {
+const relationalOrderByFor = (dbType: RelationalDatabaseType, sort: DatabaseColumnSort | null | undefined, knownColumns: string[]) => {
   if (!sort) return ''
   const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
   const column = known.get(trim(sort.column).toLowerCase())
@@ -1388,7 +1800,7 @@ const relationalQueryTable = async (
   input: DatabaseTableQueryInput,
   startedAt: number
 ): Promise<DatabaseTableQueryResult> => {
-  const dbType = connection.dbType as 'mysql' | 'postgresql'
+  const dbType = connection.dbType as RelationalDatabaseType
   try {
     const columns = await relationalColumnsForTable(connection, input)
     if (!columns.length) {
@@ -1405,9 +1817,12 @@ const relationalQueryTable = async (
     const tableRef = relationalTableReference(connection, input)
     const limitPlaceholder = relationalPlaceholder(dbType, where.params.length + 1)
     const offsetPlaceholder = relationalPlaceholder(dbType, where.params.length + 2)
-    const rowsSql = `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
+    const rowsSql =
+      dbType === 'oracle'
+        ? `SELECT * FROM ${tableRef}${where.sql}${orderBy} OFFSET ${offsetPlaceholder} ROWS FETCH NEXT ${limitPlaceholder} ROWS ONLY`
+        : `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
     const countSql = `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`
-    const params = [...where.params, pageSize, offset]
+    const params = dbType === 'oracle' ? [...where.params, offset, pageSize] : [...where.params, pageSize, offset]
 
     if (connection.dbType === 'mysql') {
       return await withMysqlConnection(connection, async (client) => {
@@ -1421,6 +1836,23 @@ const relationalQueryTable = async (
             rowCount: rows.length,
             durationMs: Math.max(1, Date.now() - startedAt),
             total: input.withTotal ? Number(count[0]?.total ?? 0) : null,
+            knownColumns
+          }
+        }
+      })
+    }
+    if (connection.dbType === 'oracle') {
+      return await withOracleConnection(connection, async (client) => {
+        const rows = await oracleRows<Record<string, unknown>>(client, rowsSql, params)
+        const count = input.withTotal ? await oracleRows<Record<string, unknown>>(client, countSql, where.params) : []
+        return {
+          ok: true,
+          data: {
+            columns: knownColumns,
+            rows,
+            rowCount: rows.length,
+            durationMs: Math.max(1, Date.now() - startedAt),
+            total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'TOTAL', 'total') ?? 0) : null,
             knownColumns
           }
         }
@@ -1445,13 +1877,14 @@ const relationalQueryTable = async (
   } catch (error) {
     return {
       ok: false,
-      errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_QUERY_FAILED' : 'DB_POSTGRES_QUERY_FAILED'),
+      errorCode: relationalErrorCode(error, relationalFallbackCode(dbType, 'QUERY_FAILED')),
       errorMessage: relationalErrorMessage(error, 'Database table query failed.')
     }
   }
 }
 
 const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteResult> => {
+  const dbType = connection.dbType as RelationalDatabaseType
   try {
     if (connection.dbType === 'mysql') {
       return await withMysqlConnection(connection, async (client) => {
@@ -1464,6 +1897,22 @@ const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: str
             columns: fields.map((field) => trim(field.name)).filter(Boolean) || columnsForRows(rows),
             rows,
             rowCount: rows.length || relationalRowCount(rawRows),
+            durationMs: Math.max(1, Date.now() - startedAt)
+          }
+        }
+      })
+    }
+    if (connection.dbType === 'oracle') {
+      return await withOracleConnection(connection, async (client) => {
+        const result = await client.execute(rawSql, [], oracleExecuteOptions())
+        const rows = oracleRowsFromResult<Record<string, unknown>>(result)
+        const columns = oracleColumnsFromMetadata(result.metaData)
+        return {
+          ok: true,
+          data: {
+            columns: columns.length ? columns : columnsForRows(rows),
+            rows,
+            rowCount: rows.length || Number(result.rowsAffected ?? 0),
             durationMs: Math.max(1, Date.now() - startedAt)
           }
         }
@@ -1486,7 +1935,7 @@ const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: str
   } catch (error) {
     return {
       ok: false,
-      errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_QUERY_FAILED' : 'DB_POSTGRES_QUERY_FAILED'),
+      errorCode: relationalErrorCode(error, relationalFallbackCode(dbType, 'QUERY_FAILED')),
       errorMessage: relationalErrorMessage(error, 'Database query failed.')
     }
   }
@@ -1505,7 +1954,14 @@ const postgresColumnTypeDdl = (row: {
   return dataType || trim(row.udt_name) || 'text'
 }
 
+const oracleDdlPermissionError = (error: unknown) => {
+  const message = relationalErrorMessage(error, '')
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+  return /ORA-01031|insufficient privileges|permission/i.test(`${code} ${message}`)
+}
+
 const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> => {
+  const dbType = connection.dbType as RelationalDatabaseType
   try {
     if (connection.dbType === 'mysql') {
       return await withMysqlConnection(connection, async (client) => {
@@ -1517,6 +1973,34 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
         const ddl = values.find((value, index) => index > 0 && typeof value === 'string')
         if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
         return { ok: true, data: { ddl: String(ddl) } }
+      })
+    }
+    if (connection.dbType === 'oracle') {
+      return await withOracleConnection(connection, async (client) => {
+        const schemaName = oracleSchemaNameFor(connection, input)
+        const tableName = oracleLookupIdentifier(input.tableName)
+        const objectRows = await oracleRows<Record<string, unknown>>(
+          client,
+          "SELECT object_type FROM all_objects WHERE owner = :1 AND object_name = :2 AND object_type IN ('TABLE', 'VIEW') ORDER BY CASE object_type WHEN 'TABLE' THEN 1 ELSE 2 END",
+          [schemaName, tableName]
+        )
+        const objectType = trim(rowValue(objectRows[0] ?? {}, 'OBJECT_TYPE', 'object_type'))
+        if (!objectType) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        try {
+          const rows = await oracleRows<Record<string, unknown>>(
+            client,
+            'SELECT DBMS_METADATA.GET_DDL(:1, :2, :3) AS ddl FROM dual',
+            [objectType, tableName, schemaName]
+          )
+          const ddl = trim(rowValue(rows[0] ?? {}, 'DDL', 'ddl'))
+          if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+          return { ok: true, data: { ddl } }
+        } catch (error) {
+          if (oracleDdlPermissionError(error)) {
+            return { ok: false, errorCode: 'permission', errorMessage: 'DDL requires elevated catalog permission.' }
+          }
+          throw error
+        }
       })
     }
 
@@ -1569,7 +2053,7 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
   } catch (error) {
     return {
       ok: false,
-      errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_DDL_FAILED' : 'DB_POSTGRES_DDL_FAILED'),
+      errorCode: relationalErrorCode(error, relationalFallbackCode(dbType, 'DDL_FAILED')),
       errorMessage: relationalErrorMessage(error, 'Database DDL lookup failed.')
     }
   }
@@ -1580,7 +2064,7 @@ const relationalMutateTable = async (
   input: DatabaseTableMutationInput,
   startedAt: number
 ): Promise<DatabaseTableMutationResult> => {
-  const dbType = connection.dbType as 'mysql' | 'postgresql'
+  const dbType = connection.dbType as RelationalDatabaseType
   try {
     const columns = await relationalColumnsForTable(connection, input)
     if (!columns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
@@ -1604,16 +2088,28 @@ const relationalMutateTable = async (
         }
       })
     } else {
-      await withPostgresClient(connection, async (client) => {
-        await postgresExec(client, 'BEGIN')
-        try {
-          for (const statement of statements) affected += await postgresExec(client, statement.sql, statement.params)
-          await postgresExec(client, 'COMMIT')
-        } catch (error) {
-          await postgresExec(client, 'ROLLBACK').catch(() => undefined)
-          throw error
-        }
-      })
+      if (connection.dbType === 'oracle') {
+        await withOracleConnection(connection, async (client) => {
+          try {
+            for (const statement of statements) affected += await oracleExec(client, statement.sql, statement.params)
+            await oracleCommit(client)
+          } catch (error) {
+            await oracleRollback(client).catch(() => undefined)
+            throw error
+          }
+        })
+      } else {
+        await withPostgresClient(connection, async (client) => {
+          await postgresExec(client, 'BEGIN')
+          try {
+            for (const statement of statements) affected += await postgresExec(client, statement.sql, statement.params)
+            await postgresExec(client, 'COMMIT')
+          } catch (error) {
+            await postgresExec(client, 'ROLLBACK').catch(() => undefined)
+            throw error
+          }
+        })
+      }
     }
     const index = databaseConnections.findIndex((item) => item.id === connection.id)
     if (index >= 0) {
@@ -1631,7 +2127,7 @@ const relationalMutateTable = async (
   } catch (error) {
     return {
       ok: false,
-      errorCode: relationalErrorCode(error, dbType === 'mysql' ? 'DB_MYSQL_MUTATION_FAILED' : 'DB_POSTGRES_MUTATION_FAILED'),
+      errorCode: relationalErrorCode(error, relationalFallbackCode(dbType, 'MUTATION_FAILED')),
       errorMessage: relationalErrorMessage(error, 'Database table mutation failed.')
     }
   }
@@ -2504,7 +3000,12 @@ export async function connectDatabaseConnection(connectionId: string): Promise<D
         catalogs
       }))
     } catch (error) {
-      const failed = applyConnectionFailure(id, error, connection.dbType === 'mysql' ? 'DB_MYSQL_CONNECTION_FAILED' : 'DB_POSTGRES_CONNECTION_FAILED', 'Database connection failed.')
+      const failed = applyConnectionFailure(
+        id,
+        error,
+        relationalFallbackCode(connection.dbType as RelationalDatabaseType, 'CONNECTION_FAILED'),
+        'Database connection failed.'
+      )
       return failed
     }
   }
@@ -2540,7 +3041,12 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
         catalogs
       }))
     } catch (error) {
-      const failed = applyConnectionFailure(id, error, connection.dbType === 'mysql' ? 'DB_MYSQL_REFRESH_FAILED' : 'DB_POSTGRES_REFRESH_FAILED', 'Database schema refresh failed.')
+      const failed = applyConnectionFailure(
+        id,
+        error,
+        relationalFallbackCode(connection.dbType as RelationalDatabaseType, 'REFRESH_FAILED'),
+        'Database schema refresh failed.'
+      )
       return failed
     }
   }
@@ -3702,15 +4208,8 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
   }
 
   if (!shouldUseDatabaseSeedData()) {
-    if (input.dbType === 'mysql' || input.dbType === 'postgresql') {
+    if (input.dbType === 'mysql' || input.dbType === 'postgresql' || input.dbType === 'oracle') {
       return testRelationalDatabaseConnection(input, startedAt)
-    }
-    if (input.dbType === 'oracle') {
-      return {
-        ok: false,
-        errorCode: 'DB_ORACLE_DRIVER_UNAVAILABLE',
-        errorMessage: 'Oracle driver is not wired in this aiopsterm backend yet.'
-      }
     }
   }
 
@@ -4057,7 +4556,7 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
       } catch (error) {
         return {
           ok: false,
-          errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_MUTATION_PLAN_FAILED' : 'DB_POSTGRES_MUTATION_PLAN_FAILED'),
+          errorCode: relationalErrorCode(error, relationalFallbackCode(connection.dbType as RelationalDatabaseType, 'MUTATION_PLAN_FAILED')),
           errorMessage: relationalErrorMessage(error, 'Database table mutation planning failed.')
         }
       }

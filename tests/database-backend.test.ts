@@ -191,6 +191,128 @@ const createMysqlDriverDouble = () => {
   }
 }
 
+const createOracleDriverDouble = () => {
+  const state = {
+    connected: 0,
+    closed: 0,
+    committed: 0,
+    rolledBack: 0,
+    configs: [] as Array<Record<string, unknown>>,
+    sql: [] as Array<{ sql: string; params: unknown[] }>,
+    rows: [
+      { EVENT_ID: 501, ACTOR: 'deploy-bot', ACTION: 'RELEASE_START', CREATED_AT: '2026-06-09 10:00:00' },
+      { EVENT_ID: 502, ACTOR: 'ops-user', ACTION: 'MANUAL_APPROVE', CREATED_AT: '2026-06-09 10:05:00' }
+    ] as Array<Record<string, unknown>>
+  }
+  const metadataFor = (rows: Array<Record<string, unknown>>) => Object.keys(rows[0] ?? {}).map((name) => ({ name }))
+  const rowsFor = (rows: Array<Record<string, unknown>>, rowsAffected: number | null = rows.length) => ({
+    rows: rows.map((row) => ({ ...row })),
+    metaData: metadataFor(rows),
+    rowsAffected
+  })
+  return {
+    driver: {
+      OUT_FORMAT_OBJECT: 4002,
+      async getConnection(config: Record<string, unknown>) {
+        state.connected += 1
+        state.configs.push({ ...config })
+        return {
+          async execute(sql: string, params: unknown[] | Record<string, unknown> = []) {
+            const bindParams = Array.isArray(params) ? params : Object.values(params)
+            const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+            state.sql.push({ sql, params: bindParams.slice() })
+
+            if (normalized.includes('from v$version')) return rowsFor([{ VERSION: 'Oracle Database 23ai live-driver' }])
+            if (normalized.includes("sys_context('userenv', 'service_name')")) {
+              return rowsFor([{ SERVICE_NAME: 'ORCLPDB1', DB_NAME: 'ORCLCDB' }])
+            }
+            if (normalized.startsWith('select distinct owner from all_objects')) return rowsFor([{ OWNER: 'OPS' }])
+            if (normalized.includes('select owner, object_name, object_type from all_objects')) {
+              return rowsFor([
+                { OWNER: 'OPS', OBJECT_NAME: 'AUDIT_LOG', OBJECT_TYPE: 'TABLE' },
+                { OWNER: 'OPS', OBJECT_NAME: 'AUDIT_LOG_V', OBJECT_TYPE: 'VIEW' },
+                { OWNER: 'OPS', OBJECT_NAME: 'AUDIT_SUMMARY', OBJECT_TYPE: 'FUNCTION' },
+                { OWNER: 'OPS', OBJECT_NAME: 'ARCHIVE_AUDIT', OBJECT_TYPE: 'PROCEDURE' }
+              ])
+            }
+            if (normalized.includes('from all_tab_columns')) {
+              const ownerFilter = String(bindParams[0] ?? '')
+              const tableFilter = String(bindParams[1] ?? '')
+              const columns = [
+                { OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG', COLUMN_NAME: 'EVENT_ID', DATA_TYPE: 'NUMBER', DATA_LENGTH: 22, DATA_PRECISION: 10, DATA_SCALE: 0, NULLABLE: 'N' },
+                { OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG', COLUMN_NAME: 'ACTOR', DATA_TYPE: 'VARCHAR2', DATA_LENGTH: 64, DATA_PRECISION: null, DATA_SCALE: null, NULLABLE: 'N' },
+                { OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG', COLUMN_NAME: 'ACTION', DATA_TYPE: 'VARCHAR2', DATA_LENGTH: 64, DATA_PRECISION: null, DATA_SCALE: null, NULLABLE: 'N' },
+                { OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG', COLUMN_NAME: 'CREATED_AT', DATA_TYPE: 'TIMESTAMP', DATA_LENGTH: 11, DATA_PRECISION: null, DATA_SCALE: null, NULLABLE: 'N' },
+                { OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG_V', COLUMN_NAME: 'EVENT_ID', DATA_TYPE: 'NUMBER', DATA_LENGTH: 22, DATA_PRECISION: 10, DATA_SCALE: 0, NULLABLE: 'N' },
+                { OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG_V', COLUMN_NAME: 'ACTION', DATA_TYPE: 'VARCHAR2', DATA_LENGTH: 64, DATA_PRECISION: null, DATA_SCALE: null, NULLABLE: 'N' }
+              ]
+              return rowsFor(columns.filter((row) => (!ownerFilter || row.OWNER === ownerFilter) && (!tableFilter || row.TABLE_NAME === tableFilter)))
+            }
+            if (normalized.includes('from all_constraints')) {
+              const ownerFilter = String(bindParams[0] ?? '')
+              const tableFilter = String(bindParams[1] ?? '')
+              const keys = [{ OWNER: 'OPS', TABLE_NAME: 'AUDIT_LOG', COLUMN_NAME: 'EVENT_ID' }]
+              return rowsFor(keys.filter((row) => (!ownerFilter || row.OWNER === ownerFilter) && (!tableFilter || row.TABLE_NAME === tableFilter)))
+            }
+            if (normalized.includes('select object_type from all_objects')) return rowsFor([{ OBJECT_TYPE: 'TABLE' }])
+            if (normalized.includes('dbms_metadata.get_ddl')) {
+              return rowsFor([
+                {
+                  DDL:
+                    'CREATE TABLE "OPS"."AUDIT_LOG" (\n  "EVENT_ID" NUMBER(10) NOT NULL,\n  "ACTOR" VARCHAR2(64) NOT NULL,\n  "ACTION" VARCHAR2(64) NOT NULL,\n  "CREATED_AT" TIMESTAMP NOT NULL,\n  PRIMARY KEY ("EVENT_ID")\n)'
+                }
+              ])
+            }
+            if (normalized.startsWith('select count(*)')) {
+              const action = bindParams[0]
+              return rowsFor([{ TOTAL: action ? state.rows.filter((row) => row.ACTION === action).length : state.rows.length }])
+            }
+            if (normalized.startsWith('select') && normalized.includes('audit_log')) {
+              const action = bindParams[0]
+              let rows = state.rows
+              if (typeof action === 'string') rows = rows.filter((row) => row.ACTION === action)
+              return rowsFor(rows)
+            }
+            if (normalized.startsWith('update ')) {
+              const action = bindParams[0]
+              const eventId = bindParams[1]
+              const row = state.rows.find((item) => item.EVENT_ID === eventId)
+              if (row) row.ACTION = action
+              return { rows: [], metaData: [], rowsAffected: row ? 1 : 0 }
+            }
+            if (normalized.startsWith('insert ')) {
+              state.rows.push({ EVENT_ID: bindParams[0], ACTOR: bindParams[1], ACTION: bindParams[2], CREATED_AT: bindParams[3] })
+              return { rows: [], metaData: [], rowsAffected: 1 }
+            }
+            if (normalized.startsWith('delete ')) {
+              const eventId = bindParams[0]
+              const before = state.rows.length
+              state.rows = state.rows.filter((row) => row.EVENT_ID !== eventId)
+              return { rows: [], metaData: [], rowsAffected: before - state.rows.length }
+            }
+            if (normalized.startsWith('truncate ')) {
+              const affected = state.rows.length
+              state.rows = []
+              return { rows: [], metaData: [], rowsAffected: affected }
+            }
+            throw Object.assign(new Error(`unexpected oracle query: ${sql}`), { code: 'ORA_FAKE_UNHANDLED' })
+          },
+          async close() {
+            state.closed += 1
+          },
+          async commit() {
+            state.committed += 1
+          },
+          async rollback() {
+            state.rolledBack += 1
+          }
+        }
+      }
+    },
+    state
+  }
+}
+
 let configureDatabaseBackendRuntime: (config?: {
   getConfig?: () => UserConfig
   fetch?: typeof fetch
@@ -2165,9 +2287,168 @@ WHERE status = ''open'';
     expect(state.configs.at(-1)).toMatchObject({ password: 'secret' })
   })
 
-  it('uses the injected MySQL driver and reports unsupported engines without seed success in non-seed runtime', async () => {
+  it('uses the injected Oracle driver in non-seed runtime instead of backend seed rows', async () => {
+    const { driver, state } = createOracleDriverDouble()
+    configureDatabaseRuntime({
+      useSeedData: false,
+      oracleDriver: driver,
+      oracleClientLibDir: '/opt/oracle/instantclient',
+      oracleClientConfigDir: '/opt/oracle/network/admin',
+      oracleDriverName: 'aiopsterm'
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'oracle',
+      name: 'live-oracle',
+      user: 'ops',
+      password: 'secret',
+      database: 'ORCLPDB1',
+      url: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'oracle',
+      serverVersion: 'Oracle Database 23ai live-driver',
+      endpoint: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1'
+    })
+    expect(state.configs[0]).toMatchObject({
+      user: 'ops',
+      password: 'secret',
+      connectString: 'db.example.test:1521/ORCLPDB1'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'oracle',
+        name: 'live-oracle',
+        user: 'ops',
+        password: 'secret',
+        database: 'ORCLPDB1',
+        url: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-oracle',
+      dbType: 'oracle',
+      host: 'connect-string',
+      port: null,
+      status: 'idle',
+      hasPassword: true
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-oracle')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    const opsSchema = connected.data?.connection.catalogs[0]?.schemas?.find((schema) => schema.name === 'OPS')
+    expect(opsSchema?.tables[0]).toMatchObject({
+      name: 'AUDIT_LOG',
+      primaryKey: ['EVENT_ID'],
+      columns: expect.arrayContaining([
+        expect.objectContaining({ name: 'EVENT_ID', type: 'NUMBER(10)', key: 'PK' }),
+        expect.objectContaining({ name: 'ACTOR', type: 'VARCHAR2(64)' })
+      ])
+    })
+    expect(opsSchema?.views?.map((view) => view.name)).toEqual(['AUDIT_LOG_V'])
+    expect(opsSchema?.functions).toEqual(['AUDIT_SUMMARY'])
+    expect(opsSchema?.procedures).toEqual(['ARCHIVE_AUDIT'])
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-oracle',
+      dbType: 'oracle',
+      databaseName: 'ORCLPDB1',
+      schemaName: 'OPS',
+      sql: 'select * from ops.audit_log'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.columns).toEqual(['EVENT_ID', 'ACTOR', 'ACTION', 'CREATED_AT'])
+    expect(sql.data?.rows).toEqual([
+      expect.objectContaining({ EVENT_ID: 501, ACTION: 'RELEASE_START' }),
+      expect.objectContaining({ EVENT_ID: 502, ACTION: 'MANUAL_APPROVE' })
+    ])
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-oracle',
+      dbType: 'oracle',
+      databaseName: 'ORCLPDB1',
+      schemaName: 'OPS',
+      tableName: 'AUDIT_LOG',
+      filters: [{ column: 'ACTION', operator: 'eq', value: 'RELEASE_START' }],
+      sort: { column: 'EVENT_ID', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data?.rows).toEqual([expect.objectContaining({ EVENT_ID: 501 })])
+    expect(tablePage.data?.total).toBe(1)
+    expect(state.sql.some((entry) => /offset :3 rows fetch next :2 rows only/i.test(entry.sql.replace(/\s+/g, ' ')))).toBe(true)
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-oracle',
+      dbType: 'oracle',
+      databaseName: 'ORCLPDB1',
+      schemaName: 'OPS',
+      tableName: 'AUDIT_LOG'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE "OPS"."AUDIT_LOG"')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-oracle',
+      dbType: 'oracle',
+      databaseName: 'ORCLPDB1',
+      schemaName: 'OPS',
+      tableName: 'AUDIT_LOG',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([501]), primaryKey: ['EVENT_ID'], patch: { ACTION: 'RELEASE_DONE' } },
+        { kind: 'insert', values: { EVENT_ID: 503, ACTOR: 'scheduler', ACTION: 'ROLLBACK_READY', CREATED_AT: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([502]), primaryKey: ['EVENT_ID'] }
+      ]
+    })
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.preview).toContain('UPDATE "OPS"."AUDIT_LOG" SET "ACTION" = \'RELEASE_DONE\' WHERE "EVENT_ID" = 501;')
+    expect(plan.data?.statements[0]).toMatchObject({
+      kind: 'update',
+      sql: 'UPDATE "OPS"."AUDIT_LOG" SET "ACTION" = :1 WHERE "EVENT_ID" = :2',
+      params: ['RELEASE_DONE', 501]
+    })
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-oracle',
+      databaseName: 'ORCLPDB1',
+      schemaName: 'OPS',
+      tableName: 'AUDIT_LOG',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([501]), primaryKey: ['EVENT_ID'], patch: { ACTION: 'RELEASE_DONE' } },
+        { kind: 'insert', values: { EVENT_ID: 503, ACTOR: 'scheduler', ACTION: 'ROLLBACK_READY', CREATED_AT: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([502]), primaryKey: ['EVENT_ID'] }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(state.rows).toEqual([
+      expect.objectContaining({ EVENT_ID: 501, ACTION: 'RELEASE_DONE' }),
+      expect.objectContaining({ EVENT_ID: 503, ACTION: 'ROLLBACK_READY' })
+    ])
+    expect(state.committed).toBeGreaterThan(0)
+
+    const refreshed = await refreshDatabaseConnection('conn-live-oracle')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.schemas?.[0]?.tables[0]?.name).toBe('AUDIT_LOG')
+    expect(state.connected).toBeGreaterThan(0)
+    expect(state.closed).toBeGreaterThan(0)
+  })
+
+  it('uses the injected MySQL driver and reports unavailable Oracle driver without seed success in non-seed runtime', async () => {
     const { driver } = createMysqlDriverDouble()
-    configureDatabaseRuntime({ useSeedData: false, mysqlDriver: driver })
+    configureDatabaseRuntime({ useSeedData: false, mysqlDriver: driver, oracleDriver: null })
 
     const mysqlProbe = await testDatabaseConnection({
       dbType: 'mysql',
@@ -2192,7 +2473,7 @@ WHERE status = ''open'';
     expect(oracleProbe).toEqual({
       ok: false,
       errorCode: 'DB_ORACLE_DRIVER_UNAVAILABLE',
-      errorMessage: 'Oracle driver is not wired in this aiopsterm backend yet.'
+      errorMessage: 'Oracle driver is unavailable. Install oracledb before connecting to Oracle.'
     })
 
     const saved = await saveDatabaseConnection({
