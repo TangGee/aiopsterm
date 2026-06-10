@@ -30,6 +30,7 @@ import {
   testAssetConnection
 } from './backend/assets'
 import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
+import { configureAiCommandBackendRuntime, listAiCommandCatalog } from './backend/aiCommands'
 import { configureAiContextBackendRuntime, listAiContextCatalog } from './backend/aiContext'
 import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
@@ -1883,6 +1884,9 @@ configureAiContextBackendRuntime({
   listKnowledgeTree: () => buildKnowledgeTreeFromDisk(),
   listSkills: () => loadSkillsFromDisk()
 })
+configureAiCommandBackendRuntime({
+  listKnowledgeDir: (relDir) => listKnowledgeDir(relDir)
+})
 
 const findSkillByName = async (skillName: string) => {
   const skills = await loadSkillsFromDisk()
@@ -2535,6 +2539,7 @@ const registerIpc = () => {
   ipcMain.handle('chat-history:message-metadata', (_event, input: AiChatMessageMetadataInput) => saveChatMessageMetadata(input))
   ipcMain.handle('ai:todo-snapshot', () => listAiTodoSnapshot())
   ipcMain.handle('ai:context-catalog', () => listAiContextCatalog())
+  ipcMain.handle('ai:command-catalog', () => listAiCommandCatalog())
   ipcMain.handle('user:get-account', () => getUserAccount())
   ipcMain.handle('user:open-login', () => openUserLogin())
   ipcMain.handle('user:login', (_event, input: AiopsUserLoginInput) => loginUserAccount(input))

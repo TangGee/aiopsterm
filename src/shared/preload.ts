@@ -378,6 +378,20 @@ export type AiContextCatalog = {
 
 export type AiContextCatalogResult = AiopsMutationResult<AiContextCatalog>
 
+export type AiCommandCatalogOption = {
+  id: string
+  label: string
+  name: string
+  path: string
+  command: string
+}
+
+export type AiCommandCatalog = {
+  commands: AiCommandCatalogOption[]
+}
+
+export type AiCommandCatalogResult = AiopsMutationResult<AiCommandCatalog>
+
 export type AiopsUserRegistrationCode = 1 | 2 | 3 | 4 | 6 | 7 | 9
 
 export type AiopsUserLastLoginMethod = 'account' | 'email' | 'mobile' | 'skip' | 'external'
@@ -2268,6 +2282,7 @@ export type AiopsPreloadApi = {
   saveChatMessageMetadata: (input: AiChatMessageMetadataInput) => Promise<AiChatMessageMetadataResult>
   listAiTodoSnapshot: () => Promise<AiTodoSnapshotResult>
   listAiContextCatalog: () => Promise<AiContextCatalogResult>
+  listAiCommandCatalog: () => Promise<AiCommandCatalogResult>
   getUserAccount: () => Promise<AiopsUserAccountResult>
   openUserLogin: () => Promise<AiopsUserMutationResult>
   loginUserAccount: (input: AiopsUserLoginInput) => Promise<AiopsUserMutationResult>

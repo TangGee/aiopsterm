@@ -1136,7 +1136,7 @@ import type {
   ConversationItem
 } from '@/stores/workspace'
 import type { TodoItem } from '@/stores/workspace'
-import type { AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
+import type { AiCommandCatalogOption, AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
 
 defineProps<{ agentMode?: boolean }>()
 
@@ -1808,13 +1808,7 @@ const findPreviousChatMatch = () => {
   setActiveChatSearchMatch(previousIndex)
 }
 
-type AiCommandOption = {
-  id: string
-  label: string
-  name: string
-  path: string
-  command: string
-}
+type AiCommandOption = AiCommandCatalogOption
 
 const setEditEditableRef = (el: Element | ComponentPublicInstance | null) => {
   editEditableRef.value = el instanceof HTMLElement ? el : null
@@ -1837,26 +1831,7 @@ const docsContextOptions = computed<AiContextOption[]>(() =>
       return first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' })
     })
 )
-const removeFileExtension = (filename: string) => {
-  const lastDot = filename.lastIndexOf('.')
-  return lastDot === -1 ? filename : filename.slice(0, lastDot)
-}
-const commandOptions = computed<AiCommandOption[]>(() => {
-  const commandDir = workspace.findKnowledgeNode('commands')
-  const commandFiles = commandDir?.type === 'dir' ? commandDir.children || [] : []
-  return commandFiles
-    .filter((node) => node.type === 'file')
-    .map((node) => {
-      const name = removeFileExtension(node.title)
-      return {
-        id: node.relPath,
-        label: `/${name}`,
-        name,
-        path: node.relPath,
-        command: `/${name}`
-      }
-    })
-})
+const commandOptions = computed<AiCommandOption[]>(() => workspace.aiCommandOptions.map((command) => ({ ...command })))
 const displayedOpenedHosts = computed(() => {
   if (chatMode.value !== 'agent') return []
   const keyword = contextQuery.value.trim().toLowerCase()
@@ -2641,7 +2616,7 @@ const openCommandPopupForTarget = async (target: 'main' | 'edit') => {
   } else {
     saveEditableSelection()
   }
-  await workspace.refreshKnowledgeTree({ persist: false })
+  await workspace.refreshAiCommandCatalog()
   commandTarget.value = target
   commandPopupOpen.value = true
   closeContextPopup()
@@ -4115,6 +4090,7 @@ watch(
 onMounted(() => {
   void workspace.refreshAiModelCatalog({ replaceSettingsOptions: false })
   void workspace.refreshAiContextCatalog({ hydrateSelection: true })
+  void workspace.refreshAiCommandCatalog()
 })
 
 onBeforeUnmount(() => {

@@ -4354,6 +4354,79 @@ describe('workspace store', () => {
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
   })
 
+  it('loads AI slash command candidates from the backend bridge instead of the renderer knowledge tree', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.aiCommandOptions).toEqual([])
+
+    await expect(store.refreshAiCommandCatalog()).resolves.toBe(true)
+
+    expect(window.aiops.listAiCommandCatalog).toHaveBeenCalled()
+    expect(store.aiCommandOptions).toEqual([
+      {
+        id: 'commands/diagnose.md',
+        label: '/diagnose',
+        name: 'diagnose',
+        path: 'commands/diagnose.md',
+        command: '/diagnose'
+      },
+      {
+        id: 'commands/rollback-plan.md',
+        label: '/rollback-plan',
+        name: 'rollback-plan',
+        path: 'commands/rollback-plan.md',
+        command: '/rollback-plan'
+      },
+      {
+        id: 'commands/Summary to Doc.md',
+        label: '/Summary to Doc',
+        name: 'Summary to Doc',
+        path: 'commands/Summary to Doc.md',
+        command: '/Summary to Doc'
+      }
+    ])
+  })
+
+  it('does not fabricate AI slash command candidates when the backend bridge is unavailable or fails', async () => {
+    const store = useWorkspaceStore()
+    const originalListAiCommandCatalog = window.aiops.listAiCommandCatalog
+
+    try {
+      store.aiCommandOptions = [
+        {
+          id: 'commands/existing.md',
+          label: '/existing',
+          name: 'existing',
+          path: 'commands/existing.md',
+          command: '/existing'
+        }
+      ]
+
+      ;(window.aiops as any).listAiCommandCatalog = undefined
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(false)
+      expect(store.aiCommandOptions).toEqual([])
+
+      store.aiCommandOptions = [
+        {
+          id: 'commands/stale.md',
+          label: '/stale',
+          name: 'stale',
+          path: 'commands/stale.md',
+          command: '/stale'
+        }
+      ]
+      ;(window.aiops as any).listAiCommandCatalog = vi.fn(async () => ({
+        ok: false,
+        errorCode: 'AI_COMMAND_CATALOG_ERROR',
+        errorMessage: 'Command backend unavailable.'
+      }))
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(false)
+      expect(store.aiCommandOptions).toEqual([])
+    } finally {
+      ;(window.aiops as any).listAiCommandCatalog = originalListAiCommandCatalog
+    }
+  })
+
   it('loads AI todos from the backend bridge instead of renderer mock defaults', async () => {
     const store = useWorkspaceStore()
 

@@ -13,6 +13,7 @@ import { settingsLanguageOptions, type SettingSectionKey } from '@/config/settin
 import type {
   AppUpdateCheckResult,
   AppUpdateProgressEvent,
+  AiCommandCatalogOption,
   AiContextCatalog,
   AiContextOption,
   AiPreferencesUserConfig,
@@ -2660,6 +2661,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     openedHosts: [],
     selectedDefaults: []
   })
+  const aiCommandOptions = ref<AiCommandCatalogOption[]>([])
   const selectedContexts = ref<AiContextOption[]>([])
 
   const registerSshSession = (
@@ -3083,6 +3085,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (options.hydrateSelection !== false && selectedContexts.value.length === 0) {
       selectedContexts.value = aiContextCatalog.value.selectedDefaults.map((context) => ({ ...context }))
     }
+    return true
+  }
+
+  const refreshAiCommandCatalog = async () => {
+    if (!window.aiops?.listAiCommandCatalog) {
+      aiCommandOptions.value = []
+      return false
+    }
+    const result = await window.aiops.listAiCommandCatalog()
+    if (!result?.ok || !result.data) {
+      aiCommandOptions.value = []
+      return false
+    }
+    aiCommandOptions.value = result.data.commands.map((command) => ({ ...command }))
     return true
   }
 
@@ -3609,6 +3625,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await loadChatConversationsFromBackend({ restoreIfEmpty: true })
     await refreshAiTodoSnapshot()
     await refreshAiContextCatalog({ hydrateSelection: true })
+    await refreshAiCommandCatalog()
   }
 
   const saveConfig = async (patch: Partial<UserConfig>) => {
@@ -10201,6 +10218,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     terminalCommandGenerationRecords,
     selectedContexts,
     aiSkillContextOptions,
+    aiCommandOptions,
     selectedCommandId,
     selectedCommandRef,
     filesUiMode,
@@ -10392,6 +10410,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadChatConversationsFromBackend,
     refreshAiTodoSnapshot,
     refreshAiContextCatalog,
+    refreshAiCommandCatalog,
     saveConfig,
     setSettingsNotice,
     setActiveSettingsSection,

@@ -3765,6 +3765,31 @@ const aiContextCatalogResultMock = () => {
     }
   }
 }
+
+const removeFileExtensionForAiCommandMock = (filename: string) => {
+  const lastDot = filename.lastIndexOf('.')
+  return lastDot === -1 ? filename : filename.slice(0, lastDot)
+}
+
+const aiCommandCatalogResultMock = () => ({
+  ok: true,
+  data: {
+    commands: listKnowledgeDirMock('commands')
+      .filter((entry) => entry.type === 'file' && entry.relPath?.trim())
+      .map((entry) => {
+        const filename = entry.name?.trim() || getKnowledgeName(entry.relPath)
+        const name = removeFileExtensionForAiCommandMock(filename)
+        return {
+          id: entry.relPath,
+          label: `/${name}`,
+          name,
+          path: entry.relPath,
+          command: `/${name}`
+        }
+      })
+      .sort((first, second) => first.name.localeCompare(second.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
+  }
+})
 type TestFileSessionKind = 'local' | 'remote'
 type TestFileSessionInfo = {
   id: string
@@ -4310,6 +4335,7 @@ Object.defineProperty(window, 'aiops', {
     listChatConversations: vi.fn(async () => chatHistoryListResultMock()),
     listAiTodoSnapshot: vi.fn(async () => aiTodoSnapshotResultMock()),
     listAiContextCatalog: vi.fn(async () => aiContextCatalogResultMock()),
+    listAiCommandCatalog: vi.fn(async () => aiCommandCatalogResultMock()),
     createChatConversation: vi.fn(async () => {
       const conversation: TestChatConversationRecord = {
         id: `conv-test-${Date.now()}-${chatHistoryStateMock.conversations.length}`,

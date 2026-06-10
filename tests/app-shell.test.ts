@@ -3022,6 +3022,7 @@ describe('AppShell', () => {
       if (node.nodeType === Node.TEXT_NODE) node.remove()
     })
     await mainInput.trigger('input')
+    vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
 
     const slashTextNode = document.createTextNode('/')
     mainInput.element.appendChild(slashTextNode)
@@ -3038,6 +3039,7 @@ describe('AppShell', () => {
     await mainInput.trigger('keydown', { key: '/' })
     await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.vm.$nextTick()
+    expect(window.aiops.listAiCommandCatalog).toHaveBeenCalled()
     expect(wrapper.find('.command-select-popup').exists()).toBe(true)
     await wrapper.find('.command-select-popup header input').setValue('summary')
     expect(wrapper.find('.command-select-popup .select-list').text()).toContain('Summary to Doc')
