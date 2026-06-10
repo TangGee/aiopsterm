@@ -7653,6 +7653,120 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('fails closed when Database DB AI success envelopes are malformed', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    const editor = wrapper.find('.db-sql-editor')
+    await editor.setValue('select id from "public"."orders";')
+
+    vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'dbai-drawer-malformed-create' }
+    } as any)
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('DB AI drawer backend returned malformed request data.')
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
+    vi.mocked(window.aiops.startDatabaseAiDrawerResponse).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'dbai-drawer-request-test-1', status: 'streaming' }
+    } as any)
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
+    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    expect(wrapper.text()).toContain('DB AI drawer backend returned malformed lifecycle data.')
+    expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
+    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        request: { id: 'dbai-drawer-request-test-2' }
+      }
+    } as any)
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.text()).toContain('DB AI drawer backend returned malformed response data.')
+    expect(wrapper.find('.db-ai-sql-actions').exists()).toBe(false)
+    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+
+    await wrapper.find('button[title="Toggle DB AI Pane"]').trigger('click')
+    vi.mocked(window.aiops.createDatabaseAiPaneRequest).mockResolvedValueOnce({
+      ok: true,
+      data: { requestId: 'dbai-pane-malformed-create' }
+    } as any)
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('DB AI pane backend returned malformed request data.')
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
+
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockClear()
+    vi.mocked(window.aiops.startDatabaseAiPaneResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        assistantMessage: {
+          id: 'dbai-pane-request-test-1-assistant',
+          requestId: 'wrong-request',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          contextSummary: 'malformed',
+          createdAt: 1,
+          updatedAt: 1
+        }
+      }
+    } as any)
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Start malformed')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+    expect(wrapper.text()).toContain('DB AI pane backend returned malformed lifecycle data.')
+    expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
+
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        requestId: 'dbai-pane-request-test-2',
+        text: 'missing assistant message',
+        provider: 'aiopsterm-local',
+        durationMs: 1
+      }
+    } as any)
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Response malformed')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('missing assistant message')
+    expect(wrapper.text()).toContain('DB AI pane backend returned malformed response data.')
+
+    await editor.setValue('syntax_error')
+    vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockResolvedValueOnce({
+      ok: true,
+      data: { sql: 'SELECT fixed;' }
+    } as any)
+    await wrapper.find('button[title="Run all"]').trigger('click')
+    await waitForDatabaseSqlResult()
+    await wrapper.find('.db-result-error button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis backend returned malformed result data.')
+    expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
+
+    wrapper.unmount()
+  })
+
   it('keeps the SQL editor shell gutter, active line, and scroll state in sync', async () => {
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,

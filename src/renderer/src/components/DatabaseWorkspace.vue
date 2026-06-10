@@ -2282,6 +2282,9 @@ const DEFAULT_GROUP_ID = 'group-default'
 const DB_AI_PANE_DEFAULT_WIDTH = 360
 const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
+const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
+const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql']
+const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'postgresql', 'sqlite', 'oracle']
 const workspaceStore = useWorkspaceStore()
 
 type SqlResult = {
@@ -3672,6 +3675,125 @@ function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+function isDbAiStatus(value: unknown): value is DbAiStatus {
+  return value === 'queued' || value === 'streaming' || value === 'done' || value === 'error' || value === 'cancelled'
+}
+
+function isDbAiAction(value: unknown): value is DbAiAction {
+  return typeof value === 'string' && DB_AI_ACTIONS.includes(value as DbAiAction)
+}
+
+function isDbAiTargetDialect(value: unknown): value is DbAiTargetDialect {
+  return typeof value === 'string' && DB_AI_TARGET_DIALECTS.includes(value as DbAiTargetDialect)
+}
+
+function isDatabaseEngineCode(value: unknown): value is DatabaseEngineCode {
+  return typeof value === 'string' && DB_ENGINE_CODES.includes(value as DatabaseEngineCode)
+}
+
+function isDbAiBackendContext(value: unknown): value is DbAiBackendContext {
+  if (!isRecord(value)) return false
+  if (value.connectionId !== undefined && typeof value.connectionId !== 'string') return false
+  if (value.dbType !== undefined && value.dbType !== '' && !isDatabaseEngineCode(value.dbType)) return false
+  if (value.databaseName !== undefined && typeof value.databaseName !== 'string') return false
+  if (value.schemaName !== undefined && typeof value.schemaName !== 'string') return false
+  if (value.tableName !== undefined && typeof value.tableName !== 'string') return false
+  if (value.contextSummary !== undefined && typeof value.contextSummary !== 'string') return false
+  return true
+}
+
+function isDbAiPaneMessageRecord(value: unknown, expected?: { role?: 'user' | 'assistant'; requestId?: string; id?: string }): value is DbAiPaneMessage {
+  if (!isRecord(value)) return false
+  if (typeof value.id !== 'string' || !value.id.trim()) return false
+  if (typeof value.requestId !== 'string' || !value.requestId.trim()) return false
+  if (value.role !== 'user' && value.role !== 'assistant') return false
+  if (!isDbAiStatus(value.status)) return false
+  if (typeof value.content !== 'string' || typeof value.contextSummary !== 'string') return false
+  if (!isNonNegativeNumber(value.createdAt) || !isNonNegativeNumber(value.updatedAt)) return false
+  if (expected?.role && value.role !== expected.role) return false
+  if (expected?.requestId && value.requestId !== expected.requestId) return false
+  if (expected?.id && value.id !== expected.id) return false
+  return true
+}
+
+function isDbAiPaneStateContext(value: unknown): value is DbAiPaneContext {
+  return (
+    isRecord(value) &&
+    typeof value.connectionId === 'string' &&
+    typeof value.catalogName === 'string' &&
+    typeof value.schemaName === 'string' &&
+    (value.dbType === '' || isDatabaseEngineCode(value.dbType))
+  )
+}
+
+function isDbAiPaneStateSnapshot(value: unknown): value is DatabaseAiPaneStateSnapshot {
+  return (
+    isRecord(value) &&
+    typeof value.open === 'boolean' &&
+    isNonNegativeNumber(value.width) &&
+    isDbAiPaneStateContext(value.context) &&
+    typeof value.draft === 'string' &&
+    Array.isArray(value.messages) &&
+    value.messages.every((message) => isDbAiPaneMessageRecord(message))
+  )
+}
+
+function isDbAiPaneRequestData(value: unknown): value is { requestId: string; userMessage: DbAiPaneMessage; assistantMessage: DbAiPaneMessage } {
+  if (!isRecord(value) || typeof value.requestId !== 'string' || !value.requestId.trim()) return false
+  return (
+    isDbAiPaneMessageRecord(value.userMessage, { role: 'user', requestId: value.requestId }) &&
+    isDbAiPaneMessageRecord(value.assistantMessage, { role: 'assistant', requestId: value.requestId })
+  )
+}
+
+function isDbAiPaneLifecycleData(value: unknown, expected: { requestId: string; assistantMessageId?: string }): value is { assistantMessage: DbAiPaneMessage } {
+  return isRecord(value) && isDbAiPaneMessageRecord(value.assistantMessage, { role: 'assistant', requestId: expected.requestId, id: expected.assistantMessageId })
+}
+
+function isDbAiPaneResponseData(
+  value: unknown,
+  expected: { requestId: string; assistantMessageId: string }
+): value is NonNullable<DatabaseAiPaneResponseResult['data']> {
+  return (
+    isRecord(value) &&
+    value.requestId === expected.requestId &&
+    isDbAiPaneMessageRecord(value.assistantMessage, { role: 'assistant', requestId: expected.requestId, id: expected.assistantMessageId }) &&
+    typeof value.text === 'string' &&
+    typeof value.provider === 'string' &&
+    isNonNegativeNumber(value.durationMs)
+  )
+}
+
+function isDbAiDrawerRequestRecord(value: unknown, expectedId?: string): value is DbAiRequest {
+  if (!isRecord(value)) return false
+  if (typeof value.id !== 'string' || !value.id.trim()) return false
+  if (expectedId && value.id !== expectedId) return false
+  return (
+    isDbAiAction(value.action) &&
+    typeof value.label === 'string' &&
+    isDbAiStatus(value.status) &&
+    typeof value.contextSummary === 'string' &&
+    typeof value.sourceSql === 'string' &&
+    typeof value.text === 'string' &&
+    isDbAiTargetDialect(value.targetDialect) &&
+    isDbAiBackendContext(value.backendContext) &&
+    isNonNegativeNumber(value.createdAt) &&
+    isNonNegativeNumber(value.updatedAt)
+  )
+}
+
+function isDbAiDrawerResponseData(value: unknown, expectedId: string): value is NonNullable<DatabaseAiDrawerResponseResult['data']> {
+  return (
+    isRecord(value) &&
+    isDbAiDrawerRequestRecord(value.request, expectedId) &&
+    typeof value.text === 'string' &&
+    typeof value.reasoning === 'string' &&
+    typeof value.sql === 'string' &&
+    typeof value.provider === 'string' &&
+    isNonNegativeNumber(value.durationMs)
+  )
+}
+
 function isDatabaseSqlExecuteData(value: unknown): value is NonNullable<DatabaseSqlExecuteResult['data']> {
   return (
     isRecord(value) &&
@@ -4115,8 +4237,12 @@ async function sendDbAiPaneMessage(promptOverride = '') {
     messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
   }
   const created = await window.aiops.createDatabaseAiPaneRequest(requestInput)
-  if (!created.ok || !created.data) {
+  if (!created.ok) {
     showNotice(created.errorMessage || 'DB AI pane request failed')
+    return
+  }
+  if (!isDbAiPaneRequestData(created.data)) {
+    showNotice('DB AI pane backend returned malformed request data.')
     return
   }
   const { userMessage, assistantMessage } = created.data
@@ -4128,8 +4254,12 @@ async function sendDbAiPaneMessage(promptOverride = '') {
 
 async function requestDbAiPaneResponse(messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) {
   const started = await window.aiops.startDatabaseAiPaneResponse({ requestId, assistantMessageId: messageId })
-  if (!started.ok || !started.data) {
+  if (!started.ok) {
     showNotice(started.errorMessage || 'DB AI pane request failed to start')
+    return
+  }
+  if (!isDbAiPaneLifecycleData(started.data, { requestId, assistantMessageId: messageId })) {
+    showNotice('DB AI pane backend returned malformed lifecycle data.')
     return
   }
   applyDbAiPaneAssistantMessage(started.data.assistantMessage)
@@ -4148,7 +4278,7 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
       activeSql: activeSqlTab.value?.sql ?? '',
       messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
     })
-    finishDbAiPaneMessage(messageId, result)
+    finishDbAiPaneMessage(messageId, result, requestId)
   } catch (error) {
     showNotice(errorToMessage(error))
   }
@@ -4162,12 +4292,17 @@ function applyDbAiPaneAssistantMessage(assistantMessage: DbAiPaneMessage) {
   scrollDbAiPaneMessagesToBottom()
 }
 
-function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponseResult) {
-  if (!result.ok && !result.data?.assistantMessage) showNotice(result.errorMessage || 'DB AI pane response failed')
+function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponseResult, requestId: string) {
+  const hasValidResponseData = isDbAiPaneResponseData(result.data, { requestId, assistantMessageId: messageId })
+  const responseData = hasValidResponseData ? result.data : null
+  if (result.ok && !hasValidResponseData) {
+    showNotice('DB AI pane backend returned malformed response data.')
+    return
+  }
+  if (!result.ok && !hasValidResponseData) showNotice(result.errorMessage || 'DB AI pane response failed')
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled') return message
-    if (result.ok && result.data?.assistantMessage) return result.data.assistantMessage
-    if (!result.ok && result.data?.assistantMessage) return result.data.assistantMessage
+    if (responseData) return responseData.assistantMessage
     return message
   })
   scrollDbAiPaneMessagesToBottom()
@@ -4179,8 +4314,12 @@ async function cancelDbAiPaneResponse() {
     .find((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
   if (!activeAssistant) return
   const result = await window.aiops.cancelDatabaseAiPaneResponse({ requestId: activeAssistant.requestId, assistantMessageId: activeAssistant.id })
-  if (!result.ok || !result.data) {
+  if (!result.ok) {
     showNotice(result.errorMessage || 'DB AI pane cancel failed')
+    return
+  }
+  if (!isDbAiPaneLifecycleData(result.data, { requestId: activeAssistant.requestId, assistantMessageId: activeAssistant.id })) {
+    showNotice('DB AI pane backend returned malformed lifecycle data.')
     return
   }
   applyDbAiPaneAssistantMessage(result.data.assistantMessage)
@@ -4276,6 +4415,11 @@ async function loadDbAiPaneState() {
       showNotice(result.errorMessage || 'DB AI pane state load failed')
       return
     }
+    if (!isDbAiPaneStateSnapshot(result.data)) {
+      ensureDbAiPaneContextInitialized(true)
+      showNotice('DB AI pane state backend returned malformed result data.')
+      return
+    }
     applyDbAiPaneStateSnapshot(result.data)
   } catch {
     ensureDbAiPaneContextInitialized(true)
@@ -4300,6 +4444,11 @@ async function persistDbAiPaneState() {
     if (!result.ok && !dbAiPaneStateNoticeShown) {
       dbAiPaneStateNoticeShown = true
       showNotice(result.errorMessage || 'DB AI pane state save failed')
+      return
+    }
+    if (result.ok && !isDbAiPaneStateSnapshot(result.data) && !dbAiPaneStateNoticeShown) {
+      dbAiPaneStateNoticeShown = true
+      showNotice('DB AI pane state backend returned malformed result data.')
     }
   } catch {
     if (!dbAiPaneStateNoticeShown) {
@@ -6475,8 +6624,12 @@ async function openDbAi(action: DbAiAction, sql: string, context = '', backendCo
     targetDialect,
     context: dbAiBackendContextForIpc({ ...backendContext, contextSummary: backendContext.contextSummary || context })
   })
-  if (!result.ok || !result.data) {
+  if (!result.ok) {
     showNotice(result.errorMessage || 'DB AI request failed')
+    return
+  }
+  if (!isDbAiDrawerRequestRecord(result.data)) {
+    showNotice('DB AI drawer backend returned malformed request data.')
     return
   }
   const request = result.data
@@ -6501,8 +6654,12 @@ async function requestDbAiDrawerResponse(reqId: string) {
   if (!request) return
   const expectedDialect = request.targetDialect
   const started = await window.aiops.startDatabaseAiDrawerResponse({ requestId: reqId })
-  if (!started.ok || !started.data) {
+  if (!started.ok) {
     showNotice(started.errorMessage || 'DB AI drawer request failed to start')
+    return
+  }
+  if (!isDbAiDrawerRequestRecord(started.data, reqId)) {
+    showNotice('DB AI drawer backend returned malformed lifecycle data.')
     return
   }
   patchDbAiRequest(reqId, { status: started.data.status, text: started.data.text, updatedAt: started.data.updatedAt })
@@ -6532,10 +6689,16 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
   const request = dbAiRequests.value[reqId]
   if (!request || request.status === 'cancelled') return
   if (expectedDialect && request.targetDialect !== expectedDialect) return
-  if (result.data?.request) {
+  const hasValidResponseData = isDbAiDrawerResponseData(result.data, reqId)
+  const responseData = hasValidResponseData ? result.data : null
+  if (result.ok && !hasValidResponseData) {
+    showNotice('DB AI drawer backend returned malformed response data.')
+    return
+  }
+  if (responseData) {
     dbAiRequests.value = {
       ...dbAiRequests.value,
-      [reqId]: result.data.request
+      [reqId]: responseData.request
     }
     return
   }
@@ -6626,10 +6789,16 @@ async function diagnoseSqlError(result: SqlResult) {
       errorMessage: result.error ?? ''
     })
     if (sqlDiagnose.resultId !== result.id) return
-    if (!response.ok || !response.data?.sql) {
+    if (!response.ok) {
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.error = response.errorMessage || 'DB AI diagnosis failed.'
+      return
+    }
+    if (!isDbAiDrawerResponseData(response.data, response.data?.request?.id ?? '') || !response.data.sql.trim()) {
+      sqlDiagnose.running = false
+      sqlDiagnose.success = false
+      sqlDiagnose.error = 'DB AI diagnosis backend returned malformed result data.'
       return
     }
     const diagnosedSql = response.data.sql
@@ -6655,11 +6824,18 @@ async function cancelDbAiRequest() {
   if (!request) return
   if (request.status === 'done' || request.status === 'error') return
   const result = await window.aiops.cancelDatabaseAiDrawerResponse({ requestId: request.id })
-  if (!result.ok || !result.data) {
+  if (!result.ok) {
     showNotice(result.errorMessage || 'DB AI request cancel failed')
     return
   }
-  patchDbAiRequest(request.id, { status: result.data.status, text: result.data.text, updatedAt: result.data.updatedAt })
+  if (!isDbAiDrawerRequestRecord(result.data, request.id)) {
+    showNotice('DB AI drawer backend returned malformed lifecycle data.')
+    return
+  }
+  dbAiRequests.value = {
+    ...dbAiRequests.value,
+    [request.id]: result.data
+  }
   showNotice('DB AI request cancelled')
 }
 
