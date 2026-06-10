@@ -245,6 +245,7 @@ const api: AiopsPreloadApi = {
   startDatabaseAiDrawerResponse: (input) => ipcRenderer.invoke('database:ai-drawer-start', input),
   cancelDatabaseAiDrawerResponse: (input) => ipcRenderer.invoke('database:ai-drawer-cancel', input),
   generateDatabaseAiDrawerResponse: (input) => ipcRenderer.invoke('database:ai-drawer-response', input),
+  diagnoseDatabaseSqlError: (input) => ipcRenderer.invoke('database:ai-diagnose-sql-error', input),
   listKubernetesCatalog: () => ipcRenderer.invoke('kubernetes:catalog'),
   switchKubernetesContext: (contextName: string) => ipcRenderer.invoke('kubernetes:context:switch', contextName),
   addKubernetesCluster: (input) => ipcRenderer.invoke('kubernetes:cluster:add', input),

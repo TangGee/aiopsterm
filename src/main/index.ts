@@ -65,6 +65,7 @@ import {
   createDatabaseCatalog,
   createDatabaseGroup,
   deleteDatabaseGroup,
+  diagnoseDatabaseSqlError,
   disconnectDatabaseConnection,
   executeDatabaseSql,
   generateDatabaseAiDrawerResponse,
@@ -237,6 +238,7 @@ import type {
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneResponseInput,
   DatabaseAiPaneStateSnapshot,
+  DatabaseSqlErrorDiagnosisInput,
   DatabaseSqlExecuteInput,
   DatabaseTableDdlInput,
   DatabaseTableMutationInput,
@@ -3476,6 +3478,7 @@ const registerIpc = () => {
   ipcMain.handle('database:ai-drawer-start', (_event, input: DatabaseAiDrawerLifecycleInput) => startDatabaseAiDrawerResponse(input))
   ipcMain.handle('database:ai-drawer-cancel', (_event, input: DatabaseAiDrawerLifecycleInput) => cancelDatabaseAiDrawerResponse(input))
   ipcMain.handle('database:ai-drawer-response', (_event, input: DatabaseAiDrawerResponseInput) => generateDatabaseAiDrawerResponse(input))
+  ipcMain.handle('database:ai-diagnose-sql-error', (_event, input: DatabaseSqlErrorDiagnosisInput) => diagnoseDatabaseSqlError(input))
   ipcMain.handle('kubernetes:catalog', () => listKubernetesCatalog())
   ipcMain.handle('kubernetes:context:switch', (_event, contextName: string) => switchKubernetesContext(contextName))
   ipcMain.handle('kubernetes:cluster:add', (_event, input: KubernetesClusterInput) => addKubernetesCluster(input))

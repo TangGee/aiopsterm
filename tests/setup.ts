@@ -6681,6 +6681,77 @@ Object.defineProperty(window, 'aiops', {
           }, 120)
         })
     ),
+    diagnoseDatabaseSqlError: vi.fn(
+      (input: {
+        sourceSql: string
+        targetDialect?: TestDatabaseAiTargetDialect
+        context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
+        errorMessage?: string
+      }) =>
+        new Promise((resolve) => {
+          window.setTimeout(() => {
+            const sourceSql = databaseTrimMock(input.sourceSql)
+            const errorMessage = databaseTrimMock(input.errorMessage)
+            const drawerInput = {
+              action: 'diagnose' as const,
+              sourceSql,
+              targetDialect: input.targetDialect,
+              context: input.context,
+              errorMessage
+            }
+            if (!sourceSql) {
+              resolve(databaseAiDrawerErrorResponseMock(drawerInput, 'DB_AI_SQL_REQUIRED', 'SQL is required.'))
+              return
+            }
+            if (!errorMessage) {
+              resolve(databaseAiDrawerErrorResponseMock(drawerInput, 'DB_AI_ERROR_REQUIRED', 'SQL error message is required.'))
+              return
+            }
+            if (!databaseTrimMock(input.context.connectionId)) {
+              resolve(databaseAiDrawerErrorResponseMock(drawerInput, 'DB_CONNECTION_REQUIRED', 'Database connection is required.'))
+              return
+            }
+            const now = Date.now()
+            const backendDbType = input.context.dbType && input.context.dbType !== 'mssql' ? input.context.dbType : ''
+            const request = storeDatabaseAiDrawerRequestMock({
+              id: `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`,
+              action: 'diagnose',
+              label: databaseAiDrawerActionNameMock('diagnose'),
+              status: 'streaming',
+              contextSummary: input.context.contextSummary || '',
+              sourceSql,
+              text: '',
+              targetDialect: input.targetDialect || input.context.dbType || 'postgresql',
+              backendContext: {
+                connectionId: input.context.connectionId || '',
+                dbType: backendDbType,
+                databaseName: input.context.databaseName || '',
+                schemaName: input.context.schemaName,
+                tableName: input.context.tableName,
+                contextSummary: input.context.contextSummary
+              },
+              createdAt: now,
+              updatedAt: now
+            })
+            const data = generateDatabaseAiDrawerTextMock({
+              action: request.action,
+              sourceSql: request.sourceSql,
+              targetDialect: request.targetDialect,
+              context: request.backendContext
+            })
+            const doneRequest = updateDatabaseAiDrawerRequestMock(request.id, { status: 'done', text: data.text, targetDialect: request.targetDialect })!
+            resolve({
+              ok: true,
+              data: {
+                request: doneRequest,
+                ...data,
+                provider: 'aiopsterm-local' as const,
+                durationMs: 1
+              }
+            })
+          }, 120)
+        })
+    ),
     executeKubernetesCommand: vi.fn(async (input: { command: string; clusterId?: string; clusterName?: string; namespace?: string; contextName?: string; defaultNamespace?: string; source?: 'terminal' | 'agent' | 'resource' }) => {
       const command = input.command.trim().replace(/\s+/g, ' ')
       const namespace = input.namespace || 'default'

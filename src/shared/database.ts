@@ -58,7 +58,9 @@ import type {
   DatabaseTableMutationPlanStatement,
   DatabaseTableMutationResult,
   DatabaseTableQueryInput,
-  DatabaseTableQueryResult
+  DatabaseTableQueryResult,
+  DatabaseSqlErrorDiagnosisInput,
+  DatabaseSqlErrorDiagnosisResult
 } from './preload'
 
 const supportedEngines = new Set(['mysql', 'postgresql', 'sqlite', 'oracle'])
@@ -4459,4 +4461,37 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
       durationMs: Math.max(1, databaseAiNow() - startedAt)
     }
   }
+}
+
+export async function diagnoseDatabaseSqlError(input: DatabaseSqlErrorDiagnosisInput): Promise<DatabaseSqlErrorDiagnosisResult> {
+  ensureDatabaseStateLoaded()
+  const sourceSql = trim(input.sourceSql)
+  const errorMessage = trim(input.errorMessage)
+  if (!sourceSql) return { ok: false, errorCode: 'DB_AI_SQL_REQUIRED', errorMessage: 'SQL is required.' }
+  if (!errorMessage) return { ok: false, errorCode: 'DB_AI_ERROR_REQUIRED', errorMessage: 'SQL error message is required.' }
+
+  const created = await createDatabaseAiDrawerRequest({
+    action: 'diagnose',
+    sourceSql,
+    targetDialect: input.targetDialect,
+    context: input.context,
+    errorMessage
+  })
+  if (!created.ok || !created.data) {
+    return { ok: false, errorCode: created.errorCode, errorMessage: created.errorMessage }
+  }
+
+  const started = startDatabaseAiDrawerResponse({ requestId: created.data.id })
+  if (!started.ok || !started.data) {
+    return { ok: false, errorCode: started.errorCode, errorMessage: started.errorMessage }
+  }
+
+  return generateDatabaseAiDrawerResponse({
+    requestId: created.data.id,
+    action: 'diagnose',
+    sourceSql: created.data.sourceSql,
+    targetDialect: created.data.targetDialect,
+    context: created.data.backendContext,
+    errorMessage
+  })
 }

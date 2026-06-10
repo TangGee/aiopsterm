@@ -6561,8 +6561,7 @@ async function diagnoseSqlError(result: SqlResult) {
 
   try {
     const connection = findConnection(tab.connectionId)
-    const response = await window.aiops.generateDatabaseAiDrawerResponse({
-      action: 'diagnose',
+    const response = await window.aiops.diagnoseDatabaseSqlError({
       sourceSql: result.sql,
       targetDialect: connection?.dbType ?? 'postgresql',
       context: dbAiBackendContextForIpc(

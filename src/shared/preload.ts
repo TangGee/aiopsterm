@@ -2171,6 +2171,15 @@ export type DatabaseAiDrawerResponseResult = AiopsMutationResult<{
   durationMs: number
 }>
 
+export type DatabaseSqlErrorDiagnosisInput = {
+  sourceSql: string
+  targetDialect?: DatabaseAiTargetDialect
+  context: DatabaseAiDrawerResponseInput['context']
+  errorMessage: string
+}
+
+export type DatabaseSqlErrorDiagnosisResult = DatabaseAiDrawerResponseResult
+
 export type KubernetesConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error'
 
 export type KubernetesClusterSource = 'local' | 'jumpserver'
@@ -2630,6 +2639,7 @@ export type AiopsPreloadApi = {
   startDatabaseAiDrawerResponse: (input: DatabaseAiDrawerLifecycleInput) => Promise<DatabaseAiDrawerLifecycleResult>
   cancelDatabaseAiDrawerResponse: (input: DatabaseAiDrawerLifecycleInput) => Promise<DatabaseAiDrawerLifecycleResult>
   generateDatabaseAiDrawerResponse: (input: DatabaseAiDrawerResponseInput) => Promise<DatabaseAiDrawerResponseResult>
+  diagnoseDatabaseSqlError: (input: DatabaseSqlErrorDiagnosisInput) => Promise<DatabaseSqlErrorDiagnosisResult>
   listKubernetesCatalog: () => Promise<KubernetesCatalogResult>
   switchKubernetesContext: (contextName: string) => Promise<KubernetesContextSwitchResult>
   addKubernetesCluster: (input: KubernetesClusterInput) => Promise<KubernetesClusterMutationResult>

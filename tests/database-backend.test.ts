@@ -15,6 +15,7 @@ import {
   createDatabaseCatalog,
   createDatabaseGroup,
   deleteDatabaseGroup,
+  diagnoseDatabaseSqlError,
   disconnectDatabaseConnection,
   generateDatabaseAiDrawerResponse,
   generateDatabaseAiPaneResponse,
@@ -1637,9 +1638,8 @@ WHERE status = ''open'';
     expect(result.data?.sql).toContain('LIMIT 100')
   })
 
-  it('diagnoses SQL errors through the drawer backend without renderer SQL generation', async () => {
-    const result = await generateDatabaseAiDrawerResponse({
-      action: 'diagnose',
+  it('diagnoses SQL errors through a dedicated backend lifecycle boundary', async () => {
+    const result = await diagnoseDatabaseSqlError({
       sourceSql: 'select * from public.orders_missing',
       targetDialect: 'postgresql',
       context: {
@@ -1653,8 +1653,24 @@ WHERE status = ''open'';
     })
 
     expect(result.ok).toBe(true)
+    expect(result.data?.request).toMatchObject({
+      id: expect.stringMatching(/^dbai-drawer-request-/),
+      action: 'diagnose',
+      label: 'Diagnose SQL',
+      status: 'done',
+      sourceSql: 'select * from public.orders_missing',
+      targetDialect: 'postgresql',
+      backendContext: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      }
+    })
     expect(result.data?.sql).toBe('SELECT *\nFROM "public"."orders"\nLIMIT 100;')
     expect(result.data?.reasoning).toContain('Diagnosis input error')
+    expect(result.data?.text).toContain('```sql')
   })
 
   it('preserves DDL permission errors from the backend boundary', async () => {

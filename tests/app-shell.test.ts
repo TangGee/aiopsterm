@@ -6608,7 +6608,27 @@ describe('AppShell', () => {
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor rejected')
     const dbAiRequestCountBeforeDiagnose = wrapper.findAll('.db-ai-request-list button').length
+    vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockClear()
+    vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mockClear()
+    vi.mocked(window.aiops.startDatabaseAiDrawerResponse).mockClear()
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
     await wrapper.find('.db-result-error button').trigger('click')
+    expect(window.aiops.diagnoseDatabaseSqlError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSql: 'syntax_error',
+        targetDialect: 'postgresql',
+        context: expect.objectContaining({
+          connectionId: 'conn-prod-pg',
+          dbType: 'postgresql',
+          databaseName: 'orders',
+          schemaName: 'public'
+        }),
+        errorMessage: expect.stringContaining('Backend SQL executor rejected')
+      })
+    )
+    expect(window.aiops.createDatabaseAiDrawerRequest).not.toHaveBeenCalled()
+    expect(window.aiops.startDatabaseAiDrawerResponse).not.toHaveBeenCalled()
+    expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     expect(wrapper.find('.db-result-diagnose-btn').classes()).toContain('loading')
     expect(wrapper.find('.db-result-diagnose-spinner').exists()).toBe(true)
     expect(wrapper.findAll('.db-ai-request-list button')).toHaveLength(dbAiRequestCountBeforeDiagnose)

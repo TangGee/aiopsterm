@@ -102,6 +102,7 @@ export {
   createDatabaseCatalog,
   createDatabaseGroup,
   deleteDatabaseGroup,
+  diagnoseDatabaseSqlError,
   disconnectDatabaseConnection,
   executeDatabaseSql,
   generateDatabaseAiDrawerResponse,
