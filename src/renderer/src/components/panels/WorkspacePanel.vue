@@ -1260,13 +1260,16 @@ const connectAsset = async (assetId: string) => {
     if (asset?.asset_type === 'organization') notice.value = `${asset.name} 是堡垒机资源，请使用刷新资产或管理资产。`
     return
   }
+  const previousActivePanelId = workspace.activePanelId
   workspace.createPanel()
   workspace.renamePanel(workspace.activePanelId, asset.name)
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
   const panelId = workspace.activePanelId
+  const discardPendingPanel = () => workspace.discardPendingTerminalPanel(panelId, previousActivePanelId)
   if (asset.isLocalShell) {
     if (!window.aiops?.createTerminal) {
       notice.value = '本地终端启动服务不可用'
+      discardPendingPanel()
       return
     }
     try {
@@ -1279,16 +1282,20 @@ const connectAsset = async (assetId: string) => {
       const panel = workspace.applyLocalTerminalSession(panelId, session)
       if (!panel) {
         notice.value = '本地终端启动失败'
+        discardPendingPanel()
         return
       }
       workspace.renamePanel(panelId, asset.name)
       notice.value = `已打开本地 shell ${asset.host}`
     } catch (error) {
       notice.value = error instanceof Error ? error.message : '本地终端启动失败'
+      discardPendingPanel()
+      return
     }
   } else {
     if (!window.aiops?.createTerminal) {
       notice.value = 'SSH 终端启动服务不可用'
+      discardPendingPanel()
       return
     }
     workspace.registerSshSession(panelId, asset)
@@ -1301,9 +1308,15 @@ const connectAsset = async (assetId: string) => {
         rows: 30
       })
       const connected = Boolean(workspace.applySshTerminalSession(panelId, session, asset))
-      if (!connected) notice.value = 'SSH 终端启动失败'
+      if (!connected) {
+        notice.value = 'SSH 终端启动失败'
+        discardPendingPanel()
+        return
+      }
     } catch (error) {
       notice.value = error instanceof Error ? error.message : 'SSH 终端启动失败'
+      discardPendingPanel()
+      return
     }
   }
   workspace.selectedContexts = [

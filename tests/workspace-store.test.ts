@@ -3290,6 +3290,54 @@ describe('workspace store', () => {
     expect(store.activePanel.output).toContain('[process exited: 1]')
   })
 
+  it('rejects malformed SSH terminal sessions and can discard pending renderer panels', () => {
+    const store = useWorkspaceStore()
+    const originalPanelId = store.activePanelId
+    const originalPanelCount = store.panels.length
+    const originalActivePanel = { ...store.activePanel }
+
+    store.createPanel()
+    store.renamePanel(store.activePanelId, 'pending ssh')
+    const pendingPanelId = store.activePanelId
+    store.registerSshSession(pendingPanelId, {
+      id: 'asset-pending-ssh',
+      name: 'pending ssh',
+      host: '10.8.0.10',
+      port: 22,
+      username: 'ops',
+      group_name: '生产',
+      asset_type: 'person'
+    })
+
+    const malformed = store.applySshTerminalSession(pendingPanelId, {
+      id: 'terminal-malformed-ssh',
+      shell: 'ssh',
+      cwd: '/home/ops',
+      kind: 'ssh',
+      connection: {
+        connectionId: '',
+        host: '10.8.0.10',
+        port: 22,
+        username: 'ops',
+        assetId: 'asset-pending-ssh',
+        assetName: 'pending ssh',
+        createdAt: 1717200003200
+      }
+    })
+
+    expect(malformed).toBeNull()
+    expect(store.activePanelId).toBe(pendingPanelId)
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.status).toBe('ready')
+    expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.8.0.10', username: 'ops' }))
+    expect(store.discardPendingTerminalPanel(pendingPanelId, originalPanelId)).toBe(true)
+    expect(store.panels).toHaveLength(originalPanelCount)
+    expect(store.activePanelId).toBe(originalPanelId)
+    expect(store.activePanel).toEqual(expect.objectContaining({ id: originalActivePanel.id, title: originalActivePanel.title }))
+    expect(store.activePanel.sessionId).toBe(originalActivePanel.sessionId)
+    expect(store.panels.some((panel) => panel.id === pendingPanelId)).toBe(false)
+  })
+
   it('does not fabricate Files SFTP sessions or file-session updates when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.refreshFileSessionCatalog()

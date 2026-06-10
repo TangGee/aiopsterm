@@ -1349,12 +1349,15 @@ const connectAsset = async (assetId: string | null) => {
     return
   }
   selectedAssetId.value = asset.id
+  const previousActivePanelId = workspace.activePanelId
   workspace.createPanel()
   workspace.renamePanel(workspace.activePanelId, asset.name || asset.title)
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
   const panelId = workspace.activePanelId
+  const discardPendingPanel = () => workspace.discardPendingTerminalPanel(panelId, previousActivePanelId)
   if (!window.aiops?.createTerminal) {
     importNotice.value = 'SSH 终端启动服务不可用'
+    discardPendingPanel()
     assetContextMenuId.value = null
     return
   }
@@ -1368,9 +1371,17 @@ const connectAsset = async (assetId: string | null) => {
       rows: 30
     })
     const connected = Boolean(workspace.applySshTerminalSession(panelId, session, asset))
-    if (!connected) importNotice.value = 'SSH 终端启动失败'
+    if (!connected) {
+      importNotice.value = 'SSH 终端启动失败'
+      discardPendingPanel()
+      assetContextMenuId.value = null
+      return
+    }
   } catch (error) {
     importNotice.value = error instanceof Error ? error.message : 'SSH 终端启动失败'
+    discardPendingPanel()
+    assetContextMenuId.value = null
+    return
   }
   workspace.selectedContexts = [
     ...workspace.selectedContexts.filter((item) => item.id !== asset.id),

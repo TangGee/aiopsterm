@@ -765,9 +765,28 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
 }
 
 const forkSelected = async () => {
+  const sourcePanelId = menu.panelId
   const forkPanel = workspace.forkSshPanel(menu.panelId)
   menu.visible = false
-  if (forkPanel) await startSshTerminalForPanel(forkPanel)
+  if (!forkPanel) return
+  const pendingSsh = forkPanel.sshSession ? { ...forkPanel.sshSession } : null
+  const connected = await startSshTerminalForPanel(forkPanel)
+  if (!connected) {
+    workspace.discardPendingTerminalPanel(forkPanel.id, sourcePanelId)
+    return
+  }
+  const ssh = forkPanel.sshSession
+  if (!ssh) return
+  const contextId = pendingSsh?.assetId || ssh.assetId || ssh.connectionId || forkPanel.id
+  workspace.selectedContexts = [
+    ...workspace.selectedContexts.filter((item) => item.id !== contextId),
+    {
+      id: contextId,
+      kind: 'hosts',
+      label: pendingSsh?.host || ssh.host,
+      detail: `${pendingSsh?.assetName || ssh.assetName} fork`
+    }
+  ]
 }
 
 const activeView = () => terminalViews.get(workspace.activePanelId)

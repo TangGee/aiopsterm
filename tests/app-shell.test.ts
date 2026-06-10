@@ -567,12 +567,19 @@ describe('AppShell', () => {
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
     expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.10.10.10', port: 2222, username: 'ops' }))
 
+    store.selectedContexts = []
+    const assetConnectedPanelId = store.activePanelId
+    const assetConnectedPanelCount = store.panels.length
     vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('unit ssh refused'))
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.trigger('dblclick')
     await flushPromises()
+    expect(store.panels).toHaveLength(assetConnectedPanelCount)
+    expect(store.activePanelId).toBe(assetConnectedPanelId)
     expect(store.activePanel.title).toBe('unit-host')
     expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.10.10.10:2222')
     expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
+    expect(store.selectedContexts.some((context) => context.id === 'asset-test-')).toBe(false)
+    expect(store.selectedContexts.some((context) => context.label === '10.10.10.10')).toBe(false)
     expect(assets.text()).toContain('unit ssh refused')
 
     await assets.findAll('.host-card').find((button) => button.text().includes('unit-host'))!.find('button[title="删除"]').trigger('click')
@@ -1575,12 +1582,18 @@ describe('AppShell', () => {
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'workspace-unit-edited' }))
       expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.44.0.9', port: 2201, username: 'ops' }))
 
+      store.selectedContexts = []
+      const workspaceConnectedPanelId = store.activePanelId
+      const workspaceConnectedPanelCount = store.panels.length
       vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('workspace ssh refused'))
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('workspace-unit-edited'))!.trigger('dblclick')
       await flushPromises()
+      expect(store.panels).toHaveLength(workspaceConnectedPanelCount)
+      expect(store.activePanelId).toBe(workspaceConnectedPanelId)
       expect(store.activePanel.title).toBe('workspace-unit-edited')
       expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.44.0.9:2201')
       expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
+      expect(store.selectedContexts.some((context) => context.label === '10.44.0.9')).toBe(false)
       expect(wrapper.text()).toContain('workspace ssh refused')
 
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('生产'))!.trigger('contextmenu', {
@@ -3510,7 +3523,7 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
 
-    await wrapper.find('.terminal-tab').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
     expect(wrapper.find('.tab-menu').text()).not.toContain('Fork SSH Channel')
     store.registerSshSession(store.activePanelId, {
       id: 'asset-fork-unit',
@@ -3554,7 +3567,7 @@ describe('AppShell', () => {
         auth_type: 'keyBased'
       }
     )
-    await wrapper.find('.terminal-tab').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
     expect(wrapper.find('.tab-menu').text()).toContain('Fork SSH Channel')
     vi.mocked(window.aiops.createTerminal).mockClear()
     await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
@@ -3574,6 +3587,19 @@ describe('AppShell', () => {
     expect(store.activePanel.sshSession?.connectionId).toBe('ssh-test-session-asset-fork-unit')
     expect(store.activePanel.sshSession?.forkFromConnectionId).toBe('ssh-source-fork-unit')
     expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit' && context.detail === 'fork-source fork')).toBe(true)
+
+    store.selectedContexts = []
+    const connectedForkPanelId = store.activePanelId
+    const connectedForkPanelCount = store.panels.length
+    await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('fork ssh refused'))
+    await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
+    await flushPromises()
+    expect(store.panels).toHaveLength(connectedForkPanelCount)
+    expect(store.activePanelId).toBe(connectedForkPanelId)
+    expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
+    expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit')).toBe(false)
+    expect(store.topNotice).toBe('fork ssh refused')
 
     vi.mocked(window.aiops.killTerminal).mockClear()
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')

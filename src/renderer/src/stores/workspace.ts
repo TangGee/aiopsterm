@@ -2696,13 +2696,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   ) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    if (!panel || !terminalSession) return null
-    panel.sessionId = terminalSession.id
-    panel.cwd = terminalSession.cwd || panel.cwd
-    panel.kind = 'terminal'
-    panel.status = 'connecting'
-    if (terminalSession.kind !== 'ssh' || !terminalSession.connection) return null
+    if (!panel || !terminalSession?.id || terminalSession.kind !== 'ssh' || !terminalSession.connection) return null
     const connection = terminalSession.connection
+    if (!String(connection.connectionId || '').trim()) return null
     const previous = panel.sshSession
     const session: TerminalSshSession = {
       connectionId: connection.connectionId,
@@ -2720,6 +2716,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       proxyName: connection.proxyName || asset?.proxyName || previous?.proxyName || '',
       createdAt: connection.createdAt
     }
+    panel.sessionId = terminalSession.id
+    panel.cwd = terminalSession.cwd || panel.cwd
+    panel.kind = 'terminal'
+    panel.status = 'connecting'
     panel.sshSession = session
     if (terminalSession.lifecycle) applyTerminalLifecycle(terminalSession.lifecycle)
     return session
@@ -9244,6 +9244,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const discardPendingTerminalPanel = (id: string, preferredActiveId?: string) => {
+    const panel = panels.value.find((item) => item.id === id)
+    if (!panel || panel.kind !== 'terminal' || panel.sessionId) return false
+    if (panels.value.length === 1) {
+      resetToDefaultTerminalPanel(panel)
+      activePanelId.value = panel.id
+      return true
+    }
+    const wasActive = activePanelId.value === id
+    panels.value = panels.value.filter((item) => item.id !== id)
+    if (preferredActiveId && panels.value.some((item) => item.id === preferredActiveId)) {
+      activePanelId.value = preferredActiveId
+    } else if (wasActive || !panels.value.some((item) => item.id === activePanelId.value)) {
+      activePanelId.value = panels.value[0].id
+    }
+    return true
+  }
+
   const closeOthers = () => {
     panels.value = panels.value.filter((panel) => panel.id === activePanelId.value)
   }
@@ -9307,16 +9325,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     panels.value.push(forkPanel)
     activePanelId.value = forkPanel.id
-    const contextId = sourceSession.assetId || sourceSession.connectionId || forkPanel.id
-    selectedContexts.value = [
-      ...selectedContexts.value.filter((item) => item.id !== contextId),
-      {
-        id: contextId,
-        kind: 'hosts',
-        label: sourceSession.host,
-        detail: `${sourceSession.assetName} fork`
-      }
-    ]
     return forkPanel
   }
 
@@ -10607,6 +10615,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     applyLocalTerminalSession,
     canForkSshPanel,
     forkSshPanel,
+    discardPendingTerminalPanel,
     closePanel,
     closeOthers,
     closeAllPanels,
