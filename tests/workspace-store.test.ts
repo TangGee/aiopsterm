@@ -216,6 +216,7 @@ const defaultMcpToolStates = {
 
 const businessDataConfigKeys = ['quickCommands', 'knowledgeBase', 'aliasCommands'] as const
 const malformedQuickCommandsBackendResultMessage = '快捷命令服务返回数据无效'
+const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
 
 const expectNoBusinessDataConfigWrites = (keys: readonly string[] = businessDataConfigKeys) => {
   const patches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch as Record<string, unknown>)
@@ -4074,6 +4075,100 @@ describe('workspace store', () => {
     expect(store.todoProgress.total).toBe(3)
     expect(store.todoProgress.completed).toBe(1)
     expect(store.todoProgress.percent).toBe(33)
+  })
+
+  it('fails closed on malformed terminal write envelopes across direct, global, approved, and quick command paths', async () => {
+    const store = useWorkspaceStore()
+    const byteLength = (data: string) => new TextEncoder().encode(data).length
+
+    store.activePanel.sessionId = 'terminal-write-main'
+    store.startMacroRecording(store.activePanelId)
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'terminal-write-main', bytes: byteLength('echo direct\n') - 1 }
+    } as any)
+    const directDecision = await store.runActiveTerminalCommand('echo direct')
+    expect(directDecision?.status).toBe('unavailable')
+    if (directDecision?.status === 'unavailable') {
+      expect(directDecision.reason).toBe(malformedTerminalWriteResultMessage)
+    }
+    expect(store.topNotice).toBe(malformedTerminalWriteResultMessage)
+    expect(store.activePanel.output).not.toContain('echo direct')
+    expect(store.recordedCommands).toEqual([])
+    store.cancelMacroRecording()
+
+    const firstPanel = store.panels.find((panel) => panel.id === 'panel-main')!
+    firstPanel.sessionId = 'terminal-write-main'
+    store.createPanel()
+    const secondPanelId = store.activePanelId
+    store.activePanel.sessionId = 'terminal-write-second'
+    store.startMacroRecording(firstPanel.id)
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { id: 'terminal-write-main', bytes: byteLength('hostname\n') }
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { id: 'wrong-terminal-write-second', bytes: byteLength('hostname\n') }
+      } as any)
+    const globalDecision = await store.runGlobalTerminalCommand('hostname')
+    expect(globalDecision?.status).toBe('unavailable')
+    if (globalDecision?.status === 'unavailable') {
+      expect(globalDecision.reason).toBe(malformedTerminalWriteResultMessage)
+      expect(globalDecision.panelIds).toEqual(['panel-main', secondPanelId])
+    }
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(2)
+    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(1, 'terminal-write-main', 'hostname\n')
+    expect(window.aiops.writeTerminal).toHaveBeenNthCalledWith(2, 'terminal-write-second', 'hostname\n')
+    expect(firstPanel.output).not.toContain('hostname')
+    expect(store.activePanel.output).not.toContain('hostname')
+    expect(store.recordedCommands).toEqual([])
+    store.cancelMacroRecording()
+
+    store.activePanelId = 'panel-main'
+    firstPanel.sessionId = 'terminal-write-main'
+    const approvalDecision = await store.runActiveTerminalCommand('rm /tmp/unsafe-file')
+    expect(approvalDecision?.status).toBe('needs-approval')
+    const approvedExecution = store.approveTerminalSecurityPrompt()
+    expect(approvedExecution?.command).toBe('rm /tmp/unsafe-file')
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'terminal-write-main', bytes: 0 }
+    } as any)
+    const approvedDecision = await store.writeTerminalExecution(approvedExecution!)
+    expect(approvedDecision?.status).toBe('unavailable')
+    if (approvedDecision?.status === 'unavailable') {
+      expect(approvedDecision.reason).toBe(malformedTerminalWriteResultMessage)
+    }
+    expect(store.terminalSecurityPrompt).toBeNull()
+    expect(firstPanel.output).not.toContain('rm /tmp/unsafe-file')
+
+    const delayedSnippet = await store.createQuickCommand({
+      snippet_name: 'Malformed delayed terminal write',
+      snippet_content: 'echo first\nsleep==250\necho second',
+      group_uuid: null
+    })
+    expect(delayedSnippet).toBeTruthy()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'terminal-write-main', bytes: 0 }
+    } as any)
+    const delayedDecision = await store.runQuickCommand(delayedSnippet!.id, true)
+    expect(delayedDecision?.status).toBe('unavailable')
+    if (delayedDecision?.status === 'unavailable') {
+      expect(delayedDecision.reason).toBe(malformedTerminalWriteResultMessage)
+    }
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-write-main', 'echo first\n')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(firstPanel.output).not.toContain('echo first')
+    expect(firstPanel.output).not.toContain('echo second')
   })
 
   it('manages External reference-style quick command scripts and macro snippets', async () => {

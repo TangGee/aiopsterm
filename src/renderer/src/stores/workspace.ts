@@ -321,6 +321,9 @@ type QuickCommandScriptPlanResolution =
   | { ok: true; plan: QuickCommandScriptPlan }
   | { ok: false; reason: string }
 
+type TerminalWriteBridgeResult = Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>
+type TerminalWriteValidation = { ok: true } | { ok: false; reason: string }
+
 export type TerminalOutputSegment = {
   text: string
   scope: TerminalOutputScope
@@ -851,9 +854,20 @@ const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standar
 const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
 
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && (max === undefined || value <= max) ? value : fallback
+
+const terminalWriteByteLength = (data: string) => new TextEncoder().encode(data).length
+
+const isTerminalWriteResultData = (value: unknown, sessionId: string, data: string) =>
+  isRecord(value) &&
+  value.id === sessionId &&
+  typeof value.bytes === 'number' &&
+  Number.isInteger(value.bytes) &&
+  value.bytes >= 0 &&
+  value.bytes === terminalWriteByteLength(data)
 
 const integerInRange = (value: unknown, fallback: number, min: number) =>
   typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
@@ -10343,8 +10357,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
   }
 
-  const terminalWriteFailureReason = (result?: Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>) =>
-    result?.errorMessage || '终端写入失败，请重新打开本地 shell 或连接 SSH'
+  const terminalWriteFailureReason = (result?: TerminalWriteBridgeResult) => result?.errorMessage || '终端写入失败，请重新打开本地 shell 或连接 SSH'
+
+  const terminalWriteExceptionReason = (error: unknown) =>
+    error instanceof Error && error.message.trim() ? error.message.trim() : '终端写入失败，请重新打开本地 shell 或连接 SSH'
+
+  const validateTerminalWriteResult = (result: TerminalWriteBridgeResult | undefined, sessionId: string, data: string): TerminalWriteValidation => {
+    if (!isRecord(result)) return { ok: false, reason: malformedTerminalWriteResultMessage }
+    if (result.ok === false) return { ok: false, reason: terminalWriteFailureReason(result as TerminalWriteBridgeResult) }
+    if (result.ok !== true || !isTerminalWriteResultData(result.data, sessionId, data)) {
+      return { ok: false, reason: malformedTerminalWriteResultMessage }
+    }
+    return { ok: true }
+  }
+
+  const writeTerminalSegment = async (sessionId: string, data: string): Promise<TerminalWriteValidation> => {
+    try {
+      const result = await window.aiops.writeTerminal(sessionId, data)
+      return validateTerminalWriteResult(result, sessionId, data)
+    } catch (error) {
+      return { ok: false, reason: terminalWriteExceptionReason(error) }
+    }
+  }
 
   const waitForSnippetDelay = (delayMs: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, delayMs)))
 
@@ -10397,10 +10431,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         for (const panelId of execution.panelIds) {
           const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
           if (!panel?.sessionId) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
-          const result = await window.aiops.writeTerminal(panel.sessionId, segment.text)
-          if (result?.ok === false) {
-            return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, terminalWriteFailureReason(result))
-          }
+          const writeResult = await writeTerminalSegment(panel.sessionId, segment.text)
+          if (!writeResult.ok) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, writeResult.reason)
         }
       }
       return { status: 'allow', execution }
@@ -10408,10 +10440,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     for (const panelId of execution.panelIds) {
       const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
       if (!panel?.sessionId) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
-      const result = await window.aiops.writeTerminal(panel.sessionId, execution.shellText || execution.inputText)
-      if (result?.ok === false) {
-        return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, terminalWriteFailureReason(result))
-      }
+      const writeData = execution.shellText || execution.inputText
+      const writeResult = await writeTerminalSegment(panel.sessionId, writeData)
+      if (!writeResult.ok) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, writeResult.reason)
     }
     recordTerminalExecutionInput(execution)
     return { status: 'allow', execution }
