@@ -2760,16 +2760,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return panel
   }
 
-  const aiSkillContextOptions = computed<AiContextOption[]>(() =>
-    settingsSkills.value
-      .filter((skill) => skill.enabled)
-      .map((skill) => ({
-        id: `skill:${skill.name}`,
-        kind: 'skills' as const,
-        label: skill.name,
-        detail: skill.description
-      }))
-  )
   const selectedCommandId = ref<string | null>(null)
   const selectedCommandRef = ref<AiCommandChipRef | null>(null)
   const filesUiMode = ref<FilesUiMode>('transfer')
@@ -3095,6 +3085,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     return true
   }
+
+  const aiSkillContextOptions = computed<AiContextOption[]>(
+    () => aiContextCatalog.value.categories.find((category) => category.id === 'skills')?.options.map((option) => ({ ...option })) || []
+  )
 
   const refreshAiTodoSnapshot = async () => {
     if (!window.aiops?.listAiTodoSnapshot) {

@@ -40,7 +40,7 @@ describe('AI context catalog backend boundary', () => {
 
   it('builds host, chat, and default contexts from backend-owned catalogs', async () => {
     const backend = await loadBackend()
-    const result = backend.listAiContextCatalog()
+    const result = await backend.listAiContextCatalog()
 
     expect(result.ok).toBe(true)
     expect(result.data?.openedHosts).toEqual([
@@ -68,5 +68,79 @@ describe('AI context catalog backend boundary', () => {
         expect.objectContaining({ id: 'chat:conv-2', label: 'K8s 发布失败' })
       ])
     )
+  })
+
+  it('builds docs and skills from configured backend sources without hardcoded skill fallbacks', async () => {
+    const backend = await loadBackend()
+    backend.configureAiContextBackendRuntime({
+      listKnowledgeTree: () => [
+        {
+          id: 'kb-dir-runbooks',
+          key: 'Runbooks',
+          title: 'Runbooks',
+          type: 'dir',
+          relPath: 'Runbooks',
+          children: [
+            {
+              id: 'kb-file-prod',
+              key: 'Runbooks/Prod.md',
+              title: 'Prod.md',
+              type: 'file',
+              relPath: 'Runbooks/Prod.md',
+              size: 128
+            }
+          ]
+        }
+      ],
+      listSkills: () => [
+        {
+          name: 'incident-triage',
+          description: 'Collect symptoms',
+          enabled: true,
+          editable: true,
+          content: 'Collect scope first.',
+          path: '/tmp/skills/incident-triage/SKILL.md'
+        },
+        {
+          name: 'disabled-skill',
+          description: 'Should not appear',
+          enabled: false,
+          editable: true,
+          content: 'hidden',
+          path: '/tmp/skills/disabled-skill/SKILL.md'
+        }
+      ]
+    })
+
+    const result = await backend.listAiContextCatalog()
+    const docs = result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'docs')?.options || []
+    const skills = result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'skills')?.options || []
+
+    expect(docs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'kb-dir:Runbooks', label: 'Runbooks', contextType: 'dir', parentRelPath: '' }),
+        expect.objectContaining({ id: 'kb-doc:Runbooks/Prod.md', label: 'Prod.md', contextType: 'doc', parentRelPath: 'Runbooks' })
+      ])
+    )
+    expect(skills).toEqual([expect.objectContaining({ id: 'skill:incident-triage', label: 'incident-triage', detail: 'Collect symptoms' })])
+    expect(skills).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'skill:audit-readonly' })]))
+    expect(skills).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'skill:disabled-skill' })]))
+  })
+
+  it('returns empty docs and skills when backend sources are unavailable instead of fabricating options', async () => {
+    const backend = await loadBackend()
+    backend.configureAiContextBackendRuntime({
+      listKnowledgeTree: () => {
+        throw new Error('knowledge unavailable')
+      },
+      listSkills: () => {
+        throw new Error('skills unavailable')
+      }
+    })
+
+    const result = await backend.listAiContextCatalog()
+    expect(result.ok).toBe(true)
+    expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'docs')?.options).toEqual([])
+    expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'skills')?.options).toEqual([])
   })
 })

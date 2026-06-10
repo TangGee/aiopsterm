@@ -1,6 +1,25 @@
-import type { AiContextCatalog, AiContextCatalogResult, AiContextCategoryInfo, AiContextOption, AiopsAssetRecord } from '@shared/preload'
+import type {
+  AiContextCatalog,
+  AiContextCatalogResult,
+  AiContextCategoryInfo,
+  AiContextOption,
+  AiopsAssetRecord,
+  KnowledgeBaseNodeConfig,
+  SkillUserConfig
+} from '@shared/preload'
 import { listAssets } from './assets'
 import { listChatConversations } from './chatHistory'
+
+type AiContextBackendRuntime = {
+  listKnowledgeTree?: () => KnowledgeBaseNodeConfig[] | Promise<KnowledgeBaseNodeConfig[]>
+  listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
+}
+
+const aiContextRuntime: AiContextBackendRuntime = {}
+
+export const configureAiContextBackendRuntime = (runtime: AiContextBackendRuntime) => {
+  Object.assign(aiContextRuntime, runtime)
+}
 
 const cloneContextOption = (context: AiContextOption): AiContextOption => ({ ...context })
 
@@ -65,26 +84,94 @@ const buildChatOptions = (): AiContextOption[] => {
     .sort((first, second) => first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' }))
 }
 
-const defaultSkillOptions = (): AiContextOption[] => [
-  { id: 'skill:audit-readonly', kind: 'skills', label: '巡检技能', detail: '生成只读检查步骤' },
-  { id: 'skill:incident-retrospective', kind: 'skills', label: '故障复盘', detail: '整理现象、假设和证据' },
-  { id: 'skill:release-guard', kind: 'skills', label: '发布守卫', detail: '发布前后检查清单' }
-]
+const parentRelPathFromRelPath = (relPath: string) => {
+  const parts = relPath.split('/').filter(Boolean)
+  return parts.length <= 1 ? '' : parts.slice(0, -1).join('/')
+}
 
-const buildCategories = (hosts: AiContextOption[], chats: AiContextOption[]): AiContextCategoryInfo[] => [
+const sortContextOptions = (options: AiContextOption[]) =>
+  [...options].sort((first, second) => {
+    if (first.contextType !== second.contextType) {
+      if (first.contextType === 'dir') return -1
+      if (second.contextType === 'dir') return 1
+    }
+    return first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  })
+
+const flattenKnowledgeNodesToDocOptions = (nodes: KnowledgeBaseNodeConfig[] = [], parentRelPath = ''): AiContextOption[] => {
+  const options: AiContextOption[] = []
+  for (const node of nodes) {
+    const relPath = node.relPath?.trim()
+    const label = node.title?.trim() || relPath.split('/').filter(Boolean).at(-1) || relPath
+    if (!relPath || !label) continue
+    const isDir = node.type === 'dir'
+    options.push({
+      id: `${isDir ? 'kb-dir' : 'kb-doc'}:${relPath}`,
+      kind: 'docs',
+      label,
+      detail: isDir ? 'dir' : relPath,
+      relPath,
+      parentRelPath: parentRelPath || parentRelPathFromRelPath(relPath),
+      contextType: isDir ? 'dir' : 'doc'
+    })
+    if (isDir && node.children?.length) {
+      options.push(...flattenKnowledgeNodesToDocOptions(node.children, relPath))
+    }
+  }
+  return sortContextOptions(options)
+}
+
+const buildDocOptions = async (): Promise<AiContextOption[]> => {
+  if (!aiContextRuntime.listKnowledgeTree) return []
+  try {
+    return flattenKnowledgeNodesToDocOptions(await aiContextRuntime.listKnowledgeTree())
+  } catch {
+    return []
+  }
+}
+
+const buildSkillOptions = async (): Promise<AiContextOption[]> => {
+  if (!aiContextRuntime.listSkills) return []
+  try {
+    const skills = await aiContextRuntime.listSkills()
+    return sortContextOptions(
+      skills
+        .filter((skill) => skill.enabled && skill.name?.trim())
+        .map((skill): AiContextOption => {
+          const name = skill.name.trim()
+          return {
+            id: `skill:${name}`,
+            kind: 'skills',
+            label: name,
+            detail: skill.description?.trim() || undefined
+          }
+        })
+    )
+  } catch {
+    return []
+  }
+}
+
+const buildCategories = (
+  hosts: AiContextOption[],
+  docs: AiContextOption[],
+  skills: AiContextOption[],
+  chats: AiContextOption[]
+): AiContextCategoryInfo[] => [
   { id: 'hosts', label: '主机', options: hosts.map(cloneContextOption) },
-  { id: 'docs', label: '文档', options: [] },
-  { id: 'skills', label: '技能', options: defaultSkillOptions() },
+  { id: 'docs', label: '文档', options: docs.map(cloneContextOption) },
+  { id: 'skills', label: '技能', options: skills.map(cloneContextOption) },
   { id: 'chats', label: '历史会话', options: chats.map(cloneContextOption) }
 ]
 
-export const listAiContextCatalog = (): AiContextCatalogResult => {
+export const listAiContextCatalog = async (): Promise<AiContextCatalogResult> => {
   try {
     const hosts = buildHostOptions()
     const chats = buildChatOptions()
+    const [docs, skills] = await Promise.all([buildDocOptions(), buildSkillOptions()])
     const defaultRemote = hosts.find((host) => host.id !== 'opened-local')
     const catalog: AiContextCatalog = {
-      categories: buildCategories(hosts, chats).map(cloneCategory),
+      categories: buildCategories(hosts, docs, skills, chats).map(cloneCategory),
       openedHosts: hosts.slice(0, 4).map(cloneContextOption),
       selectedDefaults: [hosts[0], defaultRemote].filter(Boolean).map((context) => cloneContextOption(context as AiContextOption))
     }

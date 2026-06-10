@@ -357,6 +357,7 @@ export type AiContextOption = {
   label: string
   detail?: string
   relPath?: string
+  parentRelPath?: string
   contextType?: 'file' | 'dir' | 'doc' | 'image'
   content?: string
   mediaType?: string

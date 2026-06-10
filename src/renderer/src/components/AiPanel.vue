@@ -1828,21 +1828,10 @@ const aiContextCategories = computed<AiContextCategoryView[]>(() =>
   }))
 )
 const selectedContextCategory = computed(() => aiContextCategories.value.find((category) => category.id === contextLevel.value))
-const docsCurrentNodes = computed(() => {
-  if (!docsCurrentRelDir.value) return workspace.knowledgeTree
-  const currentNode = workspace.findKnowledgeNode(docsCurrentRelDir.value)
-  return currentNode?.type === 'dir' ? currentNode.children || [] : []
-})
 const docsContextOptions = computed<AiContextOption[]>(() =>
-  docsCurrentNodes.value
-    .map((node) => ({
-      id: `${node.type === 'dir' ? 'kb-dir' : 'kb-doc'}:${node.relPath}`,
-      kind: 'docs' as const,
-      label: node.title,
-      detail: node.type === 'dir' ? 'dir' : node.relPath,
-      relPath: node.relPath,
-      contextType: node.type
-    }))
+  (selectedContextCategory.value?.options || [])
+    .filter((option) => option.parentRelPath === docsCurrentRelDir.value)
+    .map((option) => ({ ...option }))
     .sort((first, second) => {
       if (first.contextType !== second.contextType) return first.contextType === 'dir' ? -1 : 1
       return first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' })
@@ -1881,9 +1870,7 @@ const filteredContextOptions = computed(() => {
     contextLevel.value === 'docs'
       ? docsContextOptions.value
       : contextLevel.value === 'skills'
-        ? workspace.aiSkillContextOptions.length
-          ? workspace.aiSkillContextOptions
-          : selectedContextCategory.value?.options || []
+        ? workspace.aiSkillContextOptions
         : selectedContextCategory.value?.options || []
   const keyword = contextQuery.value.trim().toLowerCase()
   if (!keyword) return options
@@ -1895,7 +1882,9 @@ const hostContextsForPopup = computed(() =>
 )
 const allVisibleHostContextsSelected = computed(() => {
   const hosts = visibleHostContextOptions.value
-  return hosts.length > 0 && hosts.every((host) => hostContextsForPopup.value.some((context) => context.id === host.id))
+  const hasRemoteHost = hosts.some((host) => !isLocalhostContext(host))
+  const selectableHosts = hasRemoteHost ? hosts.filter((host) => !isLocalhostContext(host)) : hosts
+  return selectableHosts.length > 0 && selectableHosts.every((host) => hostContextsForPopup.value.some((context) => context.id === host.id))
 })
 const filteredCommands = computed(() => {
   const keyword = commandQuery.value.trim().toLowerCase()
@@ -3768,16 +3757,12 @@ const closeCommandPopup = (options: { restoreFocus?: boolean } = {}) => {
 }
 
 const openContextCategory = async (category: AiContextKind) => {
-  if (category === 'skills') {
-    await workspace.refreshSkillsFromBridge()
-  }
-  if (category === 'docs') {
-    await workspace.refreshKnowledgeTree({ persist: false })
-  }
   contextLevel.value = category
   contextQuery.value = ''
   contextKeyboardIndex.value = -1
   if (category === 'docs') resetDocsContextNavigation()
+  focusContextSearchInput()
+  await workspace.refreshAiContextCatalog({ hydrateSelection: false })
   focusContextSearchInput()
 }
 

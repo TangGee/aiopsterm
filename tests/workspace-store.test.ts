@@ -237,6 +237,7 @@ describe('workspace store', () => {
     ;(globalThis as any).__resetAiTodoSnapshotMock?.()
     ;(globalThis as any).__resetExtensionPluginStoreMock?.()
     ;(globalThis as any).__resetUserAccountStoreMock?.()
+    ;(globalThis as any).__resetSkillsStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
     vi.useFakeTimers()
   })
@@ -4327,6 +4328,22 @@ describe('workspace store', () => {
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'hosts')?.options).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'asset-3', label: '10.32.6.9' })])
     )
+    expect(store.aiContextCatalog.categories.find((category) => category.id === 'docs')?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'kb-dir:commands', label: 'commands', contextType: 'dir', parentRelPath: '' }),
+        expect.objectContaining({ id: 'kb-doc:commands/diagnose.md', label: 'diagnose.md', contextType: 'doc', parentRelPath: 'commands' })
+      ])
+    )
+    expect(store.aiContextCatalog.categories.find((category) => category.id === 'skills')?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'skill:incident-triage', label: 'incident-triage' }),
+        expect.objectContaining({ id: 'skill:k8s-rollout', label: 'k8s-rollout' })
+      ])
+    )
+    expect(store.aiContextCatalog.categories.find((category) => category.id === 'skills')?.options).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'skill:audit-readonly' })])
+    )
+    expect(store.aiSkillContextOptions.map((option) => option.id)).toEqual(['skill:incident-triage', 'skill:k8s-rollout'])
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'chats')?.options).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'chat:conv-2', label: 'K8s 发布失败' })])
     )

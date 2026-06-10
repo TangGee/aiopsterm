@@ -353,6 +353,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetChatHistoryStoreMock?.()
     ;(globalThis as any).__resetAiTodoSnapshotMock?.()
     ;(globalThis as any).__resetUserAccountStoreMock?.()
+    ;(globalThis as any).__resetSkillsStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
   })
 

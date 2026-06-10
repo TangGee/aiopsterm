@@ -2937,7 +2937,12 @@ const defaultSkills = [
   }
 ]
 
-const cloneSkills = () => defaultSkills.map((skill) => ({ ...skill }))
+const cloneDefaultSkills = () => defaultSkills.map((skill) => ({ ...skill }))
+let skillsStoreMock = cloneDefaultSkills()
+const cloneSkills = () => skillsStoreMock.map((skill) => ({ ...skill }))
+const resetSkillsStoreMock = () => {
+  skillsStoreMock = cloneDefaultSkills()
+}
 
 const defaultMcpServers: McpServerUserConfig[] = [
   {
@@ -3679,6 +3684,54 @@ const sortAssetsForAiContextMock = (assets: TestAssetRecord[]) =>
     })
   })
 
+const getKnowledgeParentRelPathMock = (relPath: string) => {
+  const parts = relPath.split('/').filter(Boolean)
+  return parts.length <= 1 ? '' : parts.slice(0, -1).join('/')
+}
+
+const flattenKnowledgeNodesForAiContextMock = (nodes: TestKnowledgeNode[] = knowledgeTreeMock, parentRelPath = '') => {
+  const options: Array<{
+    id: string
+    kind: 'docs'
+    label: string
+    detail: string
+    relPath: string
+    parentRelPath: string
+    contextType: 'dir' | 'doc'
+  }> = []
+  for (const node of nodes) {
+    if (!node.relPath || !node.title) continue
+    const isDir = node.type === 'dir'
+    options.push({
+      id: `${isDir ? 'kb-dir' : 'kb-doc'}:${node.relPath}`,
+      kind: 'docs',
+      label: node.title,
+      detail: isDir ? 'dir' : node.relPath,
+      relPath: node.relPath,
+      parentRelPath: parentRelPath || getKnowledgeParentRelPathMock(node.relPath),
+      contextType: isDir ? 'dir' : 'doc'
+    })
+    if (isDir && node.children?.length) {
+      options.push(...flattenKnowledgeNodesForAiContextMock(node.children as TestKnowledgeNode[], node.relPath))
+    }
+  }
+  return options.sort((first, second) => {
+    if (first.contextType !== second.contextType) return first.contextType === 'dir' ? -1 : 1
+    return first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  })
+}
+
+const skillsForAiContextMock = () =>
+  cloneSkills()
+    .filter((skill) => skill.enabled && skill.name.trim())
+    .map((skill) => ({
+      id: `skill:${skill.name}`,
+      kind: 'skills' as const,
+      label: skill.name,
+      detail: skill.description
+    }))
+    .sort((first, second) => first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' }))
+
 const aiContextCatalogResultMock = () => {
   const hosts = [
     { id: 'opened-local', kind: 'hosts' as const, label: '127.0.0.1', detail: 'local shell' },
@@ -3703,16 +3756,8 @@ const aiContextCatalogResultMock = () => {
     data: {
       categories: [
         { id: 'hosts' as const, label: '主机', options: hosts.map((host) => ({ ...host })) },
-        { id: 'docs' as const, label: '文档', options: [] },
-        {
-          id: 'skills' as const,
-          label: '技能',
-          options: [
-            { id: 'skill:audit-readonly', kind: 'skills' as const, label: '巡检技能', detail: '生成只读检查步骤' },
-            { id: 'skill:incident-retrospective', kind: 'skills' as const, label: '故障复盘', detail: '整理现象、假设和证据' },
-            { id: 'skill:release-guard', kind: 'skills' as const, label: '发布守卫', detail: '发布前后检查清单' }
-          ]
-        },
+        { id: 'docs' as const, label: '文档', options: flattenKnowledgeNodesForAiContextMock() },
+        { id: 'skills' as const, label: '技能', options: skillsForAiContextMock() },
         { id: 'chats' as const, label: '历史会话', options: chats.map((chat) => ({ ...chat })) }
       ],
       openedHosts: hosts.slice(0, 4).map((host) => ({ ...host })),
@@ -4165,6 +4210,7 @@ Object.assign(globalThis, {
   __resetDatabaseTableRowsMock: resetDatabaseTableRowsMock,
   __resetExtensionPluginStoreMock: resetExtensionPluginStoreMock,
   __resetUserAccountStoreMock: resetUserAccountStoreMock,
+  __resetSkillsStoreMock: resetSkillsStoreMock,
   __setUserAccountProfileMock: (patch: Partial<TestUserProfile>) => applyUserProfileMock(patch),
   __resetMcpStoreMock: resetMcpStoreMock,
   __resetFileEntriesMock: () => {
@@ -4631,7 +4677,7 @@ Object.defineProperty(window, 'aiops', {
       modelSettings: defaultModelSettings,
       shortcuts: defaultShortcuts,
       rules: defaultRules,
-      skills: defaultSkills,
+      skills: cloneSkills(),
       mcpServers: mcpServersMock.map(cloneMcpServerMock),
       mcpToolStates: getMcpToolStatesMock(mcpServersMock),
       quickCommands: defaultQuickCommands,
@@ -4694,7 +4740,7 @@ Object.defineProperty(window, 'aiops', {
       modelSettings: defaultModelSettings,
       shortcuts: defaultShortcuts,
       rules: defaultRules,
-      skills: defaultSkills,
+      skills: cloneSkills(),
       mcpServers: mcpServersMock.map(cloneMcpServerMock),
       mcpToolStates: getMcpToolStatesMock(mcpServersMock),
       quickCommands: defaultQuickCommands,
@@ -4806,22 +4852,30 @@ Object.defineProperty(window, 'aiops', {
     onMcpConfigFileChanged: vi.fn(() => () => undefined),
     getSkills: vi.fn(async () => cloneSkills()),
     getEnabledSkills: vi.fn(async () => cloneSkills().filter((skill) => skill.enabled)),
-    setSkillEnabled: vi.fn(async () => undefined),
+    setSkillEnabled: vi.fn(async (skillName: string, enabled: boolean) => {
+      skillsStoreMock = skillsStoreMock.map((skill) => (skill.name === skillName ? { ...skill, enabled } : skill))
+    }),
     getSkillsUserPath: vi.fn(async () => '/tmp/aiopsterm/skills'),
     reloadSkills: vi.fn(async () => cloneSkills()),
-    createSkill: vi.fn(async (metadata, content) => ({
-      name: metadata.name,
-      description: metadata.description,
-      enabled: true,
-      editable: true,
-      content,
-      path: `/tmp/aiopsterm/skills/${metadata.name}/SKILL.md`
-    })),
-    deleteSkill: vi.fn(async () => undefined),
+    createSkill: vi.fn(async (metadata, content) => {
+      const created = {
+        name: metadata.name,
+        description: metadata.description,
+        enabled: true,
+        editable: true,
+        content,
+        path: `/tmp/aiopsterm/skills/${metadata.name}/SKILL.md`
+      }
+      skillsStoreMock = [created, ...skillsStoreMock.filter((skill) => skill.name !== metadata.name)]
+      return { ...created }
+    }),
+    deleteSkill: vi.fn(async (skillName: string) => {
+      skillsStoreMock = skillsStoreMock.filter((skill) => skill.name !== skillName)
+    }),
     openSkillsFolder: vi.fn(async () => ({ path: '/tmp/aiopsterm/skills' })),
     importSkillZip: vi.fn(async () => ({ success: true, skillName: 'imported-skill' })),
     readSkillContent: vi.fn(async (skillName: string) => {
-      const skill = defaultSkills.find((item) => item.name === skillName)
+      const skill = skillsStoreMock.find((item) => item.name === skillName)
       return {
         metadata: {
           name: skillName,
@@ -4830,7 +4884,18 @@ Object.defineProperty(window, 'aiops', {
         content: skill?.content || ''
       }
     }),
-    updateSkill: vi.fn(async () => undefined),
+    updateSkill: vi.fn(async (skillName: string, metadata, content) => {
+      skillsStoreMock = skillsStoreMock.map((skill) =>
+        skill.name === skillName
+          ? {
+              ...skill,
+              name: metadata.name,
+              description: metadata.description,
+              content
+            }
+          : skill
+      )
+    }),
     exportSkillZip: vi.fn(async (skillName: string) => ({ success: true, filePath: `/tmp/${skillName}.zip` })),
     onSkillsUpdate: vi.fn(() => () => undefined),
     getPathForFile: vi.fn((file: File & { path?: string }) => String(file?.path || '')),

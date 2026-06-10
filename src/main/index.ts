@@ -30,7 +30,7 @@ import {
   testAssetConnection
 } from './backend/assets'
 import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
-import { listAiContextCatalog } from './backend/aiContext'
+import { configureAiContextBackendRuntime, listAiContextCatalog } from './backend/aiContext'
 import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
@@ -1878,6 +1878,11 @@ const startSkillsWatcher = async () => {
     })
   await syncSkillsConfigFromDisk()
 }
+
+configureAiContextBackendRuntime({
+  listKnowledgeTree: () => buildKnowledgeTreeFromDisk(),
+  listSkills: () => loadSkillsFromDisk()
+})
 
 const findSkillByName = async (skillName: string) => {
   const skills = await loadSkillsFromDisk()
