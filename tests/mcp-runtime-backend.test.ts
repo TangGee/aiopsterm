@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/preload'
 
 let backend: {
@@ -165,6 +166,168 @@ const operationOptions = (options: { servers?: McpServerUserConfig[]; toolStates
   clientVersion: '0.1.0-test'
 })
 
+const readJsonBody = async (request: IncomingMessage) =>
+  new Promise<Record<string, unknown>>((resolve, reject) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', (chunk) => {
+      body += chunk
+    })
+    request.on('end', () => {
+      try {
+        resolve(JSON.parse(body || '{}') as Record<string, unknown>)
+      } catch (error) {
+        reject(error)
+      }
+    })
+    request.on('error', reject)
+  })
+
+const mcpFixtureResultForMessage = (message: Record<string, unknown>) => {
+  const id = message.id
+  const method = message.method
+  if (method === 'initialize') {
+    return { jsonrpc: '2.0', id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {} }, serverInfo: { name: 'http-fixture', version: '1.0.0' } } }
+  }
+  if (method === 'tools/list') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        tools: [
+          {
+            name: 'inspect_service',
+            description: 'Inspect an HTTP-backed service.',
+            inputSchema: {
+              type: 'object',
+              required: ['name'],
+              properties: {
+                name: { type: 'string', description: 'Service name.' },
+                namespace: { type: 'string', description: 'Namespace.' }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+  if (method === 'resources/list') {
+    return { jsonrpc: '2.0', id, result: { resources: [{ name: 'http-runbook', description: 'HTTP incident runbook.', uri: 'https://runbook.local/http.md' }] } }
+  }
+  if (method === 'tools/call') {
+    const params = (message.params || {}) as Record<string, unknown>
+    const args = (params.arguments || {}) as Record<string, unknown>
+    if (params.name !== 'inspect_service') {
+      return { jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool: ${String(params.name || '')}` } }
+    }
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: { content: [{ type: 'text', text: `http-service=${String(args.name || '')};namespace=${String(args.namespace || 'default')}` }], isError: false }
+    }
+  }
+  if (method === 'resources/read') {
+    const params = (message.params || {}) as Record<string, unknown>
+    if (params.uri !== 'https://runbook.local/http.md') {
+      return { jsonrpc: '2.0', id, error: { code: -32002, message: `resource not found: ${String(params.uri || '')}` } }
+    }
+    return { jsonrpc: '2.0', id, result: { contents: [{ uri: params.uri, mimeType: 'text/markdown', text: '# HTTP Runbook\nCheck remote service health.' }] } }
+  }
+  if (id !== undefined) return { jsonrpc: '2.0', id, result: {} }
+  return null
+}
+
+const writeJsonRpcResponse = (response: ServerResponse, message: Record<string, unknown>, options: { sse?: boolean; sessionId?: string } = {}) => {
+  const body = JSON.stringify(message)
+  if (options.sse) {
+    response.writeHead(200, {
+      'content-type': 'text/event-stream',
+      ...(options.sessionId ? { 'mcp-session-id': options.sessionId } : {})
+    })
+    response.end(`event: message\ndata: ${body}\n\n`)
+    return
+  }
+  response.writeHead(200, {
+    'content-type': 'application/json',
+    ...(options.sessionId ? { 'mcp-session-id': options.sessionId } : {})
+  })
+  response.end(body)
+}
+
+const withStreamableHttpFixture = async <T>(run: (url: string) => Promise<T>) => {
+  const server = createServer(async (request, response) => {
+    if (request.method !== 'POST') {
+      response.writeHead(405)
+      response.end('method not allowed')
+      return
+    }
+    try {
+      const message = await readJsonBody(request)
+      const result = mcpFixtureResultForMessage(message)
+      if (!result) {
+        response.writeHead(202)
+        response.end()
+        return
+      }
+      writeJsonRpcResponse(response, result, { sse: request.headers.accept?.includes('text/event-stream'), sessionId: 'session-http-fixture' })
+    } catch (error) {
+      response.writeHead(500, { 'content-type': 'text/plain' })
+      response.end(error instanceof Error ? error.message : String(error))
+    }
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('fixture server did not bind')
+  try {
+    return await run(`http://127.0.0.1:${address.port}/mcp`)
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  }
+}
+
+const withLegacySseFixture = async <T>(run: (url: string) => Promise<T>) => {
+  const clients = new Set<ServerResponse>()
+  const server = createServer(async (request, response) => {
+    if (request.method === 'GET' && request.url === '/sse') {
+      clients.add(response)
+      response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
+      response.write('event: endpoint\ndata: /messages\n\n')
+      request.on('close', () => {
+        clients.delete(response)
+      })
+      return
+    }
+    if (request.method === 'POST' && request.url === '/messages') {
+      try {
+        const message = await readJsonBody(request)
+        const result = mcpFixtureResultForMessage(message)
+        response.writeHead(202)
+        response.end()
+        if (result) {
+          for (const client of clients) {
+            client.write(`event: message\ndata: ${JSON.stringify(result)}\n\n`)
+          }
+        }
+      } catch (error) {
+        response.writeHead(500, { 'content-type': 'text/plain' })
+        response.end(error instanceof Error ? error.message : String(error))
+      }
+      return
+    }
+    response.writeHead(404)
+    response.end('not found')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('fixture server did not bind')
+  try {
+    return await run(`http://127.0.0.1:${address.port}/sse`)
+  } finally {
+    for (const client of clients) client.end()
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  }
+}
+
 describe('mcp runtime backend boundary', () => {
   it('discovers tools and resources from a real stdio MCP server process', async () => {
     const snapshot = await discover(fixtureConfig())
@@ -299,11 +462,76 @@ describe('mcp runtime backend boundary', () => {
     ])
   })
 
-  it('fails closed for unsupported transports and failed stdio commands', async () => {
+  it('discovers tools and resources from streamable HTTP and legacy SSE MCP servers', async () => {
+    await withStreamableHttpFixture(async (httpUrl) => {
+      await withLegacySseFixture(async (sseUrl) => {
+        const snapshot = await discover({
+          mcpServers: {
+            remoteHttp: {
+              type: 'streamableHttp',
+              url: httpUrl,
+              timeout: 1,
+              autoApprove: ['inspect_service']
+            },
+            remoteSse: {
+              type: 'sse',
+              url: sseUrl,
+              timeout: 1
+            }
+          }
+        })
+
+        expect(snapshot.mcpServers).toEqual([
+          {
+            name: 'remoteHttp',
+            status: 'connected',
+            disabled: false,
+            tools: [
+              {
+                name: 'inspect_service',
+                description: 'Inspect an HTTP-backed service.',
+                enabled: true,
+                autoApprove: true,
+                parameters: [
+                  { name: 'name', description: 'Service name.', required: true },
+                  { name: 'namespace', description: 'Namespace.' }
+                ]
+              }
+            ],
+            resources: [{ name: 'http-runbook', description: 'HTTP incident runbook.', uri: 'https://runbook.local/http.md' }]
+          },
+          {
+            name: 'remoteSse',
+            status: 'connected',
+            disabled: false,
+            tools: [
+              {
+                name: 'inspect_service',
+                description: 'Inspect an HTTP-backed service.',
+                enabled: true,
+                autoApprove: false,
+                parameters: [
+                  { name: 'name', description: 'Service name.', required: true },
+                  { name: 'namespace', description: 'Namespace.' }
+                ]
+              }
+            ],
+            resources: [{ name: 'http-runbook', description: 'HTTP incident runbook.', uri: 'https://runbook.local/http.md' }]
+          }
+        ])
+        expect(snapshot.mcpToolStates).toEqual({
+          'remoteHttp:inspect_service': true,
+          'remoteSse:inspect_service': true
+        })
+      })
+    })
+  })
+
+  it('fails closed for failed remote and stdio MCP discovery', async () => {
     const snapshot = await discover({
       mcpServers: {
         remote: {
-          type: 'sse',
+          type: 'streamableHttp',
           url: 'http://127.0.0.1:65535/mcp',
           timeout: 1
         },
@@ -321,7 +549,7 @@ describe('mcp runtime backend boundary', () => {
         name: 'remote',
         status: 'error',
         disabled: false,
-        error: 'MCP sse transport is not supported by aiopsterm yet.',
+        error: expect.any(String),
         tools: [],
         resources: []
       },
@@ -334,6 +562,7 @@ describe('mcp runtime backend boundary', () => {
         resources: []
       }
     ])
+    expect(snapshot.mcpServers[0].error).not.toContain('not supported')
     expect(snapshot.mcpToolStates).toEqual({})
   })
 
@@ -383,6 +612,99 @@ describe('mcp runtime backend boundary', () => {
         contents: [{ uri: 'file:///runbook.md', mimeType: 'text/markdown', text: '# Runbook\nCheck service health.' }],
         durationMs: expect.any(Number)
       }
+    })
+  })
+
+  it('calls streamable HTTP MCP tools and reads resources through the backend boundary', async () => {
+    await loadBackend()
+
+    await withStreamableHttpFixture(async (url) => {
+      const config: McpConfigFile = {
+        mcpServers: {
+          remote: {
+            type: 'streamableHttp',
+            url,
+            timeout: 1
+          }
+        }
+      }
+
+      await expect(
+        backend.callMcpTool(
+          config,
+          {
+            serverName: 'remote',
+            toolName: 'inspect_service',
+            arguments: { name: 'api', namespace: 'prod' }
+          },
+          operationOptions()
+        )
+      ).resolves.toEqual({
+        ok: true,
+        data: {
+          serverName: 'remote',
+          toolName: 'inspect_service',
+          arguments: { name: 'api', namespace: 'prod' },
+          content: [{ type: 'text', text: 'http-service=api;namespace=prod' }],
+          isError: false,
+          durationMs: expect.any(Number)
+        }
+      })
+
+      await expect(
+        backend.readMcpResource(
+          config,
+          {
+            serverName: 'remote',
+            uri: 'https://runbook.local/http.md'
+          },
+          operationOptions()
+        )
+      ).resolves.toEqual({
+        ok: true,
+        data: {
+          serverName: 'remote',
+          uri: 'https://runbook.local/http.md',
+          contents: [{ uri: 'https://runbook.local/http.md', mimeType: 'text/markdown', text: '# HTTP Runbook\nCheck remote service health.' }],
+          durationMs: expect.any(Number)
+        }
+      })
+    })
+  })
+
+  it('calls legacy SSE MCP tools through the backend boundary', async () => {
+    await loadBackend()
+
+    await withLegacySseFixture(async (url) => {
+      await expect(
+        backend.callMcpTool(
+          {
+            mcpServers: {
+              remote: {
+                type: 'sse',
+                url,
+                timeout: 1
+              }
+            }
+          },
+          {
+            serverName: 'remote',
+            toolName: 'inspect_service',
+            arguments: { name: 'api' }
+          },
+          operationOptions()
+        )
+      ).resolves.toEqual({
+        ok: true,
+        data: {
+          serverName: 'remote',
+          toolName: 'inspect_service',
+          arguments: { name: 'api' },
+          content: [{ type: 'text', text: 'http-service=api;namespace=default' }],
+          isError: false,
+          durationMs: expect.any(Number)
+        }
+      })
     })
   })
 
@@ -444,7 +766,7 @@ describe('mcp runtime backend boundary', () => {
       )
     ).resolves.toMatchObject({
       ok: false,
-      errorCode: 'MCP_RESOURCE_TRANSPORT_UNSUPPORTED'
+      errorCode: 'MCP_RESOURCE_READ_FAILED'
     })
 
     await expect(

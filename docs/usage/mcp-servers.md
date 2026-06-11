@@ -10,11 +10,11 @@ New non-test profiles start with an empty MCP config:
 }
 ```
 
-## Stdio Discovery
+## Transport Discovery
 
-`stdio` servers are discovered by the main process. When the MCP settings page or editor refreshes the server list, aiopsterm starts the configured command, sends MCP `initialize`, then requests `tools/list` and `resources/list`. The renderer only displays the backend-discovered tools and resources.
+MCP servers are discovered by the main process. When the MCP settings page or editor refreshes the server list, aiopsterm opens the configured transport, sends MCP `initialize`, then requests `tools/list` and `resources/list`. The renderer only displays the backend-discovered tools and resources.
 
-Example:
+`stdio` example:
 
 ```json
 {
@@ -31,6 +31,25 @@ Example:
   }
 }
 ```
+
+`streamableHttp` example:
+
+```json
+{
+  "mcpServers": {
+    "remote-tools": {
+      "type": "streamableHttp",
+      "url": "https://mcp.example.com/mcp",
+      "timeout": 10,
+      "headers": {
+        "Authorization": "Bearer ${TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Legacy `sse` servers use the same `url`, `timeout`, and `headers` shape.
 
 Per-tool enabled state is stored separately by aiopsterm, so editing a server command does not force disabled tools back on.
 
@@ -59,12 +78,8 @@ AI chat also consumes the same stored flag. When a configured model returns a Ex
 
 ## Tool Calls And Resource Reads
 
-The main process now exposes real runtime operations for discovered `stdio` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. Each operation starts the configured MCP server command, sends MCP `initialize`, calls `tools/call` or `resources/read`, returns the server response in an `ok` envelope, and closes the process.
+The main process now exposes real runtime operations for discovered `stdio`, `streamableHttp`, and legacy `sse` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. Each operation opens the configured transport, sends MCP `initialize`, calls `tools/call` or `resources/read`, returns the server response in an `ok` envelope, and closes the operation client.
 
 Settings -> MCP also exposes those operations directly on discovered server cards. A tool row accepts a JSON object argument draft and the Run button sends that exact object to the preload bridge. A resource row exposes Read for its discovered URI. The result preview is rendered only from the backend returned `content` or `contents` payload; invalid JSON arguments, disabled servers/tools, missing bridges, malformed success envelopes, or request-mismatched responses fail closed and show an error instead of local sample output.
 
-Disabled servers, disabled tools, missing servers, unsupported transports, invalid config files, command failures, and MCP protocol errors return structured `ok: false` results. Renderer code should display those backend results and must not synthesize MCP output locally.
-
-## Unsupported Transports
-
-`sse` and `streamableHttp` entries are accepted in the config file but currently fail closed with an unsupported-transport status for discovery, tool calls, and resource reads. They do not create renderer-side tools or resources.
+Disabled servers, disabled tools, missing servers, invalid URLs, connection failures, invalid config files, command failures, HTTP status failures, and MCP protocol errors return structured `ok: false` results. Renderer code should display those backend results and must not synthesize MCP output locally.
