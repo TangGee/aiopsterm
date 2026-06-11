@@ -379,15 +379,15 @@ const loadSqliteRuntime = () => {
   return sqliteRuntime
 }
 
-const isNodeTestRuntime = () => {
+const isExplicitDatabaseSeedDataEnabled = () => {
   try {
-    return typeof process !== 'undefined' && process.env?.NODE_ENV === 'test'
+    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_DATABASE_ENABLE_SEED || '').trim() === '1'
   } catch {
     return false
   }
 }
 
-const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? isNodeTestRuntime()
+const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? isExplicitDatabaseSeedDataEnabled()
 
 type SafeStorageLike = {
   isEncryptionAvailable: () => boolean

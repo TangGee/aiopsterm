@@ -331,6 +331,7 @@ let exportDatabaseRowsBackend: (
   }
 ) => Promise<DatabaseExportResult>
 const originalDbAiBackendDouble = process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
+const originalDatabaseSeed = process.env.AIOPSTERM_DATABASE_ENABLE_SEED
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/database'
@@ -358,6 +359,7 @@ describe('database backend boundary', () => {
 
   beforeEach(() => {
     delete process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
+    process.env.AIOPSTERM_DATABASE_ENABLE_SEED = '1'
     configureDatabaseBackendRuntime()
     resetDatabaseBackendSeed()
     tempDirs = []
@@ -365,6 +367,11 @@ describe('database backend boundary', () => {
 
   afterEach(async () => {
     configureDatabaseBackendRuntime()
+    if (originalDatabaseSeed === undefined) {
+      delete process.env.AIOPSTERM_DATABASE_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_DATABASE_ENABLE_SEED = originalDatabaseSeed
+    }
     if (originalDbAiBackendDouble === undefined) {
       delete process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
     } else {
@@ -547,6 +554,34 @@ describe('database backend boundary', () => {
 
     const metricsConnection = result.data?.connections.find((connection) => connection.id === 'conn-metrics-mysql')
     expect(metricsConnection?.catalogs[0]?.tables?.map((table) => table.name)).toEqual(['service_health', 'ops_incidents', 'metric_events'])
+  })
+
+  it('requires an explicit database seed switch instead of inferring seed rows from NODE_ENV=test', async () => {
+    const originalNodeEnv = process.env.NODE_ENV
+    try {
+      process.env.NODE_ENV = 'test'
+      delete process.env.AIOPSTERM_DATABASE_ENABLE_SEED
+      resetDatabaseBackendSeed()
+
+      const closedCatalog = await listDatabaseCatalog()
+      expect(closedCatalog.ok).toBe(true)
+      expect(closedCatalog.data?.connections).toEqual([])
+      expect(closedCatalog.data?.defaults.selectedNodeId).toBeNull()
+
+      process.env.AIOPSTERM_DATABASE_ENABLE_SEED = '1'
+      resetDatabaseBackendSeed()
+
+      const seededCatalog = await listDatabaseCatalog()
+      expect(seededCatalog.ok).toBe(true)
+      expect(seededCatalog.data?.connections.find((connection) => connection.id === 'conn-prod-pg')?.name).toBe('orders-postgres')
+      expect(seededCatalog.data?.defaults.selectedNodeId).toBe('conn-prod-pg')
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV
+      } else {
+        process.env.NODE_ENV = originalNodeEnv
+      }
+    }
   })
 
   it('persists database sidebar group and connection menu actions behind the backend boundary', async () => {

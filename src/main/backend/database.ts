@@ -16,6 +16,7 @@ type DatabaseBackendRuntimeConfig = {
   timeoutMs?: number
   stateFilePath?: string
   credentialKeyPath?: string
+  useSeedData?: boolean
 }
 
 const normalizeText = (value: unknown) => String(value || '').trim()
@@ -85,7 +86,8 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
     config
       ? {
           ...(config.stateFilePath ? { stateFilePath: config.stateFilePath } : {}),
-          ...(config.credentialKeyPath ? { credentialKeyPath: config.credentialKeyPath } : {})
+          ...(config.credentialKeyPath ? { credentialKeyPath: config.credentialKeyPath } : {}),
+          ...(typeof config.useSeedData === 'boolean' ? { useSeedData: config.useSeedData } : {})
         }
       : undefined
   )
