@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { app } from 'electron'
 import Store from 'electron-store'
-import { basename as getLocalBasename, dirname as getLocalDirname, join } from 'path'
+import { basename as getLocalBasename, dirname as getLocalDirname, isAbsolute, join, resolve } from 'path'
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
 import type {
   FileSessionCatalog,
@@ -62,12 +62,41 @@ type RemoteSftpTarget = {
 
 type FilesBackendRuntimeConfig = {
   getConfig?: () => Pick<UserConfig, 'sshProxyConfigs' | 'sshAgentKeys' | 'terminal'>
+  databasePath?: string
+  useSeedData?: boolean
+  forceFallbackStore?: boolean
+  sqliteFactory?: new (path: string) => SqliteDatabase
 }
 
-const filesRuntimeConfig: FilesBackendRuntimeConfig = {}
+const defaultFileSessionSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_FILES_ENABLE_SEED || '').trim() === '1'
+
+const defaultFileSessionDatabasePath = () => {
+  const envPath = String(process.env.AIOPSTERM_FILES_DB_PATH || '').trim()
+  if (envPath) return isAbsolute(envPath) ? envPath : resolve(envPath)
+  return join(app.getPath('userData'), 'aiopsterm-state.db')
+}
+
+type FilesBackendRuntimeState = Required<Pick<FilesBackendRuntimeConfig, 'databasePath' | 'useSeedData' | 'forceFallbackStore'>> & {
+  getConfig?: FilesBackendRuntimeConfig['getConfig']
+  sqliteFactory?: new (path: string) => SqliteDatabase
+}
+
+let filesRuntimeConfig: FilesBackendRuntimeState = {
+  databasePath: defaultFileSessionDatabasePath(),
+  useSeedData: defaultFileSessionSeedMode(),
+  forceFallbackStore: false
+}
 
 export const configureFilesBackendRuntime = (config: FilesBackendRuntimeConfig = {}) => {
-  filesRuntimeConfig.getConfig = config.getConfig
+  filesRuntimeConfig = {
+    databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultFileSessionDatabasePath(),
+    useSeedData: config.useSeedData ?? defaultFileSessionSeedMode(),
+    forceFallbackStore: Boolean(config.forceFallbackStore),
+    ...(config.getConfig ? { getConfig: config.getConfig } : {}),
+    ...(config.sqliteFactory ? { sqliteFactory: config.sqliteFactory } : {})
+  }
+  fileSessionCatalog = null
+  fileSessionCatalogStore = null
 }
 
 const getSshProxyConfigs = () => filesRuntimeConfig.getConfig?.().sshProxyConfigs || []
@@ -621,10 +650,18 @@ const defaultFileSessions: FileSessionInfo[] = [
   }
 ]
 
-const defaultFileSessionCatalog = (): FileSessionCatalog => ({
+const fileSessionSeedCatalog = (): FileSessionCatalog => ({
   sessions: defaultFileSessions.map((session) => ({ ...session })),
   folders: defaultFileSessionFolders.map((folder) => ({ ...folder }))
 })
+
+const fileSessionSeedlessCatalog = (): FileSessionCatalog => ({
+  sessions: [{ ...defaultFileSessions[0] }],
+  folders: []
+})
+
+const defaultFileSessionCatalog = (): FileSessionCatalog =>
+  filesRuntimeConfig.useSeedData ? fileSessionSeedCatalog() : fileSessionSeedlessCatalog()
 
 let fileSessionCatalog: FileSessionCatalog | null = null
 
@@ -636,6 +673,28 @@ const cloneFileSessionCatalog = (catalog: FileSessionCatalog): FileSessionCatalo
 })
 
 const fileSessionLocalEntry = () => cloneSession(defaultFileSessions[0])
+
+const stableJson = (value: unknown) => JSON.stringify(value)
+
+const seedFileSessionById = new Map(fileSessionSeedCatalog().sessions.filter((session) => session.id !== 'local').map((session) => [session.id, session]))
+const seedFileSessionFolderByUuid = new Map(fileSessionSeedCatalog().folders.map((folder) => [folder.uuid, folder]))
+
+const isUnmodifiedSeedFileSession = (session: FileSessionInfo) => {
+  const seed = seedFileSessionById.get(session.id)
+  return Boolean(seed && stableJson(session) === stableJson(seed))
+}
+
+const isUnmodifiedSeedFileSessionFolder = (folder: FileSessionFolderRecord) => {
+  const seed = seedFileSessionFolderByUuid.get(folder.uuid)
+  return Boolean(seed && stableJson(folder) === stableJson(seed))
+}
+
+const stripLegacySeedFileSessionCatalog = (catalog: FileSessionCatalog): FileSessionCatalog => {
+  const sessions = catalog.sessions.filter((session) => !isUnmodifiedSeedFileSession(session))
+  const referencedFolders = new Set(sessions.map((session) => session.folderUuid).filter((uuid): uuid is string => Boolean(uuid)))
+  const folders = catalog.folders.filter((folder) => !isUnmodifiedSeedFileSessionFolder(folder) || referencedFolders.has(folder.uuid))
+  return { sessions, folders }
+}
 
 const fileSessionResult = <T>(data: T) => ({ ok: true, data })
 
@@ -1017,20 +1076,24 @@ const normalizeFileSessionCatalog = (catalog?: Partial<FileSessionCatalog> | nul
     .map((folder) => normalizeStoredFileSessionFolder(folder as Partial<FileSessionFolderRecord>))
     .filter((folder): folder is FileSessionFolderRecord => Boolean(folder))
   if (!sessions.some((session) => session.id === 'local')) sessions.unshift(fileSessionLocalEntry())
-  return { sessions, folders }
+  const normalized = { sessions, folders }
+  return filesRuntimeConfig.useSeedData ? normalized : stripLegacySeedFileSessionCatalog(normalized)
 }
 
 class FallbackFileSessionCatalogStore {
   private store = new Store<FileSessionCatalogStoreShape>({
+    projectName: 'aiopsterm',
     name: 'aiopsterm-file-sessions',
     defaults: defaultFileSessionCatalog()
-  })
+  } as ConstructorParameters<typeof Store<FileSessionCatalogStoreShape>>[0] & { projectName: string })
 
   load(): FileSessionCatalog {
-    return normalizeFileSessionCatalog({
+    const catalog = normalizeFileSessionCatalog({
       sessions: this.store.get('sessions') || [],
       folders: this.store.get('folders') || []
     })
+    if (!filesRuntimeConfig.useSeedData) this.save(catalog)
+    return catalog
   }
 
   save(catalog: FileSessionCatalog): FileSessionCatalog {
@@ -1075,10 +1138,12 @@ class SqliteFileSessionCatalogStore {
 let fileSessionCatalogStore: FallbackFileSessionCatalogStore | SqliteFileSessionCatalogStore | null = null
 
 const createFileSessionCatalogStore = () => {
+  if (filesRuntimeConfig.sqliteFactory) return new SqliteFileSessionCatalogStore(new filesRuntimeConfig.sqliteFactory(filesRuntimeConfig.databasePath))
   try {
+    if (filesRuntimeConfig.forceFallbackStore) throw new Error('force fallback file-session store')
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
-    return new SqliteFileSessionCatalogStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+    return new SqliteFileSessionCatalogStore(new Database(filesRuntimeConfig.databasePath))
   } catch {
     return new FallbackFileSessionCatalogStore()
   }

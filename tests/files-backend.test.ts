@@ -365,7 +365,11 @@ let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
 let deleteFileSessionFolder: (uuid: string) => Promise<any>
 let resetFileSessionCatalog: () => void
 let dropFileSessionCatalogCache: () => void
-let configureFilesBackendRuntime: (config?: { getConfig?: () => { sshProxyConfigs?: any[]; sshAgentKeys?: any[]; terminal?: any } }) => void
+let configureFilesBackendRuntime: (config?: {
+  getConfig?: () => { sshProxyConfigs?: any[]; sshAgentKeys?: any[]; terminal?: any }
+  useSeedData?: boolean
+  forceFallbackStore?: boolean
+}) => void
 let saveAsset: (asset: any) => any
 let saveKeychain: (keychain: any) => any
 let filesBackendExports: Record<string, unknown>
@@ -399,10 +403,10 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  configureFilesBackendRuntime?.()
   resetFileSessionCatalog?.()
   ssh2Mock.reset()
   sshProxyMock.reset()
-  configureFilesBackendRuntime?.()
 })
 
 describe('files backend content boundary', () => {
@@ -592,6 +596,58 @@ describe('files backend content boundary', () => {
     const deletedSession = await deleteFileSession('asset-release')
     expect(deletedSession.ok).toBe(true)
     expect(deletedSession.data.sessions.some((session: any) => session.id === 'asset-release')).toBe(false)
+  })
+
+  it('starts non-seed file session catalog with only the backend-owned local file session', async () => {
+    configureFilesBackendRuntime({ useSeedData: false, forceFallbackStore: true })
+    resetFileSessionCatalog()
+
+    const catalog = await listFileSessionCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data.sessions).toEqual([expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' })])
+    expect(catalog.data.sessions.some((session: any) => ['asset-1', 'folder_asset-2'].includes(session.id))).toBe(false)
+    expect(catalog.data.folders).toEqual([])
+  })
+
+  it('keeps development file session seeds available only when seed mode is enabled', async () => {
+    configureFilesBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+    resetFileSessionCatalog()
+
+    const catalog = await listFileSessionCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local', kind: 'local' }),
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion' }),
+        expect.objectContaining({ id: 'folder_asset-2', label: 'staging-files', folderUuid: 'files-folder-a' })
+      ])
+    )
+    expect(catalog.data.folders).toEqual(
+      expect.arrayContaining([expect.objectContaining({ uuid: 'files-folder-a' }), expect.objectContaining({ uuid: 'files-folder-b' })])
+    )
+  })
+
+  it('strips unchanged legacy fallback file session seeds in non-seed runtime while preserving user edits', async () => {
+    configureFilesBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+    resetFileSessionCatalog()
+    const edited = await updateFileSession('asset-1', { label: 'user-owned-prod-files', rootPath: '/srv/user-owned', folderUuid: 'files-folder-a' })
+    expect(edited.ok).toBe(true)
+
+    configureFilesBackendRuntime({ useSeedData: false, forceFallbackStore: true })
+    const catalog = await listFileSessionCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local', kind: 'local' }),
+        expect.objectContaining({ id: 'asset-1', label: 'user-owned-prod-files', rootPath: '/srv/user-owned', folderUuid: 'files-folder-a' })
+      ])
+    )
+    expect(catalog.data.sessions.some((session: any) => session.id === 'folder_asset-2')).toBe(false)
+    expect(catalog.data.folders).toContainEqual(expect.objectContaining({ uuid: 'files-folder-a' }))
+    expect(catalog.data.folders.some((folder: any) => folder.uuid === 'files-folder-b')).toBe(false)
   })
 
   it('persists file session catalog mutations behind the backend store', async () => {
