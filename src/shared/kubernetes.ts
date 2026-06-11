@@ -52,6 +52,7 @@ const nowLabel = () => '刚刚'
 type KubernetesBackendRuntimeConfig = {
   stateDir?: string
   useSeedData?: boolean
+  defaultKubeconfigPath?: string | null
 }
 
 const defaultKubernetesStateDir = () => {
@@ -64,7 +65,8 @@ const defaultKubernetesSeedMode = () =>
 
 let runtimeConfig: Required<KubernetesBackendRuntimeConfig> = {
   stateDir: defaultKubernetesStateDir(),
-  useSeedData: defaultKubernetesSeedMode()
+  useSeedData: defaultKubernetesSeedMode(),
+  defaultKubeconfigPath: join(homedir(), '.kube', 'config')
 }
 
 const defaultContexts: KubernetesContextInfo[] = [
@@ -787,9 +789,21 @@ const applyKubernetesPersistedState = (state: KubernetesPersistedCatalogState) =
   importContexts = state.importContexts.map((context) => ({ ...context }))
 }
 
-const discoverDefaultKubeconfigState = (): Pick<KubernetesPersistedCatalogState, 'contexts' | 'importContexts'> | null => {
+const idPart = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item'
+
+const expandHomePath = (value: string) => {
+  if (value === '~') return homedir()
+  if (value.startsWith('~/') || value.startsWith('~\\')) return join(homedir(), value.slice(2))
+  return value
+}
+
+const discoveredKubeconfigClusterId = (contextName: string) => `k8s-local-${idPart(contextName)}`
+
+const discoverDefaultKubeconfigState = (): Pick<KubernetesPersistedCatalogState, 'contexts' | 'clusters' | 'importContexts'> | null => {
   if (shouldUseKubernetesSeedData()) return null
-  const kubeconfigPath = join(homedir(), '.kube', 'config')
+  const configuredPath = runtimeConfig.defaultKubeconfigPath?.trim() || ''
+  if (!configuredPath) return null
+  const kubeconfigPath = expandHomePath(configuredPath)
   if (!existsSync(kubeconfigPath)) return null
   try {
     const content = readFileSync(kubeconfigPath, 'utf-8')
@@ -802,8 +816,29 @@ const discoverDefaultKubeconfigState = (): Pick<KubernetesPersistedCatalogState,
       server: context.server,
       isActive: Boolean(parsed.currentContext && context.name === parsed.currentContext)
     }))
+    const discoveredClusters = parsed.contexts.map((context) => ({
+      id: discoveredKubeconfigClusterId(context.name),
+      name: context.cluster || context.name,
+      kubeconfig_path: kubeconfigPath,
+      kubeconfig_content: null,
+      context_name: context.name,
+      server_url: context.server,
+      auth_type: 'kubeconfig',
+      is_active: parsed.currentContext && context.name === parsed.currentContext ? 1 : 0,
+      connection_status: 'disconnected' as const,
+      auto_connect: 0,
+      default_namespace: context.namespace || 'default',
+      created_at: nowLabel(),
+      updated_at: nowLabel(),
+      source_type: 'local' as const,
+      bastion_uuid: null,
+      bastion_asset_address: null,
+      bastion_asset_name: null,
+      bastion_asset_id_last: null
+    }))
     return {
       contexts: discoveredContexts,
+      clusters: discoveredClusters,
       importContexts: parsed.contexts.map((context) => ({ ...context }))
     }
   } catch {
@@ -833,6 +868,7 @@ const ensureKubernetesCatalogStateLoaded = () => {
   const discovered = discoverDefaultKubeconfigState()
   if (discovered) {
     contexts = discovered.contexts
+    clusters = discovered.clusters
     importContexts = discovered.importContexts
   }
 }
@@ -862,7 +898,15 @@ const persistKubernetesCatalogState = () => {
 export const configureKubernetesBackendRuntime = (config: KubernetesBackendRuntimeConfig = {}) => {
   runtimeConfig = {
     stateDir: config.stateDir ? (isAbsolute(config.stateDir) ? config.stateDir : resolve(config.stateDir)) : defaultKubernetesStateDir(),
-    useSeedData: config.useSeedData ?? defaultKubernetesSeedMode()
+    useSeedData: config.useSeedData ?? defaultKubernetesSeedMode(),
+    defaultKubeconfigPath:
+      config.defaultKubeconfigPath === null
+        ? ''
+        : config.defaultKubeconfigPath
+          ? isAbsolute(expandHomePath(config.defaultKubeconfigPath))
+            ? expandHomePath(config.defaultKubeconfigPath)
+            : resolve(expandHomePath(config.defaultKubeconfigPath))
+          : join(homedir(), '.kube', 'config')
   }
   agentProxyConfigCache = null
   terminalSessions = []
@@ -962,6 +1006,24 @@ const emitKubernetesTerminalExit = (
     clusterId: session.clusterId,
     emittedAt: nowLabel(),
     ...event
+  })
+}
+
+const failKubernetesClusterTerminalSessions = (clusterId: string, error: string) => {
+  terminalSessions = terminalSessions.map((session) => {
+    if (session.clusterId !== clusterId || session.status === 'ended' || session.status === 'error') return session
+    const failed: KubernetesTerminalRecord = {
+      ...session,
+      output: session.output.endsWith('\n') || !session.output ? `${session.output}${error}` : `${session.output}\n${error}`,
+      status: 'error',
+      updatedAt: nowLabel()
+    }
+    emitKubernetesTerminalExit(failed, {
+      exitCode: 1,
+      reason: 'error',
+      error
+    })
+    return failed
   })
 }
 
@@ -1155,7 +1217,9 @@ export async function testKubernetesClusterConnection(input: KubernetesClusterTe
       throw Object.assign(new Error('Kubernetes context is required.'), { code: 'K8S_TEST_CONTEXT_REQUIRED' })
     }
 
-    const content = input.kubeconfigContent?.trim() || ''
+    const existingCluster = clusters.find((item) => item.context_name === contextName)
+    const canUseExistingClusterKubeconfig = Boolean(existingCluster && !(shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(existingCluster.id)))
+    const content = input.kubeconfigContent?.trim() || (canUseExistingClusterKubeconfig ? existingCluster?.kubeconfig_content?.trim() || '' : '')
     const parsedContexts = content ? parseKubeconfigContexts(content) : []
     const context = content ? parsedContexts.find((item) => item.name === contextName) || null : findKubernetesTestContext(contextName)
     if (content && !context) {
@@ -1169,7 +1233,7 @@ export async function testKubernetesClusterConnection(input: KubernetesClusterTe
       throw Object.assign(new Error('Kubernetes server URL does not match the selected context.'), { code: 'K8S_TEST_SERVER_MISMATCH' })
     }
 
-    const kubeconfigPath = input.kubeconfigPath?.trim() || ''
+    const kubeconfigPath = input.kubeconfigPath?.trim() || (canUseExistingClusterKubeconfig ? existingCluster?.kubeconfig_path?.trim() || '' : '')
     const defaultNamespace = context?.namespace || 'default'
     if (!content && !kubeconfigPath && shouldUseKubernetesSeedData() && context) {
       return {
@@ -1333,6 +1397,7 @@ export async function connectKubernetesCluster(id: string): Promise<KubernetesCl
     if (!(shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(current.id))) {
       const probe = await probeKubernetesClusterConnection(current)
       if (!probe.success) {
+        const errorMessage = probe.error || probe.message || 'Kubernetes connection probe failed.'
         const failed: KubernetesClusterRecord = {
           ...current,
           is_active: 0,
@@ -1341,6 +1406,7 @@ export async function connectKubernetesCluster(id: string): Promise<KubernetesCl
         }
         clusters = clusters.map((cluster) => (cluster.id === id ? failed : cluster))
         contexts = contexts.map((context) => (context.name === current.context_name ? { ...context, isActive: false } : context))
+        failKubernetesClusterTerminalSessions(id, errorMessage)
         persistKubernetesCatalogState()
         return {
           ok: false,
@@ -1349,7 +1415,7 @@ export async function connectKubernetesCluster(id: string): Promise<KubernetesCl
             cluster: { ...failed }
           },
           errorCode: 'K8S_CONNECT_PROBE_FAILED',
-          errorMessage: probe.error || probe.message || 'Kubernetes connection probe failed.'
+          errorMessage
         }
       }
     }
@@ -1628,12 +1694,6 @@ const stripAnsi = (value: string) =>
     .replace(/\u001b[@-Z\\-_]/g, '')
 
 const resolveKubectlCommand = () => process.env.AIOPSTERM_KUBECTL_PATH?.trim() || 'kubectl'
-
-const expandHomePath = (value: string) => {
-  if (value === '~') return homedir()
-  if (value.startsWith('~/') || value.startsWith('~\\')) return join(homedir(), value.slice(2))
-  return value
-}
 
 const hasArgument = (args: string[], names: string[]) =>
   args.some((arg, index) => names.includes(arg) || names.some((name) => arg.startsWith(`${name}=`)) || (names.includes(args[index - 1]) && !arg.startsWith('-')))
@@ -2034,8 +2094,6 @@ const renderTerminalCommandOutput = (command: string, output: string, error = ''
   const body = output || error
   return `[aiopsterm kubectl] ${command}${body ? `\n${body}` : ''}`
 }
-
-const idPart = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item'
 
 const parseKubectlTable = (output: string) => {
   const lines = stripAnsi(output)

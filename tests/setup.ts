@@ -1157,6 +1157,14 @@ let kubernetesTerminalSessionsMock: TestKubernetesTerminalRecord[] = []
 const kubernetesTerminalDataListenersMock = new Set<(event: TestKubernetesTerminalDataEvent) => void>()
 const kubernetesTerminalExitListenersMock = new Set<(event: TestKubernetesTerminalExitEvent) => void>()
 
+;(globalThis as any).__emitKubernetesTerminalExitMock = (event: TestKubernetesTerminalExitEvent) => {
+  kubernetesTerminalExitListenersMock.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__emitKubernetesTerminalDataMock = (event: TestKubernetesTerminalDataEvent) => {
+  kubernetesTerminalDataListenersMock.forEach((listener) => listener(event))
+}
+
 const aiChatRequestIdFromAssistantMessageIdMock = (assistantMessageId?: string) => {
   const normalized = String(assistantMessageId || '').trim()
   return normalized.endsWith('-assistant') ? normalized.slice(0, -'-assistant'.length) : ''

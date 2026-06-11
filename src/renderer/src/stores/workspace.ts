@@ -10283,7 +10283,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const handleK8sTerminalData = (event: KubernetesTerminalDataEvent) => {
     if (!isK8sTerminalDataEvent(event)) return
     const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
-    if (!tab || tab.status === 'ended') return
+    if (!tab || tab.status === 'ended' || tab.status === 'error') return
     if (event.data) appendK8sTerminalOutput(tab, event.data)
     tab.lastCommandOutput = event.data
     tab.updatedAt = event.emittedAt
@@ -10293,7 +10293,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!isK8sTerminalExitEvent(event)) return
     const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
     if (!tab) return
-    tab.status = 'ended'
+    tab.status = event.reason === 'error' ? 'error' : 'ended'
     tab.exitCode = event.exitCode
     tab.collectingAiOutput = false
     tab.updatedAt = event.emittedAt

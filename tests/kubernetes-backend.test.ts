@@ -32,7 +32,7 @@ describe('kubernetes backend boundary', () => {
   beforeEach(async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'aiopsterm-k8s-state-'))
     tempDirs.push(stateDir)
-    configureKubernetesBackendRuntime({ stateDir })
+    configureKubernetesBackendRuntime({ stateDir, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
     setKubernetesTerminalEventSink(null)
   })
@@ -339,7 +339,7 @@ describe('kubernetes backend boundary', () => {
     const persisted = JSON.parse(await readFile(join(tempDirs[0], 'agent-proxy.json'), 'utf-8'))
     expect(persisted).toMatchObject({ enabled: true, type: 'SOCKS5', host: 'proxy.internal', port: 18080 })
 
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0] })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], defaultKubeconfigPath: null })
     await expect(getKubernetesAgentProxyConfig()).resolves.toMatchObject({
       ok: true,
       data: {
@@ -686,7 +686,7 @@ describe('kubernetes backend boundary', () => {
   })
 
   it('does not expose development seed clusters in non-seed runtime catalogs', async () => {
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
 
     const catalog = await listKubernetesCatalog()
@@ -696,6 +696,79 @@ describe('kubernetes backend boundary', () => {
     expect(catalog.data?.resources).toEqual([])
     expect(catalog.data?.bastions).toEqual([])
     expect(catalog.data?.clusters.some((cluster) => cluster.id === 'k8s-1' || cluster.id === 'k8s-2' || cluster.id === 'k8s-3')).toBe(false)
+  })
+
+  it('discovers kubeconfig-backed local clusters in non-seed runtime without renderer fixtures', async () => {
+    await createFakeKubectl(
+      [
+        'case "$1:$2" in',
+        '  get:namespaces)',
+        '    echo "NAME STATUS AGE"',
+        '    echo "qa Active 12d"',
+        '    echo "DISCOVERED_ARGS=$*"',
+        '    ;;',
+        '  *)',
+        '    echo "unexpected args: $*" >&2',
+        '    exit 17',
+        '    ;;',
+        'esac'
+      ].join('\n')
+    )
+    const kubeconfigDir = await mkdtemp(join(tmpdir(), 'aiopsterm-kubeconfig-discovery-'))
+    tempDirs.push(kubeconfigDir)
+    const kubeconfigPath = join(kubeconfigDir, 'config')
+    await writeFile(kubeconfigPath, qaKubeconfigContent, 'utf-8')
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: kubeconfigPath })
+    __resetKubernetesCatalogForTests()
+
+    const catalog = await listKubernetesCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.contexts).toEqual([
+      { name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa', isActive: true }
+    ])
+    expect(catalog.data?.clusters).toEqual([
+      expect.objectContaining({
+        id: 'k8s-local-qa-dev',
+        name: 'qa-cluster',
+        kubeconfig_path: kubeconfigPath,
+        kubeconfig_content: null,
+        context_name: 'qa/dev',
+        server_url: 'https://qa.k8s.local:6443',
+        auth_type: 'kubeconfig',
+        source_type: 'local',
+        connection_status: 'disconnected',
+        default_namespace: 'qa'
+      })
+    ])
+    expect(catalog.data?.importContexts).toEqual([
+      { name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }
+    ])
+
+    const connected = await connectKubernetesCluster('k8s-local-qa-dev')
+
+    expect(connected).toMatchObject({
+      ok: true,
+      data: {
+        cluster: expect.objectContaining({
+          id: 'k8s-local-qa-dev',
+          connection_status: 'connected',
+          is_active: 1
+        })
+      }
+    })
+    const testResult = await testKubernetesClusterConnection({ contextName: 'qa/dev' })
+    expect(testResult).toMatchObject({
+      ok: true,
+      data: {
+        success: true,
+        isValid: true,
+        contextName: 'qa/dev',
+        serverUrl: 'https://qa.k8s.local:6443',
+        command: 'kubectl get namespaces'
+      }
+    })
+    expect(testResult.data?.output).toContain('DISCOVERED_ARGS=get namespaces --context=qa/dev')
   })
 
   it('strips unchanged legacy seed Kubernetes catalog rows in non-seed runtime state', async () => {
@@ -762,7 +835,7 @@ describe('kubernetes backend boundary', () => {
       'utf-8'
     )
 
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
     const catalog = await listKubernetesCatalog()
 
@@ -919,7 +992,7 @@ describe('kubernetes backend boundary', () => {
       'utf-8'
     )
 
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
     const catalog = await listKubernetesCatalog()
 
@@ -968,7 +1041,7 @@ describe('kubernetes backend boundary', () => {
       importContexts: []
     }
     await writeFile(statePath, JSON.stringify(persistedCatalog, null, 2), 'utf-8')
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
 
     const before = await listKubernetesCatalog()
@@ -994,7 +1067,7 @@ describe('kubernetes backend boundary', () => {
   })
 
   it('keeps explicit seed JumpServer Kubernetes sync available for development fixtures', async () => {
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: true })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: true, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
 
     const before = await listKubernetesCatalog()
@@ -1043,7 +1116,7 @@ describe('kubernetes backend boundary', () => {
         'esac'
       ].join('\n')
     )
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
 
     await expect(listKubernetesCatalog()).resolves.toMatchObject({
@@ -1092,7 +1165,7 @@ describe('kubernetes backend boundary', () => {
     expect(persisted.resources.map((resource) => resource.name)).toEqual(expect.arrayContaining(['qa-api-5d6f7c8d9b-abcde', 'qa-api', 'qa-node-01']))
     expect(persisted.importContexts.map((context) => context.name)).toContain('qa/dev')
 
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     const restored = await listKubernetesCatalog()
 
     expect(restored.ok).toBe(true)
@@ -1125,7 +1198,7 @@ describe('kubernetes backend boundary', () => {
         'exit 43'
       ].join('\n')
     )
-    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
 
     const added = await addKubernetesCluster({
@@ -1139,6 +1212,16 @@ describe('kubernetes backend boundary', () => {
     })
     expect(added.ok).toBe(true)
     const clusterId = added.data!.cluster!.id
+    const events: unknown[] = []
+    setKubernetesTerminalEventSink((event) => events.push(event))
+    const terminal = await createKubernetesTerminal({ clusterId, namespace: 'qa' })
+    expect(terminal).toMatchObject({
+      ok: true,
+      data: expect.objectContaining({
+        clusterId,
+        status: 'connecting'
+      })
+    })
 
     const connected = await connectKubernetesCluster(clusterId)
 
@@ -1159,6 +1242,22 @@ describe('kubernetes backend boundary', () => {
       connection_status: 'error',
       is_active: 0
     })
+    await expect(writeKubernetesTerminal(terminal.data!.sessionId, 'kubectl get pods\n')).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_TERMINAL_NOT_CONNECTED',
+      errorMessage: 'Kubernetes terminal is not connected.'
+    })
+    expect(events).toEqual([
+      expect.objectContaining({
+        id: terminal.data!.id,
+        sessionId: terminal.data!.sessionId,
+        clusterId,
+        exitCode: 1,
+        reason: 'error',
+        error: 'forbidden: user cannot list namespaces',
+        emittedAt: '刚刚'
+      })
+    ])
   })
 
   it('returns pod logs with backend status details', async () => {

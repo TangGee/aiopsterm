@@ -6935,6 +6935,45 @@ describe('workspace store', () => {
     }
   })
 
+  it('keeps Kubernetes terminal tabs in error state when backend emits an error exit', async () => {
+    const store = useWorkspaceStore()
+
+    await store.refreshKubernetesCatalog()
+    await store.openK8sTerminal('k8s-1')
+    const terminal = store.k8sActiveTerminal
+    if (!terminal) throw new Error('Expected Kubernetes terminal to open.')
+
+    ;(globalThis as any).__emitKubernetesTerminalExitMock?.({
+      id: terminal.id,
+      sessionId: terminal.sessionId,
+      clusterId: terminal.clusterId,
+      exitCode: 1,
+      reason: 'error',
+      error: 'forbidden: user cannot list namespaces',
+      emittedAt: '刚刚'
+    })
+
+    expect(store.k8sActiveTerminal?.status).toBe('error')
+    expect(store.k8sActiveTerminal?.exitCode).toBe(1)
+    expect(store.k8sActiveTerminal?.collectingAiOutput).toBe(false)
+    expect(store.k8sClusterNotice).toBe('forbidden: user cannot list namespaces')
+    const outputAfterError = store.k8sActiveTerminal?.output
+    ;(globalThis as any).__emitKubernetesTerminalDataMock?.({
+      id: terminal.id,
+      sessionId: terminal.sessionId,
+      clusterId: terminal.clusterId,
+      data: '[aiopsterm kubectl] late output',
+      command: 'kubectl get pods',
+      output: 'late output',
+      success: true,
+      error: '',
+      emittedAt: '刚刚'
+    })
+    expect(store.k8sActiveTerminal?.output).toBe(outputAfterError)
+    await expect(store.sendK8sTerminalCommand('kubectl get pods')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal is not connected.')
+  })
+
   it('does not fabricate Kubernetes Agent refresh or cleanup success when backend operations fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()
