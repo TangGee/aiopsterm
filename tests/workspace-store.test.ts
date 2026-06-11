@@ -2473,6 +2473,88 @@ describe('workspace store', () => {
     }
   })
 
+  it('accepts an empty backend alias snapshot without falling back to renderer config aliases', async () => {
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      language: 'zh-CN',
+      theme: 'dark',
+      defaultMode: 'terminal',
+      leftPanelOpen: true,
+      rightPanelOpen: true,
+      modelProvider: 'local',
+      modelEndpoint: '',
+      modelName: 'aiopsterm-local-agent',
+      watermark: 'open',
+      background: {
+        mode: 'none',
+        image: '',
+        opacity: 0.15,
+        brightness: 0.45
+      },
+      terminal: defaultTerminalSettings,
+      workspacePreferences: {
+        expandedGroups: ['recent_connections'],
+        showIpMode: false
+      },
+      editorSettings: defaultEditorSettings,
+      sshProxyConfigs: defaultSshProxyConfigs,
+      sshAgentKeys: defaultSshAgentKeys,
+      extensionSettings: {
+        autoCompleteStatus: true,
+        quickVimStatus: true,
+        aliasStatus: true,
+        highlightStatus: true
+      },
+      keywordHighlight: defaultKeywordHighlight,
+      securityConfig: defaultSecurityConfig,
+      privacy: {
+        telemetry: 'enabled',
+        secretRedaction: 'disabled',
+        dataSync: 'disabled'
+      },
+      aiPreferences: defaultAiPreferences,
+      modelSettings: defaultModelSettings,
+      shortcuts: defaultShortcuts,
+      rules: defaultRules,
+      skills: defaultSkills,
+      mcpServers: defaultMcpServers,
+      mcpToolStates: defaultMcpToolStates,
+      quickCommands: {
+        groups: [],
+        snippets: []
+      },
+      knowledgeBase: {
+        tree: [],
+        usedBytes: 0,
+        totalBytes: 1073741824
+      },
+      aliasCommands: [
+        { id: 'alias-legacy-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 },
+        { id: 'alias-stale', alias: 'stale', command: 'echo stale config alias', createdAt: 1780487300000 }
+      ],
+      onboarding: {
+        version: 2,
+        guideTabAutoOpened: false,
+        completedModules: {
+          interfaceGuide: false,
+          systemSettings: false,
+          addAndConnectHost: false,
+          aiChat: false
+        }
+      }
+    })
+    vi.mocked(window.aiops.listAliasCommands).mockResolvedValueOnce({ ok: true, data: [] })
+
+    await store.hydrateConfig()
+
+    expect(store.aliasCommands).toEqual([])
+    expect(store.config.aliasCommands).toEqual([])
+    expect(store.extensionNotice).toBe('')
+    expect(window.aiops.listAliasCommands).toHaveBeenCalled()
+    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+  })
+
   it('hydrates External reference-referenced extension switches and hides Alias when disabled', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({

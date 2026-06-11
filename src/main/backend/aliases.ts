@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { isAbsolute, join, resolve } from 'path'
 import type {
   AiopsMutationResult,
   AliasCommandConfig,
@@ -14,6 +14,12 @@ import type {
 
 type AliasStoreShape = {
   aliases: AliasCommandConfig[]
+}
+
+type AliasBackendRuntimeConfig = {
+  databasePath?: string
+  useSeedData?: boolean
+  forceFallbackStore?: boolean
 }
 
 type SqliteDatabase = {
@@ -39,8 +45,26 @@ const normalizeText = (value: unknown) => String(value || '').trim()
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
+const defaultAliasSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_ALIASES_ENABLE_SEED || '').trim() === '1'
+
+const defaultAliasDatabasePath = () => {
+  const envPath = String(process.env.AIOPSTERM_ALIASES_DB_PATH || '').trim()
+  if (envPath) return isAbsolute(envPath) ? envPath : resolve(envPath)
+  return join(app.getPath('userData'), 'aiopsterm-state.db')
+}
+
+let runtimeConfig: Required<AliasBackendRuntimeConfig> = {
+  databasePath: defaultAliasDatabasePath(),
+  useSeedData: defaultAliasSeedMode(),
+  forceFallbackStore: false
+}
+
+const seedAliases = () => defaultAliases.map(cloneAlias)
+
+const emptyAliases = (): AliasCommandConfig[] => []
+
 const normalizeAliases = (source?: unknown): AliasCommandConfig[] => {
-  const rawAliases = Array.isArray(source) ? source : defaultAliases
+  const rawAliases = Array.isArray(source) ? source : runtimeConfig.useSeedData ? seedAliases() : emptyAliases()
   const aliases: AliasCommandConfig[] = []
   const seenIds = new Set<string>()
   const seenAliases = new Set<string>()
@@ -65,16 +89,25 @@ const normalizeAliases = (source?: unknown): AliasCommandConfig[] => {
   return aliases.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 }
 
+const stripLegacySeedAliases = (commands: AliasCommandConfig[]): AliasCommandConfig[] => {
+  if (runtimeConfig.useSeedData) return commands
+  const seeds = new Map(defaultAliases.map((alias) => [alias.id, alias]))
+  return commands.filter((command) => {
+    const seed = seeds.get(command.id)
+    return !seed || JSON.stringify(command) !== JSON.stringify(seed)
+  })
+}
+
 class FallbackAliasStore {
   private store: Store<AliasStoreShape> | null = null
-  private memory = cloneAliases(defaultAliases)
+  private memory = runtimeConfig.useSeedData ? cloneAliases(defaultAliases) : emptyAliases()
 
   constructor() {
     try {
       this.store = new Store<AliasStoreShape>({
         name: 'aiopsterm-aliases',
         defaults: {
-          aliases: defaultAliases
+          aliases: runtimeConfig.useSeedData ? defaultAliases : emptyAliases()
         }
       })
     } catch {
@@ -83,7 +116,7 @@ class FallbackAliasStore {
   }
 
   list(): AliasCommandConfig[] {
-    const aliases = normalizeAliases(this.store ? this.store.get('aliases') : this.memory)
+    const aliases = stripLegacySeedAliases(normalizeAliases(this.store ? this.store.get('aliases') : this.memory))
     if (this.store) this.store.set('aliases', aliases)
     else this.memory = cloneAliases(aliases)
     return cloneAliases(aliases)
@@ -109,7 +142,7 @@ class SqliteAliasStore {
       CREATE INDEX IF NOT EXISTS idx_aliases_created_at ON aliases(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_aliases_alias ON aliases(alias);
     `)
-    this.seed()
+    if (runtimeConfig.useSeedData) this.seed()
   }
 
   private seed() {
@@ -123,7 +156,7 @@ class SqliteAliasStore {
   }
 
   list(): AliasCommandConfig[] {
-    return this.db
+    const aliases = this.db
       .prepare('SELECT id, alias, command, created_at FROM aliases ORDER BY created_at DESC')
       .all()
       .map((row) => {
@@ -135,6 +168,9 @@ class SqliteAliasStore {
           createdAt: item.created_at
         }
       })
+    const normalized = stripLegacySeedAliases(normalizeAliases(aliases))
+    if (JSON.stringify(normalized) !== JSON.stringify(aliases)) return this.save(normalized)
+    return normalized
   }
 
   save(commands: AliasCommandConfig[]) {
@@ -152,9 +188,10 @@ let aliasStore: FallbackAliasStore | SqliteAliasStore | null = null
 
 const createStore = () => {
   try {
+    if (runtimeConfig.forceFallbackStore) throw new Error('force fallback alias store')
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
-    return new SqliteAliasStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+    return new SqliteAliasStore(new Database(runtimeConfig.databasePath))
   } catch {
     return new FallbackAliasStore()
   }
@@ -254,4 +291,17 @@ export const deleteAliasCommand = (input: AliasCommandDeleteInput): AliasCommand
       commands
     }
   }, 'ALIAS_BACKEND_ERROR')
+}
+
+export const configureAliasBackendRuntime = (config: AliasBackendRuntimeConfig = {}) => {
+  runtimeConfig = {
+    databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultAliasDatabasePath(),
+    useSeedData: config.useSeedData ?? defaultAliasSeedMode(),
+    forceFallbackStore: Boolean(config.forceFallbackStore)
+  }
+  aliasStore = null
+}
+
+export const resetAliasesForTests = () => {
+  aliasStore = null
 }
