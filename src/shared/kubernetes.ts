@@ -1441,7 +1441,7 @@ const kindFromToken = (token: string): KubernetesResourceKind | null => {
 const normalize = (command: string) => command.trim().replace(/\s+/g, ' ')
 
 const namespaceFromCommand = (command: string, fallback: string) => {
-  const namespaceMatch = command.match(/(?:-n|--namespace)\s+([^\s]+)/)
+  const namespaceMatch = command.match(/(?:-n|--namespace)(?:=|\s+)([^\s]+)/)
   return namespaceMatch?.[1] || fallback
 }
 
@@ -1536,6 +1536,36 @@ const buildKubectlArgs = (command: string, cluster: KubernetesClusterRecord, nam
     args.push(`--namespace=${namespace}`)
   }
   return { ok: true as const, args, error: '' }
+}
+
+type KubernetesSeedCommandRenderResult = {
+  supported: boolean
+  success: boolean
+  output: string
+  error: string
+}
+
+const unsupportedKubernetesSeedCommandMessage = (command: string) =>
+  `Kubernetes development seed data cannot execute "${command}". Select a kubeconfig-backed cluster to run arbitrary kubectl commands.`
+
+const createKubernetesSeedCommandResult = (output: string): KubernetesSeedCommandRenderResult => {
+  const success = !/^Error from server/.test(output)
+  return {
+    supported: true,
+    success,
+    output,
+    error: success ? '' : output
+  }
+}
+
+const createUnsupportedKubernetesSeedCommandResult = (command: string): KubernetesSeedCommandRenderResult => {
+  const message = unsupportedKubernetesSeedCommandMessage(command)
+  return {
+    supported: false,
+    success: false,
+    output: message,
+    error: message
+  }
 }
 
 const canRunLocalKubectl = (cluster: KubernetesClusterRecord) =>
@@ -1680,15 +1710,16 @@ const probeKubernetesClusterConnection = async (
   }
 
   if (!canRunLocalKubectl(cluster)) {
+    const seedResult = renderSeedCommand({ command, clusterId: cluster.id, namespace })
     return {
-      success: true,
-      isValid: true,
+      success: seedResult.success,
+      isValid: seedResult.success,
       contextName: cluster.context_name,
       serverUrl: cluster.server_url,
-      message: '连接测试成功',
+      message: seedResult.success ? '连接测试成功' : seedResult.error,
       command,
-      output: renderCommand({ command, clusterId: cluster.id, namespace }),
-      error: '',
+      output: seedResult.output,
+      error: seedResult.error,
       durationMs: Math.max(1, Date.now() - startedAt)
     }
   }
@@ -1719,7 +1750,7 @@ const renderList = (command: string, clusterId: string, namespace: string) => {
   if (/^kubectl(?:\.exe)?$/i.test(args[0] || '')) args.shift()
   const kindIndex = args[0] === 'get' ? 1 : -1
   const requestedName = kindIndex >= 0 && args[kindIndex + 1] && !args[kindIndex + 1].startsWith('-') ? args[kindIndex + 1] : ''
-  return resources
+  const rows = resources
     .filter((resource) => resource.clusterId === clusterId && resource.kind === kind)
     .filter((resource) => kind === 'nodes' || includeAll || resource.namespace === targetNamespace)
     .filter((resource) => !requestedName || resource.name === requestedName)
@@ -1736,6 +1767,8 @@ const renderList = (command: string, clusterId: string, namespace: string) => {
         .join('\t')
     )
     .join('\n')
+  if (requestedName && !rows) return `Error from server (NotFound): ${resourceTypeByKind[kind]}s "${requestedName}" not found`
+  return rows
 }
 
 const findResource = (clusterId: string, kind: KubernetesResourceKind, name: string, namespace: string) =>
@@ -1786,7 +1819,7 @@ const renderDescribe = (command: string, clusterId: string, namespace: string) =
     .join('\n')
 }
 
-const renderCommand = (input: KubernetesCommandInput) => {
+const renderSeedCommand = (input: KubernetesCommandInput): KubernetesSeedCommandRenderResult => {
   const command = normalize(input.command)
   const cluster = clusters.find((item) => item.id === input.clusterId) || {
     id: input.clusterId || '',
@@ -1796,20 +1829,29 @@ const renderCommand = (input: KubernetesCommandInput) => {
   }
   const namespace = input.namespace || cluster.default_namespace || 'default'
 
-  if (/^kubectl\s+config\s+current-context\b/.test(command)) return cluster.context_name
+  if (/^kubectl\s+config\s+current-context\b/.test(command)) return createKubernetesSeedCommandResult(cluster.context_name)
   if (/^kubectl\s+version\b/.test(command)) {
-    return ['Client Version: v1.30.0-aiopsterm', 'Kustomize Version: v5.0.4', `Server Version: ${cluster.name} api v1.29.4`].join('\n')
+    return createKubernetesSeedCommandResult(['Client Version: v1.30.0-aiopsterm', 'Kustomize Version: v5.0.4', `Server Version: ${cluster.name} api v1.29.4`].join('\n'))
   }
   if (/^kubectl\s+get\s+ns\b|^kubectl\s+get\s+namespaces\b/.test(command)) {
-    return namespaces
-      .filter((item) => item.clusterId === cluster.id)
-      .map((item) => `${item.name}\t${item.status}\t${item.age}`)
-      .join('\n')
+    return createKubernetesSeedCommandResult(
+      namespaces
+        .filter((item) => item.clusterId === cluster.id)
+        .map((item) => `${item.name}\t${item.status}\t${item.age}`)
+        .join('\n')
+    )
   }
-  if (/^kubectl\s+get\s+/.test(command)) return renderList(command, cluster.id, namespace)
-  if (/^kubectl\s+logs\s+/.test(command)) return renderLogs(command, cluster.id, namespace)
-  if (/^kubectl\s+describe\s+/.test(command)) return renderDescribe(command, cluster.id, namespace)
-  return `command executed through aiopsterm Kubernetes backend: ${command}`
+  if (/^kubectl\s+get\s+/.test(command)) {
+    const getKind = command.match(/^kubectl\s+get\s+([^\s]+)/)
+    if (!getKind || !kindFromToken(getKind[1])) return createUnsupportedKubernetesSeedCommandResult(command)
+    return createKubernetesSeedCommandResult(renderList(command, cluster.id, namespace))
+  }
+  if (/^kubectl\s+logs\s+/.test(command)) return createKubernetesSeedCommandResult(renderLogs(command, cluster.id, namespace))
+  if (/^kubectl\s+describe\s+/.test(command)) {
+    const output = renderDescribe(command, cluster.id, namespace)
+    return output ? createKubernetesSeedCommandResult(output) : createUnsupportedKubernetesSeedCommandResult(command)
+  }
+  return createUnsupportedKubernetesSeedCommandResult(command)
 }
 
 const renderTerminalCommandOutput = (command: string, output: string, error = '') => {
@@ -2028,13 +2070,12 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
     }
   }
 
-  const output = renderCommand({ ...input, command })
-  const success = !/^Error from server/.test(output)
+  const seedResult = renderSeedCommand({ ...input, command })
   return {
     ok: true,
     data: {
-      ...createKubernetesCommandRun(input, command, output, success, startedAt, success ? '' : output),
-      terminalOutput: renderTerminalCommandOutput(command, output, success ? '' : output)
+      ...createKubernetesCommandRun(input, command, seedResult.output, seedResult.success, startedAt, seedResult.error),
+      terminalOutput: renderTerminalCommandOutput(command, seedResult.output, seedResult.error)
     }
   }
 }
@@ -2220,7 +2261,7 @@ export async function refreshKubernetesResources(input: KubernetesResourceRefres
       : buildKubernetesGetCommand(requestedKind, namespace)
   const outputParts =
     requestedKind === 'all'
-      ? [renderCommand({ command: 'kubectl get namespaces', clusterId: cluster.id, namespace: cluster.default_namespace || 'default' }), ...refreshedKinds.map((kind) => renderList(buildKubernetesGetCommand(kind, namespace), cluster.id, namespace))]
+      ? [renderSeedCommand({ command: 'kubectl get namespaces', clusterId: cluster.id, namespace: cluster.default_namespace || 'default' }).output, ...refreshedKinds.map((kind) => renderList(buildKubernetesGetCommand(kind, namespace), cluster.id, namespace))]
       : [renderList(command, cluster.id, namespace)]
   const refreshedResources = refreshedKinds.reduce((count, kind) => count + resourcesInRefreshScope(cluster.id, kind, namespace).length, 0)
   const refreshedNamespaces = namespaces.filter((item) => item.clusterId === cluster.id).length

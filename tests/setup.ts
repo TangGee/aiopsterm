@@ -2740,6 +2740,151 @@ const k8sRefreshCommandMock = (kind: TestKubernetesResourceKind | 'all', namespa
   return namespace === 'all' ? `kubectl get ${kind} --all-namespaces` : `kubectl get ${kind} -n ${namespace}`
 }
 
+const normalizeKubernetesCommandMock = (command: string) => command.trim().replace(/\s+/g, ' ')
+
+const kubernetesSeedUnsupportedCommandMessageMock = (command: string) =>
+  `Kubernetes development seed data cannot execute "${command}". Select a kubeconfig-backed cluster to run arbitrary kubectl commands.`
+
+const kubernetesKindFromCommandTokenMock = (token: string): TestKubernetesResourceKind | null => {
+  if (/^pods?$/.test(token)) return 'pods'
+  if (/^deploy(ments?)?$/.test(token) || /^deployments?$/.test(token)) return 'deployments'
+  if (/^svc$|^services?$/.test(token)) return 'services'
+  if (/^nodes?$/.test(token)) return 'nodes'
+  return null
+}
+
+const namespaceFromKubernetesCommandMock = (command: string, fallback: string) => {
+  const namespaceMatch = command.match(/(?:-n|--namespace)(?:=|\s+)([^\s]+)/)
+  return namespaceMatch?.[1] || fallback
+}
+
+const renderKubernetesListMock = (command: string, clusterId: string, namespace: string) => {
+  const getKind = command.match(/^kubectl\s+get\s+([^\s]+)/)
+  const kind = getKind ? kubernetesKindFromCommandTokenMock(getKind[1]) : null
+  if (!kind) return ''
+  const includeAll = command.includes('--all-namespaces') || command.includes(' -A')
+  const targetNamespace = namespaceFromKubernetesCommandMock(command, namespace)
+  const parts = command.split(/\s+/)
+  const kindIndex = parts[0] === 'kubectl' && parts[1] === 'get' ? 2 : -1
+  const requestedName = kindIndex >= 0 && parts[kindIndex + 1] && !parts[kindIndex + 1].startsWith('-') ? parts[kindIndex + 1] : ''
+  const rows = kubernetesCatalogMock.resources
+    .filter((resource) => resource.clusterId === clusterId && resource.kind === kind)
+    .filter((resource) => kind === 'nodes' || includeAll || resource.namespace === targetNamespace)
+    .filter((resource) => !requestedName || resource.name === requestedName)
+    .map((resource) =>
+      [
+        kind !== 'nodes' && includeAll ? resource.namespace : '',
+        resource.name,
+        resource.ready,
+        resource.status,
+        kind === 'pods' ? String(resource.restarts || 0) : resource.node || resource.ports || resource.selector || '-',
+        resource.age
+      ]
+        .filter(Boolean)
+        .join('\t')
+    )
+    .join('\n')
+  if (requestedName && !rows) return `Error from server (NotFound): ${k8sResourceTypeByKindMock[kind]}s "${requestedName}" not found`
+  return rows
+}
+
+const findKubernetesCommandResourceMock = (clusterId: string, kind: TestKubernetesResourceKind, name: string, namespace: string) =>
+  kubernetesCatalogMock.resources.find((resource) => resource.clusterId === clusterId && resource.kind === kind && resource.name === name && (kind === 'nodes' || resource.namespace === namespace))
+
+const renderKubernetesLogsMock = (command: string, clusterId: string, namespace: string) => {
+  const match = command.match(/^kubectl\s+logs\s+([^\s]+)/)
+  if (!match) return ''
+  const podName = match[1]
+  const targetNamespace = namespaceFromKubernetesCommandMock(command, namespace)
+  const resource = findKubernetesCommandResourceMock(clusterId, 'pods', podName, targetNamespace)
+  if (!resource) return `Error from server (NotFound): pods "${podName}" not found`
+  return [
+    `2026-06-04T09:27:59Z info starting container ${resource.name}`,
+    `2026-06-04T09:28:02Z info namespace=${resource.namespace} node=${resource.node || '-'}`,
+    resource.status === 'CrashLoopBackOff' ? '2026-06-04T09:28:11Z error failed to load billing config: missing secret billing-api-token' : '',
+    `2026-06-04T09:28:15Z info readiness probe ${resource.status === 'Running' ? 'passed' : 'pending'}`
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+const renderKubernetesDescribeMock = (command: string, clusterId: string, namespace: string) => {
+  const match = command.match(/^kubectl\s+describe\s+([^\s]+)\s+([^\s]+)/)
+  if (!match) return ''
+  const kind = kubernetesKindFromCommandTokenMock(match[1])
+  if (!kind) return ''
+  const name = match[2]
+  const targetNamespace = kind === 'nodes' ? 'cluster' : namespaceFromKubernetesCommandMock(command, namespace)
+  const resource = findKubernetesCommandResourceMock(clusterId, kind, name, targetNamespace)
+  if (!resource) return `Error from server (NotFound): ${k8sResourceTypeByKindMock[kind]}s "${name}" not found`
+  return [
+    `Name: ${resource.name}`,
+    `Namespace: ${resource.kind === 'nodes' ? '<cluster>' : resource.namespace}`,
+    `Kind: ${k8sResourceTypeByKindMock[resource.kind]}`,
+    `Status: ${resource.status}`,
+    `Ready: ${resource.ready}`,
+    resource.node ? `Node: ${resource.node}` : '',
+    resource.image ? `Image: ${resource.image}` : '',
+    resource.ports ? `Ports: ${resource.ports}` : '',
+    resource.selector ? `Selector: ${resource.selector}` : '',
+    resource.restarts !== undefined ? `Restarts: ${resource.restarts}` : '',
+    `Age: ${resource.age}`,
+    '',
+    `Events: ${resource.detail}`
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+const renderKubernetesSeedCommandMock = (input: {
+  command: string
+  clusterId?: string
+  clusterName?: string
+  namespace?: string
+  contextName?: string
+  defaultNamespace?: string
+}) => {
+  const command = normalizeKubernetesCommandMock(input.command)
+  const cluster = findKubernetesClusterMock(input.clusterId || '') || {
+    id: input.clusterId || '',
+    name: input.clusterName || input.clusterId || 'unknown-cluster',
+    context_name: input.contextName || 'unknown-context',
+    default_namespace: input.defaultNamespace || 'default'
+  }
+  const namespace = input.namespace || cluster.default_namespace || 'default'
+  const result = (output: string) => {
+    const success = !output.startsWith('Error from server')
+    return { output, success, error: success ? '' : output }
+  }
+  const unsupported = () => {
+    const message = kubernetesSeedUnsupportedCommandMessageMock(command)
+    return { output: message, success: false, error: message }
+  }
+  if (/^kubectl\s+config\s+current-context\b/.test(command)) return result(cluster.context_name)
+  if (/^kubectl\s+version\b/.test(command)) {
+    return result(['Client Version: v1.30.0-aiopsterm', 'Kustomize Version: v5.0.4', `Server Version: ${cluster.name || 'cluster'} api v1.29.4`].join('\n'))
+  }
+  if (/^kubectl\s+get\s+ns\b|^kubectl\s+get\s+namespaces\b/.test(command)) {
+    return result(
+      kubernetesCatalogMock.namespaces
+        .filter((item) => item.clusterId === cluster.id)
+        .map((item) => `${item.name}\t${item.status}\t${item.age}`)
+        .join('\n')
+    )
+  }
+  if (/^kubectl\s+get\s+/.test(command)) {
+    const getKind = command.match(/^kubectl\s+get\s+([^\s]+)/)
+    if (!getKind || !kubernetesKindFromCommandTokenMock(getKind[1])) return unsupported()
+    return result(renderKubernetesListMock(command, cluster.id, namespace))
+  }
+  if (/^kubectl\s+logs\s+/.test(command)) return result(renderKubernetesLogsMock(command, cluster.id, namespace))
+  if (/^kubectl\s+describe\s+/.test(command)) {
+    const output = renderKubernetesDescribeMock(command, cluster.id, namespace)
+    return output ? result(output) : unsupported()
+  }
+  return unsupported()
+}
+
 const refreshedKubernetesResourceCountMock = (clusterId: string, kind: TestKubernetesResourceKind | 'all', namespace: string) =>
   kubernetesCatalogMock.resources.filter((resource) => {
     if (resource.clusterId !== clusterId) return false
@@ -6985,46 +7130,8 @@ Object.defineProperty(window, 'aiops', {
           }
         }
       }
-      let output = `command executed through aiopsterm Kubernetes backend: ${command}`
-      if (/^kubectl\s+config\s+current-context\b/.test(command)) output = input.contextName || 'prod/admin'
-      else if (/^kubectl\s+version\b/.test(command)) {
-        output = ['Client Version: v1.30.0-aiopsterm', 'Kustomize Version: v5.0.4', `Server Version: ${input.clusterName || 'cluster'} api v1.29.4`].join('\n')
-      } else if (/^kubectl\s+get\s+ns\b|^kubectl\s+get\s+namespaces\b/.test(command)) {
-        output = input.clusterId === 'k8s-2' ? 'staging\tActive\t48d\nci\tActive\t48d' : 'default\tActive\t92d\nops\tActive\t77d\ningress-nginx\tActive\t64d'
-      } else if (/^kubectl\s+get\s+pods\b/.test(command)) {
-        output =
-          input.clusterId === 'k8s-2'
-            ? 'staging-api-76f7d9cbf7-8l4xf\t1/1\tRunning\t0\t9h'
-            : command.includes('-A') || command.includes('--all-namespaces')
-              ? 'default\tapi-gateway-6d8c9bb7f6-l6j2m\t2/2\tRunning\t0\t3d\nops\tbilling-worker-7f9d6f9dd9-rx8mm\t0/1\tCrashLoopBackOff\t12\t18h'
-              : `${namespace}\tapi-gateway-6d8c9bb7f6-l6j2m\t2/2\tRunning\t0\t3d`
-      } else if (/^kubectl\s+get\s+deploy/.test(command)) {
-        output = 'default\tapi-gateway\t4/4\tAvailable\tapp=api-gateway\t38d\nops\tbilling-worker\t2/3\tProgressing\tapp=billing-worker\t24d'
-      } else if (/^kubectl\s+get\s+services?\b|^kubectl\s+get\s+svc\b/.test(command)) {
-        output = 'default\tapi-gateway\t10.96.12.40\tClusterIP\t80/TCP, 443/TCP\t38d'
-      } else if (/^kubectl\s+describe\s+pod\s+billing-worker-7f9d6f9dd9-rx8mm\b/.test(command)) {
-        output = [
-          'Name: billing-worker-7f9d6f9dd9-rx8mm',
-          'Namespace: ops',
-          'Kind: pod',
-          'Status: CrashLoopBackOff',
-          'Ready: 0/1',
-          'Node: prod-node-03',
-          'Image: registry.internal/billing-worker:1.15.2',
-          'Restarts: 12',
-          'Age: 18h',
-          '',
-          'Events: Background billing worker with repeated startup failures.'
-        ].join('\n')
-      } else if (/^kubectl\s+logs\s+billing-worker-7f9d6f9dd9-rx8mm\b/.test(command)) {
-        output = [
-          '2026-06-04T09:27:59Z info starting container billing-worker-7f9d6f9dd9-rx8mm',
-          '2026-06-04T09:28:02Z info namespace=ops node=prod-node-03',
-          '2026-06-04T09:28:11Z error failed to load billing config: missing secret billing-api-token',
-          '2026-06-04T09:28:15Z info readiness probe pending'
-        ].join('\n')
-      }
-      const success = !output.startsWith('Error from server')
+      const rendered = renderKubernetesSeedCommandMock(input)
+      const { output, success, error } = rendered
       const terminalOutput = `[aiopsterm kubectl] ${command}${output ? `\n${output}` : ''}`
       return {
         ok: true,
@@ -7034,7 +7141,7 @@ Object.defineProperty(window, 'aiops', {
           output,
           terminalOutput,
           success,
-          error: success ? '' : output,
+          error,
           durationMs: 1,
           startedAt: '刚刚',
           clusterId: input.clusterId || '',
@@ -7080,16 +7187,17 @@ Object.defineProperty(window, 'aiops', {
       const refreshedResources = refreshedKubernetesResourceCountMock(cluster.id, kind, namespace)
       const refreshedNamespaces = kubernetesCatalogMock.namespaces.filter((item) => item.clusterId === cluster.id).length
       const output =
-        kind === 'nodes'
-          ? kubernetesCatalogMock.resources
-              .filter((resource) => resource.clusterId === cluster.id && resource.kind === 'nodes')
-              .map((resource) => `${resource.name}\t${resource.status}\t${resource.node || '-'}\t${resource.age}\t${resource.ready}`)
-              .join('\n')
-          : kubernetesCatalogMock.resources
-              .filter((resource) => resource.clusterId === cluster.id && (kind === 'all' || resource.kind === kind))
-              .filter((resource) => resource.kind === 'nodes' || namespace === 'all' || resource.namespace === namespace)
-              .map((resource) => `${resource.namespace}\t${resource.name}\t${resource.ready}\t${resource.status}\t${resource.age}`)
-              .join('\n')
+        kind === 'all'
+          ? [
+              renderKubernetesSeedCommandMock({ command: 'kubectl get namespaces', clusterId: cluster.id, namespace: cluster.default_namespace }).output,
+              renderKubernetesListMock('kubectl get pods --all-namespaces', cluster.id, namespace),
+              renderKubernetesListMock('kubectl get deployments --all-namespaces', cluster.id, namespace),
+              renderKubernetesListMock('kubectl get services --all-namespaces', cluster.id, namespace),
+              renderKubernetesListMock('kubectl get nodes', cluster.id, namespace)
+            ]
+              .filter(Boolean)
+              .join('\n\n')
+          : renderKubernetesListMock(command, cluster.id, namespace)
       return k8sCatalogResultMock({
         runId: `k8s-run-refresh-test-${kind}-${namespace}`,
         refreshedClusterId: cluster.id,

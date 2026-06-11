@@ -9978,7 +9978,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sAgentStatus.value = result.success ? 'ready' : 'error'
     k8sResourceOutputTitle.value = `Agent kubectl / ${cluster.name}`
     k8sResourceOutput.value = `${text}\n\n${result.output || result.error || ''}`
-    setK8sNotice(result.success ? 'Kubernetes Agent 命令执行完成' : 'Kubernetes Agent 命令执行失败')
+    setK8sNotice(result.success ? 'Kubernetes Agent 命令执行完成' : result.error || result.output || 'Kubernetes Agent 命令执行失败')
     return record
   }
 

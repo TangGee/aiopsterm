@@ -6428,6 +6428,28 @@ describe('workspace store', () => {
     }
   })
 
+  it('surfaces unsupported Kubernetes seed commands as backend failures', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
+
+    const run = await store.runK8sAgentKubectl('kubectl get configmaps -n ops')
+
+    expect(run).toEqual(
+      expect.objectContaining({
+        command: 'kubectl get configmaps -n ops',
+        status: 'error',
+        error: 'Kubernetes development seed data cannot execute "kubectl get configmaps -n ops". Select a kubeconfig-backed cluster to run arbitrary kubectl commands.',
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        namespace: 'default'
+      })
+    )
+    expect(store.k8sResourceOutput).toContain('Select a kubeconfig-backed cluster')
+    expect(store.k8sAgentRuns[0]).toEqual(expect.objectContaining({ id: run?.id, status: 'error' }))
+    expect(store.k8sClusterNotice).toContain('Select a kubeconfig-backed cluster')
+  })
+
   it('does not fabricate Kubernetes resource action commands without backend planning or execution', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()

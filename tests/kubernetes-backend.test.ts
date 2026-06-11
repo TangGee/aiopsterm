@@ -132,6 +132,68 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.durationMs).toBeGreaterThan(0)
   })
 
+  it('fails closed for unsupported backend seed kubectl commands', async () => {
+    const result = await executeKubernetesCommand({
+      command: 'kubectl get events -A --sort-by=.lastTimestamp',
+      clusterId: 'k8s-1',
+      clusterName: 'prod-cluster',
+      contextName: 'prod/admin',
+      namespace: 'default',
+      source: 'agent'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        command: 'kubectl get events -A --sort-by=.lastTimestamp',
+        success: false,
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        namespace: 'default',
+        source: 'agent'
+      })
+    )
+    expect(result.data?.error).toBe(
+      'Kubernetes development seed data cannot execute "kubectl get events -A --sort-by=.lastTimestamp". Select a kubeconfig-backed cluster to run arbitrary kubectl commands.'
+    )
+    expect(result.data?.output).toBe(result.data?.error)
+    expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get events -A --sort-by=.lastTimestamp')
+    expect(result.data?.terminalOutput).toContain('Select a kubeconfig-backed cluster')
+  })
+
+  it('fails closed for unsupported backend seed resource types without fabricating output', async () => {
+    const result = await executeKubernetesCommand({
+      command: 'kubectl get configmaps -n ops',
+      clusterId: 'k8s-1',
+      namespace: 'ops'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      command: 'kubectl get configmaps -n ops',
+      success: false,
+      error: 'Kubernetes development seed data cannot execute "kubectl get configmaps -n ops". Select a kubeconfig-backed cluster to run arbitrary kubectl commands.'
+    })
+    expect(result.data?.output).toBe(result.data?.error)
+    expect(result.data?.terminalOutput).not.toContain('command executed through aiopsterm Kubernetes backend')
+  })
+
+  it('returns NotFound for missing supported backend seed get resources', async () => {
+    const result = await executeKubernetesCommand({
+      command: 'kubectl get pod missing -n ops -o wide',
+      clusterId: 'k8s-1',
+      namespace: 'ops'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      command: 'kubectl get pod missing -n ops -o wide',
+      success: false,
+      error: 'Error from server (NotFound): pods "missing" not found'
+    })
+    expect(result.data?.output).toBe('Error from server (NotFound): pods "missing" not found')
+  })
+
   it('executes kubectl through the backend for explicit kubeconfig clusters', async () => {
     await createFakeKubectl(
       [
