@@ -45,7 +45,7 @@ const normalizeText = (value: unknown) => String(value || '').trim()
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
-const defaultAliasSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_ALIASES_ENABLE_SEED || '').trim() === '1'
+const defaultAliasSeedMode = () => String(process.env.AIOPSTERM_ALIASES_ENABLE_SEED || '').trim() === '1'
 
 const defaultAliasDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_ALIASES_DB_PATH || '').trim()

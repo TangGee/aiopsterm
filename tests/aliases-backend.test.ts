@@ -41,8 +41,10 @@ type AliasBackend = {
 
 let backend: AliasBackend
 const tempDirs: string[] = []
+const originalAliasesSeedEnv = process.env.AIOPSTERM_ALIASES_ENABLE_SEED
 
 const loadBackend = async () => {
+  delete process.env.AIOPSTERM_ALIASES_ENABLE_SEED
   vi.resetModules()
   const modulePath = '../src/main/backend/aliases'
   backend = (await import(modulePath)) as AliasBackend
@@ -89,6 +91,11 @@ describe('alias command backend boundary', () => {
   })
 
   afterEach(async () => {
+    if (originalAliasesSeedEnv === undefined) {
+      delete process.env.AIOPSTERM_ALIASES_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_ALIASES_ENABLE_SEED = originalAliasesSeedEnv
+    }
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
@@ -101,6 +108,29 @@ describe('alias command backend boundary', () => {
     all = backend.listAliasCommands()
 
     expect(all).toEqual({ ok: true, data: [] })
+  })
+
+  it('does not infer alias seed mode from NODE_ENV test', async () => {
+    backend.configureAliasBackendRuntime({ forceFallbackStore: true })
+    backend.resetAliasesForTests()
+
+    const all = backend.listAliasCommands()
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(all).toEqual({ ok: true, data: [] })
+  })
+
+  it('loads alias development seeds only when the seed environment switch is enabled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-aliases-env-seed-'))
+    tempDirs.push(dir)
+    process.env.AIOPSTERM_ALIASES_ENABLE_SEED = '1'
+    backend.configureAliasBackendRuntime({ databasePath: join(dir, 'aliases.sqlite3'), forceFallbackStore: true })
+    backend.resetAliasesForTests()
+
+    const all = backend.listAliasCommands()
+
+    expect(all.ok).toBe(true)
+    expect(all.data.map((item: AliasCommandConfig) => item.alias)).toEqual(['kctx', 'gst', 'll'])
   })
 
   it('keeps non-seed fallback storage empty instead of exposing development aliases', async () => {

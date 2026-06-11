@@ -62,8 +62,10 @@ type QuickCommandsBackend = {
 
 let backend: QuickCommandsBackend
 const tempDirs: string[] = []
+const originalQuickCommandsSeedEnv = process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED
 
 const loadBackend = async () => {
+  delete process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED
   vi.resetModules()
   const modulePath = '../src/main/backend/quickCommands'
   backend = (await import(modulePath)) as QuickCommandsBackend
@@ -104,6 +106,11 @@ describe('quick commands backend boundary', () => {
   })
 
   afterEach(async () => {
+    if (originalQuickCommandsSeedEnv === undefined) {
+      delete process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED = originalQuickCommandsSeedEnv
+    }
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
@@ -118,6 +125,30 @@ describe('quick commands backend boundary', () => {
 
     expect(snapshot.groups).toEqual([])
     expect(snapshot.snippets).toEqual([])
+  })
+
+  it('does not infer quick command seed mode from NODE_ENV test', async () => {
+    backend.configureQuickCommandBackendRuntime({ forceFallbackStore: true })
+    backend.resetQuickCommandsForTests()
+
+    const snapshot = backend.getQuickCommands()
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(snapshot.groups).toEqual([])
+    expect(snapshot.snippets).toEqual([])
+  })
+
+  it('loads quick command development seeds only when the seed environment switch is enabled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-quick-commands-env-seed-'))
+    tempDirs.push(dir)
+    process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED = '1'
+    backend.configureQuickCommandBackendRuntime({ databasePath: join(dir, 'quick-commands.sqlite3'), forceFallbackStore: true })
+    backend.resetQuickCommandsForTests()
+
+    const snapshot = backend.getQuickCommands()
+
+    expect(snapshot.groups.map((group) => group.uuid)).toEqual(['snippet-group-inspection'])
+    expect(snapshot.snippets.map((snippet) => snippet.uuid)).toEqual(['snippet-disk-check', 'snippet-nginx-status', 'snippet-root-pwd'])
   })
 
   it('keeps non-seed fallback storage empty instead of exposing development commands', async () => {

@@ -29,7 +29,7 @@ npm run e2e
 
 The Playwright launcher sets explicit backend-double switches for deterministic E2E runs: `AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE=1`, `AIOPSTERM_AI_CHAT_BACKEND_DOUBLE=1`, `AIOPSTERM_DB_AI_BACKEND_DOUBLE=1`, and `AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE=1`. These switches live in main/backend runtimes only; renderer code still consumes preload/main results and runtime events. The normal development/production path does not infer backend doubles from `NODE_ENV=test`: SSH opens real `ssh2` sessions, AI chat requires a configured provider or real local model backend, and Database AI requires a configured provider before generated responses are available.
 
-AI Chat history and Todo development seed rows are also explicit opt-ins. Use `AIOPSTERM_CHAT_HISTORY_ENABLE_SEED=1` or `AIOPSTERM_AI_TODO_ENABLE_SEED=1` only when you intentionally want the backend to expose development conversations or Focus Chain rows; `NODE_ENV=test` does not enable those seeds by itself.
+Development seed rows are explicit opt-ins. Use `AIOPSTERM_CHAT_HISTORY_ENABLE_SEED=1`, `AIOPSTERM_AI_TODO_ENABLE_SEED=1`, `AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED=1`, or `AIOPSTERM_ALIASES_ENABLE_SEED=1` only when you intentionally want the backend to expose development conversations, Focus Chain rows, Quick Commands, or Alias rows; `NODE_ENV=test` does not enable those seeds by itself. The Playwright launcher enables the seed switches that its acceptance flow asserts, so those fixtures remain test-owned rather than normal runtime defaults.
 
 `npm run e2e` is an alias for the longer script name:
 

@@ -38,7 +38,7 @@ import { configureAiContextBackendRuntime, listAiContextCatalog } from './backen
 import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
-import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
+import { configureAliasBackendRuntime, deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
@@ -1360,7 +1360,14 @@ configureChatHistoryBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'chat-history.json'),
   useSeedData: process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED === '1'
 })
-configureQuickCommandBackendRuntime({ databasePath: join(app.getPath('userData'), 'aiopsterm-state.db') })
+configureQuickCommandBackendRuntime({
+  databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
+  useSeedData: process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED === '1'
+})
+configureAliasBackendRuntime({
+  databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
+  useSeedData: process.env.AIOPSTERM_ALIASES_ENABLE_SEED === '1'
+})
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')

@@ -216,8 +216,7 @@ const emptyQuickCommands = (): QuickCommandsUserConfig => ({
   snippets: []
 })
 
-const defaultQuickCommandSeedMode = () =>
-  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED || '').trim() === '1'
+const defaultQuickCommandSeedMode = () => String(process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED || '').trim() === '1'
 
 const defaultQuickCommandDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_QUICK_COMMANDS_DB_PATH || '').trim()
