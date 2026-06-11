@@ -2431,6 +2431,98 @@ describe('workspace store', () => {
     expect(store.fileTransferTasks.some((task) => task.id === 'backend-transfer-1')).toBe(false)
   })
 
+  it('observes backend-owned file transfer progress while operations are in flight', async () => {
+    const store = useWorkspaceStore()
+    const runningTask = {
+      id: 'backend-running-transfer',
+      type: 'upload' as const,
+      name: 'release-dir',
+      source: '/tmp/release-dir',
+      target: '/srv/release-dir',
+      progress: 10,
+      speed: 'pending',
+      status: 'running' as const,
+      isGroup: true,
+      totalFiles: 2,
+      finishedFiles: 0,
+      children: [
+        {
+          id: 'backend-running-transfer-child',
+          type: 'upload' as const,
+          name: 'README.md',
+          source: '/tmp/release-dir/README.md',
+          target: '/srv/release-dir/README.md',
+          progress: 20,
+          speed: '512 KB/s',
+          status: 'running' as const
+        }
+      ]
+    }
+    const progressedTask = {
+      ...runningTask,
+      progress: 75,
+      finishedFiles: 1,
+      children: [
+        {
+          ...runningTask.children[0],
+          progress: 100,
+          speed: '完成',
+          status: 'success' as const
+        }
+      ]
+    }
+    vi.mocked(window.aiops.listFileTransferTasks)
+      .mockResolvedValueOnce([runningTask])
+      .mockResolvedValueOnce([progressedTask])
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([])
+
+    const stopObserving = store.observeFileTransferTasks()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(store.fileTransferTasks).toEqual([
+      expect.objectContaining({
+        id: 'backend-running-transfer',
+        progress: 10,
+        status: 'running',
+        children: [expect.objectContaining({ id: 'backend-running-transfer-child', progress: 20 })]
+      })
+    ])
+
+    await vi.advanceTimersByTimeAsync(250)
+    expect(store.fileTransferTasks.find((task) => task.id === 'backend-running-transfer')).toEqual(
+      expect.objectContaining({
+        progress: 75,
+        status: 'running',
+        children: [expect.objectContaining({ id: 'backend-running-transfer-child', progress: 100, status: 'success' })]
+      })
+    )
+
+    store.pushFileTransferTask({
+      ...progressedTask,
+      progress: 100,
+      speed: '完成',
+      status: 'success',
+      finishedFiles: 2,
+      children: progressedTask.children.map((child) => ({ ...child, status: 'success' as const, progress: 100, speed: '完成' }))
+    })
+    stopObserving()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(store.fileTransferTasks.find((task) => task.id === 'backend-running-transfer')).toEqual(
+      expect.objectContaining({
+        progress: 100,
+        status: 'success',
+        speed: '完成'
+      })
+    )
+    const callsAfterStop = vi.mocked(window.aiops.listFileTransferTasks).mock.calls.length
+    await vi.advanceTimersByTimeAsync(500)
+    expect(vi.mocked(window.aiops.listFileTransferTasks).mock.calls.length).toBe(callsAfterStop)
+  })
+
   it('hydrates persisted External reference-style alias commands', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({

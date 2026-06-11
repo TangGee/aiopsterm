@@ -542,6 +542,10 @@ type FsDragPayload = {
   isDir: boolean
 }
 
+type AiopsBridge = NonNullable<typeof window.aiops>
+type OpenDialogBridge = NonNullable<AiopsBridge['showOpenDialog']>
+type SaveDialogBridge = NonNullable<AiopsBridge['showSaveDialog']>
+
 const permissionGroups = [
   { key: 'owner' as const, label: '所有者' },
   { key: 'group' as const, label: '用户组' },
@@ -668,9 +672,14 @@ const mutateEntry = async (mutation: FileEntryMutation, fallbackError = '文件�
   return applyMutationResult(result, mutation, fallbackError)
 }
 
-type AiopsBridge = NonNullable<typeof window.aiops>
-type OpenDialogBridge = NonNullable<AiopsBridge['showOpenDialog']>
-type SaveDialogBridge = NonNullable<AiopsBridge['showSaveDialog']>
+const runObservedFileTransfer = async (operation: Parameters<AiopsBridge['transferFileEntry']>[0], options: FileListOptions) => {
+  const stopObserving = workspace.observeFileTransferTasks()
+  try {
+    return await window.aiops.transferFileEntry(operation, options)
+  } finally {
+    stopObserving()
+  }
+}
 
 const pickLocalPath = async (
   options: Parameters<OpenDialogBridge>[0],
@@ -779,7 +788,7 @@ const queueUpload = async (kind: 'file' | 'directory') => {
   const name = getLocalPathName(localPath, kind === 'file' ? 'upload-file.txt' : 'upload-directory')
   loading.value = true
   try {
-    const transfer = await window.aiops.transferFileEntry(
+    const transfer = await runObservedFileTransfer(
       { kind: kind === 'file' ? 'upload-file' : 'upload-directory', localPath, remoteDirectory: currentPath.value },
       getListOptions()
     )
@@ -876,7 +885,7 @@ const handleOsFileDrop = async (event: DragEvent) => {
   const name = getLocalPathName(localPath)
   loading.value = true
   try {
-    const transfer = await window.aiops.transferFileEntry({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
+    const transfer = await runObservedFileTransfer({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
     if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
     await loadEntries()
     fileNotice.value = `${name} 上传成功`
@@ -908,7 +917,7 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
             fromHost: sourceSession?.host,
             toHost: props.session.host
           })
-    const transfer = await window.aiops.transferFileEntry(
+    const transfer = await runObservedFileTransfer(
       operation,
       transferOptions
     )
@@ -1063,7 +1072,7 @@ const downloadEntry = async (entry: FileBrowserEntry) => {
   if (!localPath) return
   loading.value = true
   try {
-    const transfer = await window.aiops.transferFileEntry({ kind: 'download-file', remotePath: entry.path, localPath }, getListOptions())
+    const transfer = await runObservedFileTransfer({ kind: 'download-file', remotePath: entry.path, localPath }, getListOptions())
     if (!applyTransferResult(transfer, '下载失败', `${entry.name} 下载已取消`, `${entry.name} 下载已跳过`)) return
     fileNotice.value = `${entry.name} 下载成功`
   } catch (downloadError) {

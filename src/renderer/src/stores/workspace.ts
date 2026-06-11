@@ -3794,6 +3794,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const selectedLeftFileSessionId = ref<string | null>(null)
   const selectedRightFileSessionId = ref<string | null>('local')
   const fileTransferTasks = ref<FileTransferTask[]>([])
+  const fileTransferTaskRemovalTimers = new Map<string, number>()
+  let fileTransferTaskObserverCount = 0
+  let fileTransferTaskPoller: number | null = null
   const snippetGroups = ref<SnippetGroup[]>([])
   const quickCommands = ref<QuickCommandSnippet[]>([])
   const selectedSnippetGroupUuid = ref<string | null>(null)
@@ -4249,6 +4252,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const sum = fileTransferTasks.value.reduce((acc, task) => acc + task.progress, 0)
     return Math.round(sum / fileTransferTasks.value.length)
   })
+  const hasRunningFileTransferTasks = computed(() => fileTransferTasks.value.some((task) => task.status === 'running'))
   const terminalCommandModelOptions = computed(() =>
     settingModelOptions.value.filter((model) => model.checked && !model.locked && !model.name.endsWith('-Thinking')).map((model) => model.name)
   )
@@ -8223,6 +8227,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     filesUiMode.value = mode
   }
 
+  const clearFileTransferTaskRemovalTimer = (id: string) => {
+    const timer = fileTransferTaskRemovalTimers.get(id)
+    if (timer === undefined) return
+    window.clearTimeout(timer)
+    fileTransferTaskRemovalTimers.delete(id)
+  }
+
   const normalizeFileTransferTask = (value: unknown): FileTransferTask | null => {
     if (!isRecord(value)) return null
     const type = value.type === 'download' || value.type === 'upload' || value.type === 'r2r' ? value.type : null
@@ -8260,7 +8271,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return task
   }
 
-  const refreshFileTransferTasks = async () => {
+  const normalizedFileTransferTaskSnapshot = (tasks: unknown[]) => {
+    if (!tasks.every(isFileTransferTaskData)) {
+      setTopNotice(malformedFilesBackendResultMessage)
+      return null
+    }
+    return tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task)
+  }
+
+  const mergeFileTransferTaskSnapshot = (snapshot: FileTransferTask[], options: { replaceCompleted?: boolean } = {}) => {
+    const replaceCompleted = options.replaceCompleted === true
+    const activeIds = new Set(snapshot.map((task) => task.id))
+    const finished = fileTransferTasks.value.filter((task) => task.status !== 'running' && !activeIds.has(task.id))
+    fileTransferTasks.value = replaceCompleted ? snapshot : [...snapshot, ...finished]
+    snapshot.forEach((task) => clearFileTransferTaskRemovalTimer(task.id))
+    return true
+  }
+
+  const refreshFileTransferTasks = async (options: { replaceCompleted?: boolean } = {}) => {
     const listFileTransferTasksBridge = window.aiops?.listFileTransferTasks
     if (typeof listFileTransferTasksBridge !== 'function') {
       setTopNotice('文件传输任务加载服务不可用')
@@ -8268,11 +8296,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const tasks = await listFileTransferTasksBridge()
-      if (!Array.isArray(tasks) || !tasks.every(isFileTransferTaskData)) {
+      if (!Array.isArray(tasks)) {
         setTopNotice(malformedFilesBackendResultMessage)
         return false
       }
-      fileTransferTasks.value = tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task)
+      const snapshot = normalizedFileTransferTaskSnapshot(tasks)
+      if (!snapshot) return false
+      mergeFileTransferTaskSnapshot(snapshot, options)
       return true
     } catch {
       setTopNotice('文件传输任务加载失败')
@@ -8431,9 +8461,38 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const scheduleFileTransferTaskRemoval = (id: string, delay = 800) => {
-    window.setTimeout(() => {
+    clearFileTransferTaskRemovalTimer(id)
+    const timer = window.setTimeout(() => {
       fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== id)
+      fileTransferTaskRemovalTimers.delete(id)
     }, delay)
+    fileTransferTaskRemovalTimers.set(id, timer)
+  }
+
+  const startFileTransferTaskPolling = () => {
+    if (fileTransferTaskPoller !== null) return
+    fileTransferTaskPoller = window.setInterval(() => {
+      void refreshFileTransferTasks()
+    }, 250)
+  }
+
+  const stopFileTransferTaskPollingIfIdle = () => {
+    if (fileTransferTaskObserverCount > 0 || hasRunningFileTransferTasks.value || fileTransferTaskPoller === null) return
+    window.clearInterval(fileTransferTaskPoller)
+    fileTransferTaskPoller = null
+  }
+
+  const observeFileTransferTasks = () => {
+    fileTransferTaskObserverCount += 1
+    startFileTransferTaskPolling()
+    void refreshFileTransferTasks()
+    let stopped = false
+    return () => {
+      if (stopped) return
+      stopped = true
+      fileTransferTaskObserverCount = Math.max(0, fileTransferTaskObserverCount - 1)
+      void refreshFileTransferTasks().finally(stopFileTransferTaskPollingIfIdle)
+    }
   }
 
   const selectFileSession = (side: 'left' | 'right', id: string | null) => {
@@ -8607,6 +8666,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!isFileTransferTaskData(task)) return null
     const normalized = normalizeFileTransferTask(task)
     if (!normalized) return null
+    clearFileTransferTaskRemovalTimer(normalized.id)
     fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== normalized.id)
     fileTransferTasks.value.unshift(normalized)
     if (normalized.status === 'success' || normalized.status === 'failed' || normalized.status === 'error') {
@@ -8671,6 +8731,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     markFileTransferTasksCancelled(result.data.taskIds.length ? result.data.taskIds : affectedFileTransferTaskIds(id))
+    void refreshFileTransferTasks().finally(stopFileTransferTaskPollingIfIdle)
     return true
   }
 
@@ -12263,6 +12324,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     transferTaskGroups,
     transferTaskCount,
     transferOverallPercent,
+    hasRunningFileTransferTasks,
     refreshFileSessionCatalog,
     refreshFileTransferTasks,
     terminalCommandModelOptions,
@@ -12583,6 +12645,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveFileSessionFolder,
     deleteFileSessionFolder,
     pushFileTransferTask,
+    observeFileTransferTasks,
     cancelFileTransferTask,
     createSnippetGroup,
     renameSnippetGroup,

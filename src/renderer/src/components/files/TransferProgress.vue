@@ -70,6 +70,7 @@
               <span :style="{ width: `${task.progress}%` }"></span>
             </div>
             <button
+              v-if="task.status === 'running'"
               class="danger"
               title="取消"
               @click="store.cancelFileTransferTask(task.id)"
@@ -91,6 +92,7 @@
                 <span :style="{ width: `${child.progress}%` }"></span>
               </div>
               <button
+                v-if="child.status === 'running'"
                 class="danger"
                 title="取消"
                 @click="store.cancelFileTransferTask(child.id)"
