@@ -228,6 +228,7 @@ import {
   getDefaultKnowledgeSeedFile,
   shouldUseKnowledgeSeedData
 } from '@shared/knowledgeBaseSeed'
+import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
 import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } from '@shared/skillsSeed'
 import type {
   AliasCommandConfig,
@@ -428,6 +429,7 @@ const defaultSecurityConfig: SecurityUserConfig = {
 }
 
 const defaultKnowledgeBaseUserConfig: KnowledgeBaseUserConfig = defaultKnowledgeBaseConfig()
+const defaultSettingsRulesUserConfig: UserRuleConfig[] = defaultSettingsRulesConfig()
 const defaultSkillsUserConfig: SkillUserConfig[] = defaultSkillsConfig()
 
 const defaultConfig: UserConfig = {
@@ -568,10 +570,7 @@ const defaultConfig: UserConfig = {
     { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
     { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
   ],
-  rules: [
-    { id: 'rule-1', content: '执行生产变更前必须先给出只读检查命令和回滚点。', enabled: true },
-    { id: 'rule-2', content: '不要自动执行删除、重启、扩容、写文件或修改配置类命令。', enabled: true }
-  ],
+  rules: defaultSettingsRulesUserConfig,
   skills: defaultSkillsUserConfig,
   mcpServers: defaultMcpServers(),
   mcpToolStates: defaultMcpToolStates(),
