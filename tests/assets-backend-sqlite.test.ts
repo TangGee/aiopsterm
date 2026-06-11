@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm } from 'fs/promises'
 import { createRequire } from 'module'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -82,6 +82,137 @@ describe('assets sqlite backend seed boundary', () => {
       expect(snapshot.folders).toContainEqual(expect.objectContaining({ uuid: 'custom-folder-a' }))
       expect(backend.listSshAgentKeychainOptions()).toContainEqual(expect.objectContaining({ key: 'key-1' }))
       expect(backend.listSshAgentKeychainOptions().some((option: { key: string }) => option.key === 'key-2')).toBe(false)
+    })
+  })
+
+  it('stores asset and keychain secrets encrypted while resolving plaintext only inside the backend', async () => {
+    await withAssetDatabase(async (databasePath) => {
+      const credentialKeyPath = join(databasePath, '..', 'asset-credential.key')
+      const backend = await loadBackend()
+      backend.configureAssetBackendRuntime({ databasePath, credentialKeyPath, useSeedData: false, sqliteFactory: Database })
+
+      const savedAsset = backend.saveAsset({
+        name: 'encrypted-secret-host',
+        title: 'encrypted-secret-host',
+        host: '10.77.1.7',
+        username: 'ops',
+        port: 22,
+        asset_type: 'person',
+        auth_type: 'password',
+        group: '测试',
+        group_name: '测试',
+        tags: ['manual'],
+        password: 'plain-ssh-password'
+      })
+      const savedKeychain = backend.saveKeychain({
+        name: 'encrypted-keychain',
+        type: 'ed25519',
+        publicKey: 'ssh-ed25519 AAAA encrypted',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-private-key-material\n-----END OPENSSH PRIVATE KEY-----',
+        passphrase: 'plain-passphrase'
+      })
+
+      expect(savedAsset.ok).toBe(true)
+      expect(savedAsset.data).toEqual(expect.objectContaining({ hasPassword: true }))
+      expect(savedAsset.data).toEqual(expect.not.objectContaining({ password: 'plain-ssh-password' }))
+      expect(savedKeychain.ok).toBe(true)
+      expect(savedKeychain.data).toEqual(expect.objectContaining({ hasPrivateKey: true }))
+
+      const rawDatabase = await readFile(databasePath)
+      const rawText = rawDatabase.toString('utf-8')
+      expect(rawText).not.toContain('plain-ssh-password')
+      expect(rawText).not.toContain('secret-private-key-material')
+      expect(rawText).not.toContain('plain-passphrase')
+      expect(rawText).toContain('ak1:')
+
+      expect(backend.getAssetSecret(savedAsset.data!.id)).toEqual(expect.objectContaining({ password: 'plain-ssh-password' }))
+      expect(backend.getKeychainSecret(savedKeychain.data!.id)).toEqual(
+        expect.objectContaining({
+          privateKey: expect.stringContaining('secret-private-key-material'),
+          passphrase: 'plain-passphrase'
+        })
+      )
+      expect(await readFile(credentialKeyPath)).toHaveLength(32)
+    })
+  })
+
+  it('migrates legacy plaintext SQLite secrets to encrypted storage on startup', async () => {
+    await withAssetDatabase(async (databasePath) => {
+      const credentialKeyPath = join(databasePath, '..', 'asset-credential.key')
+      const db = new Database(databasePath)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS assets (
+          id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          secret TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS asset_folders (
+          uuid TEXT PRIMARY KEY,
+          data TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS asset_keychains (
+          id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          secret TEXT NOT NULL DEFAULT '{}'
+        );
+      `)
+      db.prepare('INSERT INTO assets (id, data, secret) VALUES (?, ?, ?)').run(
+        'legacy-secret-host',
+        JSON.stringify({
+          id: 'legacy-secret-host',
+          uuid: 'legacy-secret-host',
+          name: 'legacy-secret-host',
+          title: 'legacy-secret-host',
+          host: '10.77.1.8',
+          ip: '10.77.1.8',
+          group: '测试',
+          group_name: '测试',
+          status: 'online',
+          tags: ['legacy'],
+          username: 'ops',
+          port: 22,
+          asset_type: 'person',
+          auth_type: 'password',
+          data_source: 'manual',
+          hasPassword: true
+        }),
+        JSON.stringify({ password: 'legacy-plain-password' })
+      )
+      db.prepare('INSERT INTO asset_keychains (id, data, secret) VALUES (?, ?, ?)').run(
+        'legacy-keychain',
+        JSON.stringify({
+          id: 'legacy-keychain',
+          name: 'legacy-keychain',
+          type: 'rsa',
+          publicKey: '',
+          hasPrivateKey: true,
+          createdAt: 1717200000000,
+          updatedAt: 1717200000000
+        }),
+        JSON.stringify({
+          privateKey: '-----BEGIN RSA PRIVATE KEY-----\nlegacy-private-key-material\n-----END RSA PRIVATE KEY-----',
+          passphrase: 'legacy-passphrase'
+        })
+      )
+      db.close()
+
+      const backend = await loadBackend()
+      backend.configureAssetBackendRuntime({ databasePath, credentialKeyPath, useSeedData: false, sqliteFactory: Database })
+
+      expect(backend.getAssetSecret('legacy-secret-host')).toEqual({ password: 'legacy-plain-password' })
+      expect(backend.getKeychainSecret('legacy-keychain')).toEqual(
+        expect.objectContaining({
+          privateKey: expect.stringContaining('legacy-private-key-material'),
+          passphrase: 'legacy-passphrase'
+        })
+      )
+
+      const rawDatabase = await readFile(databasePath)
+      const rawText = rawDatabase.toString('utf-8')
+      expect(rawText).not.toContain('legacy-plain-password')
+      expect(rawText).not.toContain('legacy-private-key-material')
+      expect(rawText).not.toContain('legacy-passphrase')
+      expect(rawText).toContain('ak1:')
     })
   })
 })

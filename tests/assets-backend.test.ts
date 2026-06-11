@@ -43,7 +43,9 @@ const loadBackend = async () => {
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
   storeModule.__resetMockStores?.()
   const modulePath = '../src/main/backend/assets'
-  return import(modulePath)
+  const backend = await import(modulePath)
+  backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+  return backend
 }
 
 const withAssetImportFile = async <T>(rows: unknown[], run: (filePath: string) => Promise<T>): Promise<T> => {

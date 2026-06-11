@@ -298,7 +298,7 @@ vi.mock('electron-store', () => {
     }
   }
 
-  return { default: MockStore }
+  return { default: MockStore, __resetMockStores: () => stores.clear() }
 })
 
 vi.mock('better-sqlite3', () => {
@@ -372,11 +372,15 @@ let configureFilesBackendRuntime: (config?: {
   forceFallbackStore?: boolean
   sftpPoolIdleTtlMs?: number
 }) => void
+let configureAssetBackendRuntime: (config?: { useSeedData?: boolean; forceFallbackStore?: boolean }) => void
+let resetMockStores: (() => void) | undefined
 let saveAsset: (asset: any) => any
 let saveKeychain: (keychain: any) => any
 let filesBackendExports: Record<string, unknown>
 
 beforeAll(async () => {
+  const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
+  resetMockStores = storeModule.__resetMockStores
   const modulePath = '../src/main/backend/files'
   const backend = await import(modulePath)
   filesBackendExports = backend as Record<string, unknown>
@@ -401,11 +405,14 @@ beforeAll(async () => {
   configureFilesBackendRuntime = backend.configureFilesBackendRuntime
   const assetsModulePath = '../src/main/backend/assets'
   const assetsBackend = await import(assetsModulePath)
+  configureAssetBackendRuntime = assetsBackend.configureAssetBackendRuntime
   saveAsset = assetsBackend.saveAsset
   saveKeychain = assetsBackend.saveKeychain
 })
 
 beforeEach(() => {
+  resetMockStores?.()
+  configureAssetBackendRuntime?.({ useSeedData: true, forceFallbackStore: true })
   configureFilesBackendRuntime?.()
   resetFileSessionCatalog?.()
   ssh2Mock.reset()

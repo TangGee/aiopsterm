@@ -202,11 +202,15 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('electron-store', () => {
+  const stores = new Map<string, Record<string, unknown>>()
+
   class MockStore<T extends Record<string, unknown>> {
     store: T
 
-    constructor(options?: { defaults?: T }) {
-      this.store = JSON.parse(JSON.stringify(options?.defaults || {}))
+    constructor(options?: { name?: string; defaults?: T }) {
+      const key = options?.name || 'default'
+      if (!stores.has(key)) stores.set(key, JSON.parse(JSON.stringify(options?.defaults || {})))
+      this.store = stores.get(key) as T
     }
 
     get<K extends keyof T>(key: K): T[K] {
@@ -218,7 +222,7 @@ vi.mock('electron-store', () => {
     }
   }
 
-  return { default: MockStore }
+  return { default: MockStore, __resetMockStores: () => stores.clear() }
 })
 
 vi.mock('better-sqlite3', () => {
@@ -231,10 +235,13 @@ vi.mock('../src/main/backend/sshProxy', () => ({
 
 const loadBackends = async (config: Record<string, unknown> = {}) => {
   vi.resetModules()
+  const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
+  storeModule.__resetMockStores?.()
   const assetsModulePath = '../src/main/backend/assets'
   const tunnelsModulePath = '../src/main/backend/sshTunnels'
   const assets = await import(assetsModulePath)
   const tunnels = await import(tunnelsModulePath)
+  assets.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
   tunnels.configureSshTunnelBackendRuntime({
     getConfig: () => ({
       sshProxyConfigs: [],
