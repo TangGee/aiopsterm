@@ -4624,13 +4624,57 @@ describe('workspace store', () => {
       data: {
         segments: [{ text: 'echo forged\n', delayBeforeMs: 0 }],
         shellText: 'echo different\n',
-        securityCommand: 'echo forged'
+        securityCommand: 'echo forged',
+        source: 'snippet',
+        snippetId: 1,
+        snippetName: '磁盘巡检',
+        autoExecute: true
       }
     } as any)
     const malformedPlannerDecision = await store.runQuickCommand(1, true)
     expect(malformedPlannerDecision?.status).toBe('unavailable')
     if (malformedPlannerDecision?.status === 'unavailable') {
       expect(malformedPlannerDecision.reason).toBe(malformedQuickCommandsBackendResultMessage)
+    }
+    expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.planQuickCommandScript!).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        segments: [{ text: 'echo wrong snippet\n', delayBeforeMs: 0 }],
+        shellText: 'echo wrong snippet\n',
+        securityCommand: 'echo wrong snippet',
+        source: 'snippet',
+        snippetId: 2,
+        snippetName: 'Nginx 状态',
+        autoExecute: true
+      }
+    } as any)
+    const mismatchedSnippetDecision = await store.runQuickCommand(1, true)
+    expect(mismatchedSnippetDecision?.status).toBe('unavailable')
+    if (mismatchedSnippetDecision?.status === 'unavailable') {
+      expect(mismatchedSnippetDecision.reason).toBe(malformedQuickCommandsBackendResultMessage)
+    }
+    expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.planQuickCommandScript!).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        segments: [{ text: 'df -h\nfree -m\nuptime\n', delayBeforeMs: 0 }],
+        shellText: 'df -h\nfree -m\nuptime\n',
+        securityCommand: 'df -h',
+        source: 'snippet',
+        snippetId: 1,
+        snippetName: '磁盘巡检',
+        autoExecute: false
+      }
+    } as any)
+    const mismatchedModeDecision = await store.runQuickCommand(1, true)
+    expect(mismatchedModeDecision?.status).toBe('unavailable')
+    if (mismatchedModeDecision?.status === 'unavailable') {
+      expect(mismatchedModeDecision.reason).toBe(malformedQuickCommandsBackendResultMessage)
     }
     expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()

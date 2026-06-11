@@ -37,6 +37,7 @@ import {
   isQuickCommandReorderData,
   isQuickCommandsSnapshotData,
   isQuickCommandScriptPlanData,
+  isQuickCommandScriptPlanForRequest,
   isQuickCommandSnippetDeleteData,
   isQuickCommandSnippetSaveData,
   malformedQuickCommandsBackendResultMessage
@@ -8665,14 +8666,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
   }
 
-  const resolveQuickCommandScriptPlan = async (id: number, autoExecute: boolean): Promise<QuickCommandScriptPlanResolution> => {
+  const resolveQuickCommandScriptPlan = async (command: QuickCommandSnippet, autoExecute: boolean): Promise<QuickCommandScriptPlanResolution> => {
     const planQuickCommandScriptBridge = window.aiops?.planQuickCommandScript
     if (typeof planQuickCommandScriptBridge !== 'function') return { ok: false, reason: '快捷命令执行计划服务不可用' }
     try {
-      const result = await planQuickCommandScriptBridge({ snippetId: id, autoExecute })
+      const result = await planQuickCommandScriptBridge({ snippetId: command.id, autoExecute })
       if (!result) return { ok: false, reason: '快捷命令执行计划生成失败' }
       if (!result.ok) return { ok: false, reason: result.errorMessage || '快捷命令执行计划生成失败' }
-      if (!isQuickCommandScriptPlanData(result.data)) return { ok: false, reason: malformedQuickCommandsBackendResultMessage }
+      if (!isQuickCommandScriptPlanForRequest(result.data, { snippetId: command.id, snippetName: command.snippet_name, autoExecute })) {
+        return { ok: false, reason: malformedQuickCommandsBackendResultMessage }
+      }
       return { ok: true, plan: result.data }
     } catch {
       return { ok: false, reason: '快捷命令执行计划生成失败' }
@@ -8683,7 +8686,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const command = quickCommands.value.find((item) => item.id === id)
     if (!command) return
     const targetPanelIds = resolveQuickCommandPanelIds(allTabs)
-    const planResolution = await resolveQuickCommandScriptPlan(id, autoExecute)
+    const planResolution = await resolveQuickCommandScriptPlan(command, autoExecute)
     if (!planResolution.ok) {
       return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, planResolution.reason)
     }

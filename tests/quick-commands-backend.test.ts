@@ -194,11 +194,24 @@ describe('quick commands backend boundary', () => {
     expect(restored.snippets).toEqual([expect.objectContaining({ id: snippet.id, snippet_name: '发布检查' })])
 
     const planned = expectOkData(backend.planQuickCommandScript({ snippetId: snippet.id, autoExecute: true }))
+    expect(planned).toMatchObject({
+      source: 'snippet',
+      snippetId: snippet.id,
+      snippetName: '发布检查',
+      autoExecute: true
+    })
     expect(planned.securityCommand).toBe('echo persisted')
     expect(planned.segments).toEqual([
       { text: 'echo persisted\n', delayBeforeMs: 0 },
       { text: 'echo done\n', delayBeforeMs: 100 }
     ])
+    expect(expectOkData(backend.planQuickCommandScript({ snippetContent: 'echo inline', autoExecute: false }))).toMatchObject({
+      source: 'inline',
+      snippetId: null,
+      snippetName: '',
+      autoExecute: false,
+      shellText: 'echo inline'
+    })
   })
 
   it('removes unmodified legacy seed rows from non-seed runtime while preserving user-edited rows', async () => {
@@ -368,7 +381,11 @@ describe('quick commands backend boundary', () => {
       segments: [
         { text: 'echo first\n', delayBeforeMs: 0 },
         { text: '\x03\x1b[Aecho second', delayBeforeMs: 250 }
-      ]
+      ],
+      source: 'inline',
+      snippetId: null,
+      snippetName: '',
+      autoExecute: false
     })
   })
 

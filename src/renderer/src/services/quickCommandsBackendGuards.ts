@@ -143,7 +143,20 @@ export const isQuickCommandReorderData = (value: unknown, expectedOrder: number[
     .join(',') === expectedOrder.join(',')
 
 export const isQuickCommandScriptPlanData = (value: unknown): value is QuickCommandScriptPlan => {
-  if (!isRecord(value) || !Array.isArray(value.segments) || typeof value.shellText !== 'string' || !isNonEmptyString(value.securityCommand)) return false
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.segments) ||
+    typeof value.shellText !== 'string' ||
+    !isNonEmptyString(value.securityCommand) ||
+    (value.source !== 'snippet' && value.source !== 'inline') ||
+    (value.snippetId !== null && !isPositiveInteger(value.snippetId)) ||
+    typeof value.snippetName !== 'string' ||
+    typeof value.autoExecute !== 'boolean'
+  ) {
+    return false
+  }
+  if (value.source === 'snippet' && (value.snippetId === null || !isNonEmptyString(value.snippetName))) return false
+  if (value.source === 'inline' && value.snippetId !== null) return false
   let shellText = ''
   for (const segment of value.segments) {
     if (!isRecord(segment) || typeof segment.text !== 'string') return false
@@ -153,3 +166,13 @@ export const isQuickCommandScriptPlanData = (value: unknown): value is QuickComm
   }
   return shellText === value.shellText
 }
+
+export const isQuickCommandScriptPlanForRequest = (
+  value: unknown,
+  expected: { snippetId: number; snippetName: string; autoExecute: boolean }
+): value is QuickCommandScriptPlan =>
+  isQuickCommandScriptPlanData(value) &&
+  value.source === 'snippet' &&
+  value.snippetId === expected.snippetId &&
+  value.snippetName === expected.snippetName &&
+  value.autoExecute === expected.autoExecute

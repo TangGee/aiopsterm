@@ -121,7 +121,12 @@ const quickCommandScriptItemText = (
   return ctrlKeyMap[item.payload]
 }
 
-const buildQuickCommandScriptPlan = (scriptContent: string, autoExecute: boolean, fallbackSecurityCommand = 'Quick Command'): QuickCommandScriptPlan => {
+const buildQuickCommandScriptPlan = (
+  scriptContent: string,
+  autoExecute: boolean,
+  fallbackSecurityCommand = 'Quick Command',
+  metadata: Pick<QuickCommandScriptPlan, 'source' | 'snippetId' | 'snippetName'> = { source: 'inline', snippetId: null, snippetName: '' }
+): QuickCommandScriptPlan => {
   const parsed = parseQuickCommandScript(scriptContent)
   const commandItems = parsed.filter((item): item is Extract<ParsedQuickCommandScriptItem, { type: 'COMMAND' }> => item.type === 'COMMAND')
   const context = {
@@ -152,7 +157,11 @@ const buildQuickCommandScriptPlan = (scriptContent: string, autoExecute: boolean
   return {
     segments,
     shellText: segments.map((segment) => segment.text).join(''),
-    securityCommand
+    securityCommand,
+    source: metadata.source,
+    snippetId: metadata.snippetId,
+    snippetName: metadata.snippetName,
+    autoExecute
   }
 }
 
@@ -633,7 +642,11 @@ export const planQuickCommandScript = (input: QuickCommandScriptPlanInput): Quic
       if (!Number.isInteger(snippetId) || snippetId <= 0) throw new Error('Quick command snippet id is invalid')
       const snippet = getStore().get().snippets.find((item) => item.id === snippetId)
       if (!snippet) throw new Error('Quick command snippet not found')
-      return buildQuickCommandScriptPlan(snippet.snippet_content, autoExecute, snippet.snippet_name)
+      return buildQuickCommandScriptPlan(snippet.snippet_content, autoExecute, snippet.snippet_name, {
+        source: 'snippet',
+        snippetId: snippet.id,
+        snippetName: snippet.snippet_name
+      })
     }
     if (typeof input.snippetContent !== 'string') throw new Error('Quick command script content is required')
     return buildQuickCommandScriptPlan(input.snippetContent, autoExecute)

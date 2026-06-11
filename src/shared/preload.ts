@@ -1330,6 +1330,10 @@ export type QuickCommandScriptPlan = {
   segments: QuickCommandScriptSegment[]
   shellText: string
   securityCommand: string
+  source: 'snippet' | 'inline'
+  snippetId: number | null
+  snippetName: string
+  autoExecute: boolean
 }
 
 export type QuickCommandGroupMutationResult = AiopsMutationResult<QuickCommandsUserConfig & { group: QuickCommandGroupConfig }>

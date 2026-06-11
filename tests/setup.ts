@@ -3924,7 +3924,12 @@ const parseQuickCommandScriptMock = (text: string): QuickCommandParsedScriptMock
   })
   return commands
 }
-const planQuickCommandScriptMock = (scriptContent: string, autoExecute = true, fallbackSecurityCommand = 'Quick Command') => {
+const planQuickCommandScriptMock = (
+  scriptContent: string,
+  autoExecute = true,
+  fallbackSecurityCommand = 'Quick Command',
+  metadata: { source: 'snippet' | 'inline'; snippetId: number | null; snippetName: string } = { source: 'inline', snippetId: null, snippetName: '' }
+) => {
   const parsed = parseQuickCommandScriptMock(scriptContent)
   const commandItems = parsed.filter((item): item is Extract<QuickCommandParsedScriptMock, { type: 'COMMAND' }> => item.type === 'COMMAND')
   const context = {
@@ -3960,7 +3965,11 @@ const planQuickCommandScriptMock = (scriptContent: string, autoExecute = true, f
   return {
     segments,
     shellText: segments.map((segment) => segment.text).join(''),
-    securityCommand: commandItems[0]?.payload || fallbackSecurityCommand
+    securityCommand: commandItems[0]?.payload || fallbackSecurityCommand,
+    source: metadata.source,
+    snippetId: metadata.snippetId,
+    snippetName: metadata.snippetName,
+    autoExecute
   }
 }
 
@@ -6187,7 +6196,14 @@ Object.defineProperty(window, 'aiops', {
       if (input.snippetId !== undefined) {
         const snippet = quickCommandStoreMock.snippets.find((item) => item.id === Number(input.snippetId))
         if (!snippet) return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command snippet not found' }
-        return { ok: true, data: planQuickCommandScriptMock(snippet.snippet_content, autoExecute, snippet.snippet_name) }
+        return {
+          ok: true,
+          data: planQuickCommandScriptMock(snippet.snippet_content, autoExecute, snippet.snippet_name, {
+            source: 'snippet',
+            snippetId: snippet.id,
+            snippetName: snippet.snippet_name
+          })
+        }
       }
       if (typeof input.snippetContent !== 'string') {
         return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command script content is required' }
