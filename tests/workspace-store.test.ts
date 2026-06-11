@@ -4767,6 +4767,21 @@ describe('workspace store', () => {
     await store.renameSnippetGroup(group!.uuid, '发布命令更新')
     expect(store.snippetGroups.find((item) => item.uuid === group!.uuid)?.group_name).toBe('发布命令更新')
 
+    const groupedCommand = await store.createQuickCommand({ snippet_name: '组内保留命令', snippet_content: 'echo grouped', group_uuid: group!.uuid })
+    expect(groupedCommand).toBeTruthy()
+    expect(store.quickCommands.find((command) => command.id === groupedCommand!.id)?.group_uuid).toBe(group!.uuid)
+    store.selectedSnippetGroupUuid = group!.uuid
+    await expect(store.deleteSnippetGroup(group!.uuid)).resolves.toBe(true)
+    expect(store.snippetGroups.some((item) => item.uuid === group!.uuid)).toBe(false)
+    expect(store.selectedSnippetGroupUuid).toBeNull()
+    expect(store.quickCommands.find((command) => command.id === groupedCommand!.id)).toEqual(
+      expect.objectContaining({
+        snippet_name: '组内保留命令',
+        group_uuid: null
+      })
+    )
+    expect(store.config.quickCommands?.snippets.find((command) => command.id === groupedCommand!.id)?.group_uuid).toBeNull()
+
     store.startMacroRecording()
     store.recordMacroCommand('uptime')
     await store.stopMacroRecording()

@@ -6073,6 +6073,7 @@ Object.defineProperty(window, 'aiops', {
       const groupName = String(input.group_name || '').trim()
       if (!groupName) return { ok: false, errorCode: 'QUICK_COMMAND_GROUP_REQUIRED', errorMessage: 'Group name is required' }
       const existing = input.uuid ? quickCommandStoreMock.groups.find((group) => group.uuid === input.uuid) : undefined
+      if (input.uuid && !existing) return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command group not found' }
       const group = existing
         ? { ...existing, group_name: groupName }
         : { id: nextQuickCommandGroupIdMock(), uuid: `quick-group-test-${quickCommandGroupSequenceMock++}`, group_name: groupName }
@@ -6084,9 +6085,14 @@ Object.defineProperty(window, 'aiops', {
       return { ok: true, data: { ...snapshot, group: snapshot.groups.find((item) => item.uuid === group.uuid)! } }
     }),
     deleteQuickCommandGroup: vi.fn(async (uuid: string) => {
+      if (!quickCommandStoreMock.groups.some((group) => group.uuid === uuid)) {
+        return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command group not found' }
+      }
       quickCommandStoreMock = {
         groups: quickCommandStoreMock.groups.filter((group) => group.uuid !== uuid),
-        snippets: quickCommandStoreMock.snippets.filter((snippet) => snippet.group_uuid !== uuid).map((snippet) => ({ ...snippet }))
+        snippets: quickCommandStoreMock.snippets.map((snippet) =>
+          snippet.group_uuid === uuid ? { ...snippet, group_uuid: null, update_at: '刚刚' } : { ...snippet }
+        )
       }
       const snapshot = cloneQuickCommandSnapshot(quickCommandStoreMock)
       return { ok: true, data: { ...snapshot, groupUuid: uuid } }
@@ -6097,6 +6103,7 @@ Object.defineProperty(window, 'aiops', {
         if (!snippetName) return { ok: false, errorCode: 'QUICK_COMMAND_SNIPPET_REQUIRED', errorMessage: 'Snippet name is required' }
         if (!input.snippet_content) return { ok: false, errorCode: 'QUICK_COMMAND_SNIPPET_REQUIRED', errorMessage: 'Snippet content is required' }
         const existing = input.id ? quickCommandStoreMock.snippets.find((snippet) => snippet.id === input.id) : undefined
+        if (input.id && !existing) return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command snippet not found' }
         const groupUuid = input.group_uuid && quickCommandStoreMock.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
         const snippet = existing
           ? {
@@ -6161,6 +6168,9 @@ Object.defineProperty(window, 'aiops', {
       }
     ),
     deleteQuickCommandSnippet: vi.fn(async (id: number) => {
+      if (!quickCommandStoreMock.snippets.some((snippet) => snippet.id === id)) {
+        return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command snippet not found' }
+      }
       quickCommandStoreMock = {
         groups: quickCommandStoreMock.groups.map((group) => ({ ...group })),
         snippets: quickCommandStoreMock.snippets.filter((snippet) => snippet.id !== id).map((snippet) => ({ ...snippet }))

@@ -389,6 +389,66 @@ const reorderQuickCommandSnapshot = (current: QuickCommandsUserConfig, input: Qu
   }
 }
 
+const saveQuickCommandGroupSnapshot = (
+  current: QuickCommandsUserConfig,
+  input: QuickCommandGroupSaveInput
+): QuickCommandsUserConfig & { group: QuickCommandGroupConfig } => {
+  const name = input.group_name.trim()
+  if (!name) throw new Error('Group name is required')
+  const existing = input.uuid ? current.groups.find((group) => group.uuid === input.uuid) : undefined
+  if (input.uuid && !existing) throw new Error('Quick command group not found')
+  const group: QuickCommandGroupConfig = existing
+    ? { ...existing, group_name: name }
+    : { id: nextGroupId(current.groups), uuid: `snippet-group-${randomUUID()}`, group_name: name }
+  const groups = existing ? current.groups.map((item) => (item.uuid === group.uuid ? group : item)) : [...current.groups, group]
+  return { groups, snippets: current.snippets, group }
+}
+
+const deleteQuickCommandGroupSnapshot = (current: QuickCommandsUserConfig, uuid: string): QuickCommandsUserConfig & { groupUuid: string } => {
+  if (!uuid.trim()) throw new Error('Quick command group id is required')
+  if (!current.groups.some((group) => group.uuid === uuid)) throw new Error('Quick command group not found')
+  return {
+    groups: current.groups.filter((group) => group.uuid !== uuid),
+    snippets: current.snippets.map((snippet) => (snippet.group_uuid === uuid ? { ...snippet, group_uuid: null, update_at: nowText() } : snippet)),
+    groupUuid: uuid
+  }
+}
+
+const saveQuickCommandSnippetSnapshot = (
+  current: QuickCommandsUserConfig,
+  input: QuickCommandSnippetSaveInput
+): QuickCommandsUserConfig & { snippet: QuickCommandSnippetConfig } => {
+  const name = input.snippet_name.trim()
+  if (!name) throw new Error('Snippet name is required')
+  if (!input.snippet_content) throw new Error('Snippet content is required')
+  const existing = input.id ? current.snippets.find((snippet) => snippet.id === input.id) : undefined
+  if (input.id && !existing) throw new Error('Quick command snippet not found')
+  const groupUuid = input.group_uuid && current.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
+  const snippet: QuickCommandSnippetConfig = existing
+    ? { ...existing, snippet_name: name, snippet_content: input.snippet_content, group_uuid: groupUuid, update_at: nowText() }
+    : {
+        id: nextSnippetId(current.snippets),
+        uuid: `snippet-${randomUUID()}`,
+        snippet_name: name,
+        snippet_content: input.snippet_content,
+        group_uuid: groupUuid,
+        create_at: nowText(),
+        update_at: nowText()
+      }
+  const snippets = existing ? current.snippets.map((item) => (item.id === snippet.id ? snippet : item)) : [...current.snippets, snippet]
+  return { groups: current.groups, snippets, snippet }
+}
+
+const deleteQuickCommandSnippetSnapshot = (current: QuickCommandsUserConfig, id: number): QuickCommandsUserConfig & { id: number } => {
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Quick command snippet id is invalid')
+  if (!current.snippets.some((snippet) => snippet.id === id)) throw new Error('Quick command snippet not found')
+  return {
+    groups: current.groups,
+    snippets: current.snippets.filter((snippet) => snippet.id !== id),
+    id
+  }
+}
+
 class FallbackQuickCommandStore {
   private store = new Store<QuickCommandStoreShape>({
     name: 'aiopsterm-quick-commands',
@@ -411,52 +471,33 @@ class FallbackQuickCommandStore {
 
   saveGroup(input: QuickCommandGroupSaveInput): QuickCommandsUserConfig & { group: QuickCommandGroupConfig } {
     const current = this.get()
-    const name = input.group_name.trim()
-    if (!name) throw new Error('Group name is required')
-    const existing = input.uuid ? current.groups.find((group) => group.uuid === input.uuid) : undefined
-    const group: QuickCommandGroupConfig = existing
-      ? { ...existing, group_name: name }
-      : { id: nextGroupId(current.groups), uuid: `snippet-group-${randomUUID()}`, group_name: name }
-    const groups = existing ? current.groups.map((item) => (item.uuid === group.uuid ? group : item)) : [...current.groups, group]
-    const saved = this.save({ groups, snippets: current.snippets })
+    const snapshot = saveQuickCommandGroupSnapshot(current, input)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
+    const group = saved.groups.find((item) => item.uuid === snapshot.group.uuid)
+    if (!group) throw new Error('Quick command group save failed')
     return { ...saved, group: saved.groups.find((item) => item.uuid === group.uuid)! }
   }
 
   deleteGroup(uuid: string): QuickCommandsUserConfig & { groupUuid: string } {
     const current = this.get()
-    const saved = this.save({
-      groups: current.groups.filter((group) => group.uuid !== uuid),
-      snippets: current.snippets.filter((snippet) => snippet.group_uuid !== uuid)
-    })
+    const snapshot = deleteQuickCommandGroupSnapshot(current, uuid)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
     return { ...saved, groupUuid: uuid }
   }
 
   saveSnippet(input: QuickCommandSnippetSaveInput): QuickCommandsUserConfig & { snippet: QuickCommandSnippetConfig } {
     const current = this.get()
-    const name = input.snippet_name.trim()
-    if (!name) throw new Error('Snippet name is required')
-    if (!input.snippet_content) throw new Error('Snippet content is required')
-    const existing = input.id ? current.snippets.find((snippet) => snippet.id === input.id) : undefined
-    const groupUuid = input.group_uuid && current.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
-    const snippet: QuickCommandSnippetConfig = existing
-      ? { ...existing, snippet_name: name, snippet_content: input.snippet_content, group_uuid: groupUuid, update_at: nowText() }
-      : {
-          id: nextSnippetId(current.snippets),
-          uuid: `snippet-${randomUUID()}`,
-          snippet_name: name,
-          snippet_content: input.snippet_content,
-          group_uuid: groupUuid,
-          create_at: nowText(),
-          update_at: nowText()
-        }
-    const snippets = existing ? current.snippets.map((item) => (item.id === snippet.id ? snippet : item)) : [...current.snippets, snippet]
-    const saved = this.save({ groups: current.groups, snippets })
-    return { ...saved, snippet: saved.snippets.find((item) => item.id === snippet.id)! }
+    const snapshot = saveQuickCommandSnippetSnapshot(current, input)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
+    const snippet = saved.snippets.find((item) => item.id === snapshot.snippet.id)
+    if (!snippet) throw new Error('Quick command snippet save failed')
+    return { ...saved, snippet }
   }
 
   deleteSnippet(id: number): QuickCommandsUserConfig & { id: number } {
     const current = this.get()
-    const saved = this.save({ groups: current.groups, snippets: current.snippets.filter((snippet) => snippet.id !== id) })
+    const snapshot = deleteQuickCommandSnippetSnapshot(current, id)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
     return { ...saved, id }
   }
 
@@ -538,52 +579,33 @@ class SqliteQuickCommandStore {
 
   saveGroup(input: QuickCommandGroupSaveInput): QuickCommandsUserConfig & { group: QuickCommandGroupConfig } {
     const current = this.get()
-    const name = input.group_name.trim()
-    if (!name) throw new Error('Group name is required')
-    const existing = input.uuid ? current.groups.find((group) => group.uuid === input.uuid) : undefined
-    const group: QuickCommandGroupConfig = existing
-      ? { ...existing, group_name: name }
-      : { id: nextGroupId(current.groups), uuid: `snippet-group-${randomUUID()}`, group_name: name }
-    const groups = existing ? current.groups.map((item) => (item.uuid === group.uuid ? group : item)) : [...current.groups, group]
-    const saved = this.save({ groups, snippets: current.snippets })
-    return { ...saved, group: saved.groups.find((item) => item.uuid === group.uuid)! }
+    const snapshot = saveQuickCommandGroupSnapshot(current, input)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
+    const group = saved.groups.find((item) => item.uuid === snapshot.group.uuid)
+    if (!group) throw new Error('Quick command group save failed')
+    return { ...saved, group }
   }
 
   deleteGroup(uuid: string): QuickCommandsUserConfig & { groupUuid: string } {
     const current = this.get()
-    const saved = this.save({
-      groups: current.groups.filter((group) => group.uuid !== uuid),
-      snippets: current.snippets.filter((snippet) => snippet.group_uuid !== uuid)
-    })
+    const snapshot = deleteQuickCommandGroupSnapshot(current, uuid)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
     return { ...saved, groupUuid: uuid }
   }
 
   saveSnippet(input: QuickCommandSnippetSaveInput): QuickCommandsUserConfig & { snippet: QuickCommandSnippetConfig } {
     const current = this.get()
-    const name = input.snippet_name.trim()
-    if (!name) throw new Error('Snippet name is required')
-    if (!input.snippet_content) throw new Error('Snippet content is required')
-    const existing = input.id ? current.snippets.find((snippet) => snippet.id === input.id) : undefined
-    const groupUuid = input.group_uuid && current.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
-    const snippet: QuickCommandSnippetConfig = existing
-      ? { ...existing, snippet_name: name, snippet_content: input.snippet_content, group_uuid: groupUuid, update_at: nowText() }
-      : {
-          id: nextSnippetId(current.snippets),
-          uuid: `snippet-${randomUUID()}`,
-          snippet_name: name,
-          snippet_content: input.snippet_content,
-          group_uuid: groupUuid,
-          create_at: nowText(),
-          update_at: nowText()
-        }
-    const snippets = existing ? current.snippets.map((item) => (item.id === snippet.id ? snippet : item)) : [...current.snippets, snippet]
-    const saved = this.save({ groups: current.groups, snippets })
-    return { ...saved, snippet: saved.snippets.find((item) => item.id === snippet.id)! }
+    const snapshot = saveQuickCommandSnippetSnapshot(current, input)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
+    const snippet = saved.snippets.find((item) => item.id === snapshot.snippet.id)
+    if (!snippet) throw new Error('Quick command snippet save failed')
+    return { ...saved, snippet }
   }
 
   deleteSnippet(id: number): QuickCommandsUserConfig & { id: number } {
     const current = this.get()
-    const saved = this.save({ groups: current.groups, snippets: current.snippets.filter((snippet) => snippet.id !== id) })
+    const snapshot = deleteQuickCommandSnippetSnapshot(current, id)
+    const saved = this.save({ groups: snapshot.groups, snippets: snapshot.snippets })
     return { ...saved, id }
   }
 

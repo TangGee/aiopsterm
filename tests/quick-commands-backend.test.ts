@@ -137,6 +137,25 @@ describe('quick commands backend boundary', () => {
     expect(group.id).toBe(1)
     expect(snippet.id).toBe(1)
     expect(backend.getQuickCommands().snippets).toEqual([expect.objectContaining({ id: 1, snippet_name: 'Fallback Command' })])
+
+    const deletedGroup = backend.deleteQuickCommandGroup(group.uuid)
+    expect(deletedGroup.ok).toBe(true)
+    expect(deletedGroup.data?.groups).toEqual([])
+    expect(deletedGroup.data?.snippets).toEqual([
+      expect.objectContaining({
+        id: snippet.id,
+        snippet_name: 'Fallback Command',
+        group_uuid: null
+      })
+    ])
+    expect(backend.deleteQuickCommandSnippet(snippet.id).ok).toBe(true)
+    expect(backend.deleteQuickCommandSnippet(snippet.id)).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command snippet not found'
+      })
+    )
   })
 
   it('owns group and snippet identity for new quick-command rows', async () => {
@@ -276,8 +295,8 @@ describe('quick commands backend boundary', () => {
     expect(deleted.data?.snippets.some((snippet) => snippet.id === created.id)).toBe(false)
   })
 
-  it('deletes groups with their grouped commands to mirror the panel flow', async () => {
-    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-delete-group-' })
+  it('deletes groups by moving grouped commands back to the root level like External reference', async () => {
+    const databasePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-delete-group-' })
     const group = expectOkData(backend.saveQuickCommandGroup({ group_name: '待删除组' })).group
     const grouped = expectOkData(
       backend.saveQuickCommandSnippet({
@@ -290,7 +309,73 @@ describe('quick commands backend boundary', () => {
     const deletedGroup = backend.deleteQuickCommandGroup(group.uuid)
     expect(deletedGroup.ok).toBe(true)
     expect(deletedGroup.data?.groups.some((item) => item.uuid === group.uuid)).toBe(false)
-    expect(deletedGroup.data?.snippets.some((item) => item.id === grouped.id)).toBe(false)
+    expect(deletedGroup.data?.snippets).toEqual([
+      expect.objectContaining({
+        id: grouped.id,
+        snippet_name: '组内命令',
+        group_uuid: null,
+        update_at: '刚刚'
+      })
+    ])
+
+    backend.configureQuickCommandBackendRuntime({ databasePath, useSeedData: false })
+    expect(backend.getQuickCommands().snippets).toEqual([
+      expect.objectContaining({
+        id: grouped.id,
+        group_uuid: null
+      })
+    ])
+  })
+
+  it('rejects stale group and snippet mutation targets instead of returning no-op success snapshots', async () => {
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-stale-mutations-' })
+    const group = expectOkData(backend.saveQuickCommandGroup({ group_name: '真实分组' })).group
+    const command = expectOkData(
+      backend.saveQuickCommandSnippet({
+        snippet_name: '真实命令',
+        snippet_content: 'echo real',
+        group_uuid: group.uuid
+      })
+    ).snippet
+
+    expect(backend.saveQuickCommandGroup({ uuid: 'missing-group', group_name: '假分组' })).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command group not found'
+      })
+    )
+    expect(backend.deleteQuickCommandGroup('missing-group')).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command group not found'
+      })
+    )
+    expect(
+      backend.saveQuickCommandSnippet({
+        id: command.id + 100,
+        snippet_name: '假命令',
+        snippet_content: 'echo fake',
+        group_uuid: null
+      })
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command snippet not found'
+      })
+    )
+    expect(backend.deleteQuickCommandSnippet(command.id + 100)).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command snippet not found'
+      })
+    )
+
+    expect(backend.getQuickCommands().groups).toEqual([expect.objectContaining({ uuid: group.uuid })])
+    expect(backend.getQuickCommands().snippets).toEqual([expect.objectContaining({ id: command.id, group_uuid: group.uuid })])
   })
 
   it('persists group-scoped reorder as a backend-owned snapshot and rejects stale order lists', async () => {
