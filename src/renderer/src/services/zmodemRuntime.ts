@@ -1,5 +1,13 @@
 import Zmodem, { type ZmodemSession, type ZmodemTransfer } from 'zmodem.js'
-import type { AiopsPreloadApi, TerminalDataEvent, ZmodemUploadFile } from '@shared/preload'
+import type {
+  AiopsPreloadApi,
+  TerminalDataEvent,
+  ZmodemSavePathPickResult,
+  ZmodemStreamCloseResult,
+  ZmodemStreamOpenResult,
+  ZmodemUploadFile,
+  ZmodemUploadPickResult
+} from '@shared/preload'
 
 export type TerminalZmodemProgress = {
   visible: boolean
@@ -54,6 +62,50 @@ const validateBinaryWrite = async (api: AiopsPreloadApi, sessionId: string, byte
 
 const validStreamWrite = (result: Awaited<ReturnType<AiopsPreloadApi['writeZmodemChunk']>>, streamId: string, bytes: number) =>
   result?.ok === true && result.data?.streamId === streamId && result.data.bytes === bytes
+
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
+
+const isNonNegativeInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+const isValidTimestamp = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+const isZmodemUploadFile = (value: unknown): value is ZmodemUploadFile => {
+  if (!value || typeof value !== 'object') return false
+  const file = value as Partial<ZmodemUploadFile>
+  if (!isNonEmptyString(file.name)) return false
+  if (!isNonNegativeInteger(file.size)) return false
+  if (!isValidTimestamp(file.lastModified)) return false
+  const bytes = bytesFrom(file.data)
+  return bytes.byteLength === file.size
+}
+
+const validUploadPickData = (data: ZmodemUploadPickResult['data'] | undefined): data is NonNullable<ZmodemUploadPickResult['data']> =>
+  !!data &&
+  typeof data === 'object' &&
+  Array.isArray(data.files) &&
+  data.files.every(isZmodemUploadFile) &&
+  (data.canceled === undefined || typeof data.canceled === 'boolean') &&
+  (!data.canceled || data.files.length === 0)
+
+const validSavePathPickData = (data: ZmodemSavePathPickResult['data'] | undefined): data is NonNullable<ZmodemSavePathPickResult['data']> => {
+  if (!data || typeof data !== 'object') return false
+  if (data.canceled === true) return data.filePath === undefined || data.filePath === ''
+  return isNonEmptyString(data.filePath) && (data.canceled === undefined || data.canceled === false)
+}
+
+const validStreamOpen = (
+  result: ZmodemStreamOpenResult,
+  filePath: string
+): result is ZmodemStreamOpenResult & { ok: true; data: { streamId: string; filePath: string } } =>
+  result?.ok === true && isNonEmptyString(result.data?.streamId) && result.data.filePath === filePath
+
+const validStreamClose = (
+  result: ZmodemStreamCloseResult,
+  streamId: string,
+  filePath: string,
+  bytes: number
+): result is ZmodemStreamCloseResult & { ok: true; data: { streamId: string; filePath: string; bytes: number } } =>
+  result?.ok === true && result.data?.streamId === streamId && result.data.filePath === filePath && isNonNegativeInteger(result.data.bytes) && result.data.bytes === bytes
 
 const progress = (
   type: TerminalZmodemProgress['type'],
@@ -133,8 +185,9 @@ export const createTerminalZmodemRuntime = (options: TerminalZmodemRuntimeOption
     const api = options.getApi()
     if (!api?.pickZmodemUploadFiles) throw new Error('ZMODEM upload picker is unavailable.')
     const picked = await api.pickZmodemUploadFiles()
-    const files = picked?.ok && picked.data ? picked.data.files : []
     if (!picked?.ok) throw new Error(picked?.errorMessage || 'ZMODEM upload picker failed.')
+    if (!validUploadPickData(picked.data)) throw new Error('ZMODEM upload picker returned malformed result.')
+    const files = picked.data.files
     if (!files.length) {
       update(sessionId, progress('upload', '', 0, 0, 'cancelled', 'Upload cancelled'))
       await writeBinary(sessionId, abortBytes)
@@ -157,13 +210,16 @@ export const createTerminalZmodemRuntime = (options: TerminalZmodemRuntimeOption
     const total = Math.max(0, Number(details.size) || 0)
     const save = await api.pickZmodemSavePath(fileName)
     if (!save?.ok) throw new Error(save?.errorMessage || 'ZMODEM save path picker failed.')
-    if (save.data?.canceled || !save.data?.filePath) {
+    if (!validSavePathPickData(save.data)) throw new Error('ZMODEM save path picker returned malformed result.')
+    if (save.data.canceled) {
       update(sessionId, progress('download', fileName, 0, total, 'cancelled', 'Download skipped'))
       await xfer.skip?.()
       return
     }
-    const opened = await api.openZmodemStream(save.data.filePath)
-    if (!opened?.ok || !opened.data?.streamId) throw new Error(opened?.errorMessage || 'ZMODEM stream open failed.')
+    const filePath = save.data.filePath
+    if (!isNonEmptyString(filePath)) throw new Error('ZMODEM save path picker returned malformed result.')
+    const opened = await api.openZmodemStream(filePath)
+    if (!validStreamOpen(opened, filePath)) throw new Error(opened?.errorMessage || 'ZMODEM stream open failed.')
     const streamId = opened.data.streamId
     let transferred = 0
     let pending = Promise.resolve()
@@ -183,7 +239,7 @@ export const createTerminalZmodemRuntime = (options: TerminalZmodemRuntimeOption
     xfer.on?.('complete', () => {
       pending = pending.then(async () => {
         const closed = await api.closeZmodemStream(streamId)
-        if (!closed?.ok || closed.data?.streamId !== streamId) {
+        if (!validStreamClose(closed, streamId, filePath, transferred)) {
           throw new Error(closed?.errorMessage || 'ZMODEM stream close failed.')
         }
         update(sessionId, progress('download', fileName, transferred, total || transferred, 'success', 'Download complete'))
