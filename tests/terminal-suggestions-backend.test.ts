@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   TerminalCommandGenerationInput,
@@ -13,6 +16,8 @@ type TerminalSuggestionsBackend = {
     now?: () => number
     fetch?: typeof fetch
     getConfig?: () => UserConfig
+    envPath?: string
+    executableSearchPaths?: string[]
   }) => void
   generateTerminalCommand: (input: TerminalCommandGenerationInput) => Promise<TerminalCommandGenerationResult>
   getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => Promise<TerminalCommandSuggestion[]>
@@ -276,7 +281,38 @@ describe('terminal command backend boundary', () => {
     )
   })
 
-  it('returns local backend AI suggestions when the local backend model is selected', async () => {
+  it('returns local backend AI suggestions from backend-owned command history first', async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    backend.configureTerminalSuggestionsRuntime({
+      databasePath: ':memory:',
+      now: () => 1_780_488_000_000,
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'aiopsterm-local-agent',
+          modelProvider: 'local',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'aiopsterm-local-agent', locked: false, checked: true, apiProvider: 'default' }],
+            providers: {}
+          }
+        }) as UserConfig
+    })
+
+    backend.recordTerminalCommandHistory('kubectl get pods -A', { host: '10.8.0.9' })
+
+    await expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai', host: '10.8.0.9' })).resolves.toEqual([
+      {
+        command: 'kubectl get pods -A',
+        source: 'ai',
+        explanation: 'local backend history on this host'
+      }
+    ])
+    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(backend.getTerminalCommandSuggestions('rm ', { mode: 'ai' })).resolves.toEqual([])
+  })
+
+  it('derives local backend AI suggestions from packaged Fig specs instead of a fixed command table', async () => {
     const fetchMock = vi.fn() as unknown as typeof fetch
     backend.configureTerminalSuggestionsRuntime({
       databasePath: ':memory:',
@@ -294,14 +330,49 @@ describe('terminal command backend boundary', () => {
     })
 
     await expect(backend.getTerminalCommandSuggestions('kubectl', { mode: 'ai' })).resolves.toEqual([
-      {
-        command: 'kubectl get pods -A',
+      expect.objectContaining({
+        command: 'kubectl get',
         source: 'ai',
-        explanation: 'local backend: list Kubernetes pods'
-      }
+        explanation: expect.stringContaining('local backend Fig spec:')
+      })
     ])
     expect(fetchMock).not.toHaveBeenCalled()
-    await expect(backend.getTerminalCommandSuggestions('rm ', { mode: 'ai' })).resolves.toEqual([])
+  })
+
+  it('discovers local backend AI command suggestions from executable PATH entries', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'aiopsterm-terminal-suggestions-'))
+    const executablePath = join(tempDir, 'aio-customctl')
+    writeFileSync(executablePath, '#!/bin/sh\n')
+    chmodSync(executablePath, 0o755)
+    try {
+      const fetchMock = vi.fn() as unknown as typeof fetch
+      backend.configureTerminalSuggestionsRuntime({
+        databasePath: ':memory:',
+        executableSearchPaths: [tempDir],
+        fetch: fetchMock,
+        getConfig: () =>
+          ({
+            modelName: 'aiopsterm-local-agent',
+            modelProvider: 'local',
+            modelSettings: {
+              addModelSwitch: true,
+              options: [{ name: 'aiopsterm-local-agent', locked: false, checked: true, apiProvider: 'default' }],
+              providers: {}
+            }
+          }) as UserConfig
+      })
+
+      await expect(backend.getTerminalCommandSuggestions('aio-cus', { mode: 'ai' })).resolves.toEqual([
+        {
+          command: 'aio-customctl',
+          source: 'ai',
+          explanation: 'local backend PATH executable'
+        }
+      ])
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
   })
 
   it('does not silently fall back to local AI suggestions for unknown non-local models', async () => {

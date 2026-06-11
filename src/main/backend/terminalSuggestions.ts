@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
-import { dirname, join } from 'path'
-import { mkdirSync } from 'fs'
+import { delimiter, dirname, join } from 'path'
+import { mkdirSync, readdirSync, statSync, type Dirent } from 'fs'
 import { pathToFileURL } from 'url'
 import type {
   ModelProviderCheckKey,
@@ -66,6 +66,8 @@ type TerminalSuggestionRuntimeConfig = {
   now?: () => number
   fetch?: typeof fetch
   figBuildDir?: string
+  envPath?: string
+  executableSearchPaths?: string[]
 }
 
 type TerminalSuggestionStore = {
@@ -79,6 +81,7 @@ const defaultAiSuggestTimeoutMs = 2000
 const defaultCommandGenerationTimeoutMs = 8000
 const specCache = new Map<string, FigSpec | null>()
 let availableSpecNames: Set<string> | null = null
+let executableCommandCache: { key: string; commands: string[] } | null = null
 let storeInstance: TerminalSuggestionStore | null = null
 let runtimeConfig: TerminalSuggestionRuntimeConfig = {}
 
@@ -442,6 +445,16 @@ function rebuildCommand(tokens: string[], replaceIndex: number, replacement: str
   return rebuilt.join(' ')
 }
 
+function buildFigSuggestion(command: string, explanation?: string, source: TerminalCommandSuggestion['source'] = 'base'): TerminalCommandSuggestion | null {
+  const normalized = normalizeText(command)
+  if (!normalized || !isValidTerminalCommandForHistory(normalized)) return null
+  return {
+    command: normalized,
+    source,
+    explanation: explanation || 'command spec'
+  }
+}
+
 async function getFigSuggestions(commandLine: string, limit: number): Promise<TerminalCommandSuggestion[]> {
   const tokens = splitCommandLine(commandLine)
   if (!tokens.length) return []
@@ -458,18 +471,15 @@ async function getFigSuggestions(commandLine: string, limit: number): Promise<Te
       const spec = await loadFigSpec(lower)
       return (spec?.subcommands || [])
         .slice(0, limit)
-        .map((subcommand) => ({
-          command: `${lower} ${resolveNames(subcommand.name)[0]}`,
-          source: 'base' as const,
-          explanation: subcommand.description || 'subcommand'
-        }))
-        .filter((item) => item.command.trim() !== lower)
+        .map((subcommand) => buildFigSuggestion(`${lower} ${resolveNames(subcommand.name)[0]}`, subcommand.description || 'subcommand'))
+        .filter((item): item is TerminalCommandSuggestion => Boolean(item && item.command.trim() !== lower))
     }
     const commands: TerminalCommandSuggestion[] = []
     for (const name of specs) {
       if (name.includes('/')) continue
       if (!name.startsWith(lower) || name === lower) continue
-      commands.push({ command: name, source: 'base', explanation: 'command spec' })
+      const suggestion = buildFigSuggestion(name, 'command spec')
+      if (suggestion) commands.push(suggestion)
       if (commands.length >= limit) break
     }
     return commands
@@ -482,11 +492,8 @@ async function getFigSuggestions(commandLine: string, limit: number): Promise<Te
   const suggestions: TerminalCommandSuggestion[] = []
   const context = resolveFigContext(spec, tokens.slice(1, wordIndex))
   const append = (replacement: string, explanation?: string) => {
-    suggestions.push({
-      command: rebuildCommand(tokens, wordIndex, replacement),
-      source: 'base',
-      explanation: explanation || 'command spec'
-    })
+    const suggestion = buildFigSuggestion(rebuildCommand(tokens, wordIndex, replacement), explanation)
+    if (suggestion) suggestions.push(suggestion)
   }
 
   for (const subcommand of context.subcommands || []) {
@@ -545,41 +552,206 @@ function parseAiSuggestResponse(response: string, partialCommand: string): Termi
   return { command, source: 'ai', explanation: explanation || 'AI suggestion' }
 }
 
-const localAiSuggestionCandidates: Array<{ command: string; explanation: string }> = [
-  { command: 'df -h', explanation: 'show filesystem usage' },
-  { command: 'du -sh .', explanation: 'summarize current directory size' },
-  { command: 'free -h', explanation: 'show memory usage' },
-  { command: 'uptime', explanation: 'show load average' },
-  { command: 'top -o %CPU', explanation: 'rank processes by CPU' },
-  { command: 'ps aux --sort=-%mem | head -n 12', explanation: 'rank processes by memory' },
-  { command: 'ss -tulpn', explanation: 'list listening sockets' },
-  { command: 'ip addr', explanation: 'show network addresses' },
-  { command: 'ip route', explanation: 'show routing table' },
-  { command: 'journalctl -n 120 --no-pager', explanation: 'show recent system logs' },
-  { command: 'systemctl status', explanation: 'show systemd status' },
-  { command: 'kubectl get pods -A', explanation: 'list Kubernetes pods' },
-  { command: 'kubectl get events -A --sort-by=.lastTimestamp', explanation: 'list recent Kubernetes events' },
-  { command: 'docker ps', explanation: 'list running containers' },
-  { command: 'git status --short', explanation: 'show Git working tree status' },
-  { command: 'git log --oneline -10', explanation: 'show recent commits' },
-  { command: 'find . -maxdepth 2 -type f', explanation: 'list nearby files' },
-  { command: 'grep -R "TODO" .', explanation: 'search files recursively' }
+const localFigIntentRank = [
+  'status',
+  'get',
+  'list',
+  'show',
+  'describe',
+  'logs',
+  'log',
+  'ps',
+  'top',
+  'version',
+  'info',
+  'config',
+  'help'
 ]
 
-function inferLocalAiSuggestion(partialCommand: string): TerminalCommandSuggestion | null {
+function toLocalAiSuggestion(
+  command: string,
+  partialCommand: string,
+  explanation: string,
+  score = 0
+): (TerminalCommandSuggestion & { score: number }) | null {
   const partial = partialCommand.trim()
   const lower = partial.toLowerCase()
+  const normalized = normalizeText(command)
   if (lower.length < 3) return null
-  const candidate = localAiSuggestionCandidates.find((item) => {
-    const command = item.command.toLowerCase()
-    return command.startsWith(lower) && command !== lower && isValidTerminalCommandForHistory(item.command)
-  })
-  if (!candidate) return null
+  if (!normalized || normalized.toLowerCase() === lower || !normalized.toLowerCase().startsWith(lower)) return null
+  if (!isValidTerminalCommandForHistory(normalized)) return null
   return {
-    command: candidate.command,
+    command: normalized,
     source: 'ai',
-    explanation: `local backend: ${candidate.explanation}`
+    explanation,
+    score
   }
+}
+
+function scoreFigSubcommand(subcommand: FigSubcommand, index: number): number {
+  const names = resolveNames(subcommand.name)
+  const primary = normalizeText(names[0]).toLowerCase()
+  const description = normalizeText(subcommand.description).toLowerCase()
+  const intentIndex = localFigIntentRank.indexOf(primary)
+  let score = intentIndex >= 0 ? 200 - intentIndex * 8 : 20
+  if (/\b(status|state|health)\b/.test(description)) score += 18
+  if (/\b(list|show|display|get|describe|logs?)\b/.test(description)) score += 14
+  if (/\b(delete|remove|destroy|kill|stop|terminate|prune)\b/.test(`${primary} ${description}`)) score -= 100
+  return score - index / 100
+}
+
+async function getExactCommandFigAiSuggestion(partialCommand: string): Promise<(TerminalCommandSuggestion & { score: number }) | null> {
+  const commandName = normalizeCommandName(partialCommand)
+  if (!commandName || commandName !== partialCommand.trim().toLowerCase()) return null
+  const specs = await loadAvailableSpecs()
+  if (!specs.has(commandName)) return null
+  const spec = await loadFigSpec(commandName)
+  const ranked = (spec?.subcommands || [])
+    .map((subcommand, index) => ({ subcommand, score: scoreFigSubcommand(subcommand, index) }))
+    .sort((a, b) => b.score - a.score)
+  for (const { subcommand, score } of ranked) {
+    const name = resolveNames(subcommand.name)[0]
+    const suggestion = toLocalAiSuggestion(
+      `${commandName} ${name}`,
+      partialCommand,
+      `local backend Fig spec: ${subcommand.description || 'subcommand'}`,
+      score
+    )
+    if (suggestion) return suggestion
+  }
+  return null
+}
+
+async function getFigAiSuggestions(partialCommand: string): Promise<Array<TerminalCommandSuggestion & { score: number }>> {
+  const suggestions: Array<TerminalCommandSuggestion & { score: number }> = []
+  const exact = await getExactCommandFigAiSuggestion(partialCommand)
+  if (exact) suggestions.push(exact)
+  const figSuggestions = await getFigSuggestions(partialCommand, maxSuggestionRows)
+  figSuggestions.forEach((item, index) => {
+    const suggestion = toLocalAiSuggestion(
+      item.command,
+      partialCommand,
+      `local backend Fig spec: ${item.explanation || 'command spec'}`,
+      160 - index
+    )
+    if (suggestion) suggestions.push(suggestion)
+  })
+  return suggestions
+}
+
+function resolveExecutableSearchPaths(): string[] {
+  const rawPaths =
+    runtimeConfig.executableSearchPaths && runtimeConfig.executableSearchPaths.length
+      ? runtimeConfig.executableSearchPaths
+      : normalizeText(runtimeConfig.envPath ?? process.env.PATH)
+          .split(delimiter)
+          .map((item) => item.trim())
+  const seen = new Set<string>()
+  const paths: string[] = []
+  for (const path of rawPaths) {
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    paths.push(path)
+  }
+  return paths.slice(0, 96)
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    const stat = statSync(path)
+    if (!stat.isFile()) return false
+    if (process.platform === 'win32') return true
+    return Boolean(stat.mode & 0o111)
+  } catch {
+    return false
+  }
+}
+
+function normalizeExecutableName(rawName: string): string {
+  const name = normalizeText(rawName)
+  if (process.platform === 'win32') return name.replace(/\.(exe|cmd|bat|ps1)$/i, '')
+  return name
+}
+
+function loadExecutableCommandNames(): string[] {
+  const paths = resolveExecutableSearchPaths()
+  const key = paths.join('\0')
+  if (executableCommandCache?.key === key) return executableCommandCache.commands
+  const seen = new Set<string>()
+  const commands: string[] = []
+  for (const dir of paths) {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue
+      const name = normalizeExecutableName(entry.name)
+      if (!name || seen.has(name)) continue
+      if (!isExecutableFile(join(dir, entry.name))) continue
+      if (!isValidTerminalCommandForHistory(name)) continue
+      seen.add(name)
+      commands.push(name)
+      if (commands.length >= 4096) break
+    }
+    if (commands.length >= 4096) break
+  }
+  commands.sort((a, b) => a.localeCompare(b))
+  executableCommandCache = { key, commands }
+  return commands
+}
+
+function getExecutableAiSuggestions(partialCommand: string): Array<TerminalCommandSuggestion & { score: number }> {
+  const tokens = splitCommandLine(partialCommand)
+  if (tokens.length !== 1 || tokens[0].includes('/') || tokens[0].includes('\\')) return []
+  const lower = tokens[0].toLowerCase()
+  if (lower.length < 3) return []
+  return loadExecutableCommandNames()
+    .filter((command) => {
+      const normalized = command.toLowerCase()
+      return normalized.startsWith(lower) && normalized !== lower
+    })
+    .slice(0, maxSuggestionRows)
+    .map((command, index) => ({
+      command,
+      source: 'ai' as const,
+      explanation: 'local backend PATH executable',
+      score: 80 - index
+    }))
+}
+
+async function inferLocalAiSuggestions(partialCommand: string, context?: TerminalCommandSuggestionContext): Promise<TerminalCommandSuggestion[]> {
+  const partial = partialCommand.trim()
+  if (partial.length < 3) return []
+  const suggestions: Array<TerminalCommandSuggestion & { score: number }> = []
+  try {
+    getStore()
+      .query(partial, context?.host, maxSuggestionRows)
+      .forEach((item, index) => {
+        const suggestion = toLocalAiSuggestion(item.command, partial, `local backend ${item.explanation || 'history'}`, 300 - index)
+        if (suggestion) suggestions.push(suggestion)
+      })
+  } catch {
+    // Local AI suggestions are opportunistic; history storage failures fail closed.
+  }
+  try {
+    suggestions.push(...(await getFigAiSuggestions(partial)))
+  } catch {
+    // Fig catalog lookup must not fabricate fallback rows on failure.
+  }
+  try {
+    suggestions.push(...getExecutableAiSuggestions(partial))
+  } catch {
+    // PATH discovery is best-effort and stays behind the backend boundary.
+  }
+  return dedupeSuggestions(
+    suggestions
+      .sort((a, b) => b.score - a.score)
+      .map(({ score: _score, ...item }) => item),
+    1
+  )
 }
 
 async function fetchAiSuggestion(query: string, context?: TerminalCommandSuggestionContext): Promise<TerminalCommandSuggestion[]> {
@@ -590,8 +762,7 @@ async function fetchAiSuggestion(query: string, context?: TerminalCommandSuggest
   const provider = resolveModelProvider(config, context?.modelName)
   if (!provider) {
     if (requestedModel !== 'aiopsterm-local-agent') return []
-    const localSuggestion = inferLocalAiSuggestion(query)
-    return localSuggestion ? [localSuggestion] : []
+    return inferLocalAiSuggestions(query, context)
   }
   const request = createAiSuggestRequest(provider, query.trim(), context)
   if (!request) return []
@@ -696,6 +867,7 @@ export const configureTerminalSuggestionsRuntime = (config?: TerminalSuggestionR
   runtimeConfig = config ? { ...config } : {}
   storeInstance = null
   availableSpecNames = null
+  executableCommandCache = null
   specCache.clear()
 }
 
