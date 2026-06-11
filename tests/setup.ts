@@ -35,11 +35,13 @@ import {
   DEFAULT_KNOWLEDGE_SEED_SIZES,
   DEFAULT_KNOWLEDGE_USED_BYTES
 } from '@shared/knowledgeBaseSeed'
+import { defaultModelSettingsSeedData } from '@shared/modelSettingsSeed'
 import { defaultWorkspacePreferencesSeedData } from '@shared/workspacePreferencesSeed'
 import { createHash } from 'crypto'
 import { vi } from 'vitest'
 
 process.env.AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED = '1'
+process.env.AIOPSTERM_MODEL_SETTINGS_ENABLE_SEED = '1'
 
 type TestAppUpdateProgressEvent = {
   status: 'downloading' | 'downloaded' | 'error'
@@ -2347,28 +2349,7 @@ const defaultSshProxyConfigs: any[] = []
 
 const defaultSshAgentKeys: any[] = []
 
-const defaultModelSettings = {
-  addModelSwitch: true,
-  providers: {
-    litellm: {
-      baseUrl: 'http://localhost:4000',
-      apiKey: '',
-      modelId: 'gpt-5'
-    },
-    openai: {
-      baseUrl: 'https://api.openai.com',
-      apiKey: '',
-      modelId: 'gpt-5',
-      apiFormat: 'responses'
-    }
-  },
-  options: [
-    { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-    { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-    { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
-    { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
-  ]
-}
+const defaultModelSettings = defaultModelSettingsSeedData()
 
 const defaultLockedAiModels = [
   { id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' },

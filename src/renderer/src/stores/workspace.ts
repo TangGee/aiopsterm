@@ -216,6 +216,7 @@ export type {
   AiSupportedImageType,
   AiTextContentPart
 } from '@shared/preload'
+import { defaultModelSettingsConfig as createDefaultModelSettingsConfig } from '@shared/modelSettingsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 
 type PanelDirection = 'right' | 'below'
@@ -665,6 +666,7 @@ const createEmptyUserProfile = (): AiopsUserProfile => ({
 })
 
 const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesConfig()
+const defaultModelSettingsUserConfig: ModelSettingsUserConfig = createDefaultModelSettingsConfig()
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
@@ -770,50 +772,7 @@ const defaultConfig: UserConfig = {
     },
     shellIntegrationTimeout: 4
   },
-  modelSettings: {
-    addModelSwitch: true,
-    providers: {
-      litellm: {
-        baseUrl: 'http://localhost:4000',
-        apiKey: '',
-        modelId: 'gpt-5'
-      },
-      openai: {
-        baseUrl: 'https://api.openai.com',
-        apiKey: '',
-        modelId: 'gpt-5',
-        apiFormat: 'responses'
-      },
-      bedrock: {
-        baseUrl: '',
-        apiKey: '',
-        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-        awsAccessKey: '',
-        awsSecretKey: '',
-        awsSessionToken: '',
-        awsRegion: 'us-east-1',
-        awsUseCrossRegionInference: false,
-        awsEndpointSelected: false,
-        awsBedrockEndpoint: ''
-      },
-      deepseek: {
-        baseUrl: '',
-        apiKey: '',
-        modelId: 'deepseek-chat'
-      },
-      anthropic: {
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: '',
-        modelId: 'claude-3-5-sonnet-latest'
-      },
-      ollama: {
-        baseUrl: 'http://localhost:11434',
-        apiKey: '',
-        modelId: 'llama3.1'
-      }
-    },
-    options: []
-  },
+  modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [],
   rules: [],
   skills: [],

@@ -228,6 +228,7 @@ import {
   getDefaultKnowledgeSeedFile,
   shouldUseKnowledgeSeedData
 } from '@shared/knowledgeBaseSeed'
+import { defaultModelSettingsConfig } from '@shared/modelSettingsSeed'
 import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
 import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } from '@shared/skillsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
@@ -434,6 +435,7 @@ const defaultKnowledgeBaseUserConfig: KnowledgeBaseUserConfig = defaultKnowledge
 const defaultSettingsRulesUserConfig: UserRuleConfig[] = defaultSettingsRulesConfig()
 const defaultSkillsUserConfig: SkillUserConfig[] = defaultSkillsConfig()
 const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesConfig()
+const defaultModelSettingsUserConfig: ModelSettingsUserConfig = defaultModelSettingsConfig()
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
@@ -515,55 +517,7 @@ const defaultConfig: UserConfig = {
     },
     shellIntegrationTimeout: 4
   },
-  modelSettings: {
-    addModelSwitch: true,
-    providers: {
-      litellm: {
-        baseUrl: 'http://localhost:4000',
-        apiKey: '',
-        modelId: 'gpt-5'
-      },
-      openai: {
-        baseUrl: 'https://api.openai.com',
-        apiKey: '',
-        modelId: 'gpt-5',
-        apiFormat: 'responses'
-      },
-      bedrock: {
-        baseUrl: '',
-        apiKey: '',
-        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-        awsAccessKey: '',
-        awsSecretKey: '',
-        awsSessionToken: '',
-        awsRegion: 'us-east-1',
-        awsUseCrossRegionInference: false,
-        awsEndpointSelected: false,
-        awsBedrockEndpoint: ''
-      },
-      deepseek: {
-        baseUrl: '',
-        apiKey: '',
-        modelId: 'deepseek-chat'
-      },
-      anthropic: {
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: '',
-        modelId: 'claude-3-5-sonnet-latest'
-      },
-      ollama: {
-        baseUrl: 'http://localhost:11434',
-        apiKey: '',
-        modelId: 'llama3.1'
-      }
-    },
-    options: [
-      { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-      { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-      { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
-      { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
-    ]
-  },
+  modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [
     { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
     { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
