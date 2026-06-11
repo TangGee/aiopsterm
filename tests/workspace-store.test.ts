@@ -9454,6 +9454,106 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.userContactCodeCountdown.mobile).toBe(0)
   })
 
+  it('does not start login code countdowns from request-mismatched backend snapshots', async () => {
+    vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'mobile',
+        target: 'login@example.local',
+        countdownSeconds: 300,
+        remainingSeconds: 120,
+        expiresAt: Date.now() + 120_000,
+        message: '手机登录验证码已发送'
+      }
+    })
+    await expect(store.sendUserLoginCode('email', 'login@example.local')).resolves.toBe(false)
+    expect(store.userLoginCodeSending.email).toBe(false)
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+    expect(store.userLoginCodeCountdown.mobile).toBe(0)
+    expect(store.userNotice).toBe('验证码冷却状态无效')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+
+    vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'email',
+        target: 'other@example.local',
+        countdownSeconds: 300,
+        remainingSeconds: 90,
+        expiresAt: Date.now() + 90_000,
+        message: '邮箱登录验证码已发送'
+      }
+    })
+    await expect(store.sendUserLoginCode('email', 'login@example.local')).resolves.toBe(false)
+    expect(store.userLoginCodeSending.email).toBe(false)
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+    expect(store.userNotice).toBe('验证码冷却状态无效')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userLoginCodeCountdown.email).toBe(0)
+
+    vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'email',
+        target: 'login@example.local',
+        countdownSeconds: 300,
+        remainingSeconds: 60,
+        expiresAt: Date.now() + 60_000,
+        message: '邮箱登录验证码已发送'
+      }
+    })
+    await expect(store.sendUserLoginCode('email', ' LOGIN@EXAMPLE.LOCAL ')).resolves.toBe(true)
+    expect(store.userLoginCodeSending.email).toBe(false)
+    expect(store.userLoginCodeCountdown.email).toBe(60)
+    expect(store.userNotice).toBe('邮箱登录验证码已发送')
+  })
+
+  it('does not start contact code countdowns from request-mismatched backend snapshots', async () => {
+    vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'email',
+        target: '13800000002',
+        countdownSeconds: 300,
+        remainingSeconds: 120,
+        expiresAt: Date.now() + 120_000,
+        message: '邮箱验证码已发送'
+      }
+    })
+    await expect(store.sendUserContactCode('mobile', '13800000002')).resolves.toBe(false)
+    expect(store.userContactCodeSending.mobile).toBe(false)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+    expect(store.userContactCodeCountdown.email).toBe(0)
+    expect(store.userNotice).toBe('验证码冷却状态无效')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+
+    vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'mobile',
+        target: '13800000003',
+        countdownSeconds: 300,
+        remainingSeconds: 90,
+        expiresAt: Date.now() + 90_000,
+        message: '手机验证码已发送'
+      }
+    })
+    await expect(store.sendUserContactCode('mobile', '13800000002')).resolves.toBe(false)
+    expect(store.userContactCodeSending.mobile).toBe(false)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+    expect(store.userNotice).toBe('验证码冷却状态无效')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.userContactCodeCountdown.mobile).toBe(0)
+  })
+
   it('fails closed on malformed successful user account backend result envelopes', async () => {
     const store = useWorkspaceStore()
     await store.refreshUserAccount()

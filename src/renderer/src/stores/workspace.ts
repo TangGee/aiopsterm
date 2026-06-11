@@ -1061,6 +1061,14 @@ const isUserCodeData = (source: unknown): source is UserCodeData =>
   typeof source.message === 'string' &&
   source.message.trim() !== ''
 
+const normalizeUserCodeTarget = (kind: UserCodeData['kind'], value: string) => {
+  const normalized = value.trim()
+  return kind === 'email' ? normalized.toLowerCase() : normalized
+}
+
+const isUserCodeDataForRequest = (source: unknown, kind: UserCodeData['kind'], value: string): source is UserCodeData =>
+  isUserCodeData(source) && source.kind === kind && normalizeUserCodeTarget(source.kind, source.target) === normalizeUserCodeTarget(kind, value)
+
 const isUserAvatarPrepareData = (source: unknown): source is UserAvatarPrepareData =>
   isRecord(source) &&
   typeof source.filePath === 'string' &&
@@ -6657,7 +6665,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setUserNotice(result?.errorMessage || '验证码发送失败')
         return false
       }
-      if (!isUserCodeData(result.data) || !isValidUserCodeCooldown(result.data)) {
+      if (!isUserCodeDataForRequest(result.data, kind, value) || !isValidUserCodeCooldown(result.data)) {
         rejectInvalidUserCodeCooldown('login', kind)
         return false
       }
@@ -6770,7 +6778,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setUserNotice(result?.errorMessage || '验证码发送失败')
         return false
       }
-      if (!isUserCodeData(result.data) || !isValidUserCodeCooldown(result.data)) {
+      if (!isUserCodeDataForRequest(result.data, kind, value) || !isValidUserCodeCooldown(result.data)) {
         rejectInvalidUserCodeCooldown('contact', kind)
         return false
       }

@@ -130,7 +130,7 @@ describe('user account backend boundary', () => {
         errorMessage: '手机号格式不正确'
       })
 
-      const result = backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' })
+      const result = backend.sendUserLoginCode({ kind: 'email', value: '  login@example.local  ' })
       const first = expectOkData(result)
       expect(first).toMatchObject({
         kind: 'email',
@@ -231,7 +231,7 @@ describe('user account backend boundary', () => {
       errorMessage: '当前登录方式不允许修改邮箱'
     })
 
-    const mobileCode = backend.sendUserContactCode({ kind: 'mobile', value: '13800000002' })
+    const mobileCode = backend.sendUserContactCode({ kind: 'mobile', value: '  13800000002  ' })
     expect(expectOkData(mobileCode)).toMatchObject({
       target: '13800000002',
       countdownSeconds: 300,
