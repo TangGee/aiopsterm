@@ -48,6 +48,15 @@ import {
   isSettingsRuleDeleteData,
   malformedSettingsBackendResultMessage
 } from '@/services/settingsBackendGuards'
+import {
+  isSkillContentResultData,
+  isSkillExportResultData,
+  isSkillImportResultData,
+  isSkillsSnapshotData,
+  isSkillUserConfigData,
+  malformedSkillsBackendResultMessage,
+  snapshotContainsSkill
+} from '@/services/skillsBackendGuards'
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import type { AiopstermDeepLinkPayload } from '@shared/deepLink'
@@ -4960,6 +4969,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const installSkillsUpdateListener = () => {
     if (removeSkillsUpdateListener || !window.aiops?.onSkillsUpdate) return
     removeSkillsUpdateListener = window.aiops.onSkillsUpdate((skills) => {
+      if (!isSkillsSnapshotData(skills)) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return
+      }
       applySkillsList(skills)
     })
   }
@@ -4972,6 +4985,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         window.aiops.getSkillsUserPath ? window.aiops.getSkillsUserPath() : Promise.resolve(skillsUserPath.value),
         window.aiops.getSkills()
       ])
+      if (typeof path !== 'string' || !isSkillsSnapshotData(skills)) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return null
+      }
       skillsUserPath.value = path
       return skills
     } catch {
@@ -4980,16 +4997,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const loadSkillsFromBridge = async () => {
+  const loadSkillsFromBridge = async (options: { expect?: (skills: SkillUserConfig[]) => boolean; malformedMessage?: string } = {}) => {
     const skills = await readSkillsSnapshotFromBridge()
     if (!skills) return false
-    try {
-      applySkillsList(skills)
-      return true
-    } catch {
-      setSettingsNotice('Skills 加载失败')
+    if (options.expect && !options.expect(skills)) {
+      setSettingsNotice(options.malformedMessage || malformedSkillsBackendResultMessage)
       return false
     }
+    applySkillsList(skills)
+    return true
+  }
+
+  const refreshSkillsAfterMutation = async (expect: (skills: SkillUserConfig[]) => boolean) => {
+    return loadSkillsFromBridge({ expect, malformedMessage: malformedSkillsBackendResultMessage })
   }
 
   const refreshSkillsFromBridge = () => loadSkillsFromBridge()
@@ -5001,6 +5021,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const skills = await window.aiops.reloadSkills()
+      if (!isSkillsSnapshotData(skills)) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return false
+      }
       applySkillsList(skills)
       setSettingsNotice('Skills 已重新加载')
       return true
@@ -7456,6 +7480,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
       try {
         const result = await window.aiops.readSkillContent(skill.name)
+        if (!isSkillContentResultData(result, skill.name)) {
+          setSettingsNotice(malformedSkillsBackendResultMessage)
+          return
+        }
         skillModal.value = {
           mode,
           name: skill.name,
@@ -7495,7 +7523,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
       try {
         await window.aiops.updateSkill(name, { name, description }, content)
-        await loadSkillsFromBridge()
+        const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, description, content }))
+        if (!refreshed) return false
         setSettingsNotice(`${name} 已保存`)
         closeSkillModal()
         return true
@@ -7518,10 +7547,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const created = await window.aiops.createSkill({ name, description }, content)
-      await loadSkillsFromBridge()
-      if (created) {
-        applySkillsList([created, ...settingsSkills.value.filter((item) => item.name !== created.name)])
+      if (!isSkillUserConfigData(created) || !snapshotContainsSkill([created], { name, description, content, enabled: true })) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return false
       }
+      const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, description, content }))
+      if (!refreshed) return false
       setSettingsNotice(`${name} 已创建`)
       closeSkillModal()
       return true
@@ -7539,10 +7570,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     const previous = skill.enabled
-    skill.enabled = !skill.enabled
+    const nextEnabled = !skill.enabled
     try {
-      await window.aiops.setSkillEnabled(name, skill.enabled)
-      setSettingsNotice(`${name} ${skill.enabled ? '已启用' : '已禁用'}`)
+      await window.aiops.setSkillEnabled(name, nextEnabled)
+      const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, enabled: nextEnabled }))
+      if (!refreshed) {
+        skill.enabled = previous
+        return
+      }
+      setSettingsNotice(`${name} ${nextEnabled ? '已启用' : '已禁用'}`)
     } catch {
       skill.enabled = previous
       setSettingsNotice(`${name} 状态更新失败`)
@@ -7562,7 +7598,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       await window.aiops.deleteSkill(name)
-      await loadSkillsFromBridge()
+      const refreshed = await refreshSkillsAfterMutation((skills) => !skills.some((item) => item.name === name))
+      if (!refreshed) return
       setSettingsNotice(`${name} 已删除`)
     } catch {
       setSettingsNotice(`${name} 删除失败`)
@@ -7589,18 +7626,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (pendingSkillImportOverwritePath) {
         const overwritePath = pendingSkillImportOverwritePath
         const overwriteResult = await importSkillZipBridge(overwritePath, true)
-        if (overwriteResult?.success) {
+        if (!isSkillImportResultData(overwriteResult)) {
           pendingSkillImportOverwritePath = ''
-          await loadSkillsFromBridge()
+          setSettingsNotice(malformedSkillsBackendResultMessage)
+          return false
+        }
+        if (overwriteResult.success) {
+          pendingSkillImportOverwritePath = ''
+          const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: overwriteResult.skillName! }))
+          if (!refreshed) return false
           setSettingsNotice(`${overwriteResult.skillName || 'Skill'} 已覆盖导入`)
           return true
         }
-        if (overwriteResult?.errorCode === 'DIR_EXISTS') {
+        if (overwriteResult.errorCode === 'DIR_EXISTS') {
           setSettingsNotice('Skill 已存在，再次点击 Import 覆盖')
           return false
         }
         pendingSkillImportOverwritePath = ''
-        showSkillImportError(overwriteResult?.errorCode)
+        showSkillImportError(overwriteResult.errorCode)
         return false
       }
       const showOpenDialog = window.aiops?.showOpenDialog
@@ -7614,17 +7657,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
       if (!result || result.canceled || !result.filePaths.length) return false
       const importResult = await importSkillZipBridge(result.filePaths[0])
-      if (importResult?.success) {
-        await loadSkillsFromBridge()
+      if (!isSkillImportResultData(importResult)) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return false
+      }
+      if (importResult.success) {
+        const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: importResult.skillName! }))
+        if (!refreshed) return false
         setSettingsNotice(`${importResult.skillName || 'Skill'} 已导入`)
         return true
       }
-      if (importResult?.errorCode === 'DIR_EXISTS') {
+      if (importResult.errorCode === 'DIR_EXISTS') {
         pendingSkillImportOverwritePath = result.filePaths[0]
         setSettingsNotice('Skill 已存在，再次点击 Import 覆盖')
         return false
       }
-      showSkillImportError(importResult?.errorCode)
+      showSkillImportError(importResult.errorCode)
       return false
     } catch {
       pendingSkillImportOverwritePath = ''
@@ -7641,10 +7689,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await exportSkillZipBridge(name)
-      if (result?.success) {
+      if (!isSkillExportResultData(result)) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return false
+      }
+      if (result.success) {
         setSettingsNotice(`${name} 已导出为 ZIP`)
         return true
-      } else if (result?.error !== 'cancelled') {
+      } else if (result.error !== 'cancelled') {
         setSettingsNotice(`${name} ZIP 导出失败`)
       }
       return false
@@ -11773,11 +11825,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const created = await window.aiops.createSkill({ name: skill.name, description: skill.description }, skill.content)
-      await loadSkillsFromBridge()
-      if (created) {
-        applySkillsList([created, ...settingsSkills.value.filter((item) => item.name !== created.name)])
+      if (!isSkillUserConfigData(created) || !snapshotContainsSkill([created], { name: skill.name, description: skill.description, content: skill.content, enabled: true })) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return null
       }
-      return created || skill
+      const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: skill.name, description: skill.description, content: skill.content }))
+      if (!refreshed) return null
+      return created
     } catch {
       setSettingsNotice(`${name} 创建失败`)
       return null
