@@ -342,6 +342,7 @@ const getKnowledgeBridge = (): KnowledgeBridgeApi | null => {
 
 export type TerminalSecurityExecution = {
   command: string
+  securityCommands?: string[]
   panelIds: string[]
   inputText: string
   shellText?: string
@@ -9174,6 +9175,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const decision = prepareTerminalSecurityExecution({
       command: plan.securityCommand || command.snippet_name,
+      securityCommands: plan.commands,
       panelIds: targetPanelIds,
       inputText: plan.shellText,
       shellText: plan.shellText,
@@ -11746,24 +11748,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const prepareTerminalSecurityExecution = (execution: TerminalSecurityExecution): TerminalSecurityDecision => {
-    const result = validateCommandSecurity(securitySettings.value, execution.command)
-    if (result.requiresApproval) {
-      const prompt = {
-        id: createId('terminal-security'),
-        command: execution.command,
-        panelIds: execution.panelIds,
-        source: execution.source,
-        result,
-        execution
+    const securityCommands = execution.securityCommands?.length ? execution.securityCommands : [execution.command]
+    for (const securityCommand of securityCommands) {
+      const result = validateCommandSecurity(securitySettings.value, securityCommand)
+      if (result.requiresApproval) {
+        const promptExecution = { ...execution, command: securityCommand }
+        const prompt = {
+          id: createId('terminal-security'),
+          command: securityCommand,
+          panelIds: execution.panelIds,
+          source: execution.source,
+          result,
+          execution: promptExecution
+        }
+        terminalSecurityPrompt.value = prompt
+        return { status: 'needs-approval', prompt }
       }
-      terminalSecurityPrompt.value = prompt
-      return { status: 'needs-approval', prompt }
-    }
 
-    if (!result.isAllowed) {
-      setTopNotice(commandSecurityNotice(result, execution.command))
-      terminalSecurityPrompt.value = null
-      return { status: 'blocked', result }
+      if (!result.isAllowed) {
+        setTopNotice(commandSecurityNotice(result, securityCommand))
+        terminalSecurityPrompt.value = null
+        return { status: 'blocked', result }
+      }
     }
 
     terminalSecurityPrompt.value = null

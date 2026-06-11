@@ -1386,6 +1386,7 @@ export type QuickCommandScriptPlan = {
   segments: QuickCommandScriptSegment[]
   shellText: string
   securityCommand: string
+  commands: string[]
   source: 'snippet' | 'inline'
   snippetId: number | null
   snippetName: string

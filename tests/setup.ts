@@ -4084,6 +4084,7 @@ const planQuickCommandScriptMock = (
     segments,
     shellText: segments.map((segment) => segment.text).join(''),
     securityCommand: commandItems[0]?.payload || fallbackSecurityCommand,
+    commands: commandItems.map((item) => item.payload),
     source: metadata.source,
     snippetId: metadata.snippetId,
     snippetName: metadata.snippetName,

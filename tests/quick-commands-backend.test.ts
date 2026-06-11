@@ -462,6 +462,7 @@ describe('quick commands backend boundary', () => {
     expect(planned.ok).toBe(true)
     expect(planned.data).toEqual({
       securityCommand: 'echo first',
+      commands: ['echo first', 'echo second'],
       shellText: 'echo first\n\x03\x1b[Aecho second',
       segments: [
         { text: 'echo first\n', delayBeforeMs: 0 },
@@ -505,6 +506,7 @@ describe('quick commands backend boundary', () => {
       { text: 'uptime\n', delayBeforeMs: 0 },
       { text: '\x1b[Awhoami\n', delayBeforeMs: 600 }
     ])
+    expect(planned.commands).toEqual(['uptime', 'whoami'])
   })
 
   it('rejects malformed macro recordings before creating snippets', async () => {

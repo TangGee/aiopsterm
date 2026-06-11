@@ -4850,6 +4850,34 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
 
+    const forgedCommandListSnippet = await store.createQuickCommand({
+      snippet_name: 'Forged command list',
+      snippet_content: 'echo ok\nrm /tmp/forged',
+      group_uuid: null
+    })
+    expect(forgedCommandListSnippet).toBeTruthy()
+    vi.mocked(window.aiops.planQuickCommandScript!).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        segments: [{ text: 'echo ok\nrm /tmp/forged\n', delayBeforeMs: 0 }],
+        shellText: 'echo ok\nrm /tmp/forged\n',
+        securityCommand: 'echo ok',
+        commands: ['echo ok'],
+        source: 'snippet',
+        snippetId: forgedCommandListSnippet!.id,
+        snippetName: 'Forged command list',
+        autoExecute: true
+      }
+    } as any)
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const forgedCommandListDecision = await store.runQuickCommand(forgedCommandListSnippet!.id, true)
+    expect(forgedCommandListDecision?.status).toBe('unavailable')
+    if (forgedCommandListDecision?.status === 'unavailable') {
+      expect(forgedCommandListDecision.reason).toBe(malformedQuickCommandsBackendResultMessage)
+    }
+    expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
     const dangerousSnippet = await store.createQuickCommand({ snippet_name: '危险删除', snippet_content: 'rm /tmp/file', group_uuid: null })
     expect(dangerousSnippet).toBeTruthy()
     expect(dangerousSnippet?.uuid).toMatch(/^quick-snippet-test-/)
@@ -4876,6 +4904,18 @@ describe('workspace store', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'rm /tmp/file\n')
     expect(store.activePanel.output).not.toContain('rm /tmp/file')
     expect(store.activePanel.output).not.toContain('[snippet] 危险删除')
+
+    const hiddenDangerSnippet = await store.createQuickCommand({ snippet_name: '后续危险命令', snippet_content: 'echo safe\nrm /tmp/later', group_uuid: null })
+    expect(hiddenDangerSnippet).toBeTruthy()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const hiddenDangerDecision = await store.runQuickCommand(hiddenDangerSnippet!.id, true)
+    expect(hiddenDangerDecision?.status).toBe('needs-approval')
+    expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/later')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.activePanel.output).not.toContain('echo safe')
+    expect(store.activePanel.output).not.toContain('rm /tmp/later')
+    store.cancelTerminalSecurityPrompt()
+    expect(store.terminalSecurityPrompt).toBeNull()
 
     const delayedFailureSnippet = await store.createQuickCommand({ snippet_name: '延时失败', snippet_content: 'echo first\nsleep==250\necho second', group_uuid: null })
     expect(delayedFailureSnippet).toBeTruthy()

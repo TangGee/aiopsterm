@@ -24,6 +24,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const isPositiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 const isOptionalString = (value: unknown): value is string | undefined => value === undefined || typeof value === 'string'
+const stripTerminalControlSequences = (value: string) =>
+  value
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
+const extractShellCommandLines = (shellText: string) =>
+  stripTerminalControlSequences(shellText)
+    .split(/\r\n|\n|\r/)
+    .map((line) => line.trim())
+    .filter(Boolean)
 
 export const quickCommandSnippetGroupUuid = (snippet: Pick<QuickCommandSnippetConfig, 'group_uuid'>) => snippet.group_uuid ?? null
 
@@ -148,6 +158,7 @@ export const isQuickCommandScriptPlanData = (value: unknown): value is QuickComm
     !Array.isArray(value.segments) ||
     typeof value.shellText !== 'string' ||
     !isNonEmptyString(value.securityCommand) ||
+    !Array.isArray(value.commands) ||
     (value.source !== 'snippet' && value.source !== 'inline') ||
     (value.snippetId !== null && !isPositiveInteger(value.snippetId)) ||
     typeof value.snippetName !== 'string' ||
@@ -164,7 +175,10 @@ export const isQuickCommandScriptPlanData = (value: unknown): value is QuickComm
     if (typeof delayBeforeMs !== 'number' || !Number.isFinite(delayBeforeMs) || delayBeforeMs < 0) return false
     shellText += segment.text
   }
-  return shellText === value.shellText
+  const commands = value.commands
+  if (!commands.every(isNonEmptyString)) return false
+  if (commands.length && value.securityCommand !== commands[0]) return false
+  return shellText === value.shellText && JSON.stringify(extractShellCommandLines(value.shellText)) === JSON.stringify(commands)
 }
 
 export const isQuickCommandScriptPlanForRequest = (
