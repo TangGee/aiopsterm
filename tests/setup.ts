@@ -942,7 +942,7 @@ const databaseEngineOptionsMock: DatabaseEngineInfo[] = [
   { code: 'postgresql', connectionCode: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
   { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
   { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
-  { code: 'mariadb', name: 'MariaDB', enabled: false, accent: '#c0765c' },
+  { code: 'mariadb', connectionCode: 'mariadb', name: 'MariaDB', enabled: true, accent: '#c0765c' },
   { code: 'clickhouse', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
   { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
   { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
@@ -1399,7 +1399,7 @@ const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): D
     connectionId: databaseTrimMock(state.context?.connectionId),
     catalogName: databaseTrimMock(state.context?.catalogName),
     schemaName: databaseTrimMock(state.context?.schemaName),
-    dbType: ['mysql', 'postgresql', 'sqlite', 'oracle', 'sqlserver'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
+    dbType: ['mysql', 'mariadb', 'postgresql', 'sqlite', 'oracle', 'sqlserver'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
   },
   draft: typeof state.draft === 'string' ? state.draft : '',
   messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
@@ -1458,6 +1458,9 @@ const updateDatabaseAiDrawerRequestMock = (requestId: string, patch: Partial<Pic
   databaseAiDrawerRequestsMock.set(updated.id, cloneDatabaseAiDrawerRequestMock(updated))
   return updated
 }
+
+const normalizeDatabaseAiTargetDialectMock = (dialect?: TestDatabaseAiTargetDialect | ''): TestDatabaseAiTargetDialect =>
+  dialect === 'sqlserver' ? 'mssql' : dialect === 'mariadb' ? 'mysql' : dialect || 'postgresql'
 
 const databaseAiPaneContextSummaryMock = (input: { context: { contextSummary?: string; connectionId?: string; databaseName?: string; schemaName?: string; dbType?: string } }) =>
   input.context.contextSummary ||
@@ -1536,7 +1539,7 @@ const databaseAiDrawerErrorResponseMock = (
   errorMessage: string
 ) => {
   const existing = input.requestId ? findDatabaseAiDrawerRequestMock(input.requestId) : null
-  const targetDialect = input.targetDialect || existing?.targetDialect || input.context.dbType || 'postgresql'
+  const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || existing?.targetDialect || input.context.dbType || 'postgresql')
   const text = `Reasoning\n- ${errorMessage}`
   const request =
     existing && existing.status !== 'cancelled'
@@ -1650,9 +1653,13 @@ const testDatabaseConnectionMock = async (input: DatabaseConnectionTestInput) =>
       ? 'PostgreSQL 16 local backend validation'
       : input.dbType === 'mysql'
         ? 'MySQL 8 local backend validation'
-        : input.dbType === 'oracle'
-          ? 'Oracle local backend validation'
-          : 'SQLite local backend validation'
+        : input.dbType === 'mariadb'
+          ? 'MariaDB local backend validation'
+          : input.dbType === 'oracle'
+            ? 'Oracle local backend validation'
+            : input.dbType === 'sqlserver'
+              ? 'SQL Server local backend validation'
+              : 'SQLite local backend validation'
   return { ok: true, data: { dbType: input.dbType, serverVersion, endpoint: 'test-backend', durationMs: 1 } }
 }
 
@@ -1722,7 +1729,14 @@ const buildSavedDatabaseConnectionUrlMock = (
   const port = normalized.port ? `:${normalized.port}` : ''
   const database = normalized.database ? `/${normalized.database}` : ''
   if (normalized.dbType === 'oracle') return `${normalized.host}${port}${database}`
-  const scheme = normalized.dbType === 'postgresql' ? 'jdbc:postgresql' : 'jdbc:mysql'
+  const scheme =
+    normalized.dbType === 'postgresql'
+      ? 'jdbc:postgresql'
+      : normalized.dbType === 'sqlserver'
+        ? 'jdbc:sqlserver'
+        : normalized.dbType === 'mariadb'
+          ? 'jdbc:mariadb'
+          : 'jdbc:mysql'
   return `${scheme}://${normalized.host}${port}${database}`
 }
 
@@ -1734,12 +1748,15 @@ const defaultCatalogsForSavedConnectionMock = (connection: Omit<DatabaseConnecti
   if (connection.dbType === 'oracle') {
     return [{ name: connection.database, schemas: [{ name: 'OPS', tables: [], views: [], functions: [], procedures: [] }] }]
   }
+  if (connection.dbType === 'sqlserver') {
+    return [{ name: connection.database, schemas: [{ name: 'dbo', tables: [], views: [], functions: [], procedures: [] }] }]
+  }
   return [{ name: connection.database, tables: [] }]
 }
 
 const createDatabaseCatalogForConnectionMock = (connection: DatabaseConnectionInfo, name: string): DatabaseCatalogInfo =>
-  connection.dbType === 'postgresql'
-    ? { name, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }
+  connection.dbType === 'postgresql' || connection.dbType === 'sqlserver'
+    ? { name, schemas: [{ name: connection.dbType === 'postgresql' ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
     : { name, tables: [] }
 
 const unquoteDatabaseIdentifierMock = (value: string) => {
@@ -1761,7 +1778,8 @@ const normalizeSavedDatabaseConnectionMock = (
   const hasOracleConnectString = input.dbType === 'oracle' && !!databaseTrimMock(input.url)
   const filePath = isSqlite ? databaseTrimMock(input.filePath) || sqlitePathFromUrlMock(databaseTrimMock(input.url)) : ''
   const database = isSqlite ? basenameFromDatabasePathMock(filePath) : databaseTrimMock(input.database)
-  const sslMode: DatabaseConnectionInfo['sslMode'] = input.dbType === 'postgresql' ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
+  const sslMode: DatabaseConnectionInfo['sslMode'] =
+    input.dbType === 'postgresql' || input.dbType === 'sqlserver' ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
   const normalized = {
     name: databaseTrimMock(input.name),
     dbType: input.dbType,
@@ -1821,8 +1839,12 @@ const createDatabaseCatalogMock = async (input: DatabaseCreateDatabaseInput) => 
   const index = databaseConnectionsMock.findIndex((connection) => connection.id === databaseTrimMock(input.connectionId))
   const connection = index >= 0 ? databaseConnectionsMock[index] : null
   if (!connection) return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
-  if (connection.dbType !== 'mysql' && connection.dbType !== 'postgresql') {
-    return { ok: false, errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED', errorMessage: 'Create Database is only available for MySQL and PostgreSQL connections.' }
+  if (connection.dbType !== 'mysql' && connection.dbType !== 'mariadb' && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver') {
+    return {
+      ok: false,
+      errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED',
+      errorMessage: 'Create Database is only available for MySQL, MariaDB, PostgreSQL, and SQL Server connections.'
+    }
   }
   const name = databaseNameFromCreateSqlMock(input.sql) || databaseTrimMock(input.requestedName)
   if (!name) return { ok: false, errorCode: 'DB_CREATE_DATABASE_SQL_INVALID', errorMessage: 'CREATE DATABASE statement is required.' }
@@ -1939,9 +1961,10 @@ function rowKeyForDatabaseMock(row: Record<string, unknown>, primaryKey: string[
 
 type DatabaseMutationDialectMock = DatabaseEngineCode
 type DatabaseMutationStatementMock = { kind: DatabaseTableMutation['kind']; sql: string; params: unknown[] }
+const isMysqlCompatibleDatabaseMock = (dialect: DatabaseMutationDialectMock | TestDatabaseAiTargetDialect | '') => dialect === 'mysql' || dialect === 'mariadb'
 
 const databaseMutationIdentifierMock = (value: string, dialect: DatabaseMutationDialectMock) =>
-  dialect === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
+  isMysqlCompatibleDatabaseMock(dialect) ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
 
 const databaseMutationPlaceholderMock = (dialect: DatabaseMutationDialectMock, index: number) => {
   if (dialect === 'postgresql') return `$${index}`
@@ -1954,7 +1977,7 @@ const databaseMutationTableReferenceMock = (
   dialect: DatabaseMutationDialectMock
 ) => {
   const table = databaseMutationIdentifierMock(databaseTrimMock(input.tableName), dialect)
-  if (dialect === 'mysql' || dialect === 'sqlite') return `${databaseMutationIdentifierMock(databaseTrimMock(input.databaseName), dialect)}.${table}`
+  if (isMysqlCompatibleDatabaseMock(dialect) || dialect === 'sqlite') return `${databaseMutationIdentifierMock(databaseTrimMock(input.databaseName), dialect)}.${table}`
   return `${databaseMutationIdentifierMock(databaseTrimMock(input.schemaName) || (dialect === 'postgresql' ? 'public' : ''), dialect)}.${table}`
 }
 
@@ -2017,7 +2040,7 @@ const applyDatabaseMutationSingleRowGuardMock = (
   usesPrimaryKey: boolean
 ) => {
   if (usesPrimaryKey) return sql
-  if (dialect === 'mysql') return `${sql} LIMIT 1`
+  if (isMysqlCompatibleDatabaseMock(dialect)) return `${sql} LIMIT 1`
   if (dialect === 'sqlite') return sql.replace(`WHERE ${whereSql}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
   if (dialect === 'postgresql') return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
   return sql
@@ -2147,7 +2170,7 @@ function parseDatabaseWhereMock(whereRaw?: string | null) {
 }
 
 type TestDatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-type TestDatabaseAiTargetDialect = 'mysql' | 'postgresql' | 'sqlite' | 'oracle' | 'mssql' | 'sqlserver'
+type TestDatabaseAiTargetDialect = 'mysql' | 'mariadb' | 'postgresql' | 'sqlite' | 'oracle' | 'mssql' | 'sqlserver'
 
 const stripDatabaseAiSqlTerminatorMock = (sql: string) => sql.trim().replace(/;+$/, '').trim()
 const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {
@@ -2156,7 +2179,7 @@ const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {
 }
 const quoteDatabaseAiIdentifierMock = (value: string, dialect: TestDatabaseAiTargetDialect) => {
   const raw = String(value || '').replace(/^[`"\[]|[`"\]]$/g, '')
-  if (dialect === 'mysql') return `\`${raw.replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDatabaseMock(dialect)) return `\`${raw.replace(/`/g, '``')}\``
   if (dialect === 'mssql') return `[${raw.replace(/]/g, ']]')}]`
   return `"${raw.replace(/"/g, '""')}"`
 }
@@ -2217,7 +2240,7 @@ const generateDatabaseAiDrawerSqlMock = (input: {
   targetDialect?: TestDatabaseAiTargetDialect
   context: { dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
 }) => {
-  const dialect = (input.targetDialect || input.context.dbType || 'postgresql') as TestDatabaseAiTargetDialect
+  const dialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
   if (input.action === 'convert') return convertDatabaseAiSqlMock(input.sourceSql, dialect)
   if (input.action === 'complete') {
     const base = stripDatabaseAiSqlTerminatorMock(input.sourceSql.trim() || `SELECT *\nFROM ${databaseAiTableRefMock(input, dialect)}`)
@@ -2252,7 +2275,7 @@ const generateDatabaseAiDrawerTextMock = (input: {
   targetDialect?: TestDatabaseAiTargetDialect
   context: { contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
 }) => {
-  const dialect = (input.targetDialect || input.context.dbType || 'postgresql') as TestDatabaseAiTargetDialect
+  const dialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
   const sql = generateDatabaseAiDrawerSqlMock(input)
   const reasoning = [
     'Reasoning',
@@ -7384,6 +7407,7 @@ Object.defineProperty(window, 'aiops', {
         const now = Date.now()
         const id = `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`
         const backendDbType = input.context.dbType && input.context.dbType !== 'mssql' ? input.context.dbType : ''
+        const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
         const request: DatabaseAiDrawerRequestRecord = {
           id,
           action: input.action,
@@ -7392,7 +7416,7 @@ Object.defineProperty(window, 'aiops', {
           contextSummary: input.context.contextSummary || '',
           sourceSql: input.sourceSql,
           text: '',
-          targetDialect: input.targetDialect || input.context.dbType || 'postgresql',
+          targetDialect,
           backendContext: {
             connectionId: input.context.connectionId,
             dbType: backendDbType,
@@ -7463,7 +7487,11 @@ Object.defineProperty(window, 'aiops', {
             const data = generateDatabaseAiDrawerTextMock(input)
             const request =
               input.requestId && existing
-                ? updateDatabaseAiDrawerRequestMock(input.requestId, { status: 'done', text: data.text, targetDialect: input.targetDialect || existing.targetDialect })!
+                ? updateDatabaseAiDrawerRequestMock(input.requestId, {
+                    status: 'done',
+                    text: data.text,
+                    targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || existing.targetDialect)
+                  })!
                 : storeDatabaseAiDrawerRequestMock({
                     id: input.requestId || `dbai-drawer-response-test-${databaseAiDrawerRequestSequenceMock++}`,
                     action: input.action,
@@ -7472,7 +7500,7 @@ Object.defineProperty(window, 'aiops', {
                     contextSummary: input.context.contextSummary || '',
                     sourceSql: input.sourceSql,
                     text: data.text,
-                    targetDialect: input.targetDialect || input.context.dbType || 'postgresql',
+                    targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql'),
                     backendContext: {
                       connectionId: '',
                       dbType: input.context.dbType === 'mssql' ? '' : input.context.dbType,
@@ -7510,7 +7538,7 @@ Object.defineProperty(window, 'aiops', {
             const drawerInput = {
               action: 'diagnose' as const,
               sourceSql,
-              targetDialect: input.targetDialect,
+              targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql'),
               context: input.context,
               errorMessage
             }
@@ -7528,6 +7556,7 @@ Object.defineProperty(window, 'aiops', {
             }
             const now = Date.now()
             const backendDbType = input.context.dbType && input.context.dbType !== 'mssql' ? input.context.dbType : ''
+            const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
             const request = storeDatabaseAiDrawerRequestMock({
               id: `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`,
               action: 'diagnose',
@@ -7536,7 +7565,7 @@ Object.defineProperty(window, 'aiops', {
               contextSummary: input.context.contextSummary || '',
               sourceSql,
               text: '',
-              targetDialect: input.targetDialect || input.context.dbType || 'postgresql',
+              targetDialect,
               backendContext: {
                 connectionId: input.context.connectionId || '',
                 dbType: backendDbType,

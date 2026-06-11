@@ -144,7 +144,10 @@ const createMysqlDriverDouble = () => {
   const state = {
     connected: 0,
     closed: 0,
+    committed: 0,
+    rolledBack: 0,
     configs: [] as Array<Record<string, unknown>>,
+    createdDatabases: [] as string[],
     rows: [
       { id: 1, service: 'gateway', region: 'shanghai', latency_ms: 22, healthy: 1 },
       { id: 2, service: 'worker', region: 'hangzhou', latency_ms: 61, healthy: 1 }
@@ -174,9 +177,47 @@ const createMysqlDriverDouble = () => {
             if (normalized.startsWith('show create table')) {
               return rowsFor([{ Table: 'service_health', 'Create Table': 'CREATE TABLE `service_health` (`id` int PRIMARY KEY)' }])
             }
-            if (normalized.startsWith('select count(*)')) return rowsFor([{ total: state.rows.length }])
-            if (normalized.startsWith('select') && normalized.includes('service_health')) return rowsFor(state.rows.map((row) => ({ ...row })))
-            if (normalized === 'begin' || normalized === 'commit' || normalized === 'rollback') return [{ affectedRows: 0 } as T, []]
+            if (normalized.startsWith('select count(*)')) {
+              const service = params[0]
+              const total = service ? state.rows.filter((row) => row.service === service).length : state.rows.length
+              return rowsFor([{ total }])
+            }
+            if (normalized.startsWith('select') && normalized.includes('service_health')) {
+              let rows = state.rows
+              if (params.length && typeof params[0] === 'string') rows = rows.filter((row) => row.service === params[0])
+              return rowsFor(rows.map((row) => ({ ...row })))
+            }
+            if (normalized === 'begin') return [{ affectedRows: 0 } as T, []]
+            if (normalized === 'commit') {
+              state.committed += 1
+              return [{ affectedRows: 0 } as T, []]
+            }
+            if (normalized === 'rollback') {
+              state.rolledBack += 1
+              return [{ affectedRows: 0 } as T, []]
+            }
+            if (normalized.startsWith('create database')) {
+              state.createdDatabases.push(String(sql.match(/`([^`]+)`/)?.[1] || 'unknown'))
+              return [{ affectedRows: 1 } as T, []]
+            }
+            if (normalized.startsWith('update ')) {
+              const latency = params[0]
+              const id = params[1]
+              const row = state.rows.find((item) => item.id === id)
+              if (row) row.latency_ms = latency
+              return [{ affectedRows: row ? 1 : 0 } as T, []]
+            }
+            if (normalized.startsWith('insert ')) {
+              const next = { id: params[0], service: params[1], region: params[2], latency_ms: params[3], healthy: params[4] }
+              state.rows.push(next)
+              return [{ affectedRows: 1 } as T, []]
+            }
+            if (normalized.startsWith('delete ')) {
+              const id = params[0]
+              const before = state.rows.length
+              state.rows = state.rows.filter((row) => row.id !== id)
+              return [{ affectedRows: before - state.rows.length } as T, []]
+            }
             throw Object.assign(new Error(`unexpected mysql query: ${sql}`), { code: 'MYSQL_FAKE_UNHANDLED' })
           },
           async end() {
@@ -693,7 +734,8 @@ describe('database backend boundary', () => {
       'Oracle',
       'PostgreSQL',
       'SQLServer',
-      'SQLite'
+      'SQLite',
+      'MariaDB'
     ])
     expect(result.data?.groups.map((group) => group.name)).toEqual(['Default Group', 'Production', 'Local Lab'])
     expect(result.data?.groupParents).toEqual({
@@ -3054,6 +3096,164 @@ WHERE status = ''open'';
     })
     expect(ddl.ok).toBe(true)
     expect(ddl.data?.ddl).toBe('CREATE TABLE `service_health` (`id` int PRIMARY KEY)')
+  })
+
+  it('uses the injected MySQL-compatible driver for MariaDB instead of a coming-soon placeholder', async () => {
+    const { driver, state } = createMysqlDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, mysqlDriver: driver })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.engines.find((engine) => engine.code === 'mariadb')).toMatchObject({
+      connectionCode: 'mariadb',
+      enabled: true
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'mariadb',
+      name: 'live-mariadb',
+      host: '127.0.0.1',
+      port: 3306,
+      user: 'ops',
+      password: 'secret',
+      database: 'metrics'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'mariadb',
+      serverVersion: 'MariaDB 8.4.0-live-driver',
+      endpoint: '127.0.0.1:3306'
+    })
+    expect(state.configs[0]).toMatchObject({
+      host: '127.0.0.1',
+      port: 3306,
+      user: 'ops',
+      database: 'metrics'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'mariadb',
+        name: 'live-mariadb',
+        host: '127.0.0.1',
+        port: 3306,
+        user: 'ops',
+        password: 'secret',
+        database: 'metrics',
+        env: 'Staging',
+        groupId: 'group-default',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-mariadb',
+      dbType: 'mariadb',
+      status: 'idle',
+      url: 'jdbc:mariadb://127.0.0.1:3306/metrics',
+      catalogs: [{ name: 'metrics', tables: [] }]
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-mariadb')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    expect(connected.data?.connection.catalogs[0]?.tables?.[0]).toMatchObject({
+      name: 'service_health',
+      primaryKey: ['id'],
+      columns: expect.arrayContaining([
+        expect.objectContaining({ name: 'id', type: 'int', key: 'PK' }),
+        expect.objectContaining({ name: 'service', type: 'varchar(80)' })
+      ])
+    })
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-mariadb',
+      dbType: 'mariadb',
+      databaseName: 'metrics',
+      sql: 'select * from service_health'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-mariadb',
+      dbType: 'mariadb',
+      databaseName: 'metrics',
+      tableName: 'service_health',
+      filters: [{ column: 'service', operator: 'eq', value: 'gateway' }],
+      sort: { column: 'id', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' })])
+    expect(tablePage.data?.knownColumns).toEqual(['id', 'service', 'region', 'latency_ms', 'healthy'])
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-mariadb',
+      dbType: 'mariadb',
+      databaseName: 'metrics',
+      tableName: 'service_health'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toBe('CREATE TABLE `service_health` (`id` int PRIMARY KEY)')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-mariadb',
+      dbType: 'mariadb',
+      databaseName: 'metrics',
+      tableName: 'service_health',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { latency_ms: 28 } },
+        { kind: 'insert', values: { id: 3, service: 'mariadb-cron', region: 'shenzhen', latency_ms: 88, healthy: 1 } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.preview).toContain('UPDATE `metrics`.`service_health` SET `latency_ms` = 28 WHERE `id` = 1;')
+    expect(plan.data?.statements[0]).toMatchObject({
+      kind: 'update',
+      sql: 'UPDATE `metrics`.`service_health` SET `latency_ms` = ? WHERE `id` = ?',
+      params: [28, 1]
+    })
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-mariadb',
+      databaseName: 'metrics',
+      tableName: 'service_health',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { latency_ms: 28 } },
+        { kind: 'insert', values: { id: 3, service: 'mariadb-cron', region: 'shenzhen', latency_ms: 88, healthy: 1 } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(state.rows).toEqual([
+      expect.objectContaining({ id: 1, latency_ms: 28 }),
+      expect.objectContaining({ id: 3, service: 'mariadb-cron' })
+    ])
+    expect(state.committed).toBeGreaterThan(0)
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-mariadb',
+      requestedName: 'fallback_name',
+      sql: 'CREATE DATABASE `ops_maria`;'
+    })
+    expect(createdDatabase.ok).toBe(true)
+    expect(state.createdDatabases).toEqual(['ops_maria'])
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).toContain('ops_maria')
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).not.toContain('fallback_name')
+
+    const refreshed = await refreshDatabaseConnection('conn-live-mariadb')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.tables?.[0]?.name).toBe('service_health')
+    expect(state.connected).toBeGreaterThan(0)
+    expect(state.closed).toBeGreaterThan(0)
   })
 
   it('uses the injected SQL Server driver in non-seed runtime instead of a coming-soon placeholder', async () => {

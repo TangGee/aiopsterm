@@ -2293,7 +2293,7 @@ const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
 const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
 const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql']
-const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'sqlserver']
+const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'postgresql', 'sqlite', 'oracle', 'sqlserver']
 const DB_ENGINE_OPTION_CODES = [
   'mysql',
   'h2',
@@ -2312,6 +2312,7 @@ const DB_ENGINE_OPTION_CODES = [
   'mongodb',
   'timeplus'
 ] as const
+const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DbAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb'
 const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
 const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -3039,7 +3040,7 @@ const connectionDraft = reactive({
 const createDatabaseModal = reactive({
   open: false,
   connectionId: '',
-  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'sqlserver'>,
+  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'postgresql' | 'sqlserver'>,
   name: '',
   sql: '',
   userEditedSql: false,
@@ -3155,7 +3156,11 @@ const contextConnection = computed(() => {
 const contextConnectionConnected = computed(() => contextConnection.value?.status === 'connected')
 const contextConnectionCanCreateDatabase = computed(() => {
   const connection = contextConnection.value
-  return !!connection && connection.status === 'connected' && (connection.dbType === 'mysql' || connection.dbType === 'postgresql' || connection.dbType === 'sqlserver')
+  return (
+    !!connection &&
+    connection.status === 'connected' &&
+    (connection.dbType === 'mysql' || connection.dbType === 'mariadb' || connection.dbType === 'postgresql' || connection.dbType === 'sqlserver')
+  )
 })
 const connectionMoveTargets = computed(() => {
   const connection = contextConnection.value
@@ -3356,7 +3361,14 @@ function buildConnectionUrl() {
   const port = connectionDraft.port ? `:${connectionDraft.port}` : ''
   const database = connectionDraft.database ? `/${connectionDraft.database}` : ''
   if (connectionDraft.dbType === 'oracle') return `${host}${port}${database}`
-  const scheme = connectionDraft.dbType === 'postgresql' ? 'jdbc:postgresql' : connectionDraft.dbType === 'sqlserver' ? 'jdbc:sqlserver' : 'jdbc:mysql'
+  const scheme =
+    connectionDraft.dbType === 'postgresql'
+      ? 'jdbc:postgresql'
+      : connectionDraft.dbType === 'sqlserver'
+        ? 'jdbc:sqlserver'
+        : connectionDraft.dbType === 'mariadb'
+          ? 'jdbc:mariadb'
+          : 'jdbc:mysql'
   return `${scheme}://${host}${port}${database}`
 }
 
@@ -3492,7 +3504,7 @@ function updateSqlTabSchema(event: Event) {
   tab.tableName = undefined
 }
 
-function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'sqlserver'>) {
+function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'postgresql' | 'sqlserver'>) {
   const trimmed = name.trim()
   return trimmed ? `CREATE DATABASE ${quoteIdentForDialect(trimmed, dbType)};` : ''
 }
@@ -4788,7 +4800,7 @@ function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: s
 }
 
 function quoteSqlIdentifierForDialect(value: string, dbType: DatabaseEngineCode) {
-  if (dbType === 'mysql') return `\`${String(value).replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDbType(dbType)) return `\`${String(value).replace(/`/g, '``')}\``
   if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
   return `"${String(value).replace(/"/g, '""')}"`
 }
@@ -6902,7 +6914,7 @@ async function refreshDatabaseConnectionViaBackend(connectionId: string): Promis
 
 function openCreateDatabaseModal(connectionId: string) {
   const connection = findConnection(connectionId)
-  if (!connection || (connection.dbType !== 'mysql' && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver')) return
+  if (!connection || (!isMysqlCompatibleDbType(connection.dbType) && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver')) return
   createDatabaseModal.open = true
   createDatabaseModal.connectionId = connectionId
   createDatabaseModal.dbType = connection.dbType
@@ -7041,7 +7053,7 @@ function dbAiBackendContextForIpc(context: DbAiBackendContext): DatabaseAiDrawer
 async function openDbAi(action: DbAiAction, sql: string, context = '', backendContextOverride: DbAiBackendContext = {}) {
   const backendContext = buildDbAiBackendContext(context, backendContextOverride)
   const activeDialect = backendContext.dbType || (activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined)
-  const normalizedDialect: DbAiTargetDialect = activeDialect === 'sqlserver' ? 'mssql' : activeDialect || 'postgresql'
+  const normalizedDialect: DbAiTargetDialect = activeDialect === 'sqlserver' ? 'mssql' : activeDialect === 'mariadb' ? 'mysql' : activeDialect || 'postgresql'
   const targetDialect: DbAiTargetDialect = action === 'convert' ? normalizedDialect : normalizedDialect
   const result = await window.aiops.createDatabaseAiDrawerRequest({
     action,
@@ -7284,7 +7296,9 @@ function isDbAiExecutableDialect(action: DbAiAction, target: DbAiTargetDialect) 
   if (action !== 'convert') return true
   const tab = activeSqlTab.value
   const connection = tab ? findConnection(tab.connectionId) : undefined
-  return target === 'mssql' ? connection?.dbType === 'sqlserver' : connection?.dbType === target
+  if (target === 'mssql') return connection?.dbType === 'sqlserver'
+  if (target === 'mysql') return !!connection && isMysqlCompatibleDbType(connection.dbType)
+  return connection?.dbType === target
 }
 
 function dbAiDialectLabel(dialect: DbAiTargetDialect) {
@@ -7348,7 +7362,7 @@ function quoteIdentifier(value: string) {
 }
 
 function quoteIdentForDialect(value: string, dbType: DatabaseEngineCode) {
-  if (dbType === 'mysql') return `\`${String(value).replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDbType(dbType)) return `\`${String(value).replace(/`/g, '``')}\``
   if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
   return `"${String(value).replace(/"/g, '""')}"`
 }
