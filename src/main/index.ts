@@ -60,6 +60,7 @@ import {
 } from './backend/chatImageAttachment'
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
+import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -646,57 +647,8 @@ const defaultConfig: UserConfig = {
       content: 'Prefer kubectl describe, events, image pull checks, and rollback safety checks.'
     }
   ],
-  mcpServers:
-    process.env.NODE_ENV === 'test'
-      ? [
-          {
-            name: 'filesystem',
-            status: 'connected',
-            disabled: false,
-            tools: [
-              {
-                name: 'read_file',
-                description: 'Read a workspace file for agent context.',
-                enabled: true,
-                parameters: [
-                  { name: 'path', description: 'Absolute file path.', required: true },
-                  { name: 'encoding', description: 'Optional text encoding.' }
-                ]
-              },
-              {
-                name: 'list_directory',
-                description: 'List files under a directory.',
-                enabled: true,
-                parameters: [{ name: 'path', description: 'Directory path.', required: true }]
-              }
-            ],
-            resources: [{ name: 'workspace-root', description: 'Current aiopsterm workspace.', uri: 'file:///workspace' }]
-          },
-          {
-            name: 'ops-inventory',
-            status: 'error',
-            disabled: false,
-            error: 'Token expired',
-            tools: [
-              {
-                name: 'lookup_asset',
-                description: 'Find a host by name, tag, or IP.',
-                enabled: false,
-                parameters: [{ name: 'query', description: 'Asset search query.', required: true }]
-              }
-            ],
-            resources: []
-          }
-        ]
-      : [],
-  mcpToolStates:
-    process.env.NODE_ENV === 'test'
-      ? {
-          'filesystem:read_file': true,
-          'filesystem:list_directory': true,
-          'ops-inventory:lookup_asset': false
-        }
-      : {},
+  mcpServers: defaultMcpServers(),
+  mcpToolStates: defaultMcpToolStates(),
   knowledgeBase: defaultKnowledgeBaseConfig,
   onboarding: {
     version: 2,

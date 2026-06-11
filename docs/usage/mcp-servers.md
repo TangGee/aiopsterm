@@ -2,7 +2,7 @@
 
 aiopsterm stores MCP server configuration in `setting/mcp_settings.json` under the app user-data directory. Open Settings -> MCP and use Add Server/Edit to open the JSON editor.
 
-New non-test profiles start with an empty MCP config:
+New profiles start with an empty MCP config unless the development seed switch `AIOPSTERM_MCP_ENABLE_SEED=1` is set. `NODE_ENV=test` alone does not install sample MCP servers:
 
 ```json
 {
