@@ -6725,6 +6725,35 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate JumpServer Kubernetes clusters when bastion sync is rejected', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+
+    const clustersBeforeSync = JSON.stringify(store.k8sClusters)
+    const selectedBeforeSync = store.k8sSelectedClusterId
+    const activeBeforeSync = store.k8sActiveClusterId
+    store.k8sConfigTab = 'local'
+    vi.mocked(window.aiops.syncKubernetesBastion).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'K8S_BASTION_SYNC_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes asset sync requires the live JumpServer backend integration.'
+    })
+
+    expect(store.syncK8sBastion('org-prod')).toBe(true)
+    expect(store.k8sSyncingBastionIds).toContain('org-prod')
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(window.aiops.syncKubernetesBastion).toHaveBeenCalledWith('org-prod')
+    expect(store.k8sClusterNotice).toBe('JumpServer Kubernetes asset sync requires the live JumpServer backend integration.')
+    expect(store.k8sSyncingBastionIds).not.toContain('org-prod')
+    expect(store.k8sConfigTab).toBe('local')
+    expect(JSON.stringify(store.k8sClusters)).toBe(clustersBeforeSync)
+    expect(store.k8sSelectedClusterId).toBe(selectedBeforeSync)
+    expect(store.k8sActiveClusterId).toBe(activeBeforeSync)
+  })
+
   it('fails closed on malformed successful Kubernetes backend result envelopes', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()

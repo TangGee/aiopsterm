@@ -16,6 +16,7 @@ import {
   refreshKubernetesResources,
   resizeKubernetesTerminal,
   saveKubernetesAgentProxyConfig,
+  syncKubernetesBastion,
   testKubernetesClusterConnection
 } from '@shared/kubernetes'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
@@ -631,6 +632,62 @@ describe('kubernetes backend boundary', () => {
     expect(catalog.data?.resources).toEqual([])
     expect(catalog.data?.bastions).toEqual([])
     expect(catalog.data?.clusters.some((cluster) => cluster.id === 'k8s-1' || cluster.id === 'k8s-2' || cluster.id === 'k8s-3')).toBe(false)
+  })
+
+  it('fails closed for non-seed JumpServer Kubernetes sync without fabricating clusters', async () => {
+    const statePath = join(tempDirs[0], 'catalog.json')
+    const persistedCatalog = {
+      version: 1,
+      contexts: [],
+      clusters: [],
+      bastions: [{ uuid: 'jump-prod', label: 'prod-jump', ip: '10.0.0.10' }],
+      namespaces: [],
+      resources: [],
+      importContexts: []
+    }
+    await writeFile(statePath, JSON.stringify(persistedCatalog, null, 2), 'utf-8')
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    __resetKubernetesCatalogForTests()
+
+    const before = await listKubernetesCatalog()
+    expect(before).toMatchObject({
+      ok: true,
+      data: {
+        clusters: [],
+        bastions: [{ uuid: 'jump-prod', label: 'prod-jump', ip: '10.0.0.10' }]
+      }
+    })
+
+    const synced = await syncKubernetesBastion('jump-prod')
+
+    expect(synced).toEqual({
+      ok: false,
+      errorCode: 'K8S_BASTION_SYNC_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes asset sync requires the live JumpServer backend integration.'
+    })
+    const after = await listKubernetesCatalog()
+    expect(after.data?.clusters).toEqual([])
+    expect(after.data?.bastions).toEqual(before.data?.bastions)
+    expect(JSON.parse(await readFile(statePath, 'utf-8'))).toEqual(persistedCatalog)
+  })
+
+  it('keeps explicit seed JumpServer Kubernetes sync available for development fixtures', async () => {
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: true })
+    __resetKubernetesCatalogForTests()
+
+    const before = await listKubernetesCatalog()
+    expect(before.data?.clusters.some((cluster) => cluster.bastion_uuid === 'org-prod')).toBe(false)
+
+    const synced = await syncKubernetesBastion('org-prod')
+
+    expect(synced).toMatchObject({
+      ok: true,
+      data: {
+        syncedCount: 1,
+        updatedCount: 0
+      }
+    })
+    expect(synced.data?.clusters.some((cluster) => cluster.source_type === 'jumpserver' && cluster.bastion_uuid === 'org-prod')).toBe(true)
   })
 
   it('persists non-seed Kubernetes catalog mutations and restores them through the backend store', async () => {

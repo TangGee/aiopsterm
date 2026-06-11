@@ -373,6 +373,9 @@ const kubernetesResourceKinds = new Set<KubernetesResourceKind>(['pods', 'deploy
 
 const shouldUseKubernetesSeedData = () => runtimeConfig.useSeedData
 
+const jumpserverKubernetesSyncUnavailableError = () =>
+  Object.assign(new Error('JumpServer Kubernetes asset sync requires the live JumpServer backend integration.'), { code: 'K8S_BASTION_SYNC_UNAVAILABLE' })
+
 const initialKubernetesState = () =>
   shouldUseKubernetesSeedData()
     ? {
@@ -1305,6 +1308,7 @@ export const syncKubernetesBastion = async (bastionUuid: string): Promise<Kubern
   asResult(() => {
     const bastion = bastions.find((item) => item.uuid === bastionUuid)
     if (!bastion) throw Object.assign(new Error('Kubernetes bastion not found.'), { code: 'K8S_BASTION_NOT_FOUND' })
+    if (!shouldUseKubernetesSeedData()) throw jumpserverKubernetesSyncUnavailableError()
     const existing = clusters.filter((cluster) => cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastionUuid)
     if (existing.length) {
       clusters = clusters.map((cluster) =>
