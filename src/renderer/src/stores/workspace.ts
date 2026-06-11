@@ -216,6 +216,7 @@ export type {
   AiSupportedImageType,
   AiTextContentPart
 } from '@shared/preload'
+import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 
 type PanelDirection = 'right' | 'below'
 type CloseMode = 'current' | 'others' | 'all'
@@ -663,6 +664,8 @@ const createEmptyUserProfile = (): AiopsUserProfile => ({
   avatarUpdatedAt: ''
 })
 
+const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesConfig()
+
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
   theme: 'dark',
@@ -698,10 +701,7 @@ const defaultConfig: UserConfig = {
     middleMouseEvent: 'paste',
     rightMouseEvent: 'contextMenu'
   },
-  workspacePreferences: {
-    expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
-    showIpMode: false
-  },
+  workspacePreferences: defaultWorkspacePreferencesUserConfig,
   editorSettings: {
     fontSize: 14,
     lineHeight: 0,

@@ -230,6 +230,7 @@ import {
 } from '@shared/knowledgeBaseSeed'
 import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
 import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } from '@shared/skillsSeed'
+import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import type {
   AliasCommandConfig,
   AliasCommandDeleteInput,
@@ -346,6 +347,7 @@ import type {
   KnowledgeBasePastedImageInput,
   UserConfig,
   VoiceTranscriptionInput,
+  WorkspaceUserConfig,
   UserRuleConfig,
   AiopsAssetGroupDeleteInput,
   AiopsAssetGroupListInput,
@@ -431,6 +433,7 @@ const defaultSecurityConfig: SecurityUserConfig = {
 const defaultKnowledgeBaseUserConfig: KnowledgeBaseUserConfig = defaultKnowledgeBaseConfig()
 const defaultSettingsRulesUserConfig: UserRuleConfig[] = defaultSettingsRulesConfig()
 const defaultSkillsUserConfig: SkillUserConfig[] = defaultSkillsConfig()
+const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesConfig()
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
@@ -467,10 +470,7 @@ const defaultConfig: UserConfig = {
     middleMouseEvent: 'paste',
     rightMouseEvent: 'contextMenu'
   },
-  workspacePreferences: {
-    expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
-    showIpMode: false
-  },
+  workspacePreferences: defaultWorkspacePreferencesUserConfig,
   editorSettings: {
     fontSize: 14,
     lineHeight: 0,

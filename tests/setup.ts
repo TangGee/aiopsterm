@@ -35,8 +35,11 @@ import {
   DEFAULT_KNOWLEDGE_SEED_SIZES,
   DEFAULT_KNOWLEDGE_USED_BYTES
 } from '@shared/knowledgeBaseSeed'
+import { defaultWorkspacePreferencesSeedData } from '@shared/workspacePreferencesSeed'
 import { createHash } from 'crypto'
 import { vi } from 'vitest'
+
+process.env.AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED = '1'
 
 type TestAppUpdateProgressEvent = {
   status: 'downloading' | 'downloaded' | 'error'
@@ -4838,10 +4841,7 @@ const createDefaultConfigMock = () => ({
     middleMouseEvent: 'paste',
     rightMouseEvent: 'contextMenu'
   },
-  workspacePreferences: {
-    expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
-    showIpMode: false
-  },
+  workspacePreferences: defaultWorkspacePreferencesSeedData(),
   editorSettings: defaultEditorSettings,
   sshProxyConfigs: defaultSshProxyConfigs,
   sshAgentKeys: defaultSshAgentKeys,
