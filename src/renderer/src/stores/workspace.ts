@@ -36,7 +36,7 @@ import {
   isKnowledgeDeleteResultData,
   isKnowledgeEnsureRootResultData,
   isKnowledgeEntryListData,
-  isKnowledgeImportResultData,
+  isKnowledgeImportResultForRequest,
   isKnowledgeReadResultData,
   isKnowledgeReindexResultData,
   isKnowledgeRelPathResultData,
@@ -9237,7 +9237,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const dstRelDir = getKbParent(destRelPath)
     const result = sourceType === 'folder' ? await window.aiops.kbImportFolder(srcAbsPath, dstRelDir) : await window.aiops.kbImportFile(srcAbsPath, dstRelDir)
-    if (!isKnowledgeImportResultData(result)) {
+    if (!isKnowledgeImportResultForRequest(result, dstRelDir, sourceType)) {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return false
     }

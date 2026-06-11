@@ -238,6 +238,7 @@
 import { computed, defineComponent, h, nextTick, onMounted, reactive, ref, watch, type VNode } from 'vue'
 import { ChevronDown, ChevronRight, Cloud, File, FilePlus, Folder, FolderPlus, Plus, RefreshCw, Search, UploadCloud, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { isKnowledgePathCheckResultData, malformedKnowledgeBackendResultMessage } from '@/services/knowledgeBackendGuards'
 import type { KnowledgeBaseSearchResult, KnowledgeNode } from '@shared/preload'
 
 const props = defineProps<{ query?: string }>()
@@ -469,15 +470,23 @@ const importKnowledgePath = async (filePath: string, targetDir: string, fallback
     workspace.setTopNotice('知识库导入需要路径检查服务')
     return
   }
-  let info: { exists: boolean; isDirectory: boolean; isFile: boolean }
+  let info: unknown
   try {
     info = await window.aiops.kbCheckPath(filePath)
   } catch {
     workspace.setTopNotice('知识库导入路径检查失败')
     return
   }
+  if (!isKnowledgePathCheckResultData(info)) {
+    workspace.setTopNotice(malformedKnowledgeBackendResultMessage)
+    return
+  }
   if (!info.exists) {
     workspace.setTopNotice('知识库导入路径不存在')
+    return
+  }
+  if (info.isDirectory === info.isFile) {
+    workspace.setTopNotice(malformedKnowledgeBackendResultMessage)
     return
   }
   const fileName = filePath.split(/[\\/]/).pop() || fallbackName

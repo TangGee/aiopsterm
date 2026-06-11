@@ -5765,6 +5765,12 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
       expect(store.findKnowledgeNode('Runbooks/imported.md')).toBeNull()
 
+      vi.mocked(window.aiops.kbImportFile).mockResolvedValueOnce({ jobId: 'wrong-import', relPath: 'wrong/imported.md' } as any)
+      await expect(store.addKnowledgeImportJob('Runbooks/imported.md', '/tmp/imported.md', 'file')).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Runbooks/imported.md')).toBeNull()
+      expect(store.kbImportJobs.some((job) => job.id === 'wrong-import')).toBe(false)
+
       vi.mocked(window.aiops.kbReadFile).mockResolvedValueOnce({ content: '', mtimeMs: 1717200000000, mimeType: 42 } as any)
       await store.addKnowledgeFilesToChat(['images/interface.png'])
       expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)

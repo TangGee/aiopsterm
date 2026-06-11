@@ -28,6 +28,26 @@ export const isKnowledgeWriteResultData = (value: unknown): value is { mtimeMs: 
 export const isKnowledgeImportResultData = (value: unknown): value is { jobId: string; relPath: string } =>
   isRecord(value) && isNonEmptyString(value.jobId) && isNonEmptyString(value.relPath)
 
+export type KnowledgePathCheckResultData = { exists: boolean; isDirectory: boolean; isFile: boolean }
+
+export const isKnowledgePathCheckResultData = (value: unknown): value is KnowledgePathCheckResultData =>
+  isRecord(value) && typeof value.exists === 'boolean' && typeof value.isDirectory === 'boolean' && typeof value.isFile === 'boolean'
+
+export const isKnowledgeImportResultForRequest = (
+  value: unknown,
+  expectedParentRelDir: string,
+  expectedSourceType: 'file' | 'folder'
+): value is { jobId: string; relPath: string } => {
+  if (!isKnowledgeImportResultData(value)) return false
+  const parent = expectedParentRelDir.trim().replace(/^\/+|\/+$/g, '')
+  const relPath = value.relPath.trim().replace(/^\/+|\/+$/g, '')
+  if (!relPath || !relPath.split('/').filter(Boolean).at(-1)) return false
+  const resultParent = relPath.split('/').slice(0, -1).join('/')
+  if (resultParent !== parent) return false
+  if (expectedSourceType === 'file' && relPath.endsWith('/')) return false
+  return true
+}
+
 export const isKnowledgeEnsureRootResultData = (value: unknown): value is { success: boolean } => isRecord(value) && value.success === true
 
 export const isKnowledgeEntryData = (value: unknown): value is KnowledgeBaseEntry =>
