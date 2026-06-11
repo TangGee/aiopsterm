@@ -229,6 +229,7 @@ import type {
   AiMcpToolCallActionInput,
   AiMcpToolCallActionResult,
   AiChatResponseInput,
+  AiModelCatalogInput,
   AppUpdateProgressEvent,
   AiChatConversationUpdateInput,
   AiopsAssetInput,
@@ -3824,7 +3825,11 @@ const registerIpc = () => {
     getTerminalCommandSuggestions(query, context)
   )
   ipcMain.handle('terminal:command:generate', (_event, input: TerminalCommandGenerationInput) => generateTerminalCommand(input))
-  ipcMain.handle('models:list', () => listAiModels())
+  ipcMain.handle('models:list', (_event, input?: AiModelCatalogInput) =>
+    listAiModels({
+      modelSettings: input?.modelSettings || getConfig().modelSettings
+    })
+  )
   ipcMain.handle('models:check-provider', (_event, input: ModelProviderCheckInput) => checkModelProvider(input))
   ipcMain.handle('extensions:list', () => listExtensionPlugins())
   ipcMain.handle('extensions:install-plugin', (event, input: ExtensionPluginOperationInput) => {

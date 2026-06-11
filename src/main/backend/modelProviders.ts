@@ -1,31 +1,24 @@
 import { createHash, createHmac } from 'crypto'
 import type {
   AiModelCatalog,
+  AiModelCatalogInput,
   AiopsMutationResult,
+  ModelOptionUserConfig,
   ModelProviderCheckInput,
   ModelProviderCheckKey,
   ModelProviderCheckResult,
-  ModelProviderUserConfig
+  ModelProviderUserConfig,
+  ModelSettingsUserConfig
 } from '@shared/preload'
 
-const defaultAiModelCatalog: AiModelCatalog = {
-  chatModels: [
-    { id: 'aiopsterm-local-agent', label: 'aiopsterm-local-agent', detail: 'Local aiopsterm backend model', checked: true, type: 'standard', apiProvider: 'default' },
-    { id: 'gpt-5-Thinking', label: 'gpt-5-Thinking', detail: 'Extended Thinking model', checked: true, type: 'standard', apiProvider: 'default' },
-    { id: 'ops-model', label: 'ops-model', detail: 'OpenAI Compatible model', checked: true, type: 'standard', apiProvider: 'openai' },
-    { id: 'qwen2.5-coder', label: 'qwen2.5-coder', detail: 'Ollama model', checked: true, type: 'standard', apiProvider: 'ollama' }
-  ],
-  lockedChatModels: [
-    { id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' },
-    { id: 'ops-large-context', label: 'ops-large-context', detail: 'Large context model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' }
-  ],
-  settingsModels: [
-    { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-    { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
-    { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
-    { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
-  ]
-}
+const defaultSettingsModelOptions: ModelOptionUserConfig[] = [
+  { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' }
+]
+
+const lockedCatalogModels: AiModelCatalog['lockedChatModels'] = [
+  { id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' },
+  { id: 'ops-large-context', label: 'ops-large-context', detail: 'Large context model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' }
+]
 
 const cloneModelCatalog = (catalog: AiModelCatalog): AiModelCatalog => ({
   chatModels: catalog.chatModels.map((model) => ({ ...model })),
@@ -33,7 +26,80 @@ const cloneModelCatalog = (catalog: AiModelCatalog): AiModelCatalog => ({
   settingsModels: catalog.settingsModels.map((model) => ({ ...model }))
 })
 
-export const listAiModels = async (): Promise<AiModelCatalog> => cloneModelCatalog(defaultAiModelCatalog)
+const normalizeText = (value: unknown) => String(value || '').trim()
+
+const modelOptionTypes = new Set(['standard', 'custom'])
+const modelProviderKeys = new Set(['default', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama'])
+
+const normalizeModelOption = (value: unknown): ModelOptionUserConfig | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const name = normalizeText(record.name)
+  if (!name) return null
+  const locked = typeof record.locked === 'boolean' ? record.locked : false
+  const type = modelOptionTypes.has(String(record.type)) ? (record.type as ModelOptionUserConfig['type']) : locked ? 'standard' : 'custom'
+  const apiProvider = normalizeText(record.apiProvider) || (locked ? 'default' : 'openai')
+  return {
+    name,
+    locked,
+    checked: typeof record.checked === 'boolean' ? record.checked : true,
+    type,
+    apiProvider: modelProviderKeys.has(apiProvider) ? apiProvider : 'default'
+  }
+}
+
+const normalizeSettingsOptions = (value: unknown): ModelOptionUserConfig[] => {
+  const source = Array.isArray(value) ? value : defaultSettingsModelOptions
+  const seen = new Set<string>()
+  const options: ModelOptionUserConfig[] = []
+  for (const item of source) {
+    const option = normalizeModelOption(item)
+    if (!option || seen.has(option.name)) continue
+    seen.add(option.name)
+    options.push(option)
+  }
+  if (!seen.has('aiopsterm-local-agent')) options.unshift({ ...defaultSettingsModelOptions[0] })
+  return options
+}
+
+const configuredProviderModelIds = (settings?: ModelSettingsUserConfig) => {
+  const providers = settings?.providers
+  return new Set(
+    [providers?.litellm, providers?.openai, providers?.bedrock, providers?.deepseek, providers?.anthropic, providers?.ollama]
+      .map((provider) => normalizeText(provider?.modelId))
+      .filter(Boolean)
+  )
+}
+
+const detailForModelOption = (option: ModelOptionUserConfig) => {
+  if (option.name === 'aiopsterm-local-agent') return 'Local aiopsterm backend model'
+  if (option.name.endsWith('-Thinking')) return 'Extended Thinking model'
+  if (option.type === 'custom') return `${option.apiProvider || 'custom'} configured model`
+  return option.locked ? 'Subscription model' : 'Configured model'
+}
+
+const buildModelCatalog = (settings?: ModelSettingsUserConfig): AiModelCatalog => {
+  const settingsModels = normalizeSettingsOptions(settings?.options)
+  const configuredModelIds = configuredProviderModelIds(settings)
+  const chatModels = settingsModels
+    .filter((model) => model.checked && !model.locked && (model.apiProvider === 'default' || configuredModelIds.has(model.name)))
+    .map((model) => ({
+      id: model.name,
+      label: model.name,
+      detail: detailForModelOption(model),
+      checked: model.checked,
+      locked: model.locked,
+      type: model.type,
+      apiProvider: model.apiProvider
+    }))
+  return {
+    chatModels,
+    lockedChatModels: lockedCatalogModels.map((model) => ({ ...model })),
+    settingsModels
+  }
+}
+
+export const listAiModels = async (input: AiModelCatalogInput = {}): Promise<AiModelCatalog> => cloneModelCatalog(buildModelCatalog(input.modelSettings))
 
 const providerLabels: Record<ModelProviderCheckKey, string> = {
   litellm: 'LiteLLM',
@@ -52,8 +118,6 @@ const defaultEndpoints: Record<ModelProviderCheckKey, string> = {
   anthropic: 'https://api.anthropic.com',
   ollama: 'http://localhost:11434'
 }
-
-const normalizeText = (value: unknown) => String(value || '').trim()
 
 const normalizeOpenAiEndpoint = (baseUrl: string, apiFormat: ModelProviderUserConfig['apiFormat']) => {
   if (!baseUrl) return ''

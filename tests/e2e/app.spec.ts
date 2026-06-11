@@ -228,6 +228,37 @@ const restoreLocalAiProvider = async (page: Page) => {
   })
 }
 
+const configureModelSelectorOptions = async (page: Page) => {
+  await page.evaluate(async () => {
+    const api = (window as unknown as { aiops: { getConfig: () => Promise<any>; saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
+    const config = await api.getConfig()
+    const modelSettings = config.modelSettings || {}
+    const providers = modelSettings.providers || {}
+    const options = Array.isArray(modelSettings.options)
+      ? modelSettings.options.filter((option: { name?: string }) => option.name !== 'qwen2.5-coder' && option.name !== 'gpt-5-Thinking')
+      : []
+    await api.saveConfig({
+      modelSettings: {
+        ...modelSettings,
+        providers: {
+          ...providers,
+          ollama: {
+            ...(providers.ollama || {}),
+            baseUrl: 'http://localhost:11434',
+            apiKey: '',
+            modelId: 'qwen2.5-coder'
+          }
+        },
+        options: [
+          ...options,
+          { name: 'gpt-5-Thinking', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
+          { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom', apiProvider: 'ollama' }
+        ]
+      }
+    })
+  })
+}
+
 const installVoiceRecorderDouble = async (page: Page) => {
   await page.evaluate(() => {
     class MockMediaRecorder {
@@ -307,6 +338,11 @@ test('aiopsterm primary desktop flows', async () => {
 
   try {
     const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+    await installVoiceRecorderDouble(page)
+    await configureModelSelectorOptions(page)
+    await page.reload()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
     await installVoiceRecorderDouble(page)

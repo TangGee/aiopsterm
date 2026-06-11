@@ -199,6 +199,28 @@ import type { FileSessionInfo, KeywordHighlightUserConfig } from '@shared/preloa
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
 
+const enableCatalogModelOptions = async (store: ReturnType<typeof useWorkspaceStore>) => {
+  store.updateModelProviderConfig('ollama', { modelId: 'qwen2.5-coder' })
+  const modelSettings = store.config.modelSettings!
+  const nextSettings = {
+    ...modelSettings,
+    providers: {
+      ...modelSettings.providers,
+      ollama: {
+        ...modelSettings.providers.ollama,
+        modelId: 'qwen2.5-coder'
+      }
+    },
+    options: [
+      ...(modelSettings.options || []).filter((option) => option.name !== 'gpt-5-Thinking' && option.name !== 'qwen2.5-coder'),
+      { name: 'gpt-5-Thinking', locked: false, checked: true, type: 'standard' as const, apiProvider: 'default' },
+      { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom' as const, apiProvider: 'ollama' }
+    ]
+  }
+  store.config = { ...store.config, modelSettings: nextSettings }
+  await store.refreshAiModelCatalog({ replaceSettingsOptions: true })
+}
+
 const waitForDatabaseSqlResult = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 0))
   await flushPromises()
@@ -3556,12 +3578,15 @@ describe('AppShell', () => {
   it('opens External reference-style context and command popups in the AI panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await enableCatalogModelOptions(store)
     const wrapper = mount(AiPanel, {
       attachTo: document.body,
       props: { agentMode: true },
       global: { plugins: [pinia] }
     })
-    const store = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toContain('width:')
@@ -3586,10 +3611,6 @@ describe('AppShell', () => {
     await wrapper.find('[data-onboarding-id="ai-model-option"]').trigger('click')
     expect(store.config.modelName).toBe('aiopsterm-local-agent')
     await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
-    const thinkingModelRow = wrapper.findAll('.ai-model-popup .select-list button').find((button) => button.text().includes('gpt-5'))
-    expect(thinkingModelRow).toBeTruthy()
-    expect(thinkingModelRow!.text()).not.toContain('gpt-5-Thinking')
-    expect(thinkingModelRow!.find('.thinking-icon').exists()).toBe(true)
     const lockedModelRow = wrapper.findAll('.ai-model-popup .select-list button.locked-model-option').find((button) => button.text().includes('gpt-5-pro'))
     expect(lockedModelRow).toBeTruthy()
     expect(lockedModelRow!.attributes('disabled')).toBeDefined()
@@ -3601,14 +3622,14 @@ describe('AppShell', () => {
 
     const modelSearchInput = wrapper.find('.ai-model-popup header input')
     expect(modelSearchInput.exists()).toBe(true)
-    await modelSearchInput.setValue('qwen')
-    expect(wrapper.find('.ai-model-popup .select-list').text()).toContain('qwen2.5-coder')
+    await modelSearchInput.setValue('aiopsterm-local')
+    expect(wrapper.find('.ai-model-popup .select-list').text()).toContain('aiopsterm-local-agent')
     expect(wrapper.find('.ai-model-popup .select-list').text()).not.toContain('gpt-5')
     await modelSearchInput.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(store.config.modelName).toBe('qwen2.5-coder')
-    expect(store.config.modelProvider).toBe('ollama')
+    expect(store.config.modelName).toBe('aiopsterm-local-agent')
+    expect(store.config.modelProvider).toBe('local')
     expect(wrapper.find('.ai-model-popup').exists()).toBe(false)
 
     await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
@@ -3618,7 +3639,7 @@ describe('AppShell', () => {
     expect(filteredLockedModelRow).toBeTruthy()
     expect(filteredLockedModelRow!.attributes('disabled')).toBeDefined()
     await wrapper.find('.ai-model-popup header input').trigger('keydown', { key: 'Enter' })
-    expect(store.config.modelName).toBe('qwen2.5-coder')
+    expect(store.config.modelName).toBe('aiopsterm-local-agent')
     expect(wrapper.find('.ai-model-popup').exists()).toBe(true)
     await wrapper.find('.ai-model-popup header input').setValue('missing-model')
     expect(wrapper.find('.ai-model-popup .select-list').text()).toContain('没有匹配的模型')
@@ -3626,17 +3647,15 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-model-popup').exists()).toBe(false)
 
     await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
-    const thinkingModelRowAfterSearch = wrapper.findAll('.ai-model-popup .select-list button:not(.locked-model-option)').find((button) => button.text().includes('gpt-5'))
-    expect(thinkingModelRowAfterSearch).toBeTruthy()
+    const localModelRowAfterSearch = wrapper.findAll('.ai-model-popup .select-list button:not(.locked-model-option)').find((button) => button.text().includes('aiopsterm-local-agent'))
+    expect(localModelRowAfterSearch).toBeTruthy()
     expect((wrapper.find('.ai-model-popup header input').element as HTMLInputElement).value).toBe('')
-    await thinkingModelRowAfterSearch!.trigger('click')
+    await localModelRowAfterSearch!.trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(store.config.modelName).toBe('gpt-5-Thinking')
+    expect(store.config.modelName).toBe('aiopsterm-local-agent')
     expect(store.config.modelProvider).toBe('local')
-    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).toContain('gpt-5')
-    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).not.toContain('Thinking')
-    expect(wrapper.find('[data-onboarding-id="ai-model-select"] .thinking-icon').exists()).toBe(true)
+    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).toContain('aiopsterm-local-agent')
 
     store.onboardingAiRequest = { action: 'open-context-main', stepId: 'ai-context-hosts', sequence: 2 }
     await wrapper.vm.$nextTick()

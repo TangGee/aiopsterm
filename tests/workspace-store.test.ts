@@ -167,6 +167,26 @@ const defaultSkills = [
   }
 ]
 
+const addQwenOllamaModelToStore = async (store: ReturnType<typeof useWorkspaceStore>) => {
+  store.updateModelProviderConfig('ollama', { modelId: 'qwen2.5-coder' })
+  const nextSettings = {
+    ...store.config.modelSettings!,
+    providers: {
+      ...store.config.modelSettings!.providers,
+      ollama: {
+        ...store.config.modelSettings!.providers.ollama,
+        modelId: 'qwen2.5-coder'
+      }
+    },
+    options: [
+      ...(store.config.modelSettings?.options || []),
+      { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom' as const, apiProvider: 'ollama' }
+    ]
+  }
+  store.config = { ...store.config, modelSettings: nextSettings }
+  await store.refreshAiModelCatalog({ replaceSettingsOptions: true })
+}
+
 const defaultMcpServers = [
   {
     name: 'filesystem',
@@ -851,7 +871,12 @@ describe('workspace store', () => {
           dataSync: 'disabled'
         },
         aiPreferences: defaultAiPreferences,
-        modelSettings: defaultModelSettings,
+        modelSettings: expect.objectContaining({
+          providers: expect.objectContaining({
+            openai: expect.objectContaining({ modelId: 'gpt-5' })
+          }),
+          options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent' })])
+        }),
         skills: defaultSkills,
         onboarding: {
           version: 2,
@@ -932,7 +957,12 @@ describe('workspace store', () => {
           dataSync: 'disabled'
         },
         aiPreferences: defaultAiPreferences,
-        modelSettings: defaultModelSettings,
+        modelSettings: expect.objectContaining({
+          providers: expect.objectContaining({
+            openai: expect.objectContaining({ modelId: 'gpt-5' })
+          }),
+          options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent' })])
+        }),
         skills: defaultSkills
       })
     )
@@ -4953,22 +4983,30 @@ describe('workspace store', () => {
 
     await store.refreshAiModelCatalog()
 
-    expect(window.aiops.listAiModels).toHaveBeenCalled()
+    expect(window.aiops.listAiModels).toHaveBeenCalledWith({
+      modelSettings: expect.objectContaining({
+        providers: expect.objectContaining({
+          openai: expect.objectContaining({ modelId: expect.any(String) })
+        }),
+        options: expect.any(Array)
+      })
+    })
     expect(store.aiModelOptions).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'aiopsterm-local-agent', label: 'aiopsterm-local-agent' }),
-        expect.objectContaining({ id: 'ops-model', apiProvider: 'openai' })
+        expect.objectContaining({ id: 'aiopsterm-local-agent', label: 'aiopsterm-local-agent' })
       ])
     )
+    expect(store.aiModelOptions.some((model) => model.id === 'ops-model')).toBe(false)
+    expect(store.aiModelOptions.some((model) => model.id === 'qwen2.5-coder')).toBe(false)
     expect(store.lockedAiModelOptions).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'gpt-5-pro', locked: true, tier: 'VIP' })])
     )
     expect(store.settingModelOptions).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true }),
-        expect.objectContaining({ name: 'custom-maintenance', type: 'custom', apiProvider: 'openai' })
+        expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true })
       ])
     )
+    expect(store.settingModelOptions.some((model) => model.name === 'custom-maintenance')).toBe(false)
     expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
     expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
@@ -5007,7 +5045,8 @@ describe('workspace store', () => {
 
   it('does not fabricate AI model selection when config persistence is unavailable or malformed', async () => {
     const store = useWorkspaceStore()
-    await store.refreshAiModelCatalog()
+    await addQwenOllamaModelToStore(store)
+    vi.mocked(window.aiops.saveConfig).mockClear()
     const originalSaveConfig = window.aiops.saveConfig
     const initialModelName = store.config.modelName
 
@@ -7510,6 +7549,11 @@ describe('workspace store', () => {
     await expect(store.saveModelProvider('openai')).resolves.toBe(true)
     expect(store.config.modelProvider).toBe('openai-compatible')
     expect(store.config.modelName).toBe('ops-model')
+    expect(store.settingModelOptions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'ops-model', checked: true, type: 'custom', apiProvider: 'openai' })])
+    )
+    expect(store.aiModelOptions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'ops-model', apiProvider: 'openai' })]))
+    expect(store.terminalCommandModelOptions).toContain('ops-model')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         modelProvider: 'openai-compatible',

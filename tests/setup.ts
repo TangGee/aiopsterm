@@ -2257,25 +2257,35 @@ const defaultModelSettings = {
   ]
 }
 
-const defaultAiModelCatalog = {
-  chatModels: [
-    { id: 'aiopsterm-local-agent', label: 'aiopsterm-local-agent', detail: 'Local aiopsterm development model', checked: true, type: 'standard', apiProvider: 'default' },
-    { id: 'gpt-5-Thinking', label: 'gpt-5-Thinking', detail: 'Extended Thinking model', checked: true, type: 'standard', apiProvider: 'default' },
-    { id: 'ops-model', label: 'ops-model', detail: 'OpenAI Compatible model', checked: true, type: 'standard', apiProvider: 'openai' },
-    { id: 'qwen2.5-coder', label: 'qwen2.5-coder', detail: 'Ollama model', checked: true, type: 'standard', apiProvider: 'ollama' }
-  ],
-  lockedChatModels: [
-    { id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' },
-    { id: 'ops-large-context', label: 'ops-large-context', detail: 'Large context model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' }
-  ],
-  settingsModels: defaultModelSettings.options.map((option) => ({ ...option }))
-}
+const defaultLockedAiModels = [
+  { id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' },
+  { id: 'ops-large-context', label: 'ops-large-context', detail: 'Large context model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' }
+]
 
-const cloneAiModelCatalog = () => ({
-  chatModels: defaultAiModelCatalog.chatModels.map((model) => ({ ...model })),
-  lockedChatModels: defaultAiModelCatalog.lockedChatModels.map((model) => ({ ...model })),
-  settingsModels: defaultAiModelCatalog.settingsModels.map((model) => ({ ...model }))
-})
+const cloneAiModelCatalog = (input?: { modelSettings?: typeof defaultModelSettings }) => {
+  const settings = input?.modelSettings || defaultModelSettings
+  const configuredModelIds = new Set(Object.values(settings.providers || {}).map((provider: any) => String(provider?.modelId || '').trim()).filter(Boolean))
+  const settingsModels = (settings.options || defaultModelSettings.options).map((model: any) => ({ ...model }))
+  if (!settingsModels.some((model: any) => model.name === 'aiopsterm-local-agent')) {
+    settingsModels.unshift({ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' })
+  }
+  const chatModels = settingsModels
+    .filter((model: any) => model.checked && !model.locked && (model.apiProvider === 'default' || configuredModelIds.has(model.name)))
+    .map((model: any) => ({
+      id: model.name,
+      label: model.name,
+      detail: model.name === 'aiopsterm-local-agent' ? 'Local aiopsterm development model' : `${model.apiProvider || 'custom'} configured model`,
+      checked: model.checked,
+      locked: model.locked,
+      type: model.type,
+      apiProvider: model.apiProvider
+    }))
+  return {
+    chatModels,
+    lockedChatModels: defaultLockedAiModels.map((model) => ({ ...model })),
+    settingsModels
+  }
+}
 
 const defaultKubernetesCatalog = {
   contexts: [
@@ -6547,7 +6557,7 @@ Object.defineProperty(window, 'aiops', {
         cleanedAt: '刚刚'
       }
     })),
-    listAiModels: vi.fn(async () => cloneAiModelCatalog()),
+    listAiModels: vi.fn(async (input?: { modelSettings?: typeof defaultModelSettings }) => cloneAiModelCatalog(input)),
     checkModelProvider: vi.fn(
       async (input: {
         provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'

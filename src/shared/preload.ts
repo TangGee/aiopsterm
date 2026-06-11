@@ -1130,6 +1130,10 @@ export type ModelSettingsUserConfig = {
   options: ModelOptionUserConfig[]
 }
 
+export type AiModelCatalogInput = {
+  modelSettings?: ModelSettingsUserConfig
+}
+
 export type ShortcutUserConfig = {
   id: string
   action: string
@@ -2756,7 +2760,7 @@ export type AiopsPreloadApi = {
   closeZmodemStream: (streamId: string) => Promise<ZmodemStreamCloseResult>
   getTerminalCommandSuggestions: (query: string, context?: TerminalCommandSuggestionContext) => Promise<TerminalCommandSuggestion[]>
   generateTerminalCommand: (input: TerminalCommandGenerationInput) => Promise<TerminalCommandGenerationResult>
-  listAiModels: () => Promise<AiModelCatalog>
+  listAiModels: (input?: AiModelCatalogInput) => Promise<AiModelCatalog>
   checkModelProvider: (input: ModelProviderCheckInput) => Promise<ModelProviderCheckResult>
   listExtensionPlugins: () => Promise<ExtensionPluginListResult>
   installExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>

@@ -1916,6 +1916,8 @@ const modelSettingsSnapshotsMatch = (left: ModelSettingsUserConfig, right: Model
   modelProviderSettingsMatch(left.providers.ollama, right.providers.ollama) &&
   modelOptionsSnapshotsMatch(left.options, right.options)
 
+const modelOptionProviderForSavedProvider = (provider: ModelProviderKey): string => (provider === 'openai' ? 'openai' : provider)
+
 const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
   const rawGroups = Array.isArray(incoming.groups) ? incoming.groups : defaultQuickCommands.groups
@@ -4057,7 +4059,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNoticeText('模型列表加载服务不可用')
       return null
     }
-    aiModelCatalogLoadPromise ||= listAiModelsBridge()
+    aiModelCatalogLoadPromise ||= listAiModelsBridge({ modelSettings: normalizeModelSettingsConfig(config.value.modelSettings).normalized })
       .then((catalog) => normalizeAiModelCatalog(catalog))
       .finally(() => {
         aiModelCatalogLoadPromise = null
@@ -4761,6 +4763,42 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const getPersistedModelSettingsSnapshot = (): ModelSettingsUserConfig => normalizeModelSettingsConfig(config.value.modelSettings).normalized
 
+  const getModelSettingsSnapshotWithProviderModel = (provider: ModelProviderKey, providerSettings: ModelProviderSettings): ModelSettingsUserConfig => {
+    const modelName = providerSettings.modelId.trim()
+    const nextSettings = getModelSettingsSnapshot()
+    nextSettings.providers = {
+      ...nextSettings.providers,
+      [provider]: { ...providerSettings }
+    }
+    if (!modelName) return normalizeModelSettingsConfig(nextSettings).normalized
+    const existingIndex = nextSettings.options.findIndex((option) => option.name === modelName)
+    const apiProvider = modelOptionProviderForSavedProvider(provider)
+    if (existingIndex >= 0) {
+      nextSettings.options = nextSettings.options.map((option, index) =>
+        index === existingIndex && !option.locked
+          ? {
+              ...option,
+              checked: true,
+              type: 'custom',
+              apiProvider
+            }
+          : option
+      )
+    } else {
+      nextSettings.options = [
+        ...nextSettings.options,
+        {
+          name: modelName,
+          locked: false,
+          checked: true,
+          type: 'custom',
+          apiProvider
+        }
+      ]
+    }
+    return normalizeModelSettingsConfig(nextSettings).normalized
+  }
+
   const applyModelOptionSettingsSnapshot = (settings: ModelSettingsUserConfig) => {
     addModelSwitch.value = settings.addModelSwitch
     settingModelOptions.value = settings.options.map((option) => ({
@@ -4811,6 +4849,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         modelSettings: savedModelSettings
       })
+      await refreshAiModelCatalog({ replaceSettingsOptions: false })
       return true
     } catch (error) {
       setSettingsNotice(error instanceof Error ? error.message : failureMessage)
@@ -5864,14 +5903,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       anthropic: 'Anthropic',
       ollama: 'Ollama'
     }
+    const nextModelSettings = getModelSettingsSnapshotWithProviderModel(provider, configPatch)
     try {
       const savedConfig = await saveConfigBridge({
         modelProvider: providerName[provider],
         modelEndpoint: configPatch.baseUrl,
         modelName: configPatch.modelId,
-        modelSettings: getModelSettingsSnapshot()
+        modelSettings: nextModelSettings
       })
       if (!isRecord(savedConfig) || !isRecord(savedConfig.modelSettings) || !isRecord(savedConfig.modelSettings.providers) || !Array.isArray(savedConfig.modelSettings.options)) {
+        setSettingsNotice('模型 Provider 保存失败')
+        return false
+      }
+      const savedModelSettings = normalizeModelSettingsConfig(savedConfig.modelSettings).normalized
+      if (!modelSettingsSnapshotsMatch(savedModelSettings, nextModelSettings)) {
         setSettingsNotice('模型 Provider 保存失败')
         return false
       }
@@ -5891,13 +5936,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('模型 Provider 保存失败')
         return false
       }
-      const savedModelSettings = applyModelSettingsSnapshot(savedConfig.modelSettings)
+      applyModelSettingsSnapshot(savedModelSettings)
       config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         modelProvider: savedProvider,
         modelEndpoint: savedEndpoint,
         modelName: savedModelName,
         modelSettings: savedModelSettings
       })
+      await refreshAiModelCatalog({ replaceSettingsOptions: false })
       setSettingsNotice(`${providerLabel[provider]} Save 成功`)
       return true
     } catch (error) {

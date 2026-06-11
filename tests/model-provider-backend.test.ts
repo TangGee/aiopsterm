@@ -6,7 +6,7 @@ let checkModelProvider: (input: {
   config: Record<string, unknown>
   timeoutMs?: number
 }) => Promise<any>
-let listAiModels: () => Promise<any>
+let listAiModels: (input?: { modelSettings?: any }) => Promise<any>
 
 type RequestRecord = {
   method: string
@@ -74,16 +74,34 @@ const sendJson = (response: ServerResponse, statusCode: number, payload: unknown
 }
 
 describe('model provider backend boundary', () => {
-  it('returns a cloned AI model catalog for the renderer model selectors', async () => {
-    const firstCatalog = await listAiModels()
+  it('returns a config-derived cloned AI model catalog for the renderer model selectors', async () => {
+    const modelSettings = {
+      addModelSwitch: true,
+      providers: {
+        litellm: { baseUrl: 'http://localhost:4000', apiKey: '', modelId: 'gpt-5' },
+        openai: { baseUrl: 'https://api.openai.com', apiKey: '', modelId: 'ops-model', apiFormat: 'responses' },
+        bedrock: { baseUrl: '', apiKey: '', modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0' },
+        deepseek: { baseUrl: '', apiKey: '', modelId: 'deepseek-chat' },
+        anthropic: { baseUrl: 'https://api.anthropic.com', apiKey: '', modelId: 'claude-3-5-sonnet-latest' },
+        ollama: { baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'qwen2.5-coder' }
+      },
+      options: [
+        { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
+        { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
+        { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
+        { name: 'ops-model', locked: false, checked: true, type: 'custom', apiProvider: 'openai' },
+        { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom', apiProvider: 'ollama' },
+        { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
+      ]
+    }
+    const firstCatalog = await listAiModels({ modelSettings })
     firstCatalog.chatModels[0].label = 'mutated'
     firstCatalog.settingsModels.push({ name: 'mutated-model', locked: false, checked: true })
 
-    const secondCatalog = await listAiModels()
+    const secondCatalog = await listAiModels({ modelSettings })
 
     expect(secondCatalog.chatModels.map((model: { id: string }) => model.id)).toEqual([
       'aiopsterm-local-agent',
-      'gpt-5-Thinking',
       'ops-model',
       'qwen2.5-coder'
     ])
@@ -101,6 +119,17 @@ describe('model provider backend boundary', () => {
     )
     expect(secondCatalog.chatModels[0].label).toBe('aiopsterm-local-agent')
     expect(secondCatalog.settingsModels.some((model: { name: string }) => model.name === 'mutated-model')).toBe(false)
+  })
+
+  it('does not expose unsaved provider model rows from the default catalog', async () => {
+    const catalog = await listAiModels()
+
+    expect(catalog.chatModels.map((model: { id: string }) => model.id)).toEqual(['aiopsterm-local-agent'])
+    expect(catalog.settingsModels).toEqual([
+      expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard' })
+    ])
+    expect(catalog.chatModels.some((model: { id: string }) => model.id === 'ops-model')).toBe(false)
+    expect(catalog.chatModels.some((model: { id: string }) => model.id === 'qwen2.5-coder')).toBe(false)
   })
 
   it('validates OpenAI-compatible configuration against the live Responses endpoint', async () => {
