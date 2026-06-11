@@ -21,6 +21,7 @@ type ExtensionPlugin = {
   installedAt?: string
   packagePath?: string
   storePackagePath?: string
+  subscriptionUrl?: string
   readme?: string
   size?: number
   categories?: string[]
@@ -51,7 +52,6 @@ let resetExtensionPluginCatalogForTests: () => void
 let configureExtensionBackendRuntime: (config?: { extensionRootDir?: string; storePackageDir?: string }) => void
 let cancelExtensionInstall: (pluginId: string) => any
 let openExtensionSubscription: (input: { plugin: ExtensionPlugin }, openExternal?: (url: string) => Promise<void> | void) => Promise<any>
-let EXTENSION_SUBSCRIPTION_URL: string
 
 const basePlugin = (patch: Partial<ExtensionPlugin> = {}): ExtensionPlugin => ({
   pluginId: 'cloud-assets',
@@ -188,7 +188,6 @@ beforeAll(async () => {
   configureExtensionBackendRuntime = backend.configureExtensionBackendRuntime as typeof configureExtensionBackendRuntime
   cancelExtensionInstall = backend.cancelExtensionInstall as typeof cancelExtensionInstall
   openExtensionSubscription = backend.openExtensionSubscription as typeof openExtensionSubscription
-  EXTENSION_SUBSCRIPTION_URL = backend.EXTENSION_SUBSCRIPTION_URL as string
 })
 
 describe('extension plugin backend boundary', () => {
@@ -256,20 +255,14 @@ describe('extension plugin backend boundary', () => {
     const result = await listExtensionPlugins()
 
     expect(result.ok).toBe(true)
-    expect(result.data.map((plugin: ExtensionPlugin) => plugin.pluginId)).toEqual(
-      expect.arrayContaining(['jumpserverSupport', 'Alias', 'cloud-assets', 'ops-runbook'])
-    )
+    expect(result.data.map((plugin: ExtensionPlugin) => plugin.pluginId)).toEqual(['jumpserverSupport', 'Alias'])
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'Alias')).toMatchObject({
       source: 'preinstalled',
       isPlugin: false
     })
-    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')).toMatchObject({
-      source: 'store',
-      installed: false,
-      hasUpdate: false
-    })
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')).toBeUndefined()
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'local-shell-tools')).toBeUndefined()
-    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')?.description).not.toContain('占位')
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toBeUndefined()
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'jumpserverSupport')).toMatchObject({
       detailSummary: expect.stringContaining('资产同步'),
       guideSteps: expect.arrayContaining(['同步资产并确认主机分组。']),
@@ -279,21 +272,27 @@ describe('extension plugin backend boundary', () => {
     })
   })
 
-  it('fails closed when a store plugin has no real package source', async () => {
-    const progress: ExtensionProgress[] = []
-    const result = await installExtensionPlugin({ plugin: basePlugin() }, (event) => progress.push(event), { stepDelayMs: 0 })
+  it('discovers store plugin catalog rows from configured real package directories', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
+    try {
+      const storePackage = await createStorePackage(storePackageDir, {}, { readme: '# Cloud Assets\n\nReal store package.' })
+      configureStorePackageDir(storePackageDir)
 
-    expect(result).toEqual({
-      ok: false,
-      errorCode: 'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
-      errorMessage: 'Cloud Assets requires a real .external-reference package before it can be installed.'
-    })
-    expect(progress).toEqual([])
-    const catalog = await listExtensionPlugins()
-    expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toMatchObject({
-      installed: false,
-      installedVersion: ''
-    })
+      const catalog = await listExtensionPlugins()
+      expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toMatchObject({
+        pluginId: 'cloud-assets',
+        name: 'Cloud Assets',
+        source: 'store',
+        installed: false,
+        latestVersion: '0.9.1',
+        storePackagePath: storePackage.filePath,
+        readme: expect.stringContaining('Real store package.'),
+        categories: ['Cloud', 'Assets'],
+        functions: [{ title: 'Cloud sync', desc: 'Sync cloud hosts from a real package.' }]
+      })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
   })
 
   it('installs a store plugin from a configured real package', async () => {
@@ -443,6 +442,7 @@ describe('extension plugin backend boundary', () => {
           displayName: 'Ops Runbook',
           version: '1.3.0',
           description: 'Updated runbook package.',
+          iconKey: 'runbook',
           categories: ['Tools', 'Runbook'],
           functions: [{ title: '发布守卫', desc: 'Updated release guard.' }]
         },
@@ -477,7 +477,8 @@ describe('extension plugin backend boundary', () => {
   it('rejects a store package whose version does not match the catalog version', async () => {
     const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     try {
-      await writeFile(join(storePackageDir, 'cloud-assets.external-reference'), createZipFixture([
+      const mismatchedPackagePath = join(storePackageDir, 'cloud-assets-0.8.0.external-reference')
+      await writeFile(mismatchedPackagePath, createZipFixture([
         {
           name: 'plugin.json',
           content: JSON.stringify({
@@ -489,9 +490,8 @@ describe('extension plugin backend boundary', () => {
         },
         { name: 'main.js', content: 'module.exports = {}' }
       ]))
-      configureStorePackageDir(storePackageDir)
 
-      const result = await installExtensionPlugin({ plugin: basePlugin() }, undefined, { stepDelayMs: 0 })
+      const result = await installExtensionPlugin({ plugin: basePlugin({ storePackagePath: mismatchedPackagePath }) }, undefined, { stepDelayMs: 0 })
 
       expect(result).toEqual({
         ok: false,
@@ -503,9 +503,8 @@ describe('extension plugin backend boundary', () => {
     }
   })
 
-  it('fails closed when an installed store plugin update has no real package source', async () => {
+  it('does not fabricate updates for installed store plugins without a real store package', async () => {
     const oldPackagePath = join(extensionRootDir, 'installed', 'ops-runbook', '1.2.0')
-    const progress: ExtensionProgress[] = []
     await mkdir(oldPackagePath, { recursive: true })
     await writeFile(
       join(extensionRootDir, 'registry.json'),
@@ -539,21 +538,16 @@ describe('extension plugin backend boundary', () => {
     configureExtensionBackendRuntime({ extensionRootDir })
     const catalogBefore = await listExtensionPlugins()
     const opsRunbook = catalogBefore.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')
-    expect(opsRunbook).toMatchObject({ installed: true, hasUpdate: true, installedVersion: '1.2.0', latestVersion: '1.3.0' })
-
-    const result = await updateExtensionPlugin({ plugin: opsRunbook }, (event) => progress.push(event), { stepDelayMs: 0 })
-
-    expect(result).toEqual({
-      ok: false,
-      errorCode: 'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
-      errorMessage: 'Ops Runbook requires a real .external-reference package before it can be installed.'
-    })
-    expect(progress).toEqual([])
-    const catalogAfter = await listExtensionPlugins()
-    expect(catalogAfter.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')).toMatchObject({
+    expect(opsRunbook).toMatchObject({
       installed: true,
-      hasUpdate: true,
-      installedVersion: '1.2.0'
+      hasUpdate: false,
+      installedVersion: '1.2.0',
+      latestVersion: '1.2.0'
+    })
+    await expect(updateExtensionPlugin({ plugin: opsRunbook }, undefined, { stepDelayMs: 0 })).resolves.toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_PLUGIN_UPDATE_UNAVAILABLE',
+      errorMessage: 'Plugin has no available update.'
     })
   })
 
@@ -738,7 +732,46 @@ describe('extension plugin backend boundary', () => {
   })
 
   it('opens the private plugin subscription entry behind the backend boundary', async () => {
+    const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     const openedUrls: string[] = []
+    const subscriptionUrl = 'https://aiopsterm.local/extensions/private-automation-pack'
+    try {
+      await createStorePackage(storePackageDir, {
+        id: 'private-automation-pack',
+        displayName: 'Private Automation Pack',
+        version: '2.0.0',
+        description: 'Private package metadata from a real store package.',
+        iconKey: 'private',
+        installable: false,
+        isPrivate: true,
+        subscriptionUrl,
+        categories: ['Private', 'Automation']
+      })
+      configureStorePackageDir(storePackageDir)
+      const catalog = await listExtensionPlugins()
+      const privatePlugin = catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'private-automation-pack')
+
+      const result = await openExtensionSubscription(
+        {
+          plugin: privatePlugin
+        },
+        (url) => {
+          openedUrls.push(url)
+        }
+      )
+
+      expect(result.ok).toBe(true)
+      expect(openedUrls).toEqual([subscriptionUrl])
+      expect(result.data).toMatchObject({
+        pluginId: 'private-automation-pack',
+        url: subscriptionUrl
+      })
+    } finally {
+      await rm(storePackageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects private subscription entries without a backend-owned subscription URL', async () => {
     const result = await openExtensionSubscription(
       {
         plugin: basePlugin({
@@ -749,16 +782,13 @@ describe('extension plugin backend boundary', () => {
           isPrivate: true
         })
       },
-      (url) => {
-        openedUrls.push(url)
-      }
+      () => undefined
     )
 
-    expect(result.ok).toBe(true)
-    expect(openedUrls).toEqual([EXTENSION_SUBSCRIPTION_URL])
-    expect(result.data).toMatchObject({
-      pluginId: 'private-automation-pack',
-      url: EXTENSION_SUBSCRIPTION_URL
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE',
+      errorMessage: 'Plugin subscription URL is not available.'
     })
   })
 

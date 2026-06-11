@@ -930,6 +930,7 @@ export type ExtensionPluginRuntimeConfig = {
   installedAt?: string
   packagePath?: string
   storePackagePath?: string
+  subscriptionUrl?: string
   size?: number
   readme?: string
   categories?: string[]

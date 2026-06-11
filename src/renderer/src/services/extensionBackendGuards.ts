@@ -48,7 +48,7 @@ export const isExtensionPluginRuntimeConfig = (value: unknown): value is Extensi
   if (!isOptionalBoolean(value.isPrivate)) return false
   if (value.source !== undefined && !extensionSources.has(String(value.source))) return false
   if (!isOptionalString(value.lastUpdated) || !isOptionalString(value.installedAt)) return false
-  if (!isOptionalString(value.packagePath) || !isOptionalString(value.storePackagePath)) return false
+  if (!isOptionalString(value.packagePath) || !isOptionalString(value.storePackagePath) || !isOptionalString(value.subscriptionUrl)) return false
   if (value.size !== undefined && !isNonNegativeFiniteNumber(value.size)) return false
   if (!isOptionalString(value.readme) || !isOptionalString(value.detailSummary)) return false
   if (value.categories !== undefined && !isStringArray(value.categories)) return false

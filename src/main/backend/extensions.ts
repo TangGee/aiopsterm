@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, type Dirent } from 'fs'
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { inflateRawSync } from 'zlib'
 import type {
   ExtensionInstallProgress,
@@ -16,7 +16,6 @@ import type {
 } from '@shared/preload'
 
 export const EXTENSION_INSTALL_STEP_DELAY_MS = 120
-export const EXTENSION_SUBSCRIPTION_URL = 'https://github.com/external-reference/External reference/discussions/1521'
 
 type ExtensionProgressEmitter = (progress: ExtensionInstallProgress) => void
 
@@ -34,6 +33,17 @@ type LocalExtensionPackageManifest = {
   categories?: unknown
   readme?: unknown
   functions?: unknown
+  iconKey?: unknown
+  installable?: unknown
+  private?: unknown
+  isPrivate?: unknown
+  subscriptionUrl?: unknown
+  store?: {
+    installable?: unknown
+    private?: unknown
+    isPrivate?: unknown
+    subscriptionUrl?: unknown
+  }
   contributes?: {
     views?: unknown
   }
@@ -83,7 +93,7 @@ let runtimeConfig: Required<ExtensionBackendRuntimeConfig> = {
   storePackageDir: defaultStorePackageDir()
 }
 
-const extensionCatalogSeed: ExtensionPluginRuntimeConfig[] = [
+const builtinExtensionCatalog: ExtensionPluginRuntimeConfig[] = [
   {
     pluginId: 'jumpserverSupport',
     name: 'Jumpserver Support',
@@ -133,79 +143,22 @@ const extensionCatalogSeed: ExtensionPluginRuntimeConfig[] = [
     latestVersion: '',
     source: 'preinstalled',
     categories: ['Tools']
-  },
-  {
-    pluginId: 'ops-runbook',
-    name: 'Ops Runbook',
-    description: '本地维护流程和技能模板。',
-    iconKey: 'runbook',
-    tabName: 'Ops Runbook',
-    show: true,
-    isPlugin: true,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: '1.3.0',
-    installable: true,
-    source: 'store',
-    lastUpdated: '2026-06-01',
-    size: 1843200,
-    readme: 'Ops Runbook 提供常用巡检、发布前检查和故障复盘模板，可在终端工作区中作为辅助流程打开。',
-    categories: ['Tools', 'Runbook'],
-    functions: [
-      { title: '巡检模板', desc: '生成磁盘、负载、服务状态的检查清单。' },
-      { title: '发布守卫', desc: '把发布前后验证步骤整理为可复用流程。' }
-    ]
-  },
-  {
-    pluginId: 'cloud-assets',
-    name: 'Cloud Assets',
-    description: '云资产发现和同步插件，需要真实 .external-reference 包后安装。',
-    iconKey: 'cloud',
-    tabName: 'Cloud Assets',
-    show: true,
-    isPlugin: true,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: '0.9.1',
-    installable: true,
-    source: 'store',
-    lastUpdated: '2026-05-28',
-    size: 2310144,
-    readme: 'Cloud Assets 需要来自插件仓库或本地拖入的真实 .external-reference 包。未配置真实包时，后端不会模拟安装成功。',
-    categories: ['Cloud', 'Assets'],
-    functions: [
-      { title: '云资产同步', desc: '按账号和地域拉取云主机列表。' },
-      { title: '标签映射', desc: '把云标签映射到本地资产分组。' }
-    ]
-  },
-  {
-    pluginId: 'private-automation-pack',
-    name: 'Private Automation Pack',
-    description: '私有自动化插件，需要订阅后安装。',
-    iconKey: 'private',
-    tabName: 'Private Automation Pack',
-    show: true,
-    isPlugin: true,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: '2.0.0',
-    installable: false,
-    isPrivate: true,
-    source: 'store',
-    lastUpdated: '2026-05-20',
-    size: 4194304,
-    readme: '私有插件展示订阅入口；未订阅时不可直接安装。',
-    categories: ['Private', 'Automation'],
-    functions: [{ title: '订阅能力', desc: '开通后启用私有自动化任务模板。' }]
   }
 ]
 
 const wait = (durationMs: number) => new Promise((resolve) => setTimeout(resolve, durationMs))
 
 const trimText = (value: unknown) => String(value || '').trim()
+
+const booleanFromUnknown = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (['true', '1', 'yes'].includes(normalized)) return true
+    if (['false', '0', 'no'].includes(normalized)) return false
+  }
+  return undefined
+}
 
 const resolveOptionalPath = (value: unknown, fallback = '') => {
   const text = trimText(value)
@@ -240,10 +193,11 @@ const clonePlugin = (plugin: ExtensionPluginRuntimeConfig): ExtensionPluginRunti
   functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
   guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
   connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
-  storePackagePath: trimText(plugin.storePackagePath) || undefined
+  storePackagePath: trimText(plugin.storePackagePath) || undefined,
+  subscriptionUrl: trimText(plugin.subscriptionUrl) || undefined
 })
 
-let extensionCatalog = extensionCatalogSeed.map(clonePlugin)
+let extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
 
 const extensionRegistryPath = () => join(runtimeConfig.extensionRootDir, 'registry.json')
 
@@ -273,20 +227,20 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
     const installedVersion = trimText(record.installedVersion)
     const packagePath = trimText(record.packagePath)
     if (!pluginId || !name || !installedVersion || !packagePath) continue
-    const seedPlugin = extensionCatalogSeed.find((plugin) => plugin.pluginId === pluginId)
+    const catalogPlugin = extensionCatalog.find((plugin) => plugin.pluginId === pluginId)
     const source = trimText(record.source) === 'store' ? 'store' : 'local'
     const isLocal = source === 'local'
     const categories = parseStringArray(record.categories)
     const functions = parseManifestFunctions(record.functions)
     const latestVersion =
       source === 'store'
-        ? trimText(seedPlugin?.latestVersion) || trimText(record.latestVersion) || installedVersion
+        ? trimText(catalogPlugin?.latestVersion) || trimText(record.latestVersion) || installedVersion
         : trimText(record.latestVersion) || installedVersion
     plugins.push({
       pluginId,
       name,
-      description: trimText(record.description) || seedPlugin?.description || 'Installed from a .external-reference package.',
-      iconKey: normalizeExtensionIconKey(record.iconKey || seedPlugin?.iconKey),
+      description: trimText(record.description) || catalogPlugin?.description || 'Installed from a .external-reference package.',
+      iconKey: normalizeExtensionIconKey(record.iconKey || catalogPlugin?.iconKey),
       tabName: trimText(record.tabName) || name,
       show: record.show === false ? false : true,
       isPlugin: true,
@@ -301,13 +255,14 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
       installedAt: trimText(record.installedAt),
       packagePath,
       storePackagePath: trimText(record.storePackagePath) || undefined,
+      subscriptionUrl: trimText(record.subscriptionUrl || catalogPlugin?.subscriptionUrl) || undefined,
       size: typeof record.size === 'number' && Number.isFinite(record.size) ? record.size : undefined,
-      readme: trimText(record.readme) || seedPlugin?.readme || '',
-      categories: categories.length ? categories : seedPlugin?.categories ? [...seedPlugin.categories] : [isLocal ? 'Local' : 'Store'],
+      readme: trimText(record.readme) || catalogPlugin?.readme || '',
+      categories: categories.length ? categories : catalogPlugin?.categories ? [...catalogPlugin.categories] : [isLocal ? 'Local' : 'Store'],
       functions: functions.length
         ? functions
-        : seedPlugin?.functions
-          ? seedPlugin.functions.map((item) => ({ ...item }))
+        : catalogPlugin?.functions
+          ? catalogPlugin.functions.map((item) => ({ ...item }))
           : [{ title: 'Installed plugin', desc: 'Installed from a .external-reference package through the backend boundary.' }]
     })
   }
@@ -323,6 +278,83 @@ const readLocalExtensionRegistry = (): ExtensionPluginRuntimeConfig[] => {
   } catch {
     return []
   }
+}
+
+const walkStorePackageFiles = (rootDir: string, depth = 0): string[] => {
+  if (!rootDir || depth > 2) return []
+  let entries: Dirent[]
+  try {
+    entries = readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const files: string[] = []
+  for (const entry of entries) {
+    const fullPath = join(rootDir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...walkStorePackageFiles(fullPath, depth + 1))
+      continue
+    }
+    if (!entry.isFile() || extname(entry.name).toLowerCase() !== '.external-reference') continue
+    files.push(fullPath)
+  }
+  return files.sort((left, right) => left.localeCompare(right))
+}
+
+const storePluginFromPackage = (filePath: string): ExtensionPluginRuntimeConfig | null => {
+  const input = createPackageInputFromPath(filePath)
+  if (!input) return null
+  const parsedPackage = parsePackageManifestFromInput(input)
+  if ('ok' in parsedPackage) return null
+  const { manifest, entries, packageSize } = parsedPackage
+  const pluginId = trimText(manifest.id)
+  const version = trimText(manifest.version)
+  const mainEntryName = normalizePackageEntryName(trimText(manifest.main))
+  if (!pluginId || !version || !mainEntryName || !findZipEntry(entries, mainEntryName)) return null
+  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
+  const viewName = parseFirstContributedViewName(manifest)
+  const categories = parseStringArray(manifest.categories)
+  const functions = parseManifestFunctions(manifest.functions)
+  const readmeEntry = findReadmeZipEntry(entries, manifest)
+  const storeFlags = extractStoreManifestFlags(manifest)
+  return {
+    pluginId,
+    name: displayName,
+    description: trimText(manifest.description) || 'Discovered from a real .external-reference package in the aiopsterm extension store directory.',
+    iconKey: normalizeExtensionIconKey(manifest.iconKey),
+    tabName: viewName || displayName,
+    show: true,
+    isPlugin: true,
+    installed: false,
+    hasUpdate: false,
+    installedVersion: '',
+    latestVersion: version,
+    installable: storeFlags.installable,
+    isPrivate: storeFlags.isPrivate,
+    source: 'store',
+    lastUpdated: new Date(statSync(filePath).mtimeMs).toISOString(),
+    size: packageSize,
+    readme: readmeEntry ? readZipEntryText(readmeEntry) : `${displayName} is available from a verified .external-reference package.`,
+    categories: categories.length ? categories : ['Store'],
+    functions: functions.length ? functions : [{ title: 'Store plugin', desc: 'Discovered from a real .external-reference package through the backend boundary.' }],
+    storePackagePath: filePath,
+    subscriptionUrl: storeFlags.subscriptionUrl || undefined
+  }
+}
+
+const readStoreExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
+  const storePackageDir = trimText(runtimeConfig.storePackageDir)
+  if (!storePackageDir || !existsSync(storePackageDir)) return []
+  const latestByPlugin = new Map<string, ExtensionPluginRuntimeConfig>()
+  for (const filePath of walkStorePackageFiles(storePackageDir)) {
+    const plugin = storePluginFromPackage(filePath)
+    if (!plugin) continue
+    const existing = latestByPlugin.get(plugin.pluginId)
+    if (!existing || isVersionNewer(plugin.latestVersion || '', existing.latestVersion || '')) {
+      latestByPlugin.set(plugin.pluginId, plugin)
+    }
+  }
+  return [...latestByPlugin.values()].sort((left, right) => left.name.localeCompare(right.name))
 }
 
 const writeLocalExtensionRegistry = () => {
@@ -356,7 +388,8 @@ const upsertExtensionCatalogPlugin = (plugin: ExtensionPluginRuntimeConfig, opti
 }
 
 const reloadExtensionCatalog = () => {
-  extensionCatalog = extensionCatalogSeed.map(clonePlugin)
+  extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
+  for (const plugin of readStoreExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })
 }
 
@@ -448,9 +481,13 @@ export const openExtensionSubscription = async (
   if (plugin.installable !== false && !plugin.isPrivate) {
     return subscriptionErrorResult('EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE', 'Plugin does not require a subscription.')
   }
+  const subscriptionUrl = trimText(plugin.subscriptionUrl)
+  if (!subscriptionUrl) {
+    return subscriptionErrorResult('EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE', 'Plugin subscription URL is not available.')
+  }
 
   try {
-    await openExternal?.(EXTENSION_SUBSCRIPTION_URL)
+    await openExternal?.(subscriptionUrl)
   } catch (error) {
     return subscriptionErrorResult(
       'EXTENSION_SUBSCRIPTION_OPEN_FAILED',
@@ -462,7 +499,7 @@ export const openExtensionSubscription = async (
     ok: true,
     data: {
       pluginId: plugin.pluginId,
-      url: EXTENSION_SUBSCRIPTION_URL,
+      url: subscriptionUrl,
       message: `${plugin.name} subscription entry opened by aiopsterm backend.`
     }
   }
@@ -750,6 +787,18 @@ const parseManifestFunctions = (value: unknown): Array<{ title: string; desc: st
     .filter((item): item is { title: string; desc: string } => Boolean(item))
 }
 
+const extractStoreManifestFlags = (manifest: LocalExtensionPackageManifest) => {
+  const store = asRecord(manifest.store)
+  const privateFlag = booleanFromUnknown(manifest.isPrivate) ?? booleanFromUnknown(manifest.private) ?? booleanFromUnknown(store?.isPrivate) ?? booleanFromUnknown(store?.private) ?? false
+  const installable = booleanFromUnknown(manifest.installable) ?? booleanFromUnknown(store?.installable) ?? !privateFlag
+  const subscriptionUrl = trimText(manifest.subscriptionUrl || store?.subscriptionUrl)
+  return {
+    isPrivate: privateFlag,
+    installable,
+    subscriptionUrl
+  }
+}
+
 const parseFirstContributedViewName = (manifest: LocalExtensionPackageManifest) => {
   const contributes = asRecord(manifest.contributes)
   const views = contributes ? contributes.views : undefined
@@ -759,13 +808,9 @@ const parseFirstContributedViewName = (manifest: LocalExtensionPackageManifest) 
   return trimText(firstView.name || firstView.id)
 }
 
-const parseLocalPackageManifest = (
-  input: ExtensionPackageInstallInput,
-  options: LocalExtensionPackageParseOptions = {}
-): LocalExtensionPackageConfig | ExtensionPluginOperationResult => {
-  const packageSource = options.source || 'local'
-  const basePlugin = options.basePlugin ? clonePlugin(options.basePlugin) : undefined
-  const allowedPluginId = trimText(options.allowExistingPluginId)
+const parsePackageManifestFromInput = (
+  input: ExtensionPackageInstallInput
+): { manifest: LocalExtensionPackageManifest; entries: LocalZipEntry[]; filePath: string; packageSize: number } | ExtensionPluginOperationResult => {
   const fileName = trimText(input?.fileName)
   if (!fileName) return localPackageErrorResult('EXTENSION_PACKAGE_REQUIRED', 'Plugin package file is required.')
   if (!fileName.toLowerCase().endsWith('.external-reference')) {
@@ -806,20 +851,36 @@ const parseLocalPackageManifest = (
     return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_MISSING', 'Plugin package must contain plugin.json.')
   }
 
-  let manifest: LocalExtensionPackageManifest
   try {
     const parsed = JSON.parse(readZipEntryText(manifestEntry))
     const manifestRecord = asRecord(parsed)
     if (!manifestRecord) {
       return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must be a JSON object.')
     }
-    manifest = manifestRecord as LocalExtensionPackageManifest
+    return {
+      manifest: manifestRecord as LocalExtensionPackageManifest,
+      entries: zipEntries,
+      filePath,
+      packageSize
+    }
   } catch (error) {
     return localPackageErrorResult(
       'EXTENSION_PACKAGE_MANIFEST_INVALID',
       error instanceof Error ? error.message : 'plugin.json could not be parsed.'
     )
   }
+}
+
+const parseLocalPackageManifest = (
+  input: ExtensionPackageInstallInput,
+  options: LocalExtensionPackageParseOptions = {}
+): LocalExtensionPackageConfig | ExtensionPluginOperationResult => {
+  const packageSource = options.source || 'local'
+  const basePlugin = options.basePlugin ? clonePlugin(options.basePlugin) : undefined
+  const allowedPluginId = trimText(options.allowExistingPluginId)
+  const parsedPackage = parsePackageManifestFromInput(input)
+  if ('ok' in parsedPackage) return parsedPackage
+  const { manifest, entries: zipEntries, filePath, packageSize } = parsedPackage
 
   const pluginId = trimText(manifest.id)
   const version = trimText(manifest.version)
@@ -847,6 +908,7 @@ const parseLocalPackageManifest = (
   const viewName = parseFirstContributedViewName(manifest)
   const categories = parseStringArray(manifest.categories)
   const functions = parseManifestFunctions(manifest.functions)
+  const storeFlags = extractStoreManifestFlags(manifest)
   const readmeEntry = findReadmeZipEntry(zipEntries, manifest)
   const fallbackReadme =
     packageSource === 'store'
@@ -869,7 +931,7 @@ const parseLocalPackageManifest = (
         trimText(manifest.description) ||
         basePlugin?.description ||
         (packageSource === 'store' ? 'Installed from a store .external-reference package.' : 'Installed from a local .external-reference package.'),
-      iconKey: packageSource === 'store' ? normalizeExtensionIconKey(basePlugin?.iconKey) : 'local',
+      iconKey: packageSource === 'store' ? normalizeExtensionIconKey(basePlugin?.iconKey || manifest.iconKey) : 'local',
       tabName: viewName || basePlugin?.tabName || displayName,
       show: true,
       isPlugin: true,
@@ -877,9 +939,9 @@ const parseLocalPackageManifest = (
       hasUpdate: false,
       installedVersion: '',
       latestVersion: version,
-      installable: basePlugin?.installable === false ? false : true,
+      installable: packageSource === 'store' ? storeFlags.installable : basePlugin?.installable === false ? false : true,
       required: basePlugin?.required,
-      isPrivate: basePlugin?.isPrivate,
+      isPrivate: packageSource === 'store' ? storeFlags.isPrivate : basePlugin?.isPrivate,
       isDraggedOnly: packageSource === 'local',
       source: packageSource,
       lastUpdated: new Date().toISOString(),
@@ -887,7 +949,8 @@ const parseLocalPackageManifest = (
       readme,
       categories: categories.length ? categories : fallbackCategories,
       functions: functions.length ? functions : fallbackFunctions,
-      storePackagePath: packageSource === 'store' ? filePath : undefined
+      storePackagePath: packageSource === 'store' ? filePath : undefined,
+      subscriptionUrl: packageSource === 'store' ? storeFlags.subscriptionUrl || basePlugin?.subscriptionUrl : undefined
     }
   }
 }

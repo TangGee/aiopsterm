@@ -528,6 +528,7 @@ type TestExtensionPlugin = {
   source?: 'preinstalled' | 'store' | 'local'
   isPrivate?: boolean
   lastUpdated?: string
+  subscriptionUrl?: string
   size?: number
   readme?: string
   categories?: string[]
@@ -587,7 +588,10 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
     latestVersion: '',
     source: 'preinstalled',
     categories: ['Tools']
-  },
+  }
+]
+
+const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
   {
     pluginId: 'ops-runbook',
     name: 'Ops Runbook',
@@ -648,6 +652,7 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
     latestVersion: '2.0.0',
     installable: false,
     isPrivate: true,
+    subscriptionUrl: 'https://aiopsterm.local/extensions/private-automation-pack',
     source: 'store',
     lastUpdated: '2026-05-20',
     size: 4194304,
@@ -4795,6 +4800,7 @@ Object.assign(globalThis, {
   __resetDatabaseTableRowsMock: resetDatabaseTableRowsMock,
   __resetExtensionPluginStoreMock: resetExtensionPluginStoreMock,
   __setExtensionPluginStoreMock: setExtensionPluginStoreMock,
+  __loadExtensionPluginStoreFixtureMock: () => setExtensionPluginStoreMock([...defaultExtensionPluginCatalog, ...extensionPluginStoreFixtureCatalog]),
   __resetUserAccountStoreMock: resetUserAccountStoreMock,
   __resetSkillsStoreMock: resetSkillsStoreMock,
   __setUserAccountProfileMock: (patch: Partial<TestUserProfile>) => applyUserProfileMock(patch),
@@ -6610,11 +6616,18 @@ Object.defineProperty(window, 'aiops', {
           errorMessage: 'Plugin does not require a subscription.'
         }
       }
+      if (!plugin.subscriptionUrl) {
+        return {
+          ok: false,
+          errorCode: 'EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE',
+          errorMessage: 'Plugin subscription URL is not available.'
+        }
+      }
       return {
         ok: true,
         data: {
           pluginId: plugin.pluginId,
-          url: 'https://github.com/external-reference/External reference/discussions/1521',
+          url: plugin.subscriptionUrl,
           message: `${plugin.name} subscription entry opened by test backend.`
         }
       }

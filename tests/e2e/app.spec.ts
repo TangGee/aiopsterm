@@ -4,6 +4,7 @@ import { chmod, mkdir, rm, writeFile } from 'fs/promises'
 import type { AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
+import { deflateRawSync } from 'zlib'
 
 const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
   const userDataDir = path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
@@ -45,6 +46,111 @@ const createFakeKubectl = async () => {
   )
   await chmod(filePath, 0o755)
   return { dir, filePath }
+}
+
+const crcTable = new Uint32Array(256).map((_, value) => {
+  let crc = value
+  for (let index = 0; index < 8; index++) {
+    crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1
+  }
+  return crc >>> 0
+})
+
+const crc32 = (data: Buffer) => {
+  let crc = 0xffffffff
+  for (const byte of data) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8)
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+const createZipFixture = (entries: Array<{ name: string; content: string }>) => {
+  const localParts: Buffer[] = []
+  const centralParts: Buffer[] = []
+  let offset = 0
+
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8')
+    const content = Buffer.from(entry.content, 'utf8')
+    const compressedContent = deflateRawSync(content)
+    const checksum = crc32(content)
+
+    const localHeader = Buffer.alloc(30)
+    localHeader.writeUInt32LE(0x04034b50, 0)
+    localHeader.writeUInt16LE(20, 4)
+    localHeader.writeUInt16LE(0, 6)
+    localHeader.writeUInt16LE(8, 8)
+    localHeader.writeUInt16LE(0, 10)
+    localHeader.writeUInt16LE(0, 12)
+    localHeader.writeUInt32LE(checksum, 14)
+    localHeader.writeUInt32LE(compressedContent.length, 18)
+    localHeader.writeUInt32LE(content.length, 22)
+    localHeader.writeUInt16LE(name.length, 26)
+    localHeader.writeUInt16LE(0, 28)
+    localParts.push(localHeader, name, compressedContent)
+
+    const centralHeader = Buffer.alloc(46)
+    centralHeader.writeUInt32LE(0x02014b50, 0)
+    centralHeader.writeUInt16LE(20, 4)
+    centralHeader.writeUInt16LE(20, 6)
+    centralHeader.writeUInt16LE(0, 8)
+    centralHeader.writeUInt16LE(8, 10)
+    centralHeader.writeUInt16LE(0, 12)
+    centralHeader.writeUInt16LE(0, 14)
+    centralHeader.writeUInt32LE(checksum, 16)
+    centralHeader.writeUInt32LE(compressedContent.length, 20)
+    centralHeader.writeUInt32LE(content.length, 24)
+    centralHeader.writeUInt16LE(name.length, 28)
+    centralHeader.writeUInt16LE(0, 30)
+    centralHeader.writeUInt16LE(0, 32)
+    centralHeader.writeUInt16LE(0, 34)
+    centralHeader.writeUInt16LE(0, 36)
+    centralHeader.writeUInt32LE(0, 38)
+    centralHeader.writeUInt32LE(offset, 42)
+    centralParts.push(centralHeader, name)
+
+    offset += localHeader.length + name.length + compressedContent.length
+  }
+
+  const centralOffset = offset
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0)
+  const endHeader = Buffer.alloc(22)
+  endHeader.writeUInt32LE(0x06054b50, 0)
+  endHeader.writeUInt16LE(0, 4)
+  endHeader.writeUInt16LE(0, 6)
+  endHeader.writeUInt16LE(entries.length, 8)
+  endHeader.writeUInt16LE(entries.length, 10)
+  endHeader.writeUInt32LE(centralSize, 12)
+  endHeader.writeUInt32LE(centralOffset, 16)
+  endHeader.writeUInt16LE(0, 20)
+
+  return Buffer.concat([...localParts, ...centralParts, endHeader])
+}
+
+const createE2eExtensionStore = async () => {
+  const dir = path.join(os.tmpdir(), `aiopsterm-e2e-extension-store-${Date.now()}`)
+  await mkdir(dir, { recursive: true })
+  const manifest = {
+    id: 'ops-runbook',
+    displayName: 'Ops Runbook',
+    version: '1.3.0',
+    description: '本地维护流程和技能模板。',
+    main: 'main.js',
+    iconKey: 'runbook',
+    categories: ['Tools', 'Runbook'],
+    functions: [
+      { title: '巡检模板', desc: '生成磁盘、负载、服务状态的检查清单。' },
+      { title: '发布守卫', desc: '把发布前后验证步骤整理为可复用流程。' }
+    ],
+    contributes: { views: [{ id: 'opsRunbook', name: 'Ops Runbook' }] }
+  }
+  await writeFile(
+    path.join(dir, 'ops-runbook-1.3.0.external-reference'),
+    createZipFixture([
+      { name: 'plugin.json', content: JSON.stringify(manifest) },
+      { name: 'main.js', content: 'module.exports = {}' },
+      { name: 'README.md', content: '# Ops Runbook\n\nE2E store package.' }
+    ])
+  )
+  return { dir }
 }
 
 const startVoiceTranscriptionServer = async () => {
@@ -192,8 +298,12 @@ test('aiopsterm primary desktop flows', async () => {
   await writeFile(path.join(filesFixtureDir, 'e2e-visible.txt'), 'E2E visible local file\n', 'utf-8')
   await writeFile(path.join(filesFixtureDir, '.hidden-e2e.env'), 'AIOPSTERM_E2E=1\n', 'utf-8')
   const fakeKubectl = await createFakeKubectl()
+  const extensionStore = await createE2eExtensionStore()
   const voiceServer = await startVoiceTranscriptionServer()
-  const app = await launchApp('primary', { AIOPSTERM_KUBECTL_PATH: fakeKubectl.filePath })
+  const app = await launchApp('primary', {
+    AIOPSTERM_KUBECTL_PATH: fakeKubectl.filePath,
+    AIOPSTERM_EXTENSION_STORE_DIR: extensionStore.dir
+  })
 
   try {
     const page = await app.firstWindow()
@@ -958,6 +1068,7 @@ test('aiopsterm primary desktop flows', async () => {
     await voiceServer.close()
     await rm(filesFixtureDir, { recursive: true, force: true })
     await rm(fakeKubectl.dir, { recursive: true, force: true })
+    await rm(extensionStore.dir, { recursive: true, force: true })
   }
 })
 

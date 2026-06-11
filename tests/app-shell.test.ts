@@ -6070,6 +6070,15 @@ describe('AppShell', () => {
     expect(panel.text()).toContain('支持资产同步与资产直连')
     expect(panel.text()).toContain('Alias')
     expect(panel.text()).toContain('系统')
+    expect(panel.text()).not.toContain('Store')
+    expect(panel.text()).not.toContain('Private')
+    expect(panel.find('button[title="安装"]').exists()).toBe(false)
+    expect(panel.find('button[title="订阅"]').exists()).toBe(false)
+
+    ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
+    await store.refreshExtensionPlugins()
+    await panel.vm.$nextTick()
+
     expect(panel.text()).toContain('Store')
     expect(panel.text()).toContain('Private')
     expect(panel.find('button[title="安装"]').exists()).toBe(true)
@@ -6108,7 +6117,7 @@ describe('AppShell', () => {
       fileName: 'local-tools.external-reference',
       filePath: '/tmp/local-tools.external-reference',
       size: 4096,
-      existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'cloud-assets'])
+      existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'Alias', 'cloud-assets'])
     })
     expect(store.extensionInstallLoadingMap['local-local-tools']).toBe(true)
     expect(store.extensionInstallProgressMap['local-local-tools']).toMatchObject({ stage: 'installing', percent: 100 })

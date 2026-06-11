@@ -5625,6 +5625,7 @@ describe('workspace store', () => {
   it('manages External reference-style extension plugin state and alias validation', async () => {
     const store = useWorkspaceStore()
 
+    ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
     await store.refreshExtensionPlugins()
 
     const jumpserver = store.extensionPlugins.find((plugin) => plugin.pluginId === 'jumpserverSupport')
@@ -5722,6 +5723,7 @@ describe('workspace store', () => {
 
   it('does not fabricate extension plugin writes when bridges are unavailable or fail', async () => {
     const store = useWorkspaceStore()
+    ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
     await store.refreshExtensionPlugins()
     Object.assign(store.extensionPlugins.find((item) => item.pluginId === 'ops-runbook')!, {
       installed: true,
@@ -6018,6 +6020,7 @@ describe('workspace store', () => {
 
   it('fails closed on malformed successful extension and alias backend envelopes', async () => {
     const store = useWorkspaceStore()
+    ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
     await store.refreshExtensionPlugins()
     await store.refreshAliasCommands()
     vi.mocked(window.aiops.saveConfig).mockClear()
