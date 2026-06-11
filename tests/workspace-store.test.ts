@@ -7369,6 +7369,96 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate Kubernetes command output when backend returns empty successful envelopes', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
+
+    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'k8s-run-empty-agent-success',
+        command: 'kubectl get namespaces',
+        output: '',
+        terminalOutput: '',
+        success: true,
+        error: '',
+        durationMs: 1,
+        startedAt: '刚刚',
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        namespace: 'default',
+        source: 'agent'
+      }
+    })
+    const agentRunsBefore = store.k8sAgentRuns.map((run) => ({ ...run }))
+    await expect(store.refreshK8sAgentNamespaces()).resolves.toBeNull()
+    expect(store.k8sAgentRuns).toEqual(agentRunsBefore)
+    expect(store.k8sResourceOutput).toBe('选择 Kubernetes 资源后，可在这里查看 Describe、Logs 或 kubectl 执行结果。')
+    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+
+    await store.openK8sTerminal('k8s-1')
+    const terminal = store.k8sActiveTerminal
+    if (!terminal) throw new Error('Expected Kubernetes terminal to open.')
+    terminal.collectingAiOutput = true
+    const chatCountBefore = store.chatMessages.length
+    vi.mocked(window.aiops.writeKubernetesTerminal).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        id: terminal.id,
+        sessionId: terminal.sessionId,
+        bytes: new TextEncoder().encode('kubectl get events\n').byteLength,
+        command: 'kubectl get events',
+        output: '',
+        success: true,
+        error: '',
+        terminalOutput: '',
+        updatedAt: '刚刚'
+      }
+    })
+    await expect(store.sendK8sTerminalCommand('kubectl get events')).resolves.toBe('')
+    expect(store.k8sActiveTerminal?.collectingAiOutput).toBe(false)
+    expect(store.chatMessages).toHaveLength(chatCountBefore)
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned no output to send.')
+    expect(store.k8sActiveTerminal?.commandHistory[0]).toBe('kubectl get events')
+
+    vi.mocked(window.aiops.refreshKubernetesResources).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        runId: 'k8s-run-empty-resource-refresh',
+        refreshedClusterId: 'k8s-1',
+        refreshedKind: store.k8sResourceKind,
+        currentContext: 'prod/admin',
+        clusters: store.k8sClusters.map((cluster) => ({ ...cluster })),
+        contexts: store.k8sContexts.map((context) => ({ ...context })),
+        bastions: store.k8sBastions.map((bastion) => ({ ...bastion })),
+        namespaces: store.k8sNamespaces.map((namespace) => ({ ...namespace })),
+        resources: store.k8sResources.map((resource) => ({ ...resource })),
+        importContexts: store.k8sImportContexts.map((context) => ({ ...context })),
+        activeClusterId: store.k8sActiveClusterId,
+        selectedClusterId: store.k8sSelectedClusterId,
+        agentProxyConfig: { ...store.k8sProxyConfig },
+        command: 'kubectl get pods --all-namespaces',
+        output: '',
+        terminalOutput: '',
+        success: true,
+        error: '',
+        durationMs: 1,
+        startedAt: '刚刚',
+        clusterId: 'k8s-1',
+        contextName: 'prod/admin',
+        namespace: store.k8sResourceNamespace,
+        source: 'resource',
+        refreshedResources: 2,
+        refreshedNamespaces: 0,
+        message: 'Kubernetes resources refreshed'
+      }
+    })
+    await expect(store.refreshK8sResources()).resolves.toBeNull()
+    expect(store.k8sClusterNotice).toBe('Kubernetes resource refresh backend returned malformed result data.')
+    expect(store.k8sResourceOutput).toBe('选择 Kubernetes 资源后，可在这里查看 Describe、Logs 或 kubectl 执行结果。')
+  })
+
   it('rejects stale or request-mismatched Kubernetes backend results before mutating UI state', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()

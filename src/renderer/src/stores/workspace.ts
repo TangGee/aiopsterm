@@ -2396,6 +2396,9 @@ const isK8sBackendCommandForRequest = (
   expected: { command?: string; clusterId?: string; namespace?: string; source?: K8sBackendCommandData['source'] } = {}
 ): source is K8sBackendCommandData => {
   if (!isK8sBackendCommandData(source)) return false
+  const hasBackendOutput = source.output.trim() !== '' || source.error.trim() !== '' || source.terminalOutput.trim() !== ''
+  if (!hasBackendOutput) return false
+  if (source.terminalOutput.trim() && !normalizeK8sCommandText(source.terminalOutput).includes(normalizeK8sCommandText(source.command))) return false
   if (expected.command !== undefined) {
     const expectedCommand = normalizeK8sCommandText(expected.command)
     const actualCommand = normalizeK8sCommandText(source.command)
@@ -2405,6 +2408,11 @@ const isK8sBackendCommandForRequest = (
   if (expected.namespace !== undefined && source.namespace !== expected.namespace) return false
   if (expected.source !== undefined && source.source !== expected.source) return false
   return true
+}
+
+const k8sCommandDisplayOutput = (result: { command: string; output?: string; error?: string }) => {
+  const body = (result.output || '').trim() || (result.error || '').trim()
+  return body ? `${result.command}\n\n${body}` : result.command
 }
 
 const isK8sResourceActionPlanData = (
@@ -2471,10 +2479,15 @@ const isK8sBackendResourceRefreshData = (
   source: unknown,
   expected: { clusterId?: string; kind?: K8sResourceKind | 'all'; namespace?: string } = {}
 ): source is K8sBackendResourceRefreshData => {
-  if (!isK8sBackendCommandData(source) || !isK8sCatalogSnapshot(source) || !isRecord(source)) return false
+  if (
+    !isK8sBackendCommandForRequest(source, { clusterId: expected.clusterId, namespace: expected.namespace, source: 'resource' }) ||
+    !isK8sCatalogSnapshot(source) ||
+    !isRecord(source)
+  ) {
+    return false
+  }
   const record = source as Record<string, unknown>
   const valid =
-    source.source === 'resource' &&
     typeof record.refreshedClusterId === 'string' &&
     k8sRefreshKinds.includes(record.refreshedKind as K8sResourceKind | 'all') &&
     isNonNegativeFiniteNumber(record.refreshedResources) &&
@@ -2483,7 +2496,6 @@ const isK8sBackendResourceRefreshData = (
   if (!valid) return false
   if (expected.clusterId !== undefined && (source.clusterId !== expected.clusterId || record.refreshedClusterId !== expected.clusterId)) return false
   if (expected.kind !== undefined && record.refreshedKind !== expected.kind) return false
-  if (expected.namespace !== undefined && source.namespace !== expected.namespace) return false
   return true
 }
 
@@ -10883,17 +10895,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tab.updatedAt = result.data.updatedAt
     if (tab.collectingAiOutput) {
       tab.collectingAiOutput = false
-      const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)
-      const host: AiContextOption | undefined = cluster
-        ? {
-            id: `k8s-${cluster.id}`,
-            kind: 'hosts',
-            label: cluster.name,
-            detail: `${cluster.context_name} / ${tab.namespace}`
-          }
-        : undefined
-      void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput || 'Command executed successfully, no output returned'}\n\`\`\``, undefined, host ? [host] : undefined)
-      setK8sNotice(`${tab.name} 命令输出已发送到 AI`)
+      if (!terminalOutput.trim()) {
+        setK8sNotice('Kubernetes terminal backend returned no output to send.')
+      } else {
+        const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)
+        const host: AiContextOption | undefined = cluster
+          ? {
+              id: `k8s-${cluster.id}`,
+              kind: 'hosts',
+              label: cluster.name,
+              detail: `${cluster.context_name} / ${tab.namespace}`
+            }
+          : undefined
+        void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput}\n\`\`\``, undefined, host ? [host] : undefined)
+        setK8sNotice(`${tab.name} 命令输出已发送到 AI`)
+      }
     }
     return terminalOutput
   }
@@ -11034,7 +11050,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sAgentCommandDraft.value = text
     k8sAgentStatus.value = result.success ? 'ready' : 'error'
     k8sResourceOutputTitle.value = `Agent kubectl / ${cluster.name}`
-    k8sResourceOutput.value = `${text}\n\n${result.output || result.error || ''}`
+    k8sResourceOutput.value = k8sCommandDisplayOutput(result)
     setK8sNotice(result.success ? 'Kubernetes Agent 命令执行完成' : result.error || result.output || 'Kubernetes Agent 命令执行失败')
     return record
   }
@@ -11054,7 +11070,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     k8sAgentStatus.value = record.status === 'success' ? 'ready' : 'error'
     k8sResourceOutputTitle.value = 'Agent Test Connection'
-    k8sResourceOutput.value = `${record.command}\n\n${record.output || record.error || ''}`
+    k8sResourceOutput.value = k8sCommandDisplayOutput(record)
     window.setTimeout(() => {
       k8sAgentTesting.value = false
     }, 160)
@@ -11072,7 +11088,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!result) return null
     const record = addK8sAgentRun(result, cluster)
     k8sResourceOutputTitle.value = `Namespaces / ${cluster.name}`
-    k8sResourceOutput.value = `${record.command}\n\n${result.output || result.error || ''}`
+    k8sResourceOutput.value = k8sCommandDisplayOutput(result)
     setK8sNotice(result.success ? 'Kubernetes namespaces 已刷新' : result.error || 'Kubernetes namespaces 刷新失败')
     return record
   }
@@ -11138,9 +11154,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
       applyKubernetesCatalog(result.data)
       const record = addK8sAgentRun(result.data, cluster)
-      k8sResourceOutput.value = result.data.success
-        ? `${result.data.command}\n\n${result.data.output || ''}\n\n${result.data.message || `已刷新 ${result.data.refreshedResources} 条资源。`}`
-        : `${result.data.command}\n\n${result.data.output || result.data.error || ''}`
+      k8sResourceOutput.value = k8sCommandDisplayOutput(result.data)
       k8sResourceLoading.value = false
       setK8sNotice(result.data.success ? result.data.message || 'Kubernetes 资源已刷新' : result.data.error || result.data.message || 'Kubernetes 资源刷新失败')
       return record
@@ -11155,14 +11169,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const result = await executeK8sResourceAction(resourceId, 'describe')
     if (!result) return
     k8sResourceOutputTitle.value = result.title
-    k8sResourceOutput.value = `${result.command}\n\n${result.output || result.error || ''}`
+    k8sResourceOutput.value = k8sCommandDisplayOutput(result)
   }
 
   const showK8sPodLogs = async (resourceId: string) => {
     const result = await executeK8sResourceAction(resourceId, 'logs')
     if (!result) return
     k8sResourceOutputTitle.value = result.title
-    k8sResourceOutput.value = `${result.command}\n\n${result.output || result.error || ''}`
+    k8sResourceOutput.value = k8sCommandDisplayOutput(result)
   }
 
   const copyK8sResourceCommand = async (resourceId: string, action: K8sResourceAction = 'get') => {
