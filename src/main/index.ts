@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
@@ -195,6 +195,7 @@ import {
   logoutUserAccount,
   openUserLogin,
   prepareUserAvatarImage,
+  resolveUserAvatarAssetPath,
   resetUserPassword,
   revokeTrustedDevice,
   sendUserContactCode,
@@ -1125,6 +1126,19 @@ const handleDeepLinkUrl = (rawUrl: string) => {
 
 const findDeepLinkArg = (argv: string[]) => argv.find((arg) => typeof arg === 'string' && arg.startsWith(aiopstermProtocolPrefix))
 
+const userAvatarProtocolScheme = 'aiopsterm-user-avatar'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: userAvatarProtocolScheme,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true
+    }
+  }
+])
+
 const registerDeepLinkProtocol = () => {
   if (!app.isDefaultProtocolClient(aiopstermProtocolScheme)) {
     app.setAsDefaultProtocolClient(aiopstermProtocolScheme)
@@ -1133,6 +1147,20 @@ const registerDeepLinkProtocol = () => {
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 registerDeepLinkProtocol()
+
+const registerUserAvatarProtocol = () => {
+  protocol.handle(userAvatarProtocolScheme, async (request) => {
+    const assetPath = resolveUserAvatarAssetPath(request.url)
+    if (!assetPath) return new Response('Avatar not found', { status: 404 })
+    try {
+      const metadata = await stat(assetPath)
+      if (!metadata.isFile()) return new Response('Avatar not found', { status: 404 })
+      return net.fetch(pathToFileURL(assetPath).href)
+    } catch {
+      return new Response('Avatar not found', { status: 404 })
+    }
+  })
+}
 if (!gotSingleInstanceLock) {
   const deepLinkArg = findDeepLinkArg(process.argv)
   if (deepLinkArg) handleDeepLinkUrl(deepLinkArg)
@@ -3659,6 +3687,7 @@ const registerIpc = () => {
 }
 
 app.whenReady().then(async () => {
+  registerUserAvatarProtocol()
   registerIpc()
   await Promise.all([startSecurityConfigWatcher(), startKeywordHighlightConfigWatcher(), startMcpConfigWatcher(), startSkillsWatcher()])
   createWindow()

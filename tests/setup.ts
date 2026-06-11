@@ -401,6 +401,8 @@ const isValidUserEmailMock = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.tes
 
 const isValidUserMobileMock = (value: string) => /^1[3-9]\d{9}$/.test(value)
 
+const userAvatarAssetUrlPatternMock = /^aiopsterm-user-avatar:\/\/[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i
+
 const userCodeCooldownKeyMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string) =>
   [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
 
@@ -5331,6 +5333,7 @@ Object.defineProperty(window, 'aiops', {
       const filePath = trimUserTextMock(input.filePath)
       if (!filePath) return userErrorMock('USER_AVATAR_PATH_REQUIRED', '请选择头像图片')
       const name = filePath.split(/[/\\]/).pop() || 'avatar.png'
+      const assetFileName = `${createHash('sha256').update(filePath).digest('hex')}.png`
       return {
         ok: true as const,
         data: {
@@ -5339,6 +5342,8 @@ Object.defineProperty(window, 'aiops', {
           mimeType: 'image/png',
           size: 6,
           dataUrl: 'data:image/png;base64,avatar',
+          avatarImageUrl: `aiopsterm-user-avatar://${assetFileName}`,
+          assetFileName,
           message: '头像图片已读取'
         }
       }
@@ -5353,11 +5358,15 @@ Object.defineProperty(window, 'aiops', {
         if (validation) return userErrorMock('USER_PROFILE_INVALID', validation)
         const nextAvatarInitials = trimUserTextMock(input.avatarInitials).toUpperCase().slice(0, 3)
         const avatarChanged = input.avatarImageUrl !== undefined || input.avatarInitials !== undefined
+        const nextAvatarImageUrl = input.avatarImageUrl !== undefined ? trimUserTextMock(input.avatarImageUrl) : userProfileStoreMock.avatarImageUrl
+        if (input.avatarImageUrl !== undefined && nextAvatarImageUrl && !userAvatarAssetUrlPatternMock.test(nextAvatarImageUrl)) {
+          return userErrorMock('USER_AVATAR_ASSET_INVALID', '头像图片必须来自后端头像上传结果')
+        }
         applyUserProfileMock({
-          ...input,
           name: input.name !== undefined ? trimUserTextMock(input.name) : userProfileStoreMock.name,
           username: input.username !== undefined ? trimUserTextMock(input.username) : userProfileStoreMock.username,
           avatarInitials: nextAvatarInitials || userProfileStoreMock.avatarInitials,
+          avatarImageUrl: nextAvatarImageUrl,
           avatarUpdatedAt: avatarChanged ? userTimestampMock() : userProfileStoreMock.avatarUpdatedAt
         })
         return userSuccessMock(avatarChanged ? '头像更新成功' : '个人信息已保存')

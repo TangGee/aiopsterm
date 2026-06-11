@@ -15,6 +15,7 @@ type UserBackend = {
   sendUserLoginCode: (input: any) => any
   peekUserCodeForTests: (scope: 'login' | 'contact', kind: 'email' | 'mobile', target: string) => string
   prepareUserAvatarImage: (input: any) => Promise<any>
+  resolveUserAvatarAssetPath: (avatarImageUrl: string) => string
   updateUserProfile: (input: any) => any
   sendUserContactCode: (input: any) => any
   bindUserContact: (input: any) => any
@@ -253,12 +254,31 @@ describe('user account backend boundary', () => {
         name: 'avatar.png',
         mimeType: 'image/png',
         size: bytes.byteLength,
+        avatarImageUrl: expect.stringMatching(/^aiopsterm-user-avatar:\/\/[a-f0-9]{64}\.png$/),
+        assetFileName: expect.stringMatching(/^[a-f0-9]{64}\.png$/),
         message: '头像图片已读取'
       })
       expect(data.dataUrl).toBe(`data:image/png;base64,${bytes.toString('base64')}`)
+      expect(data.avatarImageUrl).toBe(`aiopsterm-user-avatar://${data.assetFileName}`)
+      await expect(readFile(backend.resolveUserAvatarAssetPath(data.avatarImageUrl))).resolves.toEqual(bytes)
+      expect(expectOkData(backend.updateUserProfile({ avatarImageUrl: data.avatarImageUrl })).profile.avatarImageUrl).toBe(data.avatarImageUrl)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('rejects renderer-fabricated avatar urls before profile mutation', () => {
+    expect(backend.updateUserProfile({ avatarImageUrl: 'data:image/png;base64,avatar' })).toEqual({
+      ok: false,
+      errorCode: 'USER_AVATAR_ASSET_INVALID',
+      errorMessage: '头像图片必须来自后端头像上传结果'
+    })
+    expect(backend.updateUserProfile({ avatarImageUrl: 'file:///tmp/avatar.png' })).toEqual({
+      ok: false,
+      errorCode: 'USER_AVATAR_ASSET_INVALID',
+      errorMessage: '头像图片必须来自后端头像上传结果'
+    })
+    expect(backend.getUserAccount().data?.profile.avatarImageUrl).toBe('')
   })
 
   it('rejects non-image avatar files before profile mutation', async () => {
@@ -477,7 +497,7 @@ describe('user account backend boundary', () => {
           name: 'Ops Owner',
           username: 'ops_owner',
           avatarInitials: 'OO',
-          avatarImageUrl: '',
+          avatarImageUrl: 'data:image/png;base64,stale-renderer-avatar',
           registrationType: 'personal',
           registrationCode: 9,
           authProvider: 'local',
@@ -528,6 +548,7 @@ describe('user account backend boundary', () => {
       name: 'Ops Owner',
       username: 'ops_owner',
       email: 'owner@example.local',
+      avatarImageUrl: '',
       subscription: 'pro',
       skippedLogin: false
     })

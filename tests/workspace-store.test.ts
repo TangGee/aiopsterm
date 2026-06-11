@@ -10474,11 +10474,17 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
         mimeType: 'text/plain',
         size: 6,
         dataUrl: 'data:text/plain;base64,avatar',
+        avatarImageUrl: 'aiopsterm-user-avatar://bad-avatar.png',
+        assetFileName: 'bad-avatar.png',
         message: 'malformed avatar'
       }
     } as any)
     await expect(store.prepareUserAvatarImage('/tmp/avatar.txt')).resolves.toBeNull()
     expect(store.userNotice).toBe('头像后端返回了无效结果')
+    assertUserSnapshotUnchanged()
+
+    await expect(store.updateUserProfile({ avatarImageUrl: 'data:image/png;base64,avatar' })).resolves.toBe(false)
+    expect(store.userNotice).toBe('头像图片必须来自后端头像上传结果')
     assertUserSnapshotUnchanged()
   })
 

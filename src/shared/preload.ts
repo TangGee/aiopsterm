@@ -550,9 +550,7 @@ export type AiopsUserLoginInput =
   | { method: 'email'; email: string; code: string }
   | { method: 'mobile'; mobile: string; code: string }
 
-export type AiopsUserProfileUpdateInput = Partial<
-  Pick<AiopsUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl' | 'avatarUpdatedAt'>
->
+export type AiopsUserProfileUpdateInput = Partial<Pick<AiopsUserProfile, 'name' | 'username' | 'avatarInitials' | 'avatarImageUrl'>>
 
 export type AiopsUserAvatarPrepareInput = {
   filePath: string
@@ -564,6 +562,8 @@ export type AiopsUserAvatarPrepareResult = AiopsMutationResult<{
   mimeType: string
   size: number
   dataUrl: string
+  avatarImageUrl: string
+  assetFileName: string
   message: string
 }>
 

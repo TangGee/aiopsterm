@@ -557,7 +557,7 @@
           </button>
           <button
             class="settings-button primary"
-            :disabled="!avatarPreview"
+            :disabled="!avatarPreparedImageUrl && !avatarCleared"
             @click="saveAvatar"
           >
             保存
@@ -701,6 +701,8 @@ const confirmPasswordDraft = ref('')
 const contactDraft = ref('')
 const contactCodeDraft = ref('')
 const avatarPreview = ref('')
+const avatarPreparedImageUrl = ref('')
+const avatarCleared = ref(false)
 const avatarZoom = ref(1)
 const avatarOffset = reactive({ x: 0, y: 0 })
 const avatarDrag = reactive({ active: false, startX: 0, startY: 0 })
@@ -838,6 +840,10 @@ const saveContact = async () => {
 
 const openAvatarModal = () => {
   resetAvatarPreview()
+  if (workspace.userProfile.avatarImageUrl) {
+    avatarPreview.value = workspace.userProfile.avatarImageUrl
+    avatarPreparedImageUrl.value = workspace.userProfile.avatarImageUrl
+  }
   avatarModalOpen.value = true
 }
 
@@ -856,6 +862,8 @@ const chooseAvatarImage = async () => {
     const prepared = await workspace.prepareUserAvatarImage(result.filePaths[0])
     if (!prepared) return
     avatarPreview.value = prepared.dataUrl
+    avatarPreparedImageUrl.value = prepared.avatarImageUrl
+    avatarCleared.value = false
     avatarZoom.value = 1
     avatarOffset.x = 0
     avatarOffset.y = 0
@@ -866,11 +874,19 @@ const chooseAvatarImage = async () => {
 }
 
 const clearAvatarImage = () => {
-  resetAvatarPreview()
+  avatarPreview.value = ''
+  avatarPreparedImageUrl.value = ''
+  avatarCleared.value = true
+  avatarZoom.value = 1
+  avatarOffset.x = 0
+  avatarOffset.y = 0
+  avatarDrag.active = false
 }
 
 const resetAvatarPreview = () => {
   avatarPreview.value = ''
+  avatarPreparedImageUrl.value = ''
+  avatarCleared.value = false
   avatarZoom.value = 1
   avatarOffset.x = 0
   avatarOffset.y = 0
@@ -902,12 +918,12 @@ const startAvatarDrag = (event: MouseEvent) => {
 }
 
 const saveAvatar = async () => {
-  if (!avatarPreview.value) {
+  if (!avatarPreparedImageUrl.value && !avatarCleared.value) {
     workspace.setUserNotice('请先上传头像图片')
     return
   }
   const saved = await workspace.updateUserProfile({
-    avatarImageUrl: avatarPreview.value
+    avatarImageUrl: avatarCleared.value ? '' : avatarPreparedImageUrl.value
   })
   if (saved) cancelAvatarModal()
 }

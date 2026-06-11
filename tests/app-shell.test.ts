@@ -2310,7 +2310,7 @@ describe('AppShell', () => {
       expect(store.userNotice).toBe('头像图片已读取')
       await panel.find('.avatar-settings-modal footer .primary').trigger('click')
       await flushPromises()
-      expect(store.userProfile.avatarImageUrl).toBe('data:image/png;base64,avatar')
+      expect(store.userProfile.avatarImageUrl).toMatch(/^aiopsterm-user-avatar:\/\/[a-f0-9]{64}\.png$/)
       expect(store.userNotice).toBe('头像更新成功')
 
       await panel.find('.user-info-footer .danger').trigger('click')
@@ -2409,6 +2409,8 @@ describe('AppShell', () => {
           mimeType: 'text/plain',
           size: 6,
           dataUrl: 'data:text/plain;base64,avatar',
+          avatarImageUrl: 'aiopsterm-user-avatar://bad-avatar.png',
+          assetFileName: 'bad-avatar.png',
           message: 'malformed avatar'
         }
       } as any)

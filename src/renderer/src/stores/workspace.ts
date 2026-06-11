@@ -1038,6 +1038,7 @@ const userSubscriptions: AiopsUserProfile['subscription'][] = ['free', 'pro', 'u
 const userLastLoginMethods: AiopsUserProfile['lastLoginMethod'][] = ['account', 'email', 'mobile', 'skip', 'external']
 const userCodeKinds: UserCodeData['kind'][] = ['email', 'mobile']
 const userAvatarMimeTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
+const userAvatarAssetUrlPattern = /^aiopsterm-user-avatar:\/\/[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i
 
 const isUserProfileSnapshot = (source: unknown): source is AiopsUserProfile =>
   isRecord(source) &&
@@ -1126,6 +1127,11 @@ const isUserAvatarPrepareData = (source: unknown): source is UserAvatarPrepareDa
   source.size > 0 &&
   typeof source.dataUrl === 'string' &&
   /^data:image\/[a-z0-9.+-]+;base64,/i.test(source.dataUrl) &&
+  typeof source.avatarImageUrl === 'string' &&
+  userAvatarAssetUrlPattern.test(source.avatarImageUrl) &&
+  typeof source.assetFileName === 'string' &&
+  /^[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i.test(source.assetFileName) &&
+  source.avatarImageUrl === `aiopsterm-user-avatar://${source.assetFileName}` &&
   typeof source.message === 'string' &&
   source.message.trim() !== ''
 
@@ -7120,7 +7126,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const updateUserProfile = async (
-    patch: Partial<Pick<AiopsUserProfile, 'name' | 'username' | 'email' | 'mobile' | 'avatarInitials' | 'avatarImageUrl' | 'avatarUpdatedAt'>>
+    patch: Partial<Pick<AiopsUserProfile, 'name' | 'username' | 'avatarInitials' | 'avatarImageUrl'>>
   ) => {
     const updateUserProfileBridge = window.aiops?.updateUserProfile
     if (typeof updateUserProfileBridge !== 'function') {

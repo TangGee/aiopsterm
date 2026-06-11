@@ -17,10 +17,10 @@ import type {
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
-import { readFile, stat } from 'fs/promises'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
+import { copyFile, readFile, stat } from 'fs/promises'
 import { hostname, networkInterfaces, userInfo } from 'os'
-import { basename, dirname, extname, isAbsolute, resolve } from 'path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'path'
 
 const defaultUserProfile: AiopsUserProfile = {
   uid: 2001007,
@@ -247,6 +247,12 @@ const normalizeSubscription = (value: unknown, fallback: AiopsUserProfile['subsc
 const normalizeRegistrationType = (value: unknown, fallback: AiopsUserProfile['registrationType']) =>
   value === 'enterprise' || value === 'personal' ? value : fallback
 
+const normalizePersistedAvatarImageUrl = (value: unknown, fallback: string) => {
+  const avatarImageUrl = persistedRawString(value, fallback)
+  if (!avatarImageUrl) return ''
+  return avatarAssetExists(avatarImageUrl) ? avatarImageUrl : fallback
+}
+
 const normalizePersistedProfile = (value: unknown): AiopsUserProfile => {
   const base = createInitialUserProfile()
   const record = isRecord(value) ? value : {}
@@ -259,7 +265,7 @@ const normalizePersistedProfile = (value: unknown): AiopsUserProfile => {
     name,
     username: persistedString(record.username, base.username),
     avatarInitials,
-    avatarImageUrl: persistedRawString(record.avatarImageUrl, base.avatarImageUrl),
+    avatarImageUrl: normalizePersistedAvatarImageUrl(record.avatarImageUrl, base.avatarImageUrl),
     registrationType: normalizeRegistrationType(record.registrationType, base.registrationType),
     registrationCode: normalizeRegistrationCode(record.registrationCode, base.registrationCode),
     authProvider: normalizeAuthProvider(record.authProvider, base.authProvider),
@@ -417,6 +423,8 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 const isValidMobile = (value: string) => /^1[3-9]\d{9}$/.test(value)
 
 const maxAvatarBytes = 2 * 1024 * 1024
+const avatarAssetScheme = 'aiopsterm-user-avatar'
+const avatarAssetUrlPrefix = `${avatarAssetScheme}://`
 
 const userCodeCooldownKey = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) =>
   [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
@@ -525,6 +533,44 @@ const avatarMimeByExtension: Record<string, string> = {
   '.webp': 'image/webp',
   '.bmp': 'image/bmp',
   '.svg': 'image/svg+xml'
+}
+
+const avatarExtensionByMime: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/bmp': '.bmp',
+  'image/svg+xml': '.svg'
+}
+
+const safeAvatarAssetName = (value: string) => /^[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i.test(value)
+
+const avatarAssetDirectory = () => resolve(dirname(runtimeConfig.stateFilePath), 'avatars')
+
+const avatarAssetUrl = (fileName: string) => `${avatarAssetUrlPrefix}${fileName}`
+
+const avatarAssetNameFromUrl = (value: string) => {
+  const trimmed = trimText(value)
+  if (!trimmed.startsWith(avatarAssetUrlPrefix)) return ''
+  const fileName = trimmed.slice(avatarAssetUrlPrefix.length).replace(/^\/+|\/+$/g, '')
+  return safeAvatarAssetName(fileName) ? fileName : ''
+}
+
+export const resolveUserAvatarAssetPath = (avatarImageUrl: string) => {
+  const fileName = avatarAssetNameFromUrl(avatarImageUrl)
+  if (!fileName) return ''
+  return resolve(avatarAssetDirectory(), fileName)
+}
+
+const avatarAssetExists = (avatarImageUrl: string) => {
+  const assetPath = resolveUserAvatarAssetPath(avatarImageUrl)
+  if (!assetPath) return false
+  try {
+    return statSync(assetPath).isFile()
+  } catch {
+    return false
+  }
 }
 
 const avatarMimeFromHeader = (buffer: Buffer, filePath: string) => {
@@ -736,6 +782,12 @@ export const prepareUserAvatarImage = async (input: AiopsUserAvatarPrepareInput)
     const content = await readFile(filePath)
     const mimeType = avatarMimeFromHeader(content, filePath)
     if (!mimeType) return errorResult('USER_AVATAR_INVALID_IMAGE', '请选择图片文件')
+    const digest = createHash('sha256').update(content).digest('hex')
+    const assetFileName = `${digest}${avatarExtensionByMime[mimeType] || extname(filePath).toLowerCase()}`
+    if (!safeAvatarAssetName(assetFileName)) return errorResult('USER_AVATAR_INVALID_IMAGE', '请选择图片文件')
+    const assetPath = join(avatarAssetDirectory(), assetFileName)
+    mkdirSync(dirname(assetPath), { recursive: true })
+    if (resolve(filePath) !== assetPath) await copyFile(filePath, assetPath)
     return {
       ok: true,
       data: {
@@ -744,6 +796,8 @@ export const prepareUserAvatarImage = async (input: AiopsUserAvatarPrepareInput)
         mimeType,
         size: content.byteLength,
         dataUrl: `data:${mimeType};base64,${content.toString('base64')}`,
+        avatarImageUrl: avatarAssetUrl(assetFileName),
+        assetFileName,
         message: '头像图片已读取'
       }
     }
@@ -767,11 +821,15 @@ export const updateUserProfile = (input: AiopsUserProfileUpdateInput): AiopsUser
   if (validation) return errorResult('USER_PROFILE_INVALID', validation)
   const nextAvatarInitials = trimText(input.avatarInitials).toUpperCase().slice(0, 3)
   const avatarChanged = input.avatarImageUrl !== undefined || input.avatarInitials !== undefined
+  const nextAvatarImageUrl = input.avatarImageUrl !== undefined ? trimText(input.avatarImageUrl) : profileStore.avatarImageUrl
+  if (input.avatarImageUrl !== undefined && nextAvatarImageUrl && !avatarAssetExists(nextAvatarImageUrl)) {
+    return errorResult('USER_AVATAR_ASSET_INVALID', '头像图片必须来自后端头像上传结果')
+  }
   applyProfile({
-    ...input,
     name: input.name !== undefined ? trimText(input.name) : profileStore.name,
     username: input.username !== undefined ? trimText(input.username) : profileStore.username,
     avatarInitials: nextAvatarInitials || profileStore.avatarInitials,
+    avatarImageUrl: nextAvatarImageUrl,
     avatarUpdatedAt: avatarChanged ? timestamp() : profileStore.avatarUpdatedAt
   })
   return successMutation(avatarChanged ? '头像更新成功' : '个人信息已保存')
