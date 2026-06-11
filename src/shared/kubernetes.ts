@@ -365,8 +365,6 @@ const defaultAgentProxyConfig: KubernetesAgentProxyConfig = {
   updatedAt: ''
 }
 
-const developmentSeedBastionIds = new Set(defaultBastions.map((bastion) => bastion.uuid))
-const developmentSeedContextNames = new Set(defaultContexts.map((context) => context.name))
 const kubernetesConnectionStatuses = new Set<KubernetesConnectionStatus>(['connected', 'connecting', 'disconnected', 'error'])
 const kubernetesClusterSources = new Set<KubernetesClusterRecord['source_type']>(['local', 'jumpserver'])
 const kubernetesResourceKinds = new Set<KubernetesResourceKind>(['pods', 'deployments', 'services', 'nodes'])
@@ -423,6 +421,20 @@ const cloneAgentProxyConfig = (config: KubernetesAgentProxyConfig): KubernetesAg
 const agentProxyConfigPath = () => join(runtimeConfig.stateDir, 'agent-proxy.json')
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!isRecord(value)) return value
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, unknown>>((result, key) => {
+      const nextValue = stableValue(value[key])
+      if (nextValue !== undefined) result[key] = nextValue
+      return result
+    }, {})
+}
+
+const stableJson = (value: unknown) => JSON.stringify(stableValue(value))
 
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T): T =>
   typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback
@@ -583,7 +595,6 @@ const normalizePersistedCluster = (value: unknown): KubernetesClusterRecord | nu
   const contextName = persistedString(value.context_name)
   const serverUrl = persistedString(value.server_url)
   if (!id || !name || !contextName || !serverUrl) return null
-  if (!shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(id)) return null
   const sourceType =
     typeof value.source_type === 'string' && kubernetesClusterSources.has(value.source_type as KubernetesClusterRecord['source_type'])
       ? (value.source_type as KubernetesClusterRecord['source_type'])
@@ -661,6 +672,56 @@ const uniqueBy = <T>(items: T[], keyOf: (item: T) => string) => {
   })
 }
 
+const createNormalizedSeedMaps = () => {
+  const seedClusterIds = new Set(defaultClusters.map((cluster) => cluster.id))
+  return {
+    contexts: new Map(defaultContexts.map((context) => [context.name, normalizePersistedContext(context)!])),
+    importContexts: new Map(
+      defaultImportContexts.map((context) => [context.name, normalizePersistedImportContext(context)!])
+    ),
+    bastions: new Map(defaultBastions.map((bastion) => [bastion.uuid, normalizePersistedBastion(bastion)!])),
+    clusters: new Map(defaultClusters.map((cluster) => [cluster.id, normalizePersistedCluster(cluster)!])),
+    namespaces: new Map(defaultNamespaces.map((namespace) => [namespace.id, normalizePersistedNamespace(namespace, seedClusterIds)!])),
+    resources: new Map(defaultResources.map((resource) => [resource.id, normalizePersistedResource(resource, seedClusterIds)!]))
+  }
+}
+
+const isSeedEqualById = <T extends { id: string }>(item: T, seedItems: Map<string, T>) => {
+  const seed = seedItems.get(item.id)
+  return Boolean(seed && stableJson(item) === stableJson(seed))
+}
+
+const isSeedEqualByName = <T extends { name: string }>(item: T, seedItems: Map<string, T>) => {
+  const seed = seedItems.get(item.name)
+  return Boolean(seed && stableJson(item) === stableJson(seed))
+}
+
+const isSeedEqualByUuid = <T extends { uuid: string }>(item: T, seedItems: Map<string, T>) => {
+  const seed = seedItems.get(item.uuid)
+  return Boolean(seed && stableJson(item) === stableJson(seed))
+}
+
+const stripLegacySeedKubernetesState = (state: KubernetesPersistedCatalogState): KubernetesPersistedCatalogState => {
+  if (shouldUseKubernetesSeedData()) return state
+  const seeds = createNormalizedSeedMaps()
+  const clusters = state.clusters.filter((cluster) => !isSeedEqualById(cluster, seeds.clusters))
+  const keptClusterIds = new Set(clusters.map((cluster) => cluster.id))
+  const keptContextNames = new Set(clusters.map((cluster) => cluster.context_name))
+  const keptBastionUuids = new Set(clusters.map((cluster) => cluster.bastion_uuid).filter((uuid): uuid is string => Boolean(uuid)))
+  const contexts = state.contexts.filter((context) => keptContextNames.has(context.name) || !isSeedEqualByName(context, seeds.contexts))
+  const importContexts = state.importContexts.filter((context) => keptContextNames.has(context.name) || !isSeedEqualByName(context, seeds.importContexts))
+  const bastions = state.bastions.filter((bastion) => keptBastionUuids.has(bastion.uuid) || !isSeedEqualByUuid(bastion, seeds.bastions))
+  return {
+    version: 1,
+    contexts,
+    clusters,
+    bastions,
+    namespaces: state.namespaces.filter((namespace) => keptClusterIds.has(namespace.clusterId) && !isSeedEqualById(namespace, seeds.namespaces)),
+    resources: state.resources.filter((resource) => keptClusterIds.has(resource.clusterId) && !isSeedEqualById(resource, seeds.resources)),
+    importContexts
+  }
+}
+
 const normalizePersistedKubernetesState = (value: unknown): KubernetesPersistedCatalogState | null => {
   if (!isRecord(value)) return null
   const clusters = Array.isArray(value.clusters)
@@ -672,23 +733,17 @@ const normalizePersistedKubernetesState = (value: unknown): KubernetesPersistedC
   const knownClusterIds = new Set(clusters.map((cluster) => cluster.id))
   const contexts = Array.isArray(value.contexts)
     ? uniqueBy(
-        value.contexts
-          .map(normalizePersistedContext)
-          .filter((context): context is KubernetesContextInfo => Boolean(context))
-          .filter((context) => shouldUseKubernetesSeedData() || !developmentSeedContextNames.has(context.name)),
+        value.contexts.map(normalizePersistedContext).filter((context): context is KubernetesContextInfo => Boolean(context)),
         (context) => context.name
       )
     : []
   const bastions = Array.isArray(value.bastions)
     ? uniqueBy(
-        value.bastions
-          .map(normalizePersistedBastion)
-          .filter((bastion): bastion is KubernetesBastionGroup => Boolean(bastion))
-          .filter((bastion) => shouldUseKubernetesSeedData() || !developmentSeedBastionIds.has(bastion.uuid)),
+        value.bastions.map(normalizePersistedBastion).filter((bastion): bastion is KubernetesBastionGroup => Boolean(bastion)),
         (bastion) => bastion.uuid
       )
     : []
-  return {
+  const state: KubernetesPersistedCatalogState = {
     version: 1,
     contexts,
     clusters,
@@ -711,14 +766,12 @@ const normalizePersistedKubernetesState = (value: unknown): KubernetesPersistedC
       : [],
     importContexts: Array.isArray(value.importContexts)
       ? uniqueBy(
-          value.importContexts
-            .map(normalizePersistedImportContext)
-            .filter((context): context is KubernetesImportContextInfo => Boolean(context))
-            .filter((context) => shouldUseKubernetesSeedData() || !developmentSeedContextNames.has(context.name)),
+          value.importContexts.map(normalizePersistedImportContext).filter((context): context is KubernetesImportContextInfo => Boolean(context)),
           (context) => context.name
         )
       : []
   }
+  return stripLegacySeedKubernetesState(state)
 }
 
 const applyKubernetesPersistedState = (state: KubernetesPersistedCatalogState) => {
@@ -766,6 +819,7 @@ const ensureKubernetesCatalogStateLoaded = () => {
       const state = normalizePersistedKubernetesState(parsed)
       if (state) {
         applyKubernetesPersistedState(state)
+        if (!shouldUseKubernetesSeedData()) persistKubernetesCatalogState()
         return
       }
     } catch {
@@ -1573,7 +1627,7 @@ const createUnsupportedKubernetesSeedCommandResult = (command: string): Kubernet
 }
 
 const canRunLocalKubectl = (cluster: KubernetesClusterRecord) =>
-  !developmentSeedClusterIds.has(cluster.id) &&
+  !(shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(cluster.id)) &&
   cluster.source_type === 'local' &&
   cluster.auth_type === 'kubeconfig' &&
   Boolean(cluster.kubeconfig_content?.trim() || cluster.kubeconfig_path?.trim())
@@ -1582,7 +1636,7 @@ const nonRunnableKubernetesReason = (cluster: KubernetesClusterRecord) => {
   if (cluster.source_type === 'jumpserver' || cluster.auth_type === 'jumpserver') {
     return 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
   }
-  if (developmentSeedClusterIds.has(cluster.id)) return ''
+  if (shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(cluster.id)) return ''
   if (!cluster.kubeconfig_content?.trim() && !cluster.kubeconfig_path?.trim()) {
     return 'Kubeconfig path or content is required before executing kubectl.'
   }

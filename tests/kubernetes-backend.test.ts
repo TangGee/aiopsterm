@@ -634,6 +634,264 @@ describe('kubernetes backend boundary', () => {
     expect(catalog.data?.clusters.some((cluster) => cluster.id === 'k8s-1' || cluster.id === 'k8s-2' || cluster.id === 'k8s-3')).toBe(false)
   })
 
+  it('strips unchanged legacy seed Kubernetes catalog rows in non-seed runtime state', async () => {
+    const statePath = join(tempDirs[0], 'catalog.json')
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          version: 1,
+          contexts: [
+            {
+              name: 'prod/admin',
+              cluster: 'prod-cluster',
+              namespace: 'default',
+              server: 'https://prod.k8s.local:6443',
+              isActive: true
+            }
+          ],
+          clusters: [
+            {
+              id: 'k8s-1',
+              name: 'prod-cluster',
+              kubeconfig_path: '~/.kube/config',
+              kubeconfig_content: null,
+              context_name: 'prod/admin',
+              server_url: 'https://prod.k8s.local:6443',
+              auth_type: 'kubeconfig',
+              is_active: 1,
+              connection_status: 'connected',
+              auto_connect: 1,
+              default_namespace: 'default',
+              created_at: '2026-05-28 10:20',
+              updated_at: '2026-06-03 09:30',
+              source_type: 'local',
+              bastion_uuid: null,
+              bastion_asset_address: null,
+              bastion_asset_name: null,
+              bastion_asset_id_last: null
+            }
+          ],
+          bastions: [{ uuid: 'org-1', label: 'jumpserver-org', ip: 'bastion.internal' }],
+          namespaces: [{ id: 'k8s-ns-prod-default', clusterId: 'k8s-1', name: 'default', status: 'Active', age: '92d' }],
+          resources: [
+            {
+              id: 'k8s-pod-api-1',
+              clusterId: 'k8s-1',
+              kind: 'pods',
+              name: 'api-gateway-6d8c9bb7f6-l6j2m',
+              namespace: 'default',
+              status: 'Running',
+              ready: '2/2',
+              age: '3d',
+              detail: 'REST ingress workload serving public API traffic.',
+              node: 'prod-node-01',
+              image: 'registry.internal/api-gateway:2.8.4',
+              restarts: 0
+            }
+          ],
+          importContexts: [{ name: 'prod/admin', cluster: 'prod-cluster', server: 'https://prod.k8s.local:6443', namespace: 'default' }]
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    )
+
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    __resetKubernetesCatalogForTests()
+    const catalog = await listKubernetesCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data).toMatchObject({
+      contexts: [],
+      clusters: [],
+      bastions: [],
+      namespaces: [],
+      resources: [],
+      importContexts: []
+    })
+    expect(JSON.parse(await readFile(statePath, 'utf-8'))).toMatchObject({
+      contexts: [],
+      clusters: [],
+      bastions: [],
+      namespaces: [],
+      resources: [],
+      importContexts: []
+    })
+  })
+
+  it('preserves user-edited seed-derived Kubernetes rows without falling back to seed command output', async () => {
+    const statePath = join(tempDirs[0], 'catalog.json')
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          version: 1,
+          contexts: [
+            {
+              name: 'prod/admin',
+              cluster: 'prod-cluster',
+              namespace: 'default',
+              server: 'https://prod.k8s.local:6443',
+              isActive: true
+            },
+            {
+              name: 'staging/devops',
+              cluster: 'staging-cluster',
+              namespace: 'staging',
+              server: 'https://staging.k8s.local:6443',
+              isActive: false
+            }
+          ],
+          clusters: [
+            {
+              id: 'k8s-1',
+              name: 'prod-owned',
+              kubeconfig_path: null,
+              kubeconfig_content: null,
+              context_name: 'prod/admin',
+              server_url: 'https://prod.k8s.local:6443',
+              auth_type: 'kubeconfig',
+              is_active: 1,
+              connection_status: 'connected',
+              auto_connect: 1,
+              default_namespace: 'ops',
+              created_at: '2026-05-28 10:20',
+              updated_at: '2026-06-10 09:30',
+              source_type: 'local',
+              bastion_uuid: null,
+              bastion_asset_address: null,
+              bastion_asset_name: null,
+              bastion_asset_id_last: null
+            },
+            {
+              id: 'k8s-2',
+              name: 'staging-cluster',
+              kubeconfig_path: '~/.kube/staging',
+              kubeconfig_content: null,
+              context_name: 'staging/devops',
+              server_url: 'https://staging.k8s.local:6443',
+              auth_type: 'kubeconfig',
+              is_active: 0,
+              connection_status: 'disconnected',
+              auto_connect: 0,
+              default_namespace: 'staging',
+              created_at: '2026-05-28 11:20',
+              updated_at: '2026-06-01 12:10',
+              source_type: 'local',
+              bastion_uuid: null,
+              bastion_asset_address: null,
+              bastion_asset_name: null,
+              bastion_asset_id_last: null
+            },
+            {
+              id: 'k8s-3',
+              name: 'jumpserver-owned',
+              kubeconfig_path: null,
+              kubeconfig_content: null,
+              context_name: 'jumpserver/prod',
+              server_url: '172.16.20.14:6443',
+              auth_type: 'jumpserver',
+              is_active: 0,
+              connection_status: 'error',
+              auto_connect: 0,
+              default_namespace: 'ops',
+              created_at: '2026-05-30 15:00',
+              updated_at: '2026-06-10 18:10',
+              source_type: 'jumpserver',
+              bastion_uuid: 'org-1',
+              bastion_asset_address: '172.16.20.14',
+              bastion_asset_name: 'jumpserver-prod',
+              bastion_asset_id_last: 1014
+            }
+          ],
+          bastions: [
+            { uuid: 'org-1', label: 'jumpserver-org', ip: 'bastion.internal' },
+            { uuid: 'org-prod', label: 'prod-bastion', ip: '10.24.8.12' }
+          ],
+          namespaces: [
+            { id: 'k8s-ns-prod-default', clusterId: 'k8s-1', name: 'default', status: 'Active', age: '92d' },
+            { id: 'k8s-ns-prod-ops', clusterId: 'k8s-1', name: 'ops-owned', status: 'Active', age: '1d' }
+          ],
+          resources: [
+            {
+              id: 'k8s-pod-api-1',
+              clusterId: 'k8s-1',
+              kind: 'pods',
+              name: 'api-gateway-6d8c9bb7f6-l6j2m',
+              namespace: 'default',
+              status: 'Investigating',
+              ready: '2/2',
+              age: '3d',
+              detail: 'User-edited workload note.',
+              node: 'prod-node-01',
+              image: 'registry.internal/api-gateway:2.8.4',
+              restarts: 1
+            },
+            {
+              id: 'k8s-pod-worker-1',
+              clusterId: 'k8s-1',
+              kind: 'pods',
+              name: 'billing-worker-7f9d6f9dd9-rx8mm',
+              namespace: 'ops',
+              status: 'CrashLoopBackOff',
+              ready: '0/1',
+              age: '18h',
+              detail: 'Background billing worker with repeated startup failures.',
+              node: 'prod-node-03',
+              image: 'registry.internal/billing-worker:1.15.2',
+              restarts: 12
+            }
+          ],
+          importContexts: [
+            { name: 'prod/admin', cluster: 'prod-cluster', server: 'https://prod.k8s.local:6443', namespace: 'default' },
+            { name: 'staging/devops', cluster: 'staging-cluster', server: 'https://staging.k8s.local:6443', namespace: 'staging' }
+          ]
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    )
+
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], useSeedData: false })
+    __resetKubernetesCatalogForTests()
+    const catalog = await listKubernetesCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.clusters.map((cluster) => cluster.id)).toEqual(['k8s-1', 'k8s-3'])
+    expect(catalog.data?.clusters[0]).toMatchObject({
+      id: 'k8s-1',
+      name: 'prod-owned',
+      connection_status: 'disconnected',
+      default_namespace: 'ops'
+    })
+    expect(catalog.data?.contexts.map((context) => context.name)).toEqual(['prod/admin'])
+    expect(catalog.data?.bastions).toEqual([expect.objectContaining({ uuid: 'org-1', label: 'jumpserver-org' })])
+    expect(catalog.data?.importContexts.map((context) => context.name)).toEqual(['prod/admin'])
+    expect(catalog.data?.namespaces).toEqual([expect.objectContaining({ id: 'k8s-ns-prod-ops', name: 'ops-owned' })])
+    expect(catalog.data?.resources).toEqual([
+      expect.objectContaining({
+        id: 'k8s-pod-api-1',
+        status: 'Investigating',
+        detail: 'User-edited workload note.',
+        restarts: 1
+      })
+    ])
+    expect(JSON.parse(await readFile(statePath, 'utf-8')).clusters.map((cluster: { id: string }) => cluster.id)).toEqual(['k8s-1', 'k8s-3'])
+
+    const command = await executeKubernetesCommand({
+      command: 'kubectl get pods -A',
+      clusterId: 'k8s-1',
+      namespace: 'default'
+    })
+    expect(command.ok).toBe(true)
+    expect(command.data?.success).toBe(false)
+    expect(command.data?.error).toContain('Kubeconfig path or content is required')
+    expect(command.data?.output).not.toContain('api-gateway-6d8c9bb7f6-l6j2m')
+  })
+
   it('fails closed for non-seed JumpServer Kubernetes sync without fabricating clusters', async () => {
     const statePath = join(tempDirs[0], 'catalog.json')
     const persistedCatalog = {
