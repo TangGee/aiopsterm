@@ -24,6 +24,10 @@ type SettingsPreferencesSeedInput = {
   customInstructions?: unknown
 }
 
+type SettingsPreferencesRuntimeConfig = {
+  useSeedData?: boolean
+}
+
 type SqliteDatabase = {
   exec(sql: string): void
   prepare(sql: string): {
@@ -45,6 +49,13 @@ const defaultRules: UserRuleConfig[] = [
   { id: 'rule-2', content: '不要自动执行删除、重启、扩容、写文件或修改配置类命令。', enabled: true }
 ]
 
+const defaultSettingsPreferencesSeedMode = () =>
+  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED || '').trim() === '1'
+
+let runtimeConfig: Required<SettingsPreferencesRuntimeConfig> = {
+  useSeedData: defaultSettingsPreferencesSeedMode()
+}
+
 const shortcutDefaultsById = new Map(defaultShortcuts.map((shortcut) => [shortcut.id, shortcut]))
 const shortcutModifierTokens = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'cmd', 'command', 'meta'])
 const platformKeys = ['mac', 'windows', 'linux'] as const
@@ -57,13 +68,25 @@ const clonePreferences = (preferences: SettingsPreferencesSnapshot): SettingsPre
 })
 const defaultPreferences = (): SettingsPreferencesSnapshot => ({
   shortcuts: defaultShortcuts.map(cloneShortcut),
-  rules: defaultRules.map(cloneRule)
+  rules: runtimeConfig.useSeedData ? defaultRules.map(cloneRule) : []
 })
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const normalizeText = (value: unknown) => String(value || '').trim()
 const getShortcutParts = (shortcut: string) => shortcut.split('+').map((part) => part.trim()).filter(Boolean)
 const platformKey = () => (process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux')
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!isRecord(value)) return value
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, unknown>>((result, key) => {
+      const nextValue = stableValue(value[key])
+      if (nextValue !== undefined) result[key] = nextValue
+      return result
+    }, {})
+}
+const stableJson = (value: unknown) => JSON.stringify(stableValue(value))
 
 const isValidShortcutForAction = (actionId: string, shortcut: string) => {
   const parts = getShortcutParts(shortcut)
@@ -110,7 +133,7 @@ export const normalizeSettingsShortcuts = (source?: unknown): ShortcutUserConfig
 }
 
 export const normalizeSettingsRules = (source?: unknown, customInstructions?: unknown): UserRuleConfig[] => {
-  const rawRules = Array.isArray(source) ? source : defaultRules
+  const rawRules = Array.isArray(source) ? source : runtimeConfig.useSeedData ? defaultRules : []
   const seenIds = new Set<string>()
   const rules: UserRuleConfig[] = []
 
@@ -146,9 +169,19 @@ export const normalizeSettingsRules = (source?: unknown, customInstructions?: un
   return rules
 }
 
+const defaultRuleById = new Map(defaultRules.map((rule) => [rule.id, rule]))
+
+const stripLegacySeedSettingsRules = (rules: UserRuleConfig[]) => {
+  if (runtimeConfig.useSeedData) return rules
+  return rules.filter((rule) => {
+    const seed = defaultRuleById.get(rule.id)
+    return !seed || stableJson(rule) !== stableJson(seed)
+  })
+}
+
 export const normalizeSettingsPreferences = (source?: SettingsPreferencesSeedInput): SettingsPreferencesSnapshot => ({
   shortcuts: normalizeSettingsShortcuts(source?.shortcuts),
-  rules: normalizeSettingsRules(source?.rules, source?.customInstructions)
+  rules: stripLegacySeedSettingsRules(normalizeSettingsRules(source?.rules, source?.customInstructions))
 })
 
 class FallbackSettingsPreferencesStore {
@@ -207,6 +240,13 @@ class SqliteSettingsPreferencesStore {
 }
 
 let settingsPreferencesStore: FallbackSettingsPreferencesStore | SqliteSettingsPreferencesStore | null = null
+
+export const configureSettingsPreferencesBackendRuntime = (config: SettingsPreferencesRuntimeConfig = {}) => {
+  runtimeConfig = {
+    useSeedData: config.useSeedData ?? defaultSettingsPreferencesSeedMode()
+  }
+  settingsPreferencesStore = null
+}
 
 const createStore = () => {
   try {

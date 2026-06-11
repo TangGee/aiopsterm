@@ -74,6 +74,73 @@ describe('settings preferences backend boundary', () => {
     ])
   })
 
+  it('does not expose development seed rules in non-seed runtime defaults', async () => {
+    const backend = await loadBackend()
+    backend.configureSettingsPreferencesBackendRuntime({ useSeedData: false })
+
+    const result = backend.getSettingsPreferences()
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.shortcuts).toEqual([
+      { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
+      { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
+      { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
+      { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
+    ])
+    expect(result.data?.rules).toEqual([])
+  })
+
+  it('strips unchanged legacy seed rules in non-seed runtime while preserving user edits', async () => {
+    const backend = await loadBackend()
+    backend.configureSettingsPreferencesBackendRuntime({ useSeedData: true })
+    expect(backend.getSettingsPreferences().data?.rules.map((rule: { id: string }) => rule.id)).toEqual(['rule-1', 'rule-2'])
+
+    backend.configureSettingsPreferencesBackendRuntime({ useSeedData: false })
+    let restored = backend.getSettingsPreferences()
+
+    expect(restored.ok).toBe(true)
+    expect(restored.data?.rules).toEqual([])
+    expect(storeState.get('aiopsterm-settings-preferences')?.preferences).toMatchObject({
+      rules: []
+    })
+
+    storeState.set('aiopsterm-settings-preferences', {
+      preferences: {
+        shortcuts: [
+          { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
+          { id: 'toggleAi', action: '显示/隐藏 AI 侧边栏', shortcut: 'Ctrl+Shift+A' },
+          { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
+          { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
+        ],
+        rules: [
+          { id: 'rule-1', content: '执行生产变更前必须先给出只读检查命令、影响面和回滚点。', enabled: true },
+          { id: 'rule-2', content: '不要自动执行删除、重启、扩容、写文件或修改配置类命令。', enabled: true }
+        ]
+      }
+    })
+
+    backend.configureSettingsPreferencesBackendRuntime({ useSeedData: false })
+    restored = backend.getSettingsPreferences()
+
+    expect(restored.ok).toBe(true)
+    expect(restored.data?.rules).toEqual([
+      {
+        id: 'rule-1',
+        content: '执行生产变更前必须先给出只读检查命令、影响面和回滚点。',
+        enabled: true
+      }
+    ])
+    expect(storeState.get('aiopsterm-settings-preferences')?.preferences).toMatchObject({
+      rules: [
+        {
+          id: 'rule-1',
+          content: '执行生产变更前必须先给出只读检查命令、影响面和回滚点。',
+          enabled: true
+        }
+      ]
+    })
+  })
+
   it('migrates External reference-shaped flat shortcuts and legacy custom instructions behind the backend boundary', async () => {
     const backend = await loadBackend()
     const result = backend.getSettingsPreferences({
