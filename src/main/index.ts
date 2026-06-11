@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
@@ -94,7 +94,9 @@ import { exportDatabaseRows } from './backend/databaseExport'
 import {
   cancelExtensionInstall,
   configureExtensionBackendRuntime,
+  downloadExtensionPackage,
   installExtensionPackage,
+  installExtensionPluginFromUrl,
   installExtensionPlugin,
   listExtensionPlugins,
   openExtensionSubscription,
@@ -266,8 +268,10 @@ import type {
   DatabaseTableMutationPlanInput,
   DatabaseTableQueryInput,
   ExtensionInstallProgress,
+  ExtensionPackageDownloadInput,
   ExtensionPackageInstallInput,
   ExtensionPluginOperationInput,
+  ExtensionPluginUrlInstallInput,
   ExtensionSubscriptionInput,
   FileContentOptions,
   FileEntryMutation,
@@ -1291,7 +1295,10 @@ configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('us
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
 configureSshTunnelBackendRuntime({ getConfig })
-configureExtensionBackendRuntime({ extensionRootDir: join(app.getPath('userData'), 'extensions') })
+configureExtensionBackendRuntime({
+  extensionRootDir: join(app.getPath('userData'), 'extensions'),
+  fetch: (url, init) => net.fetch(url, init)
+})
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
 configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
 configureAiTodoBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'ai-todos.json') })
@@ -3793,6 +3800,11 @@ const registerIpc = () => {
   ipcMain.handle('extensions:install-package', (event, input: ExtensionPackageInstallInput) => {
     const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
     return installExtensionPackage(input, emit)
+  })
+  ipcMain.handle('extensions:download-package', (_event, input: ExtensionPackageDownloadInput) => downloadExtensionPackage(input))
+  ipcMain.handle('extensions:install-plugin-from-url', (event, input: ExtensionPluginUrlInstallInput) => {
+    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    return installExtensionPluginFromUrl(input, emit)
   })
   ipcMain.handle('extensions:uninstall-plugin', (_event, input: ExtensionPluginOperationInput) => uninstallExtensionPlugin(input))
   ipcMain.handle('extensions:open-subscription', (_event, input: ExtensionSubscriptionInput) =>

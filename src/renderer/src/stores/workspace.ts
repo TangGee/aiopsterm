@@ -9384,7 +9384,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     categories: plugin.categories ? [...plugin.categories] : undefined,
     functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
     guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
-    connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
+    connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
+    packageUrl: plugin.packageUrl || undefined,
+    packageSha256: plugin.packageSha256 || undefined
   })
 
   const applyExtensionPluginFromBackend = (plugin: ExtensionPluginRuntimeConfig) => {
@@ -9394,7 +9396,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       categories: plugin.categories ? [...plugin.categories] : undefined,
       functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
       guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
-      connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
+      connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
+      packageUrl: plugin.packageUrl || undefined,
+      packageSha256: plugin.packageSha256 || undefined
     }
     const index = extensionPlugins.value.findIndex((item) => item.pluginId === nextPlugin.pluginId)
     if (nextPlugin.show === false && nextPlugin.source === 'local') {
@@ -9432,7 +9436,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         categories: plugin.categories ? [...plugin.categories] : undefined,
         functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
         guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
-        connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined
+        connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
+        packageUrl: plugin.packageUrl || undefined,
+        packageSha256: plugin.packageSha256 || undefined
       }))
       ensureSelectedExtensionVisible()
       return true

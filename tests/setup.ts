@@ -528,6 +528,10 @@ type TestExtensionPlugin = {
   source?: 'preinstalled' | 'store' | 'local'
   isPrivate?: boolean
   lastUpdated?: string
+  storePackagePath?: string
+  packagePath?: string
+  packageUrl?: string
+  packageSha256?: string
   subscriptionUrl?: string
   size?: number
   readme?: string
@@ -622,9 +626,11 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     latestVersion: '0.9.1',
     installable: true,
     source: 'store',
-    lastUpdated: '2026-05-28',
-    size: 2310144,
-    readme: 'Cloud Assets 需要来自插件仓库或本地拖入的真实 .external-reference 包。未配置真实包时，后端不会模拟安装成功。',
+  lastUpdated: '2026-05-28',
+  size: 2310144,
+  packageUrl: 'https://aiopsterm.local/extensions/cloud-assets-0.9.1.external-reference',
+  packageSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  readme: 'Cloud Assets 需要来自插件仓库或本地拖入的真实 .external-reference 包。未配置真实包时，后端不会模拟安装成功。',
     categories: ['Cloud', 'Assets'],
     functions: [
       { title: '云资产同步', desc: '按账号和地域拉取云主机列表。' },
@@ -6689,6 +6695,40 @@ Object.defineProperty(window, 'aiops', {
       }
       const plugin = createPackagePluginMock(input)
       return finishExtensionOperationMock('package', plugin)
+    }),
+    downloadExtensionPackage: vi.fn(async (input: { url: string }) => {
+      if (!/^https?:\/\//i.test(input.url || '')) {
+        return { ok: false, errorCode: 'EXTENSION_PACKAGE_DOWNLOAD_URL_INVALID', errorMessage: 'Plugin package download URL must be http or https.' }
+      }
+      return { ok: true, data: { url: input.url, bytes: 0, data: [] } }
+    }),
+    installExtensionPluginFromUrl: vi.fn(async (input: { pluginId: string; version?: string; url: string; sha256?: string }) => {
+      if (!/^https?:\/\//i.test(input.url || '')) {
+        return { ok: false, errorCode: 'EXTENSION_PACKAGE_DOWNLOAD_URL_INVALID', errorMessage: 'Plugin package download URL must be http or https.' }
+      }
+      const existing = extensionPluginStoreMock.find((plugin) => plugin.pluginId === input.pluginId)
+      const plugin = cloneTestExtensionPlugin(
+        existing || {
+          pluginId: input.pluginId,
+          name: input.pluginId,
+          description: 'Remote extension package.',
+          iconKey: 'local',
+          tabName: input.pluginId,
+          show: true,
+          isPlugin: true,
+          installed: false,
+          hasUpdate: false,
+          installedVersion: '',
+          latestVersion: input.version || 'latest',
+          installable: true,
+          source: 'store',
+          categories: ['Store']
+        }
+      )
+      plugin.latestVersion = input.version || plugin.latestVersion || 'latest'
+      plugin.packageUrl = input.url
+      plugin.packageSha256 = input.sha256
+      return finishExtensionOperationMock(plugin.installed && plugin.hasUpdate ? 'update' : 'install', plugin)
     }),
     uninstallExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => {
       const plugin = cloneTestExtensionPlugin(input.plugin)

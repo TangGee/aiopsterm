@@ -1,4 +1,5 @@
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
+import { createHash } from 'crypto'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { deflateRawSync } from 'zlib'
@@ -21,6 +22,8 @@ type ExtensionPlugin = {
   installedAt?: string
   packagePath?: string
   storePackagePath?: string
+  packageUrl?: string
+  packageSha256?: string
   subscriptionUrl?: string
   readme?: string
   size?: number
@@ -49,9 +52,17 @@ let installExtensionPackage: (
 let uninstallExtensionPlugin: (input: { plugin: ExtensionPlugin }) => Promise<any>
 let listExtensionPlugins: () => Promise<any>
 let resetExtensionPluginCatalogForTests: () => void
-let configureExtensionBackendRuntime: (config?: { extensionRootDir?: string; storePackageDir?: string }) => void
+let configureExtensionBackendRuntime: (config?: {
+  extensionRootDir?: string
+  storePackageDir?: string
+  storeCatalogUrl?: string
+  remotePackageCacheDir?: string
+  fetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<any>
+}) => void
 let cancelExtensionInstall: (pluginId: string) => any
 let openExtensionSubscription: (input: { plugin: ExtensionPlugin }, openExternal?: (url: string) => Promise<void> | void) => Promise<any>
+let downloadExtensionPackage: (input: { url: string }) => Promise<any>
+let installExtensionPluginFromUrl: (input: { pluginId: string; version?: string; url: string; sha256?: string }, emit?: (progress: ExtensionProgress) => void, options?: { stepDelayMs?: number }) => Promise<any>
 
 const basePlugin = (patch: Partial<ExtensionPlugin> = {}): ExtensionPlugin => ({
   pluginId: 'cloud-assets',
@@ -147,6 +158,38 @@ const createZipFixture = (entries: Array<{ name: string; content: string }>) => 
   return Buffer.concat([...localParts, ...centralParts, endHeader])
 }
 
+const sha256Hex = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex')
+
+const fetchResponse = (body: Buffer | string, options: { status?: number; chunkSize?: number } = {}) => {
+  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body, 'utf8')
+  const status = options.status ?? 200
+  const chunkSize = options.chunkSize
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name: string) => (name.toLowerCase() === 'content-length' ? String(buffer.byteLength) : null)
+    },
+    body: chunkSize
+      ? {
+          getReader: () => {
+            let offset = 0
+            return {
+              read: async () => {
+                if (offset >= buffer.byteLength) return { done: true }
+                const value = buffer.subarray(offset, Math.min(buffer.byteLength, offset + chunkSize))
+                offset += value.byteLength
+                return { done: false, value }
+              }
+            }
+          }
+        }
+      : null,
+    arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    text: async () => buffer.toString('utf8')
+  }
+}
+
 const createLocalPackage = async (
   patch: Record<string, unknown> = {},
   options: { includeManifest?: boolean; includeMain?: boolean; readme?: string } = {}
@@ -188,6 +231,8 @@ beforeAll(async () => {
   configureExtensionBackendRuntime = backend.configureExtensionBackendRuntime as typeof configureExtensionBackendRuntime
   cancelExtensionInstall = backend.cancelExtensionInstall as typeof cancelExtensionInstall
   openExtensionSubscription = backend.openExtensionSubscription as typeof openExtensionSubscription
+  downloadExtensionPackage = backend.downloadExtensionPackage as typeof downloadExtensionPackage
+  installExtensionPluginFromUrl = backend.installExtensionPluginFromUrl as typeof installExtensionPluginFromUrl
 })
 
 describe('extension plugin backend boundary', () => {
@@ -294,6 +339,68 @@ describe('extension plugin backend boundary', () => {
     }
   })
 
+  it('discovers remote store catalog rows from a backend-owned manifest URL', async () => {
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageBuffer = createZipFixture([
+      {
+        name: 'plugin.json',
+        content: JSON.stringify({
+          id: 'cloud-assets',
+          displayName: 'Cloud Assets',
+          version: '0.9.1',
+          description: 'Remote catalog package.',
+          main: 'main.js',
+          iconKey: 'cloud',
+          categories: ['Cloud', 'Remote'],
+          functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }]
+        })
+      },
+      { name: 'main.js', content: 'module.exports = {}' }
+    ])
+    const packageSha256 = sha256Hex(packageBuffer)
+    const fetchCalls: string[] = []
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      storeCatalogUrl: 'https://extensions.aiopsterm.test/catalog.json',
+      fetch: async (url: string) => {
+        fetchCalls.push(url)
+        return fetchResponse(
+          JSON.stringify({
+            plugins: [
+              {
+                id: 'cloud-assets',
+                displayName: 'Cloud Assets',
+                version: '0.9.1',
+                description: 'Remote catalog package.',
+                iconKey: 'cloud',
+                packageUrl,
+                packageSha256,
+                categories: ['Cloud', 'Remote'],
+                functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }]
+              }
+            ]
+          })
+        ) as any
+      }
+    })
+
+    const catalog = await listExtensionPlugins()
+
+    expect(catalog.ok).toBe(true)
+    expect(fetchCalls).toEqual(['https://extensions.aiopsterm.test/catalog.json'])
+    expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toMatchObject({
+      pluginId: 'cloud-assets',
+      name: 'Cloud Assets',
+      source: 'store',
+      installed: false,
+      latestVersion: '0.9.1',
+      packageUrl,
+      packageSha256,
+      categories: ['Cloud', 'Remote'],
+      functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }]
+    })
+  })
+
   it('installs a store plugin from a configured real package', async () => {
     const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     const progress: ExtensionProgress[] = []
@@ -365,6 +472,165 @@ describe('extension plugin backend boundary', () => {
     } finally {
       await rm(storePackageDir, { recursive: true, force: true })
     }
+  })
+
+  it('downloads, verifies and installs a remote store plugin package', async () => {
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageBuffer = createZipFixture([
+      {
+        name: 'plugin.json',
+        content: JSON.stringify({
+          id: 'cloud-assets',
+          displayName: 'Cloud Assets',
+          version: '0.9.1',
+          description: 'Remote package from catalog.',
+          main: 'main.js',
+          iconKey: 'cloud',
+          categories: ['Cloud', 'Remote'],
+          functions: [{ title: 'Remote sync', desc: 'Sync cloud hosts from a remote package.' }]
+        })
+      },
+      { name: 'main.js', content: 'module.exports = {}' },
+      { name: 'README.md', content: '# Cloud Assets\n\nRemote package readme.' }
+    ])
+    const packageSha256 = sha256Hex(packageBuffer)
+    const progress: ExtensionProgress[] = []
+    const fetchCalls: string[] = []
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      fetch: async (url: string) => {
+        fetchCalls.push(url)
+        return fetchResponse(packageBuffer, { chunkSize: 48 }) as any
+      }
+    })
+
+    const result = await installExtensionPlugin(
+      {
+        plugin: basePlugin({
+          packageUrl,
+          packageSha256
+        })
+      },
+      (event) => progress.push(event),
+      { stepDelayMs: 0 }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(fetchCalls).toEqual([packageUrl])
+    expect(result.data.plugin).toMatchObject({
+      pluginId: 'cloud-assets',
+      source: 'store',
+      installed: true,
+      installedVersion: '0.9.1',
+      packageUrl,
+      packageSha256,
+      packagePath: expect.stringContaining(join('cloud-assets', '0.9.1')),
+      storePackagePath: expect.stringContaining(join('cache', 'cloud-assets', 'cloud-assets-0.9.1.external-reference')),
+      readme: expect.stringContaining('Remote package readme.'),
+      categories: ['Cloud', 'Remote'],
+      functions: [{ title: 'Remote sync', desc: 'Sync cloud hosts from a remote package.' }]
+    })
+    expect(progress.map((event) => event.stage)).toEqual(expect.arrayContaining(['downloading', 'verifying', 'installing', 'done']))
+    expect(progress.some((event) => event.stage === 'downloading' && event.percent > 0)).toBe(true)
+    await access(join(result.data.plugin.packagePath, 'plugin.json'))
+    await access(join(result.data.plugin.storePackagePath))
+    const registry = JSON.parse(await readFile(join(extensionRootDir, 'registry.json'), 'utf8')) as { plugins: ExtensionPlugin[] }
+    expect(registry.plugins[0]).toMatchObject({
+      pluginId: 'cloud-assets',
+      packageUrl,
+      packageSha256
+    })
+  })
+
+  it('rejects remote store packages with a mismatched checksum before installing', async () => {
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageBuffer = createZipFixture([
+      {
+        name: 'plugin.json',
+        content: JSON.stringify({
+          id: 'cloud-assets',
+          displayName: 'Cloud Assets',
+          version: '0.9.1',
+          main: 'main.js'
+        })
+      },
+      { name: 'main.js', content: 'module.exports = {}' }
+    ])
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      fetch: async () => fetchResponse(packageBuffer) as any
+    })
+
+    const result = await installExtensionPlugin(
+      {
+        plugin: basePlugin({
+          packageUrl,
+          packageSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        })
+      },
+      undefined,
+      { stepDelayMs: 0 }
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_STORE_PACKAGE_CHECKSUM_MISMATCH',
+      errorMessage: 'Plugin package checksum mismatch.'
+    })
+    await expect(stat(join(extensionRootDir, 'registry.json'))).rejects.toThrow()
+  })
+
+  it('supports External reference-style explicit URL download and install APIs', async () => {
+    const packageUrl = 'https://extensions.aiopsterm.test/direct-runbook-1.0.0.external-reference'
+    const packageBuffer = createZipFixture([
+      {
+        name: 'plugin.json',
+        content: JSON.stringify({
+          id: 'direct-runbook',
+          displayName: 'Direct Runbook',
+          version: '1.0.0',
+          main: 'main.js',
+          categories: ['Tools']
+        })
+      },
+      { name: 'main.js', content: 'module.exports = {}' }
+    ])
+    const packageSha256 = sha256Hex(packageBuffer)
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      fetch: async () => fetchResponse(packageBuffer) as any
+    })
+
+    const downloadResult = await downloadExtensionPackage({ url: packageUrl })
+    expect(downloadResult).toMatchObject({
+      ok: true,
+      data: {
+        url: packageUrl,
+        bytes: packageBuffer.byteLength
+      }
+    })
+    expect(Buffer.from(downloadResult.data.data)).toEqual(packageBuffer)
+
+    const installResult = await installExtensionPluginFromUrl(
+      {
+        pluginId: 'direct-runbook',
+        version: '1.0.0',
+        url: packageUrl,
+        sha256: packageSha256
+      },
+      undefined,
+      { stepDelayMs: 0 }
+    )
+
+    expect(installResult.ok).toBe(true)
+    expect(installResult.data.plugin).toMatchObject({
+      pluginId: 'direct-runbook',
+      installed: true,
+      installedVersion: '1.0.0',
+      packageUrl,
+      packageSha256,
+      source: 'store'
+    })
   })
 
   it('rejects a store package whose manifest id does not match the catalog plugin', async () => {
@@ -728,6 +994,49 @@ describe('extension plugin backend boundary', () => {
     } finally {
       await rm(storePackageDir, { recursive: true, force: true })
     }
+  })
+
+  it('aborts an active remote package download when installation is cancelled', async () => {
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const progress: ExtensionProgress[] = []
+    let aborted = false
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      fetch: async (_url: string, init?: { signal?: AbortSignal }) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          arrayBuffer: () => new Promise<ArrayBuffer>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              aborted = true
+              reject(new Error('aborted by test'))
+            })
+          })
+        }) as any
+    })
+
+    const pending = installExtensionPlugin(
+      {
+        plugin: basePlugin({
+          packageUrl
+        })
+      },
+      (event) => progress.push(event),
+      { stepDelayMs: 0 }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    const cancelResult = cancelExtensionInstall('cloud-assets')
+    const result = await pending
+
+    expect(cancelResult.ok).toBe(true)
+    expect(aborted).toBe(true)
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_PLUGIN_OPERATION_CANCELLED',
+      errorMessage: 'Plugin operation cancelled.'
+    })
+    expect(progress.at(-1)).toMatchObject({ pluginId: 'cloud-assets', stage: 'cancelled', percent: 0 })
   })
 
   it('opens the private plugin subscription entry behind the backend boundary', async () => {

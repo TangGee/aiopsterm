@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, type Dirent } from 'fs'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { inflateRawSync } from 'zlib'
@@ -12,7 +13,10 @@ import type {
   ExtensionPluginRuntimeConfig,
   ExtensionPluginCancelResult,
   ExtensionSubscriptionInput,
-  ExtensionSubscriptionResult
+  ExtensionSubscriptionResult,
+  ExtensionPackageDownloadInput,
+  ExtensionPackageDownloadResult,
+  ExtensionPluginUrlInstallInput
 } from '@shared/preload'
 
 export const EXTENSION_INSTALL_STEP_DELAY_MS = 120
@@ -38,20 +42,48 @@ type LocalExtensionPackageManifest = {
   private?: unknown
   isPrivate?: unknown
   subscriptionUrl?: unknown
+  packageUrl?: unknown
+  downloadUrl?: unknown
+  url?: unknown
+  sha256?: unknown
+  packageSha256?: unknown
   store?: {
     installable?: unknown
     private?: unknown
     isPrivate?: unknown
     subscriptionUrl?: unknown
+    packageUrl?: unknown
+    downloadUrl?: unknown
+    url?: unknown
+    sha256?: unknown
+    packageSha256?: unknown
   }
   contributes?: {
     views?: unknown
   }
 }
 
+type RemoteExtensionCatalogPluginManifest = LocalExtensionPackageManifest & {
+  fileName?: unknown
+  size?: unknown
+  lastUpdated?: unknown
+  categories?: unknown
+}
+
+type RemoteExtensionCatalogManifest = {
+  plugins?: unknown
+}
+
 type LocalExtensionPackageConfig = {
   plugin: ExtensionPluginRuntimeConfig
   entries: LocalZipEntry[]
+}
+
+type ParsedExtensionPackageInput = {
+  manifest: LocalExtensionPackageManifest
+  entries: LocalZipEntry[]
+  filePath: string
+  packageSize: number
 }
 
 type LocalExtensionPackageParseOptions = {
@@ -69,12 +101,37 @@ type LocalZipEntry = {
 type ExtensionBackendRuntimeConfig = {
   extensionRootDir?: string
   storePackageDir?: string
+  storeCatalogUrl?: string
+  remotePackageCacheDir?: string
+  fetch?: ExtensionFetch
 }
 
 type ActiveExtensionOperation = {
   pluginId: string
   cancelled: boolean
+  abortController?: AbortController
 }
+
+type ExtensionFetchResponse = {
+  ok: boolean
+  status: number
+  headers?: {
+    get(name: string): string | null
+  }
+  body?: {
+    getReader?: () => {
+      read: () => Promise<{ done?: boolean; value?: Uint8Array }>
+    }
+  } | null
+  arrayBuffer: () => Promise<ArrayBuffer>
+  text?: () => Promise<string>
+}
+
+type ExtensionFetch = (url: string, init?: { signal?: AbortSignal }) => Promise<ExtensionFetchResponse>
+
+type StorePackageInput =
+  | { kind: 'local'; input: ExtensionPackageInstallInput }
+  | { kind: 'remote'; plugin: ExtensionPluginRuntimeConfig; url: string; sha256?: string }
 
 const activeOperations = new Map<string, ActiveExtensionOperation>()
 
@@ -88,9 +145,25 @@ const defaultStorePackageDir = () => {
   return envRoot ? (isAbsolute(envRoot) ? envRoot : resolve(envRoot)) : ''
 }
 
+const defaultStoreCatalogUrl = () => String(process.env.AIOPSTERM_EXTENSION_STORE_CATALOG_URL || '').trim()
+
+const defaultRemotePackageCacheDir = () => {
+  const envRoot = String(process.env.AIOPSTERM_EXTENSION_PACKAGE_CACHE_DIR || '').trim()
+  return envRoot ? (isAbsolute(envRoot) ? envRoot : resolve(envRoot)) : join(defaultExtensionRootDir(), 'cache')
+}
+
+const defaultExtensionFetch: ExtensionFetch = async (url, init) => {
+  if (typeof fetch !== 'function') throw new Error('Fetch is not available in this runtime.')
+  const response = await fetch(url, init)
+  return response as ExtensionFetchResponse
+}
+
 let runtimeConfig: Required<ExtensionBackendRuntimeConfig> = {
   extensionRootDir: defaultExtensionRootDir(),
-  storePackageDir: defaultStorePackageDir()
+  storePackageDir: defaultStorePackageDir(),
+  storeCatalogUrl: defaultStoreCatalogUrl(),
+  remotePackageCacheDir: defaultRemotePackageCacheDir(),
+  fetch: defaultExtensionFetch
 }
 
 const builtinExtensionCatalog: ExtensionPluginRuntimeConfig[] = [
@@ -187,6 +260,8 @@ const clonePlugin = (plugin: ExtensionPluginRuntimeConfig): ExtensionPluginRunti
   guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
   connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
   storePackagePath: trimText(plugin.storePackagePath) || undefined,
+  packageUrl: trimText(plugin.packageUrl) || undefined,
+  packageSha256: trimText(plugin.packageSha256) || undefined,
   subscriptionUrl: trimText(plugin.subscriptionUrl) || undefined
 })
 
@@ -206,6 +281,8 @@ const resolveOperationPlugin = (plugin: ExtensionPluginRuntimeConfig) => {
   if (!catalogPlugin) return incomingPlugin
   const resolvedPlugin = clonePlugin(catalogPlugin)
   if (!resolvedPlugin.storePackagePath && incomingPlugin.storePackagePath) resolvedPlugin.storePackagePath = incomingPlugin.storePackagePath
+  if (!resolvedPlugin.packageUrl && incomingPlugin.packageUrl) resolvedPlugin.packageUrl = incomingPlugin.packageUrl
+  if (!resolvedPlugin.packageSha256 && incomingPlugin.packageSha256) resolvedPlugin.packageSha256 = incomingPlugin.packageSha256
   return resolvedPlugin
 }
 
@@ -229,6 +306,9 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
       source === 'store'
         ? trimText(catalogPlugin?.latestVersion) || trimText(record.latestVersion) || installedVersion
         : trimText(record.latestVersion) || installedVersion
+    const storePackagePath = trimText(catalogPlugin?.storePackagePath) || trimText(record.storePackagePath) || undefined
+    const packageUrl = trimText(catalogPlugin?.packageUrl) || trimText(record.packageUrl) || undefined
+    const packageSha256 = trimText(catalogPlugin?.packageSha256) || trimText(record.packageSha256) || undefined
     plugins.push({
       pluginId,
       name,
@@ -247,7 +327,9 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
       lastUpdated: trimText(record.lastUpdated) || trimText(record.installedAt),
       installedAt: trimText(record.installedAt),
       packagePath,
-      storePackagePath: trimText(record.storePackagePath) || undefined,
+      storePackagePath,
+      packageUrl,
+      packageSha256,
       subscriptionUrl: trimText(record.subscriptionUrl || catalogPlugin?.subscriptionUrl) || undefined,
       size: typeof record.size === 'number' && Number.isFinite(record.size) ? record.size : undefined,
       readme: trimText(record.readme) || catalogPlugin?.readme || '',
@@ -270,6 +352,36 @@ const readLocalExtensionRegistry = (): ExtensionPluginRuntimeConfig[] => {
     return normalizeLocalRegistryPlugins(parsed.plugins)
   } catch {
     return []
+  }
+}
+
+const normalizeAbsoluteHttpUrl = (value: unknown, baseUrl?: string) => {
+  const text = trimText(value)
+  if (!text) return ''
+  try {
+    const url = baseUrl ? new URL(text, baseUrl) : new URL(text)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+const normalizeSha256 = (value: unknown) => {
+  const text = trimText(value).toLowerCase()
+  return /^[a-f0-9]{64}$/.test(text) ? text : ''
+}
+
+const extractPackageManifestSource = (manifest: LocalExtensionPackageManifest, baseUrl?: string) => {
+  const store = asRecord(manifest.store)
+  const packageUrl = normalizeAbsoluteHttpUrl(
+    manifest.packageUrl || manifest.downloadUrl || manifest.url || store?.packageUrl || store?.downloadUrl || store?.url,
+    baseUrl
+  )
+  const packageSha256 = normalizeSha256(manifest.packageSha256 || manifest.sha256 || store?.packageSha256 || store?.sha256)
+  return {
+    packageUrl,
+    packageSha256
   }
 }
 
@@ -310,6 +422,7 @@ const storePluginFromPackage = (filePath: string): ExtensionPluginRuntimeConfig 
   const functions = parseManifestFunctions(manifest.functions)
   const readmeEntry = findReadmeZipEntry(entries, manifest)
   const storeFlags = extractStoreManifestFlags(manifest)
+  const packageSource = extractPackageManifestSource(manifest)
   return {
     pluginId,
     name: displayName,
@@ -331,6 +444,8 @@ const storePluginFromPackage = (filePath: string): ExtensionPluginRuntimeConfig 
     categories: categories.length ? categories : ['Store'],
     functions: functions.length ? functions : [{ title: 'Store plugin', desc: 'Discovered from a real .external-reference package through the backend boundary.' }],
     storePackagePath: filePath,
+    packageUrl: packageSource.packageUrl || undefined,
+    packageSha256: packageSource.packageSha256 || undefined,
     subscriptionUrl: storeFlags.subscriptionUrl || undefined
   }
 }
@@ -348,6 +463,75 @@ const readStoreExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
     }
   }
   return [...latestByPlugin.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+const remoteCatalogPluginFromManifest = (
+  manifest: RemoteExtensionCatalogPluginManifest,
+  catalogUrl: string
+): ExtensionPluginRuntimeConfig | null => {
+  const pluginId = trimText(manifest.id)
+  const version = trimText(manifest.version)
+  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
+  if (!pluginId || !version || !displayName) return null
+  const packageSource = extractPackageManifestSource(manifest, catalogUrl)
+  if (!packageSource.packageUrl) return null
+  const categories = parseStringArray(manifest.categories)
+  const functions = parseManifestFunctions(manifest.functions)
+  const storeFlags = extractStoreManifestFlags(manifest)
+  const viewName = parseFirstContributedViewName(manifest)
+  const packageSize = Number(manifest.size)
+  return {
+    pluginId,
+    name: displayName,
+    description: trimText(manifest.description) || 'Available from a remote aiopsterm extension catalog.',
+    iconKey: normalizeExtensionIconKey(manifest.iconKey),
+    tabName: viewName || displayName,
+    show: true,
+    isPlugin: true,
+    installed: false,
+    hasUpdate: false,
+    installedVersion: '',
+    latestVersion: version,
+    installable: storeFlags.installable,
+    isPrivate: storeFlags.isPrivate,
+    source: 'store',
+    lastUpdated: trimText(manifest.lastUpdated) || undefined,
+    size: Number.isFinite(packageSize) && packageSize >= 0 ? packageSize : undefined,
+    readme: trimText(manifest.readme) || `${displayName} is available from a remote aiopsterm extension catalog.`,
+    categories: categories.length ? categories : ['Store'],
+    functions: functions.length ? functions : [{ title: 'Remote store plugin', desc: 'Available from a real remote .external-reference package catalog.' }],
+    packageUrl: packageSource.packageUrl,
+    packageSha256: packageSource.packageSha256 || undefined,
+    subscriptionUrl: storeFlags.subscriptionUrl || undefined
+  }
+}
+
+const readRemoteExtensionCatalog = async (): Promise<ExtensionPluginRuntimeConfig[]> => {
+  const catalogUrl = trimText(runtimeConfig.storeCatalogUrl)
+  if (!catalogUrl) return []
+  const normalizedCatalogUrl = normalizeAbsoluteHttpUrl(catalogUrl)
+  if (!normalizedCatalogUrl) return []
+  try {
+    const response = await runtimeConfig.fetch(normalizedCatalogUrl)
+    if (!response.ok) return []
+    const text = response.text ? await response.text() : Buffer.from(await response.arrayBuffer()).toString('utf8')
+    const parsed = JSON.parse(text) as RemoteExtensionCatalogManifest
+    const plugins = Array.isArray(parsed.plugins) ? parsed.plugins : []
+    const latestByPlugin = new Map<string, ExtensionPluginRuntimeConfig>()
+    for (const item of plugins) {
+      const record = asRecord(item)
+      if (!record) continue
+      const plugin = remoteCatalogPluginFromManifest(record as RemoteExtensionCatalogPluginManifest, normalizedCatalogUrl)
+      if (!plugin) continue
+      const existing = latestByPlugin.get(plugin.pluginId)
+      if (!existing || isVersionNewer(plugin.latestVersion || '', existing.latestVersion || '')) {
+        latestByPlugin.set(plugin.pluginId, plugin)
+      }
+    }
+    return [...latestByPlugin.values()].sort((left, right) => left.name.localeCompare(right.name))
+  } catch {
+    return []
+  }
 }
 
 const writeLocalExtensionRegistry = () => {
@@ -386,12 +570,24 @@ const reloadExtensionCatalog = () => {
   for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })
 }
 
+const reloadExtensionCatalogFromSources = async () => {
+  extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
+  for (const plugin of readStoreExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
+  for (const plugin of await readRemoteExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
+  for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })
+}
+
 export const configureExtensionBackendRuntime = (config: ExtensionBackendRuntimeConfig = {}) => {
   const extensionRootDir = resolveOptionalPath(config.extensionRootDir, defaultExtensionRootDir())
   const storePackageDir = resolveOptionalPath(config.storePackageDir, defaultStorePackageDir())
+  const storeCatalogUrl = trimText(config.storeCatalogUrl) || defaultStoreCatalogUrl()
+  const remotePackageCacheDir = resolveOptionalPath(config.remotePackageCacheDir, join(extensionRootDir, 'cache'))
   runtimeConfig = {
     extensionRootDir,
-    storePackageDir
+    storePackageDir,
+    storeCatalogUrl,
+    remotePackageCacheDir,
+    fetch: config.fetch || defaultExtensionFetch
   }
   reloadExtensionCatalog()
 }
@@ -401,12 +597,21 @@ export const resetExtensionPluginCatalogForTests = () => {
   activeOperations.clear()
 }
 
-export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult> => ({
-  ok: true,
-  data: extensionCatalog.map(clonePlugin)
-})
+export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult> => {
+  await reloadExtensionCatalogFromSources()
+  return {
+    ok: true,
+    data: extensionCatalog.map(clonePlugin)
+  }
+}
 
 const errorResult = (errorCode: string, errorMessage: string): ExtensionPluginOperationResult => ({
+  ok: false,
+  errorCode,
+  errorMessage
+})
+
+const downloadErrorResult = (errorCode: string, errorMessage: string): ExtensionPackageDownloadResult => ({
   ok: false,
   errorCode,
   errorMessage
@@ -724,10 +929,27 @@ const createPackageInputFromPath = (filePath: string): ExtensionPackageInstallIn
   }
 }
 
-const resolveStorePackageInput = (plugin: ExtensionPluginRuntimeConfig): ExtensionPackageInstallInput | ExtensionPluginOperationResult => {
+const packageFileNameFromPlugin = (plugin: ExtensionPluginRuntimeConfig) => {
+  const version = trimText(plugin.latestVersion) || trimText(plugin.installedVersion) || 'latest'
+  return `${safePackagePathSegment(plugin.pluginId)}-${safePackagePathSegment(version)}.external-reference`
+}
+
+const resolveRemotePackageCachePath = (plugin: ExtensionPluginRuntimeConfig) =>
+  join(runtimeConfig.remotePackageCacheDir, safePackagePathSegment(plugin.pluginId), packageFileNameFromPlugin(plugin))
+
+const resolveStorePackageInput = (plugin: ExtensionPluginRuntimeConfig): StorePackageInput | ExtensionPluginOperationResult => {
   const pluginId = trimText(plugin.pluginId)
   const version = trimText(plugin.latestVersion) || trimText(plugin.installedVersion) || 'latest'
   const candidates: string[] = []
+  const packageUrl = normalizeAbsoluteHttpUrl(plugin.packageUrl)
+  if (plugin.hasUpdate && packageUrl) {
+    return {
+      kind: 'remote',
+      plugin,
+      url: packageUrl,
+      sha256: normalizeSha256(plugin.packageSha256) || undefined
+    }
+  }
   const storePackageDir = trimText(runtimeConfig.storePackageDir)
   if (storePackageDir) {
     candidates.push(
@@ -749,13 +971,161 @@ const resolveStorePackageInput = (plugin: ExtensionPluginRuntimeConfig): Extensi
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue
     const input = createPackageInputFromPath(candidate)
-    if (input) return input
+    if (input) return { kind: 'local', input }
+  }
+
+  if (packageUrl) {
+    return {
+      kind: 'remote',
+      plugin,
+      url: packageUrl,
+      sha256: normalizeSha256(plugin.packageSha256) || undefined
+    }
   }
 
   return localPackageErrorResult(
     'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
     `${plugin.name} requires a real .external-reference package before it can be installed.`
   )
+}
+
+const fetchExtensionPackageBuffer = async (
+  url: string,
+  options: {
+    signal?: AbortSignal
+    onProgress?: (receivedBytes: number, totalBytes: number) => void
+  } = {}
+) => {
+  const response = await runtimeConfig.fetch(url, options.signal ? { signal: options.signal } : undefined)
+  if (!response.ok) throw new Error(`Plugin package download failed: HTTP ${response.status}.`)
+  const totalBytes = Number(response.headers?.get('content-length') || 0)
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const buffer = Buffer.from(await response.arrayBuffer())
+    options.onProgress?.(buffer.byteLength, totalBytes || buffer.byteLength)
+    return {
+      buffer,
+      totalBytes: totalBytes || buffer.byteLength
+    }
+  }
+
+  const chunks: Buffer[] = []
+  let receivedBytes = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    const chunk = Buffer.from(value)
+    chunks.push(chunk)
+    receivedBytes += chunk.byteLength
+    options.onProgress?.(receivedBytes, totalBytes)
+  }
+  return {
+    buffer: Buffer.concat(chunks, receivedBytes),
+    totalBytes: totalBytes || receivedBytes
+  }
+}
+
+const downloadStorePackage = async (
+  packageInput: Extract<StorePackageInput, { kind: 'remote' }>,
+  operation: ExtensionPluginOperation,
+  activeOperation: ActiveExtensionOperation,
+  emit?: ExtensionProgressEmitter
+): Promise<ParsedExtensionPackageInput | ExtensionPluginOperationResult> => {
+  const pluginId = packageInput.plugin.pluginId
+  const abortController = new AbortController()
+  activeOperation.abortController = abortController
+  const cancelledResult = () => {
+    emitProgress(emit, pluginId, operation, 'cancelled', 0, 'Plugin operation cancelled.')
+    return {
+      ok: false,
+      errorCode: 'EXTENSION_PLUGIN_OPERATION_CANCELLED',
+      errorMessage: 'Plugin operation cancelled.'
+    }
+  }
+
+  if (activeOperation.cancelled) return cancelledResult()
+  emitProgress(emit, pluginId, operation, 'downloading', 0, 'Downloading plugin package.')
+
+  let response: ExtensionFetchResponse
+  try {
+    response = await runtimeConfig.fetch(packageInput.url, { signal: abortController.signal })
+  } catch (error) {
+    if (activeOperation.cancelled || abortController.signal.aborted) return cancelledResult()
+    return localPackageErrorResult(
+      'EXTENSION_STORE_PACKAGE_DOWNLOAD_FAILED',
+      error instanceof Error ? error.message : 'Plugin package download failed.'
+    )
+  }
+
+  if (activeOperation.cancelled || abortController.signal.aborted) return cancelledResult()
+  if (!response.ok) {
+    return localPackageErrorResult(
+      'EXTENSION_STORE_PACKAGE_DOWNLOAD_FAILED',
+      `Plugin package download failed: HTTP ${response.status}.`
+    )
+  }
+
+  let downloaded: { buffer: Buffer; totalBytes: number }
+  try {
+    const totalBytes = Number(response.headers?.get('content-length') || 0)
+    const reader = response.body?.getReader?.()
+    if (!reader) {
+      const buffer = Buffer.from(await response.arrayBuffer())
+      downloaded = { buffer, totalBytes: totalBytes || buffer.byteLength }
+    } else {
+      const chunks: Buffer[] = []
+      let receivedBytes = 0
+      for (;;) {
+        if (activeOperation.cancelled || abortController.signal.aborted) return cancelledResult()
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value) continue
+        const chunk = Buffer.from(value)
+        chunks.push(chunk)
+        receivedBytes += chunk.byteLength
+        const percent = totalBytes > 0 ? Math.min(99, Math.round((receivedBytes / totalBytes) * 100)) : 0
+        emitProgress(emit, pluginId, operation, 'downloading', percent, `Downloaded ${receivedBytes} bytes.`)
+      }
+      downloaded = { buffer: Buffer.concat(chunks, receivedBytes), totalBytes: totalBytes || receivedBytes }
+    }
+  } catch (error) {
+    if (activeOperation.cancelled || abortController.signal.aborted) return cancelledResult()
+    return localPackageErrorResult(
+      'EXTENSION_STORE_PACKAGE_DOWNLOAD_FAILED',
+      error instanceof Error ? error.message : 'Plugin package download failed.'
+    )
+  }
+
+  if (activeOperation.cancelled || abortController.signal.aborted) return cancelledResult()
+  const { buffer, totalBytes } = downloaded
+  emitProgress(emit, pluginId, operation, 'downloading', 100, `Downloaded ${buffer.byteLength} bytes.`)
+
+  const expectedSha256 = normalizeSha256(packageInput.sha256)
+  if (expectedSha256) {
+    const actualSha256 = createHash('sha256').update(buffer).digest('hex')
+    if (actualSha256 !== expectedSha256) {
+      return localPackageErrorResult('EXTENSION_STORE_PACKAGE_CHECKSUM_MISMATCH', 'Plugin package checksum mismatch.')
+    }
+  }
+
+  const cachePath = resolveRemotePackageCachePath(packageInput.plugin)
+  try {
+    mkdirSync(dirname(cachePath), { recursive: true })
+    writeFileSync(cachePath, buffer)
+  } catch (error) {
+    return localPackageErrorResult(
+      'EXTENSION_STORE_PACKAGE_CACHE_FAILED',
+      error instanceof Error ? error.message : 'Plugin package could not be cached.'
+    )
+  }
+
+  const parsedPackage = parsePackageManifestFromBuffer(basename(cachePath), buffer, cachePath)
+  if ('ok' in parsedPackage) return parsedPackage
+  return {
+    ...parsedPackage,
+    packageSize: Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : parsedPackage.packageSize
+  }
 }
 
 const parseStringArray = (value: unknown): string[] => {
@@ -803,7 +1173,7 @@ const parseFirstContributedViewName = (manifest: LocalExtensionPackageManifest) 
 
 const parsePackageManifestFromInput = (
   input: ExtensionPackageInstallInput
-): { manifest: LocalExtensionPackageManifest; entries: LocalZipEntry[]; filePath: string; packageSize: number } | ExtensionPluginOperationResult => {
+): ParsedExtensionPackageInput | ExtensionPluginOperationResult => {
   const fileName = trimText(input?.fileName)
   if (!fileName) return localPackageErrorResult('EXTENSION_PACKAGE_REQUIRED', 'Plugin package file is required.')
   if (!fileName.toLowerCase().endsWith('.external-reference')) {
@@ -864,14 +1234,63 @@ const parsePackageManifestFromInput = (
   }
 }
 
+const parsePackageManifestFromBuffer = (
+  fileName: string,
+  buffer: Buffer,
+  packageFilePath = ''
+): ParsedExtensionPackageInput | ExtensionPluginOperationResult => {
+  const normalizedFileName = trimText(fileName)
+  if (!normalizedFileName) return localPackageErrorResult('EXTENSION_PACKAGE_REQUIRED', 'Plugin package file is required.')
+  if (!normalizedFileName.toLowerCase().endsWith('.external-reference')) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .external-reference extension.')
+  }
+
+  let zipEntries: LocalZipEntry[]
+  try {
+    zipEntries = parseLocalZipEntries(buffer)
+  } catch (error) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_READ_FAILED',
+      error instanceof Error ? error.message : 'Plugin package file could not be opened.'
+    )
+  }
+
+  const manifestEntry = findZipEntry(zipEntries, 'plugin.json')
+  if (!manifestEntry) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_MISSING', 'Plugin package must contain plugin.json.')
+  }
+
+  try {
+    const parsed = JSON.parse(readZipEntryText(manifestEntry))
+    const manifestRecord = asRecord(parsed)
+    if (!manifestRecord) {
+      return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must be a JSON object.')
+    }
+    return {
+      manifest: manifestRecord as LocalExtensionPackageManifest,
+      entries: zipEntries,
+      filePath: packageFilePath,
+      packageSize: buffer.byteLength
+    }
+  } catch (error) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_MANIFEST_INVALID',
+      error instanceof Error ? error.message : 'plugin.json could not be parsed.'
+    )
+  }
+}
+
 const parseLocalPackageManifest = (
-  input: ExtensionPackageInstallInput,
+  input: ExtensionPackageInstallInput | ParsedExtensionPackageInput,
   options: LocalExtensionPackageParseOptions = {}
 ): LocalExtensionPackageConfig | ExtensionPluginOperationResult => {
   const packageSource = options.source || 'local'
   const basePlugin = options.basePlugin ? clonePlugin(options.basePlugin) : undefined
   const allowedPluginId = trimText(options.allowExistingPluginId)
-  const parsedPackage = parsePackageManifestFromInput(input)
+  const parsedPackage =
+    'manifest' in input && 'entries' in input && 'packageSize' in input
+      ? input
+      : parsePackageManifestFromInput(input)
   if ('ok' in parsedPackage) return parsedPackage
   const { manifest, entries: zipEntries, filePath, packageSize } = parsedPackage
 
@@ -902,6 +1321,7 @@ const parseLocalPackageManifest = (
   const categories = parseStringArray(manifest.categories)
   const functions = parseManifestFunctions(manifest.functions)
   const storeFlags = extractStoreManifestFlags(manifest)
+  const packageDownloadSource = extractPackageManifestSource(manifest)
   const readmeEntry = findReadmeZipEntry(zipEntries, manifest)
   const fallbackReadme =
     packageSource === 'store'
@@ -943,6 +1363,8 @@ const parseLocalPackageManifest = (
       categories: categories.length ? categories : fallbackCategories,
       functions: functions.length ? functions : fallbackFunctions,
       storePackagePath: packageSource === 'store' ? filePath : undefined,
+      packageUrl: packageSource === 'store' ? packageDownloadSource.packageUrl || basePlugin?.packageUrl : undefined,
+      packageSha256: packageSource === 'store' ? packageDownloadSource.packageSha256 || basePlugin?.packageSha256 : undefined,
       subscriptionUrl: packageSource === 'store' ? storeFlags.subscriptionUrl || basePlugin?.subscriptionUrl : undefined
     }
   }
@@ -967,30 +1389,12 @@ export const runExtensionPluginOperation = async (
     return successResult(operation, next, `${plugin.name} uninstalled by aiopsterm backend.`)
   }
 
-  const packageInput = resolveStorePackageInput(plugin)
-  if ('ok' in packageInput) return packageInput
-
-  const packageConfig = parseLocalPackageManifest(packageInput, {
-    source: 'store',
-    allowExistingPluginId: plugin.pluginId,
-    basePlugin: plugin
-  })
-  if ('ok' in packageConfig) return packageConfig
-  const expectedVersion = trimText(plugin.latestVersion) || trimText(plugin.installedVersion)
-  const packageVersion = trimText(packageConfig.plugin.latestVersion)
-  if (expectedVersion && packageVersion && packageVersion !== expectedVersion) {
-    return errorResult(
-      'EXTENSION_STORE_PACKAGE_VERSION_MISMATCH',
-      `${plugin.name} package version ${packageVersion} does not match expected version ${expectedVersion}.`
-    )
-  }
-
   const pluginId = plugin.pluginId
   if (activeOperations.has(pluginId)) {
     return errorResult('EXTENSION_PLUGIN_OPERATION_BUSY', 'Plugin operation is already running.')
   }
 
-  const activeOperation = { pluginId, cancelled: false }
+  const activeOperation: ActiveExtensionOperation = { pluginId, cancelled: false }
   activeOperations.set(pluginId, activeOperation)
   const stepDelayMs = Math.max(0, options.stepDelayMs ?? EXTENSION_INSTALL_STEP_DELAY_MS)
 
@@ -1002,6 +1406,47 @@ export const runExtensionPluginOperation = async (
       errorCode: 'EXTENSION_PLUGIN_OPERATION_CANCELLED',
       errorMessage: 'Plugin operation cancelled.'
     }
+  }
+
+  const packageInput = resolveStorePackageInput(plugin)
+  if ('ok' in packageInput) {
+    activeOperations.delete(pluginId)
+    emitProgress(emit, pluginId, operation, 'error', 0, packageInput.errorMessage)
+    return packageInput
+  }
+
+  const parsedPackage =
+    packageInput.kind === 'remote'
+      ? await downloadStorePackage(packageInput, operation, activeOperation, emit)
+      : parsePackageManifestFromInput(packageInput.input)
+  activeOperation.abortController = undefined
+  if ('ok' in parsedPackage) {
+    activeOperations.delete(pluginId)
+    if (parsedPackage.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED') return parsedPackage
+    emitProgress(emit, pluginId, operation, 'error', 0, parsedPackage.errorMessage)
+    return parsedPackage
+  }
+
+  const packageConfig = parseLocalPackageManifest(parsedPackage, {
+    source: 'store',
+    allowExistingPluginId: plugin.pluginId,
+    basePlugin: plugin
+  })
+  if ('ok' in packageConfig) {
+    activeOperations.delete(pluginId)
+    emitProgress(emit, pluginId, operation, 'error', 0, packageConfig.errorMessage)
+    return packageConfig
+  }
+  const expectedVersion = trimText(plugin.latestVersion) || trimText(plugin.installedVersion)
+  const packageVersion = trimText(packageConfig.plugin.latestVersion)
+  if (expectedVersion && packageVersion && packageVersion !== expectedVersion) {
+    activeOperations.delete(pluginId)
+    const result = errorResult(
+      'EXTENSION_STORE_PACKAGE_VERSION_MISMATCH',
+      `${plugin.name} package version ${packageVersion} does not match expected version ${expectedVersion}.`
+    )
+    emitProgress(emit, pluginId, operation, 'error', 0, result.errorMessage)
+    return result
   }
 
   for (const step of operationSteps(operation)) {
@@ -1041,6 +1486,65 @@ export const updateExtensionPlugin = (
 
 export const uninstallExtensionPlugin = (input: ExtensionPluginOperationInput) => runExtensionPluginOperation('uninstall', input)
 
+export const downloadExtensionPackage = async (input: ExtensionPackageDownloadInput): Promise<ExtensionPackageDownloadResult> => {
+  const packageUrl = normalizeAbsoluteHttpUrl(input?.url)
+  if (!packageUrl) return downloadErrorResult('EXTENSION_PACKAGE_DOWNLOAD_URL_INVALID', 'Plugin package download URL must be http or https.')
+  try {
+    const { buffer } = await fetchExtensionPackageBuffer(packageUrl)
+    return {
+      ok: true,
+      data: {
+        url: packageUrl,
+        bytes: buffer.byteLength,
+        data: [...buffer]
+      }
+    }
+  } catch (error) {
+    return downloadErrorResult(
+      'EXTENSION_STORE_PACKAGE_DOWNLOAD_FAILED',
+      error instanceof Error ? error.message : 'Plugin package download failed.'
+    )
+  }
+}
+
+export const installExtensionPluginFromUrl = (
+  input: ExtensionPluginUrlInstallInput,
+  emit?: ExtensionProgressEmitter,
+  options?: ExtensionOperationOptions
+): Promise<ExtensionPluginOperationResult> => {
+  const pluginId = trimText(input?.pluginId)
+  const packageUrl = normalizeAbsoluteHttpUrl(input?.url)
+  if (!pluginId) return Promise.resolve(errorResult('EXTENSION_PLUGIN_ID_REQUIRED', 'Plugin id is required.'))
+  if (!packageUrl) return Promise.resolve(errorResult('EXTENSION_PACKAGE_DOWNLOAD_URL_INVALID', 'Plugin package download URL must be http or https.'))
+  const catalogPlugin = extensionCatalog.find((plugin) => plugin.pluginId === pluginId)
+  const version = trimText(input?.version) || trimText(catalogPlugin?.latestVersion) || 'latest'
+  const plugin: ExtensionPluginRuntimeConfig = {
+    ...(catalogPlugin ? clonePlugin(catalogPlugin) : {
+      pluginId,
+      name: pluginId,
+      description: 'Remote extension package.',
+      iconKey: 'local' as const,
+      tabName: pluginId,
+      show: true,
+      isPlugin: true,
+      installed: false,
+      hasUpdate: false,
+      source: 'store' as const,
+      categories: ['Store'],
+      functions: [{ title: 'Remote store plugin', desc: 'Installed from a remote .external-reference package URL.' }]
+    }),
+    pluginId,
+    latestVersion: version,
+    installedVersion: catalogPlugin?.installedVersion || '',
+    installable: catalogPlugin?.installable === false ? false : true,
+    packageUrl,
+    packageSha256: normalizeSha256(input?.sha256) || catalogPlugin?.packageSha256,
+    storePackagePath: undefined,
+    source: 'store'
+  }
+  return runExtensionPluginOperation(plugin.installed && plugin.hasUpdate ? 'update' : 'install', { plugin }, emit, options)
+}
+
 export const installExtensionPackage = async (
   input: ExtensionPackageInstallInput,
   emit?: ExtensionProgressEmitter,
@@ -1054,7 +1558,7 @@ export const installExtensionPackage = async (
     return errorResult('EXTENSION_PLUGIN_OPERATION_BUSY', 'Plugin operation is already running.')
   }
 
-  const activeOperation = { pluginId, cancelled: false }
+  const activeOperation: ActiveExtensionOperation = { pluginId, cancelled: false }
   activeOperations.set(pluginId, activeOperation)
   const stepDelayMs = Math.max(0, options?.stepDelayMs ?? EXTENSION_INSTALL_STEP_DELAY_MS)
   const cancelledResult = (): ExtensionPluginOperationResult => {
@@ -1099,7 +1603,10 @@ export const cancelExtensionInstall = (pluginId: string): ExtensionPluginCancelR
   }
 
   const activeOperation = activeOperations.get(normalizedPluginId)
-  if (activeOperation) activeOperation.cancelled = true
+  if (activeOperation) {
+    activeOperation.cancelled = true
+    activeOperation.abortController?.abort()
+  }
 
   return {
     ok: true,

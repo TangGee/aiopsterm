@@ -930,6 +930,8 @@ export type ExtensionPluginRuntimeConfig = {
   installedAt?: string
   packagePath?: string
   storePackagePath?: string
+  packageUrl?: string
+  packageSha256?: string
   subscriptionUrl?: string
   size?: number
   readme?: string
@@ -955,6 +957,25 @@ export type ExtensionPackageInstallInput = {
   filePath?: string
   size?: number
   existingPluginIds?: string[]
+}
+
+export type ExtensionPackageDownloadInput = {
+  pluginId?: string
+  url: string
+}
+
+export type ExtensionPackageDownloadResult = AiopsMutationResult<{
+  url: string
+  bytes: number
+  data: number[]
+}>
+
+export type ExtensionPluginUrlInstallInput = {
+  pluginId: string
+  version?: string
+  fileName?: string
+  url: string
+  sha256?: string
 }
 
 export type ExtensionInstallProgress = {
@@ -2786,6 +2807,8 @@ export type AiopsPreloadApi = {
   installExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   updateExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   installExtensionPackage: (input: ExtensionPackageInstallInput) => Promise<ExtensionPluginOperationResult>
+  downloadExtensionPackage: (input: ExtensionPackageDownloadInput) => Promise<ExtensionPackageDownloadResult>
+  installExtensionPluginFromUrl: (input: ExtensionPluginUrlInstallInput) => Promise<ExtensionPluginOperationResult>
   uninstallExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   openExtensionSubscription: (input: ExtensionSubscriptionInput) => Promise<ExtensionSubscriptionResult>
   cancelExtensionInstall: (pluginId: string) => Promise<ExtensionPluginCancelResult>

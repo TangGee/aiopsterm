@@ -5956,7 +5956,13 @@ describe('workspace store', () => {
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBe(true)
     await installPromise
     expect(window.aiops.installExtensionPlugin).toHaveBeenCalledWith({
-      plugin: expect.objectContaining({ pluginId: 'cloud-assets', installed: false, latestVersion: '0.9.1' })
+      plugin: expect.objectContaining({
+        pluginId: 'cloud-assets',
+        installed: false,
+        latestVersion: '0.9.1',
+        packageUrl: 'https://aiopsterm.local/extensions/cloud-assets-0.9.1.external-reference',
+        packageSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      })
     })
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(false)
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
