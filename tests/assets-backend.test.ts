@@ -11,11 +11,15 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('electron-store', () => {
+  const stores = new Map<string, Record<string, unknown>>()
+
   class MockStore<T extends Record<string, unknown>> {
     store: T
 
-    constructor(options?: { defaults?: T }) {
-      this.store = JSON.parse(JSON.stringify(options?.defaults || {}))
+    constructor(options?: { name?: string; defaults?: T }) {
+      const key = options?.name || 'default'
+      if (!stores.has(key)) stores.set(key, JSON.parse(JSON.stringify(options?.defaults || {})))
+      this.store = stores.get(key) as T
     }
 
     get<K extends keyof T>(key: K): T[K] {
@@ -27,7 +31,7 @@ vi.mock('electron-store', () => {
     }
   }
 
-  return { default: MockStore }
+  return { default: MockStore, __resetMockStores: () => stores.clear() }
 })
 
 vi.mock('better-sqlite3', () => {
@@ -36,6 +40,8 @@ vi.mock('better-sqlite3', () => {
 
 const loadBackend = async () => {
   vi.resetModules()
+  const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
+  storeModule.__resetMockStores?.()
   const modulePath = '../src/main/backend/assets'
   return import(modulePath)
 }
@@ -87,6 +93,72 @@ const createSshRuntime = (options: { fail?: Error } = {}) => {
 describe('assets backend boundary', () => {
   beforeEach(() => {
     vi.resetModules()
+  })
+
+  it('starts non-seed asset runtime with only the backend-owned local shell asset', async () => {
+    const backend = await loadBackend()
+    backend.configureAssetBackendRuntime({ useSeedData: false, forceFallbackStore: true })
+
+    const snapshot = backend.listAssets()
+
+    expect(snapshot.assets).toHaveLength(1)
+    expect(snapshot.assets[0]).toEqual(expect.objectContaining({ id: 'local-127-1', isLocalShell: true }))
+    expect(snapshot.assets.some((asset: { id: string }) => ['asset-1', 'asset-2', 'asset-3', 'asset-4', 'asset-5'].includes(asset.id))).toBe(false)
+    expect(snapshot.folders).toEqual([])
+    expect(backend.listSshAgentKeychainOptions()).toEqual([])
+  })
+
+  it('keeps development asset seeds available only when seed mode is enabled', async () => {
+    const backend = await loadBackend()
+    backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+
+    const snapshot = backend.listAssets()
+
+    expect(snapshot.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local-127-1', isLocalShell: true }),
+        expect.objectContaining({ id: 'asset-1', title: 'prod-bastion' }),
+        expect.objectContaining({ id: 'asset-5', title: 'jumpserver-org', asset_type: 'organization' })
+      ])
+    )
+    expect(snapshot.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'custom-folder-a' })]))
+    expect(backend.listSshAgentKeychainOptions()).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'key-1' }), expect.objectContaining({ key: 'key-2' })]))
+  })
+
+  it('strips unmodified legacy fallback seed assets in non-seed runtime while preserving user edits', async () => {
+    const backend = await loadBackend()
+    backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+    expect(backend.listAssets().assets.some((asset: { id: string }) => asset.id === 'asset-1')).toBe(true)
+    const edited = backend.saveAsset({
+      id: 'asset-1',
+      name: 'user-owned-prod',
+      title: 'user-owned-prod',
+      host: '10.24.8.12',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'keyBased',
+      group: '生产',
+      group_name: '生产',
+      tags: ['linux', 'prod'],
+      keychainId: 'key-1',
+      folderUuid: 'custom-folder-a'
+    })
+    expect(edited.ok).toBe(true)
+
+    backend.configureAssetBackendRuntime({ useSeedData: false, forceFallbackStore: true })
+    const snapshot = backend.listAssets()
+
+    expect(snapshot.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local-127-1', isLocalShell: true }),
+        expect.objectContaining({ id: 'asset-1', title: 'user-owned-prod' })
+      ])
+    )
+    expect(snapshot.assets.some((asset: { id: string }) => ['asset-2', 'asset-3', 'asset-4', 'asset-5'].includes(asset.id))).toBe(false)
+    expect(snapshot.folders).toContainEqual(expect.objectContaining({ uuid: 'custom-folder-a' }))
+    expect(backend.listSshAgentKeychainOptions()).toContainEqual(expect.objectContaining({ key: 'key-1' }))
+    expect(backend.listSshAgentKeychainOptions().some((option: { key: string }) => option.key === 'key-2')).toBe(false)
   })
 
   it('owns the local shell system asset and protects it from asset mutations', async () => {

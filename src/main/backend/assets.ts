@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import Store from 'electron-store'
 import { createHash, randomUUID } from 'crypto'
-import { basename, join } from 'path'
+import { createRequire } from 'module'
+import { basename, isAbsolute, join, resolve } from 'path'
 import { readFile, writeFile } from 'fs/promises'
 import type { Client, ConnectConfig } from 'ssh2'
 import type {
@@ -45,6 +46,8 @@ type AssetSecret = {
   passphrase?: string
 }
 
+const requireNative = createRequire(__filename)
+
 type AssetStoreShape = {
   assets: AiopsAssetRecord[]
   folders: AiopsCustomFolderRecord[]
@@ -70,6 +73,13 @@ type AssetConnectionRuntimeConfig = {
   ssh2Runtime?: { Client: new () => AssetSshTestClient } | null
   now?: () => number
   timeoutMs?: number
+}
+
+type AssetBackendRuntimeConfig = AssetConnectionRuntimeConfig & {
+  databasePath?: string
+  useSeedData?: boolean
+  forceFallbackStore?: boolean
+  sqliteFactory?: new (path: string) => SqliteDatabase
 }
 
 type AssetExportRuntime = {
@@ -151,6 +161,24 @@ const defaultKeychainSecrets: Record<string, AssetSecret> = {
     privateKey: '-----BEGIN RSA PRIVATE KEY-----\n-----END RSA PRIVATE KEY-----',
     passphrase: ''
   }
+}
+
+const defaultAssetSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_ASSETS_ENABLE_SEED || '').trim() === '1'
+
+const defaultAssetDatabasePath = () => {
+  const envPath = String(process.env.AIOPSTERM_ASSETS_DB_PATH || '').trim()
+  if (envPath) return isAbsolute(envPath) ? envPath : resolve(envPath)
+  return join(app.getPath('userData'), 'aiopsterm-state.db')
+}
+
+type AssetRuntimeState = Required<Pick<AssetBackendRuntimeConfig, 'databasePath' | 'useSeedData' | 'forceFallbackStore'>> & {
+  sqliteFactory?: new (path: string) => SqliteDatabase
+}
+
+let runtimeConfig: AssetRuntimeState = {
+  databasePath: defaultAssetDatabasePath(),
+  useSeedData: defaultAssetSeedMode(),
+  forceFallbackStore: false
 }
 
 const LOCAL_SHELL_ASSET_ID = 'local-127-1'
@@ -294,6 +322,53 @@ const cloneFolder = (folder: AiopsCustomFolderRecord): AiopsCustomFolderRecord =
 
 const cloneKeychain = (keychain: AiopsKeychainRecord): AiopsKeychainRecord => ({ ...keychain })
 
+const seedAssets = () => defaultAssets.filter((asset) => !asset.isLocalShell).map(cloneAsset)
+
+const seedFolders = () => defaultFolders.map(cloneFolder)
+
+const seedKeychains = () => defaultKeychains.map(cloneKeychain)
+
+const seedKeychainSecrets = () => ({ ...defaultKeychainSecrets })
+
+const emptySeedlessStore = (): AssetStoreShape => ({
+  assets: [],
+  folders: [],
+  secrets: {},
+  keychains: [],
+  keychainSecrets: {}
+})
+
+const seededStore = (): AssetStoreShape => ({
+  assets: seedAssets(),
+  folders: seedFolders(),
+  secrets: {},
+  keychains: seedKeychains(),
+  keychainSecrets: seedKeychainSecrets()
+})
+
+const defaultStoreShape = () => (runtimeConfig.useSeedData ? seededStore() : emptySeedlessStore())
+
+const stableJson = (value: unknown) => JSON.stringify(value)
+
+const seedAssetById = new Map(seedAssets().map((asset) => [asset.id, asset]))
+const seedFolderByUuid = new Map(defaultFolders.map((folder) => [folder.uuid, folder]))
+const seedKeychainById = new Map(defaultKeychains.map((keychain) => [keychain.id, keychain]))
+
+const isUnmodifiedSeedAsset = (asset: AiopsAssetRecord) => {
+  const seed = seedAssetById.get(asset.id)
+  return Boolean(seed && stableJson(asset) === stableJson(seed))
+}
+
+const isUnmodifiedSeedFolder = (folder: AiopsCustomFolderRecord) => {
+  const seed = seedFolderByUuid.get(folder.uuid)
+  return Boolean(seed && stableJson(folder) === stableJson(seed))
+}
+
+const isUnmodifiedSeedKeychain = (keychain: AiopsKeychainRecord, secret?: AssetSecret) => {
+  const seed = seedKeychainById.get(keychain.id)
+  return Boolean(seed && stableJson(keychain) === stableJson(seed) && stableJson(secret || {}) === stableJson(defaultKeychainSecrets[keychain.id] || {}))
+}
+
 const sanitizeAsset = (asset: AiopsAssetRecord, secret?: AssetSecret): AiopsAssetRecord => ({
   ...cloneAsset(asset),
   hasPassword: Boolean(secret?.password || asset.hasPassword),
@@ -316,6 +391,17 @@ export const configureAssetConnectionRuntime = (config: AssetConnectionRuntimeCo
   assetConnectionRuntime.ssh2Runtime = config.ssh2Runtime
   assetConnectionRuntime.now = config.now
   assetConnectionRuntime.timeoutMs = config.timeoutMs
+}
+
+export const configureAssetBackendRuntime = (config: AssetBackendRuntimeConfig = {}) => {
+  runtimeConfig = {
+    databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultAssetDatabasePath(),
+    useSeedData: config.useSeedData ?? defaultAssetSeedMode(),
+    forceFallbackStore: Boolean(config.forceFallbackStore),
+    ...(config.sqliteFactory ? { sqliteFactory: config.sqliteFactory } : {})
+  }
+  configureAssetConnectionRuntime(config)
+  assetStore = null
 }
 
 const assetConnectionNow = () => assetConnectionRuntime.now?.() ?? Date.now()
@@ -623,22 +709,47 @@ const listAssetGroupsFromAssets = (assets: AiopsAssetRecord[], input: AiopsAsset
 
 class FallbackAssetStore {
   private store = new Store<AssetStoreShape>({
+    projectName: 'aiopsterm',
     name: 'aiopsterm-assets',
-    defaults: {
-      assets: defaultAssets.map(cloneAsset),
-      folders: defaultFolders.map(cloneFolder),
-      secrets: {},
-      keychains: defaultKeychains.map(cloneKeychain),
-      keychainSecrets: { ...defaultKeychainSecrets }
-    }
-  })
+    defaults: defaultStoreShape()
+  } as ConstructorParameters<typeof Store<AssetStoreShape>>[0] & { projectName: string })
 
   constructor() {
-    if (!(this.store.get('keychains') || []).length) this.store.set('keychains', defaultKeychains.map(cloneKeychain))
-    if (!Object.keys(this.store.get('keychainSecrets') || {}).length) this.store.set('keychainSecrets', { ...defaultKeychainSecrets })
+    if (runtimeConfig.useSeedData) {
+      if (!(this.store.get('assets') || []).filter((asset) => !asset.isLocalShell).length) this.store.set('assets', seedAssets())
+      if (!(this.store.get('folders') || []).length) this.store.set('folders', seedFolders())
+      if (!(this.store.get('keychains') || []).length) this.store.set('keychains', seedKeychains())
+      if (!Object.keys(this.store.get('keychainSecrets') || {}).length) this.store.set('keychainSecrets', seedKeychainSecrets())
+    } else {
+      this.stripLegacySeedData()
+    }
+  }
+
+  private stripLegacySeedData() {
+    const rawAssets = this.store.get('assets') || []
+    const secrets = this.store.get('secrets') || {}
+    const assets = rawAssets.filter((asset) => {
+      if (asset.id === LOCAL_SHELL_ASSET_ID || asset.uuid === LOCAL_SHELL_ASSET_ID || asset.isLocalShell) return false
+      return !isUnmodifiedSeedAsset(asset)
+    })
+    const assetIds = new Set(assets.map((asset) => asset.id))
+    const nextSecrets = Object.fromEntries(Object.entries(secrets).filter(([assetId]) => assetIds.has(assetId)))
+    const referencedFolders = new Set(assets.map((asset) => asset.folderUuid).filter((uuid): uuid is string => Boolean(uuid)))
+    const folders = (this.store.get('folders') || []).filter((folder) => !isUnmodifiedSeedFolder(folder) || referencedFolders.has(folder.uuid))
+    const referencedKeychains = new Set(assets.map((asset) => asset.keychainId).filter((id): id is string => Boolean(id)))
+    const keychainSecrets = this.store.get('keychainSecrets') || {}
+    const keychains = (this.store.get('keychains') || []).filter((keychain) => !isUnmodifiedSeedKeychain(keychain, keychainSecrets[keychain.id]) || referencedKeychains.has(keychain.id))
+    const keychainIds = new Set(keychains.map((keychain) => keychain.id))
+    const nextKeychainSecrets = Object.fromEntries(Object.entries(keychainSecrets).filter(([keychainId]) => keychainIds.has(keychainId)))
+    this.store.set('assets', assets)
+    this.store.set('secrets', nextSecrets)
+    this.store.set('folders', folders)
+    this.store.set('keychains', keychains)
+    this.store.set('keychainSecrets', nextKeychainSecrets)
   }
 
   list(): AiopsAssetSnapshot {
+    if (!runtimeConfig.useSeedData) this.stripLegacySeedData()
     const secrets = this.store.get('secrets') || {}
     const assets = withLocalShellAsset(this.store.get('assets') || [])
     return {
@@ -765,25 +876,26 @@ class SqliteAssetStore {
         secret TEXT NOT NULL DEFAULT '{}'
       );
     `)
-    this.seed()
+    if (runtimeConfig.useSeedData) this.seed()
+    else this.stripLegacySeedData()
   }
 
   private seed() {
-    const assetCount = this.db.prepare('SELECT COUNT(*) as count FROM assets').get() as { count: number }
-    if (!assetCount.count) {
-      for (const asset of defaultAssets) {
+    const nonLocalAssetCount = this.rawAssets().filter(({ asset }) => !asset.isLocalShell && asset.id !== LOCAL_SHELL_ASSET_ID && asset.uuid !== LOCAL_SHELL_ASSET_ID).length
+    if (!nonLocalAssetCount) {
+      for (const asset of seedAssets()) {
         this.db.prepare('INSERT INTO assets (id, data, secret) VALUES (?, ?, ?)').run(asset.id, JSON.stringify(asset), '{}')
       }
     }
     const folderCount = this.db.prepare('SELECT COUNT(*) as count FROM asset_folders').get() as { count: number }
     if (!folderCount.count) {
-      for (const folder of defaultFolders) {
+      for (const folder of seedFolders()) {
         this.db.prepare('INSERT INTO asset_folders (uuid, data) VALUES (?, ?)').run(folder.uuid, JSON.stringify(folder))
       }
     }
     const keychainCount = this.db.prepare('SELECT COUNT(*) as count FROM asset_keychains').get() as { count: number }
     if (!keychainCount.count) {
-      for (const keychain of defaultKeychains) {
+      for (const keychain of seedKeychains()) {
         this.db
           .prepare('INSERT INTO asset_keychains (id, data, secret) VALUES (?, ?, ?)')
           .run(keychain.id, JSON.stringify(keychain), JSON.stringify(defaultKeychainSecrets[keychain.id] || {}))
@@ -791,9 +903,43 @@ class SqliteAssetStore {
     }
   }
 
+  private stripLegacySeedData() {
+    const tx = this.db.transaction(() => {
+      const rawAssets = this.rawAssets()
+      const assetsToKeep = rawAssets.filter(({ asset }) => {
+        if (asset.id === LOCAL_SHELL_ASSET_ID || asset.uuid === LOCAL_SHELL_ASSET_ID || asset.isLocalShell) return false
+        return !isUnmodifiedSeedAsset(asset)
+      })
+      const assetIdsToKeep = new Set(assetsToKeep.map(({ asset }) => asset.id))
+      for (const { asset } of rawAssets) {
+        if (!assetIdsToKeep.has(asset.id)) this.db.prepare('DELETE FROM assets WHERE id = ?').run(asset.id)
+      }
+
+      const referencedFolders = new Set(assetsToKeep.map(({ asset }) => asset.folderUuid).filter((uuid): uuid is string => Boolean(uuid)))
+      const rawFolders = this.db
+        .prepare('SELECT uuid, data FROM asset_folders')
+        .all()
+        .map((row) => {
+          const data = row as { uuid: string; data: string }
+          return { uuid: data.uuid, folder: JSON.parse(data.data) as AiopsCustomFolderRecord }
+        })
+      for (const { uuid, folder } of rawFolders) {
+        if (isUnmodifiedSeedFolder(folder) && !referencedFolders.has(folder.uuid)) this.db.prepare('DELETE FROM asset_folders WHERE uuid = ?').run(uuid)
+      }
+
+      const referencedKeychains = new Set(assetsToKeep.map(({ asset }) => asset.keychainId).filter((id): id is string => Boolean(id)))
+      for (const { keychain, secret } of this.rawKeychains()) {
+        if (isUnmodifiedSeedKeychain(keychain, secret) && !referencedKeychains.has(keychain.id)) {
+          this.db.prepare('DELETE FROM asset_keychains WHERE id = ?').run(keychain.id)
+        }
+      }
+    })
+    tx()
+  }
+
   private rawAssets(): Array<{ asset: AiopsAssetRecord; secret: AssetSecret }> {
     return this.db
-      .prepare('SELECT data, secret FROM assets ORDER BY json_extract(data, "$.name") ASC')
+      .prepare("SELECT data, secret FROM assets ORDER BY json_extract(data, '$.name') ASC")
       .all()
       .map((row) => {
         const data = row as { data: string; secret: string }
@@ -805,13 +951,14 @@ class SqliteAssetStore {
   }
 
   list(): AiopsAssetSnapshot {
+    if (!runtimeConfig.useSeedData) this.stripLegacySeedData()
     const rows = this.rawAssets()
     const rawAssets = withLocalShellAsset(rows.map(({ asset }) => asset))
     const secrets = new Map(rows.map(({ asset, secret }) => [asset.id, secret]))
     return {
       assets: rawAssets.map((asset) => sanitizeAsset(asset, secrets.get(asset.id))),
       folders: this.db
-        .prepare('SELECT data FROM asset_folders ORDER BY json_extract(data, "$.name") ASC')
+        .prepare("SELECT data FROM asset_folders ORDER BY json_extract(data, '$.name') ASC")
         .all()
         .map((row) => cloneFolder(JSON.parse((row as { data: string }).data) as AiopsCustomFolderRecord))
     }
@@ -828,7 +975,7 @@ class SqliteAssetStore {
 
   private rawKeychains(): Array<{ keychain: AiopsKeychainRecord; secret: AssetSecret }> {
     return this.db
-      .prepare('SELECT data, secret FROM asset_keychains ORDER BY json_extract(data, "$.name") ASC')
+      .prepare("SELECT data, secret FROM asset_keychains ORDER BY json_extract(data, '$.name') ASC")
       .all()
       .map((row) => {
         const data = row as { data: string; secret: string }
@@ -930,12 +1077,15 @@ class SqliteAssetStore {
 let assetStore: FallbackAssetStore | SqliteAssetStore | null = null
 
 const createStore = () => {
+  if (runtimeConfig.sqliteFactory) {
+    return new SqliteAssetStore(new runtimeConfig.sqliteFactory(runtimeConfig.databasePath))
+  }
   try {
+    if (runtimeConfig.forceFallbackStore) throw new Error('force fallback asset store')
     // Native SQLite is preferred. If the Electron ABI has not been rebuilt yet,
     // the backend falls back to electron-store without changing renderer APIs.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase
-    return new SqliteAssetStore(new Database(join(app.getPath('userData'), 'aiopsterm-state.db')))
+    const Database = runtimeConfig.sqliteFactory || (requireNative('better-sqlite3') as new (path: string) => SqliteDatabase)
+    return new SqliteAssetStore(new Database(runtimeConfig.databasePath))
   } catch {
     return new FallbackAssetStore()
   }
