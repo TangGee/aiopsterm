@@ -27,6 +27,8 @@ Run Electron end-to-end checks and generate acceptance screenshots under `test-r
 npm run e2e
 ```
 
+The Playwright launcher sets `AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE=1` for deterministic SSH tab creation in E2E runs. This switch lives in the main/backend SSH terminal runtime only; renderer code still consumes `createTerminal()` results and `terminal:data` events, and the normal development/production path opens real `ssh2` sessions.
+
 `npm run e2e` is an alias for the longer script name:
 
 ```bash

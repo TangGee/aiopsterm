@@ -168,9 +168,7 @@ import {
   saveSettingsShortcut
 } from './backend/settingsPreferences'
 import { configureSshTunnelBackendRuntime, startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
-import { applyConfiguredSshAgentAuth } from './backend/sshAgent'
-import { createSshProxySocketForAsset } from './backend/sshProxy'
-import type { SshProxySocket } from './backend/sshProxy'
+import { configureSshTerminalBackendRuntime, createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
 import {
   configureTerminalSuggestionsRuntime,
   generateTerminalCommand,
@@ -342,7 +340,6 @@ import type {
   AiopsSshTunnelStartInput,
   AiopsSshTunnelStopInput
 } from '@shared/preload'
-import type { ClientChannel, ConnectConfig } from 'ssh2'
 
 type PtyProcess = {
   write(data: string): void
@@ -358,28 +355,13 @@ type PtyModule = {
 
 type TerminalSession = {
   id: string
-  process: ChildProcessWithoutNullStreams | PtyProcess | SshShellSession
+  process: ChildProcessWithoutNullStreams | PtyProcess | SshTerminalSession
   shell: string
   cwd: string
   window: BrowserWindow
   kind: 'pty' | 'process' | 'ssh'
   host?: string
   manualCloseRequested?: boolean
-}
-
-type SshShellSession = {
-  write(data: string | Buffer): void
-  resize(cols: number, rows: number): void
-  kill(reason?: TerminalDisconnectReason): void
-}
-
-type Ssh2Client = {
-  on(event: 'ready', listener: () => void): Ssh2Client
-  on(event: 'error', listener: (error: Error) => void): Ssh2Client
-  on(event: 'close' | 'end', listener: () => void): Ssh2Client
-  connect(config: ConnectConfig): void
-  shell(options: Record<string, unknown>, callback: (error: Error | undefined, stream: ClientChannel) => void): void
-  end(): void
 }
 
 type SkillImportResult = {
@@ -786,7 +768,7 @@ const terminalBinaryPayload = (payload: unknown): Buffer => {
 
 const writeTerminalBuffer = (session: TerminalSession, buffer: Buffer) => {
   if (session.kind === 'ssh') {
-    ;(session.process as SshShellSession).write(buffer)
+    ;(session.process as SshTerminalSession).write(buffer)
   } else {
     ;(session.process as ChildProcessWithoutNullStreams).stdin.write(buffer)
   }
@@ -1299,6 +1281,13 @@ configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('us
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
 configureSshTunnelBackendRuntime({ getConfig })
+configureSshTerminalBackendRuntime({
+  getConfig,
+  getAsset,
+  getAssetSecret,
+  getKeychainSecret,
+  useBackendDouble: process.env.AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE === '1'
+})
 configureExtensionBackendRuntime({
   extensionRootDir: join(app.getPath('userData'), 'extensions'),
   fetch: (url, init) => net.fetch(url, init)
@@ -2555,282 +2544,13 @@ const loadPty = (): PtyModule | null => {
   }
 }
 
-const loadSsh2 = (): { Client: new () => Ssh2Client } | null => {
-  try {
-    return require('ssh2') as { Client: new () => Ssh2Client }
-  } catch {
-    return null
-  }
-}
-
-const resolveSshTarget = (options: TerminalCreateOptions) => {
-  const asset = options.assetId ? getAsset(options.assetId) : null
-  const secret = options.assetId ? getAssetSecret(options.assetId) : {}
-  const keychainSecret = asset?.keychainId ? getKeychainSecret(asset.keychainId) : {}
-  const host = options.ssh?.host || asset?.host || ''
-  const username = options.ssh?.username || asset?.username || ''
-  const port = Number(options.ssh?.port || asset?.port || 22)
-  const requestProxyName = typeof options.ssh?.proxyName === 'string' ? options.ssh.proxyName.trim() : ''
-  const targetProxyName = asset?.needProxy ? asset.proxyName : requestProxyName
-  return {
-    asset: asset || (options.ssh?.needProxy ? { needProxy: true, proxyName: targetProxyName } : null),
-    host,
-    username,
-    port,
-    password: options.ssh?.password || secret.password,
-    privateKey: options.ssh?.privateKey || secret.privateKey || keychainSecret.privateKey,
-    passphrase: options.ssh?.passphrase || secret.passphrase || keychainSecret.passphrase,
-    title: options.title || asset?.name || asset?.title || host
-  }
-}
-
-const createInProcessSshSession = (): SshShellSession => ({
-  write: () => undefined,
-  resize: () => undefined,
-  kill: () => undefined
-})
-
 const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
-  const target = resolveSshTarget(options)
-  const cwd = target.username ? `/home/${target.username}` : '~'
-  const lifecycleBase = {
-    kind: 'ssh' as const,
-    shell: 'ssh',
-    cwd,
-    host: target.host,
-    port: target.port,
-    username: target.username,
-    connectionId: `ssh-${id}`
-  }
-  if (process.env.NODE_ENV === 'test') {
-    return {
-      shell: 'ssh',
-      cwd,
-      session: createInProcessSshSession(),
-      connection: target,
-      lifecycle: createTerminalLifecycleEvent(id, {
-        ...lifecycleBase,
-        stage: 'shell-ready',
-        message: target.host ? `SSH shell ready for ${target.username}@${target.host}:${target.port}` : 'SSH shell ready.'
-      })
-    }
-  }
-
-  const ssh2 = loadSsh2()
-  if (!ssh2) {
-    const error = new Error('ssh2 runtime is not available. Run npm install and rebuild native modules if needed.')
-    const lifecycle = sendTerminalErrorLifecycle(owner, id, 'ssh', error, {
-      ...lifecycleBase,
-      code: 1,
-      message: 'SSH runtime is not available.'
-    })
-    sendTerminalData(owner, id, `\n[aiopsterm] ${error.message}\n`)
-    sendTerminalExit(owner, lifecycle, 1)
-    return {
-      shell: 'ssh',
-      cwd: '~',
-      session: null,
-      connection: target,
-      lifecycle
-    }
-  }
-
-  if (!target.host || !target.username || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) {
-    const error = new Error('SSH target requires host, username, and a valid port.')
-    const lifecycle = sendTerminalErrorLifecycle(owner, id, 'ssh', error, {
-      ...lifecycleBase,
-      code: 1,
-      message: 'SSH target is invalid.'
-    })
-    sendTerminalData(owner, id, `\n[aiopsterm] ${error.message}\n`)
-    sendTerminalExit(owner, lifecycle, 1)
-    return {
-      shell: 'ssh',
-      cwd: '~',
-      session: null,
-      connection: target,
-      lifecycle
-    }
-  }
-
-  const client = new ssh2.Client()
-  let stream: ClientChannel | null = null
-  let proxySocket: SshProxySocket | null = null
-  let closed = false
-  let cols = options.cols || 100
-  let rows = options.rows || 30
-  const pendingWrites: Array<string | Buffer> = []
-
-  let lifecycle = sendTerminalLifecycle(owner, id, {
-    ...lifecycleBase,
-    stage: 'connecting',
-    message: `Connecting ${target.username}@${target.host}:${target.port}`
+  return createSshTerminalSession(id, options, {
+    lifecycle: (event) => owner.webContents.send('terminal:lifecycle', event),
+    exit: (event, code) => sendTerminalExit(owner, event, code ?? event.code ?? null),
+    data: (chunk) => sendTerminalData(owner, id, chunk),
+    closed: () => sessions.delete(id)
   })
-
-  const finish = (
-    code: number | null,
-    reason: TerminalDisconnectReason,
-    event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>> = {}
-  ) => {
-    if (closed) return
-    closed = true
-    sessions.delete(id)
-    lifecycle = sendTerminalLifecycle(owner, id, {
-      ...lifecycleBase,
-      ...event,
-      stage: reason === 'error' || reason === 'network' ? 'error' : 'closed',
-      code,
-      reason,
-      isNetworkDisconnect: reason === 'network' || event.isNetworkDisconnect === true,
-      message:
-        event.message ||
-        (reason === 'manual'
-          ? 'Terminal closed by user.'
-          : reason === 'process'
-            ? 'Terminal process exited.'
-            : reason === 'network'
-              ? 'SSH connection closed by network.'
-              : 'SSH terminal closed.')
-    })
-    sendTerminalExit(owner, lifecycle, code)
-  }
-
-  const fail = (
-    error: unknown,
-    message: string,
-    code = 1,
-    event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>> = {}
-  ) => {
-    if (closed) return
-    closed = true
-    sessions.delete(id)
-    lifecycle = sendTerminalErrorLifecycle(owner, id, 'ssh', error, {
-      ...lifecycleBase,
-      ...event,
-      code,
-      message
-    })
-    sendTerminalExit(owner, lifecycle, code)
-  }
-
-  const session: SshShellSession = {
-    write(data: string | Buffer) {
-      if (closed) return
-      if (stream) {
-        stream.write(data)
-      } else {
-        pendingWrites.push(data)
-      }
-    },
-    resize(nextCols: number, nextRows: number) {
-      cols = nextCols
-      rows = nextRows
-      if (stream && typeof (stream as unknown as { setWindow?: (...args: number[]) => void }).setWindow === 'function') {
-        ;(stream as unknown as { setWindow: (...args: number[]) => void }).setWindow(rows, cols, 0, 0)
-      }
-    },
-    kill(reason: TerminalDisconnectReason = 'manual') {
-      finish(0, reason)
-      try {
-        stream?.close()
-      } catch {}
-      try {
-        proxySocket?.destroy()
-      } catch {}
-      try {
-        client.end()
-      } catch {}
-    }
-  }
-
-  sendTerminalData(owner, id, `[aiopsterm] connecting ${target.username}@${target.host}:${target.port}\n`)
-
-  client
-    .on('ready', () => {
-      if (closed) return
-      lifecycle = sendTerminalLifecycle(owner, id, {
-        ...lifecycleBase,
-        stage: 'connected',
-        message: `SSH connected ${target.username}@${target.host}:${target.port}`
-      })
-      client.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
-        if (error) {
-          sendTerminalData(owner, id, `\n[aiopsterm] SSH shell failed: ${error.message}\n`)
-          fail(error, 'SSH shell failed.', 1)
-          return
-        }
-        stream = channel
-        lifecycle = sendTerminalLifecycle(owner, id, {
-          ...lifecycleBase,
-          stage: 'shell-ready',
-          message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
-        })
-        sendTerminalData(owner, id, `[aiopsterm] connected ${target.username}@${target.host}:${target.port}\n`)
-        while (pendingWrites.length) {
-          stream.write(pendingWrites.shift() || '')
-        }
-        channel.on('data', (chunk: Buffer | string) => sendTerminalData(owner, id, chunk))
-        channel.stderr.on('data', (chunk: Buffer | string) => sendTerminalData(owner, id, chunk))
-        channel.on('close', () => finish(0, 'process'))
-      })
-    })
-    .on('error', (error) => {
-      sendTerminalData(owner, id, `\n[aiopsterm] SSH connection failed: ${error.message}\n`)
-      fail(error, 'SSH connection failed.', 1)
-    })
-    .on('close', () => finish(null, 'unknown'))
-    .on('end', () => finish(null, 'unknown'))
-
-  const connectConfig: ConnectConfig = {
-    host: target.host,
-    port: target.port,
-    username: target.username,
-    readyTimeout: 20000,
-    keepaliveInterval: 10000
-  }
-  if (target.password) connectConfig.password = target.password
-  if (target.privateKey) connectConfig.privateKey = target.privateKey
-  if (target.passphrase) connectConfig.passphrase = target.passphrase
-  const configuredAgentAuth = applyConfiguredSshAgentAuth(connectConfig, getConfig(), (keyChainId) => getKeychainSecret(keyChainId), {
-    enableForward: true,
-    overrideExistingAgent: false
-  })
-  if (!configuredAgentAuth && !target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) connectConfig.agent = process.env.SSH_AUTH_SOCK
-
-  void (async () => {
-    try {
-      const proxy = await createSshProxySocketForAsset(target.asset, getConfig().sshProxyConfigs, target.host, target.port)
-      if (proxy) {
-        lifecycle = sendTerminalLifecycle(owner, id, {
-          ...lifecycleBase,
-          stage: 'proxy-opening',
-          proxyName: proxy.config.name,
-          message: `Opening SSH proxy ${proxy.config.name}`
-        })
-        sendTerminalData(owner, id, `[aiopsterm] opening SSH proxy ${proxy.config.name}\n`)
-        proxySocket = proxy.socket
-        connectConfig.sock = proxy.socket
-        delete connectConfig.host
-        delete connectConfig.port
-      }
-      if (closed) {
-        proxySocket?.destroy()
-        return
-      }
-      client.connect(connectConfig)
-    } catch (error) {
-      sendTerminalData(owner, id, `\n[aiopsterm] SSH proxy tunnel failed: ${error instanceof Error ? error.message : String(error)}\n`)
-      fail(error, 'SSH proxy tunnel failed.', 1)
-    }
-  })()
-
-  return {
-    shell: 'ssh',
-    cwd,
-    session,
-    connection: target,
-    lifecycle
-  }
 }
 
 const registerIpc = () => {
@@ -3715,7 +3435,7 @@ const registerIpc = () => {
     if (session.kind === 'pty') {
       ;(session.process as PtyProcess).write(data)
     } else if (session.kind === 'ssh') {
-      ;(session.process as SshShellSession).write(data)
+      ;(session.process as SshTerminalSession).write(data)
     } else {
       ;(session.process as ChildProcessWithoutNullStreams).stdin.write(data)
     }
@@ -3751,7 +3471,7 @@ const registerIpc = () => {
     if (session.kind === 'pty') {
       ;(session.process as PtyProcess).resize(cols, rows)
     } else if (session.kind === 'ssh') {
-      ;(session.process as SshShellSession).resize(cols, rows)
+      ;(session.process as SshTerminalSession).resize(cols, rows)
     }
   })
 
@@ -3760,7 +3480,7 @@ const registerIpc = () => {
     if (!session) return createTerminalKillResult(id, false)
     session.manualCloseRequested = true
     if (session.kind === 'ssh') {
-      ;(session.process as SshShellSession).kill('manual')
+      ;(session.process as SshTerminalSession).kill('manual')
     } else {
       session.process.kill()
     }
@@ -3926,7 +3646,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   sessions.forEach((session) => {
     if (session.kind === 'ssh') {
-      ;(session.process as SshShellSession).kill()
+      ;(session.process as SshTerminalSession).kill()
     } else {
       session.process.kill()
     }

@@ -1,0 +1,423 @@
+import { EventEmitter } from 'events'
+import { PassThrough } from 'stream'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { TerminalLifecycleEvent } from '../src/shared/preload'
+
+type RecordedEvents = {
+  lifecycle: TerminalLifecycleEvent[]
+  data: Array<string | Buffer>
+  exit: Array<{ event: TerminalLifecycleEvent; code?: number | null }>
+  closed: string[]
+}
+
+class MockProxySocket extends PassThrough {
+  destroyedFlag = false
+
+  override destroy(error?: Error): this {
+    if (!this.destroyedFlag) {
+      this.destroyedFlag = true
+      this.emit('close', error)
+    }
+    return this
+  }
+}
+
+class MockSshChannel extends PassThrough {
+  stderr = new PassThrough()
+  writes: Array<string | Buffer> = []
+  windows: Array<{ rows: number; cols: number; height: number; width: number }> = []
+  closeCalls = 0
+
+  override write(chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void): boolean {
+    this.writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk))
+    const done = typeof encoding === 'function' ? encoding : callback
+    done?.()
+    return true
+  }
+
+  setWindow(rows: number, cols: number, height: number, width: number) {
+    this.windows.push({ rows, cols, height, width })
+  }
+
+  close() {
+    this.closeCalls += 1
+    this.emit('close')
+  }
+}
+
+const createSshRuntime = (options: { failConnect?: Error; failShell?: Error } = {}) => {
+  const clients: MockSshClient[] = []
+  const connectConfigs: Array<Record<string, unknown>> = []
+  const channels: MockSshChannel[] = []
+  const shellOptions: Array<Record<string, unknown>> = []
+
+  class MockSshClient extends EventEmitter {
+    endCalls = 0
+
+    connect(config: Record<string, unknown>) {
+      connectConfigs.push(config)
+      queueMicrotask(() => {
+        if (options.failConnect) this.emit('error', options.failConnect)
+        else this.emit('ready')
+      })
+    }
+
+    shell(_options: Record<string, unknown>, callback: (error: Error | undefined, stream: MockSshChannel) => void) {
+      shellOptions.push(_options)
+      const channel = new MockSshChannel()
+      channels.push(channel)
+      queueMicrotask(() => {
+        callback(options.failShell, channel)
+      })
+    }
+
+    end() {
+      this.endCalls += 1
+      this.emit('end')
+    }
+  }
+
+  return {
+    runtime: {
+      Client: class extends MockSshClient {
+        constructor() {
+          super()
+          clients.push(this)
+        }
+      }
+    },
+    clients,
+    connectConfigs,
+    channels,
+    shellOptions
+  }
+}
+
+const waitForMicrotasks = async (count = 1) => {
+  for (let index = 0; index < count; index += 1) {
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+  }
+}
+
+const createRecorder = (): RecordedEvents => ({
+  lifecycle: [],
+  data: [],
+  exit: [],
+  closed: []
+})
+
+const loadSshTerminalBackend = async () => {
+  const modulePath = '../src/main/backend/sshTerminal'
+  return import(modulePath)
+}
+
+const runtimeConfig = (sshProxyConfigs: any[] = []) => ({
+  sshProxyConfigs,
+  sshAgentKeys: [],
+  terminal: { sshAgentsStatus: false }
+})
+
+const asRuntime = (runtime: unknown) => runtime as never
+
+const createSink = (events: RecordedEvents) => ({
+  lifecycle: (event: TerminalLifecycleEvent) => events.lifecycle.push(event),
+  data: (chunk: string | Buffer) => events.data.push(chunk),
+  exit: (event: TerminalLifecycleEvent, code?: number | null) => events.exit.push({ event, code }),
+  closed: (id: string) => events.closed.push(id)
+})
+
+describe('ssh terminal backend runtime', () => {
+  beforeEach(async () => {
+    const backend = await loadSshTerminalBackend()
+    backend.configureSshTerminalBackendRuntime()
+  })
+
+  it('opens real ssh2 shell sessions through the backend runtime and keeps status out of terminal data', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const result = backend.createSshTerminalSession(
+      'ssh-unit-1',
+      {
+        kind: 'ssh',
+        ssh: {
+          host: '10.71.0.8',
+          username: 'deploy',
+          port: 2222,
+          password: 'secret'
+        },
+        cols: 120,
+        rows: 40
+      },
+      createSink(events)
+    )
+    result.session?.write('uptime\n')
+    result.session?.resize(132, 44)
+    await waitForMicrotasks(4)
+    result.session?.resize(140, 48)
+    ssh.channels[0].emit('data', Buffer.from('remote output\n'))
+    ssh.channels[0].stderr.emit('data', 'remote error\n')
+
+    expect(result.session).toBeTruthy()
+    expect(result.connection).toEqual(
+      expect.objectContaining({
+        host: '10.71.0.8',
+        username: 'deploy',
+        port: 2222,
+        password: 'secret'
+      })
+    )
+    expect(ssh.connectConfigs).toEqual([
+      expect.objectContaining({
+        host: '10.71.0.8',
+        port: 2222,
+        username: 'deploy',
+        password: 'secret',
+        readyTimeout: 20000,
+        keepaliveInterval: 10000
+      })
+    ])
+    expect(ssh.shellOptions).toEqual([expect.objectContaining({ term: 'xterm-256color', cols: 132, rows: 44 })])
+    expect(ssh.channels[0].writes).toEqual(['uptime\n'])
+    expect(ssh.channels[0].windows).toContainEqual({ rows: 48, cols: 140, height: 0, width: 0 })
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connected', 'shell-ready'])
+    expect(events.data.map((chunk) => chunk.toString())).toEqual(['remote output\n', 'remote error\n'])
+    expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('[aiopsterm]')
+  })
+
+  it('resolves asset secrets, keychain secrets, and proxy sockets before connecting', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const proxySocket = new MockProxySocket()
+    const events = createRecorder()
+    const proxyCalls: Array<Record<string, unknown>> = []
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () =>
+        ({
+          id: 'asset-proxy-1',
+          name: 'proxy-host',
+          title: 'proxy-host',
+          host: '10.72.0.9',
+          username: 'ops',
+          port: 2200,
+          asset_type: 'person',
+          auth_type: 'keyBased',
+          needProxy: true,
+          proxyName: 'release-proxy',
+          keychainId: 'key-1'
+        }) as never,
+      getAssetSecret: () => ({ password: 'saved-password' }),
+      getKeychainSecret: () => ({ privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----', passphrase: 'phrase' }),
+      getConfig: () => runtimeConfig([{ name: 'release-proxy', type: 'HTTP', host: '127.0.0.1', port: 8080, enableProxyIdentity: false }]),
+      createSshProxySocketForAsset: async (asset: unknown, configs: unknown, targetHost: unknown, targetPort: unknown) => {
+        proxyCalls.push({ asset, configs, targetHost, targetPort })
+        return {
+          config: { name: 'release-proxy', type: 'HTTP', host: '127.0.0.1', port: 8080, enableProxyIdentity: false },
+          socket: proxySocket
+        } as never
+      }
+    })
+
+    const result = backend.createSshTerminalSession('ssh-proxy-1', { kind: 'ssh', assetId: 'asset-proxy-1' }, createSink(events))
+    await waitForMicrotasks(4)
+
+    expect(result.connection).toEqual(
+      expect.objectContaining({
+        host: '10.72.0.9',
+        username: 'ops',
+        port: 2200,
+        password: 'saved-password',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----',
+        passphrase: 'phrase'
+      })
+    )
+    expect(proxyCalls).toEqual([
+      expect.objectContaining({
+        targetHost: '10.72.0.9',
+        targetPort: 2200
+      })
+    ])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connected', 'shell-ready'])
+    expect(events.lifecycle[1]).toEqual(expect.objectContaining({ proxyName: 'release-proxy' }))
+    expect(ssh.connectConfigs[0]).toEqual(
+      expect.objectContaining({
+        username: 'ops',
+        password: 'saved-password',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----',
+        passphrase: 'phrase',
+        sock: proxySocket
+      })
+    )
+    expect(ssh.connectConfigs[0]).not.toHaveProperty('host')
+    expect(ssh.connectConfigs[0]).not.toHaveProperty('port')
+  })
+
+  it('fails closed when ssh2 runtime is unavailable or target fields are invalid', async () => {
+    const backend = await loadSshTerminalBackend()
+    const unavailable = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: null,
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const noRuntime = backend.createSshTerminalSession(
+      'ssh-no-runtime',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'ops', port: 22 } },
+      createSink(unavailable)
+    )
+    expect(noRuntime.session).toBeNull()
+    expect(unavailable.lifecycle).toEqual([
+      expect.objectContaining({
+        id: 'ssh-no-runtime',
+        stage: 'error',
+        message: 'SSH runtime is not available.',
+        errorMessage: 'ssh2 runtime is not available. Run npm install and rebuild native modules if needed.'
+      })
+    ])
+    expect(unavailable.exit).toEqual([{ event: unavailable.lifecycle[0], code: 1 }])
+    expect(unavailable.data).toEqual([])
+
+    const invalid = createRecorder()
+    const invalidResult = backend.createSshTerminalSession('ssh-invalid', { kind: 'ssh', ssh: { host: '', username: '', port: 0 } }, createSink(invalid))
+    expect(invalidResult.session).toBeNull()
+    expect(invalid.lifecycle).toEqual([
+      expect.objectContaining({
+        id: 'ssh-invalid',
+        stage: 'error',
+        message: 'SSH target is invalid.',
+        errorMessage: 'SSH target requires host, username, and a valid port.'
+      })
+    ])
+    expect(invalid.exit).toEqual([{ event: invalid.lifecycle[0], code: 1 }])
+    expect(invalid.data).toEqual([])
+  })
+
+  it('emits structured shell and connection failures without terminal data fabrication', async () => {
+    const backend = await loadSshTerminalBackend()
+    const shellFailureSsh = createSshRuntime({ failShell: new Error('shell denied') })
+    const shellEvents = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(shellFailureSsh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    backend.createSshTerminalSession(
+      'ssh-shell-fail',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'ops', port: 22 } },
+      createSink(shellEvents)
+    )
+    await waitForMicrotasks(4)
+    expect(shellEvents.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connected', 'error'])
+    expect(shellEvents.lifecycle[2]).toEqual(expect.objectContaining({ message: 'SSH shell failed.', errorMessage: 'shell denied' }))
+    expect(shellEvents.exit).toEqual([{ event: shellEvents.lifecycle[2], code: 1 }])
+    expect(shellEvents.data).toEqual([])
+
+    const connectFailureSsh = createSshRuntime({ failConnect: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
+    const connectEvents = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(connectFailureSsh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+    backend.createSshTerminalSession(
+      'ssh-connect-fail',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'ops', port: 22 } },
+      createSink(connectEvents)
+    )
+    await waitForMicrotasks(3)
+    expect(connectEvents.lifecycle).toEqual([
+      expect.objectContaining({ stage: 'connecting' }),
+      expect.objectContaining({
+        stage: 'error',
+        message: 'SSH connection failed.',
+        reason: 'network',
+        isNetworkDisconnect: true,
+        errorCode: 'ECONNRESET',
+        errorMessage: 'read ECONNRESET'
+      })
+    ])
+    expect(connectEvents.exit).toEqual([{ event: connectEvents.lifecycle[1], code: 1 }])
+    expect(connectEvents.data).toEqual([])
+  })
+
+  it('closes sessions, proxy sockets, and registry state from the backend kill path', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const proxySocket = new MockProxySocket()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () =>
+        ({
+          id: 'asset-proxy-close',
+          name: 'proxy-close',
+          host: '10.72.0.10',
+          username: 'ops',
+          port: 22,
+          needProxy: true,
+          proxyName: 'release-proxy'
+        }) as never,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig([{ name: 'release-proxy', type: 'HTTP', host: '127.0.0.1', port: 8080, enableProxyIdentity: false }]),
+      createSshProxySocketForAsset: async () =>
+        ({
+          config: { name: 'release-proxy', type: 'HTTP', host: '127.0.0.1', port: 8080, enableProxyIdentity: false },
+          socket: proxySocket
+        }) as never
+    })
+
+    const result = backend.createSshTerminalSession('ssh-kill-1', { kind: 'ssh', assetId: 'asset-proxy-close' }, createSink(events))
+    await waitForMicrotasks(4)
+    result.session?.kill('manual')
+
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connected', 'shell-ready', 'closed'])
+    expect(events.lifecycle.at(-1)).toEqual(expect.objectContaining({ reason: 'manual', message: 'Terminal closed by user.' }))
+    expect(events.exit.at(-1)).toEqual({ event: events.lifecycle.at(-1), code: 0 })
+    expect(events.closed).toEqual(['ssh-kill-1'])
+    expect(ssh.channels[0].closeCalls).toBe(1)
+    expect(proxySocket.destroyedFlag).toBe(true)
+    expect(ssh.clients[0].endCalls).toBe(1)
+  })
+
+  it('uses an explicit backend double only when configured for e2e harnesses', async () => {
+    const backend = await loadSshTerminalBackend()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      useBackendDouble: true,
+      ssh2Runtime: null,
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const result = backend.createSshTerminalSession(
+      'ssh-double-1',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'ops', port: 22 } },
+      createSink(events)
+    )
+    result.session?.write('ignored\n')
+
+    expect(result.session).toBeTruthy()
+    expect(events.lifecycle).toEqual([expect.objectContaining({ id: 'ssh-double-1', stage: 'shell-ready' })])
+    expect(events.data).toEqual([])
+  })
+})
