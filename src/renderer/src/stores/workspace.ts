@@ -238,6 +238,7 @@ type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadA
 type AiChatConversationRestoreData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['restoreChatConversation']>>['data']>
 type AiChatMessageMetadataData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveChatMessageMetadata']>>['data']>
 type AiMcpToolCallActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['approveAiMcpToolCall']>>['data']>
+type AiMcpResourceAccessActionData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['approveAiMcpResourceAccess']>>['data']>
 type AiChatExchangeRequestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createAiChatExchangeRequest']>>['data']>
 type AiChatResponseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['generateAiChatResponse']>>['data']>
 type AiChatCancelData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['cancelAiChatResponse']>>['data']>
@@ -388,13 +389,17 @@ export type ChatMessage = {
   favorite?: boolean
   feedback?: 'up' | 'down'
   executedCommand?: string
-  ask?: 'command' | 'mcp_tool_call' | 'followup'
+  ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
   mcpToolCall?: {
     serverName: string
     toolName: string
     arguments?: Record<string, unknown>
+  }
+  mcpResourceAccess?: {
+    serverName: string
+    uri: string
   }
   followupOptions?: string[]
   selectedOption?: string
@@ -2293,7 +2298,7 @@ const isK8sBackendResourceRefreshData = (
 const aiChatHistoryMessageRoles: AiChatHistoryMessage['role'][] = ['user', 'assistant', 'system']
 const aiChatMessageStates: AiChatMessageState[] = ['streaming', 'done', 'cancelled', 'error']
 const aiChatFeedbackValues: NonNullable<AiChatHistoryMessage['feedback']>[] = ['up', 'down']
-const aiChatAskValues: NonNullable<AiChatHistoryMessage['ask']>[] = ['command', 'mcp_tool_call', 'followup']
+const aiChatAskValues: NonNullable<AiChatHistoryMessage['ask']>[] = ['command', 'mcp_tool_call', 'mcp_resource_access', 'followup']
 const aiChatSayValues: NonNullable<AiChatHistoryMessage['say']>[] = ['command', 'command_output', 'search_result', 'context_truncated']
 const aiChatActionValues: NonNullable<AiChatHistoryMessage['action']>[] = ['approved', 'rejected']
 const aiChatModes: NonNullable<AiChatResponseInput['mode']>[] = ['agent', 'command', 'chat']
@@ -2368,6 +2373,8 @@ const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage
       isNonEmptyString(source.mcpToolCall.serverName) &&
       isNonEmptyString(source.mcpToolCall.toolName) &&
       (source.mcpToolCall.arguments === undefined || isRecord(source.mcpToolCall.arguments)))) &&
+  (source.mcpResourceAccess === undefined ||
+    (isRecord(source.mcpResourceAccess) && isNonEmptyString(source.mcpResourceAccess.serverName) && isNonEmptyString(source.mcpResourceAccess.uri))) &&
   (source.followupOptions === undefined || (Array.isArray(source.followupOptions) && source.followupOptions.every((item) => typeof item === 'string'))) &&
   isOptionalString(source.selectedOption) &&
   isOptionalBoolean(source.partial)
@@ -2480,6 +2487,13 @@ const isAiMcpToolCallActionData = (source: unknown): source is AiMcpToolCallActi
       isRecord(source.mcpConfig.mcpConfig) &&
       Array.isArray(source.mcpConfig.mcpServers) &&
       isRecord(source.mcpConfig.mcpToolStates)))
+
+const isAiMcpResourceAccessActionData = (source: unknown): source is AiMcpResourceAccessActionData =>
+  isRecord(source) &&
+  (source.status === 'approved' || source.status === 'rejected') &&
+  isAiChatConversationRecord(source.conversation) &&
+  Array.isArray(source.messages) &&
+  source.messages.every(isAiChatHistoryMessage)
 
 const isAiChatCancelData = (source: unknown): source is AiChatCancelData =>
   isRecord(source) &&
@@ -3816,6 +3830,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     say: message.say,
     action: message.action,
     mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
+    mcpResourceAccess: message.mcpResourceAccess ? cloneStructuredValue(message.mcpResourceAccess) : undefined,
     followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
     selectedOption: message.selectedOption,
     partial: message.partial
@@ -3846,6 +3861,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       say: message.say,
       action: message.action,
       mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
+      mcpResourceAccess: message.mcpResourceAccess ? cloneStructuredValue(message.mcpResourceAccess) : undefined,
       followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
       selectedOption: message.selectedOption,
       partial: message.partial
@@ -11319,6 +11335,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const applyAiMcpResourceAccessResult = (data: AiMcpResourceAccessActionData) => {
+    const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
+    const nextConversation = cloneConversationRecord(data.conversation)
+    conversations.value = existing
+      ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
+      : [nextConversation, ...conversations.value]
+    selectedConversationId.value = nextConversation.id
+    applyChatMessageSnapshot(data.messages)
+  }
+
   const runAiMcpToolCallAction = async (messageId: string, action: 'approve' | 'reject', options: { autoApprove?: boolean } = {}) => {
     const message = chatMessages.value.find((item) => item.id === messageId)
     if (!message?.mcpToolCall || message.ask !== 'mcp_tool_call') return false
@@ -11349,6 +11375,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const approveAiMcpToolCall = (messageId: string, options: { autoApprove?: boolean } = {}) => runAiMcpToolCallAction(messageId, 'approve', options)
 
   const rejectAiMcpToolCall = (messageId: string) => runAiMcpToolCallAction(messageId, 'reject')
+
+  const runAiMcpResourceAccessAction = async (messageId: string, action: 'approve' | 'reject') => {
+    const message = chatMessages.value.find((item) => item.id === messageId)
+    if (!message?.mcpResourceAccess || message.ask !== 'mcp_resource_access') return false
+    if (!selectedConversationId.value) {
+      setTopNotice('会话历史写入服务不可用')
+      return false
+    }
+    const bridge = action === 'approve' ? window.aiops?.approveAiMcpResourceAccess : window.aiops?.rejectAiMcpResourceAccess
+    if (typeof bridge !== 'function') {
+      setTopNotice('AI MCP 资源审批服务不可用')
+      return false
+    }
+    const synced = await updateCurrentConversationSnapshot(undefined, { notifyUnavailable: true, notifyFailure: true })
+    if (!synced) return false
+    const result = await bridge({
+      conversationId: selectedConversationId.value,
+      messageId
+    })
+    if (!result?.ok || !isAiMcpResourceAccessActionData(result.data)) {
+      setTopNotice(result?.errorMessage || 'AI MCP 资源审批失败')
+      return false
+    }
+    applyAiMcpResourceAccessResult(result.data)
+    return result.data.status
+  }
+
+  const approveAiMcpResourceAccess = (messageId: string) => runAiMcpResourceAccessAction(messageId, 'approve')
+
+  const rejectAiMcpResourceAccess = (messageId: string) => runAiMcpResourceAccessAction(messageId, 'reject')
 
   const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
     const message = chatMessages.value.find((item) => item.id === id)
@@ -12024,6 +12080,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectCommandPreset,
     approveAiMcpToolCall,
     rejectAiMcpToolCall,
+    approveAiMcpResourceAccess,
+    rejectAiMcpResourceAccess,
     setMessageFeedback,
     toggleMessageFavorite,
     retryAssistantMessage,

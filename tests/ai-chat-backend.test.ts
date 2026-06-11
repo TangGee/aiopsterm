@@ -364,6 +364,79 @@ describe('ai chat backend response boundary', () => {
     })
   })
 
+  it('turns provider MCP resource blocks into backend-owned approval messages', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '<access_mcp_resource><server_name>filesystem</server_name><uri>file:///workspace</uri></access_mcp_resource>'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+    const readMcpResource = vi.fn()
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 75_000,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          mcpServers: [
+            {
+              name: 'filesystem',
+              status: 'connected',
+              disabled: false,
+              tools: [],
+              resources: [{ uri: 'file:///workspace', name: 'Workspace', description: 'Workspace files', mimeType: 'text/plain' }]
+            }
+          ],
+          mcpToolStates: {},
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-mcp-resource',
+      assistantMessageId: 'aichat-request-mcp-resource-assistant',
+      prompt: '读取工作区资源',
+      model: 'ops-chat'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(readMcpResource).not.toHaveBeenCalled()
+    expect(result.data).toMatchObject({
+      text: '请求访问 MCP Resource filesystem:file:///workspace。',
+      message: {
+        id: 'aichat-request-mcp-resource-assistant',
+        role: 'assistant',
+        state: 'done',
+        ask: 'mcp_resource_access',
+        mcpResourceAccess: {
+          serverName: 'filesystem',
+          uri: 'file:///workspace'
+        }
+      }
+    })
+  })
+
   it('auto-executes provider MCP tool blocks when the tool is configured for auto approve', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

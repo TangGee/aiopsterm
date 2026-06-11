@@ -143,6 +143,17 @@ describe('AI chat history backend boundary', () => {
             }
           },
           {
+            id: 'history-resource',
+            role: 'assistant',
+            text: '访问部署资源',
+            state: 'done',
+            ask: 'mcp_resource_access',
+            mcpResourceAccess: {
+              serverName: 'prod-agent',
+              uri: 'file:///workspace/release.md'
+            }
+          },
+          {
             id: 'history-followup',
             role: 'assistant',
             text: '请选择下一步',
@@ -183,6 +194,12 @@ describe('AI chat history backend boundary', () => {
         ask: 'mcp_tool_call',
         state: 'error',
         mcpToolCall: expect.objectContaining({ serverName: 'prod-agent', toolName: 'inspect_deployment' })
+      }),
+      expect.objectContaining({
+        id: 'history-resource',
+        ask: 'mcp_resource_access',
+        state: 'done',
+        mcpResourceAccess: expect.objectContaining({ serverName: 'prod-agent', uri: 'file:///workspace/release.md' })
       }),
       expect.objectContaining({ id: 'history-followup', ask: 'followup', followupOptions: ['继续观察', '执行回滚'], selectedOption: '执行回滚' }),
       expect.objectContaining({ id: 'history-truncated', say: 'context_truncated', partial: true })
@@ -225,6 +242,17 @@ describe('AI chat history backend boundary', () => {
           serverName: 'prod-agent',
           toolName: 'inspect_deployment',
           arguments: { namespace: 'prod', name: 'web' }
+        }
+      },
+      {
+        id: 'history-resource',
+        role: 'assistant',
+        text: '访问部署资源',
+        state: 'done',
+        ask: 'mcp_resource_access',
+        mcpResourceAccess: {
+          serverName: 'prod-agent',
+          uri: 'file:///workspace/release.md'
         }
       },
       {

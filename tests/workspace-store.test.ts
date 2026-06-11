@@ -537,6 +537,75 @@ describe('workspace store', () => {
     })
   })
 
+  it('approves and rejects AI MCP resource access through the backend bridge', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.chatMessages = [
+      { id: 'mcp-resource-user', role: 'user', text: '读取工作区资源' },
+      {
+        id: 'mcp-resource-ask',
+        role: 'assistant',
+        text: '请求访问 MCP Resource filesystem:file:///workspace。',
+        state: 'done',
+        ask: 'mcp_resource_access',
+        mcpResourceAccess: {
+          serverName: 'filesystem',
+          uri: 'file:///workspace'
+        }
+      }
+    ]
+
+    vi.mocked(window.aiops.updateChatConversation).mockClear()
+    vi.mocked(window.aiops.approveAiMcpResourceAccess).mockClear()
+    const approved = await store.approveAiMcpResourceAccess('mcp-resource-ask')
+
+    expect(approved).toBe('approved')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'conv-1',
+        messages: expect.arrayContaining([expect.objectContaining({ id: 'mcp-resource-ask', ask: 'mcp_resource_access' })])
+      })
+    )
+    expect(window.aiops.approveAiMcpResourceAccess).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      messageId: 'mcp-resource-ask'
+    })
+    expect(store.chatMessages.find((message) => message.id === 'mcp-resource-ask')).toMatchObject({
+      action: 'approved',
+      say: 'command_output',
+      state: 'done',
+      text: 'MCP resource file:///workspace'
+    })
+
+    store.chatMessages = [
+      { id: 'mcp-resource-user-2', role: 'user', text: '再次读取资源' },
+      {
+        id: 'mcp-resource-reject',
+        role: 'assistant',
+        text: '请求访问 MCP Resource filesystem:file:///workspace。',
+        state: 'done',
+        ask: 'mcp_resource_access',
+        mcpResourceAccess: {
+          serverName: 'filesystem',
+          uri: 'file:///workspace'
+        }
+      }
+    ]
+    vi.mocked(window.aiops.rejectAiMcpResourceAccess).mockClear()
+    const rejected = await store.rejectAiMcpResourceAccess('mcp-resource-reject')
+
+    expect(rejected).toBe('rejected')
+    expect(window.aiops.rejectAiMcpResourceAccess).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      messageId: 'mcp-resource-reject'
+    })
+    expect(store.chatMessages.find((message) => message.id === 'mcp-resource-reject')).toMatchObject({
+      action: 'rejected',
+      ask: 'mcp_resource_access',
+      state: 'done'
+    })
+  })
+
   it('keeps configuration changes in local state before bridge persistence', async () => {
     const store = useWorkspaceStore()
 

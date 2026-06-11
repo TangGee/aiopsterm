@@ -670,13 +670,17 @@ export type AiChatHistoryMessage = {
   favorite?: boolean
   feedback?: 'up' | 'down'
   executedCommand?: string
-  ask?: 'command' | 'mcp_tool_call' | 'followup'
+  ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
   mcpToolCall?: {
     serverName: string
     toolName: string
     arguments?: Record<string, unknown>
+  }
+  mcpResourceAccess?: {
+    serverName: string
+    uri: string
   }
   followupOptions?: string[]
   selectedOption?: string
@@ -768,6 +772,22 @@ export type AiMcpToolCallActionResult = AiopsMutationResult<{
     errorMessage: string
   }
   mcpConfig?: NonNullable<McpConfigWriteResult['data']>
+}>
+
+export type AiMcpResourceAccessActionInput = {
+  conversationId: string
+  messageId: string
+}
+
+export type AiMcpResourceAccessActionResult = AiopsMutationResult<{
+  status: 'approved' | 'rejected'
+  conversation: AiChatConversationRecord
+  messages: AiChatHistoryMessage[]
+  resourceAccess?: NonNullable<McpResourceReadResult['data']>
+  resourceAccessError?: {
+    errorCode?: string
+    errorMessage: string
+  }
 }>
 
 export type AiTodoStatus = 'pending' | 'in_progress' | 'completed'
@@ -2562,6 +2582,8 @@ export type AiopsPreloadApi = {
   saveChatMessageMetadata: (input: AiChatMessageMetadataInput) => Promise<AiChatMessageMetadataResult>
   approveAiMcpToolCall: (input: AiMcpToolCallActionInput) => Promise<AiMcpToolCallActionResult>
   rejectAiMcpToolCall: (input: AiMcpToolCallActionInput) => Promise<AiMcpToolCallActionResult>
+  approveAiMcpResourceAccess: (input: AiMcpResourceAccessActionInput) => Promise<AiMcpResourceAccessActionResult>
+  rejectAiMcpResourceAccess: (input: AiMcpResourceAccessActionInput) => Promise<AiMcpResourceAccessActionResult>
   exportChat: (input: AiChatExportInput) => Promise<AiChatExportResult>
   listAiTodoSnapshot: () => Promise<AiTodoSnapshotResult>
   listAiContextCatalog: () => Promise<AiContextCatalogResult>

@@ -32,7 +32,7 @@ import {
   saveKeychain,
   testAssetConnection
 } from './backend/assets'
-import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, generateAiChatResponse } from './backend/aiChat'
+import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, formatMcpResourceReadContent, generateAiChatResponse } from './backend/aiChat'
 import { configureAiCommandBackendRuntime, listAiCommandCatalog } from './backend/aiCommands'
 import { configureAiContextBackendRuntime, listAiContextCatalog } from './backend/aiContext'
 import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
@@ -223,6 +223,8 @@ import type {
   AiChatExportInput,
   AiChatHistoryMessage,
   AiChatMessageMetadataInput,
+  AiMcpResourceAccessActionInput,
+  AiMcpResourceAccessActionResult,
   AiMcpToolCallActionInput,
   AiMcpToolCallActionResult,
   AiChatResponseInput,
@@ -2276,6 +2278,15 @@ const callCurrentMcpTool = async (input: McpToolCallInput) => {
   })
 }
 
+const readCurrentMcpResource = async (input: McpResourceReadInput) => {
+  const current = getConfig()
+  return readMcpResource(await loadCurrentMcpConfigFile(), input, {
+    servers: current.mcpServers || [],
+    clientName: 'aiopsterm',
+    clientVersion: app.getVersion()
+  })
+}
+
 const handleAiMcpToolCallAction = async (input: AiMcpToolCallActionInput, approve: boolean): Promise<AiMcpToolCallActionResult> => {
   const conversationId = String(input?.conversationId || '').trim()
   const messageId = String(input?.messageId || '').trim()
@@ -2368,6 +2379,90 @@ const handleAiMcpToolCallAction = async (input: AiMcpToolCallActionInput, approv
         ? { toolCall: toolResult.data }
         : { toolCallError: { errorCode: toolResult.errorCode, errorMessage: toolResult.errorMessage || 'MCP tool call failed.' } }),
       ...(mcpConfig ? { mcpConfig } : {})
+    }
+  }
+}
+
+const handleAiMcpResourceAccessAction = async (
+  input: AiMcpResourceAccessActionInput,
+  approve: boolean
+): Promise<AiMcpResourceAccessActionResult> => {
+  const conversationId = String(input?.conversationId || '').trim()
+  const messageId = String(input?.messageId || '').trim()
+  if (!conversationId || !messageId) {
+    return {
+      ok: false,
+      errorCode: 'AI_MCP_RESOURCE_ACCESS_TARGET_REQUIRED',
+      errorMessage: 'AI MCP resource access approval requires a conversation and message id.'
+    }
+  }
+  const snapshot = getChatConversationMessages(conversationId)
+  if (!snapshot.ok || !snapshot.data) {
+    return {
+      ok: false,
+      errorCode: snapshot.errorCode || 'AI_MCP_RESOURCE_ACCESS_HISTORY_UNAVAILABLE',
+      errorMessage: snapshot.errorMessage || 'AI chat history is unavailable.'
+    }
+  }
+  const messageIndex = snapshot.data.messages.findIndex((message) => message.id === messageId)
+  const message = messageIndex >= 0 ? snapshot.data.messages[messageIndex] : undefined
+  if (!message || message.ask !== 'mcp_resource_access' || !message.mcpResourceAccess) {
+    return {
+      ok: false,
+      errorCode: 'AI_MCP_RESOURCE_ACCESS_NOT_FOUND',
+      errorMessage: 'AI MCP resource access message was not found.'
+    }
+  }
+  const nextMessages = cloneChatHistoryMessages(snapshot.data.messages)
+  const nextMessage = nextMessages[messageIndex]
+  if (!approve) {
+    nextMessage.action = 'rejected'
+    nextMessage.state = 'done'
+    const saved = replaceChatConversationMessages(conversationId, nextMessages)
+    if (!saved.ok || !saved.data) {
+      return {
+        ok: false,
+        errorCode: saved.errorCode || 'AI_MCP_RESOURCE_ACCESS_REJECT_SAVE_FAILED',
+        errorMessage: saved.errorMessage || 'AI MCP resource access rejection could not be saved.'
+      }
+    }
+    return {
+      ok: true,
+      data: {
+        status: 'rejected',
+        conversation: saved.data.conversation,
+        messages: saved.data.messages
+      }
+    }
+  }
+
+  const resourceInput: McpResourceReadInput = {
+    serverName: message.mcpResourceAccess.serverName,
+    uri: message.mcpResourceAccess.uri
+  }
+  const resourceResult = await readCurrentMcpResource(resourceInput)
+  nextMessage.action = 'approved'
+  nextMessage.say = 'command_output'
+  nextMessage.state = resourceResult.ok && resourceResult.data ? 'done' : 'error'
+  nextMessage.text =
+    resourceResult.ok && resourceResult.data ? formatMcpResourceReadContent(resourceResult.data.contents) : resourceResult.errorMessage || 'MCP resource access failed.'
+  const saved = replaceChatConversationMessages(conversationId, nextMessages)
+  if (!saved.ok || !saved.data) {
+    return {
+      ok: false,
+      errorCode: saved.errorCode || 'AI_MCP_RESOURCE_ACCESS_SAVE_FAILED',
+      errorMessage: saved.errorMessage || 'AI MCP resource access result could not be saved.'
+    }
+  }
+  return {
+    ok: true,
+    data: {
+      status: 'approved',
+      conversation: saved.data.conversation,
+      messages: saved.data.messages,
+      ...(resourceResult.ok && resourceResult.data
+        ? { resourceAccess: resourceResult.data }
+        : { resourceAccessError: { errorCode: resourceResult.errorCode, errorMessage: resourceResult.errorMessage || 'MCP resource access failed.' } })
     }
   }
 }
@@ -2762,6 +2857,8 @@ const registerIpc = () => {
   ipcMain.handle('chat-history:message-metadata', (_event, input: AiChatMessageMetadataInput) => saveChatMessageMetadata(input))
   ipcMain.handle('ai:mcp-tool-call:approve', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, true))
   ipcMain.handle('ai:mcp-tool-call:reject', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, false))
+  ipcMain.handle('ai:mcp-resource-access:approve', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, true))
+  ipcMain.handle('ai:mcp-resource-access:reject', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, false))
   ipcMain.handle('chat:export', async (event, input: AiChatExportInput) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     return exportChat(input, {

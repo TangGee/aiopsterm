@@ -39,6 +39,7 @@ const cloneMessage = (message: AiChatHistoryMessage): AiChatHistoryMessage => ({
   hosts: message.hosts ? message.hosts.map((host) => ({ ...host })) : undefined,
   contentParts: message.contentParts ? cloneJson(message.contentParts) : undefined,
   mcpToolCall: message.mcpToolCall ? cloneJson(message.mcpToolCall) : undefined,
+  mcpResourceAccess: message.mcpResourceAccess ? cloneJson(message.mcpResourceAccess) : undefined,
   followupOptions: message.followupOptions ? [...message.followupOptions] : undefined
 })
 
@@ -147,7 +148,8 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
             })
             .filter(Boolean) as AiChatHistoryMessage['hosts']
         : undefined
-      const ask = item.ask === 'command' || item.ask === 'mcp_tool_call' || item.ask === 'followup' ? item.ask : undefined
+      const ask =
+        item.ask === 'command' || item.ask === 'mcp_tool_call' || item.ask === 'mcp_resource_access' || item.ask === 'followup' ? item.ask : undefined
       const say =
         item.say === 'command' || item.say === 'command_output' || item.say === 'search_result' || item.say === 'context_truncated'
           ? item.say
@@ -159,6 +161,12 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
             serverName: normalizeText(item.mcpToolCall.serverName),
             toolName: normalizeText(item.mcpToolCall.toolName),
             arguments: isRecord(item.mcpToolCall.arguments) ? cloneJson(item.mcpToolCall.arguments) : undefined
+          }
+        : undefined
+      const mcpResourceAccess = isRecord(item.mcpResourceAccess)
+        ? {
+            serverName: normalizeText(item.mcpResourceAccess.serverName),
+            uri: normalizeText(item.mcpResourceAccess.uri)
           }
         : undefined
       const followupOptions = Array.isArray(item.followupOptions) ? item.followupOptions.map(normalizeText).filter(Boolean) : undefined
@@ -176,6 +184,7 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
         say,
         action,
         mcpToolCall: mcpToolCall?.serverName && mcpToolCall.toolName ? mcpToolCall : undefined,
+        mcpResourceAccess: mcpResourceAccess?.serverName && mcpResourceAccess.uri ? mcpResourceAccess : undefined,
         followupOptions: followupOptions?.length ? followupOptions : undefined,
         selectedOption: normalizeText(item.selectedOption) || undefined,
         partial: item.partial === true ? true : undefined

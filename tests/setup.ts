@@ -3330,13 +3330,17 @@ type TestChatHistoryMessage = {
   state?: 'streaming' | 'done' | 'cancelled' | 'error'
   favorite?: boolean
   feedback?: 'up' | 'down'
-  ask?: 'command' | 'mcp_tool_call' | 'followup'
+  ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
   mcpToolCall?: {
     serverName: string
     toolName: string
     arguments?: Record<string, unknown>
+  }
+  mcpResourceAccess?: {
+    serverName: string
+    uri: string
   }
 }
 
@@ -3423,7 +3427,8 @@ const cloneChatMessage = (message: TestChatHistoryMessage): TestChatHistoryMessa
         ...message.mcpToolCall,
         arguments: message.mcpToolCall.arguments ? { ...message.mcpToolCall.arguments } : undefined
       }
-    : undefined
+    : undefined,
+  mcpResourceAccess: message.mcpResourceAccess ? { ...message.mcpResourceAccess } : undefined
 })
 const cloneChatMessages = (messages: TestChatHistoryMessage[]) => messages.map(cloneChatMessage)
 const chatHistoryListResultMock = () => ({
@@ -4634,6 +4639,23 @@ const callMcpToolMock = async (serverName: string, toolName: string, args?: Reco
   }
 }
 
+const readMcpResourceMock = async (serverName: string, uri: string) => {
+  const server = mcpServersMock.find((item) => item.name === serverName)
+  if (!server) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
+  if (server.disabled) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_DISABLED', errorMessage: `MCP server "${serverName}" is disabled.` }
+  const resource = server.resources.find((item) => item.uri === uri)
+  if (!resource) return { ok: false, errorCode: 'MCP_RESOURCE_NOT_FOUND', errorMessage: `MCP resource not found: ${serverName}:${uri}` }
+  return {
+    ok: true,
+    data: {
+      serverName,
+      uri,
+      contents: [{ uri, mimeType: 'text/plain', text: `MCP resource ${uri}` }],
+      durationMs: 1
+    }
+  }
+}
+
 const handleAiMcpToolCallActionMock = async (input: { conversationId: string; messageId: string; autoApprove?: boolean }, approve: boolean) => {
   const conversation = chatHistoryStateMock.conversations.find((item) => item.id === input.conversationId)
   if (!conversation) return { ok: false, errorCode: 'CHAT_HISTORY_NOT_FOUND', errorMessage: 'Conversation not found.' }
@@ -4681,6 +4703,46 @@ const handleAiMcpToolCallActionMock = async (input: { conversationId: string; me
         ? { toolCall: toolResult.data }
         : { toolCallError: { errorCode: toolResult.errorCode, errorMessage: toolResult.errorMessage || 'MCP tool call failed.' } }),
       ...(mcpConfig ? { mcpConfig } : {})
+    }
+  }
+}
+
+const handleAiMcpResourceAccessActionMock = async (input: { conversationId: string; messageId: string }, approve: boolean) => {
+  const conversation = chatHistoryStateMock.conversations.find((item) => item.id === input.conversationId)
+  if (!conversation) return { ok: false, errorCode: 'CHAT_HISTORY_NOT_FOUND', errorMessage: 'Conversation not found.' }
+  const messages = cloneChatMessages(chatHistoryStateMock.messagesByConversationId[input.conversationId] || [])
+  const message = messages.find((item) => item.id === input.messageId)
+  if (!message?.mcpResourceAccess || message.ask !== 'mcp_resource_access') {
+    return { ok: false, errorCode: 'AI_MCP_RESOURCE_ACCESS_NOT_FOUND', errorMessage: 'AI MCP resource access message was not found.' }
+  }
+  if (!approve) {
+    message.action = 'rejected'
+    message.state = 'done'
+    chatHistoryStateMock.messagesByConversationId[input.conversationId] = cloneChatMessages(messages)
+    return {
+      ok: true,
+      data: {
+        status: 'rejected' as const,
+        conversation: cloneChatConversation(conversation),
+        messages: cloneChatMessages(messages)
+      }
+    }
+  }
+  const resourceResult = await readMcpResourceMock(message.mcpResourceAccess.serverName, message.mcpResourceAccess.uri)
+  message.action = 'approved'
+  message.say = 'command_output'
+  message.state = resourceResult.ok && resourceResult.data ? 'done' : 'error'
+  message.text = resourceResult.ok && resourceResult.data ? String(resourceResult.data.contents[0]?.text || '') : resourceResult.errorMessage || 'MCP resource access failed.'
+  chatHistoryStateMock.messagesByConversationId[input.conversationId] = cloneChatMessages(messages)
+  return {
+    ok: true,
+    data: {
+      status: 'approved' as const,
+      conversation: cloneChatConversation(conversation),
+      messages: cloneChatMessages(messages),
+      ...(resourceResult.ok && resourceResult.data
+        ? { resourceAccess: resourceResult.data }
+        : { resourceAccessError: { errorCode: resourceResult.errorCode, errorMessage: resourceResult.errorMessage || 'MCP resource access failed.' } })
     }
   }
 }
@@ -5413,22 +5475,9 @@ Object.defineProperty(window, 'aiops', {
     callMcpTool: vi.fn(callMcpToolMock),
     approveAiMcpToolCall: vi.fn((input: { conversationId: string; messageId: string; autoApprove?: boolean }) => handleAiMcpToolCallActionMock(input, true)),
     rejectAiMcpToolCall: vi.fn((input: { conversationId: string; messageId: string; autoApprove?: boolean }) => handleAiMcpToolCallActionMock(input, false)),
-    readMcpResource: vi.fn(async (serverName: string, uri: string) => {
-      const server = mcpServersMock.find((item) => item.name === serverName)
-      if (!server) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
-      if (server.disabled) return { ok: false, errorCode: 'MCP_RESOURCE_SERVER_DISABLED', errorMessage: `MCP server "${serverName}" is disabled.` }
-      const resource = server.resources.find((item) => item.uri === uri)
-      if (!resource) return { ok: false, errorCode: 'MCP_RESOURCE_NOT_FOUND', errorMessage: `MCP resource not found: ${serverName}:${uri}` }
-      return {
-        ok: true,
-        data: {
-          serverName,
-          uri,
-          contents: [{ uri, mimeType: 'text/plain', text: `MCP resource ${uri}` }],
-          durationMs: 1
-        }
-      }
-    }),
+    approveAiMcpResourceAccess: vi.fn((input: { conversationId: string; messageId: string }) => handleAiMcpResourceAccessActionMock(input, true)),
+    rejectAiMcpResourceAccess: vi.fn((input: { conversationId: string; messageId: string }) => handleAiMcpResourceAccessActionMock(input, false)),
+    readMcpResource: vi.fn(readMcpResourceMock),
     onMcpConfigFileChanged: vi.fn(() => () => undefined),
     getSkills: vi.fn(async () => cloneSkills()),
     getEnabledSkills: vi.fn(async () => cloneSkills().filter((skill) => skill.enabled)),

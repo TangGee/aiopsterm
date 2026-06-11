@@ -79,6 +79,16 @@ const exportInput = (): AiChatExportInput => ({
       }
     },
     {
+      id: 'mcp-resource',
+      role: 'assistant',
+      text: '访问 MCP 资源',
+      ask: 'mcp_resource_access',
+      mcpResourceAccess: {
+        serverName: 'prod-agent',
+        uri: 'file:///workspace/release.md'
+      }
+    },
+    {
       id: 'followup',
       role: 'assistant',
       text: '请选择下一步',
@@ -158,6 +168,7 @@ describe('AI chat export backend boundary', () => {
     expect(markdown).toContain('deployment "web" successfully rolled out')
     expect(markdown).toContain('"MCP SERVER": "prod-agent"')
     expect(markdown).toContain('"namespace": "prod"')
+    expect(markdown).toContain('"URI": "file:///workspace/release.md"')
     expect(markdown).toContain('- [ ] 继续观察')
     expect(markdown).toContain('- [x] 执行回滚')
     expect(markdown).toContain('**Search Result**')

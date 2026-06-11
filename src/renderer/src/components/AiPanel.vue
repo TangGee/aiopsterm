@@ -451,6 +451,50 @@
           </div>
         </div>
         <div
+          v-if="message.ask === 'mcp_resource_access' && message.mcpResourceAccess"
+          class="ai-mcp-tool-call"
+          data-testid="ai-mcp-resource-access"
+        >
+          <div class="ai-mcp-tool-call-grid">
+            <span>MCP Server</span>
+            <strong>{{ message.mcpResourceAccess.serverName }}</strong>
+            <span>Resource</span>
+            <strong>{{ message.mcpResourceAccess.uri }}</strong>
+          </div>
+          <div
+            v-if="!message.action"
+            class="message-command-actions ai-mcp-approval-actions"
+          >
+            <button
+              type="button"
+              class="secondary"
+              data-testid="ai-mcp-resource-reject"
+              @click.stop="void rejectMcpResourceAccess(message.id)"
+            >
+              <X />
+              <span>拒绝</span>
+            </button>
+            <button
+              type="button"
+              class="primary"
+              data-testid="ai-mcp-resource-approve"
+              @click.stop="void approveMcpResourceAccess(message.id)"
+            >
+              <Play />
+              <span>批准</span>
+            </button>
+          </div>
+          <div
+            v-else
+            class="ai-mcp-tool-call-status"
+            :class="message.action"
+          >
+            <Check v-if="message.action === 'approved'" />
+            <X v-else />
+            <span>{{ message.action === 'approved' ? '已批准' : '已拒绝' }}</span>
+          </div>
+        </div>
+        <div
           v-if="isCommandSuggestionMessage(message)"
           class="message-command-actions"
         >
@@ -1537,6 +1581,16 @@ const approveMcpToolCall = async (id: string, autoApprove = false) => {
 const rejectMcpToolCall = async (id: string) => {
   const result = await workspace.rejectAiMcpToolCall(id)
   showChatExportNotice(result === 'rejected' ? 'MCP 工具调用已拒绝。' : 'MCP 工具拒绝失败。')
+}
+
+const approveMcpResourceAccess = async (id: string) => {
+  const result = await workspace.approveAiMcpResourceAccess(id)
+  showChatExportNotice(result === 'approved' ? 'MCP 资源已读取。' : 'MCP 资源审批失败。')
+}
+
+const rejectMcpResourceAccess = async (id: string) => {
+  const result = await workspace.rejectAiMcpResourceAccess(id)
+  showChatExportNotice(result === 'rejected' ? 'MCP 资源访问已拒绝。' : 'MCP 资源拒绝失败。')
 }
 
 const toggleMessageFavorite = async (id: string) => {

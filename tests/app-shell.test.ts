@@ -3405,6 +3405,79 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('renders and approves AI MCP resource access through the backend bridge', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: '请求访问 MCP Resource filesystem:file:///workspace。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-resource-test-1',
+        assistantMessageId: 'aichat-request-resource-test-1-assistant',
+        message: {
+          id: 'aichat-request-resource-test-1-assistant',
+          role: 'assistant',
+          text: '请求访问 MCP Resource filesystem:file:///workspace。',
+          state: 'done',
+          ask: 'mcp_resource_access',
+          mcpResourceAccess: {
+            serverName: 'filesystem',
+            uri: 'file:///workspace'
+          }
+        }
+      }
+    } as any)
+
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('读取工作区资源'))
+    const range = document.createRange()
+    range.selectNodeContents(input.element)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await waitForMockCall(vi.mocked(window.aiops.generateAiChatResponse), 'generateAiChatResponse')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-mcp-resource-access"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-mcp-resource-access"]').text()).toContain('filesystem')
+    expect(wrapper.find('[data-testid="ai-mcp-resource-access"]').text()).toContain('file:///workspace')
+
+    vi.mocked(window.aiops.approveAiMcpResourceAccess).mockClear()
+    await wrapper.find('[data-testid="ai-mcp-resource-approve"]').trigger('click')
+    await waitForMockCall(vi.mocked(window.aiops.approveAiMcpResourceAccess), 'approveAiMcpResourceAccess')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.approveAiMcpResourceAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'aichat-request-resource-test-1-assistant'
+      })
+    )
+    expect(store.chatMessages.at(-1)).toMatchObject({
+      action: 'approved',
+      say: 'command_output',
+      text: 'MCP resource file:///workspace'
+    })
+    expect(wrapper.text()).toContain('MCP resource file:///workspace')
+
+    wrapper.unmount()
+  })
+
   it('opens External reference-style context and command popups in the AI panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

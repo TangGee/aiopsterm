@@ -72,6 +72,14 @@ export const markdownForChatExportMessage = (message: AiChatExportMessage) => {
     return `${roleHeader}\n\n\`\`\`json\n${JSON.stringify(toolCall, null, 2)}\n\`\`\`${hosts}\n`
   }
 
+  if (message.ask === 'mcp_resource_access' && message.mcpResourceAccess) {
+    const resourceAccess = {
+      'MCP SERVER': message.mcpResourceAccess.serverName,
+      URI: message.mcpResourceAccess.uri
+    }
+    return `${roleHeader}\n\n\`\`\`json\n${JSON.stringify(resourceAccess, null, 2)}\n\`\`\`${hosts}\n`
+  }
+
   if (message.ask === 'followup') {
     const options = message.followupOptions || []
     const optionList = options.length

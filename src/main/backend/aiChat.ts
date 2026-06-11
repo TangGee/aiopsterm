@@ -12,6 +12,8 @@ import type {
   AiChatResponseInput,
   AiChatResponseResult,
   AiChatSkillInput,
+  McpResourceReadInput,
+  McpResourceReadResult,
   McpToolCallInput,
   McpToolCallResult,
   ModelProviderCheckKey,
@@ -370,7 +372,7 @@ const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined =>
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
 }
 
-const decodeMcpToolTagValue = (value: string) =>
+const decodeMcpTagValue = (value: string) =>
   value
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
@@ -379,17 +381,17 @@ const decodeMcpToolTagValue = (value: string) =>
     .replace(/&amp;/g, '&')
     .trim()
 
-const readMcpToolTag = (body: string, tagName: string) => {
+const readMcpTag = (body: string, tagName: string) => {
   const match = body.match(new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>`, 'i'))
-  return match ? decodeMcpToolTagValue(match[1]) : ''
+  return match ? decodeMcpTagValue(match[1]) : ''
 }
 
 const parseMcpToolUseBlock = (text: string): McpToolCallInput | null => {
   const block = text.match(/<use_mcp_tool>\s*([\s\S]*?)\s*<\/use_mcp_tool>/i)
   if (!block) return null
-  const serverName = readMcpToolTag(block[1], 'server_name')
-  const toolName = readMcpToolTag(block[1], 'tool_name')
-  const argumentsText = readMcpToolTag(block[1], 'arguments')
+  const serverName = readMcpTag(block[1], 'server_name')
+  const toolName = readMcpTag(block[1], 'tool_name')
+  const argumentsText = readMcpTag(block[1], 'arguments')
   if (!serverName || !toolName) return null
   let parsedArguments: Record<string, unknown> = {}
   if (argumentsText) {
@@ -406,6 +408,15 @@ const parseMcpToolUseBlock = (text: string): McpToolCallInput | null => {
   }
 }
 
+const parseMcpResourceAccessBlock = (text: string): McpResourceReadInput | null => {
+  const block = text.match(/<access_mcp_resource>\s*([\s\S]*?)\s*<\/access_mcp_resource>/i)
+  if (!block) return null
+  const serverName = readMcpTag(block[1], 'server_name')
+  const uri = readMcpTag(block[1], 'uri')
+  if (!serverName || !uri) return null
+  return { serverName, uri }
+}
+
 const formatMcpToolCallContent = (content: NonNullable<McpToolCallResult['data']>['content']) => {
   if (!content.length) return '[]'
   return content
@@ -418,6 +429,7 @@ const formatMcpToolCallContent = (content: NonNullable<McpToolCallResult['data']
 }
 
 const createMcpToolCallSummary = (toolCall: McpToolCallInput) => `MCP Tool ${toolCall.serverName}/${toolCall.toolName}`
+const createMcpResourceAccessSummary = (resourceAccess: McpResourceReadInput) => `MCP Resource ${resourceAccess.serverName}:${resourceAccess.uri}`
 
 const createMcpToolAskMessage = (toolCall: McpToolCallInput, control: AiChatResponseControl): AiChatHistoryMessage => ({
   id: control.assistantMessageId || `aichat-mcp-${randomUUID()}`,
@@ -451,6 +463,36 @@ const createMcpToolOutputMessage = (
   }
 })
 
+const createMcpResourceAccessAskMessage = (resourceAccess: McpResourceReadInput, control: AiChatResponseControl): AiChatHistoryMessage => ({
+  id: control.assistantMessageId || `aichat-mcp-resource-${randomUUID()}`,
+  role: 'assistant',
+  text: `请求访问 ${createMcpResourceAccessSummary(resourceAccess)}。`,
+  state: 'done',
+  ask: 'mcp_resource_access',
+  mcpResourceAccess: {
+    serverName: resourceAccess.serverName,
+    uri: resourceAccess.uri
+  }
+})
+
+const createMcpResourceAccessOutputMessage = (
+  resourceAccess: McpResourceReadInput,
+  text: string,
+  state: Extract<AiChatHistoryMessage['state'], 'done' | 'error'>,
+  control: AiChatResponseControl
+): AiChatHistoryMessage => ({
+  id: control.assistantMessageId || `aichat-mcp-resource-${randomUUID()}`,
+  role: 'assistant',
+  text,
+  state,
+  say: 'command_output',
+  action: 'approved',
+  mcpResourceAccess: {
+    serverName: resourceAccess.serverName,
+    uri: resourceAccess.uri
+  }
+})
+
 const resolveConfiguredMcpTool = (config: UserConfig, toolCall: McpToolCallInput) => {
   const server = (config.mcpServers || []).find((item) => item.name === toolCall.serverName)
   if (!server) return { ok: false as const, reason: `MCP server not found: ${toolCall.serverName}` }
@@ -462,6 +504,28 @@ const resolveConfiguredMcpTool = (config: UserConfig, toolCall: McpToolCallInput
   const enabled = typeof config.mcpToolStates?.[stateKey] === 'boolean' ? config.mcpToolStates[stateKey] : tool.enabled
   if (!enabled) return { ok: false as const, reason: `MCP tool "${stateKey}" is disabled.` }
   return { ok: true as const, server, tool }
+}
+
+const resolveConfiguredMcpResourceServer = (config: UserConfig, resourceAccess: McpResourceReadInput) => {
+  const server = (config.mcpServers || []).find((item) => item.name === resourceAccess.serverName)
+  if (!server) return { ok: false as const, reason: `MCP server not found: ${resourceAccess.serverName}` }
+  if (server.disabled || server.status === 'disabled') return { ok: false as const, reason: `MCP server "${server.name}" is disabled.` }
+  if (server.status !== 'connected') return { ok: false as const, reason: `MCP server "${server.name}" is not connected.` }
+  return { ok: true as const, server }
+}
+
+export const formatMcpResourceReadContent = (contents: NonNullable<McpResourceReadResult['data']>['contents']) => {
+  if (!contents.length) return '(No content)'
+  return (
+    contents
+      .map((item) => {
+        if (typeof item.text === 'string') return item.text
+        if (typeof item.blob === 'string') return `[Binary data: ${item.mimeType || 'unknown'}]`
+        return JSON.stringify(item, null, 2)
+      })
+      .filter(Boolean)
+      .join('\n\n') || '(No content)'
+  )
 }
 
 const resolveMcpToolResponse = async (
@@ -547,6 +611,55 @@ const resolveMcpToolResponse = async (
   }
 }
 
+const resolveMcpResourceAccessResponse = async (
+  text: string,
+  config: UserConfig | undefined,
+  modelName: string,
+  startedAt: number,
+  control: AiChatResponseControl
+): Promise<AiChatResponseResult | null> => {
+  const resourceAccess = parseMcpResourceAccessBlock(text)
+  if (!resourceAccess) return null
+  if (!config) {
+    return {
+      ok: false,
+      errorCode: 'AI_MCP_CONFIG_UNAVAILABLE',
+      errorMessage: 'MCP config is unavailable.'
+    }
+  }
+  const configured = resolveConfiguredMcpResourceServer(config, resourceAccess)
+  if (!configured.ok) {
+    const message = createMcpResourceAccessOutputMessage(resourceAccess, configured.reason, 'error', control)
+    return {
+      ok: true,
+      data: {
+        text: message.text,
+        provider: 'aiopsterm-local',
+        model: modelName,
+        durationMs: Math.max(1, now() - startedAt),
+        status: 'done',
+        requestId: control.requestId,
+        assistantMessageId: control.assistantMessageId,
+        message
+      }
+    }
+  }
+  const message = createMcpResourceAccessAskMessage(resourceAccess, control)
+  return {
+    ok: true,
+    data: {
+      text: message.text,
+      provider: 'aiopsterm-local',
+      model: modelName,
+      durationMs: Math.max(1, now() - startedAt),
+      status: 'done',
+      requestId: control.requestId,
+      assistantMessageId: control.assistantMessageId,
+      message
+    }
+  }
+}
+
 async function generateProviderAiChatResponse(
   input: AiChatResponseInput,
   config: UserConfig,
@@ -581,6 +694,8 @@ async function generateProviderAiChatResponse(
   }
   const mcpResponse = await resolveMcpToolResponse(response.text, config, modelName, startedAt, control)
   if (mcpResponse) return mcpResponse
+  const mcpResourceResponse = await resolveMcpResourceAccessResponse(response.text, config, modelName, startedAt, control)
+  if (mcpResourceResponse) return mcpResourceResponse
   return {
     ok: true,
     data: {
