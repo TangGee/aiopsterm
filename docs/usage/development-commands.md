@@ -21,6 +21,19 @@ npm run typecheck
 npm test
 ```
 
+Run the opt-in live SSH/SFTP backend verification against a real host:
+
+```bash
+AIOPSTERM_LIVE_SSH_ENABLE=1 \
+AIOPSTERM_LIVE_SSH_HOST=example.com \
+AIOPSTERM_LIVE_SSH_PORT=22 \
+AIOPSTERM_LIVE_SSH_USERNAME=root \
+AIOPSTERM_LIVE_SSH_PASSWORD='set-in-your-shell-only' \
+npm run test:live:ssh
+```
+
+`AIOPSTERM_LIVE_SSH_HOST` may also include `host:port` when the separate port variable is omitted. The test is skipped unless `AIOPSTERM_LIVE_SSH_ENABLE=1` is set, stores credentials only in a temporary backend database, writes under `AIOPSTERM_LIVE_SSH_REMOTE_DIR` or a generated `/tmp/aiopsterm-live-*` directory on the remote host, and cleans that directory after the run. Use `AIOPSTERM_LIVE_SSH_PRIVATE_KEY` plus optional `AIOPSTERM_LIVE_SSH_PASSPHRASE` instead of the password variable for key-based verification.
+
 Run Electron end-to-end checks and generate acceptance screenshots under `test-results/`:
 
 ```bash

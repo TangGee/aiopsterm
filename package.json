@@ -18,6 +18,7 @@
     "build:linux": "npm run generate:icons && npm run build && npm run rebuild:native && electron-builder --linux --config electron-builder.yml",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
+    "test:live:ssh": "vitest run tests/live-ssh-backend.test.ts",
     "e2e": "npm run test:e2e",
     "test:e2e": "npm run build && playwright test",
     "generate:icons": "node scripts/generate-app-icons.mjs",
