@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { app } from 'electron'
 import Store from 'electron-store'
 import { basename as getLocalBasename, dirname as getLocalDirname, isAbsolute, join, resolve } from 'path'
@@ -60,12 +60,24 @@ type RemoteSftpTarget = {
   } | null
 }
 
+type RemoteSftpPooledConnection = {
+  key: string
+  client: { end: () => void }
+  sftp: SFTPWrapper
+  proxySocket: SshProxySocket | null
+  refCount: number
+  closing: boolean
+  lastUsedAt: number
+  closeTimer: ReturnType<typeof setTimeout> | null
+}
+
 type FilesBackendRuntimeConfig = {
   getConfig?: () => Pick<UserConfig, 'sshProxyConfigs' | 'sshAgentKeys' | 'terminal'>
   databasePath?: string
   useSeedData?: boolean
   forceFallbackStore?: boolean
   sqliteFactory?: new (path: string) => SqliteDatabase
+  sftpPoolIdleTtlMs?: number
 }
 
 const defaultFileSessionSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_FILES_ENABLE_SEED || '').trim() === '1'
@@ -79,19 +91,23 @@ const defaultFileSessionDatabasePath = () => {
 type FilesBackendRuntimeState = Required<Pick<FilesBackendRuntimeConfig, 'databasePath' | 'useSeedData' | 'forceFallbackStore'>> & {
   getConfig?: FilesBackendRuntimeConfig['getConfig']
   sqliteFactory?: new (path: string) => SqliteDatabase
+  sftpPoolIdleTtlMs: number
 }
 
 let filesRuntimeConfig: FilesBackendRuntimeState = {
   databasePath: defaultFileSessionDatabasePath(),
   useSeedData: defaultFileSessionSeedMode(),
-  forceFallbackStore: false
+  forceFallbackStore: false,
+  sftpPoolIdleTtlMs: 30_000
 }
 
 export const configureFilesBackendRuntime = (config: FilesBackendRuntimeConfig = {}) => {
+  clearRemoteSftpPool()
   filesRuntimeConfig = {
     databasePath: config.databasePath ? (isAbsolute(config.databasePath) ? config.databasePath : resolve(config.databasePath)) : defaultFileSessionDatabasePath(),
     useSeedData: config.useSeedData ?? defaultFileSessionSeedMode(),
     forceFallbackStore: Boolean(config.forceFallbackStore),
+    sftpPoolIdleTtlMs: Math.max(0, Number(config.sftpPoolIdleTtlMs ?? 30_000) || 0),
     ...(config.getConfig ? { getConfig: config.getConfig } : {}),
     ...(config.sqliteFactory ? { sqliteFactory: config.sqliteFactory } : {})
   }
@@ -215,7 +231,59 @@ const fileError = (error: unknown, errorCode: string) => {
   return { ok: false as const, errorCode, errorMessage: sftpErrorMessage(error) }
 }
 
-const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFTPWrapper) => Promise<T>): Promise<T> => {
+const remoteSftpPool = new Map<string, RemoteSftpPooledConnection>()
+const remoteSftpPendingConnections = new Map<string, Promise<RemoteSftpPooledConnection>>()
+
+const remoteSftpTargetKey = (target: RemoteSftpTarget) => {
+  const secretFingerprint = createHash('sha256')
+    .update([target.password || '', target.privateKey || '', target.passphrase || '', target.agent ? 'agent' : ''].join('\0'))
+    .digest('hex')
+    .slice(0, 16)
+  return [
+    target.assetId,
+    target.host,
+    target.port,
+    target.username,
+    target.proxyAsset?.needProxy ? target.proxyAsset.proxyName || 'proxy' : 'direct',
+    secretFingerprint
+  ].join('|')
+}
+
+const closeRemoteSftpConnection = (connection: RemoteSftpPooledConnection) => {
+  if (connection.closing) return
+  connection.closing = true
+  if (connection.closeTimer) {
+    clearTimeout(connection.closeTimer)
+    connection.closeTimer = null
+  }
+  remoteSftpPool.delete(connection.key)
+  try {
+    connection.client.end()
+  } catch {}
+  try {
+    connection.proxySocket?.destroy()
+  } catch {}
+}
+
+const scheduleRemoteSftpConnectionClose = (connection: RemoteSftpPooledConnection) => {
+  if (connection.refCount > 0 || connection.closing) return
+  const ttl = filesRuntimeConfig.sftpPoolIdleTtlMs
+  if (connection.closeTimer) clearTimeout(connection.closeTimer)
+  if (ttl <= 0) {
+    closeRemoteSftpConnection(connection)
+    return
+  }
+  connection.closeTimer = setTimeout(() => {
+    if (connection.refCount <= 0) closeRemoteSftpConnection(connection)
+  }, ttl)
+}
+
+const clearRemoteSftpPool = () => {
+  remoteSftpPendingConnections.clear()
+  for (const connection of [...remoteSftpPool.values()]) closeRemoteSftpConnection(connection)
+}
+
+const createRemoteSftpConnection = async (target: RemoteSftpTarget, key: string): Promise<RemoteSftpPooledConnection> => {
   const ssh2 = loadSsh2()
   if (!ssh2) throw new Error('ssh2 runtime is not available')
 
@@ -240,7 +308,7 @@ const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFT
     delete connectConfig.port
   }
 
-  return new Promise<T>((resolve, reject) => {
+  return new Promise<RemoteSftpPooledConnection>((resolve, reject) => {
     let settled = false
     const settle = (fn: () => void) => {
       if (settled) return
@@ -263,10 +331,19 @@ const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFT
             closeClient()
             return
           }
-          operation(sftp)
-            .then((result) => settle(() => resolve(result)))
-            .catch((operationError) => settle(() => reject(operationError)))
-            .finally(closeClient)
+          const connection: RemoteSftpPooledConnection = {
+            key,
+            client,
+            sftp,
+            proxySocket,
+            refCount: 0,
+            closing: false,
+            lastUsedAt: Date.now(),
+            closeTimer: null
+          }
+          client.once('error', () => closeRemoteSftpConnection(connection))
+          client.once('close', () => closeRemoteSftpConnection(connection))
+          settle(() => resolve(connection))
         })
       })
       .once('error', (error) =>
@@ -284,6 +361,62 @@ const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFT
       })
     client.connect(connectConfig)
   })
+}
+
+const acquireRemoteSftpConnection = async (target: RemoteSftpTarget) => {
+  const key = remoteSftpTargetKey(target)
+  const existing = remoteSftpPool.get(key)
+  if (existing && !existing.closing) {
+    if (existing.closeTimer) {
+      clearTimeout(existing.closeTimer)
+      existing.closeTimer = null
+    }
+    existing.refCount += 1
+    existing.lastUsedAt = Date.now()
+    return existing
+  }
+  const pending =
+    remoteSftpPendingConnections.get(key) ||
+    createRemoteSftpConnection(target, key)
+      .then((connection) => {
+        remoteSftpPool.set(key, connection)
+        return connection
+      })
+      .finally(() => {
+        remoteSftpPendingConnections.delete(key)
+      })
+  if (!remoteSftpPendingConnections.has(key)) remoteSftpPendingConnections.set(key, pending)
+  const connection = await pending
+  if (connection.closeTimer) {
+    clearTimeout(connection.closeTimer)
+    connection.closeTimer = null
+  }
+  connection.refCount += 1
+  connection.lastUsedAt = Date.now()
+  return connection
+}
+
+const releaseRemoteSftpConnection = (connection: RemoteSftpPooledConnection, invalidate = false) => {
+  connection.refCount = Math.max(0, connection.refCount - 1)
+  connection.lastUsedAt = Date.now()
+  if (invalidate) {
+    closeRemoteSftpConnection(connection)
+    return
+  }
+  scheduleRemoteSftpConnectionClose(connection)
+}
+
+const withRemoteSftp = async <T>(target: RemoteSftpTarget, operation: (sftp: SFTPWrapper) => Promise<T>): Promise<T> => {
+  const connection = await acquireRemoteSftpConnection(target)
+  let invalidate = false
+  try {
+    return await operation(connection.sftp)
+  } catch (error) {
+    invalidate = !isFileTransferCancelledError(error)
+    throw error
+  } finally {
+    releaseRemoteSftpConnection(connection, invalidate)
+  }
 }
 
 const sftpStat = (sftp: SFTPWrapper, path: string) =>
@@ -1310,7 +1443,18 @@ export const __resetFileSessionCatalogForTests = () => {
   fileSessionCatalog = getFileSessionCatalogStore().reset()
   activeFileTransferTasks.clear()
   activeFileTransferControls.clear()
+  clearRemoteSftpPool()
 }
+
+export const __getRemoteSftpPoolSnapshotForTests = () => ({
+  active: [...remoteSftpPool.values()].map((connection) => ({
+    key: connection.key,
+    refCount: connection.refCount,
+    closing: connection.closing,
+    hasCloseTimer: Boolean(connection.closeTimer)
+  })),
+  pending: remoteSftpPendingConnections.size
+})
 
 const sortEntries = (entries: FileListEntry[]) =>
   entries.sort((a, b) => {

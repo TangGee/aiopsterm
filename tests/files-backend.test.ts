@@ -365,10 +365,12 @@ let saveFileSessionFolder: (folder: Record<string, unknown>) => Promise<any>
 let deleteFileSessionFolder: (uuid: string) => Promise<any>
 let resetFileSessionCatalog: () => void
 let dropFileSessionCatalogCache: () => void
+let getRemoteSftpPoolSnapshotForTests: () => { active: Array<{ key: string; refCount: number; closing: boolean; hasCloseTimer: boolean }>; pending: number }
 let configureFilesBackendRuntime: (config?: {
   getConfig?: () => { sshProxyConfigs?: any[]; sshAgentKeys?: any[]; terminal?: any }
   useSeedData?: boolean
   forceFallbackStore?: boolean
+  sftpPoolIdleTtlMs?: number
 }) => void
 let saveAsset: (asset: any) => any
 let saveKeychain: (keychain: any) => any
@@ -395,6 +397,7 @@ beforeAll(async () => {
   deleteFileSessionFolder = backend.deleteFileSessionFolder
   resetFileSessionCatalog = backend.__resetFileSessionCatalogForTests
   dropFileSessionCatalogCache = backend.__dropFileSessionCatalogCacheForTests
+  getRemoteSftpPoolSnapshotForTests = backend.__getRemoteSftpPoolSnapshotForTests
   configureFilesBackendRuntime = backend.configureFilesBackendRuntime
   const assetsModulePath = '../src/main/backend/assets'
   const assetsBackend = await import(assetsModulePath)
@@ -795,8 +798,45 @@ describe('files backend content boundary', () => {
     )
   })
 
+  it('reuses pooled SFTP connections across sequential operations for the same asset', async () => {
+    configureFilesBackendRuntime({ sftpPoolIdleTtlMs: 60_000 })
+    resetFileSessionCatalog()
+    const sessionId = saveSftpAsset()
+
+    const rows = await listFiles('/srv', { kind: 'remote', sessionId, host: 'client-host-ignored' })
+    expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(['archive', 'logs', 'note.txt']))
+    const read = await readFileContent('/srv/note.txt', { kind: 'remote', sessionId })
+    expect(read.ok).toBe(true)
+    const written = await writeFileContent('/srv/releases/pooled.txt', 'pooled write\n', { kind: 'remote', sessionId, host: 'ui-host' })
+    expect(written.ok).toBe(true)
+    const renamed = await mutateFileEntry({ kind: 'rename', oldPath: '/srv/releases/pooled.txt', newPath: '/srv/releases/renamed-pooled.txt' }, { kind: 'remote', sessionId })
+    expect(renamed.ok).toBe(true)
+
+    expect(ssh2Mock.connectConfigs).toHaveLength(1)
+    expect(ssh2Mock.calls.filter((call) => call.method === 'sftp')).toHaveLength(1)
+    expect(ssh2Mock.calls.filter((call) => call.method === 'end')).toHaveLength(0)
+    expect(getRemoteSftpPoolSnapshotForTests()).toMatchObject({
+      active: [expect.objectContaining({ refCount: 0, closing: false, hasCloseTimer: true })],
+      pending: 0
+    })
+  })
+
+  it('clears pooled SFTP connections when runtime configuration is reloaded', async () => {
+    configureFilesBackendRuntime({ sftpPoolIdleTtlMs: 60_000 })
+    resetFileSessionCatalog()
+    const sessionId = saveSftpAsset()
+    await listFiles('/srv', { kind: 'remote', sessionId })
+    expect(getRemoteSftpPoolSnapshotForTests().active).toHaveLength(1)
+
+    configureFilesBackendRuntime({ sftpPoolIdleTtlMs: 60_000 })
+
+    expect(getRemoteSftpPoolSnapshotForTests()).toEqual({ active: [], pending: 0 })
+    expect(ssh2Mock.calls.filter((call) => call.method === 'end')).toHaveLength(1)
+  })
+
   it('routes asset-backed SFTP connections through configured SSH proxies', async () => {
     configureFilesBackendRuntime({
+      sftpPoolIdleTtlMs: 0,
       getConfig: () => ({
         sshProxyConfigs: [
           {
