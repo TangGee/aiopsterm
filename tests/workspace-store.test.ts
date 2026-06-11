@@ -236,6 +236,7 @@ const defaultMcpToolStates = {
 
 const businessDataConfigKeys = ['quickCommands', 'knowledgeBase', 'aliasCommands'] as const
 const malformedQuickCommandsBackendResultMessage = '快捷命令服务返回数据无效'
+const malformedKnowledgeBackendResultMessage = '知识库服务返回数据无效'
 const malformedSkillsBackendResultMessage = 'Skills 服务返回数据无效'
 const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
 
@@ -5650,6 +5651,126 @@ describe('workspace store', () => {
       expect(store.activePanel.kind).not.toBe('knowledge')
     } finally {
       window.aiops.kbCreateFile = originalKbCreateFile
+    }
+  })
+
+  it('fails closed on malformed Knowledge backend results instead of mutating tree or chat context', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.openKnowledgeFile('Markdown语法指南.md')
+    store.copyKnowledgeNodes(['commands/Summary to Doc.md'], 'copy')
+    store.chatMessages.push({
+      id: 'assistant-malformed-kb',
+      role: 'assistant',
+      text: 'Persist this only after verified knowledge writes.',
+      state: 'done'
+    })
+
+    const originalTree = JSON.stringify(store.knowledgeTree)
+    const originalSelectedKeys = [...store.kbSelectedKeys]
+    const originalPanelIds = store.panels.map((panel) => panel.id)
+    const originalContexts = JSON.stringify(store.selectedContexts)
+    const originalAiops = {
+      kbEnsureRoot: window.aiops.kbEnsureRoot,
+      kbListDir: window.aiops.kbListDir,
+      kbSearchStatus: window.aiops.kbSearchStatus,
+      kbSearch: window.aiops.kbSearch,
+      kbReindex: window.aiops.kbReindex,
+      kbCreateFile: window.aiops.kbCreateFile,
+      kbMkdir: window.aiops.kbMkdir,
+      kbRename: window.aiops.kbRename,
+      kbDelete: window.aiops.kbDelete,
+      kbCopy: window.aiops.kbCopy,
+      kbMove: window.aiops.kbMove,
+      kbImportFile: window.aiops.kbImportFile,
+      kbReadFile: window.aiops.kbReadFile,
+      kbWriteFile: window.aiops.kbWriteFile
+    }
+
+    try {
+      vi.mocked(window.aiops.kbEnsureRoot).mockResolvedValueOnce({ success: false } as any)
+      await expect(store.refreshKnowledgeTree({ persist: false })).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(JSON.stringify(store.knowledgeTree)).toBe(originalTree)
+
+      vi.mocked(window.aiops.kbListDir).mockResolvedValueOnce([{ name: 'broken', relPath: '', type: 'file' }] as any)
+      await expect(store.refreshKnowledgeTree({ persist: false })).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(JSON.stringify(store.knowledgeTree)).toBe(originalTree)
+
+      vi.mocked(window.aiops.kbSearchStatus).mockResolvedValueOnce({ totalFiles: -1, totalChunks: 1, provider: '', model: 'lexical', updatedAt: 1 } as any)
+      await expect(store.refreshKnowledgeSearchStatus()).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+
+      vi.mocked(window.aiops.kbSearch).mockResolvedValueOnce([{ path: '', startLine: 0, endLine: 0, score: 1, snippet: 'bad', matchCount: 1 }] as any)
+      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual([])
+      expect(store.kbContentSearchResults).toEqual([])
+      expect(store.kbSearchError).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+
+      vi.mocked(window.aiops.kbReindex).mockResolvedValueOnce({ files: 1, chunks: -1 } as any)
+      await expect(store.reindexKnowledgeContent()).resolves.toBeNull()
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+
+      vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({ relPath: 'wrong/Nope.md' } as any)
+      await expect(store.createKnowledgeNode('file', '', 'Nope.md')).resolves.toBeNull()
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Nope.md')).toBeNull()
+      expect(store.kbSelectedKeys).toEqual(originalSelectedKeys)
+
+      vi.mocked(window.aiops.kbRename).mockResolvedValueOnce({ relPath: 'wrong/Markdown-v3.md' } as any)
+      await store.renameKnowledgeNode('Markdown语法指南.md', 'Markdown-v3.md')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('Markdown-v3.md')).toBeNull()
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanelIds)
+
+      vi.mocked(window.aiops.kbDelete).mockResolvedValueOnce({ success: false } as any)
+      await store.deleteKnowledgeNodes(['Markdown语法指南.md'])
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanelIds)
+
+      vi.mocked(window.aiops.kbCopy).mockResolvedValueOnce({ relPath: 'wrong/Summary to Doc.md' } as any)
+      await store.pasteKnowledgeNodes('')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Summary to Doc.md')).toBeNull()
+      expect(store.findKnowledgeNode('commands/Summary to Doc.md')).toBeTruthy()
+
+      store.copyKnowledgeNodes(['commands/Summary to Doc.md'], 'cut')
+      vi.mocked(window.aiops.kbMove).mockResolvedValueOnce({ relPath: 'wrong/Summary to Doc.md' } as any)
+      await store.pasteKnowledgeNodes('')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Summary to Doc.md')).toBeNull()
+      expect(store.findKnowledgeNode('commands/Summary to Doc.md')).toBeTruthy()
+      expect(store.kbClipboard?.mode).toBe('cut')
+
+      vi.mocked(window.aiops.kbImportFile).mockResolvedValueOnce({ jobId: '', relPath: 'Runbooks/imported.md' } as any)
+      await expect(store.addKnowledgeImportJob('Runbooks/imported.md', '/tmp/imported.md', 'file')).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Runbooks/imported.md')).toBeNull()
+
+      vi.mocked(window.aiops.kbReadFile).mockResolvedValueOnce({ content: '', mtimeMs: 1717200000000, mimeType: 42 } as any)
+      await store.addKnowledgeFilesToChat(['images/interface.png'])
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(JSON.stringify(store.selectedContexts)).toBe(originalContexts)
+
+      vi.mocked(window.aiops.kbMkdir).mockResolvedValueOnce({ success: true, relPath: 'wrong-summary' } as any)
+      await expect(store.summarizeMessageToKnowledge('assistant-malformed-kb')).resolves.toBeNull()
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('summary')).toBeNull()
+
+      vi.mocked(window.aiops.kbMkdir).mockResolvedValueOnce({ success: true, relPath: 'summary' } as any)
+      vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({ relPath: 'summary/ai-message-assistant-malformed-kb.md' })
+      vi.mocked(window.aiops.kbWriteFile).mockResolvedValueOnce({ mtimeMs: Number.NaN } as any)
+      await expect(store.summarizeMessageToKnowledge('assistant-malformed-kb')).resolves.toBeNull()
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('summary/ai-message-assistant-malformed-kb.md')).toBeNull()
+
+      expect(JSON.stringify(store.knowledgeTree)).toBe(originalTree)
+      expect(store.panels.map((panel) => panel.id)).toEqual(originalPanelIds)
+    } finally {
+      Object.assign(window.aiops, originalAiops)
     }
   })
 

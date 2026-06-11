@@ -31,6 +31,21 @@ import {
   malformedFilesBackendResultMessage
 } from '@/services/filesBackendGuards'
 import {
+  expectedKnowledgeRelPath,
+  isKnowledgeDeleteResultData,
+  isKnowledgeEnsureRootResultData,
+  isKnowledgeEntryListData,
+  isKnowledgeImportResultData,
+  isKnowledgeReadResultData,
+  isKnowledgeReindexResultData,
+  isKnowledgeRelPathResultData,
+  isKnowledgeSearchResultListData,
+  isKnowledgeSearchStatusData,
+  isKnowledgeTransferProgressData,
+  isKnowledgeWriteResultData,
+  malformedKnowledgeBackendResultMessage
+} from '@/services/knowledgeBackendGuards'
+import {
   isQuickCommandGroupDeleteData,
   isQuickCommandGroupSaveData,
   isQuickCommandMacroSaveData,
@@ -4604,8 +4619,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const loadKnowledgeTreeFromBridge = async (relDir = ''): Promise<KnowledgeNode[]> => {
     const knowledgeBridge = getKnowledgeBridge()
-    if (!knowledgeBridge) return cloneKnowledgeNodes(knowledgeTree.value)
+    if (!knowledgeBridge) throw new Error('KNOWLEDGE_BRIDGE_UNAVAILABLE')
     const entries = await knowledgeBridge.kbListDir(relDir)
+    if (!isKnowledgeEntryListData(entries)) throw new Error(malformedKnowledgeBackendResultMessage)
     const nodes: KnowledgeNode[] = []
     for (const entry of entries) {
       const node = knowledgeEntryToNode(entry)
@@ -4620,19 +4636,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshKnowledgeTree = async (options: { persist?: boolean } = {}) => {
     void options
     const knowledgeBridge = getKnowledgeBridge()
-    if (!knowledgeBridge) return
-    await knowledgeBridge.kbEnsureRoot()
-    const nextTree = await loadKnowledgeTreeFromBridge('')
-    const nextSnapshot: KnowledgeBaseUserConfig = {
-      tree: cloneKnowledgeNodes(nextTree),
-      usedBytes: knowledgeTreeSize(nextTree),
-      totalBytes: kbTotalBytes.value
+    if (!knowledgeBridge) {
+      setTopNotice('知识库加载服务不可用')
+      return false
     }
-    knowledgeTree.value = nextTree
-    kbUsedBytes.value = nextSnapshot.usedBytes
+    try {
+      const rootResult = await knowledgeBridge.kbEnsureRoot()
+      if (!isKnowledgeEnsureRootResultData(rootResult)) {
+        setTopNotice(malformedKnowledgeBackendResultMessage)
+        return false
+      }
+      const nextTree = await loadKnowledgeTreeFromBridge('')
+      const nextSnapshot: KnowledgeBaseUserConfig = {
+        tree: cloneKnowledgeNodes(nextTree),
+        usedBytes: knowledgeTreeSize(nextTree),
+        totalBytes: kbTotalBytes.value
+      }
+      knowledgeTree.value = nextTree
+      kbUsedBytes.value = nextSnapshot.usedBytes
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error && error.message === malformedKnowledgeBackendResultMessage ? malformedKnowledgeBackendResultMessage : '知识库加载失败')
+      return false
+    }
   }
 
   const handleKnowledgeTransferProgress = (event: KnowledgeBaseTransferProgress) => {
+    if (!isKnowledgeTransferProgressData(event)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return
+    }
     const total = event.total || 1
     const percent = Math.min(100, Math.round((event.transferred / total) * 100))
     const existing = kbImportJobs.value.find((job) => job.id === event.jobId)
@@ -8981,7 +9014,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshKnowledgeSearchStatus = async () => {
     if (!window.aiops?.kbSearchStatus) return false
     try {
-      kbSearchStatus.value = await window.aiops.kbSearchStatus()
+      const status = await window.aiops.kbSearchStatus()
+      if (!isKnowledgeSearchStatusData(status)) {
+        setTopNotice(malformedKnowledgeBackendResultMessage)
+        return false
+      }
+      kbSearchStatus.value = status
       return true
     } catch {
       return false
@@ -9008,6 +9046,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const results = await window.aiops.kbSearch(normalizedQuery, { maxResults: 12, minScore: 0.15 })
       if (request !== kbSearchRequest) return kbContentSearchResults.value
+      if (!isKnowledgeSearchResultListData(results)) {
+        kbContentSearchResults.value = []
+        kbSearchError.value = malformedKnowledgeBackendResultMessage
+        setTopNotice(malformedKnowledgeBackendResultMessage)
+        return []
+      }
       kbContentSearchResults.value = results
       await refreshKnowledgeSearchStatus()
       return results
@@ -9028,6 +9072,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await window.aiops.kbReindex()
+      if (!isKnowledgeReindexResultData(result)) {
+        setTopNotice(malformedKnowledgeBackendResultMessage)
+        return null
+      }
       await refreshKnowledgeSearchStatus()
       if (kbSearchQuery.value.trim().length > 1) void searchKnowledgeContent()
       return result
@@ -9038,13 +9086,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const backendRelPathOrNotice = (result: { relPath?: string } | null | undefined, notice: string) => {
-    const relPath = typeof result?.relPath === 'string' && result.relPath.trim() ? result.relPath.trim() : ''
-    if (!relPath) {
+  const backendRelPathOrNotice = (result: unknown, notice: string) => {
+    if (!isKnowledgeRelPathResultData(result)) {
       setTopNotice(notice)
       return ''
     }
-    return relPath
+    return result.relPath.trim()
   }
 
   const createKnowledgeNode = async (kind: KnowledgeNodeType, parentRelDir: string, title: string) => {
@@ -9058,10 +9105,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       kind === 'dir'
         ? await window.aiops.kbMkdir(parentRelDir, name)
         : await window.aiops.kbCreateFile(parentRelDir, name, '')
-    await refreshKnowledgeTree()
     const relPath = backendRelPathOrNotice(result, '知识库写入服务不可用')
     if (!relPath) return null
+    if (relPath !== expectedKnowledgeRelPath(parentRelDir, name)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return null
+    }
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return null
     const created = findKnowledgeNode(relPath)
+    if (!created || created.type !== kind) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return null
+    }
     kbSelectedKeys.value = [relPath]
     if (kind === 'dir' && !kbExpandedKeys.value.includes(relPath)) {
       kbExpandedKeys.value.push(relPath)
@@ -9078,9 +9134,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     const result = await window.aiops.kbRename(relPath, name)
-    await refreshKnowledgeTree()
     const nextRelPath = backendRelPathOrNotice(result, '知识库重命名服务不可用')
     if (!nextRelPath) return
+    if (nextRelPath !== expectedKnowledgeRelPath(getKbParent(relPath), name)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return
+    }
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return
+    if (!findKnowledgeNode(nextRelPath)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return
+    }
     kbSelectedKeys.value = [nextRelPath]
     kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, nextRelPath) : key))
     syncKnowledgePanelsAfterRename(relPath, nextRelPath)
@@ -9094,11 +9159,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     for (const relPath of relPaths) {
       const node = findKnowledgeNode(relPath)
       if (!node) continue
-      await window.aiops.kbDelete(relPath, node.type === 'dir')
+      const result = await window.aiops.kbDelete(relPath, node.type === 'dir')
+      if (!isKnowledgeDeleteResultData(result)) {
+        setTopNotice(malformedKnowledgeBackendResultMessage)
+        return
+      }
+    }
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return
+    if (relPaths.some((relPath) => findKnowledgeNode(relPath))) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return
     }
     kbSelectedKeys.value = kbSelectedKeys.value.filter((key) => !relPaths.includes(key))
     kbExpandedKeys.value = kbExpandedKeys.value.filter((key) => !relPaths.some((relPath) => key === relPath || key.startsWith(`${relPath}/`)))
-    await refreshKnowledgeTree()
     closeKnowledgePanelsForRemoved(relPaths)
   }
 
@@ -9117,15 +9191,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const sources = [...kbClipboard.value.sources]
     const mode = kbClipboard.value.mode
+    const resultRelPaths: string[] = []
     for (const source of sources) {
+      let result: unknown
       if (mode === 'copy') {
-        await window.aiops.kbCopy(source, dstRelDir)
+        result = await window.aiops.kbCopy(source, dstRelDir)
       } else {
-        await window.aiops.kbMove(source, dstRelDir)
+        result = await window.aiops.kbMove(source, dstRelDir)
       }
+      const resultRelPath = backendRelPathOrNotice(result, '知识库复制移动服务不可用')
+      if (!resultRelPath) return
+      const sourceName = source.split('/').pop() || source
+      if (resultRelPath !== expectedKnowledgeRelPath(dstRelDir, sourceName)) {
+        setTopNotice(malformedKnowledgeBackendResultMessage)
+        return
+      }
+      resultRelPaths.push(resultRelPath)
+    }
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return
+    if (resultRelPaths.some((relPath) => !findKnowledgeNode(relPath))) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return
+    }
+    if (mode === 'cut' && sources.some((source) => findKnowledgeNode(source))) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return
     }
     if (mode === 'cut') kbClipboard.value = null
-    await refreshKnowledgeTree()
     if (mode === 'cut') closeKnowledgePanelsForRemoved(sources)
   }
 
@@ -9140,13 +9233,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const dstRelDir = getKbParent(destRelPath)
     const result = sourceType === 'folder' ? await window.aiops.kbImportFolder(srcAbsPath, dstRelDir) : await window.aiops.kbImportFile(srcAbsPath, dstRelDir)
+    if (!isKnowledgeImportResultData(result)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return false
+    }
     if (!kbImportJobs.value.some((job) => job.id === result.jobId)) {
       kbImportJobs.value.push({ id: result.jobId, destRelPath: result.relPath, percent: 100 })
       window.setTimeout(() => {
         kbImportJobs.value = kbImportJobs.value.filter((job) => job.id !== result.jobId)
       }, 500)
     }
-    await refreshKnowledgeTree()
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return false
+    const imported = findKnowledgeNode(result.relPath)
+    if (!imported || imported.type !== sourceType) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return false
+    }
     return true
   }
 
@@ -9167,13 +9270,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         if (window.aiops?.kbReadFile) {
           try {
             const result = await window.aiops.kbReadFile(relPath, 'base64')
-            imageContext = {
-              ...imageContext,
-              mediaType: result.mimeType || imageContext.mediaType,
-              data: result.content
+            if (isKnowledgeReadResultData(result, 'base64')) {
+              imageContext = {
+                ...imageContext,
+                mediaType: result.mimeType || imageContext.mediaType,
+                data: result.content
+              }
+            } else {
+              setTopNotice(malformedKnowledgeBackendResultMessage)
+              continue
             }
           } catch {
-            // Keep a path-only image context if the file is temporarily unreadable.
+            setTopNotice('知识库文件读取失败')
+            continue
           }
         }
         selectedContexts.value = selectedContexts.value.some((context) => context.id === imageContext.id)
@@ -11750,8 +11859,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('知识库写入服务不可用')
       return null
     }
-    await window.aiops.kbMkdir('', title)
-    await refreshKnowledgeTree()
+    const result = await window.aiops.kbMkdir('', title)
+    const createdRelPath = backendRelPathOrNotice(result, '知识库写入服务不可用')
+    if (!createdRelPath) return null
+    if (createdRelPath !== relPath) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return null
+    }
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return null
     const created = findKnowledgeNode(relPath)
     return created?.type === 'dir' ? created : null
   }
@@ -11768,13 +11884,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     const result = await window.aiops.kbCreateFile('summary', fileName, content)
-    const relPath = typeof result?.relPath === 'string' && result.relPath.trim() ? result.relPath.trim() : ''
+    const relPath = isKnowledgeRelPathResultData(result) ? result.relPath.trim() : ''
     if (!relPath) {
       setTopNotice('知识库写入服务不可用')
       return null
     }
-    await window.aiops.kbWriteFile(relPath, content)
-    await refreshKnowledgeTree()
+    if (relPath !== expectedKnowledgeRelPath('summary', fileName)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return null
+    }
+    const writeResult = await window.aiops.kbWriteFile(relPath, content)
+    if (!isKnowledgeWriteResultData(writeResult)) {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return null
+    }
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return null
+    const created = findKnowledgeNode(relPath)
+    if (!created || created.type !== 'file') {
+      setTopNotice(malformedKnowledgeBackendResultMessage)
+      return null
+    }
 
     kbSelectedKeys.value = [relPath]
     openKnowledgeFile(relPath)
