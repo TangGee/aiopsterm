@@ -19,6 +19,7 @@ type UserBackend = {
   sendUserContactCode: (input: any) => any
   bindUserContact: (input: any) => any
   resetUserPassword: (input: any) => any
+  deactivateUserAccount: (input: any) => any
   revokeTrustedDevice: (id: number) => any
 }
 
@@ -368,6 +369,42 @@ describe('user account backend boundary', () => {
       message: '可信设备已移除'
     })
     expect(data.trustedDevices.map((device: { id: number }) => device.id)).toEqual([1])
+  })
+
+  it('deactivates the current logged-in account and clears local account state', () => {
+    expect(backend.deactivateUserAccount({ uid: 0 })).toEqual({
+      ok: false,
+      errorCode: 'USER_DEACTIVATE_UID_REQUIRED',
+      errorMessage: '无法确定当前用户账号'
+    })
+
+    expect(backend.deactivateUserAccount({ uid: 123456 })).toEqual({
+      ok: false,
+      errorCode: 'USER_DEACTIVATE_UID_MISMATCH',
+      errorMessage: '当前用户账号不匹配'
+    })
+
+    const result = backend.deactivateUserAccount({ uid: 2001007 })
+    const data = expectOkData(result)
+    expect(data.message).toBe('账号已停用，当前登录状态已清除')
+    expect(data.profile).toMatchObject({
+      uid: 0,
+      subscription: 'free',
+      email: '',
+      mobile: '',
+      skippedLogin: true,
+      localDatabaseReady: false,
+      needDeviceVerification: false,
+      lastLoginMethod: 'skip'
+    })
+    expect(data.trustedDevices).toHaveLength(1)
+    expect(data.trustedDevices[0]).toMatchObject({ id: 1, current: true })
+
+    expect(backend.deactivateUserAccount({ uid: 2001007 })).toEqual({
+      ok: false,
+      errorCode: 'USER_DEACTIVATE_LOGIN_REQUIRED',
+      errorMessage: '请先登录账号'
+    })
   })
 
   it('does not expose development seed trusted devices in non-seed runtime defaults', async () => {

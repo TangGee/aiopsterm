@@ -576,6 +576,10 @@ export type AiopsUserContactBindInput = AiopsUserCodeInput & {
   code: string
 }
 
+export type AiopsUserDeactivateInput = {
+  uid: number
+}
+
 export type AiopsUserPasswordInput = {
   password: string
 }
@@ -2727,6 +2731,7 @@ export type AiopsPreloadApi = {
   resetUserPassword: (input: AiopsUserPasswordInput) => Promise<AiopsUserMutationResult>
   sendUserContactCode: (input: AiopsUserCodeInput) => Promise<AiopsUserCodeResult>
   bindUserContact: (input: AiopsUserContactBindInput) => Promise<AiopsUserMutationResult>
+  deactivateUserAccount: (input: AiopsUserDeactivateInput) => Promise<AiopsUserMutationResult>
   revokeTrustedDevice: (id: number) => Promise<AiopsTrustedDeviceRevokeResult>
   getProtocolPrefix: () => Promise<string>
   handleProtocolUrl: (url: string) => Promise<{ success: boolean; reason?: string; payload?: AiopstermDeepLinkPayload }>

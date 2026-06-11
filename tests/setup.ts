@@ -529,6 +529,26 @@ const resetUserAccountStoreMock = () => {
   userCodeCooldownStoreMock.clear()
 }
 
+const deactivateUserAccountStoreMock = () => {
+  userProfileStoreMock = {
+    ...cloneUserProfileMock(defaultUserProfile),
+    uid: 0,
+    name: 'Local Operator',
+    username: 'local_ops',
+    email: '',
+    mobile: '',
+    subscription: 'free',
+    subscriptionExpiresAt: '',
+    skippedLogin: true,
+    localDatabaseReady: false,
+    needDeviceVerification: false,
+    lastLoginMethod: 'skip',
+    lastLoginAt: ''
+  }
+  trustedDeviceStoreMock = [cloneTrustedDeviceMock({ ...defaultTrustedDevices[0], id: 1, current: true })]
+  userCodeCooldownStoreMock.clear()
+}
+
 const validateUserProfileUpdateMock = (input: Partial<Pick<TestUserProfile, 'name' | 'username' | 'avatarInitials' | 'avatarImageUrl'>>) => {
   const username = trimUserTextMock(input.username ?? userProfileStoreMock.username)
   const name = trimUserTextMock(input.name ?? userProfileStoreMock.name)
@@ -5366,6 +5386,16 @@ Object.defineProperty(window, 'aiops', {
       applyUserProfileMock({ [input.kind]: value })
       clearUserCodeCooldownMock('contact', input.kind, value)
       return userSuccessMock(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')
+    }),
+    deactivateUserAccount: vi.fn(async (input: { uid: number }) => {
+      const uid = Number(input?.uid)
+      if (!Number.isFinite(uid) || uid <= 0) return userErrorMock('USER_DEACTIVATE_UID_REQUIRED', '无法确定当前用户账号')
+      if (userProfileStoreMock.skippedLogin || userProfileStoreMock.lastLoginMethod === 'skip' || !userProfileStoreMock.uid) {
+        return userErrorMock('USER_DEACTIVATE_LOGIN_REQUIRED', '请先登录账号')
+      }
+      if (uid !== userProfileStoreMock.uid) return userErrorMock('USER_DEACTIVATE_UID_MISMATCH', '当前用户账号不匹配')
+      deactivateUserAccountStoreMock()
+      return userSuccessMock('账号已停用，当前登录状态已清除')
     }),
     revokeTrustedDevice: vi.fn(async (id: number) => {
       const deviceId = Number(id)

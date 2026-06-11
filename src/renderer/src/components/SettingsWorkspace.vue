@@ -1485,7 +1485,15 @@ const PrivacySettingsPage = defineComponent({
           ]),
           h('div', { class: 'account-management-section' }, [
             h('div', [h('strong', 'Account Management'), h('small', '停用账户会关闭同步和登录状态。')]),
-            h('button', { class: 'settings-button danger', onClick: () => workspace.updatePrivacySettings({ deactivateModalOpen: true }) }, '停用账户')
+            h(
+              'button',
+              {
+                class: 'settings-button danger',
+                disabled: workspace.privacySettings.deactivateLoading,
+                onClick: () => workspace.updatePrivacySettings({ deactivateModalOpen: true })
+              },
+              workspace.privacySettings.deactivateLoading ? '停用中' : '停用账户'
+            )
           ])
         ]),
         workspace.privacySettings.deactivateModalOpen
@@ -1495,15 +1503,23 @@ const PrivacySettingsPage = defineComponent({
                 h('p', '请输入 DEACTIVATE 以确认。'),
                 h('input', { class: 'settings-input', value: workspace.privacySettings.deactivateConfirmationInput, onInput: (event: Event) => (workspace.privacySettings.deactivateConfirmationInput = (event.target as HTMLInputElement).value) }),
                 h('footer', [
-                  h('button', { class: 'settings-button', onClick: () => workspace.updatePrivacySettings({ deactivateModalOpen: false, deactivateConfirmationInput: '' }) }, '取消'),
+                  h(
+                    'button',
+                    {
+                      class: 'settings-button',
+                      disabled: workspace.privacySettings.deactivateLoading,
+                      onClick: () => workspace.updatePrivacySettings({ deactivateModalOpen: false, deactivateConfirmationInput: '' })
+                    },
+                    '取消'
+                  ),
                   h(
                     'button',
                     {
                       class: 'settings-button danger',
-                      disabled: workspace.privacySettings.deactivateConfirmationInput.trim() !== 'DEACTIVATE',
-                      onClick: () => workspace.updatePrivacySettings({ deactivateModalOpen: false, deactivateConfirmationInput: '' })
+                      disabled: workspace.privacySettings.deactivateConfirmationInput.trim() !== 'DEACTIVATE' || workspace.privacySettings.deactivateLoading,
+                      onClick: () => workspace.deactivateUserAccount()
                     },
-                    '停用账户'
+                    workspace.privacySettings.deactivateLoading ? '停用中' : '停用账户'
                   )
                 ])
               ])

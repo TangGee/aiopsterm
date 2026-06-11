@@ -589,6 +589,7 @@ export type ExtensionSettings = ExtensionUserConfig
 export type PrivacySettings = PrivacyUserConfig & {
   deactivateModalOpen: boolean
   deactivateConfirmationInput: string
+  deactivateLoading: boolean
 }
 
 export type BillingSettings = {
@@ -3393,7 +3394,8 @@ const defaultSecuritySettings: SecuritySettings = {
 const defaultPrivacySettings: PrivacySettings = {
   ...defaultConfig.privacy!,
   deactivateModalOpen: false,
-  deactivateConfirmationInput: ''
+  deactivateConfirmationInput: '',
+  deactivateLoading: false
 }
 
 const defaultBillingSettings: BillingSettings = {
@@ -4507,7 +4509,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     privacySettings.value = {
       ...normalizedPrivacy,
       deactivateModalOpen: false,
-      deactivateConfirmationInput: ''
+      deactivateConfirmationInput: '',
+      deactivateLoading: false
     }
     const { normalized: normalizedAiPreferences, changed: aiPreferencesChanged } = normalizeAiPreferencesConfig(savedConfig.aiPreferences)
     aiPreferences.value = {
@@ -6590,7 +6593,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const hasPersistentPatch = 'telemetry' in patch || 'secretRedaction' in patch || 'dataSync' in patch
     const localPatch = {
       ...(('deactivateModalOpen' in patch) ? { deactivateModalOpen: patch.deactivateModalOpen } : {}),
-      ...(('deactivateConfirmationInput' in patch) ? { deactivateConfirmationInput: patch.deactivateConfirmationInput } : {})
+      ...(('deactivateConfirmationInput' in patch) ? { deactivateConfirmationInput: patch.deactivateConfirmationInput } : {}),
+      ...(('deactivateLoading' in patch) ? { deactivateLoading: patch.deactivateLoading } : {})
     }
     if (Object.keys(localPatch).length) {
       privacySettings.value = {
@@ -6825,6 +6829,58 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch {
       setUserNotice('登出失败')
       return false
+    }
+  }
+
+  const deactivateUserAccount = async () => {
+    const confirmation = privacySettings.value.deactivateConfirmationInput.trim()
+    if (confirmation !== 'DEACTIVATE') {
+      setSettingsNotice('请输入 DEACTIVATE 以确认停用账户')
+      return false
+    }
+    const deactivateUserAccountBridge = window.aiops?.deactivateUserAccount
+    if (typeof deactivateUserAccountBridge !== 'function') {
+      setSettingsNotice('账户停用服务不可用')
+      setUserNotice('账户停用服务不可用')
+      return false
+    }
+    const uid = Number(userProfile.value.uid)
+    if (!Number.isFinite(uid) || uid <= 0) {
+      setSettingsNotice('无法确定当前用户账号')
+      setUserNotice('无法确定当前用户账号')
+      return false
+    }
+    privacySettings.value = {
+      ...privacySettings.value,
+      deactivateLoading: true
+    }
+    try {
+      const ok = applyUserMutationResult(await deactivateUserAccountBridge({ uid }))
+      if (!ok) {
+        setSettingsNotice(userNotice.value || '账户停用失败')
+        return false
+      }
+      resetUserCodeState('login')
+      resetUserCodeState('contact')
+      userAccountCenterOpen.value = false
+      privacySettings.value = {
+        ...privacySettings.value,
+        deactivateModalOpen: false,
+        deactivateConfirmationInput: '',
+        deactivateLoading: false
+      }
+      setSettingsNotice('账号已停用')
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '账户停用失败'
+      setSettingsNotice(message)
+      setUserNotice(message)
+      return false
+    } finally {
+      privacySettings.value = {
+        ...privacySettings.value,
+        deactivateLoading: false
+      }
     }
   }
 
@@ -12580,6 +12636,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveMcpConfigEditor,
     refreshMcpServersFromBridge,
     updatePrivacySettings,
+    deactivateUserAccount,
     setUserNotice,
     openAccountCenter,
     closeAccountCenter,

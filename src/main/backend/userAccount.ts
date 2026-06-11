@@ -9,6 +9,7 @@ import type {
   AiopsUserCodeInput,
   AiopsUserCodeResult,
   AiopsUserContactBindInput,
+  AiopsUserDeactivateInput,
   AiopsUserLoginInput,
   AiopsUserMutationResult,
   AiopsUserPasswordInput,
@@ -339,6 +340,11 @@ const normalizePersistedUserAccountState = (value: unknown): UserAccountPersiste
 const applyInitialUserAccountState = () => {
   profileStore = createInitialUserProfile()
   trustedDeviceStore = createInitialTrustedDevices()
+}
+
+const applyDeactivatedUserAccountState = () => {
+  profileStore = createLocalUserProfile()
+  trustedDeviceStore = createLocalTrustedDevices()
 }
 
 const applyPersistedUserAccountState = (state: UserAccountPersistedState) => {
@@ -684,6 +690,18 @@ export const logoutUserAccount = (): AiopsUserMutationResult => {
     needDeviceVerification: false
   })
   return successMutation('已退出登录')
+}
+
+export const deactivateUserAccount = (input: AiopsUserDeactivateInput): AiopsUserMutationResult => {
+  ensureUserAccountStateLoaded()
+  const uid = Number(input?.uid)
+  if (!Number.isFinite(uid) || uid <= 0) return errorResult('USER_DEACTIVATE_UID_REQUIRED', '无法确定当前用户账号')
+  if (profileStore.skippedLogin || profileStore.lastLoginMethod === 'skip' || !profileStore.uid) {
+    return errorResult('USER_DEACTIVATE_LOGIN_REQUIRED', '请先登录账号')
+  }
+  if (uid !== profileStore.uid) return errorResult('USER_DEACTIVATE_UID_MISMATCH', '当前用户账号不匹配')
+  applyDeactivatedUserAccountState()
+  return successMutation('账号已停用，当前登录状态已清除')
 }
 
 export const skipUserLogin = (): AiopsUserMutationResult => {

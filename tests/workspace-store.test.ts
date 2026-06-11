@@ -3225,7 +3225,8 @@ describe('workspace store', () => {
       secretRedaction: 'enabled',
       dataSync: 'disabled',
       deactivateModalOpen: false,
-      deactivateConfirmationInput: ''
+      deactivateConfirmationInput: '',
+      deactivateLoading: false
     })
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -8621,6 +8622,76 @@ describe('workspace store', () => {
     }
   })
 
+  it('does not fabricate account deactivation from the Privacy page without backend confirmation', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshUserAccount()
+    const originalDeactivate = window.aiops.deactivateUserAccount
+
+    try {
+      await expect(store.updatePrivacySettings({ deactivateModalOpen: true, deactivateConfirmationInput: 'DEACTIVATE' })).resolves.toBe(true)
+      ;(window.aiops as any).deactivateUserAccount = undefined
+      await expect(store.deactivateUserAccount()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('账户停用服务不可用')
+      expect(store.privacySettings.deactivateModalOpen).toBe(true)
+      expect(store.privacySettings.deactivateConfirmationInput).toBe('DEACTIVATE')
+      expect(store.billingSettings.skippedLogin).toBe(false)
+
+      ;(window.aiops as any).deactivateUserAccount = originalDeactivate
+      vi.mocked(window.aiops.deactivateUserAccount!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'USER_DEACTIVATE_OFFLINE',
+        errorMessage: '停用后端离线'
+      })
+      await expect(store.deactivateUserAccount()).resolves.toBe(false)
+      expect(window.aiops.deactivateUserAccount).toHaveBeenCalledWith({ uid: store.userProfile.uid })
+      expect(store.settingsNotice).toBe('停用后端离线')
+      expect(store.privacySettings.deactivateModalOpen).toBe(true)
+      expect(store.billingSettings.skippedLogin).toBe(false)
+
+      vi.mocked(window.aiops.deactivateUserAccount!).mockResolvedValueOnce({
+        ok: true,
+        data: {} as any
+      })
+      await expect(store.deactivateUserAccount()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('用户后端返回了无效结果')
+      expect(store.privacySettings.deactivateModalOpen).toBe(true)
+      expect(store.billingSettings.skippedLogin).toBe(false)
+
+      vi.mocked(window.aiops.deactivateUserAccount!).mockImplementationOnce(async (input) => {
+        expect(input.uid).toBe(store.userProfile.uid)
+        return {
+          ok: true,
+          data: {
+            profile: {
+              ...store.userProfile,
+              uid: 0,
+              email: '',
+              mobile: '',
+              subscription: 'free',
+              subscriptionExpiresAt: '',
+              skippedLogin: true,
+              localDatabaseReady: false,
+              needDeviceVerification: false,
+              lastLoginMethod: 'skip'
+            },
+            trustedDevices: [store.trustedDevices[0]],
+            message: '账号已停用，当前登录状态已清除'
+          }
+        }
+      })
+      await expect(store.deactivateUserAccount()).resolves.toBe(true)
+      expect(store.privacySettings.deactivateModalOpen).toBe(false)
+      expect(store.privacySettings.deactivateConfirmationInput).toBe('')
+      expect(store.privacySettings.deactivateLoading).toBe(false)
+      expect(store.billingSettings.skippedLogin).toBe(true)
+      expect(store.billingSettings.subscription).toBe('free')
+      expect(store.userNotice).toBe('账号已停用，当前登录状态已清除')
+      expect(store.settingsNotice).toBe('账号已停用')
+    } finally {
+      window.aiops.deactivateUserAccount = originalDeactivate
+    }
+  })
+
   it('does not fabricate editor setting writes when the config bridge is unavailable or fails', async () => {
     const store = useWorkspaceStore()
     await store.hydrateConfig()
@@ -9538,9 +9609,17 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       })
     )
     vi.mocked(window.aiops.saveConfig).mockClear()
+    expect(await store.loginWithAccount('privacy_ops', 'secret')).toBe(true)
     await expect(store.updatePrivacySettings({ deactivateModalOpen: true })).resolves.toBe(true)
     expect(store.privacySettings.deactivateModalOpen).toBe(true)
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
+    store.privacySettings.deactivateConfirmationInput = 'DEACTIVATE'
+    const uidBeforeDeactivate = store.userProfile.uid
+    await expect(store.deactivateUserAccount()).resolves.toBe(true)
+    expect(window.aiops.deactivateUserAccount).toHaveBeenCalledWith({ uid: uidBeforeDeactivate })
+    expect(store.privacySettings.deactivateModalOpen).toBe(false)
+    expect(store.privacySettings.deactivateConfirmationInput).toBe('')
+    expect(store.billingSettings.skippedLogin).toBe(true)
 
     const latestCheck = store.checkAboutUpdate()
     expect(store.aboutSettings.updateStatus).toBe('checking')

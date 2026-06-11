@@ -187,6 +187,7 @@ import {
 import {
   bindUserContact,
   configureUserAccountBackendRuntime,
+  deactivateUserAccount,
   getUserAccount,
   loginUserAccount,
   logoutUserAccount,
@@ -243,6 +244,7 @@ import type {
   AiopsUserAvatarPrepareInput,
   AiopsUserCodeInput,
   AiopsUserContactBindInput,
+  AiopsUserDeactivateInput,
   AiopsUserLoginInput,
   AiopsUserPasswordInput,
   AiopsUserProfileUpdateInput,
@@ -2617,6 +2619,7 @@ const registerIpc = () => {
   ipcMain.handle('user:reset-password', (_event, input: AiopsUserPasswordInput) => resetUserPassword(input))
   ipcMain.handle('user:send-contact-code', (_event, input: AiopsUserCodeInput) => sendUserContactCode(input))
   ipcMain.handle('user:bind-contact', (_event, input: AiopsUserContactBindInput) => bindUserContact(input))
+  ipcMain.handle('user:deactivate-account', (_event, input: AiopsUserDeactivateInput) => deactivateUserAccount(input))
   ipcMain.handle('user:revoke-trusted-device', (_event, id: number) => revokeTrustedDevice(id))
   ipcMain.handle('app:get-protocol-prefix', () => aiopstermProtocolPrefix)
   ipcMain.handle('app:handle-protocol-url', async (_event, rawUrl: string) => handleDeepLinkUrl(rawUrl))

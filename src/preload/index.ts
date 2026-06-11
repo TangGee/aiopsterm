@@ -54,6 +54,7 @@ const api: AiopsPreloadApi = {
   resetUserPassword: (input) => ipcRenderer.invoke('user:reset-password', input),
   sendUserContactCode: (input) => ipcRenderer.invoke('user:send-contact-code', input),
   bindUserContact: (input) => ipcRenderer.invoke('user:bind-contact', input),
+  deactivateUserAccount: (input) => ipcRenderer.invoke('user:deactivate-account', input),
   revokeTrustedDevice: (id: number) => ipcRenderer.invoke('user:revoke-trusted-device', id),
   getProtocolPrefix: () => ipcRenderer.invoke('app:get-protocol-prefix') as Promise<string>,
   handleProtocolUrl: (url: string) => ipcRenderer.invoke('app:handle-protocol-url', url),
