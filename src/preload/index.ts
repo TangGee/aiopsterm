@@ -276,6 +276,7 @@ const api: AiopsPreloadApi = {
   disconnectKubernetesCluster: (id: string) => ipcRenderer.invoke('kubernetes:cluster:disconnect', id),
   syncKubernetesBastion: (bastionUuid: string) => ipcRenderer.invoke('kubernetes:bastion:sync', bastionUuid),
   createKubernetesTerminal: (input) => ipcRenderer.invoke('kubernetes:terminal:create', input),
+  writeKubernetesTerminal: (id: string, data: string) => ipcRenderer.invoke('kubernetes:terminal:write', id, data),
   resizeKubernetesTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('kubernetes:terminal:resize', id, cols, rows),
   closeKubernetesTerminal: (id: string, exitCode?: number) => ipcRenderer.invoke('kubernetes:terminal:close', id, exitCode),
   executeKubernetesCommand: (input) => ipcRenderer.invoke('kubernetes:execute-command', input),
@@ -314,6 +315,16 @@ const api: AiopsPreloadApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalExitEvent) => listener(payload)
     ipcRenderer.on('terminal:exit', wrapped)
     return () => ipcRenderer.off('terminal:exit', wrapped)
+  },
+  onKubernetesTerminalData: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('kubernetes:terminal:data', wrapped)
+    return () => ipcRenderer.off('kubernetes:terminal:data', wrapped)
+  },
+  onKubernetesTerminalExit: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('kubernetes:terminal:exit', wrapped)
+    return () => ipcRenderer.off('kubernetes:terminal:exit', wrapped)
   }
 }
 

@@ -140,10 +140,12 @@ import {
   refreshKubernetesResources,
   resizeKubernetesTerminal,
   saveKubernetesAgentProxyConfig,
+  setKubernetesTerminalEventSink,
   switchKubernetesContext,
   syncKubernetesBastion,
   testKubernetesClusterConnection,
-  updateKubernetesCluster
+  updateKubernetesCluster,
+  writeKubernetesTerminal
 } from './backend/kubernetes'
 import { checkModelProvider, listAiModels } from './backend/modelProviders'
 import {
@@ -295,6 +297,8 @@ import type {
   KubernetesResourceActionInput,
   KubernetesResourceRefreshInput,
   KubernetesTerminalCreateInput,
+  KubernetesTerminalDataEvent,
+  KubernetesTerminalExitEvent,
   KnowledgeBaseUserConfig,
   McpConfigFile,
   McpResourceReadInput,
@@ -1300,6 +1304,12 @@ configureExtensionBackendRuntime({
   fetch: (url, init) => net.fetch(url, init)
 })
 configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
+setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => {
+  const channel = 'data' in event ? 'kubernetes:terminal:data' : 'kubernetes:terminal:exit'
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send(channel, event)
+  })
+})
 configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
 configureAiTodoBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'ai-todos.json') })
 configureChatHistoryBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'chat-history.json') })
@@ -3863,6 +3873,7 @@ const registerIpc = () => {
   ipcMain.handle('kubernetes:cluster:disconnect', (_event, id: string) => disconnectKubernetesCluster(id))
   ipcMain.handle('kubernetes:bastion:sync', (_event, bastionUuid: string) => syncKubernetesBastion(bastionUuid))
   ipcMain.handle('kubernetes:terminal:create', (_event, input: KubernetesTerminalCreateInput) => createKubernetesTerminal(input))
+  ipcMain.handle('kubernetes:terminal:write', (_event, id: string, data: string) => writeKubernetesTerminal(id, data))
   ipcMain.handle('kubernetes:terminal:resize', (_event, id: string, cols: number, rows: number) => resizeKubernetesTerminal(id, cols, rows))
   ipcMain.handle('kubernetes:terminal:close', (_event, id: string, exitCode?: number) => closeKubernetesTerminal(id, exitCode))
   ipcMain.handle('kubernetes:execute-command', (_event, input: KubernetesCommandInput) => executeKubernetesCommand(input))

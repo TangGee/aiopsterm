@@ -150,6 +150,8 @@ import type {
   KubernetesClusterTestInput,
   KubernetesConnectionStatus,
   KubernetesContextInfo,
+  KubernetesTerminalDataEvent,
+  KubernetesTerminalExitEvent,
   KubernetesImportContextInfo,
   KubernetesNamespaceInfo,
   KubernetesResource,
@@ -264,6 +266,7 @@ type K8sKubeconfigImportData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['i
 type K8sClusterTestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['testKubernetesClusterConnection']>>['data']>
 type K8sProxyConfigData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveKubernetesAgentProxyConfig']>>['data']>
 type K8sTerminalCloseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['closeKubernetesTerminal']>>['data']>
+type K8sTerminalWriteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['writeKubernetesTerminal']>>['data']>
 type AiChatHistorySnapshotData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['listChatConversations']>>['data']>
 type AiChatConversationMutationData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createChatConversation']>>['data']>
 type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['deleteChatConversation']>>['data']>
@@ -2187,6 +2190,55 @@ const isK8sTerminalCloseData = (source: unknown): source is K8sTerminalCloseData
   return isFiniteNumber((source as Record<string, unknown>).exitCode)
 }
 
+const isK8sTerminalWriteDataForRequest = (source: unknown, expected: { id: string; data: string; command: string }): source is K8sTerminalWriteData => {
+  if (
+    !isRecord(source) ||
+    typeof source.id !== 'string' ||
+    typeof source.sessionId !== 'string' ||
+    source.sessionId !== expected.id ||
+    typeof source.bytes !== 'number' ||
+    source.bytes !== new TextEncoder().encode(expected.data).byteLength ||
+    typeof source.command !== 'string' ||
+    normalizeK8sCommandText(source.command) !== normalizeK8sCommandText(expected.command) ||
+    typeof source.output !== 'string' ||
+    typeof source.success !== 'boolean' ||
+    typeof source.error !== 'string' ||
+    typeof source.terminalOutput !== 'string' ||
+    typeof source.updatedAt !== 'string'
+  ) {
+    return false
+  }
+  return true
+}
+
+const isK8sTerminalDataEvent = (source: unknown): source is KubernetesTerminalDataEvent =>
+  isRecord(source) &&
+  typeof source.id === 'string' &&
+  source.id.trim() !== '' &&
+  typeof source.sessionId === 'string' &&
+  source.sessionId.trim() !== '' &&
+  typeof source.clusterId === 'string' &&
+  source.clusterId.trim() !== '' &&
+  typeof source.data === 'string' &&
+  typeof source.command === 'string' &&
+  typeof source.output === 'string' &&
+  typeof source.success === 'boolean' &&
+  typeof source.error === 'string' &&
+  typeof source.emittedAt === 'string'
+
+const isK8sTerminalExitEvent = (source: unknown): source is KubernetesTerminalExitEvent =>
+  isRecord(source) &&
+  typeof source.id === 'string' &&
+  source.id.trim() !== '' &&
+  typeof source.sessionId === 'string' &&
+  source.sessionId.trim() !== '' &&
+  typeof source.clusterId === 'string' &&
+  source.clusterId.trim() !== '' &&
+  isFiniteNumber(source.exitCode) &&
+  (source.reason === 'closed' || source.reason === 'disconnect' || source.reason === 'error') &&
+  (source.error === undefined || typeof source.error === 'string') &&
+  typeof source.emittedAt === 'string'
+
 const isK8sProxyConfigData = (source: unknown): source is K8sProxyConfigData =>
   isRecord(source) && isK8sAgentProxyConfig(source.proxyConfig) && typeof source.message === 'string'
 
@@ -3801,6 +3853,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const k8sClusterNotice = ref('')
   const k8sTerminalTabs = ref<K8sTerminalTab[]>([])
   const k8sActiveTerminalId = ref<string | null>(null)
+  let removeK8sTerminalDataListener: (() => void) | null = null
+  let removeK8sTerminalExitListener: (() => void) | null = null
   const k8sAddModalOpen = ref(false)
   const k8sEditModalOpen = ref(false)
   const k8sEditingClusterId = ref<string | null>(null)
@@ -10163,6 +10217,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tab.updatedAt = '刚刚'
   }
 
+  const handleK8sTerminalData = (event: KubernetesTerminalDataEvent) => {
+    if (!isK8sTerminalDataEvent(event)) return
+    const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
+    if (!tab || tab.status === 'ended') return
+    if (event.data) appendK8sTerminalOutput(tab, event.data)
+    tab.lastCommandOutput = event.data
+    tab.updatedAt = event.emittedAt
+  }
+
+  const handleK8sTerminalExit = (event: KubernetesTerminalExitEvent) => {
+    if (!isK8sTerminalExitEvent(event)) return
+    const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
+    if (!tab) return
+    tab.status = 'ended'
+    tab.exitCode = event.exitCode
+    tab.collectingAiOutput = false
+    tab.updatedAt = event.emittedAt
+    if (event.reason === 'error' && event.error) setK8sNotice(event.error)
+  }
+
+  const installK8sTerminalListeners = () => {
+    if (!removeK8sTerminalDataListener && typeof window.aiops?.onKubernetesTerminalData === 'function') {
+      removeK8sTerminalDataListener = window.aiops.onKubernetesTerminalData(handleK8sTerminalData)
+    }
+    if (!removeK8sTerminalExitListener && typeof window.aiops?.onKubernetesTerminalExit === 'function') {
+      removeK8sTerminalExitListener = window.aiops.onKubernetesTerminalExit(handleK8sTerminalExit)
+    }
+  }
+
   const completeK8sTerminalConnect = (clusterId: string) => {
     k8sTerminalTabs.value
       .filter((tab) => tab.clusterId === clusterId && tab.status === 'connecting')
@@ -10175,6 +10258,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const openK8sTerminal = async (clusterId: string, options: { forceNew?: boolean; namespace?: string; cols?: number; rows?: number } = {}) => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
     if (!cluster) return null
+    installK8sTerminalListeners()
     let tab = options.forceNew ? undefined : k8sTerminalTabs.value.find((item) => item.clusterId === clusterId && item.status !== 'ended')
     if (!tab) {
       if (!window.aiops?.createKubernetesTerminal) {
@@ -10312,16 +10396,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab.collectingAiOutput = false
       return ''
     }
-    const result = await executeK8sBackendCommand(text, tab.clusterId, tab.namespace, 'terminal')
-    if (!result) {
+    const writeKubernetesTerminal = window.aiops?.writeKubernetesTerminal
+    if (typeof writeKubernetesTerminal !== 'function') {
+      setK8sNotice('Kubernetes terminal write API 不可用')
       tab.collectingAiOutput = false
       return ''
     }
-    const terminalOutput = result.terminalOutput || ''
+    const payload = text.endsWith('\n') ? text : `${text}\n`
+    let result: Awaited<ReturnType<AiopsPreloadApi['writeKubernetesTerminal']>>
+    try {
+      result = await writeKubernetesTerminal(tab.sessionId, payload)
+    } catch (error) {
+      setK8sNotice(error instanceof Error ? error.message : 'Kubernetes terminal command failed.')
+      tab.collectingAiOutput = false
+      return ''
+    }
+    if (!result?.ok) {
+      setK8sNotice(result?.errorMessage || 'Kubernetes terminal command failed.')
+      tab.collectingAiOutput = false
+      return ''
+    }
+    if (!isK8sTerminalWriteDataForRequest(result.data, { id: tab.sessionId, data: payload, command: text })) {
+      setK8sNotice('Kubernetes terminal backend returned malformed write data.')
+      tab.collectingAiOutput = false
+      return ''
+    }
+    const terminalOutput = result.data.terminalOutput || ''
     tab.commandHistory = [text, ...tab.commandHistory.filter((item) => item !== text)].slice(0, 20)
     tab.lastCommand = text
-    tab.lastCommandOutput = terminalOutput
-    if (terminalOutput) appendK8sTerminalOutput(tab, terminalOutput)
+    tab.updatedAt = result.data.updatedAt
     if (tab.collectingAiOutput) {
       tab.collectingAiOutput = false
       const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)

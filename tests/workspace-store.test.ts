@@ -6664,27 +6664,12 @@ describe('workspace store', () => {
     expect((store.k8sActiveTerminal?.output.match(/\[staging\]\$ /g) || [])).toHaveLength(1)
     expect(store.k8sActiveTerminal?.commandHistory[0]).toBe('kubectl get ns')
     expect(store.k8sActiveTerminal?.lastCommandOutput).toContain('staging')
-    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
-      ok: true,
-      data: {
-        runId: 'k8s-run-terminal-output-boundary',
-        command: 'kubectl get pods -A',
-        output: 'renderer must not format this output',
-        terminalOutput: 'BACKEND TERMINAL TEXT\nkubectl output owned by preload/main',
-        success: true,
-        error: '',
-        durationMs: 1,
-        startedAt: '刚刚',
-        clusterId: 'k8s-2',
-        contextName: 'staging/devops',
-        namespace: 'staging',
-        source: 'terminal'
-      }
-    })
+    vi.mocked(window.aiops.writeKubernetesTerminal).mockClear()
     await store.sendK8sTerminalCommand('kubectl get pods -A')
-    expect(store.k8sActiveTerminal?.output).toContain('BACKEND TERMINAL TEXT\nkubectl output owned by preload/main')
-    expect(store.k8sActiveTerminal?.output).not.toContain('[aiopsterm kubectl] kubectl get pods -A\nrenderer must not format this output')
-    expect(store.k8sActiveTerminal?.lastCommandOutput).toBe('BACKEND TERMINAL TEXT\nkubectl output owned by preload/main')
+    expect(window.aiops.writeKubernetesTerminal).toHaveBeenCalledWith(store.k8sActiveTerminal?.sessionId, 'kubectl get pods -A\n')
+    expect(window.aiops.executeKubernetesCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'kubectl get pods -A', source: 'terminal' }))
+    expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl get pods -A')
+    expect(store.k8sActiveTerminal?.lastCommandOutput).toContain('[aiopsterm kubectl] kubectl get pods -A')
 
     const reusedTerminalId = store.k8sActiveTerminal!.id
     await store.openK8sTerminal('k8s-2')
@@ -7465,32 +7450,47 @@ describe('workspace store', () => {
     const terminalOutputBefore = terminal.output
     const terminalHistoryBefore = [...terminal.commandHistory]
     const terminalLastOutputBefore = terminal.lastCommandOutput
-    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+    const originalWriteKubernetesTerminal = window.aiops.writeKubernetesTerminal
+    ;(window.aiops as any).writeKubernetesTerminal = undefined
+    await expect(store.sendK8sTerminalCommand('kubectl get pods')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal write API 不可用')
+    expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
+    expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
+    ;(window.aiops as any).writeKubernetesTerminal = originalWriteKubernetesTerminal
+
+    vi.mocked(window.aiops.writeKubernetesTerminal).mockResolvedValueOnce({
       ok: true,
-      data: k8sCommandResult({
-        runId: 'mismatched-terminal-run',
+      data: {
+        id: terminal.id,
+        sessionId: 'wrong-session',
+        bytes: new TextEncoder().encode('kubectl get pods\n').byteLength,
         command: 'kubectl get services',
         output: 'MISMATCHED POD OUTPUT',
-        terminalOutput: '[aiopsterm kubectl] mismatched pod output'
-      })
+        success: true,
+        error: '',
+        terminalOutput: '[aiopsterm kubectl] mismatched pod output',
+        updatedAt: '刚刚'
+      }
     } as any)
     await expect(store.sendK8sTerminalCommand('kubectl get pods')).resolves.toBe('')
-    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned malformed write data.')
     expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
     expect(store.k8sActiveTerminal?.output).not.toContain('mismatched pod output')
     expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
     expect(store.k8sActiveTerminal?.lastCommandOutput).toBe(terminalLastOutputBefore)
 
-    vi.mocked(window.aiops.executeKubernetesCommand).mockResolvedValueOnce({
+    vi.mocked(window.aiops.writeKubernetesTerminal).mockResolvedValueOnce({
       ok: true,
       data: {
+        id: terminal.id,
+        sessionId: terminal.sessionId,
         command: 'kubectl get pods',
         output: 'MALFORMED POD OUTPUT',
         terminalOutput: 'MALFORMED TERMINAL TEXT'
       }
     } as any)
     await expect(store.sendK8sTerminalCommand('kubectl get pods')).resolves.toBe('')
-    expect(store.k8sClusterNotice).toBe('Kubernetes command backend returned malformed result data.')
+    expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned malformed write data.')
     expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
     expect(store.k8sActiveTerminal?.output).not.toContain('MALFORMED TERMINAL TEXT')
     expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
@@ -7499,9 +7499,9 @@ describe('workspace store', () => {
     const activeTerminal = store.k8sActiveTerminal
     if (!activeTerminal) throw new Error('Expected active Kubernetes terminal for disconnected command coverage.')
     activeTerminal.status = 'error'
-    vi.mocked(window.aiops.executeKubernetesCommand).mockClear()
+    vi.mocked(window.aiops.writeKubernetesTerminal).mockClear()
     await expect(store.sendK8sTerminalCommand('kubectl get pods -A')).resolves.toBe('')
-    expect(window.aiops.executeKubernetesCommand).not.toHaveBeenCalled()
+    expect(window.aiops.writeKubernetesTerminal).not.toHaveBeenCalled()
     expect(store.k8sClusterNotice).toBe('Kubernetes terminal is not connected.')
     expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
     expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)

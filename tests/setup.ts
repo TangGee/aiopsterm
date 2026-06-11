@@ -1075,6 +1075,42 @@ let databaseAiPaneStateMock = defaultDatabaseAiPaneStateMock()
 let aiChatExchangeRequestSequenceMock = 1
 const cancelledAiChatResponseKeysMock = new Set<string>()
 let kubernetesTerminalSequenceMock = 1
+type TestKubernetesTerminalRecord = {
+  id: string
+  sessionId: string
+  clusterId: string
+  name: string
+  namespace: string
+  output: string
+  status: 'connecting' | 'connected' | 'ended' | 'error'
+  cols: number
+  rows: number
+  createdAt: string
+  updatedAt: string
+}
+type TestKubernetesTerminalDataEvent = {
+  id: string
+  sessionId: string
+  clusterId: string
+  data: string
+  command: string
+  output: string
+  success: boolean
+  error: string
+  emittedAt: string
+}
+type TestKubernetesTerminalExitEvent = {
+  id: string
+  sessionId: string
+  clusterId: string
+  exitCode: number
+  reason: 'closed' | 'disconnect' | 'error'
+  error?: string
+  emittedAt: string
+}
+let kubernetesTerminalSessionsMock: TestKubernetesTerminalRecord[] = []
+const kubernetesTerminalDataListenersMock = new Set<(event: TestKubernetesTerminalDataEvent) => void>()
+const kubernetesTerminalExitListenersMock = new Set<(event: TestKubernetesTerminalExitEvent) => void>()
 
 const aiChatRequestIdFromAssistantMessageIdMock = (assistantMessageId?: string) => {
   const normalized = String(assistantMessageId || '').trim()
@@ -2673,6 +2709,9 @@ const resetKubernetesCatalogMock = () => {
     agentProxyConfig: { ...defaultKubernetesCatalog.agentProxyConfig }
   }
   kubernetesTerminalSequenceMock = 1
+  kubernetesTerminalSessionsMock = []
+  kubernetesTerminalDataListenersMock.clear()
+  kubernetesTerminalExitListenersMock.clear()
 }
 
 const k8sCatalogResultMock = (extra?: Record<string, unknown>) => ({ ok: true, data: { ...cloneKubernetesCatalog(), ...extra } })
@@ -6544,6 +6583,9 @@ Object.defineProperty(window, 'aiops', {
       kubernetesCatalogMock.currentContext = existing.context_name
       kubernetesCatalogMock.activeClusterId = id
       kubernetesCatalogMock.selectedClusterId = id
+      kubernetesTerminalSessionsMock = kubernetesTerminalSessionsMock.map((session) =>
+        session.clusterId === id && session.status === 'connecting' ? { ...session, status: 'connected', updatedAt: '刚刚' } : session
+      )
       return k8sCatalogResultMock({ cluster: { ...findKubernetesClusterMock(id)! } })
     }),
     disconnectKubernetesCluster: vi.fn(async (id: string) => {
@@ -6557,6 +6599,20 @@ Object.defineProperty(window, 'aiops', {
       }
       kubernetesCatalogMock.clusters = kubernetesCatalogMock.clusters.map((cluster) => (cluster.id === id ? updated : cluster))
       kubernetesCatalogMock.activeClusterId = kubernetesCatalogMock.clusters.find((cluster) => cluster.is_active === 1)?.id || null
+      const closedSessions = kubernetesTerminalSessionsMock.filter((session) => session.clusterId === id)
+      kubernetesTerminalSessionsMock = kubernetesTerminalSessionsMock.filter((session) => session.clusterId !== id)
+      closedSessions.forEach((session) => {
+        kubernetesTerminalExitListenersMock.forEach((listener) =>
+          listener({
+            id: session.id,
+            sessionId: session.sessionId,
+            clusterId: session.clusterId,
+            exitCode: 0,
+            reason: 'disconnect',
+            emittedAt: '刚刚'
+          })
+        )
+      })
       return k8sCatalogResultMock({ cluster: { ...updated } })
     }),
     syncKubernetesBastion: vi.fn(async (bastionUuid: string) => {
@@ -6599,56 +6655,102 @@ Object.defineProperty(window, 'aiops', {
       const sequence = kubernetesTerminalSequenceMock++
       const perClusterCount = vi.mocked(window.aiops.createKubernetesTerminal).mock.calls.filter(([call]) => call.clusterId === input.clusterId).length
       const namespace = input.namespace || cluster.default_namespace || 'default'
-      return {
-        ok: true,
-        data: {
-          id: `k8s-tab-test-${sequence}`,
-          sessionId: `k8s-session-test-${sequence}`,
-          clusterId: cluster.id,
-          name: perClusterCount <= 1 ? cluster.name : `${cluster.name}-${perClusterCount}`,
-          namespace,
-          output: [`Connecting to cluster ${cluster.name}...`, `kubectl context: ${cluster.context_name}`, `namespace: ${namespace}`, `[${namespace}]$ `].join('\n'),
-          status: cluster.connection_status === 'connected' ? ('connected' as const) : ('connecting' as const),
-          cols: Math.max(20, Math.min(240, Math.round(Number(input.cols) || 80))),
-          rows: Math.max(8, Math.min(80, Math.round(Number(input.rows) || 24))),
-          createdAt: '刚刚',
-          updatedAt: '刚刚'
-        }
-      }
-    }),
-    resizeKubernetesTerminal: vi.fn(async (id: string, cols: number, rows: number) => ({
-      ok: true,
-      data: {
-        id: `resized-${id}`,
-        sessionId: id,
-        clusterId: 'k8s-1',
-        name: 'resized-terminal',
-        namespace: 'default',
-        output: '',
-        status: 'connected' as const,
-        cols: Math.max(20, Math.min(240, Math.round(Number(cols) || 80))),
-        rows: Math.max(8, Math.min(80, Math.round(Number(rows) || 24))),
+      const record: TestKubernetesTerminalRecord = {
+        id: `k8s-tab-test-${sequence}`,
+        sessionId: `k8s-session-test-${sequence}`,
+        clusterId: cluster.id,
+        name: perClusterCount <= 1 ? cluster.name : `${cluster.name}-${perClusterCount}`,
+        namespace,
+        output: [`Connecting to cluster ${cluster.name}...`, `kubectl context: ${cluster.context_name}`, `namespace: ${namespace}`, `[${namespace}]$ `].join('\n'),
+        status: cluster.connection_status === 'connected' ? 'connected' : 'connecting',
+        cols: Math.max(20, Math.min(240, Math.round(Number(input.cols) || 80))),
+        rows: Math.max(8, Math.min(80, Math.round(Number(input.rows) || 24))),
         createdAt: '刚刚',
         updatedAt: '刚刚'
       }
-    })),
-    closeKubernetesTerminal: vi.fn(async (id: string, exitCode = 0) => ({
-      ok: true,
-      data: {
-        id: `closed-${id}`,
-        sessionId: id,
-        clusterId: 'k8s-1',
-        name: 'closed-terminal',
-        namespace: 'default',
-        output: '',
-        status: 'ended' as const,
-        cols: 80,
-        rows: 24,
-        createdAt: '刚刚',
-        updatedAt: '刚刚',
-        exitCode
+      kubernetesTerminalSessionsMock = [...kubernetesTerminalSessionsMock, record]
+      return {
+        ok: true,
+        data: { ...record }
       }
-    })),
+    }),
+    writeKubernetesTerminal: vi.fn(async (id: string, data: string) => {
+      const session = kubernetesTerminalSessionsMock.find((item) => item.sessionId === id || item.id === id)
+      if (!session) return { ok: false, errorCode: 'K8S_TERMINAL_NOT_FOUND', errorMessage: 'Kubernetes terminal session not found.' }
+      if (session.status === 'ended') return { ok: false, errorCode: 'K8S_TERMINAL_ENDED', errorMessage: 'Kubernetes terminal session has ended.' }
+      if (session.status !== 'connected') return { ok: false, errorCode: 'K8S_TERMINAL_NOT_CONNECTED', errorMessage: 'Kubernetes terminal is not connected.' }
+      const command = normalizeKubernetesCommandMock(data)
+      if (!command) return { ok: false, errorCode: 'K8S_EMPTY_COMMAND', errorMessage: 'Kubernetes command is required.' }
+      const cluster = findKubernetesClusterMock(session.clusterId)
+      const rendered = renderKubernetesSeedCommandMock({
+        command,
+        clusterId: session.clusterId,
+        clusterName: cluster?.name,
+        contextName: cluster?.context_name,
+        namespace: session.namespace,
+        defaultNamespace: cluster?.default_namespace
+      })
+      const terminalOutput = `[aiopsterm kubectl] ${command}${rendered.output ? `\n${rendered.output}` : ''}`
+      session.output = session.output.endsWith('\n') || !session.output ? `${session.output}${terminalOutput}` : `${session.output}\n${terminalOutput}`
+      session.updatedAt = '刚刚'
+      const event: TestKubernetesTerminalDataEvent = {
+        id: session.id,
+        sessionId: session.sessionId,
+        clusterId: session.clusterId,
+        data: terminalOutput,
+        command,
+        output: rendered.output,
+        success: rendered.success,
+        error: rendered.error,
+        emittedAt: '刚刚'
+      }
+      kubernetesTerminalDataListenersMock.forEach((listener) => listener(event))
+      return {
+        ok: true,
+        data: {
+          id: session.id,
+          sessionId: session.sessionId,
+          bytes: new TextEncoder().encode(data).byteLength,
+          command,
+          output: rendered.output,
+          success: rendered.success,
+          error: rendered.error,
+          terminalOutput,
+          updatedAt: session.updatedAt
+        }
+      }
+    }),
+    resizeKubernetesTerminal: vi.fn(async (id: string, cols: number, rows: number) => {
+      const session = kubernetesTerminalSessionsMock.find((item) => item.sessionId === id || item.id === id)
+      if (!session) return { ok: false, errorCode: 'K8S_TERMINAL_NOT_FOUND', errorMessage: 'Kubernetes terminal session not found.' }
+      session.cols = Math.max(20, Math.min(240, Math.round(Number(cols) || 80)))
+      session.rows = Math.max(8, Math.min(80, Math.round(Number(rows) || 24)))
+      session.updatedAt = '刚刚'
+      return { ok: true, data: { ...session } }
+    }),
+    closeKubernetesTerminal: vi.fn(async (id: string, exitCode = 0) => {
+      const session = kubernetesTerminalSessionsMock.find((item) => item.sessionId === id || item.id === id)
+      if (!session) return { ok: false, errorCode: 'K8S_TERMINAL_NOT_FOUND', errorMessage: 'Kubernetes terminal session not found.' }
+      session.status = 'ended'
+      session.updatedAt = '刚刚'
+      kubernetesTerminalSessionsMock = kubernetesTerminalSessionsMock.filter((item) => item.sessionId !== session.sessionId)
+      const event: TestKubernetesTerminalExitEvent = {
+        id: session.id,
+        sessionId: session.sessionId,
+        clusterId: session.clusterId,
+        exitCode,
+        reason: 'closed',
+        emittedAt: '刚刚'
+      }
+      kubernetesTerminalExitListenersMock.forEach((listener) => listener(event))
+      return {
+        ok: true,
+        data: {
+          ...session,
+          exitCode
+        }
+      }
+    }),
     cleanupKubernetesAgent: vi.fn(async () => ({
       ok: true,
       data: {
@@ -7372,6 +7474,18 @@ Object.defineProperty(window, 'aiops', {
           namespace,
           source: input.source || 'terminal'
         }
+      }
+    }),
+    onKubernetesTerminalData: vi.fn((listener: (event: TestKubernetesTerminalDataEvent) => void) => {
+      kubernetesTerminalDataListenersMock.add(listener)
+      return () => {
+        kubernetesTerminalDataListenersMock.delete(listener)
+      }
+    }),
+    onKubernetesTerminalExit: vi.fn((listener: (event: TestKubernetesTerminalExitEvent) => void) => {
+      kubernetesTerminalExitListenersMock.add(listener)
+      return () => {
+        kubernetesTerminalExitListenersMock.delete(listener)
       }
     }),
     planKubernetesResourceAction: vi.fn(async (input: { resourceId: string; action?: TestKubernetesResourceAction }) =>

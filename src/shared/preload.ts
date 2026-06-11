@@ -2579,6 +2579,38 @@ export type KubernetesTerminalRecord = {
 export type KubernetesTerminalCreateResult = AiopsMutationResult<KubernetesTerminalRecord>
 export type KubernetesTerminalMutationResult = AiopsMutationResult<KubernetesTerminalRecord>
 export type KubernetesTerminalCloseResult = AiopsMutationResult<KubernetesTerminalRecord & { exitCode: number }>
+export type KubernetesTerminalWriteData = {
+  id: string
+  sessionId: string
+  bytes: number
+  command: string
+  output: string
+  success: boolean
+  error: string
+  terminalOutput: string
+  updatedAt: string
+}
+export type KubernetesTerminalWriteResult = AiopsMutationResult<KubernetesTerminalWriteData>
+export type KubernetesTerminalDataEvent = {
+  id: string
+  sessionId: string
+  clusterId: string
+  data: string
+  command: string
+  output: string
+  success: boolean
+  error: string
+  emittedAt: string
+}
+export type KubernetesTerminalExitEvent = {
+  id: string
+  sessionId: string
+  clusterId: string
+  exitCode: number
+  reason: 'closed' | 'disconnect' | 'error'
+  error?: string
+  emittedAt: string
+}
 
 export type KubernetesCommandInput = {
   command: string
@@ -2864,6 +2896,7 @@ export type AiopsPreloadApi = {
   disconnectKubernetesCluster: (id: string) => Promise<KubernetesClusterMutationResult>
   syncKubernetesBastion: (bastionUuid: string) => Promise<KubernetesBastionSyncResult>
   createKubernetesTerminal: (input: KubernetesTerminalCreateInput) => Promise<KubernetesTerminalCreateResult>
+  writeKubernetesTerminal: (id: string, data: string) => Promise<KubernetesTerminalWriteResult>
   resizeKubernetesTerminal: (id: string, cols: number, rows: number) => Promise<KubernetesTerminalMutationResult>
   closeKubernetesTerminal: (id: string, exitCode?: number) => Promise<KubernetesTerminalCloseResult>
   executeKubernetesCommand: (input: KubernetesCommandInput) => Promise<KubernetesCommandResult>
@@ -2891,4 +2924,6 @@ export type AiopsPreloadApi = {
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
   onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
+  onKubernetesTerminalData: (listener: (event: KubernetesTerminalDataEvent) => void) => () => void
+  onKubernetesTerminalExit: (listener: (event: KubernetesTerminalExitEvent) => void) => () => void
 }

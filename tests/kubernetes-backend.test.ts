@@ -16,8 +16,10 @@ import {
   refreshKubernetesResources,
   resizeKubernetesTerminal,
   saveKubernetesAgentProxyConfig,
+  setKubernetesTerminalEventSink,
   syncKubernetesBastion,
-  testKubernetesClusterConnection
+  testKubernetesClusterConnection,
+  writeKubernetesTerminal
 } from '@shared/kubernetes'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -32,6 +34,7 @@ describe('kubernetes backend boundary', () => {
     tempDirs.push(stateDir)
     configureKubernetesBackendRuntime({ stateDir })
     __resetKubernetesCatalogForTests()
+    setKubernetesTerminalEventSink(null)
   })
 
   afterEach(async () => {
@@ -96,6 +99,67 @@ describe('kubernetes backend boundary', () => {
     expect(closed.ok).toBe(true)
     expect(closed.data).toMatchObject({ sessionId: created.data!.sessionId, status: 'ended', exitCode: 0 })
     await expect(resizeKubernetesTerminal(created.data!.sessionId, 80, 24)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_TERMINAL_NOT_FOUND'
+    })
+  })
+
+  it('writes Kubernetes terminal commands through backend-owned session events', async () => {
+    const events: unknown[] = []
+    setKubernetesTerminalEventSink((event) => events.push(event))
+    const created = await createKubernetesTerminal({
+      clusterId: 'k8s-1',
+      namespace: 'ops'
+    })
+    expect(created.ok).toBe(true)
+
+    const result = await writeKubernetesTerminal(created.data!.sessionId, 'kubectl get pods -n ops\n')
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        id: created.data!.id,
+        sessionId: created.data!.sessionId,
+        bytes: Buffer.byteLength('kubectl get pods -n ops\n', 'utf-8'),
+        command: 'kubectl get pods -n ops',
+        success: true,
+        error: '',
+        updatedAt: '刚刚'
+      })
+    )
+    expect(result.data?.terminalOutput).toContain('[aiopsterm kubectl] kubectl get pods -n ops')
+    expect(result.data?.terminalOutput).toContain('billing-worker-7f9d6f9dd9-rx8mm')
+    expect(events).toEqual([
+      expect.objectContaining({
+        id: created.data!.id,
+        sessionId: created.data!.sessionId,
+        clusterId: 'k8s-1',
+        data: expect.stringContaining('[aiopsterm kubectl] kubectl get pods -n ops'),
+        command: 'kubectl get pods -n ops',
+        output: expect.stringContaining('billing-worker-7f9d6f9dd9-rx8mm'),
+        success: true,
+        error: '',
+        emittedAt: '刚刚'
+      })
+    ])
+
+    await expect(writeKubernetesTerminal(created.data!.sessionId, '   \n')).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_EMPTY_COMMAND'
+    })
+    const closed = await closeKubernetesTerminal(created.data!.sessionId, 0)
+    expect(closed.ok).toBe(true)
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        id: created.data!.id,
+        sessionId: created.data!.sessionId,
+        clusterId: 'k8s-1',
+        exitCode: 0,
+        reason: 'closed',
+        emittedAt: '刚刚'
+      })
+    )
+    await expect(writeKubernetesTerminal(created.data!.sessionId, 'kubectl get ns\n')).resolves.toMatchObject({
       ok: false,
       errorCode: 'K8S_TERMINAL_NOT_FOUND'
     })

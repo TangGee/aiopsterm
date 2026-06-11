@@ -6772,6 +6772,7 @@ describe('AppShell', () => {
     await workspace.find('.k8s-command-line input').setValue('kubectl get pods -A')
     await workspace.find('.k8s-command-line').trigger('submit')
     await flushPromises()
+    expect(window.aiops.writeKubernetesTerminal).toHaveBeenCalledWith(expect.stringMatching(/^k8s-session-test-/), 'kubectl get pods -A\n')
     expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl get pods -A')
     await workspace.vm.$nextTick()
     expect(workspace.find('.k8s-terminal-history').text()).toContain('kubectl get pods -A')

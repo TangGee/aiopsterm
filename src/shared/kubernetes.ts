@@ -40,8 +40,11 @@ import type {
   KubernetesTerminalCloseResult,
   KubernetesTerminalCreateInput,
   KubernetesTerminalCreateResult,
+  KubernetesTerminalDataEvent,
+  KubernetesTerminalExitEvent,
   KubernetesTerminalMutationResult,
-  KubernetesTerminalRecord
+  KubernetesTerminalRecord,
+  KubernetesTerminalWriteResult
 } from './preload'
 
 const nowLabel = () => '刚刚'
@@ -413,6 +416,7 @@ let terminalSessions: KubernetesTerminalRecord[] = []
 let agentProxyConfigCache: KubernetesAgentProxyConfig | null = null
 let kubernetesCatalogLoadedStateDir = ''
 let kubernetesCatalogStateLoaded = false
+let kubernetesTerminalEventSink: ((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => void) | null = null
 
 applyInitialKubernetesState()
 
@@ -931,6 +935,36 @@ const cloneTerminalRecord = (record: KubernetesTerminalRecord): KubernetesTermin
 
 const findTerminalSession = (id: string) => terminalSessions.find((session) => session.id === id || session.sessionId === id)
 
+export const setKubernetesTerminalEventSink = (sink: ((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => void) | null) => {
+  kubernetesTerminalEventSink = sink
+}
+
+const emitKubernetesTerminalData = (
+  session: KubernetesTerminalRecord,
+  event: Omit<KubernetesTerminalDataEvent, 'id' | 'sessionId' | 'clusterId' | 'emittedAt'>
+) => {
+  kubernetesTerminalEventSink?.({
+    id: session.id,
+    sessionId: session.sessionId,
+    clusterId: session.clusterId,
+    emittedAt: nowLabel(),
+    ...event
+  })
+}
+
+const emitKubernetesTerminalExit = (
+  session: KubernetesTerminalRecord,
+  event: Omit<KubernetesTerminalExitEvent, 'id' | 'sessionId' | 'clusterId' | 'emittedAt'>
+) => {
+  kubernetesTerminalEventSink?.({
+    id: session.id,
+    sessionId: session.sessionId,
+    clusterId: session.clusterId,
+    emittedAt: nowLabel(),
+    ...event
+  })
+}
+
 const stripYamlScalar = (value: string) => {
   const trimmed = value.trim()
   if (!trimmed) return ''
@@ -1325,6 +1359,15 @@ export async function connectKubernetesCluster(id: string): Promise<KubernetesCl
       connection_status: cluster.id === id ? 'connected' : cluster.connection_status === 'connected' ? 'disconnected' : cluster.connection_status,
       updated_at: cluster.id === id ? nowLabel() : cluster.updated_at
     }))
+    terminalSessions = terminalSessions.map((session) =>
+      session.clusterId === id && session.status === 'connecting'
+        ? {
+            ...session,
+            status: 'connected',
+            updatedAt: nowLabel()
+          }
+        : session
+    )
     contexts = contexts.map((context) => ({ ...context, isActive: context.name === current.context_name }))
     const connected = requireCluster(id)
     persistKubernetesCatalogState()
@@ -1430,6 +1473,76 @@ export const createKubernetesTerminal = async (input: KubernetesTerminalCreateIn
     return cloneTerminalRecord(record)
   })
 
+export async function writeKubernetesTerminal(id: string, data: string): Promise<KubernetesTerminalWriteResult> {
+  try {
+    ensureKubernetesCatalogStateLoaded()
+    const current = findTerminalSession(id)
+    if (!current) throw Object.assign(new Error('Kubernetes terminal session not found.'), { code: 'K8S_TERMINAL_NOT_FOUND' })
+    if (current.status === 'ended') throw Object.assign(new Error('Kubernetes terminal session has ended.'), { code: 'K8S_TERMINAL_ENDED' })
+    if (current.status !== 'connected') {
+      throw Object.assign(new Error('Kubernetes terminal is not connected.'), { code: 'K8S_TERMINAL_NOT_CONNECTED' })
+    }
+    const text = typeof data === 'string' ? data : ''
+    const command = normalize(text)
+    const bytes = Buffer.byteLength(text, 'utf-8')
+    if (!command) {
+      return {
+        ok: false,
+        errorCode: 'K8S_EMPTY_COMMAND',
+        errorMessage: 'Kubernetes command is required.'
+      }
+    }
+    const cluster = requireCluster(current.clusterId)
+    const result = await executeKubernetesCommand({
+      command,
+      clusterId: current.clusterId,
+      clusterName: cluster.name,
+      contextName: cluster.context_name,
+      namespace: current.namespace,
+      defaultNamespace: cluster.default_namespace,
+      source: 'terminal'
+    })
+    if (!result.ok || !result.data) {
+      return {
+        ok: false,
+        errorCode: result.errorCode || 'K8S_TERMINAL_WRITE_FAILED',
+        errorMessage: result.errorMessage || 'Kubernetes terminal command failed.'
+      }
+    }
+    const terminalOutput = result.data.terminalOutput
+    const updated: KubernetesTerminalRecord = {
+      ...current,
+      output: terminalOutput ? (current.output.endsWith('\n') || !current.output ? `${current.output}${terminalOutput}` : `${current.output}\n${terminalOutput}`) : current.output,
+      status: current.status,
+      updatedAt: nowLabel()
+    }
+    terminalSessions = terminalSessions.map((session) => (session.id === current.id ? updated : session))
+    emitKubernetesTerminalData(updated, {
+      data: terminalOutput,
+      command,
+      output: result.data.output,
+      success: result.data.success,
+      error: result.data.error
+    })
+    return {
+      ok: true,
+      data: {
+        id: updated.id,
+        sessionId: updated.sessionId,
+        bytes,
+        command,
+        output: result.data.output,
+        success: result.data.success,
+        error: result.data.error,
+        terminalOutput,
+        updatedAt: updated.updatedAt
+      }
+    }
+  } catch (error) {
+    return toMutationError(error, 'K8S_TERMINAL_WRITE_FAILED')
+  }
+}
+
 export const resizeKubernetesTerminal = async (id: string, cols: number, rows: number): Promise<KubernetesTerminalMutationResult> =>
   asResult(() => {
     const current = findTerminalSession(id)
@@ -1455,6 +1568,10 @@ export const closeKubernetesTerminal = async (id: string, exitCode = 0): Promise
       exitCode
     }
     terminalSessions = terminalSessions.filter((session) => session.id !== current.id)
+    emitKubernetesTerminalExit(current, {
+      exitCode,
+      reason: 'closed'
+    })
     return { ...closed }
   })
 
@@ -1462,6 +1579,7 @@ export const __resetKubernetesCatalogForTests = () => {
   applyInitialKubernetesState()
   terminalSessions = []
   agentProxyConfigCache = null
+  kubernetesTerminalEventSink = null
   kubernetesCatalogLoadedStateDir = ''
   kubernetesCatalogStateLoaded = false
 }

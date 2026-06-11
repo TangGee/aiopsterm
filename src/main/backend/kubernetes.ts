@@ -18,6 +18,8 @@ export {
   saveKubernetesAgentProxyConfig,
   switchKubernetesContext,
   syncKubernetesBastion,
+  setKubernetesTerminalEventSink,
   testKubernetesClusterConnection,
-  updateKubernetesCluster
+  updateKubernetesCluster,
+  writeKubernetesTerminal
 } from '@shared/kubernetes'
