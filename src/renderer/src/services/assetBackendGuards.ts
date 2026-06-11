@@ -7,6 +7,7 @@ import type {
   AiopsAssetRecord,
   AiopsAssetSnapshot,
   AiopsCustomFolderRecord,
+  AiopsKeychainRecord,
   AiopsSshTunnelMutationResult,
   AiopsSshTunnelRecord
 } from '@shared/preload'
@@ -20,6 +21,7 @@ const assetDataSources = new Set(['manual', 'refresh', 'import'])
 const sshTunnelTypes = new Set(['local_forward', 'remote_forward', 'dynamic_socks'])
 const sshTunnelStates = new Set(['created', 'active'])
 const connectionAuthSources = new Set(['password', 'privateKey', 'keychain', 'sshAgent'])
+const keychainTypes = new Set(['rsa', 'ed25519', 'ecdsa'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -84,6 +86,29 @@ export const isAiopsAssetConnectionTestInfo = (value: unknown): value is AiopsAs
     isOptionalString(value.proxyName) &&
     (value.agentKeyCount === undefined || isNonNegativeInteger(value.agentKeyCount))
   )
+}
+
+export const isAiopsKeychainRecord = (value: unknown): value is AiopsKeychainRecord => {
+  if (!isRecord(value)) return false
+  return (
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.name) &&
+    keychainTypes.has(String(value.type)) &&
+    typeof value.publicKey === 'string' &&
+    isOptionalString(value.privateKey) &&
+    isOptionalString(value.passphrase) &&
+    typeof value.hasPrivateKey === 'boolean' &&
+    isNonNegativeInteger(value.createdAt) &&
+    isNonNegativeInteger(value.updatedAt)
+  )
+}
+
+export const isAiopsKeychainListData = (value: unknown): value is AiopsKeychainRecord[] =>
+  Array.isArray(value) && value.every(isAiopsKeychainRecord)
+
+export const isAiopsKeychainDeleteData = (value: unknown, expectedId: string): value is { id: string } => {
+  if (!isRecord(value)) return false
+  return value.id === expectedId
 }
 
 export const isAiopsAssetImportPreviewRecord = (value: unknown): value is AiopsAssetImportPreviewRecord => {

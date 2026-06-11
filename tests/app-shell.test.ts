@@ -857,6 +857,71 @@ describe('AppShell', () => {
     }
   })
 
+  it('fails closed on malformed successful Key Management result envelopes', async () => {
+    const malformedMessage = '资产服务返回数据无效'
+    const originalAiops = {
+      listKeychains: window.aiops.listKeychains,
+      getKeychain: window.aiops.getKeychain,
+      saveKeychain: window.aiops.saveKeychain,
+      deleteKeychain: window.aiops.deleteKeychain
+    }
+    const mountKeysPanel = async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(AssetsPanel, {
+        props: { query: '' },
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+      await wrapper.findAll('.asset-management-item').find((button) => button.text().includes('密钥管理'))!.trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+    const findKeyCard = (wrapper: ReturnType<typeof mount>, name: string) =>
+      wrapper.findAll('.keychain-card').find((button) => button.text().includes(name))
+
+    try {
+      vi.mocked(window.aiops.listKeychains).mockResolvedValueOnce([{ id: 'broken-key-list' }] as any)
+      const listMalformed = await mountKeysPanel()
+      expect(listMalformed.text()).toContain(malformedMessage)
+      expect(findKeyCard(listMalformed, 'broken-key-list')).toBeUndefined()
+      expect(findKeyCard(listMalformed, 'prod-ed25519')).toBeUndefined()
+      listMalformed.unmount()
+
+      const detailMalformed = await mountKeysPanel()
+      vi.mocked(window.aiops.getKeychain).mockResolvedValueOnce({ id: 'key-1', name: 'prod-ed25519' } as any)
+      await findKeyCard(detailMalformed, 'prod-ed25519')!.find('button[title="编辑"]').trigger('click')
+      await flushPromises()
+      expect(detailMalformed.text()).toContain(malformedMessage)
+      expect(detailMalformed.find('.key-form-panel').exists()).toBe(false)
+      detailMalformed.unmount()
+
+      const saveMalformed = await mountKeysPanel()
+      await saveMalformed.find('[data-testid="key-new-button"]').trigger('click')
+      await saveMalformed.find('.key-form-panel input').setValue('malformed-save-key')
+      await saveMalformed.find('.key-form-panel textarea').setValue('-----BEGIN RSA PRIVATE KEY-----')
+      vi.mocked(window.aiops.saveKeychain).mockResolvedValueOnce({ ok: true, data: { id: 'broken-save-key' } } as any)
+      await saveMalformed.find('.key-form-panel .asset-submit-button').trigger('click')
+      await flushPromises()
+      expect(saveMalformed.text()).toContain(malformedMessage)
+      expect(saveMalformed.find('.key-form-panel').exists()).toBe(true)
+      expect(findKeyCard(saveMalformed, 'malformed-save-key')).toBeUndefined()
+      saveMalformed.unmount()
+
+      const deleteMalformed = await mountKeysPanel()
+      await findKeyCard(deleteMalformed, 'prod-ed25519')!.find('button[title="删除"]').trigger('click')
+      await deleteMalformed.find('.asset-confirm-modal input').setValue('prod-ed25519')
+      vi.mocked(window.aiops.deleteKeychain).mockResolvedValueOnce({ ok: true, data: { id: 'different-key' } } as any)
+      await deleteMalformed.find('.asset-confirm-modal footer .danger').trigger('click')
+      await flushPromises()
+      expect(deleteMalformed.text()).toContain(malformedMessage)
+      expect(findKeyCard(deleteMalformed, 'prod-ed25519')).toBeTruthy()
+      deleteMalformed.unmount()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not import key files without preload dialog, path, or read bridges', async () => {
     const originalAiops = {
       showOpenDialog: window.aiops.showOpenDialog,

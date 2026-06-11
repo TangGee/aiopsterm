@@ -916,6 +916,9 @@ import {
   isAiopsAssetImportPreviewData,
   isAiopsAssetRecord,
   isAiopsAssetSnapshot,
+  isAiopsKeychainDeleteData,
+  isAiopsKeychainListData,
+  isAiopsKeychainRecord,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
 
@@ -1053,10 +1056,8 @@ const refreshKeychains = async () => {
   }
   try {
     const nextKeychains = await listKeychains()
-    if (!Array.isArray(nextKeychains)) {
-      throw new Error('密钥列表响应无效。')
-    }
-    keychains.value = nextKeychains
+    if (!isAiopsKeychainListData(nextKeychains)) throw new Error(malformedAssetBackendResultMessage)
+    keychains.value = nextKeychains.map((keychain) => ({ ...keychain }))
     keyServiceNotice.value = ''
   } catch (error) {
     keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
@@ -1794,6 +1795,11 @@ const editKey = async (keyId: string | null) => {
     keyContextMenuId.value = null
     return
   }
+  if (!isAiopsKeychainRecord(key)) {
+    keyServiceNotice.value = malformedAssetBackendResultMessage
+    keyContextMenuId.value = null
+    return
+  }
   keyEditMode.value = true
   keyFormError.value = ''
   keyServiceNotice.value = ''
@@ -1848,7 +1854,8 @@ const saveKeychainRecord = async (input: AiopsKeychainInput) => {
     throw new Error('密钥保存服务不可用。')
   }
   const result = await saveKeychain(input)
-  if (!result?.ok || !result.data) throw new Error(result?.errorMessage || '密钥保存失败')
+  if (!result?.ok) throw new Error(result?.errorMessage || '密钥保存失败')
+  if (!isAiopsKeychainRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
   await refreshKeychains()
   return result.data
 }
@@ -1899,6 +1906,11 @@ const removeKey = (keyId: string | null) => {
     if (!result?.ok) {
       keyServiceNotice.value = result?.errorMessage || '密钥删除失败。'
       keyImportNotice.value = result?.errorMessage || '密钥删除失败。'
+      return
+    }
+    if (!isAiopsKeychainDeleteData(result.data, keyId)) {
+      keyServiceNotice.value = malformedAssetBackendResultMessage
+      keyImportNotice.value = malformedAssetBackendResultMessage
       return
     }
     try {
