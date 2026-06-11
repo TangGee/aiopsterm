@@ -515,6 +515,63 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('persists External reference-style layout pane resizing and quick-close through backend config snapshots', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    const leftPane = () => wrapper.find('[data-layout-pane="terminal-left"]')
+    const rightPane = () => wrapper.find('[data-layout-pane="terminal-right"]')
+    const agentsPane = () => wrapper.find('[data-layout-pane="agents-left"]')
+    const leftResizer = () => wrapper.find('[data-layout-resizer="terminal-left"]')
+    const rightResizer = () => wrapper.find('[data-layout-resizer="terminal-right"]')
+    const agentsResizer = () => wrapper.find('[data-layout-resizer="agents-left"]')
+
+    expect(leftPane().attributes('style')).toContain('286px')
+    await leftResizer().trigger('mousedown', { clientX: 286 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 336 }))
+    await wrapper.vm.$nextTick()
+    expect(leftPane().attributes('style')).toContain('336px')
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await flushPromises()
+    expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ leftPanelOpen: true, leftPanelWidth: 336 })
+    expect(store.leftPanelWidth).toBe(336)
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1200 })
+    await rightResizer().trigger('mousedown', { clientX: 840 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 1170 }))
+    await flushPromises()
+    expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelOpen: false })
+    expect(store.rightPanelOpen).toBe(false)
+    expect(rightPane().exists()).toBe(false)
+
+    await store.toggleMode()
+    await flushPromises()
+    expect(store.mode).toBe('agents')
+    expect(agentsPane().attributes('style')).toContain('286px')
+    await agentsResizer().trigger('mousedown', { clientX: 286 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 386 }))
+    await wrapper.vm.$nextTick()
+    expect(agentsPane().attributes('style')).toContain('386px')
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await flushPromises()
+    expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ agentsLeftOpen: true, agentsLeftWidth: 386 })
+    expect(store.agentsLeftWidth).toBe(386)
+
+    wrapper.unmount()
+  })
+
   it('matches External reference-style top layout controls for modes, sidebars, update badge, and window controls', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

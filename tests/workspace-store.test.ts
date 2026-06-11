@@ -852,9 +852,52 @@ describe('workspace store', () => {
       expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelOpen: false })
       expect(store.rightPanelOpen).toBe(false)
 
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        leftPanelOpen: true,
+        leftPanelWidth: 320
+      })
+      await expect(store.resizeLeftPanel(320)).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ leftPanelOpen: true, leftPanelWidth: 320 })
+      expect(store.leftPanelOpen).toBe(true)
+      expect(store.leftPanelWidth).toBe(320)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        rightPanelOpen: true,
+        rightPanelWidth: 360
+      })
+      await expect(store.resizeRightPanel(400)).resolves.toBe(false)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelOpen: true, rightPanelWidth: 400 })
+      expect(store.rightPanelWidth).toBe(360)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        leftPanelOpen: false
+      })
+      await expect(store.quickCloseLeftPanel()).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ leftPanelOpen: false })
+      expect(store.leftPanelOpen).toBe(false)
+      expect(store.leftPanelWidth).toBe(320)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        agentsLeftOpen: true,
+        defaultMode: 'agents'
+      })
+      await expect(store.toggleMode()).resolves.toBe(true)
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        agentsLeftOpen: true,
+        agentsLeftWidth: 340
+      })
+      await expect(store.resizeLeftPanel(340)).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ agentsLeftOpen: true, agentsLeftWidth: 340 })
+      expect(store.agentsLeftWidth).toBe(340)
+
       ;(window.aiops as any).saveConfig = undefined
-      await expect(store.toggleRight()).resolves.toBe(false)
-      expect(store.rightPanelOpen).toBe(false)
+      await expect(store.resizeLeftPanel(360)).resolves.toBe(false)
+      expect(store.agentsLeftWidth).toBe(340)
       expect(store.topNotice).toBe('布局设置保存服务不可用')
     } finally {
       window.aiops.saveConfig = originalSaveConfig

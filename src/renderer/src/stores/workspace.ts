@@ -228,6 +228,26 @@ type AppUpdateDownloadData = NonNullable<AppUpdateDownloadResult['data']>
 type AppUpdateInstallData = NonNullable<AppUpdateInstallResult['data']>
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
+
+export const layoutWidthLimits: {
+  min: number
+  max: number
+  quickCloseThreshold: number
+  defaults: {
+    leftPanelWidth: number
+    rightPanelWidth: number
+    agentsLeftWidth: number
+  }
+} = {
+  min: 220,
+  max: 640,
+  quickCloseThreshold: 50,
+  defaults: {
+    leftPanelWidth: 286,
+    rightPanelWidth: 360,
+    agentsLeftWidth: 286
+  }
+}
 type AiChatHistoryHost = NonNullable<AiChatHistoryMessage['hosts']>[number]
 type OnboardingAiRequest =
   | 'none'
@@ -647,6 +667,9 @@ const defaultConfig: UserConfig = {
   leftPanelOpen: true,
   rightPanelOpen: true,
   agentsLeftOpen: true,
+  leftPanelWidth: layoutWidthLimits.defaults.leftPanelWidth,
+  rightPanelWidth: layoutWidthLimits.defaults.rightPanelWidth,
+  agentsLeftWidth: layoutWidthLimits.defaults.agentsLeftWidth,
   modelProvider: 'local',
   modelEndpoint: '',
   modelName: 'aiopsterm-local-agent',
@@ -3152,7 +3175,9 @@ const normalizeCatalogModelProvider = (value: unknown): UserConfig['modelProvide
 }
 
 type GeneralBaseSettingsPatch = Partial<Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'>>
-type LayoutPreferencesPatch = Partial<Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen'>>
+type LayoutPreferencesPatch = Partial<
+  Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen' | 'leftPanelWidth' | 'rightPanelWidth' | 'agentsLeftWidth'>
+>
 type BackgroundUserConfig = UserConfig['background']
 
 const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
@@ -3212,6 +3237,21 @@ const normalizeLayoutPreferencesPatch = (patch: LayoutPreferencesPatch) => {
     if (!isBooleanValue(patch.agentsLeftOpen)) return null
     normalized.agentsLeftOpen = patch.agentsLeftOpen
   }
+  if (patch.leftPanelWidth !== undefined) {
+    const width = numberInRange(patch.leftPanelWidth, 0, layoutWidthLimits.min, layoutWidthLimits.max)
+    if (!width) return null
+    normalized.leftPanelWidth = Math.round(width)
+  }
+  if (patch.rightPanelWidth !== undefined) {
+    const width = numberInRange(patch.rightPanelWidth, 0, layoutWidthLimits.min, layoutWidthLimits.max)
+    if (!width) return null
+    normalized.rightPanelWidth = Math.round(width)
+  }
+  if (patch.agentsLeftWidth !== undefined) {
+    const width = numberInRange(patch.agentsLeftWidth, 0, layoutWidthLimits.min, layoutWidthLimits.max)
+    if (!width) return null
+    normalized.agentsLeftWidth = Math.round(width)
+  }
   return normalized
 }
 
@@ -3220,15 +3260,28 @@ const layoutPreferencesPatchMatches = (patch: LayoutPreferencesPatch, savedConfi
   if (patch.leftPanelOpen !== undefined && savedConfig.leftPanelOpen !== patch.leftPanelOpen) return false
   if (patch.rightPanelOpen !== undefined && savedConfig.rightPanelOpen !== patch.rightPanelOpen) return false
   if (patch.agentsLeftOpen !== undefined && savedConfig.agentsLeftOpen !== patch.agentsLeftOpen) return false
+  if (patch.leftPanelWidth !== undefined && savedConfig.leftPanelWidth !== patch.leftPanelWidth) return false
+  if (patch.rightPanelWidth !== undefined && savedConfig.rightPanelWidth !== patch.rightPanelWidth) return false
+  if (patch.agentsLeftWidth !== undefined && savedConfig.agentsLeftWidth !== patch.agentsLeftWidth) return false
   return true
 }
 
-const isLayoutPreferencesSnapshot = (source: unknown): source is Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen'> =>
+const isLayoutWidthValue = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) && value >= layoutWidthLimits.min && value <= layoutWidthLimits.max
+
+const layoutWidthFromConfig = (value: unknown, fallback: number) => numberInRange(value, fallback, layoutWidthLimits.min, layoutWidthLimits.max)
+
+const isLayoutPreferencesSnapshot = (
+  source: unknown
+): source is Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen' | 'leftPanelWidth' | 'rightPanelWidth' | 'agentsLeftWidth'> =>
   isRecord(source) &&
   isDefaultModeValue(source.defaultMode) &&
   isBooleanValue(source.leftPanelOpen) &&
   isBooleanValue(source.rightPanelOpen) &&
-  isBooleanValue(source.agentsLeftOpen)
+  isBooleanValue(source.agentsLeftOpen) &&
+  isLayoutWidthValue(source.leftPanelWidth) &&
+  isLayoutWidthValue(source.rightPanelWidth) &&
+  isLayoutWidthValue(source.agentsLeftWidth)
 
 const backgroundModeValues = ['none', 'preset', 'custom'] as const
 
@@ -3281,6 +3334,9 @@ const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): Use
   rightPanelOpen: typeof patch.rightPanelOpen === 'boolean' ? patch.rightPanelOpen : typeof base.rightPanelOpen === 'boolean' ? base.rightPanelOpen : defaultConfig.rightPanelOpen,
   agentsLeftOpen:
     typeof patch.agentsLeftOpen === 'boolean' ? patch.agentsLeftOpen : typeof base.agentsLeftOpen === 'boolean' ? base.agentsLeftOpen : defaultConfig.agentsLeftOpen,
+  leftPanelWidth: layoutWidthFromConfig(patch.leftPanelWidth, layoutWidthFromConfig(base.leftPanelWidth, defaultConfig.leftPanelWidth!)),
+  rightPanelWidth: layoutWidthFromConfig(patch.rightPanelWidth, layoutWidthFromConfig(base.rightPanelWidth, defaultConfig.rightPanelWidth!)),
+  agentsLeftWidth: layoutWidthFromConfig(patch.agentsLeftWidth, layoutWidthFromConfig(base.agentsLeftWidth, defaultConfig.agentsLeftWidth!)),
   modelProvider: normalizeUserModelProvider(patch.modelProvider || base.modelProvider),
   modelName: normalizeUserModelName(patch.modelName || base.modelName),
   background: normalizeBackgroundConfig({
@@ -3718,6 +3774,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const leftPanelOpen = ref(true)
   const rightPanelOpen = ref(true)
   const agentsLeftOpen = ref(true)
+  const leftPanelWidth = ref(layoutWidthLimits.defaults.leftPanelWidth)
+  const rightPanelWidth = ref(layoutWidthLimits.defaults.rightPanelWidth)
+  const agentsLeftWidth = ref(layoutWidthLimits.defaults.agentsLeftWidth)
   const topUpdateState = ref<TopUpdateState>('idle')
   const topNotice = ref('')
   const onboardingCompleted = ref<Record<OnboardingModuleId, boolean>>(createDefaultOnboardingCompleted())
@@ -4777,6 +4836,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     leftPanelOpen.value = config.value.leftPanelOpen
     rightPanelOpen.value = config.value.rightPanelOpen
     agentsLeftOpen.value = config.value.agentsLeftOpen
+    leftPanelWidth.value = layoutWidthFromConfig(config.value.leftPanelWidth, defaultConfig.leftPanelWidth!)
+    rightPanelWidth.value = layoutWidthFromConfig(config.value.rightPanelWidth, defaultConfig.rightPanelWidth!)
+    agentsLeftWidth.value = layoutWidthFromConfig(config.value.agentsLeftWidth, defaultConfig.agentsLeftWidth!)
     config.value.theme = normalizeThemeId(config.value.theme)
     applyCurrentTheme()
     applyCurrentEditorSettings()
@@ -5954,6 +6016,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     leftPanelOpen.value = config.value.leftPanelOpen
     rightPanelOpen.value = config.value.rightPanelOpen
     agentsLeftOpen.value = config.value.agentsLeftOpen
+    leftPanelWidth.value = layoutWidthFromConfig(config.value.leftPanelWidth, defaultConfig.leftPanelWidth!)
+    rightPanelWidth.value = layoutWidthFromConfig(config.value.rightPanelWidth, defaultConfig.rightPanelWidth!)
+    agentsLeftWidth.value = layoutWidthFromConfig(config.value.agentsLeftWidth, defaultConfig.agentsLeftWidth!)
   }
 
   const persistLayoutPreferences = async (patch: LayoutPreferencesPatch) => {
@@ -11471,6 +11536,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return saved
   }
 
+  const resizeLeftPanel = async (width: number) => {
+    const previousWidth = mode.value === 'agents' ? agentsLeftWidth.value : leftPanelWidth.value
+    const normalizedWidth = Math.round(numberInRange(width, previousWidth, layoutWidthLimits.min, layoutWidthLimits.max))
+    if (mode.value === 'agents') {
+      agentsLeftWidth.value = normalizedWidth
+      const saved = await persistLayoutPreferences({ agentsLeftOpen: true, agentsLeftWidth: normalizedWidth })
+      if (!saved) agentsLeftWidth.value = previousWidth
+      if (saved) setTopNotice(`Agents 会话侧栏宽度已保存为 ${agentsLeftWidth.value}px`)
+      return saved
+    }
+    leftPanelWidth.value = normalizedWidth
+    const saved = await persistLayoutPreferences({ leftPanelOpen: true, leftPanelWidth: normalizedWidth })
+    if (!saved) leftPanelWidth.value = previousWidth
+    if (saved) setTopNotice(`左侧面板宽度已保存为 ${leftPanelWidth.value}px`)
+    return saved
+  }
+
+  const resizeRightPanel = async (width: number) => {
+    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    const previousWidth = rightPanelWidth.value
+    const normalizedWidth = Math.round(numberInRange(width, previousWidth, layoutWidthLimits.min, layoutWidthLimits.max))
+    rightPanelWidth.value = normalizedWidth
+    const saved = await persistLayoutPreferences({ rightPanelOpen: true, rightPanelWidth: normalizedWidth })
+    if (!saved) rightPanelWidth.value = previousWidth
+    if (saved) setTopNotice(`AI 侧栏宽度已保存为 ${rightPanelWidth.value}px`)
+    return saved
+  }
+
+  const quickCloseLeftPanel = async () => {
+    const saved = await persistLayoutPreferences(mode.value === 'agents' ? { agentsLeftOpen: false } : { leftPanelOpen: false })
+    if (saved) setTopNotice(mode.value === 'agents' ? 'Agents 会话侧栏已关闭' : '左侧面板已关闭')
+    return saved
+  }
+
+  const quickCloseRightPanel = async () => {
+    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    const saved = await persistLayoutPreferences({ rightPanelOpen: false })
+    if (saved) setTopNotice('AI 侧栏已关闭')
+    return saved
+  }
+
   const createPanel = (split?: PanelDirection) => {
     const panel = createEmptyTerminalPanel(createId('panel'), split ? `split ${panels.value.length}` : `shell ${panels.value.length}`, split)
     panels.value.push(panel)
@@ -12591,6 +12697,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
+    leftPanelWidth,
+    rightPanelWidth,
+    agentsLeftWidth,
     topUpdateState,
     topNotice,
     setTopNotice,
@@ -13048,6 +13157,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     toggleK8sBastionCollapsed,
     toggleLeft,
     toggleRight,
+    resizeLeftPanel,
+    resizeRightPanel,
+    quickCloseLeftPanel,
+    quickCloseRightPanel,
     createPanel,
     registerSshSession,
     applySshTerminalSession,

@@ -1693,6 +1693,9 @@ export type UserConfig = {
   leftPanelOpen: boolean
   rightPanelOpen: boolean
   agentsLeftOpen: boolean
+  leftPanelWidth?: number
+  rightPanelWidth?: number
+  agentsLeftWidth?: number
   modelProvider: 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'bedrock' | 'deepseek' | 'anthropic'
   modelEndpoint: string
   modelName: string

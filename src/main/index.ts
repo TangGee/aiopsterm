@@ -493,6 +493,9 @@ const defaultConfig: UserConfig = {
   leftPanelOpen: true,
   rightPanelOpen: true,
   agentsLeftOpen: true,
+  leftPanelWidth: 286,
+  rightPanelWidth: 360,
+  agentsLeftWidth: 286,
   modelProvider: 'local',
   modelEndpoint: '',
   modelName: 'aiopsterm-local-agent',
@@ -1244,9 +1247,15 @@ const normalizeModelName = (value: unknown) => {
   return modelName
 }
 
+const normalizeLayoutWidth = (value: unknown, fallback: number) =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 220 && value <= 640 ? Math.round(value) : fallback
+
 const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
+  leftPanelWidth: normalizeLayoutWidth(patch.leftPanelWidth, normalizeLayoutWidth(base.leftPanelWidth, defaultConfig.leftPanelWidth!)),
+  rightPanelWidth: normalizeLayoutWidth(patch.rightPanelWidth, normalizeLayoutWidth(base.rightPanelWidth, defaultConfig.rightPanelWidth!)),
+  agentsLeftWidth: normalizeLayoutWidth(patch.agentsLeftWidth, normalizeLayoutWidth(base.agentsLeftWidth, defaultConfig.agentsLeftWidth!)),
   modelProvider: normalizeModelProvider(patch.modelProvider || base.modelProvider),
   modelName: normalizeModelName(patch.modelName || base.modelName),
   background: {

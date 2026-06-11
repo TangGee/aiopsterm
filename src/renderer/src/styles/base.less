@@ -457,19 +457,27 @@ svg {
 }
 
 .mode-terminal {
-  grid-template-columns: 48px auto minmax(0, 1fr) auto;
-}
-
-.mode-terminal.module-settings {
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-}
-
-.mode-terminal.module-user {
   grid-template-columns: 48px minmax(0, 1fr);
 }
 
+.mode-terminal.has-left-pane {
+  grid-template-columns: 48px auto 6px minmax(0, 1fr);
+}
+
+.mode-terminal.has-right-pane {
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+}
+
+.mode-terminal.has-left-pane.has-right-pane {
+  grid-template-columns: 48px auto 6px minmax(0, 1fr) auto;
+}
+
 .mode-agents {
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mode-agents.has-left-pane {
+  grid-template-columns: auto 6px minmax(0, 1fr);
 }
 
 .side-rail {
@@ -576,10 +584,78 @@ svg {
 }
 
 .module-panel {
-  width: 286px;
+  width: 100%;
+  height: 100%;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   padding: 14px;
+}
+
+.layout-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-pane-left {
+  border-right: 1px solid var(--border);
+}
+
+.layout-pane-left .module-panel,
+.layout-pane-left .agents-sidebar {
+  border-right: 0;
+}
+
+.layout-pane-right {
+  position: relative;
+  border-left: 1px solid var(--border);
+}
+
+.layout-resizer {
+  position: relative;
+  z-index: 2;
+  width: 6px;
+  min-width: 6px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.layout-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.layout-resizer-left::before {
+  left: 0;
+}
+
+.layout-resizer-right::before {
+  right: 0;
+}
+
+.layout-pane-right > .layout-resizer-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.layout-resizer:hover,
+.layout-resizer.dragging {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.layout-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .module-panel-native {
@@ -7533,8 +7609,9 @@ code {
 }
 
 .ai-panel {
-  width: 360px;
-  border-left: 1px solid var(--border);
+  width: 100%;
+  height: 100%;
+  border-left: 0;
   border-right: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
@@ -9187,7 +9264,8 @@ code {
 }
 
 .agents-sidebar {
-  width: 286px;
+  width: 100%;
+  height: 100%;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -11225,7 +11303,7 @@ th {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 40%) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 34%) minmax(220px, 1fr);
 }
 
 .k8s-left-section {
@@ -11365,7 +11443,7 @@ th {
 .k8s-modal-form label,
 .k8s-form-status {
   display: grid;
-  grid-template-columns: 126px minmax(0, 1fr);
+  grid-template-columns: minmax(86px, 32%) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -11535,11 +11613,11 @@ th {
 
 @media (max-width: 1080px) {
   .module-panel {
-    width: 240px;
+    width: 100%;
   }
 
   .ai-panel {
-    width: 312px;
+    width: 100%;
   }
 
   .terminal-grid.split {
@@ -12527,8 +12605,24 @@ th {
 
 .db-sql-overview table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
+}
+
+.db-sql-overview th:nth-child(1),
+.db-sql-overview td:nth-child(1) {
+  width: 70%;
+}
+
+.db-sql-overview th:nth-child(2),
+.db-sql-overview td:nth-child(2) {
+  width: 18%;
+}
+
+.db-sql-overview th:nth-child(3),
+.db-sql-overview td:nth-child(3) {
+  width: 12%;
 }
 
 .db-sql-overview th,
@@ -12565,18 +12659,23 @@ th {
 }
 
 .db-sql-overview td:first-child {
-  max-width: 420px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.db-sql-overview td:first-child .db-result-dot {
+  display: inline-block;
+  margin-right: 7px;
+  vertical-align: middle;
 }
 
 .db-sql-overview code {
-  min-width: 0;
-  display: block;
+  max-width: calc(100% - 18px);
+  display: inline-block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: middle;
   color: var(--text);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
