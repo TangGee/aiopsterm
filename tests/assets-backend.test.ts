@@ -455,7 +455,7 @@ describe('assets backend boundary', () => {
     const refreshed = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
 
     expect(refreshed.ok).toBe(true)
-    expect(refreshed.data).toMatchObject({ refreshed: 1, created: 1, updated: 0 })
+    expect(refreshed.data).toMatchObject({ organizationId: 'org-1', refreshed: 1, created: 1, updated: 0 })
     expect(refreshed.data?.assets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -469,8 +469,20 @@ describe('assets backend boundary', () => {
     )
 
     const refreshedAgain = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
-    expect(refreshedAgain.data).toMatchObject({ refreshed: 1, created: 0, updated: 1 })
+    expect(refreshedAgain.data).toMatchObject({ organizationId: 'org-1', refreshed: 1, created: 0, updated: 1 })
     expect(refreshedAgain.data?.assets.filter((asset: { id: string }) => asset.id === 'asset-5-synced')).toHaveLength(1)
+  })
+
+  it('rejects organization refresh for an unknown organization id', async () => {
+    const backend = await loadBackend()
+    const refreshed = backend.refreshOrganizationAssets({ organizationId: 'missing-org' })
+
+    expect(refreshed).toEqual({
+      ok: false,
+      errorCode: 'ASSET_BACKEND_ERROR',
+      errorMessage: 'Organization asset not found: missing-org'
+    })
+    expect(backend.listAssets().assets.some((asset: { id: string }) => asset.id.includes('missing-org-synced'))).toBe(false)
   })
 
   it('previews asset imports in the backend without exposing imported secrets', async () => {

@@ -279,6 +279,7 @@ export type AiopsOrganizationAssetRefreshInput = {
 
 export type AiopsOrganizationAssetRefreshResult = AiopsMutationResult<
   AiopsAssetSnapshot & {
+    organizationId?: string
     refreshed: number
     created: number
     updated: number

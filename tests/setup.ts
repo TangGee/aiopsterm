@@ -5864,6 +5864,9 @@ Object.defineProperty(window, 'aiops', {
           asset.asset_type === 'organization' &&
           (!input?.organizationId || asset.id === input.organizationId || asset.uuid === input.organizationId)
       )
+      if (input?.organizationId && organizations.length === 0) {
+        return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: `Organization asset not found: ${input.organizationId}` }
+      }
       let created = 0
       let updated = 0
       organizations.forEach((organization, index) => {
@@ -5880,6 +5883,7 @@ Object.defineProperty(window, 'aiops', {
         data: {
           assets: assetStoreMock.map(cloneAsset),
           folders: assetFolderStoreMock.map(cloneAssetFolder),
+          ...(input?.organizationId && organizations[0] ? { organizationId: organizations[0].uuid || organizations[0].id } : {}),
           refreshed: created + updated,
           created,
           updated

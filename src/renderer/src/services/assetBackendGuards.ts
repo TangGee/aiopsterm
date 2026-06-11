@@ -6,6 +6,7 @@ import type {
   AiopsAssetImportPreviewResult,
   AiopsAssetRecord,
   AiopsAssetSnapshot,
+  AiopsOrganizationAssetRefreshResult,
   AiopsCustomFolderRecord,
   AiopsKeychainRecord,
   AiopsSshTunnelMutationResult,
@@ -70,6 +71,41 @@ export const isAiopsCustomFolderRecord = (value: unknown): value is AiopsCustomF
 export const isAiopsAssetSnapshot = (value: unknown): value is AiopsAssetSnapshot => {
   if (!isRecord(value)) return false
   return Array.isArray(value.assets) && Array.isArray(value.folders) && value.assets.every(isAiopsAssetRecord) && value.folders.every(isAiopsCustomFolderRecord)
+}
+
+export type AiopsOrganizationAssetRefreshData = NonNullable<AiopsOrganizationAssetRefreshResult['data']>
+
+export const findAiopsOrganizationInSnapshot = (snapshot: AiopsAssetSnapshot, organizationId: string): AiopsAssetRecord | null => {
+  const requestedId = organizationId.trim()
+  if (!requestedId) return null
+  return snapshot.assets.find((asset) => asset.asset_type === 'organization' && (asset.id === requestedId || asset.uuid === requestedId)) || null
+}
+
+export const isAiopsOrganizationAssetRefreshData = (
+  value: unknown,
+  expectedOrganizationId?: string
+): value is AiopsOrganizationAssetRefreshData => {
+  if (!isAiopsAssetSnapshot(value) || !isRecord(value)) return false
+  const record = value as Record<string, unknown>
+  if (!isNonNegativeInteger(record.refreshed) || !isNonNegativeInteger(record.created) || !isNonNegativeInteger(record.updated)) return false
+  if (record.refreshed !== record.created + record.updated) return false
+
+  const requestedId = expectedOrganizationId?.trim()
+  if (!requestedId) {
+    return record.organizationId === undefined || typeof record.organizationId === 'string'
+  }
+
+  const organization = findAiopsOrganizationInSnapshot(value, requestedId)
+  if (!organization) return false
+  if (
+    record.organizationId !== undefined &&
+    record.organizationId !== organization.id &&
+    record.organizationId !== organization.uuid &&
+    record.organizationId !== requestedId
+  ) {
+    return false
+  }
+  return true
 }
 
 export const isAiopsAssetConnectionTestInfo = (value: unknown): value is AiopsAssetConnectionTestInfo => {

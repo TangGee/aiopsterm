@@ -1462,6 +1462,30 @@ describe('AppShell', () => {
     expect(managed.text()).toContain('prod-bastion')
     expect(managed.text()).not.toContain('malformed-refresh')
     expect((managed.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('prod-bastion'))!.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+
+    const organization = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await organization.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    await organization.findAll('.host-card').find((button) => button.text().includes('jumpserver-org'))!.trigger('contextmenu')
+    const wrongOrganizationAssets = await window.aiops.listAssets()
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...wrongOrganizationAssets,
+        organizationId: 'other-org',
+        refreshed: 1,
+        created: 1,
+        updated: 0
+      }
+    } as any)
+    await organization.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('刷新资产'))!.trigger('click')
+    await flushPromises()
+    expect(organization.text()).toContain(malformedMessage)
+    expect(organization.text()).not.toContain('已刷新堡垒机资源 jumpserver-org')
+    expect(organization.text()).not.toContain('jumpserver-org-synced-asset')
   })
 
   it('does not fabricate Workspace host favorite, comment, or tunnel state before asset writes succeed', async () => {
@@ -1639,6 +1663,24 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('jumpserver-org')
     expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
     expect(wrapper.text()).not.toContain('workspace-malformed-refresh')
+
+    await groupRow('jumpserver-org').trigger('contextmenu')
+    const wrongOrganizationAssets = await window.aiops.listAssets()
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...wrongOrganizationAssets,
+        organizationId: 'other-org',
+        refreshed: 1,
+        created: 1,
+        updated: 0
+      }
+    } as any)
+    await menuButton('刷新').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(wrapper.text()).not.toContain('jumpserver-org 资源已刷新')
+    expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
   })
 
   it('does not visually commit Workspace and Files resource tree preferences before config saves return matching snapshots', async () => {
@@ -6555,10 +6597,25 @@ describe('AppShell', () => {
     expect(workspace.text()).not.toContain('connected to bastion host')
     expect(workspace.find('.connection_log_terminal').exists()).toBe(false)
     expect(workspace.find('.mock_terminal').exists()).toBe(false)
+    const wrongOrganizationAssets = await window.aiops.listAssets()
     vi.mocked(window.aiops.refreshOrganizationAssets).mockClear()
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...wrongOrganizationAssets,
+        organizationId: 'other-org',
+        refreshed: 1,
+        created: 1,
+        updated: 0
+      }
+    } as any)
     await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
     await flushPromises()
     expect(window.aiops.refreshOrganizationAssets).toHaveBeenCalledWith({ organizationId: 'asset-5' })
+    expect(workspace.text()).toContain('资产服务返回数据无效')
+    expect(workspace.text()).not.toContain('jumpserver-org-synced-asset')
+    await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
+    await flushPromises()
     expect(workspace.text()).toContain('jumpserver-org-synced-asset')
     await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('打开资产管理'))!.trigger('click')
     expect(store.activeModule).toBe('assets')

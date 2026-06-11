@@ -1396,6 +1396,9 @@ export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshIn
         asset.asset_type === 'organization' &&
         (!input.organizationId || asset.id === input.organizationId || asset.uuid === input.organizationId)
     )
+    if (input.organizationId && organizations.length === 0) {
+      throw new Error(`Organization asset not found: ${input.organizationId}`)
+    }
     let created = 0
     let updated = 0
 
@@ -1409,6 +1412,7 @@ export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshIn
 
     return {
       ...store.list(),
+      ...(input.organizationId && organizations[0] ? { organizationId: organizations[0].uuid || organizations[0].id } : {}),
       refreshed: created + updated,
       created,
       updated

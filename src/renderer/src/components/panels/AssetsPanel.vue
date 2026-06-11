@@ -919,6 +919,7 @@ import {
   isAiopsKeychainDeleteData,
   isAiopsKeychainListData,
   isAiopsKeychainRecord,
+  isAiopsOrganizationAssetRefreshData,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
 
@@ -1519,9 +1520,11 @@ const submitForm = async () => {
 const refreshOrganizationAsset = async () => {
   if (contextAsset.value) {
     try {
-      const result = await window.aiops?.refreshOrganizationAssets?.({ organizationId: contextAsset.value.id })
+      const expectedOrganizationId = contextAsset.value.id
+      const result = await window.aiops?.refreshOrganizationAssets?.({ organizationId: expectedOrganizationId })
       if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
-      if (!applyAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+      if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+      applyAssetSnapshot(result.data)
       importNotice.value = `已刷新堡垒机资源 ${contextAsset.value.title}。`
     } catch (error) {
       importNotice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败。'
@@ -1606,11 +1609,10 @@ const submitManagedForm = async () => {
 
 const refreshManagedAssets = async () => {
   try {
-    const result = await window.aiops?.refreshOrganizationAssets?.(
-      managedOrganization.value ? { organizationId: managedOrganization.value.id } : undefined
-    )
+    const expectedOrganizationId = managedOrganization.value?.id
+    const result = await window.aiops?.refreshOrganizationAssets?.(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新资产表失败。')
-    if (!isAiopsAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+    if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
     const data = result.data
     applyAssetSnapshot(data)
     selectedRows.value = selectedRows.value.filter((id) => data.assets.some((asset) => asset.id === id))

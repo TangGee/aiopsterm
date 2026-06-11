@@ -364,7 +364,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { isAiopsAssetSnapshot, malformedAssetBackendResultMessage } from '@/services/assetBackendGuards'
+import { isAiopsAssetSnapshot, isAiopsOrganizationAssetRefreshData, malformedAssetBackendResultMessage } from '@/services/assetBackendGuards'
 import type { AiopsAssetRecord, AiopsAssetSnapshot, ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
 
 type ExtensionPlugin = ExtensionPluginRuntimeConfig
@@ -495,9 +495,10 @@ const refreshJumpserverAssets = async (organizationId?: string) => {
   try {
     const result = await refreshOrganizationAssets({ organizationId: targetOrganizationId })
     if (!result?.ok) throw new Error(result?.errorMessage || '组织资产刷新失败')
-    if (!applyJumpserverRefreshSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
-    const created = typeof result.data?.created === 'number' ? result.data.created : 0
-    const updated = typeof result.data?.updated === 'number' ? result.data.updated : 0
+    if (!isAiopsOrganizationAssetRefreshData(result.data, targetOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+    applyJumpserverRefreshSnapshot(result.data)
+    const created = result.data.created
+    const updated = result.data.updated
     jumpserverAssetError.value = ''
     jumpserverAssetNotice.value = `刷新完成：新增 ${created}，更新 ${updated}`
     return true

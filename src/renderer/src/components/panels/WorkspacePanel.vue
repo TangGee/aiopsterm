@@ -712,6 +712,7 @@ import {
   isAiopsAssetRecord,
   isAiopsAssetSnapshot,
   isAiopsCustomFolderRecord,
+  isAiopsOrganizationAssetRefreshData,
   isAiopsSshTunnelMutationData,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
@@ -1481,9 +1482,11 @@ const refreshGroup = async (groupKey: string) => {
   notice.value = '正在刷新堡垒机资源'
   const organization = organizationAssets.value.find((asset) => asset.uuid === groupKey)
   try {
-    const result = await window.aiops?.refreshOrganizationAssets?.(organization ? { organizationId: organization.id } : undefined)
+    const expectedOrganizationId = organization?.id
+    const result = await window.aiops?.refreshOrganizationAssets?.(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
-    if (!applyWorkspaceAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+    if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+    applyWorkspaceAssetSnapshot(result.data)
     await refreshDirectGroupOptions()
     if (organization) await expandGroup(organization.uuid)
     notice.value = organization ? `${organization.name} 资源已刷新` : '堡垒机资源已刷新'
