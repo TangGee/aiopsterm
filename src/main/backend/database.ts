@@ -9,6 +9,7 @@ import { createProviderTextRequest, fetchProviderText, resolveModelProvider, typ
 
 type DatabaseBackendRuntimeConfig = {
   getConfig?: () => UserConfig
+  localBackendDouble?: boolean
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -92,6 +93,7 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
     config
       ? {
           getModelName: () => normalizeText(config.getConfig?.().modelName) || 'aiopsterm-local-agent',
+          localBackendDouble: config.localBackendDouble,
           wait: config.wait,
           now: config.now,
           generateText: (input) => generateDatabaseProviderText(input, config)

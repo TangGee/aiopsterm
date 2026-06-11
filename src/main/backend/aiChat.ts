@@ -32,6 +32,7 @@ type AiChatRuntimeConfig = {
   getConfig?: () => UserConfig
   listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
   callMcpTool?: (input: McpToolCallInput) => Promise<McpToolCallResult>
+  localBackendDouble?: boolean
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -56,6 +57,16 @@ const wait = (durationMs: number) => {
 }
 
 const now = () => (runtimeConfig.now ? runtimeConfig.now() : Date.now())
+
+const isExplicitAiChatLocalDoubleEnabled = () => {
+  try {
+    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE || '').trim() === '1'
+  } catch {
+    return false
+  }
+}
+
+const isAiChatLocalDoubleEnabled = () => runtimeConfig.localBackendDouble === true || isExplicitAiChatLocalDoubleEnabled()
 
 export const configureAiChatRuntime = (config?: AiChatRuntimeConfig) => {
   runtimeConfig = config ? { ...config } : {}
@@ -883,7 +894,7 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
       if (providerResponse) return complete(providerResponse)
     }
     if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(input, control, modelName, startedAt))
-    if (modelName !== 'aiopsterm-local-agent') {
+    if (modelName !== 'aiopsterm-local-agent' || !isAiChatLocalDoubleEnabled()) {
       return complete({
         ok: false,
         errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE',

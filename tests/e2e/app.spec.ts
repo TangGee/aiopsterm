@@ -16,6 +16,8 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
       ...env,
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
+      AIOPSTERM_AI_CHAT_BACKEND_DOUBLE: '1',
+      AIOPSTERM_DB_AI_BACKEND_DOUBLE: '1',
       AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE: '1',
       AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE: '1',
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'

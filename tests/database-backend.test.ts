@@ -316,6 +316,7 @@ const createOracleDriverDouble = () => {
 
 let configureDatabaseBackendRuntime: (config?: {
   getConfig?: () => UserConfig
+  localBackendDouble?: boolean
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -329,6 +330,7 @@ let exportDatabaseRowsBackend: (
     now?: () => Date
   }
 ) => Promise<DatabaseExportResult>
+const originalDbAiBackendDouble = process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/database'
@@ -355,6 +357,7 @@ describe('database backend boundary', () => {
   }
 
   beforeEach(() => {
+    delete process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
     configureDatabaseBackendRuntime()
     resetDatabaseBackendSeed()
     tempDirs = []
@@ -362,6 +365,11 @@ describe('database backend boundary', () => {
 
   afterEach(async () => {
     configureDatabaseBackendRuntime()
+    if (originalDbAiBackendDouble === undefined) {
+      delete process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
+    } else {
+      process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE = originalDbAiBackendDouble
+    }
     vi.restoreAllMocks()
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
     tempDirs = []
@@ -1168,6 +1176,7 @@ describe('database backend boundary', () => {
   })
 
   it('generates DB AI pane responses behind the database backend boundary', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
     const created = await createDatabaseAiPaneRequest({
       prompt: 'Summarize schema and generate a SELECT',
       context: {
@@ -1483,7 +1492,47 @@ describe('database backend boundary', () => {
     })
   })
 
+  it('rejects local DB AI pane responses unless the backend double is explicitly enabled', async () => {
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+    expect(startDatabaseAiPaneResponse({ requestId: created.data!.requestId, assistantMessageId: created.data!.assistantMessage.id }).data?.assistantMessage).toMatchObject({
+      status: 'streaming'
+    })
+
+    const result = await generateDatabaseAiPaneResponse({
+      requestId: created.data!.requestId,
+      assistantMessageId: created.data!.assistantMessage.id,
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public'
+      }
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('DB_AI_PROVIDER_UNAVAILABLE')
+    expect(result.data).toMatchObject({
+      provider: 'aiopsterm-local',
+      assistantMessage: {
+        id: created.data!.assistantMessage.id,
+        status: 'error',
+        content: 'Database AI provider is unavailable.'
+      },
+      text: 'Database AI provider is unavailable.'
+    })
+  })
+
   it('keeps DB AI pane lifecycle status behind the database backend boundary', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
     const created = await createDatabaseAiPaneRequest({
       prompt: 'Summarize schema',
       context: {
@@ -1629,6 +1678,7 @@ describe('database backend boundary', () => {
   })
 
   it('generates DB AI drawer SQL behind the database backend boundary', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
     const created = await createDatabaseAiDrawerRequest({
       action: 'convert',
       sourceSql: 'select id from "public"."orders" where status = \'open\'',
@@ -1789,6 +1839,7 @@ WHERE status = ''open'';
   })
 
   it('keeps DB AI drawer lifecycle status behind the database backend boundary', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
     const created = await createDatabaseAiDrawerRequest({
       action: 'convert',
       sourceSql: 'select id from "public"."orders"',
@@ -1914,6 +1965,7 @@ WHERE status = ''open'';
   })
 
   it('completes drawer SQL from the supplied cursor prefix', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
     const result = await generateDatabaseAiDrawerResponse({
       action: 'complete',
       sourceSql: 'select id from public.orders where',
@@ -1932,6 +1984,7 @@ WHERE status = ''open'';
   })
 
   it('diagnoses SQL errors through a dedicated backend lifecycle boundary', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
     const result = await diagnoseDatabaseSqlError({
       sourceSql: 'select * from public.orders_missing',
       targetDialect: 'postgresql',

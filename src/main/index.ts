@@ -1321,7 +1321,11 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
 configureTerminalSuggestionsRuntime({ getConfig })
 configureAssetConnectionRuntime({ getConfig })
-configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('userData'), 'database-workspace.json') })
+configureDatabaseBackendRuntime({
+  getConfig,
+  localBackendDouble: process.env.NODE_ENV === 'test',
+  stateFilePath: join(app.getPath('userData'), 'database-workspace.json')
+})
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
 configurePrivacyRuntime({
@@ -1976,6 +1980,7 @@ configureAiCommandBackendRuntime({
 configureAiChatRuntime({
   getConfig,
   listSkills: () => loadSkillsFromDisk(),
+  localBackendDouble: process.env.NODE_ENV === 'test',
   callMcpTool: async (input) => {
     const current = getConfig()
     return callMcpTool(await loadCurrentMcpConfigFile(), input, {

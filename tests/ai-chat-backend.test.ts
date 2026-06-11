@@ -14,6 +14,7 @@ let configureAiChatRuntime: (config?: {
   getConfig?: () => UserConfig
   listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
   callMcpTool?: (input: McpToolCallInput) => Promise<McpToolCallResult>
+  localBackendDouble?: boolean
   fetch?: typeof fetch
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
@@ -21,6 +22,7 @@ let configureAiChatRuntime: (config?: {
 }) => void
 let localAiChatResponseMinDelayMs: number
 const tempDirs: string[] = []
+const originalAiChatBackendDouble = process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/aiChat'
@@ -38,6 +40,7 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
+  delete process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-ai-chat-todos-'))
   tempDirs.push(dir)
   configureAiTodoBackendRuntime({ stateFilePath: join(dir, 'ai-todos.json'), useSeedData: false })
@@ -46,6 +49,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   configureAiChatRuntime()
+  if (originalAiChatBackendDouble === undefined) {
+    delete process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE
+  } else {
+    process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE = originalAiChatBackendDouble
+  }
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
@@ -188,6 +196,7 @@ describe('ai chat backend response boundary', () => {
       nowMs += durationMs
     })
     configureAiChatRuntime({
+      localBackendDouble: true,
       now: () => nowMs,
       wait
     })
@@ -633,10 +642,30 @@ describe('ai chat backend response boundary', () => {
     })
   })
 
+  it('rejects local assistant generation unless the backend double is explicitly enabled', async () => {
+    const wait = vi.fn()
+    configureAiChatRuntime({
+      wait
+    })
+
+    await expect(
+      generateAiChatResponse({
+        prompt: '检查生产磁盘',
+        model: 'aiopsterm-local-agent'
+      })
+    ).resolves.toEqual({
+      ok: false,
+      errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE',
+      errorMessage: 'AI chat provider is unavailable'
+    })
+    expect(wait).not.toHaveBeenCalled()
+  })
+
   it('cancels active local responses at the backend boundary', async () => {
     let nowMs = 50_000
     const waits: Array<{ durationMs: number; resolve: () => void }> = []
     configureAiChatRuntime({
+      localBackendDouble: true,
       now: () => nowMs,
       wait: (durationMs: number) =>
         new Promise((resolve) => {

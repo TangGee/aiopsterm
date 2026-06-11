@@ -3241,6 +3241,7 @@ export type DatabaseAiProviderTextResult =
 type DatabaseAiRuntimeConfig = {
   getModelName?: () => string | undefined
   generateText?: (input: DatabaseAiProviderTextInput) => Promise<DatabaseAiProviderTextResult>
+  localBackendDouble?: boolean
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
 }
@@ -3562,6 +3563,16 @@ const databaseAiNow = () => (databaseAiRuntime.now ? databaseAiRuntime.now() : D
 const databaseAiModelName = () => trim(databaseAiRuntime.getModelName?.()) || 'aiopsterm-local-agent'
 
 const shouldUseDatabaseAiProvider = (modelName: string) => trim(modelName) !== '' && trim(modelName) !== 'aiopsterm-local-agent'
+
+const isExplicitDatabaseAiLocalDoubleEnabled = () => {
+  try {
+    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_DB_AI_BACKEND_DOUBLE || '').trim() === '1'
+  } catch {
+    return false
+  }
+}
+
+const isDatabaseAiLocalDoubleEnabled = () => databaseAiRuntime.localBackendDouble === true || isExplicitDatabaseAiLocalDoubleEnabled()
 
 const unquoteIdentifier = (value: string) => value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
 
@@ -4891,6 +4902,9 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
   if (shouldUseDatabaseAiProvider(modelName)) {
     return generateProviderDatabaseAiPaneResponse(input, modelName, startedAt, prompt)
   }
+  if (!isDatabaseAiLocalDoubleEnabled()) {
+    return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROVIDER_UNAVAILABLE', 'Database AI provider is unavailable.')
+  }
 
   const promptLower = prompt.toLowerCase()
   const contextLine = databaseAiPaneContextSummary(input)
@@ -5057,6 +5071,9 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
   const modelName = databaseAiModelName()
   if (shouldUseDatabaseAiProvider(modelName)) {
     return generateProviderDatabaseAiDrawerResponse(input, modelName, startedAt, dialect)
+  }
+  if (!isDatabaseAiLocalDoubleEnabled()) {
+    return databaseAiDrawerErrorResponse(input, startedAt, 'DB_AI_PROVIDER_UNAVAILABLE', 'Database AI provider is unavailable.')
   }
 
   const generatedSql = buildDrawerGeneratedSql(input, dialect)
