@@ -59,7 +59,13 @@ const exportInput = (): AiChatExportInput => ({
       role: 'assistant',
       text: 'kubectl rollout status deploy/web',
       ask: 'command',
-      executedCommand: 'kubectl rollout status deploy/web'
+      executedCommand: 'kubectl rollout status deploy/web',
+      commandExecution: {
+        ip: 'prod-agent',
+        command: 'kubectl rollout status deploy/web',
+        requiresApproval: true,
+        interactive: false
+      }
     },
     {
       id: 'output',

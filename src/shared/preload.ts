@@ -673,6 +673,12 @@ export type AiChatHistoryMessage = {
   ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
+  commandExecution?: {
+    ip: string
+    command: string
+    requiresApproval: boolean
+    interactive: boolean
+  }
   mcpToolCall?: {
     serverName: string
     toolName: string

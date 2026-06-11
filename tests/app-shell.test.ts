@@ -3478,6 +3478,81 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('renders provider execute_command blocks as runnable backend-owned command cards', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: '请求执行 Command 10.24.8.12: uptime。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-command-test-1',
+        assistantMessageId: 'aichat-request-command-test-1-assistant',
+        message: {
+          id: 'aichat-request-command-test-1-assistant',
+          role: 'assistant',
+          text: 'uptime',
+          state: 'done',
+          ask: 'command',
+          commandExecution: {
+            ip: '10.24.8.12',
+            command: 'uptime',
+            requiresApproval: false,
+            interactive: false
+          }
+        }
+      }
+    } as any)
+
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('检查负载'))
+    const range = document.createRange()
+    range.selectNodeContents(input.element)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await waitForMockCall(vi.mocked(window.aiops.generateAiChatResponse), 'generateAiChatResponse')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const commandMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('uptime'))
+    expect(commandMessage).toBeTruthy()
+    expect(commandMessage!.find('[data-testid="ai-message-command-run"]').exists()).toBe(true)
+
+    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith(expect.any(String), 'uptime\n')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('终端会话不可用')
+
+    store.activePanel.sessionId = 'terminal-command-panel'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-command-test-1-assistant')).toMatchObject({
+      executedCommand: 'uptime',
+      commandExecution: {
+        ip: '10.24.8.12',
+        command: 'uptime'
+      }
+    })
+
+    wrapper.unmount()
+  })
+
   it('opens External reference-style context and command popups in the AI panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

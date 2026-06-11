@@ -372,6 +372,13 @@ const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined =>
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
 }
 
+type AiCommandExecutionInput = {
+  ip: string
+  command: string
+  requiresApproval: boolean
+  interactive: boolean
+}
+
 const decodeMcpTagValue = (value: string) =>
   value
     .replace(/&quot;/g, '"')
@@ -408,6 +415,24 @@ const parseMcpToolUseBlock = (text: string): McpToolCallInput | null => {
   }
 }
 
+const parseBooleanTagValue = (value: string) => value.trim().toLowerCase() === 'true'
+
+const parseExecuteCommandBlock = (text: string): AiCommandExecutionInput | null => {
+  const block = text.match(/<execute_command>\s*([\s\S]*?)\s*<\/execute_command>/i)
+  if (!block) return null
+  const ip = readMcpTag(block[1], 'ip')
+  const command = readMcpTag(block[1], 'command')
+  const requiresApprovalText = readMcpTag(block[1], 'requires_approval')
+  const interactiveText = readMcpTag(block[1], 'interactive')
+  if (!ip || !command || !requiresApprovalText || !interactiveText) return null
+  return {
+    ip,
+    command,
+    requiresApproval: parseBooleanTagValue(requiresApprovalText),
+    interactive: parseBooleanTagValue(interactiveText)
+  }
+}
+
 const parseMcpResourceAccessBlock = (text: string): McpResourceReadInput | null => {
   const block = text.match(/<access_mcp_resource>\s*([\s\S]*?)\s*<\/access_mcp_resource>/i)
   if (!block) return null
@@ -430,6 +455,22 @@ const formatMcpToolCallContent = (content: NonNullable<McpToolCallResult['data']
 
 const createMcpToolCallSummary = (toolCall: McpToolCallInput) => `MCP Tool ${toolCall.serverName}/${toolCall.toolName}`
 const createMcpResourceAccessSummary = (resourceAccess: McpResourceReadInput) => `MCP Resource ${resourceAccess.serverName}:${resourceAccess.uri}`
+
+const createCommandExecutionSummary = (commandExecution: AiCommandExecutionInput) => `Command ${commandExecution.ip}: ${commandExecution.command}`
+
+const createCommandExecutionAskMessage = (commandExecution: AiCommandExecutionInput, control: AiChatResponseControl): AiChatHistoryMessage => ({
+  id: control.assistantMessageId || `aichat-command-${randomUUID()}`,
+  role: 'assistant',
+  text: commandExecution.command,
+  state: 'done',
+  ask: 'command',
+  commandExecution: {
+    ip: commandExecution.ip,
+    command: commandExecution.command,
+    requiresApproval: commandExecution.requiresApproval,
+    interactive: commandExecution.interactive
+  }
+})
 
 const createMcpToolAskMessage = (toolCall: McpToolCallInput, control: AiChatResponseControl): AiChatHistoryMessage => ({
   id: control.assistantMessageId || `aichat-mcp-${randomUUID()}`,
@@ -611,6 +652,30 @@ const resolveMcpToolResponse = async (
   }
 }
 
+const resolveCommandExecutionResponse = (
+  text: string,
+  modelName: string,
+  startedAt: number,
+  control: AiChatResponseControl
+): AiChatResponseResult | null => {
+  const commandExecution = parseExecuteCommandBlock(text)
+  if (!commandExecution) return null
+  const message = createCommandExecutionAskMessage(commandExecution, control)
+  return {
+    ok: true,
+    data: {
+      text: `请求执行 ${createCommandExecutionSummary(commandExecution)}。`,
+      provider: 'aiopsterm-local',
+      model: modelName,
+      durationMs: Math.max(1, now() - startedAt),
+      status: 'done',
+      requestId: control.requestId,
+      assistantMessageId: control.assistantMessageId,
+      message
+    }
+  }
+}
+
 const resolveMcpResourceAccessResponse = async (
   text: string,
   config: UserConfig | undefined,
@@ -692,6 +757,8 @@ async function generateProviderAiChatResponse(
       errorMessage: response.errorMessage
     }
   }
+  const commandResponse = resolveCommandExecutionResponse(response.text, modelName, startedAt, control)
+  if (commandResponse) return commandResponse
   const mcpResponse = await resolveMcpToolResponse(response.text, config, modelName, startedAt, control)
   if (mcpResponse) return mcpResponse
   const mcpResourceResponse = await resolveMcpResourceAccessResponse(response.text, config, modelName, startedAt, control)

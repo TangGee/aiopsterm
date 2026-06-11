@@ -606,6 +606,34 @@ describe('workspace store', () => {
     })
   })
 
+  it('accepts backend-owned execute_command messages and runs them through the terminal bridge', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.chatMessages = [
+      {
+        id: 'command-ask',
+        role: 'assistant',
+        text: 'uptime',
+        state: 'done',
+        ask: 'command',
+        commandExecution: {
+          ip: '10.24.8.12',
+          command: 'uptime',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    ]
+    store.activePanel.sessionId = 'terminal-command-session'
+
+    vi.mocked(window.aiops.updateChatConversation).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const decision = await store.runActiveTerminalCommand(store.chatMessages[0].commandExecution!.command, 'agent')
+
+    expect(decision?.status).toBe('allow')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-session', 'uptime\n')
+  })
+
   it('keeps configuration changes in local state before bridge persistence', async () => {
     const store = useWorkspaceStore()
 

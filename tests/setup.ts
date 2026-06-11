@@ -3333,6 +3333,12 @@ type TestChatHistoryMessage = {
   ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
+  commandExecution?: {
+    ip: string
+    command: string
+    requiresApproval: boolean
+    interactive: boolean
+  }
   mcpToolCall?: {
     serverName: string
     toolName: string
@@ -3422,6 +3428,7 @@ const cloneChatConversation = (conversation: TestChatConversationRecord): TestCh
 const cloneChatMessage = (message: TestChatHistoryMessage): TestChatHistoryMessage => ({
   ...message,
   hosts: message.hosts?.map((host) => ({ ...host })),
+  commandExecution: message.commandExecution ? { ...message.commandExecution } : undefined,
   mcpToolCall: message.mcpToolCall
     ? {
         ...message.mcpToolCall,

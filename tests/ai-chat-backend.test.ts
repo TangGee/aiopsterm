@@ -364,6 +364,70 @@ describe('ai chat backend response boundary', () => {
     })
   })
 
+  it('turns provider execute_command blocks into backend-owned command approval messages', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '<execute_command><ip>10.24.8.12</ip><command>uptime</command><requires_approval>false</requires_approval><interactive>false</interactive></execute_command>'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 65_000,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-command',
+      assistantMessageId: 'aichat-request-command-assistant',
+      prompt: '检查负载',
+      model: 'ops-chat'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      text: '请求执行 Command 10.24.8.12: uptime。',
+      message: {
+        id: 'aichat-request-command-assistant',
+        role: 'assistant',
+        text: 'uptime',
+        state: 'done',
+        ask: 'command',
+        commandExecution: {
+          ip: '10.24.8.12',
+          command: 'uptime',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    })
+  })
+
   it('turns provider MCP resource blocks into backend-owned approval messages', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

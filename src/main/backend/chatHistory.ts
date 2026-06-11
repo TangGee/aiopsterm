@@ -38,6 +38,7 @@ const cloneMessage = (message: AiChatHistoryMessage): AiChatHistoryMessage => ({
   ...message,
   hosts: message.hosts ? message.hosts.map((host) => ({ ...host })) : undefined,
   contentParts: message.contentParts ? cloneJson(message.contentParts) : undefined,
+  commandExecution: message.commandExecution ? cloneJson(message.commandExecution) : undefined,
   mcpToolCall: message.mcpToolCall ? cloneJson(message.mcpToolCall) : undefined,
   mcpResourceAccess: message.mcpResourceAccess ? cloneJson(message.mcpResourceAccess) : undefined,
   followupOptions: message.followupOptions ? [...message.followupOptions] : undefined
@@ -163,6 +164,14 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
             arguments: isRecord(item.mcpToolCall.arguments) ? cloneJson(item.mcpToolCall.arguments) : undefined
           }
         : undefined
+      const commandExecution = isRecord(item.commandExecution)
+        ? {
+            ip: normalizeText(item.commandExecution.ip),
+            command: normalizeText(item.commandExecution.command),
+            requiresApproval: item.commandExecution.requiresApproval === true,
+            interactive: item.commandExecution.interactive === true
+          }
+        : undefined
       const mcpResourceAccess = isRecord(item.mcpResourceAccess)
         ? {
             serverName: normalizeText(item.mcpResourceAccess.serverName),
@@ -183,6 +192,7 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
         ask,
         say,
         action,
+        commandExecution: commandExecution?.ip && commandExecution.command ? commandExecution : undefined,
         mcpToolCall: mcpToolCall?.serverName && mcpToolCall.toolName ? mcpToolCall : undefined,
         mcpResourceAccess: mcpResourceAccess?.serverName && mcpResourceAccess.uri ? mcpResourceAccess : undefined,
         followupOptions: followupOptions?.length ? followupOptions : undefined,

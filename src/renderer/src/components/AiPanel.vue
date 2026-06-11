@@ -1491,7 +1491,9 @@ const chatExportMessage = (message: ChatMessage): AiChatExportMessage => ({
   ask: message.ask,
   say: message.say,
   action: message.action,
+  commandExecution: message.commandExecution,
   mcpToolCall: message.mcpToolCall,
+  mcpResourceAccess: message.mcpResourceAccess,
   followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
   selectedOption: message.selectedOption,
   partial: message.partial
@@ -1537,13 +1539,17 @@ const copyMessageToClipboard = async (message: { text: string; contentParts?: Ai
   showChatExportNotice(copied ? '消息已复制。' : '复制失败。')
 }
 
-const isCommandSuggestionMessage = (message: { role: string; contentParts?: AiContentPart[]; text: string; state?: string }) => {
+const isCommandSuggestionMessage = (message: { role: string; contentParts?: AiContentPart[]; text: string; state?: string; ask?: string; commandExecution?: { command: string } }) => {
   if (message.role !== 'assistant' || message.state === 'streaming') return false
+  if (message.ask === 'command' && message.commandExecution?.command.trim()) return true
   return Boolean(message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command') || message.text.trim().startsWith('/'))
 }
 
-const runMessageCommand = async (message: { text: string; contentParts?: AiContentPart[]; executedCommand?: string }) => {
-  const command = messagePlainText(message).trim()
+const commandTextForMessage = (message: { text: string; contentParts?: AiContentPart[]; commandExecution?: { command: string } }) =>
+  message.commandExecution?.command.trim() || messagePlainText(message).trim()
+
+const runMessageCommand = async (message: { text: string; contentParts?: AiContentPart[]; commandExecution?: { command: string }; executedCommand?: string }) => {
+  const command = commandTextForMessage(message)
   if (!command) {
     showChatExportNotice('没有可运行的命令。')
     return

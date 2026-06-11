@@ -392,6 +392,12 @@ export type ChatMessage = {
   ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
+  commandExecution?: {
+    ip: string
+    command: string
+    requiresApproval: boolean
+    interactive: boolean
+  }
   mcpToolCall?: {
     serverName: string
     toolName: string
@@ -2368,6 +2374,12 @@ const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage
   (source.ask === undefined || aiChatAskValues.includes(source.ask as NonNullable<AiChatHistoryMessage['ask']>)) &&
   (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatHistoryMessage['say']>)) &&
   (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatHistoryMessage['action']>)) &&
+  (source.commandExecution === undefined ||
+    (isRecord(source.commandExecution) &&
+      isNonEmptyString(source.commandExecution.ip) &&
+      isNonEmptyString(source.commandExecution.command) &&
+      typeof source.commandExecution.requiresApproval === 'boolean' &&
+      typeof source.commandExecution.interactive === 'boolean')) &&
   (source.mcpToolCall === undefined ||
     (isRecord(source.mcpToolCall) &&
       isNonEmptyString(source.mcpToolCall.serverName) &&
@@ -3829,6 +3841,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     ask: message.ask,
     say: message.say,
     action: message.action,
+    commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined,
     mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
     mcpResourceAccess: message.mcpResourceAccess ? cloneStructuredValue(message.mcpResourceAccess) : undefined,
     followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
@@ -3860,6 +3873,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ask: message.ask,
       say: message.say,
       action: message.action,
+      commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined,
       mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
       mcpResourceAccess: message.mcpResourceAccess ? cloneStructuredValue(message.mcpResourceAccess) : undefined,
       followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,

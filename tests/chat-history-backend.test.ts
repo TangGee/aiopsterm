@@ -128,7 +128,13 @@ describe('AI chat history backend boundary', () => {
             text: 'kubectl rollout status deploy/web',
             state: 'done',
             ask: 'command',
-            executedCommand: 'kubectl rollout status deploy/web'
+            executedCommand: 'kubectl rollout status deploy/web',
+            commandExecution: {
+              ip: 'prod-cluster',
+              command: 'kubectl rollout status deploy/web',
+              requiresApproval: true,
+              interactive: false
+            }
           },
           {
             id: 'history-assistant',
@@ -188,7 +194,17 @@ describe('AI chat history backend boundary', () => {
           expect.objectContaining({ type: 'image', name: 'topology.png' })
         ])
       }),
-      expect.objectContaining({ id: 'history-command', ask: 'command', executedCommand: 'kubectl rollout status deploy/web' }),
+      expect.objectContaining({
+        id: 'history-command',
+        ask: 'command',
+        executedCommand: 'kubectl rollout status deploy/web',
+        commandExecution: expect.objectContaining({
+          ip: 'prod-cluster',
+          command: 'kubectl rollout status deploy/web',
+          requiresApproval: true,
+          interactive: false
+        })
+      }),
       expect.objectContaining({
         id: 'history-assistant',
         ask: 'mcp_tool_call',
@@ -230,7 +246,13 @@ describe('AI chat history backend boundary', () => {
         text: 'kubectl rollout status deploy/web',
         state: 'done',
         executedCommand: 'kubectl rollout status deploy/web',
-        ask: 'command'
+        ask: 'command',
+        commandExecution: {
+          ip: 'prod-cluster',
+          command: 'kubectl rollout status deploy/web',
+          requiresApproval: true,
+          interactive: false
+        }
       },
       {
         id: 'history-assistant',

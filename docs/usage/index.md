@@ -1,5 +1,6 @@
 # Usage Docs
 
+- [AI Command Tools](ai-command-tools.md)
 - [Development Commands](development-commands.md)
 - [Desktop Protocol](desktop-protocol.md)
 - [MCP Servers](mcp-servers.md)
