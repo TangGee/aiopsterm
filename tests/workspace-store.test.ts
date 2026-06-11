@@ -9009,6 +9009,26 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
         available: true,
         channel: 'manual',
         isUpdateAvailable: true,
+        updateInfo: null
+      })
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.settingsNotice).toBe('更新后端返回了无效结果')
+
+      vi.mocked(window.aiops.checkUpdate!).mockResolvedValueOnce({
+        available: true,
+        channel: 'manual',
+        isUpdateAvailable: true,
+        updateInfo: null
+      })
+      await expect(store.checkTopUpdate()).resolves.toBe(false)
+      expect(store.topUpdateState).toBe('local')
+      expect(store.topNotice).toBe('更新后端返回了无效结果')
+
+      vi.mocked(window.aiops.checkUpdate!).mockResolvedValueOnce({
+        available: true,
+        channel: 'manual',
+        isUpdateAvailable: true,
         updateInfo: { version: '0.2.0', channel: 'manual' }
       })
       await expect(store.checkAboutUpdate()).resolves.toBe(true)
@@ -9033,6 +9053,23 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.aboutSettings.updateStatus).toBe('error')
       expect(store.aboutSettings.progress).toBe(0)
       expect(store.settingsNotice).toBe('下载后端离线')
+
+      store.aboutSettings.updateStatus = 'available'
+      vi.mocked(window.aiops.downloadAppUpdate!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          version: '0.2.0',
+          status: 'downloaded',
+          percent: 80,
+          filePath: '/tmp/aiopsterm-test-updates/0.2.0.bin',
+          size: 1024,
+          message: 'malformed download percent'
+        }
+      } as any)
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.progress).toBe(0)
+      expect(store.settingsNotice).toBe('更新后端返回了无效结果')
 
       store.aboutSettings.updateStatus = 'available'
       vi.mocked(window.aiops.downloadAppUpdate!).mockRejectedValueOnce(new Error('download bridge offline'))
@@ -9062,6 +9099,23 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.aboutSettings.version).toBe('0.1.0')
       expect(store.aboutSettings.newVersion).toBe('0.2.0')
       expect(store.settingsNotice).toBe('安装后端离线')
+
+      store.aboutSettings.updateStatus = 'downloaded'
+      vi.mocked(window.aiops.installAppUpdate!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          version: '0.2.0',
+          status: 'install-requested',
+          filePath: '/tmp/aiopsterm-test-updates/0.2.0.bin',
+          size: 1024,
+          message: 'missing requestedAt'
+        }
+      } as any)
+      await expect(store.checkAboutUpdate()).resolves.toBe(false)
+      expect(store.aboutSettings.updateStatus).toBe('error')
+      expect(store.aboutSettings.version).toBe('0.1.0')
+      expect(store.aboutSettings.newVersion).toBe('0.2.0')
+      expect(store.settingsNotice).toBe('更新后端返回了无效结果')
 
       store.aboutSettings.updateStatus = 'downloaded'
       vi.mocked(window.aiops.installAppUpdate!).mockRejectedValueOnce(new Error('install bridge offline'))

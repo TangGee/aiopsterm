@@ -1419,23 +1419,30 @@ const TrustedDevicesSettingsPage = defineComponent({
     return () =>
       h('div', [
         h('h3', '可信设备'),
-        h('div', { class: 'settings-section-card trusted-devices-card' }, [
-          h('p', { class: 'settings-description' }, '管理允许登录当前账户的可信设备。'),
-          h(
-            'div',
-            { class: 'trusted-device-list' },
-            workspace.trustedDevices.map((device) =>
-              h('div', { class: 'trusted-device-item' }, [
-                h('div', { class: 'trusted-device-info' }, [
-                  h('div', [h('strong', device.deviceName || 'Unknown Device'), device.current ? h('span', { class: 'current-tag' }, '当前设备') : null]),
-                  h('small', `${device.lastLoginUserAgent} · IP: ${device.lastLoginIp}, ${device.location}, ${maskMac(device.macAddress)}`)
-                ]),
-                h('button', { class: 'settings-button danger', disabled: device.current, onClick: () => workspace.openTrustedDeviceRevoke(device.id) }, '移除')
-              ])
-            )
-          ),
-          h('div', { class: 'trusted-count' }, `${workspace.trustedDevices.length}/3`)
-        ]),
+        workspace.userProfile.skippedLogin || workspace.userProfile.lastLoginMethod === 'skip'
+          ? h('div', { class: 'settings-section-card trusted-devices-card settings-empty-state' }, [
+              h('p', '登录后可查看和管理当前账户的可信设备。'),
+              h('button', { class: 'settings-button primary', onClick: () => workspace.openUserLogin() }, '登录')
+            ])
+          : h('div', { class: 'settings-section-card trusted-devices-card' }, [
+              h('p', { class: 'settings-description' }, '管理允许登录当前账户的可信设备。'),
+              h(
+                'div',
+                { class: 'trusted-device-list' },
+                workspace.trustedDevices.length
+                  ? workspace.trustedDevices.map((device) =>
+                      h('div', { class: 'trusted-device-item' }, [
+                        h('div', { class: 'trusted-device-info' }, [
+                          h('div', [h('strong', device.deviceName || 'Unknown Device'), device.current ? h('span', { class: 'current-tag' }, '当前设备') : null]),
+                          h('small', `${device.lastLoginUserAgent} · IP: ${device.lastLoginIp}, ${device.location}, ${maskMac(device.macAddress)}`)
+                        ]),
+                        h('button', { class: 'settings-button danger', disabled: device.current, onClick: () => workspace.openTrustedDeviceRevoke(device.id) }, '移除')
+                      ])
+                    )
+                  : [h('div', { class: 'settings-empty-state' }, '暂无可信设备')]
+              ),
+              h('div', { class: 'trusted-count' }, `${workspace.trustedDevices.length}/3`)
+            ]),
         workspace.trustedDeviceModal.open
           ? h('div', { class: 'settings-modal' }, [
               h('div', { class: 'settings-modal-card small' }, [

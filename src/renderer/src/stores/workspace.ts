@@ -55,6 +55,8 @@ import type { OnboardingModuleId } from '@/config/onboarding'
 import { settingsLanguageOptions, type SettingSectionKey } from '@/config/settings'
 import type {
   AppUpdateCheckResult,
+  AppUpdateDownloadResult,
+  AppUpdateInstallResult,
   AppUpdateProgressEvent,
   AiChatChipContentPart,
   AiChatChipRef,
@@ -190,6 +192,8 @@ type QuickCommandSnippet = QuickCommandSnippetConfig
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type KnowledgeBridgeApi = Pick<AiopsPreloadApi, 'kbEnsureRoot' | 'kbListDir'>
 type ModelProviderKey = ModelProviderCheckKey
+type AppUpdateDownloadData = NonNullable<AppUpdateDownloadResult['data']>
+type AppUpdateInstallData = NonNullable<AppUpdateInstallResult['data']>
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 type AiChatHistoryHost = NonNullable<AiChatHistoryMessage['hosts']>[number]
@@ -3265,8 +3269,64 @@ const settingsDocumentationUrl = 'https://aiopsterm.local/docs'
 const settingsFeedbackUrl = 'https://aiopsterm.local/feedback'
 const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<string, unknown> | undefined)?.[name] === 'function'
 
-const resolveUpdateVersion = (result?: AppUpdateCheckResult | null) =>
-  result?.updateInfo?.version || result?.versionInfo?.version || (result?.isUpdateAvailable || result?.available ? '0.1.1' : '')
+const appUpdateChannels: AppUpdateCheckResult['channel'][] = ['local', 'manual', 'auto']
+const appUpdateStatusMessage = '更新后端返回了无效结果'
+
+const isAppUpdateCheckResult = (source: unknown): source is AppUpdateCheckResult => {
+  if (!isRecord(source)) return false
+  if (typeof source.available !== 'boolean' || !appUpdateChannels.includes(source.channel as AppUpdateCheckResult['channel'])) return false
+  if (source.isUpdateAvailable !== undefined && typeof source.isUpdateAvailable !== 'boolean') return false
+  if (source.versionInfo !== undefined) {
+    if (!isRecord(source.versionInfo) || !isNonEmptyString(source.versionInfo.version)) return false
+    if (source.versionInfo.channel !== undefined && typeof source.versionInfo.channel !== 'string') return false
+  }
+  if (source.updateInfo !== undefined && source.updateInfo !== null) {
+    if (!isRecord(source.updateInfo) || !isNonEmptyString(source.updateInfo.version)) return false
+    if (source.updateInfo.channel !== undefined && typeof source.updateInfo.channel !== 'string') return false
+    if (source.updateInfo.fileName !== undefined && typeof source.updateInfo.fileName !== 'string') return false
+    const updateSize = source.updateInfo.size
+    if (updateSize !== undefined && (typeof updateSize !== 'number' || !Number.isFinite(updateSize) || updateSize < 0)) return false
+    if (source.updateInfo.sha256 !== undefined && typeof source.updateInfo.sha256 !== 'string') return false
+    if (source.updateInfo.notes !== undefined && typeof source.updateInfo.notes !== 'string') return false
+  }
+  return true
+}
+
+const resolveUpdateVersion = (result?: AppUpdateCheckResult | null) => result?.updateInfo?.version || result?.versionInfo?.version || ''
+
+const hasAvailableAppUpdate = (result: AppUpdateCheckResult) => Boolean(result.available || result.isUpdateAvailable || result.updateInfo)
+
+const isAppUpdateDownloadData = (source: unknown, version: string): source is AppUpdateDownloadData =>
+  isRecord(source) &&
+  source.version === version &&
+  source.status === 'downloaded' &&
+  source.percent === 100 &&
+  isNonEmptyString(source.filePath) &&
+  typeof source.size === 'number' &&
+  Number.isFinite(source.size) &&
+  source.size >= 0 &&
+  (source.sha256 === undefined || typeof source.sha256 === 'string') &&
+  isNonEmptyString(source.message)
+
+const isAppUpdateInstallData = (source: unknown, version: string): source is AppUpdateInstallData =>
+  isRecord(source) &&
+  source.version === version &&
+  source.status === 'install-requested' &&
+  isNonEmptyString(source.filePath) &&
+  typeof source.size === 'number' &&
+  Number.isFinite(source.size) &&
+  source.size >= 0 &&
+  (source.sha256 === undefined || typeof source.sha256 === 'string') &&
+  isNonEmptyString(source.requestedAt) &&
+  isNonEmptyString(source.message)
+
+const isAppUpdateProgressEvent = (source: unknown): source is AppUpdateProgressEvent =>
+  isRecord(source) &&
+  (source.status === 'downloading' || source.status === 'downloaded' || source.status === 'error') &&
+  isNonEmptyString(source.version) &&
+  typeof source.percent === 'number' &&
+  Number.isFinite(source.percent) &&
+  (source.message === undefined || typeof source.message === 'string')
 
 const getKbParent = (relPath: string) => {
   const parts = relPath.split('/').filter(Boolean)
@@ -6763,6 +6823,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let removeAppUpdateProgressListener: (() => void) | null = null
 
   const handleAppUpdateProgress = (event: AppUpdateProgressEvent) => {
+    if (!isAppUpdateProgressEvent(event)) {
+      aboutSettings.value = {
+        ...aboutSettings.value,
+        updateStatus: 'error',
+        progress: 0
+      }
+      setSettingsNotice(appUpdateStatusMessage)
+      return
+    }
     aboutSettings.value = {
       ...aboutSettings.value,
       updateStatus: event.status === 'downloaded' ? 'downloaded' : event.status,
@@ -6806,6 +6875,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice(result?.errorMessage || '更新下载失败')
         return false
       }
+      if (!isAppUpdateDownloadData(result.data, version)) {
+        aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
+        setSettingsNotice(appUpdateStatusMessage)
+        return false
+      }
       aboutSettings.value = {
         ...aboutSettings.value,
         updateStatus: 'downloaded',
@@ -6831,6 +6905,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = await installAppUpdateBridge(version)
       if (!result?.ok || !result.data) {
         setNotice(result?.errorMessage || '更新安装失败')
+        return false
+      }
+      if (!isAppUpdateInstallData(result.data, version)) {
+        setNotice(appUpdateStatusMessage)
         return false
       }
       applyRequestedAppUpdateInstall(result.data.version)
@@ -6869,12 +6947,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setSettingsNotice('正在检查更新')
     try {
       const result = await checkUpdateBridge()
+      if (!isAppUpdateCheckResult(result)) {
+        aboutSettings.value = {
+          ...aboutSettings.value,
+          updateStatus: 'error',
+          progress: 0
+        }
+        setSettingsNotice(appUpdateStatusMessage)
+        return false
+      }
       const detectedVersion = resolveUpdateVersion(result)
-      if (result?.available || result?.isUpdateAvailable || result?.updateInfo) {
+      if (hasAvailableAppUpdate(result)) {
+        if (!detectedVersion) {
+          aboutSettings.value = {
+            ...aboutSettings.value,
+            updateStatus: 'error',
+            progress: 0
+          }
+          setSettingsNotice(appUpdateStatusMessage)
+          return false
+        }
         aboutSettings.value = {
           ...aboutSettings.value,
           updateStatus: 'available',
-          newVersion: detectedVersion || aboutSettings.value.version
+          newVersion: detectedVersion
         }
         setSettingsNotice(`检测到可用更新 ${aboutSettings.value.newVersion}`)
         return true
@@ -6916,10 +7012,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     topUpdateState.value = 'checking'
     try {
       const result = await checkUpdateBridge()
-      topUpdateState.value = result?.available ? 'available' : 'local'
-      if (result?.available) {
-        const detectedVersion = resolveUpdateVersion(result)
-        if (detectedVersion) aboutSettings.value.newVersion = detectedVersion
+      if (!isAppUpdateCheckResult(result)) {
+        topUpdateState.value = 'local'
+        setTopNotice(appUpdateStatusMessage)
+        return false
+      }
+      const available = hasAvailableAppUpdate(result)
+      const detectedVersion = resolveUpdateVersion(result)
+      if (available && !detectedVersion) {
+        topUpdateState.value = 'local'
+        setTopNotice(appUpdateStatusMessage)
+        return false
+      }
+      topUpdateState.value = available ? 'available' : 'local'
+      if (available) {
+        aboutSettings.value.newVersion = detectedVersion
         setTopNotice(detectedVersion ? `检测到可用更新 ${detectedVersion}` : '检测到可用更新')
       }
       return true
