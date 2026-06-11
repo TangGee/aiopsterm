@@ -223,9 +223,10 @@ import {
 } from '@shared/deepLink'
 import {
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH,
-  DEFAULT_KNOWLEDGE_SEED_SIZES,
-  DEFAULT_KNOWLEDGE_USED_BYTES,
-  getDefaultKnowledgeSeedFile
+  defaultKnowledgeBaseConfig,
+  defaultKnowledgeSeedTree,
+  getDefaultKnowledgeSeedFile,
+  shouldUseKnowledgeSeedData
 } from '@shared/knowledgeBaseSeed'
 import type {
   AliasCommandConfig,
@@ -425,70 +426,7 @@ const defaultSecurityConfig: SecurityUserConfig = {
   }
 }
 
-const defaultKnowledgeBaseConfig: KnowledgeBaseUserConfig = {
-  tree: [
-    {
-      id: 'kb-dir-commands',
-      key: 'commands',
-      relPath: 'commands',
-      title: 'commands',
-      type: 'dir',
-      children: [
-        {
-          id: 'kb-file-rollback-plan',
-          key: 'commands/rollback-plan.md',
-          relPath: 'commands/rollback-plan.md',
-          title: 'rollback-plan.md',
-          type: 'file',
-          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/rollback-plan.md']
-        },
-        {
-          id: 'kb-file-diagnose',
-          key: 'commands/diagnose.md',
-          relPath: 'commands/diagnose.md',
-          title: 'diagnose.md',
-          type: 'file',
-          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/diagnose.md']
-        },
-        {
-          id: 'kb-file-summary',
-          key: 'commands/Summary to Doc.md',
-          relPath: 'commands/Summary to Doc.md',
-          title: 'Summary to Doc.md',
-          type: 'file',
-          size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/Summary to Doc.md']
-        }
-      ]
-    },
-    {
-      id: 'kb-dir-images',
-      key: 'images',
-      relPath: 'images',
-      title: 'images',
-      type: 'dir',
-      children: [
-        {
-          id: 'kb-file-interface',
-          key: 'images/interface.png',
-          relPath: 'images/interface.png',
-          title: 'interface.png',
-          type: 'file',
-          size: DEFAULT_KNOWLEDGE_SEED_SIZES['images/interface.png']
-        }
-      ]
-    },
-    {
-      id: 'kb-file-markdown',
-      key: 'Markdown语法指南.md',
-      relPath: 'Markdown语法指南.md',
-      title: 'Markdown语法指南.md',
-      type: 'file',
-      size: DEFAULT_KNOWLEDGE_SEED_SIZES['Markdown语法指南.md']
-    }
-  ],
-  usedBytes: DEFAULT_KNOWLEDGE_USED_BYTES,
-  totalBytes: 1024 * 1024 * 1024
-}
+const defaultKnowledgeBaseUserConfig: KnowledgeBaseUserConfig = defaultKnowledgeBaseConfig()
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
@@ -650,7 +588,7 @@ const defaultConfig: UserConfig = {
   ],
   mcpServers: defaultMcpServers(),
   mcpToolStates: defaultMcpToolStates(),
-  knowledgeBase: defaultKnowledgeBaseConfig,
+  knowledgeBase: defaultKnowledgeBaseUserConfig,
   onboarding: {
     version: 2,
     guideTabAutoOpened: false,
@@ -1702,8 +1640,10 @@ const ensureKnowledgeBaseDirectory = async () => {
   try {
     await access(getKnowledgeBaseInitMarkerPath())
   } catch {
-    for (const node of defaultKnowledgeBaseConfig.tree) {
-      await ensureKnowledgeSeedNode(node)
+    if (shouldUseKnowledgeSeedData()) {
+      for (const node of defaultKnowledgeSeedTree()) {
+        await ensureKnowledgeSeedNode(node)
+      }
     }
     await writeFile(getKnowledgeBaseInitMarkerPath(), 'initialized\n', 'utf-8')
   }
@@ -1767,7 +1707,7 @@ const syncKnowledgeBaseConfigFromDisk = async () => {
   const nextKnowledgeBase: KnowledgeBaseUserConfig = {
     tree,
     usedBytes: sumKnowledgeTreeSize(tree),
-    totalBytes: config.knowledgeBase?.totalBytes || defaultKnowledgeBaseConfig.totalBytes
+    totalBytes: config.knowledgeBase?.totalBytes || defaultKnowledgeBaseUserConfig.totalBytes
   }
   store.set('config', mergeConfig(config, { knowledgeBase: nextKnowledgeBase }))
   invalidateKnowledgeSearchIndex()

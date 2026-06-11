@@ -60,6 +60,85 @@ export const DEFAULT_KNOWLEDGE_SEED_SIZES: Record<string, number> = Object.freez
 
 export const DEFAULT_KNOWLEDGE_USED_BYTES = Object.values(DEFAULT_KNOWLEDGE_SEED_SIZES).reduce((total, size) => total + size, 0)
 
+export const DEFAULT_KNOWLEDGE_TOTAL_BYTES = 1024 * 1024 * 1024
+
+export const defaultKnowledgeSeedTree = () => [
+  {
+    id: 'kb-dir-commands',
+    key: 'commands',
+    relPath: 'commands',
+    title: 'commands',
+    type: 'dir' as const,
+    children: [
+      {
+        id: 'kb-file-rollback-plan',
+        key: 'commands/rollback-plan.md',
+        relPath: 'commands/rollback-plan.md',
+        title: 'rollback-plan.md',
+        type: 'file' as const,
+        size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/rollback-plan.md']
+      },
+      {
+        id: 'kb-file-diagnose',
+        key: 'commands/diagnose.md',
+        relPath: 'commands/diagnose.md',
+        title: 'diagnose.md',
+        type: 'file' as const,
+        size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/diagnose.md']
+      },
+      {
+        id: 'kb-file-summary',
+        key: 'commands/Summary to Doc.md',
+        relPath: 'commands/Summary to Doc.md',
+        title: 'Summary to Doc.md',
+        type: 'file' as const,
+        size: DEFAULT_KNOWLEDGE_SEED_SIZES['commands/Summary to Doc.md']
+      }
+    ]
+  },
+  {
+    id: 'kb-dir-images',
+    key: 'images',
+    relPath: 'images',
+    title: 'images',
+    type: 'dir' as const,
+    children: [
+      {
+        id: 'kb-file-interface',
+        key: 'images/interface.png',
+        relPath: 'images/interface.png',
+        title: 'interface.png',
+        type: 'file' as const,
+        size: DEFAULT_KNOWLEDGE_SEED_SIZES['images/interface.png']
+      }
+    ]
+  },
+  {
+    id: 'kb-file-markdown',
+    key: 'Markdown语法指南.md',
+    relPath: 'Markdown语法指南.md',
+    title: 'Markdown语法指南.md',
+    type: 'file' as const,
+    size: DEFAULT_KNOWLEDGE_SEED_SIZES['Markdown语法指南.md']
+  }
+]
+
+const isExplicitKnowledgeSeedEnabled = () => {
+  try {
+    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_KNOWLEDGE_ENABLE_SEED || '').trim() === '1'
+  } catch {
+    return false
+  }
+}
+
+export const shouldUseKnowledgeSeedData = () => isExplicitKnowledgeSeedEnabled()
+
+export const defaultKnowledgeBaseConfig = () => ({
+  tree: shouldUseKnowledgeSeedData() ? defaultKnowledgeSeedTree() : [],
+  usedBytes: shouldUseKnowledgeSeedData() ? DEFAULT_KNOWLEDGE_USED_BYTES : 0,
+  totalBytes: DEFAULT_KNOWLEDGE_TOTAL_BYTES
+})
+
 export const getDefaultKnowledgeSeedFile = (relPath: string): DefaultKnowledgeSeedFile | null => {
   if (relPath === DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH) {
     return {
