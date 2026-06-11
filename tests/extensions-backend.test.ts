@@ -265,11 +265,10 @@ describe('extension plugin backend boundary', () => {
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toBeUndefined()
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'jumpserverSupport')).toMatchObject({
       detailSummary: expect.stringContaining('资产同步'),
-      guideSteps: expect.arrayContaining(['同步资产并确认主机分组。']),
-      connectionLog: expect.arrayContaining([
-        expect.objectContaining({ time: '10:15:50', status: 'success', message: 'connected to bastion host' })
-      ])
+      functions: expect.arrayContaining([expect.objectContaining({ title: '同步状态' })]),
+      guideSteps: expect.arrayContaining(['同步资产并确认主机分组。'])
     })
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'jumpserverSupport')?.connectionLog).toBeUndefined()
   })
 
   it('discovers store plugin catalog rows from configured real package directories', async () => {

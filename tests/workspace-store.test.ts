@@ -5681,9 +5681,7 @@ describe('workspace store', () => {
     const jumpserver = store.extensionPlugins.find((plugin) => plugin.pluginId === 'jumpserverSupport')
     expect(jumpserver?.detailSummary).toContain('资产同步')
     expect(jumpserver?.guideSteps).toEqual(expect.arrayContaining(['同步资产并确认主机分组。']))
-    expect(jumpserver?.connectionLog).toEqual(
-      expect.arrayContaining([expect.objectContaining({ status: 'success', message: 'connected to bastion host' })])
-    )
+    expect(jumpserver?.connectionLog).toBeUndefined()
 
     expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
     await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)

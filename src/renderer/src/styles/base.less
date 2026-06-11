@@ -10040,6 +10040,120 @@ th {
   color: var(--danger);
 }
 
+.jumpserver_asset_notice {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.jumpserver_asset_notice.error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.jumpserver_asset_summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.jumpserver_asset_summary > div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+}
+
+.jumpserver_asset_summary span,
+.jumpserver_source_row small,
+.jumpserver_synced_asset small,
+.jumpserver_asset_actions span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.jumpserver_asset_summary strong {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.jumpserver_asset_actions,
+.jumpserver_source_row,
+.jumpserver_synced_asset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.jumpserver_asset_actions {
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.jumpserver_source_list,
+.jumpserver_synced_assets {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.jumpserver_source_row,
+.jumpserver_synced_asset {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  padding: 8px 10px;
+}
+
+.jumpserver_source_row > span,
+.jumpserver_synced_asset > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.jumpserver_source_row strong,
+.jumpserver_source_row small,
+.jumpserver_synced_asset strong,
+.jumpserver_synced_asset small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jumpserver_synced_asset b {
+  flex: 0 0 auto;
+  min-width: 58px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.jumpserver_synced_asset .asset_status_online {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.jumpserver_synced_asset .asset_status_offline {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
 .feature_list {
   padding: 14px 0;
   display: grid;

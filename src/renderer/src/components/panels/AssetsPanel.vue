@@ -2063,6 +2063,20 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => workspace.assetManagementOpenRequest.sequence,
+  (sequence) => {
+    if (!sequence) return
+    managedOrganizationId.value = workspace.assetManagementOpenRequest.organizationId || null
+    selectedRows.value = []
+    assetManagementQuery.value = ''
+    assetManagementPage.value = 1
+    managedEditorOpen.value = false
+    activeAssetView.value = 'assetManagement'
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   refreshAssets().catch((error) => {
     importNotice.value = error instanceof Error ? error.message : '资产加载失败。'

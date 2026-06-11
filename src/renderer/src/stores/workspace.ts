@@ -3686,6 +3686,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionInstallProgressMap = ref<Record<string, ExtensionInstallProgress>>({})
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
+  const assetManagementOpenRequest = ref<{ sequence: number; organizationId?: string }>({ sequence: 0 })
   const aliasCommands = ref<AliasCommand[]>([])
   const aliasEditSnapshot = ref<AliasCommand | null>(null)
   const aliasSearchQuery = ref('')
@@ -7966,6 +7967,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const openAssetManagement = (organizationId?: string) => {
+    mode.value = 'terminal'
+    activeModule.value = 'assets'
+    leftPanelOpen.value = true
+    rightPanelOpen.value = config.value.rightPanelOpen
+    onboardingGuideOpen.value = false
+    assetManagementOpenRequest.value = {
+      sequence: assetManagementOpenRequest.value.sequence + 1,
+      ...(organizationId ? { organizationId } : {})
+    }
+    setTopNotice(organizationId ? '已打开组织资产管理' : '已打开资产管理')
+  }
+
   const handleDeepLink = (payload: AiopstermDeepLinkPayload) => {
     if (payload.target === 'agents') {
       mode.value = 'agents'
@@ -11847,6 +11861,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionInstallProgressMap,
     extensionDragActive,
     extensionInstallingPackageName,
+    assetManagementOpenRequest,
     aliasCommands,
     refreshAliasCommands,
     aliasSearchQuery,
@@ -12109,6 +12124,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     confirmTrustedDeviceRevoke,
     toggleMode,
     setActiveModule,
+    openAssetManagement,
     setFilesUiMode,
     selectFileSession,
     openFileSession,

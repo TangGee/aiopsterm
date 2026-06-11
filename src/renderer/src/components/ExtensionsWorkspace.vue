@@ -159,26 +159,86 @@
                 >
                   暂无接入步骤
                 </div>
-                <h3>连接日志</h3>
+                <h3>资产同步状态</h3>
                 <div
-                  v-if="workspace.selectedExtension.connectionLog?.length"
-                  class="connection_log_terminal"
+                  v-if="jumpserverAssetError"
+                  class="jumpserver_asset_notice error"
                 >
-                  <p
-                    v-for="entry in workspace.selectedExtension.connectionLog"
-                    :key="`${entry.time}-${entry.message}`"
-                    :class="`connection_log_${entry.status}`"
+                  {{ jumpserverAssetError }}
+                </div>
+                <div class="jumpserver_asset_summary">
+                  <div>
+                    <span>Jumpserver 数据源</span>
+                    <strong>{{ jumpserverOrganizations.length }}</strong>
+                  </div>
+                  <div>
+                    <span>已同步主机</span>
+                    <strong>{{ jumpserverSyncedAssets.length }}</strong>
+                  </div>
+                  <div>
+                    <span>在线同步主机</span>
+                    <strong>{{ jumpserverOnlineSyncedAssets.length }}</strong>
+                  </div>
+                </div>
+                <div class="jumpserver_asset_actions">
+                  <button
+                    class="op_btn primary"
+                    :disabled="jumpserverAssetLoading || jumpserverOrganizations.length === 0"
+                    @click="refreshJumpserverAssets()"
                   >
-                    <span>[{{ entry.time }}]</span>
-                    <b>{{ connectionLogStatusMark(entry.status) }}</b>
-                    {{ entry.message }}
-                  </p>
+                    {{ jumpserverAssetLoading ? '刷新中' : '刷新组织资产' }}
+                  </button>
+                  <button
+                    class="op_btn"
+                    @click="openJumpserverAssetManagement"
+                  >
+                    打开资产管理
+                  </button>
+                  <span v-if="jumpserverAssetNotice">{{ jumpserverAssetNotice }}</span>
                 </div>
                 <div
-                  v-else
+                  v-if="jumpserverOrganizations.length"
+                  class="jumpserver_source_list"
+                >
+                  <div
+                    v-for="organization in jumpserverOrganizations"
+                    :key="organization.id"
+                    class="jumpserver_source_row"
+                  >
+                    <span>
+                      <strong>{{ organization.title }}</strong>
+                      <small>{{ organization.username }}@{{ organization.host }}:{{ organization.port }}</small>
+                    </span>
+                    <button
+                      class="op_btn"
+                      :disabled="jumpserverAssetLoading"
+                      @click="refreshJumpserverAssets(organization.id)"
+                    >
+                      刷新
+                    </button>
+                  </div>
+                </div>
+                <div
+                  v-else-if="!jumpserverAssetLoading"
                   class="empty_readme"
                 >
-                  暂无连接日志
+                  暂无 Jumpserver 数据源，请先在资产管理中新增堡垒机。
+                </div>
+                <div
+                  v-if="jumpserverSyncedAssets.length"
+                  class="jumpserver_synced_assets"
+                >
+                  <div
+                    v-for="asset in jumpserverSyncedAssets"
+                    :key="asset.id"
+                    class="jumpserver_synced_asset"
+                  >
+                    <span>
+                      <strong>{{ asset.title }}</strong>
+                      <small>{{ asset.username }}@{{ asset.host }}:{{ asset.port }}</small>
+                    </span>
+                    <b :class="`asset_status_${asset.status}`">{{ asset.status }}</b>
+                  </div>
                 </div>
               </div>
             </div>
@@ -289,7 +349,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, type Component, type PropType } from 'vue'
+import { computed, defineComponent, h, ref, watch, type Component, type PropType } from 'vue'
 import {
   Check,
   Cloud,
@@ -304,11 +364,16 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
+import { isAiopsAssetSnapshot, malformedAssetBackendResultMessage } from '@/services/assetBackendGuards'
+import type { AiopsAssetRecord, AiopsAssetSnapshot, ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
 
 type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
 const workspace = useWorkspaceStore()
+const jumpserverAssetSnapshot = ref<AiopsAssetSnapshot>({ assets: [], folders: [] })
+const jumpserverAssetLoading = ref(false)
+const jumpserverAssetError = ref('')
+const jumpserverAssetNotice = ref('')
 
 const iconMap: Record<ExtensionIconKey, Component> = {
   jumpserver: Layers,
@@ -335,12 +400,6 @@ const formatSize = (size?: number) => {
     index++
   }
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
-}
-
-const connectionLogStatusMark = (status: 'progress' | 'success' | 'error') => {
-  if (status === 'success') return '✓'
-  if (status === 'error') return '!'
-  return '●'
 }
 
 const installStageText = (stage?: ExtensionInstallStage) => {
@@ -370,6 +429,97 @@ const updateButtonText = computed(() => {
   if (!isSelectedBusy.value) return '更新'
   return selectedStageText.value || 'Updating'
 })
+
+const isJumpserverOrganization = (asset: AiopsAssetRecord) =>
+  asset.asset_type === 'organization' && asset.tags.some((tag) => tag.toLowerCase() === 'jumpserver')
+
+const jumpserverOrganizations = computed(() => jumpserverAssetSnapshot.value.assets.filter(isJumpserverOrganization))
+const jumpserverOrganizationIds = computed(() => new Set(jumpserverOrganizations.value.flatMap((asset) => [asset.id, asset.uuid])))
+const jumpserverSyncedAssets = computed(() =>
+  jumpserverAssetSnapshot.value.assets.filter(
+    (asset) =>
+      !asset.isLocalShell &&
+      asset.asset_type !== 'organization' &&
+      asset.data_source === 'refresh' &&
+      (asset.tags.some((tag) => tag.toLowerCase() === 'jumpserver') || Boolean(asset.organizationId && jumpserverOrganizationIds.value.has(asset.organizationId)))
+  )
+)
+const jumpserverOnlineSyncedAssets = computed(() => jumpserverSyncedAssets.value.filter((asset) => asset.status === 'online'))
+
+const loadJumpserverAssetSnapshot = async () => {
+  if (workspace.selectedExtension?.pluginId !== 'jumpserverSupport') return false
+  const listAssets = window.aiops?.listAssets
+  if (typeof listAssets !== 'function') {
+    jumpserverAssetError.value = '资产列表服务不可用'
+    return false
+  }
+  jumpserverAssetLoading.value = true
+  try {
+    const snapshot = await listAssets()
+    if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+    jumpserverAssetSnapshot.value = {
+      assets: snapshot.assets.map((asset) => ({ ...asset, tags: [...asset.tags] })),
+      folders: snapshot.folders.map((folder) => ({ ...folder }))
+    }
+    jumpserverAssetError.value = ''
+    return true
+  } catch (error) {
+    jumpserverAssetError.value = error instanceof Error ? error.message : '资产列表加载失败'
+    return false
+  } finally {
+    jumpserverAssetLoading.value = false
+  }
+}
+
+const applyJumpserverRefreshSnapshot = (snapshot: unknown) => {
+  if (!isAiopsAssetSnapshot(snapshot)) return false
+  jumpserverAssetSnapshot.value = {
+    assets: snapshot.assets.map((asset) => ({ ...asset, tags: [...asset.tags] })),
+    folders: snapshot.folders.map((folder) => ({ ...folder }))
+  }
+  return true
+}
+
+const refreshJumpserverAssets = async (organizationId?: string) => {
+  const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+  if (typeof refreshOrganizationAssets !== 'function') {
+    jumpserverAssetError.value = '组织资产刷新服务不可用'
+    return false
+  }
+  const targetOrganizationId = organizationId || jumpserverOrganizations.value[0]?.id
+  if (!targetOrganizationId) {
+    jumpserverAssetNotice.value = '请先在资产管理中新增 Jumpserver 数据源'
+    return false
+  }
+  jumpserverAssetLoading.value = true
+  try {
+    const result = await refreshOrganizationAssets({ organizationId: targetOrganizationId })
+    if (!result?.ok) throw new Error(result?.errorMessage || '组织资产刷新失败')
+    if (!applyJumpserverRefreshSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+    const created = typeof result.data?.created === 'number' ? result.data.created : 0
+    const updated = typeof result.data?.updated === 'number' ? result.data.updated : 0
+    jumpserverAssetError.value = ''
+    jumpserverAssetNotice.value = `刷新完成：新增 ${created}，更新 ${updated}`
+    return true
+  } catch (error) {
+    jumpserverAssetError.value = error instanceof Error ? error.message : '组织资产刷新失败'
+    return false
+  } finally {
+    jumpserverAssetLoading.value = false
+  }
+}
+
+const openJumpserverAssetManagement = () => {
+  workspace.openAssetManagement(jumpserverOrganizations.value[0]?.id)
+}
+
+watch(
+  () => workspace.selectedExtension?.pluginId,
+  (pluginId) => {
+    if (pluginId === 'jumpserverSupport') void loadJumpserverAssetSnapshot()
+  },
+  { immediate: true }
+)
 
 const PluginHeader = defineComponent({
   name: 'PluginHeader',

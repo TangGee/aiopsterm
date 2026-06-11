@@ -558,20 +558,13 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
       { title: '资产同步', desc: '从堡垒机同步组织、主机和账号信息。' },
       { title: '资产直连', desc: '在终端中选择同步资产后直接建立 SSH 会话。' },
       { title: '认证联动', desc: '保留 Jumpserver 会话认证、审计和代理链路状态。' },
-      { title: '连接日志', desc: '展示堡垒机、目标主机、认证阶段的连接进度。' }
+      { title: '同步状态', desc: '展示后端资产同步数量、数据源和已同步主机状态。' }
     ],
     guideSteps: [
       '在资产管理中新增 Jumpserver 数据源。',
       '填写堡垒机地址、组织和认证信息。',
       '同步资产并确认主机分组。',
       '从终端或文件管理中选择资产直连。'
-    ],
-    connectionLog: [
-      { time: '10:15:49', status: 'progress', message: 'connecting to bastion host' },
-      { time: '10:15:50', status: 'success', message: 'connected to bastion host' },
-      { time: '10:15:50', status: 'progress', message: 'connecting to target' },
-      { time: '10:15:51', status: 'progress', message: 'authenticating' },
-      { time: '10:15:51', status: 'success', message: 'connected to target' }
     ]
   },
   {
