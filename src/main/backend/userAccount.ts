@@ -189,6 +189,20 @@ const userCodeCooldowns = new Map<string, UserCodeCooldown>()
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!isRecord(value)) return value
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, unknown>>((result, key) => {
+      const nextValue = stableValue(value[key])
+      if (nextValue !== undefined) result[key] = nextValue
+      return result
+    }, {})
+}
+
+const stableJson = (value: unknown) => JSON.stringify(stableValue(value))
+
 const persistedString = (value: unknown, fallback = '') => (typeof value === 'string' ? value.trim() || fallback : fallback)
 
 const persistedRawString = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback)
@@ -260,6 +274,12 @@ const normalizePersistedProfile = (value: unknown): AiopsUserProfile => {
   }
 }
 
+const withSingleCurrentTrustedDevice = (devices: AiopsTrustedDevice[], fallback: AiopsTrustedDevice[]) => {
+  if (!devices.length) return fallback
+  const currentIndex = Math.max(0, devices.findIndex((device) => device.current))
+  return devices.map((device, index) => ({ ...device, current: index === currentIndex }))
+}
+
 const normalizePersistedTrustedDevices = (value: unknown): AiopsTrustedDevice[] => {
   const fallback = createInitialTrustedDevices()
   if (!Array.isArray(value)) return fallback
@@ -282,18 +302,33 @@ const normalizePersistedTrustedDevices = (value: unknown): AiopsTrustedDevice[] 
       current: persistedBoolean(item.current, false)
     })
   })
-  if (!devices.length) return fallback
-  if (!devices.some((device) => device.current)) devices[0] = { ...devices[0], current: true }
-  return devices.map((device, index) => ({ ...device, current: device.current && !devices.slice(0, index).some((item) => item.current) }))
+  return withSingleCurrentTrustedDevice(devices, fallback)
+}
+
+const seedTrustedDevicesById = new Map(defaultTrustedDevices.map((device) => [device.id, device]))
+
+const stripLegacySeedUserAccountState = (state: UserAccountPersistedState): UserAccountPersistedState => {
+  if (runtimeConfig.useSeedData) return state
+  const profile = stableJson(state.profile) === stableJson(defaultUserProfile) ? createLocalUserProfile() : state.profile
+  const trustedDevices = state.trustedDevices.filter((device) => {
+    const seed = seedTrustedDevicesById.get(device.id)
+    return !seed || stableJson(device) !== stableJson(seed)
+  })
+  return {
+    version: 1,
+    profile,
+    trustedDevices: withSingleCurrentTrustedDevice(trustedDevices, createLocalTrustedDevices())
+  }
 }
 
 const normalizePersistedUserAccountState = (value: unknown): UserAccountPersistedState | null => {
   if (!isRecord(value)) return null
-  return {
+  const state: UserAccountPersistedState = {
     version: 1,
     profile: normalizePersistedProfile(value.profile),
     trustedDevices: normalizePersistedTrustedDevices(value.trustedDevices)
   }
+  return runtimeConfig.useSeedData ? state : stripLegacySeedUserAccountState(state)
 }
 
 const applyInitialUserAccountState = () => {
@@ -315,7 +350,10 @@ const ensureUserAccountStateLoaded = () => {
   try {
     const parsed = JSON.parse(readFileSync(runtimeConfig.stateFilePath, 'utf-8')) as unknown
     const state = normalizePersistedUserAccountState(parsed)
-    if (state) applyPersistedUserAccountState(state)
+    if (state) {
+      applyPersistedUserAccountState(state)
+      if (!runtimeConfig.useSeedData) persistUserAccountState()
+    }
   } catch {
     /* Keep the backend-owned default account state when local account state is corrupt. */
   }

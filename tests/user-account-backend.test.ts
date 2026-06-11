@@ -314,6 +314,124 @@ describe('user account backend boundary', () => {
     expect(data.trustedDevices.some((device: { deviceName: string }) => device.deviceName === 'MacBook')).toBe(false)
   })
 
+  it('strips unmodified legacy seed profile and trusted devices in non-seed runtime state', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-legacy-seed-empty-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'user-account.json')
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
+    backend.resetUserAccountForTests()
+    expectOkData(backend.updateUserProfile({ username: 'local_ops', name: 'Local Operator' }))
+
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: false })
+    const data = expectOkData(backend.getUserAccount())
+
+    expect(data.profile).toMatchObject({
+      uid: 0,
+      subscription: 'free',
+      skippedLogin: true,
+      localDatabaseReady: false,
+      lastLoginMethod: 'skip'
+    })
+    expect(data.profile.name).not.toBe('Local Operator')
+    expect(data.profile.email).toBe('')
+    expect(data.profile.mobile).toBe('')
+    expect(data.trustedDevices).toHaveLength(1)
+    expect(data.trustedDevices[0]).toMatchObject({ id: 1, current: true })
+    expect(data.trustedDevices[0].deviceName).not.toBe('Linux Workstation')
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8'))).toMatchObject({
+      profile: expect.objectContaining({
+        uid: 0,
+        subscription: 'free',
+        skippedLogin: true,
+        localDatabaseReady: false
+      }),
+      trustedDevices: [expect.objectContaining({ id: 1, current: true })]
+    })
+  })
+
+  it('preserves user-edited seed-derived account rows while stripping unchanged seed devices', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-legacy-seed-edited-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'user-account.json')
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        profile: {
+          uid: 2001007,
+          name: 'Ops Owner',
+          username: 'ops_owner',
+          avatarInitials: 'OO',
+          avatarImageUrl: '',
+          registrationType: 'personal',
+          registrationCode: 9,
+          authProvider: 'local',
+          subscription: 'pro',
+          subscriptionExpiresAt: '2026-12-31',
+          email: 'owner@example.local',
+          mobile: '13800000000',
+          localIp: '127.0.0.1',
+          macAddress: 'aa:bb:cc:dd:ee:ff',
+          isOfficeDevice: true,
+          needDeviceVerification: false,
+          skippedLogin: false,
+          localDatabaseReady: true,
+          lastLoginMethod: 'account',
+          lastLoginAt: '2026-06-04 10:30',
+          passwordUpdatedAt: '2026-06-01 09:00',
+          avatarUpdatedAt: '2026-06-01 09:00'
+        },
+        trustedDevices: [
+          {
+            id: 1,
+            deviceName: 'Primary Ops Workstation',
+            macAddress: 'aa:bb:cc:dd:ee:ff',
+            lastLoginIp: '10.24.8.12',
+            location: 'Shanghai',
+            lastLoginUserAgent: 'Chrome/125 Linux',
+            current: true
+          },
+          {
+            id: 2,
+            deviceName: 'MacBook',
+            macAddress: '11:22:33:44:55:66',
+            lastLoginIp: '10.18.3.42',
+            location: 'Hangzhou',
+            lastLoginUserAgent: 'Safari/17 macOS',
+            current: false
+          }
+        ]
+      }),
+      'utf-8'
+    )
+
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: false })
+    const data = expectOkData(backend.getUserAccount())
+
+    expect(data.profile).toMatchObject({
+      uid: 2001007,
+      name: 'Ops Owner',
+      username: 'ops_owner',
+      email: 'owner@example.local',
+      subscription: 'pro',
+      skippedLogin: false
+    })
+    expect(data.trustedDevices).toEqual([
+      expect.objectContaining({
+        id: 1,
+        deviceName: 'Primary Ops Workstation',
+        current: true
+      })
+    ])
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).trustedDevices).toEqual([
+      expect.objectContaining({
+        id: 1,
+        deviceName: 'Primary Ops Workstation',
+        current: true
+      })
+    ])
+  })
+
   it('persists account mutations and restores profile plus trusted devices through the backend store', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-persist-'))
     tempDirs.push(dir)
