@@ -3068,6 +3068,8 @@ describe('AppShell', () => {
       vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/empty-ref.log'] })
       vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
         mode: 'local',
+        taskId: 'conv-attachment-boundary',
+        srcAbsPath: '/tmp/empty-ref.log',
         refPath: '',
         name: 'empty-ref.log',
         size: 128,
@@ -3078,6 +3080,72 @@ describe('AppShell', () => {
       await wrapper.vm.$nextTick()
       expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
       expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/wrong-task.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
+        mode: 'local',
+        taskId: 'other-conversation',
+        srcAbsPath: '/tmp/wrong-task.log',
+        refPath: 'aiopsterm://chat-attachment/other-conversation/wrong-task.log',
+        name: 'wrong-task.log',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/other-conversation/wrong-task.log'
+      })
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/wrong-source.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
+        mode: 'local',
+        taskId: 'conv-attachment-boundary',
+        srcAbsPath: '/tmp/other-source.log',
+        refPath: 'aiopsterm://chat-attachment/conv-attachment-boundary/wrong-source.log',
+        name: 'wrong-source.log',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/conv-attachment-boundary/wrong-source.log'
+      })
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/wrong-ref.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
+        mode: 'local',
+        taskId: 'conv-attachment-boundary',
+        srcAbsPath: '/tmp/wrong-ref.log',
+        refPath: 'aiopsterm://chat-attachment/other-conversation/wrong-ref.log',
+        name: 'wrong-ref.log',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/conv-attachment-boundary/wrong-ref.log'
+      })
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').exists()).toBe(false)
+
+      store.selectedConversationId = 'conv:attachment/normalized'
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/normalized-task.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
+        mode: 'local',
+        taskId: 'conv-attachment-normalized',
+        srcAbsPath: '/tmp/normalized-task.log',
+        refPath: 'aiopsterm://chat-attachment/conv-attachment-normalized/normalized-task.log',
+        name: 'normalized-task.log',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/conv-attachment-normalized/normalized-task.log'
+      })
+      await wrapper.find('[data-testid="ai-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(window.aiops.stageChatAttachment).toHaveBeenLastCalledWith({ taskId: 'conv:attachment/normalized', srcAbsPath: '/tmp/normalized-task.log' })
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('已添加文件：normalized-task.log')
+      expect(wrapper.find('.chat-editable .mention-chip-doc').text()).toContain('normalized-task.log')
     } finally {
       ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
       ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
@@ -3164,6 +3232,8 @@ describe('AppShell', () => {
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/malformed-attachment.log'] })
       vi.mocked(window.aiops.stageChatAttachment).mockResolvedValueOnce({
         mode: 'local',
+        taskId: 'conv-malformed-ai-boundary',
+        srcAbsPath: '/tmp/malformed-attachment.log',
         refPath: 'aiopsterm://chat-attachment/conv-malformed-ai-boundary/malformed-attachment.log',
         name: '',
         size: 128,

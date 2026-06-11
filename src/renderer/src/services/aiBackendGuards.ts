@@ -105,6 +105,8 @@ export const isAiChatExportData = (value: unknown): value is AiChatExportData =>
 export const isChatAttachmentStageData = (value: unknown): value is ChatAttachmentStageResult =>
   isRecord(value) &&
   value.mode === 'local' &&
+  isNonEmptyString(value.taskId) &&
+  isNonEmptyString(value.srcAbsPath) &&
   isNonEmptyString(value.refPath) &&
   isNonEmptyString(value.name) &&
   isNonNegativeFiniteNumber(value.size) &&

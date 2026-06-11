@@ -1229,6 +1229,7 @@ import {
   isVoiceTranscriptionData,
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
+import { chatAttachmentPathSegments, normalizeChatAttachmentPath, normalizeChatAttachmentTaskId, parseChatAttachmentRef } from '@shared/chatAttachment'
 import type {
   AiChatChipContentPart,
   AiChipContentPart,
@@ -3297,6 +3298,18 @@ const ensureAttachmentConversationId = async () => {
   return created?.id || ''
 }
 
+const isStagedAttachmentForRequest = (staged: unknown, taskId: string, srcAbsPath: string) => {
+  if (!isChatAttachmentStageData(staged)) return false
+  const expectedTaskId = normalizeChatAttachmentTaskId(taskId)
+  const expectedSource = normalizeChatAttachmentPath(srcAbsPath)
+  if (staged.taskId !== expectedTaskId || normalizeChatAttachmentPath(staged.srcAbsPath) !== expectedSource) return false
+  if (staged.name === '.' || staged.name === '..' || staged.name.includes('/') || staged.name.includes('\\')) return false
+  const ref = parseChatAttachmentRef(staged.refPath)
+  if (!ref || ref.taskId !== expectedTaskId || ref.name !== staged.name) return false
+  const stagedParts = chatAttachmentPathSegments(staged.stagedPath)
+  return stagedParts.at(-3) === 'chat-attachments' && stagedParts.at(-2) === expectedTaskId && stagedParts.at(-1) === staged.name
+}
+
 const handleFileUpload = async () => {
   if (streaming.value) return
   const showOpenDialog = window.aiops?.showOpenDialog
@@ -3322,7 +3335,7 @@ const handleFileUpload = async () => {
     if (!result || result.canceled || !result.filePaths?.length) return
     const srcAbsPath = result.filePaths[0]
     const staged = await stageAttachment({ taskId, srcAbsPath })
-    if (!isChatAttachmentStageData(staged)) {
+    if (!isStagedAttachmentForRequest(staged, taskId, srcAbsPath)) {
       throw new Error(malformedAiBackendResultMessage)
     }
     const displayName = staged.name || srcAbsPath.split(/[/\\]/).pop() || 'file'

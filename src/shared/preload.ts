@@ -1501,6 +1501,8 @@ export type LocalFileReadResult = {
 
 export type ChatAttachmentStageResult = {
   mode: 'local'
+  taskId: string
+  srcAbsPath: string
   refPath: string
   name: string
   size: number

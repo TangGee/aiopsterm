@@ -37,6 +37,7 @@ import { configureAiCommandBackendRuntime, listAiCommandCatalog } from './backen
 import { configureAiContextBackendRuntime, listAiContextCatalog } from './backend/aiContext'
 import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
 import { exportChat } from './backend/chatExport'
+import { stageChatAttachment } from './backend/chatAttachments'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
@@ -1381,33 +1382,9 @@ const knowledgeSearchExtensions = new Set([
 const maxKnowledgeImportBytes = 10 * 1024 * 1024
 const maxKnowledgeSearchFileBytes = 2 * 1024 * 1024
 const maxKnowledgeSearchQueryLength = 512
-const maxChatAttachmentBytes = 10 * 1024 * 1024
 const maxCustomBackgroundBytes = 20 * 1024 * 1024
 const maxLocalTextReadBytes = 2 * 1024 * 1024
 const allowedCustomBackgroundExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
-const allowedChatAttachmentExtensions = new Set([
-  '.txt',
-  '.md',
-  '.js',
-  '.ts',
-  '.py',
-  '.java',
-  '.cpp',
-  '.c',
-  '.html',
-  '.css',
-  '.json',
-  '.xml',
-  '.yaml',
-  '.yml',
-  '.sql',
-  '.sh',
-  '.bat',
-  '.ps1',
-  '.log',
-  '.csv',
-  '.tsv'
-])
 
 const normalizeKnowledgeRelPath = (relPath: string) => relPath.replace(/\\/g, '/').replace(/^\/+/, '')
 
@@ -1430,13 +1407,6 @@ let knowledgeSearchIndex: KnowledgeSearchIndex | null = null
 
 const invalidateKnowledgeSearchIndex = () => {
   knowledgeSearchIndex = null
-}
-
-const normalizeChatAttachmentTaskId = (taskId: string) => taskId.trim().replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 96)
-
-const sanitizeChatAttachmentName = (name: string) => {
-  const cleaned = basename(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim()
-  return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : `attachment-${Date.now()}.txt`
 }
 
 const sanitizeCustomBackgroundName = (name: string) => {
@@ -3361,30 +3331,7 @@ const registerIpc = () => {
     await writeFile(filePath, typeof content === 'string' ? content : String(content), 'utf-8')
   })
   ipcMain.handle('chat:stage-attachment', async (_event, payload: { taskId: string; srcAbsPath: string }) => {
-    const taskId = normalizeChatAttachmentTaskId(typeof payload?.taskId === 'string' ? payload.taskId : '')
-    const srcAbsPath = typeof payload?.srcAbsPath === 'string' ? payload.srcAbsPath : ''
-    if (!taskId) throw new Error('taskId is required')
-    if (!srcAbsPath || !isAbsolute(srcAbsPath)) throw new Error('srcAbsPath must be absolute')
-
-    const metadata = await stat(srcAbsPath)
-    if (!metadata.isFile()) throw new Error('Attachment source must be a file')
-    if (metadata.size > maxChatAttachmentBytes) throw new Error('Attachment file too large')
-
-    const ext = extname(srcAbsPath).toLowerCase()
-    if (!allowedChatAttachmentExtensions.has(ext)) throw new Error('Attachment file type not allowed')
-
-    const taskDir = join(getChatAttachmentsPath(), taskId)
-    await mkdir(taskDir, { recursive: true })
-    const finalName = await ensureUniqueKnowledgeName(taskDir, sanitizeChatAttachmentName(basename(srcAbsPath)))
-    const stagedPath = join(taskDir, finalName)
-    await cp(srcAbsPath, stagedPath)
-    return {
-      mode: 'local',
-      refPath: `aiopsterm://chat-attachment/${encodeURIComponent(taskId)}/${encodeURIComponent(finalName)}`,
-      name: finalName,
-      size: metadata.size,
-      stagedPath
-    }
+    return stageChatAttachment(payload, getChatAttachmentsPath())
   })
   ipcMain.handle('chat:validate-image-attachment', (_event, input?: ChatImageAttachmentValidateInput) => validateChatImageAttachment(input || {}))
   ipcMain.handle('chat:prepare-image-attachment', (_event, input?: ChatImageAttachmentPrepareInput) => prepareChatImageAttachment(input || {}))

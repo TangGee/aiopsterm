@@ -5657,6 +5657,8 @@ Object.defineProperty(window, 'aiops', {
       const name = srcAbsPath.split(/[/\\]/).pop() || 'attachment.txt'
       return {
         mode: 'local' as const,
+        taskId,
+        srcAbsPath,
         refPath: `aiopsterm://chat-attachment/${encodeURIComponent(taskId)}/${encodeURIComponent(name)}`,
         name,
         size: 128,
