@@ -58,6 +58,23 @@ type AppUpdateOptions = {
 
 type AppUpdateProgressEmitter = (event: AppUpdateProgressEvent) => void
 
+type AppUpdateInstallerInput = {
+  version: string
+  filePath: string
+  size: number
+  sha256?: string
+  signature?: AppUpdateSignatureInfo
+}
+
+type AppUpdateInstallerResult = {
+  handoff: NonNullable<AppUpdateInstallResult['data']>['handoff']
+  message?: string
+}
+
+type AppUpdateInstallOptions = {
+  installer?: (input: AppUpdateInstallerInput) => Promise<AppUpdateInstallerResult> | AppUpdateInstallerResult
+}
+
 let downloadedUpdate: DownloadedUpdate | null = null
 
 const normalizeVersion = (value: unknown) => String(value || '').trim().replace(/^v/i, '')
@@ -464,12 +481,15 @@ export const downloadAppUpdate = async (
   }
 }
 
-export const installAppUpdate = async (input: { version?: string } = {}): Promise<AppUpdateInstallResult> => {
+export const installAppUpdate = async (input: { version?: string } = {}, options: AppUpdateInstallOptions = {}): Promise<AppUpdateInstallResult> => {
   const version = normalizeVersion(input.version) || downloadedUpdate?.version || ''
   if (!version) return mutationError('APP_UPDATE_VERSION_REQUIRED', 'Downloaded update version is required.')
   if (!downloadedUpdate) return mutationError('APP_UPDATE_DOWNLOAD_REQUIRED', 'Update package must be downloaded before install.')
   if (version !== downloadedUpdate.version) {
     return mutationError('APP_UPDATE_VERSION_MISMATCH', 'Downloaded update version does not match.')
+  }
+  if (typeof options.installer !== 'function') {
+    return mutationError('APP_UPDATE_INSTALLER_UNAVAILABLE', 'Update installer handoff is not configured.')
   }
 
   try {
@@ -477,6 +497,24 @@ export const installAppUpdate = async (input: { version?: string } = {}): Promis
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Cached update package is invalid.'
     return mutationError('APP_UPDATE_PACKAGE_INVALID', errorMessage)
+  }
+
+  let installResult: AppUpdateInstallerResult
+  try {
+    installResult = await options.installer({
+      version,
+      filePath: downloadedUpdate.filePath,
+      size: downloadedUpdate.size,
+      ...(downloadedUpdate.sha256 ? { sha256: downloadedUpdate.sha256 } : {}),
+      ...(downloadedUpdate.signature ? { signature: downloadedUpdate.signature } : {})
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Update installer handoff failed.'
+    return mutationError('APP_UPDATE_INSTALL_HANDOFF_FAILED', errorMessage)
+  }
+
+  if (installResult?.handoff?.kind !== 'os-open' || installResult.handoff.accepted !== true) {
+    return mutationError('APP_UPDATE_INSTALL_HANDOFF_FAILED', 'Update installer handoff was not accepted by the operating system.')
   }
 
   return {
@@ -488,8 +526,9 @@ export const installAppUpdate = async (input: { version?: string } = {}): Promis
       size: downloadedUpdate.size,
       ...(downloadedUpdate.sha256 ? { sha256: downloadedUpdate.sha256 } : {}),
       ...(downloadedUpdate.signature ? { signature: downloadedUpdate.signature } : {}),
+      handoff: installResult.handoff,
       requestedAt: new Date().toISOString(),
-      message: `Update ${version} install requested with cached package.`
+      message: installResult.message || `Update ${version} handed off to the operating system installer.`
     }
   }
 }

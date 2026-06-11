@@ -5032,6 +5032,10 @@ Object.defineProperty(window, 'aiops', {
         filePath: `/tmp/aiopsterm-test-updates/${version || '0.1.1'}.bin`,
         size: 1024,
         sha256: createHash('sha256').update(version || '0.1.1').digest('hex'),
+        handoff: {
+          kind: 'os-open' as const,
+          accepted: true as const
+        },
         requestedAt: '2026-06-09T10:00:00.000Z',
         message: `Update ${version || '0.1.1'} install requested by test backend.`
       }

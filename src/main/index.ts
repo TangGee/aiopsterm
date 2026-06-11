@@ -2561,7 +2561,24 @@ const registerIpc = () => {
     const emit = (progress: AppUpdateProgressEvent) => event.sender.send('app:update-progress', progress)
     return downloadAppUpdate({ version }, emit, { cacheDir: join(app.getPath('userData'), 'updates') })
   })
-  ipcMain.handle('app:install-update', (_event, version?: string) => installAppUpdate({ version }))
+  ipcMain.handle('app:install-update', (_event, version?: string) =>
+    installAppUpdate(
+      { version },
+      {
+        installer: async (update) => {
+          const errorMessage = await shell.openPath(update.filePath)
+          if (errorMessage) throw new Error(errorMessage)
+          return {
+            handoff: {
+              kind: 'os-open',
+              accepted: true
+            },
+            message: `Update ${update.version} handed off to the operating system installer.`
+          }
+        }
+      }
+    )
+  )
   ipcMain.handle('chat-history:list', () => listChatConversations())
   ipcMain.handle('chat-history:create', () => createChatConversation())
   ipcMain.handle('chat-history:update', (_event, input: AiChatConversationUpdateInput) => updateChatConversation(input))

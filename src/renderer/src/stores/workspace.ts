@@ -3473,6 +3473,9 @@ const isAppUpdateInstallData = (source: unknown, version: string): source is App
   source.size >= 0 &&
   (source.sha256 === undefined || typeof source.sha256 === 'string') &&
   (source.signature === undefined || isAppUpdateSignatureInfo(source.signature)) &&
+  isRecord(source.handoff) &&
+  source.handoff.kind === 'os-open' &&
+  source.handoff.accepted === true &&
   isNonEmptyString(source.requestedAt) &&
   isNonEmptyString(source.message)
 

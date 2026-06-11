@@ -1616,6 +1616,10 @@ export type AppUpdateInstallResult = AiopsMutationResult<{
   size: number
   sha256?: string
   signature?: AppUpdateSignatureInfo
+  handoff: {
+    kind: 'os-open'
+    accepted: true
+  }
   requestedAt: string
   message: string
 }>

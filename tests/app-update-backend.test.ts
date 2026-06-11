@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type AppUpdateTestOptions = {
   manifestPath?: string
@@ -12,13 +12,19 @@ type AppUpdateTestOptions = {
   trustedPublicKeyPath?: string
 }
 
+type AppUpdateInstallTestOptions = {
+  installer?: (input: { version: string; filePath: string; size: number; sha256?: string; signature?: unknown }) =>
+    | { handoff: { kind: 'os-open'; accepted: true }; message?: string }
+    | Promise<{ handoff: { kind: 'os-open'; accepted: true }; message?: string }>
+}
+
 let checkAppUpdate: (currentVersion: string, options?: AppUpdateTestOptions) => any
 let downloadAppUpdate: (
   input: { version?: string },
   emit?: (event: { status: string; version: string; percent: number; message?: string }) => void,
   options?: AppUpdateTestOptions
 ) => Promise<any>
-let installAppUpdate: (input?: { version?: string }) => Promise<any>
+let installAppUpdate: (input?: { version?: string }, options?: AppUpdateInstallTestOptions) => Promise<any>
 let resetAppUpdateStateForTests: () => void
 
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex')
@@ -266,7 +272,7 @@ describe('app update backend boundary', () => {
     }
   })
 
-  it('requires a downloaded cache package before install and returns the cached file path', async () => {
+  it('requires a downloaded cache package and configured installer before install handoff', async () => {
     const fixture = await createUpdateFixture({ version: '0.1.5', packageContent: 'package-v015' })
 
     try {
@@ -280,16 +286,39 @@ describe('app update backend boundary', () => {
         manifestPath: fixture.manifestPath,
         cacheDir: fixture.cacheDir
       })
-      const result = await installAppUpdate({ version: '0.1.5' })
+      await expect(installAppUpdate({ version: '0.1.5' })).resolves.toEqual({
+        ok: false,
+        errorCode: 'APP_UPDATE_INSTALLER_UNAVAILABLE',
+        errorMessage: 'Update installer handoff is not configured.'
+      })
+
+      const installer = vi.fn(async () => ({
+        handoff: {
+          kind: 'os-open' as const,
+          accepted: true as const
+        },
+        message: 'test installer accepted update package'
+      }))
+      const result = await installAppUpdate({ version: '0.1.5' }, { installer })
 
       expect(result.ok).toBe(true)
+      expect(installer).toHaveBeenCalledWith({
+        version: '0.1.5',
+        filePath: downloaded.data.filePath,
+        size: Buffer.byteLength(fixture.packageContent),
+        sha256: sha256(fixture.packageContent)
+      })
       expect(result.data).toMatchObject({
         version: '0.1.5',
         status: 'install-requested',
         filePath: downloaded.data.filePath,
         size: Buffer.byteLength(fixture.packageContent),
         sha256: sha256(fixture.packageContent),
-        message: 'Update 0.1.5 install requested with cached package.'
+        handoff: {
+          kind: 'os-open',
+          accepted: true
+        },
+        message: 'test installer accepted update package'
       })
       expect(result.data.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     } finally {
@@ -325,12 +354,116 @@ describe('app update backend boundary', () => {
         keyId: 'release-key-1'
       })
 
-      const installed = await installAppUpdate({ version: '0.2.2' })
+      const installer = vi.fn(async () => ({
+        handoff: {
+          kind: 'os-open' as const,
+          accepted: true as const
+        }
+      }))
+      const installed = await installAppUpdate({ version: '0.2.2' }, { installer })
       expect(installed.ok).toBe(true)
+      expect(installer).toHaveBeenCalledWith({
+        version: '0.2.2',
+        filePath: downloaded.data.filePath,
+        size: Buffer.byteLength(fixture.packageContent),
+        sha256: sha256(fixture.packageContent),
+        signature: {
+          algorithm: 'ed25519',
+          verified: true,
+          keyId: 'release-key-1'
+        }
+      })
       expect(installed.data?.signature).toEqual({
         algorithm: 'ed25519',
         verified: true,
         keyId: 'release-key-1'
+      })
+      expect(installed.data?.handoff).toEqual({
+        kind: 'os-open',
+        accepted: true
+      })
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails install handoff when the operating system opener rejects the cached package', async () => {
+    const fixture = await createUpdateFixture({ version: '0.1.6', packageContent: 'package-v016' })
+
+    try {
+      await expect(
+        downloadAppUpdate({ version: '0.1.6' }, undefined, {
+          manifestPath: fixture.manifestPath,
+          cacheDir: fixture.cacheDir
+        })
+      ).resolves.toMatchObject({ ok: true })
+
+      await expect(
+        installAppUpdate(
+          { version: '0.1.6' },
+          {
+            installer: async () => {
+              throw new Error('no application is associated with this package')
+            }
+          }
+        )
+      ).resolves.toEqual({
+        ok: false,
+        errorCode: 'APP_UPDATE_INSTALL_HANDOFF_FAILED',
+        errorMessage: 'no application is associated with this package'
+      })
+
+      const secondInstaller = vi.fn(async () => ({
+        handoff: {
+          kind: 'os-open' as const,
+          accepted: true as const
+        }
+      }))
+      await expect(installAppUpdate({ version: '0.1.6' }, { installer: secondInstaller })).resolves.toMatchObject({
+        ok: true,
+        data: {
+          version: '0.1.6',
+          status: 'install-requested',
+          handoff: {
+            kind: 'os-open',
+            accepted: true
+          }
+        }
+      })
+      expect(secondInstaller).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects install handoff results that do not confirm an accepted OS handoff', async () => {
+    const fixture = await createUpdateFixture({ version: '0.1.7', packageContent: 'package-v017' })
+
+    try {
+      await expect(
+        downloadAppUpdate({ version: '0.1.7' }, undefined, {
+          manifestPath: fixture.manifestPath,
+          cacheDir: fixture.cacheDir
+        })
+      ).resolves.toMatchObject({ ok: true })
+
+      await expect(
+        installAppUpdate(
+          { version: '0.1.7' },
+          {
+            installer: async () =>
+              ({
+                handoff: {
+                  kind: 'os-open',
+                  accepted: false
+                }
+              }) as any
+          }
+        )
+      ).resolves.toEqual({
+        ok: false,
+        errorCode: 'APP_UPDATE_INSTALL_HANDOFF_FAILED',
+        errorMessage: 'Update installer handoff was not accepted by the operating system.'
       })
     } finally {
       await rm(fixture.root, { recursive: true, force: true })
