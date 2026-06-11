@@ -3,7 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { UserConfig } from '@shared/preload'
+import type { DatabaseExportInput, DatabaseExportResult, UserConfig } from '@shared/preload'
+import { sanitizeDatabaseExportFileName } from '../src/shared/databaseExport'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -320,11 +321,22 @@ let configureDatabaseBackendRuntime: (config?: {
   now?: () => number
   timeoutMs?: number
 }) => void
+let exportDatabaseRowsBackend: (
+  input: DatabaseExportInput,
+  runtime: {
+    showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
+    writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
+    now?: () => Date
+  }
+) => Promise<DatabaseExportResult>
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/database'
   const backend = await import(modulePath)
   configureDatabaseBackendRuntime = backend.configureDatabaseBackendRuntime
+  const exportModulePath = '../src/main/backend/databaseExport'
+  const exportBackend = (await import(exportModulePath)) as { exportDatabaseRows: typeof exportDatabaseRowsBackend }
+  exportDatabaseRowsBackend = exportBackend.exportDatabaseRows
 })
 
 describe('database backend boundary', () => {
@@ -334,6 +346,12 @@ describe('database backend boundary', () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-sqlite-'))
     tempDirs.push(dir)
     return join(dir, 'ops-cache.sqlite3')
+  }
+
+  const createTempCsvFile = async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-export-'))
+    tempDirs.push(dir)
+    return join(dir, 'orders-page.csv')
   }
 
   beforeEach(() => {
@@ -367,6 +385,129 @@ describe('database backend boundary', () => {
       endpoint: '127.0.0.1:5432'
     })
     expect(result.data?.durationMs).toBeGreaterThan(0)
+  })
+
+  it('exports visible database rows through the backend CSV file boundary', async () => {
+    const outputFile = await createTempCsvFile()
+    const input = {
+      title: 'orders/page:*?"<>|',
+      kind: 'table-page' as const,
+      columns: ['id', 'service', 'note', 'payload', 'binary', 'empty'],
+      rows: [
+        {
+          id: 1,
+          service: 'payment,api',
+          note: 'said "ready"\nnow',
+          payload: { status: 'open' },
+          binary: new Uint8Array([0, 15, 255]),
+          empty: null
+        },
+        {
+          id: 2,
+          service: 'orders-worker',
+          note: 'plain',
+          payload: ['a', 'b'],
+          binary: new Uint8Array([16]),
+          empty: undefined
+        }
+      ],
+      metadata: {
+        connectionName: 'orders-postgres',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders',
+        page: 2,
+        pageSize: 10,
+        total: 42
+      }
+    }
+    const now = () => new Date('2026-06-04T00:00:00Z')
+    const showSaveDialog = vi.fn(async () => ({ canceled: false, filePath: outputFile }))
+
+    const result = await exportDatabaseRowsBackend(input, { showSaveDialog, now })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      exported: 2,
+      fileName: sanitizeDatabaseExportFileName(input, now()),
+      filePath: outputFile
+    })
+    expect(showSaveDialog).toHaveBeenCalledWith({
+      defaultPath: sanitizeDatabaseExportFileName(input, now()),
+      filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+    })
+    const csv = await readFile(outputFile, 'utf-8')
+    expect(csv).toBe(result.data?.csv)
+    expect(csv).toContain('# aiopsterm database export\n')
+    expect(csv).toContain('# kind,table-page\n')
+    expect(csv).toContain('# connection,orders-postgres\n')
+    expect(csv).toContain('# table,orders\n')
+    expect(csv).toContain('# page,2\n')
+    expect(csv).toContain('id,service,note,payload,binary,empty\n')
+    expect(csv).toContain('1,"payment,api","said ""ready""\nnow","{""status"":""open""}",0x000fff,')
+    expect(csv).toContain('2,orders-worker,plain,"[""a"",""b""]",0x10,')
+  })
+
+  it('returns a canceled database export result without writing a file', async () => {
+    const writeFile = vi.fn(async () => undefined)
+    const input = {
+      title: 'orders',
+      kind: 'sql-result' as const,
+      columns: ['id'],
+      rows: [{ id: 1 }],
+      metadata: { sql: 'select * from orders', total: 1 }
+    }
+
+    const result = await exportDatabaseRowsBackend(input, {
+      showSaveDialog: async () => ({ canceled: true }),
+      writeFile,
+      now: () => new Date('2026-06-04T00:00:00Z')
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        exported: 0,
+        fileName: sanitizeDatabaseExportFileName(input, new Date('2026-06-04T00:00:00Z')),
+        canceled: true
+      }
+    })
+    expect(writeFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid database export payloads before opening the save dialog', async () => {
+    const showSaveDialog = vi.fn(async () => ({ canceled: false, filePath: '/tmp/unused.csv' }))
+
+    await expect(
+      exportDatabaseRowsBackend(
+        {
+          title: 'empty columns',
+          kind: 'table-page',
+          columns: [],
+          rows: [{ id: 1 }]
+        },
+        { showSaveDialog }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_EMPTY_COLUMNS'
+    })
+
+    await expect(
+      exportDatabaseRowsBackend(
+        {
+          title: 'empty rows',
+          kind: 'table-page',
+          columns: ['id'],
+          rows: []
+        },
+        { showSaveDialog }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_EMPTY_ROWS'
+    })
+    expect(showSaveDialog).not.toHaveBeenCalled()
   })
 
   it('lists the database workspace catalog through the backend boundary', async () => {

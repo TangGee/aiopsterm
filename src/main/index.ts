@@ -89,6 +89,7 @@ import {
   startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from './backend/database'
+import { exportDatabaseRows } from './backend/databaseExport'
 import {
   cancelExtensionInstall,
   configureExtensionBackendRuntime,
@@ -254,6 +255,7 @@ import type {
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneResponseInput,
   DatabaseAiPaneStateSnapshot,
+  DatabaseExportInput,
   DatabaseSqlErrorDiagnosisInput,
   DatabaseSqlExecuteInput,
   DatabaseTableDdlInput,
@@ -3864,6 +3866,14 @@ const registerIpc = () => {
   ipcMain.handle('database:query-table', (_event, input: DatabaseTableQueryInput) => queryDatabaseTable(input))
   ipcMain.handle('database:mutation-plan', (_event, input: DatabaseTableMutationPlanInput) => planDatabaseTableMutation(input))
   ipcMain.handle('database:mutate-table', (_event, input: DatabaseTableMutationInput) => mutateDatabaseTable(input))
+  ipcMain.handle('database:export-rows', (_event, input: DatabaseExportInput) =>
+    exportDatabaseRows(input, {
+      showSaveDialog: (options) => {
+        const owner = BrowserWindow.getFocusedWindow()
+        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+      }
+    })
+  )
   ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
   ipcMain.handle('database:ai-pane-state:save', (_event, input: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(input))
   ipcMain.handle('database:ai-pane-request', (_event, input: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(input))

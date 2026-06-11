@@ -2159,6 +2159,31 @@ export type DatabaseTableMutationPlanResult = AiopsMutationResult<{
   warning: string
 }>
 
+export type DatabaseExportInput = {
+  title: string
+  kind: 'sql-result' | 'table-page'
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  metadata?: {
+    connectionName?: string
+    databaseName?: string
+    schemaName?: string
+    tableName?: string
+    sql?: string
+    page?: number
+    pageSize?: number
+    total?: number | null
+  }
+}
+
+export type DatabaseExportResult = AiopsMutationResult<{
+  exported: number
+  fileName: string
+  filePath?: string
+  canceled?: boolean
+  csv?: string
+}>
+
 export type DatabaseAiPaneMessageInput = {
   role: 'user' | 'assistant'
   content: string
@@ -2762,6 +2787,7 @@ export type AiopsPreloadApi = {
   queryDatabaseTable: (input: DatabaseTableQueryInput) => Promise<DatabaseTableQueryResult>
   planDatabaseTableMutation: (input: DatabaseTableMutationPlanInput) => Promise<DatabaseTableMutationPlanResult>
   mutateDatabaseTable: (input: DatabaseTableMutationInput) => Promise<DatabaseTableMutationResult>
+  exportDatabaseRows: (input: DatabaseExportInput) => Promise<DatabaseExportResult>
   getDatabaseAiPaneState: () => Promise<DatabaseAiPaneStateResult>
   saveDatabaseAiPaneState: (input: DatabaseAiPaneStateSnapshot) => Promise<DatabaseAiPaneStateResult>
   createDatabaseAiPaneRequest: (input: DatabaseAiPaneRequestInput) => Promise<DatabaseAiPaneRequestResult>

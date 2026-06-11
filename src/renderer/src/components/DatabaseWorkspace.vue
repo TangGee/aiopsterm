@@ -936,9 +936,12 @@
                   :page-size="activeSqlResultViewState.pageSize"
                   :total="filteredSqlRows.length"
                   :hide-refresh="true"
+                  :can-export="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
+                  export-title="Export current SQL result page"
                   @goto-page="(page) => updateSqlResultPage(page)"
                   @goto-last-page="gotoLastSqlResultPage"
                   @change-page-size="(size) => updateSqlResultPageSize(size)"
+                  @export="exportActiveSqlResultPage"
                 />
                 <ResultGrid
                   class="db-sql-result-grid"
@@ -976,6 +979,8 @@
           :can-undo="activeDataTab.undoStack.length > 0"
           :is-dirty="isDataTabDirty(activeDataTab)"
           :edit-disabled-reason="dataEditDisabledReason(activeDataTab)"
+          :can-export="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
+          export-title="Export current table page"
           @goto-page="(page) => updateDataPage(page)"
           @goto-last-page="gotoLastDataPage"
           @change-page-size="(size) => updateDataPageSize(size)"
@@ -985,6 +990,7 @@
           @delete-row="deleteSelectedDataRow"
           @undo="undoDataChanges"
           @save="saveDataChanges"
+          @export="exportActiveDataPage"
         />
         <div class="db-where-bar">
           <span class="db-where-table"><Table2 /> {{ activeDataTab.tableName }}</span>
@@ -2200,6 +2206,7 @@ import type {
   DatabaseConnectionTestResult,
   DatabaseEngineCode,
   DatabaseEngineInfo,
+  DatabaseExportResult,
   DatabaseGroupCreateInput,
   DatabaseGroupInfo,
   DatabaseGroupDeleteResult,
@@ -2442,9 +2449,11 @@ const DataGridToolbar = defineComponent({
     canUndo: { type: Boolean, default: false },
     isDirty: { type: Boolean, default: false },
     editDisabledReason: { type: String, default: '' },
-    hideRefresh: { type: Boolean, default: false }
+    hideRefresh: { type: Boolean, default: false },
+    canExport: { type: Boolean, default: false },
+    exportTitle: { type: String, default: 'Export CSV' }
   },
-  emits: ['gotoPage', 'gotoLastPage', 'changePageSize', 'refreshTotal', 'refresh', 'add-row', 'delete-row', 'undo', 'save'],
+  emits: ['gotoPage', 'gotoLastPage', 'changePageSize', 'refreshTotal', 'refresh', 'add-row', 'delete-row', 'undo', 'save', 'export'],
   setup(props, { emit }) {
     const pageSizes = [10, 50, 100, 500, 1000, 5000, 10000]
     const pageCount = computed(() =>
@@ -2511,7 +2520,17 @@ const DataGridToolbar = defineComponent({
           h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-comment', disabled: true, title: 'Comment' }, '💬')
         ]),
         h('span', { class: 'db-toolbar-spacer' }),
-        h('button', { type: 'button', disabled: true, class: 'db-toolbar-btn db-toolbar-export' }, 'Export ▾')
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: !props.canExport,
+            class: 'db-toolbar-btn db-toolbar-export',
+            title: props.canExport ? props.exportTitle : 'No rows to export',
+            onClick: () => emit('export')
+          },
+          'Export ▾'
+        )
       ])
   }
 })
@@ -4047,6 +4066,18 @@ function isDatabaseTableQueryData(value: unknown): value is NonNullable<Database
   )
 }
 
+function isDatabaseExportData(value: unknown): value is NonNullable<DatabaseExportResult['data']> {
+  return (
+    isRecord(value) &&
+    isNonNegativeNumber(value.exported) &&
+    typeof value.fileName === 'string' &&
+    value.fileName.trim().endsWith('.csv') &&
+    (value.filePath === undefined || typeof value.filePath === 'string') &&
+    (value.canceled === undefined || typeof value.canceled === 'boolean') &&
+    (value.csv === undefined || typeof value.csv === 'string')
+  )
+}
+
 function tableNodeExists(tableId: string) {
   return connections.value.some((connection) =>
     connection.catalogs.some((catalog) => {
@@ -5555,6 +5586,82 @@ function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }
     schemaName: tab.schemaName,
     tableName: tab.tableName,
     mutations: buildDataMutationPayload(tab)
+  })
+}
+
+async function exportDatabaseRowsThroughBackend(input: Parameters<typeof window.aiops.exportDatabaseRows>[0]) {
+  if (typeof window.aiops.exportDatabaseRows !== 'function') {
+    showNotice('Database export service unavailable')
+    return null
+  }
+  try {
+    const result = await window.aiops.exportDatabaseRows(input)
+    if (!result.ok) {
+      showNotice(result.errorMessage || 'Database export failed')
+      return null
+    }
+    if (!isDatabaseExportData(result.data)) {
+      showNotice('Database export backend returned malformed result data.')
+      return null
+    }
+    if (result.data.canceled) {
+      showNotice('Database export cancelled')
+      return result.data
+    }
+    showNotice(`Exported ${result.data.exported} row${result.data.exported === 1 ? '' : 's'} to ${result.data.fileName}`)
+    return result.data
+  } catch (error) {
+    showNotice(errorToMessage(error))
+    return null
+  }
+}
+
+function exportActiveSqlResultPage() {
+  const tab = activeSqlTab.value
+  const result = activeSqlResult.value
+  if (!tab || !result || result.status !== 'ok' || !pagedSqlRows.value.length) {
+    showNotice('No SQL result rows to export')
+    return null
+  }
+  const connection = findConnection(tab.connectionId)
+  return exportDatabaseRowsThroughBackend({
+    title: `${tab.title}-${result.title}`,
+    kind: 'sql-result',
+    columns: result.columns,
+    rows: pagedSqlRows.value,
+    metadata: {
+      connectionName: connection?.name,
+      databaseName: tab.catalogName,
+      schemaName: tab.schemaName,
+      sql: result.sql,
+      page: activeSqlResultViewState.value.page,
+      pageSize: activeSqlResultViewState.value.pageSize,
+      total: filteredSqlRows.value.length
+    }
+  })
+}
+
+function exportActiveDataPage() {
+  const tab = activeDataTab.value
+  if (!tab || tab.loading || tab.error || !pagedDataRows.value.length) {
+    showNotice('No table rows to export')
+    return null
+  }
+  const connection = findConnection(tab.connectionId)
+  return exportDatabaseRowsThroughBackend({
+    title: `${tab.title}-page-${tab.page}`,
+    kind: 'table-page',
+    columns: tab.columns,
+    rows: pagedDataRows.value,
+    metadata: {
+      connectionName: connection?.name,
+      databaseName: tab.catalogName,
+      schemaName: tab.schemaName,
+      tableName: tab.tableName,
+      page: tab.page,
+      pageSize: tab.pageSize,
+      total: tab.total
+    }
   })
 }
 

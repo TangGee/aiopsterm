@@ -9,6 +9,7 @@ import type {
   DatabaseConnectionTestInput,
   DatabaseEngineCode,
   DatabaseEngineInfo,
+  DatabaseExportInput,
   DatabaseGroupCreateInput,
   DatabaseGroupInfo,
   DatabaseGroupUpdateInput,
@@ -27,6 +28,7 @@ import type {
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { buildChatExportMarkdown, sanitizeChatExportFileName } from '@shared/chatExport'
 import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
+import { buildDatabaseExportCsv, sanitizeDatabaseExportFileName } from '@shared/databaseExport'
 import {
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64,
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME,
@@ -5544,6 +5546,15 @@ Object.defineProperty(window, 'aiops', {
         fileName: sanitizeChatExportFileName(input.title),
         filePath: '/tmp/ai-chat-export.md',
         markdown: buildChatExportMarkdown(input, new Date('2026-06-04T12:00:00+08:00'))
+      }
+    })),
+    exportDatabaseRows: vi.fn(async (input: DatabaseExportInput) => ({
+      ok: true,
+      data: {
+        exported: input.rows.length,
+        fileName: sanitizeDatabaseExportFileName(input, new Date('2026-06-04T12:00:00+08:00')),
+        filePath: '/tmp/database-export.csv',
+        csv: buildDatabaseExportCsv(input)
       }
     })),
     saveCustomBackground: vi.fn(async (srcAbsPath: string) => {

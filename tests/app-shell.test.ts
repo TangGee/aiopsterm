@@ -6994,6 +6994,30 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
     expect(wrapper.find('.db-filter-chip').text()).toContain('EQ payment-api')
     expect(wrapper.find('.db-result-table').text()).not.toContain('orders-worker')
+    vi.mocked(window.aiops.exportDatabaseRows).mockClear()
+    const sqlExportButton = wrapper.find('.db-sql-results .db-toolbar-export')
+    expect(sqlExportButton.attributes('disabled')).toBeUndefined()
+    expect(sqlExportButton.attributes('title')).toBe('Export current SQL result page')
+    await sqlExportButton.trigger('click')
+    await flushPromises()
+    expect(window.aiops.exportDatabaseRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining('Query'),
+        kind: 'sql-result',
+        columns: ['id', 'service', 'status', 'owner', 'updated_at'],
+        rows: [expect.objectContaining({ id: 1001, service: 'payment-api', status: 'investigating' })],
+        metadata: expect.objectContaining({
+          connectionName: 'orders-pg-edited',
+          databaseName: 'orders',
+          schemaName: 'public',
+          sql: expect.stringContaining('public.orders'),
+          page: 1,
+          pageSize: 100,
+          total: 1
+        })
+      })
+    )
+    expect(wrapper.text()).toContain('Exported 1 row to')
     await wrapper.find('.db-result-tabs [role="tab"]').trigger('keydown', { key: ' ' })
     expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
     await firstResultTab.trigger('keydown', { key: 'Enter' })
@@ -7258,7 +7282,35 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-toolbar-btn-save').attributes('title')).toContain('No changes to save')
     expect(wrapper.find('.db-toolbar button[title="Chart"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.db-toolbar button[title="Comment"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.db-toolbar .db-toolbar-export').attributes('disabled')).toBeDefined()
+    const tableExportButton = wrapper.find('.db-data-workspace .db-toolbar-export')
+    expect(tableExportButton.attributes('disabled')).toBeUndefined()
+    expect(tableExportButton.attributes('title')).toBe('Export current table page')
+    vi.mocked(window.aiops.exportDatabaseRows).mockClear()
+    await tableExportButton.trigger('click')
+    await flushPromises()
+    expect(window.aiops.exportDatabaseRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'orders-page-1',
+        kind: 'table-page',
+        columns: ['id', 'service', 'status', 'owner', 'updated_at'],
+        rows: [
+          expect.objectContaining({ id: 1001, service: 'payment-api' }),
+          expect.objectContaining({ id: 1002, service: 'orders-worker' }),
+          expect.objectContaining({ id: 1003, service: 'k8s-ingress' }),
+          expect.objectContaining({ id: 1004, service: 'billing-sync' })
+        ],
+        metadata: expect.objectContaining({
+          connectionName: 'orders-pg-edited',
+          databaseName: 'orders',
+          schemaName: 'public',
+          tableName: 'orders',
+          page: 1,
+          pageSize: 10,
+          total: 4
+        })
+      })
+    )
+    expect(wrapper.text()).toContain('Exported 4 rows to')
     expect(wrapper.find('.db-where-bar input[aria-label="ORDER BY expression"]').exists()).toBe(false)
     expect(wrapper.find('.db-where-bar button[title="Apply order"]').exists()).toBe(false)
     expect(wrapper.findAll('.db-where-bar input')).toHaveLength(1)
@@ -7686,6 +7738,12 @@ describe('AppShell', () => {
     await waitForDatabaseTableData(wrapper)
     expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
     expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('Execution OK')
+
+    vi.mocked(window.aiops.exportDatabaseRows).mockResolvedValueOnce({ ok: true, data: { exported: 1 } } as any)
+    await wrapper.find('.db-data-workspace .db-toolbar-export').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database export backend returned malformed result data.')
+    expect(wrapper.text()).not.toContain('Exported 1 row to')
 
     vi.mocked(window.aiops.queryDatabaseTable).mockResolvedValueOnce({ ok: true } as any)
     await wrapper.find('.db-data-workspace .db-toolbar button[title="Refresh"]').trigger('click')

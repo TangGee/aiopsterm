@@ -250,6 +250,7 @@ const api: AiopsPreloadApi = {
   queryDatabaseTable: (input) => ipcRenderer.invoke('database:query-table', input),
   planDatabaseTableMutation: (input) => ipcRenderer.invoke('database:mutation-plan', input),
   mutateDatabaseTable: (input) => ipcRenderer.invoke('database:mutate-table', input),
+  exportDatabaseRows: (input) => ipcRenderer.invoke('database:export-rows', input),
   getDatabaseAiPaneState: () => ipcRenderer.invoke('database:ai-pane-state:get'),
   saveDatabaseAiPaneState: (input) => ipcRenderer.invoke('database:ai-pane-state:save', input),
   createDatabaseAiPaneRequest: (input) => ipcRenderer.invoke('database:ai-pane-request', input),
