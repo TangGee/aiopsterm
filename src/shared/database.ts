@@ -63,7 +63,7 @@ import type {
   DatabaseSqlErrorDiagnosisResult
 } from './preload'
 
-const supportedEngines = new Set(['mysql', 'mariadb', 'postgresql', 'sqlite', 'oracle', 'sqlserver'])
+const supportedEngines = new Set(['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver'])
 const DEFAULT_DATABASE_GROUP_ID = 'group-default'
 const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
 const databaseStatusValues = new Set<DatabaseConnectionInfo['status']>(['idle', 'testing', 'connected', 'failed'])
@@ -72,7 +72,9 @@ const postgresSslModeValues = new Set(['', 'disable', 'require', 'verify-ca', 'v
 const engineVersions: Record<DatabaseConnectionTestInput['dbType'], string> = {
   mysql: 'MySQL 8 local backend validation',
   mariadb: 'MariaDB local backend validation',
+  oceanbase: 'OceanBase MySQL-compatible local backend validation',
   postgresql: 'PostgreSQL 16 local backend validation',
+  kingbase: 'KingBase PostgreSQL-compatible local backend validation',
   sqlite: 'SQLite local backend validation',
   oracle: 'Oracle local backend validation',
   sqlserver: 'SQL Server local backend validation'
@@ -90,9 +92,9 @@ const databaseEngines: DatabaseEngineInfo[] = [
   { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
   { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
   { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
-  { code: 'oceanbase', name: 'OceanBase', enabled: false, accent: '#0ea5e9' },
+  { code: 'oceanbase', connectionCode: 'oceanbase', name: 'OceanBase', enabled: true, accent: '#0ea5e9' },
   { code: 'hive', name: 'Hive', enabled: false, accent: '#f59e0b' },
-  { code: 'kingbase', name: 'KingBase', enabled: false, accent: '#dc2626' },
+  { code: 'kingbase', connectionCode: 'kingbase', name: 'KingBase', enabled: true, accent: '#dc2626' },
   { code: 'mongodb', name: 'MongoDB', enabled: false, accent: '#4db33d' },
   { code: 'timeplus', name: 'Timeplus', enabled: false, accent: '#14b8a6' }
 ]
@@ -880,13 +882,31 @@ const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTable
 const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string) =>
   sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
 
-type RelationalDatabaseType = Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'postgresql' | 'oracle' | 'sqlserver'>
+type RelationalDatabaseType = Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'oracle' | 'sqlserver'>
 type DatabaseMutationDialect = DatabaseEngineCode
 type DatabaseMutationStatement = Omit<DatabaseTableMutationPlanStatement, 'preview'>
 type DatabaseRowMutation = Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>
 
-const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb'
-const mysqlCompatibleLabel = (dbType: DatabaseEngineCode | '') => (dbType === 'mariadb' ? 'MariaDB' : 'MySQL')
+const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb' || dbType === 'oceanbase'
+const isPostgresCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'postgresql' || dbType === 'kingbase'
+const mysqlCompatibleLabel = (dbType: DatabaseEngineCode | '') => (dbType === 'mariadb' ? 'MariaDB' : dbType === 'oceanbase' ? 'OceanBase' : 'MySQL')
+const postgresCompatibleLabel = (dbType: DatabaseEngineCode | '') => (dbType === 'kingbase' ? 'KingBase' : 'PostgreSQL')
+const mysqlCompatibleDriverErrorCode = (dbType: DatabaseEngineCode | '') =>
+  dbType === 'mariadb' ? 'DB_MARIADB_DRIVER_UNAVAILABLE' : dbType === 'oceanbase' ? 'DB_OCEANBASE_DRIVER_UNAVAILABLE' : 'DB_MYSQL_DRIVER_UNAVAILABLE'
+const postgresCompatibleDriverErrorCode = (dbType: DatabaseEngineCode | '') =>
+  dbType === 'kingbase' ? 'DB_KINGBASE_DRIVER_UNAVAILABLE' : 'DB_POSTGRES_DRIVER_UNAVAILABLE'
+const jdbcSchemeForDbType = (dbType: DatabaseEngineCode) =>
+  dbType === 'postgresql'
+    ? 'jdbc:postgresql'
+    : dbType === 'kingbase'
+      ? 'jdbc:kingbase8'
+      : dbType === 'sqlserver'
+        ? 'jdbc:sqlserver'
+        : dbType === 'mariadb'
+          ? 'jdbc:mariadb'
+          : dbType === 'oceanbase'
+            ? 'jdbc:oceanbase'
+            : 'jdbc:mysql'
 
 const databaseMutationIdentifier = (value: string, dialect: DatabaseMutationDialect) =>
   isMysqlCompatibleDbType(dialect)
@@ -896,7 +916,7 @@ const databaseMutationIdentifier = (value: string, dialect: DatabaseMutationDial
       : `"${String(value || '').replace(/"/g, '""')}"`
 
 const databaseMutationPlaceholder = (dialect: DatabaseMutationDialect, index: number) => {
-  if (dialect === 'postgresql') return `$${index}`
+  if (isPostgresCompatibleDbType(dialect)) return `$${index}`
   if (dialect === 'oracle') return `:${index}`
   if (dialect === 'sqlserver') return `@p${index}`
   return '?'
@@ -988,7 +1008,7 @@ const applyDatabaseMutationSingleRowGuard = (
   if (isMysqlCompatibleDbType(dialect)) return `${sql} LIMIT 1`
   if (dialect === 'sqlserver') return sql.replace(/^DELETE FROM /i, 'DELETE TOP (1) FROM ').replace(/^UPDATE /i, 'UPDATE TOP (1) ')
   if (dialect === 'sqlite') return sql.replace(`WHERE ${whereSql}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
-  if (dialect === 'postgresql') return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
+  if (isPostgresCompatibleDbType(dialect)) return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
   return sql
 }
 
@@ -1119,7 +1139,13 @@ const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTa
 
 const isRelationalConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is DatabaseConnectionInfo =>
   !!connection &&
-  (connection.dbType === 'mysql' || connection.dbType === 'mariadb' || connection.dbType === 'postgresql' || connection.dbType === 'oracle' || connection.dbType === 'sqlserver')
+  (connection.dbType === 'mysql' ||
+    connection.dbType === 'mariadb' ||
+    connection.dbType === 'oceanbase' ||
+    connection.dbType === 'postgresql' ||
+    connection.dbType === 'kingbase' ||
+    connection.dbType === 'oracle' ||
+    connection.dbType === 'sqlserver')
 
 const relationalErrorCode = (error: unknown, fallback: string) => {
   const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
@@ -1128,7 +1154,8 @@ const relationalErrorCode = (error: unknown, fallback: string) => {
 
 const relationalErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
 
-const relationalEngineCode = (dbType: RelationalDatabaseType) => (dbType === 'postgresql' ? 'POSTGRES' : dbType.toUpperCase())
+const relationalEngineCode = (dbType: RelationalDatabaseType) =>
+  dbType === 'postgresql' || dbType === 'kingbase' ? (dbType === 'kingbase' ? 'KINGBASE' : 'POSTGRES') : dbType.toUpperCase()
 
 const relationalFallbackCode = (dbType: RelationalDatabaseType, action: string) => `DB_${relationalEngineCode(dbType)}_${action}`
 
@@ -1145,7 +1172,7 @@ const relationalIdentifier = (value: string, dbType: RelationalDatabaseType) =>
       : `"${String(value || '').replace(/"/g, '""')}"`
 
 const relationalPlaceholder = (dbType: RelationalDatabaseType, index: number) => {
-  if (dbType === 'postgresql') return `$${index}`
+  if (isPostgresCompatibleDbType(dbType)) return `$${index}`
   if (dbType === 'oracle') return `:${index}`
   if (dbType === 'sqlserver') return `@p${index}`
   return '?'
@@ -1170,7 +1197,7 @@ const relationalTableReference = (
   const dbType = connection.dbType as RelationalDatabaseType
   const tableName = dbType === 'oracle' ? oracleLookupIdentifier(input.tableName) : trim(input.tableName)
   const table = relationalIdentifier(tableName, dbType)
-  if (connection.dbType === 'postgresql') return `${relationalIdentifier(trim(input.schemaName) || 'public', 'postgresql')}.${table}`
+  if (isPostgresCompatibleDbType(connection.dbType)) return `${relationalIdentifier(trim(input.schemaName) || 'public', dbType)}.${table}`
   if (connection.dbType === 'sqlserver') return `${relationalIdentifier(trim(input.schemaName) || 'dbo', 'sqlserver')}.${table}`
   if (connection.dbType === 'oracle') {
     const schemaName = oracleSchemaNameFor(connection, input)
@@ -1272,17 +1299,21 @@ const openMysqlConnection = async (
   if (!driver) {
     const label = mysqlCompatibleLabel(dbType)
     throw Object.assign(new Error(`${label} driver is unavailable. Install mysql2 before connecting to ${label}.`), {
-      code: dbType === 'mariadb' ? 'DB_MARIADB_DRIVER_UNAVAILABLE' : 'DB_MYSQL_DRIVER_UNAVAILABLE'
+      code: mysqlCompatibleDriverErrorCode(dbType)
     })
   }
   return driver.createConnection(mysqlConfigFor(input))
 }
 
-const openPostgresClient = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => {
+const openPostgresClient = async (
+  input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>,
+  dbType: DatabaseEngineCode | '' = 'postgresql'
+) => {
   const driver = loadPostgresRuntime()
   if (!driver) {
-    throw Object.assign(new Error('PostgreSQL driver is unavailable. Install pg before connecting to PostgreSQL.'), {
-      code: 'DB_POSTGRES_DRIVER_UNAVAILABLE'
+    const label = postgresCompatibleLabel(dbType)
+    throw Object.assign(new Error(`${label} driver is unavailable. Install pg before connecting to ${label}.`), {
+      code: postgresCompatibleDriverErrorCode(dbType)
     })
   }
   const client = new driver.Client(postgresConfigFor(input))
@@ -1331,7 +1362,7 @@ const withMysqlConnection = async <T>(connection: DatabaseConnectionInfo, fn: (c
 const withPostgresClient = async <T>(connection: DatabaseConnectionInfo, fn: (client: PostgresClient) => Promise<T>) => {
   let client: PostgresClient | null = null
   try {
-    client = await openPostgresClient(connectionTestInputFromSaved(connection))
+    client = await openPostgresClient(connectionTestInputFromSaved(connection), connection.dbType)
     return await fn(client)
   } finally {
     if (client) {
@@ -1497,6 +1528,39 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
     }
   }
 
+  if (isPostgresCompatibleDbType(input.dbType)) {
+    let client: PostgresClient | null = null
+    const label = postgresCompatibleLabel(input.dbType)
+    try {
+      client = await openPostgresClient(input, input.dbType)
+      const rows = await postgresRows<{ version?: string }>(client, 'SELECT version() AS version')
+      const version = trim(rows[0]?.version)
+      return {
+        ok: true,
+        data: {
+          dbType: input.dbType,
+          serverVersion: version ? (version.toLowerCase().includes(label.toLowerCase()) ? version : `${label} ${version}`) : label,
+          endpoint: endpointFor(input),
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: relationalErrorCode(error, relationalFallbackCode(input.dbType, 'CONNECTION_FAILED')),
+        errorMessage: relationalErrorMessage(error, `${label} connection failed.`)
+      }
+    } finally {
+      if (client) {
+        try {
+          await client.end()
+        } catch {
+          /* ignore close errors */
+        }
+      }
+    }
+  }
+
   if (input.dbType === 'oracle') {
     let client: OracleConnection | null = null
     try {
@@ -1567,31 +1631,7 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
     }
   }
 
-  let client: PostgresClient | null = null
-  try {
-    client = await openPostgresClient(input)
-    const rows = await postgresRows<{ version?: string }>(client, 'SELECT version() AS version')
-    const version = trim(rows[0]?.version)
-    return {
-      ok: true,
-      data: {
-        dbType: 'postgresql',
-        serverVersion: version || 'PostgreSQL',
-        endpoint: endpointFor(input),
-        durationMs: Math.max(1, Date.now() - startedAt)
-      }
-    }
-  } catch (error) {
-    return { ok: false, errorCode: relationalErrorCode(error, 'DB_POSTGRES_CONNECTION_FAILED'), errorMessage: relationalErrorMessage(error, 'PostgreSQL connection failed.') }
-  } finally {
-    if (client) {
-      try {
-        await client.end()
-      } catch {
-        /* ignore close errors */
-      }
-    }
-  }
+  return { ok: false, errorCode: 'DB_UNSUPPORTED_ENGINE', errorMessage: `Unsupported relational database engine: ${input.dbType}` }
 }
 
 const databaseColumnId = (connectionId: string, tableName: string) => `tbl-${connectionId}-${tableName.replace(/[^A-Za-z0-9_-]+/g, '-')}`
@@ -2522,7 +2562,7 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
         const viewRows = await postgresRows<{ ddl?: string }>(
           client,
           'SELECT pg_get_viewdef(($1)::regclass, true) AS ddl',
-          [`${relationalIdentifier(schemaName, 'postgresql')}.${relationalIdentifier(tableName, 'postgresql')}`]
+          [`${relationalIdentifier(schemaName, dbType)}.${relationalIdentifier(tableName, dbType)}`]
         ).catch(() => [])
         const viewDdl = trim(viewRows[0]?.ddl)
         if (!viewDdl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
@@ -2535,7 +2575,7 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
       )
       const columnLines = columns.map((row) => {
         const pieces = [
-          `  ${relationalIdentifier(trim(row.column_name), 'postgresql')} ${postgresColumnTypeDdl(row)}`,
+          `  ${relationalIdentifier(trim(row.column_name), dbType)} ${postgresColumnTypeDdl(row)}`,
           trim(row.is_nullable).toUpperCase() === 'NO' ? 'NOT NULL' : '',
           trim(row.column_default) ? `DEFAULT ${trim(row.column_default)}` : ''
         ].filter(Boolean)
@@ -2543,7 +2583,7 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
       })
       const pk = primaryKeys.map((row) => trim(row.column_name)).filter(Boolean)
       if (pk.length) {
-        columnLines.push(`  PRIMARY KEY (${pk.map((column) => relationalIdentifier(column, 'postgresql')).join(', ')})`)
+        columnLines.push(`  PRIMARY KEY (${pk.map((column) => relationalIdentifier(column, dbType)).join(', ')})`)
       }
       return { ok: true, data: { ddl: `CREATE TABLE ${relationalTableReference(connection, input)} (\n${columnLines.join(',\n')}\n);` } }
     })
@@ -2978,7 +3018,7 @@ const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>
     database: normalizePersistedString(value.database),
     filePath: dbType === 'sqlite' ? normalizePersistedString(value.filePath) || undefined : undefined,
     readonly: dbType === 'sqlite' ? value.readonly !== false : undefined,
-    sslMode: dbType === 'postgresql' || dbType === 'sqlserver' ? sslMode : '',
+    sslMode: isPostgresCompatibleDbType(dbType) || dbType === 'sqlserver' ? sslMode : '',
     url: normalizePersistedString(value.url) || undefined,
     status:
       typeof value.status === 'string' && databaseStatusValues.has(value.status as DatabaseConnectionInfo['status'])
@@ -3241,14 +3281,7 @@ const buildSavedConnectionUrl = (
   const port = normalized.port ? `:${normalized.port}` : ''
   const database = normalized.database ? `/${normalized.database}` : ''
   if (normalized.dbType === 'oracle') return `${normalized.host}${port}${database}`
-  const scheme =
-    normalized.dbType === 'postgresql'
-      ? 'jdbc:postgresql'
-      : normalized.dbType === 'sqlserver'
-        ? 'jdbc:sqlserver'
-        : normalized.dbType === 'mariadb'
-          ? 'jdbc:mariadb'
-          : 'jdbc:mysql'
+  const scheme = jdbcSchemeForDbType(normalized.dbType)
   return `${scheme}://${normalized.host}${port}${database}`
 }
 
@@ -3259,7 +3292,7 @@ const defaultCatalogsForSavedConnection = (connection: Omit<DatabaseConnectionIn
     const sqliteCatalogs = sqliteCatalogsForConnection({ ...connection, catalogs: [] })
     return sqliteCatalogs ?? [{ name: catalogName, tables: [] }]
   }
-  if (connection.dbType === 'postgresql') {
+  if (isPostgresCompatibleDbType(connection.dbType)) {
     return [{ name: catalogName, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }]
   }
   if (connection.dbType === 'oracle') {
@@ -3272,8 +3305,8 @@ const defaultCatalogsForSavedConnection = (connection: Omit<DatabaseConnectionIn
 }
 
 const createDatabaseCatalogForConnection = (connection: DatabaseConnectionInfo, name: string): DatabaseCatalogInfo =>
-  connection.dbType === 'postgresql' || connection.dbType === 'sqlserver'
-    ? { name, schemas: [{ name: connection.dbType === 'postgresql' ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
+  isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'sqlserver'
+    ? { name, schemas: [{ name: isPostgresCompatibleDbType(connection.dbType) ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
     : { name, tables: [] }
 
 const unquoteDatabaseIdentifier = (value: string) => {
@@ -3299,7 +3332,7 @@ const normalizeDatabaseConnectionSaveDraft = (
   const host = isSqlite ? 'local' : hasOracleConnectString ? 'connect-string' : trim(input.host)
   const port = isSqlite || hasOracleConnectString ? null : normalizedDatabasePort(input.port)
   const sslMode: DatabaseConnectionInfo['sslMode'] =
-    input.dbType === 'postgresql' && postgresSslModeValues.has(input.sslMode ?? '') ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
+    isPostgresCompatibleDbType(input.dbType) && postgresSslModeValues.has(input.sslMode ?? '') ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
   const normalized = {
     name: trim(input.name),
     dbType: input.dbType,
@@ -4033,7 +4066,7 @@ const quoteIdentifier = (value: string, dbType: DatabaseConnectionTestInput['dbT
 const qualifiedTableReference = (input: { dbType?: DatabaseConnectionTestInput['dbType'] | ''; databaseName?: string; schemaName?: string; tableName: string }) => {
   const dbType = input.dbType && supportedEngines.has(input.dbType) ? input.dbType : 'postgresql'
   const table = quoteIdentifier(input.tableName, dbType)
-  if ((dbType === 'postgresql' || dbType === 'oracle' || dbType === 'sqlserver') && input.schemaName) return `${quoteIdentifier(input.schemaName, dbType)}.${table}`
+  if ((isPostgresCompatibleDbType(dbType) || dbType === 'oracle' || dbType === 'sqlserver') && input.schemaName) return `${quoteIdentifier(input.schemaName, dbType)}.${table}`
   if (dbType === 'sqlite' && input.databaseName) return `${quoteIdentifier(input.databaseName, dbType)}.${table}`
   return table
 }
@@ -4079,7 +4112,13 @@ const drawerDbType = (input: DatabaseAiDrawerResponseInput) =>
   input.context.dbType && supportedEngines.has(input.context.dbType) ? input.context.dbType : 'postgresql'
 
 const normalizeDatabaseAiTargetDialect = (dialect: DatabaseAiTargetDialect | '' | undefined): DatabaseAiTargetDialect =>
-  dialect === 'sqlserver' ? 'mssql' : dialect === 'mariadb' ? 'mysql' : dialect || 'postgresql'
+  dialect === 'sqlserver'
+    ? 'mssql'
+    : dialect === 'mariadb' || dialect === 'oceanbase'
+      ? 'mysql'
+      : dialect === 'kingbase'
+        ? 'postgresql'
+        : dialect || 'postgresql'
 
 const drawerTargetDialect = (input: DatabaseAiDrawerResponseInput): DatabaseAiTargetDialect =>
   normalizeDatabaseAiTargetDialect(input.targetDialect || drawerDbType(input))
@@ -4095,6 +4134,8 @@ const dialectLabel = (dialect: DatabaseAiTargetDialect) => {
   if (dialect === 'postgresql') return 'PostgreSQL'
   if (dialect === 'mysql') return 'MySQL'
   if (dialect === 'mariadb') return 'MariaDB'
+  if (dialect === 'oceanbase') return 'OceanBase'
+  if (dialect === 'kingbase') return 'KingBase'
   if (dialect === 'sqlite') return 'SQLite'
   if (dialect === 'oracle') return 'Oracle'
   if (dialect === 'mssql' || dialect === 'sqlserver') return 'SQL Server'
@@ -4157,7 +4198,7 @@ const drawerTableReference = (input: DatabaseAiDrawerResponseInput, dialect: Dat
     ? tableKeyForContext({ connectionId, databaseName, schemaName, tableName: explicitTable })
     : firstTableKeyForContext({ connectionId, databaseName, schemaName })
   const parts = key ? keyParts(key) : { databaseName, schemaName, tableName: explicitTable || 'orders' }
-  if ((dialect === 'postgresql' || dialect === 'oracle' || dialect === 'mssql' || dialect === 'sqlserver') && parts.schemaName) {
+  if ((isPostgresCompatibleDbType(dialect) || dialect === 'oracle' || dialect === 'mssql' || dialect === 'sqlserver') && parts.schemaName) {
     return `${quoteDrawerIdentifier(parts.schemaName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
   }
   if (dialect === 'sqlite' && parts.databaseName) return `${quoteDrawerIdentifier(parts.databaseName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
@@ -4223,6 +4264,7 @@ const isExecutableDrawerDialect = (input: DatabaseAiDrawerResponseInput, dialect
   if (input.action !== 'convert') return true
   if (dialect === 'mssql') return drawerDbType(input) === 'sqlserver'
   if (dialect === 'mysql') return isMysqlCompatibleDbType(drawerDbType(input))
+  if (dialect === 'postgresql') return isPostgresCompatibleDbType(drawerDbType(input))
   return drawerDbType(input) === dialect
 }
 
@@ -4805,9 +4847,7 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
   }
 
   if (!shouldUseDatabaseSeedData()) {
-    if (input.dbType === 'mysql' || input.dbType === 'mariadb' || input.dbType === 'postgresql' || input.dbType === 'oracle' || input.dbType === 'sqlserver') {
-      return testRelationalDatabaseConnection(input, startedAt)
-    }
+    return testRelationalDatabaseConnection(input, startedAt)
   }
 
   return {
@@ -4909,11 +4949,11 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
-  if (!isMysqlCompatibleDbType(connection.dbType) && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver') {
+  if (!isMysqlCompatibleDbType(connection.dbType) && !isPostgresCompatibleDbType(connection.dbType) && connection.dbType !== 'sqlserver') {
     return {
       ok: false,
       errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED',
-      errorMessage: 'Create Database is only available for MySQL, MariaDB, PostgreSQL, and SQL Server connections.'
+      errorMessage: 'Create Database is only available for MySQL-compatible, PostgreSQL-compatible, and SQL Server connections.'
     }
   }
 
@@ -4934,9 +4974,9 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
         await withMysqlConnection(connection, async (client) => {
           await mysqlExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, connection.dbType as RelationalDatabaseType)}`)
         })
-      } else if (connection.dbType === 'postgresql') {
+      } else if (isPostgresCompatibleDbType(connection.dbType)) {
         await withPostgresClient(connection, async (client) => {
-          await postgresExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'postgresql')}`)
+          await postgresExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, connection.dbType as RelationalDatabaseType)}`)
         })
       } else {
         await withSqlServerPool(connection, async (client) => {
@@ -4952,7 +4992,7 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
             ? 'DB_MYSQL_CREATE_DATABASE_FAILED'
             : connection.dbType === 'sqlserver'
               ? 'DB_SQLSERVER_CREATE_DATABASE_FAILED'
-              : 'DB_POSTGRES_CREATE_DATABASE_FAILED'
+              : relationalFallbackCode(connection.dbType as RelationalDatabaseType, 'CREATE_DATABASE_FAILED')
         ),
         errorMessage: relationalErrorMessage(error, 'Create database failed.')
       }

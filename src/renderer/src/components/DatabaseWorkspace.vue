@@ -1901,7 +1901,7 @@
               @input="markConnectionUrlAuto"
             />
           </label>
-          <label v-if="connectionDraft.dbType === 'postgresql'">
+          <label v-if="isPostgresCompatibleDbType(connectionDraft.dbType)">
             SSL Mode
             <select v-model="connectionDraft.sslMode">
               <option value="">-</option>
@@ -2293,7 +2293,7 @@ const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
 const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
 const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql']
-const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'postgresql', 'sqlite', 'oracle', 'sqlserver']
+const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver']
 const DB_ENGINE_OPTION_CODES = [
   'mysql',
   'h2',
@@ -2312,7 +2312,20 @@ const DB_ENGINE_OPTION_CODES = [
   'mongodb',
   'timeplus'
 ] as const
-const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DbAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb'
+const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DbAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb' || dbType === 'oceanbase'
+const isPostgresCompatibleDbType = (dbType: DatabaseEngineCode | DbAiTargetDialect | '') => dbType === 'postgresql' || dbType === 'kingbase'
+const connectionSchemeForDbType = (dbType: DatabaseEngineCode) =>
+  dbType === 'postgresql'
+    ? 'jdbc:postgresql'
+    : dbType === 'kingbase'
+      ? 'jdbc:kingbase8'
+      : dbType === 'sqlserver'
+        ? 'jdbc:sqlserver'
+        : dbType === 'mariadb'
+          ? 'jdbc:mariadb'
+          : dbType === 'oceanbase'
+            ? 'jdbc:oceanbase'
+            : 'jdbc:mysql'
 const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
 const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -3040,7 +3053,7 @@ const connectionDraft = reactive({
 const createDatabaseModal = reactive({
   open: false,
   connectionId: '',
-  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'postgresql' | 'sqlserver'>,
+  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver'>,
   name: '',
   sql: '',
   userEditedSql: false,
@@ -3159,7 +3172,7 @@ const contextConnectionCanCreateDatabase = computed(() => {
   return (
     !!connection &&
     connection.status === 'connected' &&
-    (connection.dbType === 'mysql' || connection.dbType === 'mariadb' || connection.dbType === 'postgresql' || connection.dbType === 'sqlserver')
+    (isMysqlCompatibleDbType(connection.dbType) || isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'sqlserver')
   )
 })
 const connectionMoveTargets = computed(() => {
@@ -3361,14 +3374,7 @@ function buildConnectionUrl() {
   const port = connectionDraft.port ? `:${connectionDraft.port}` : ''
   const database = connectionDraft.database ? `/${connectionDraft.database}` : ''
   if (connectionDraft.dbType === 'oracle') return `${host}${port}${database}`
-  const scheme =
-    connectionDraft.dbType === 'postgresql'
-      ? 'jdbc:postgresql'
-      : connectionDraft.dbType === 'sqlserver'
-        ? 'jdbc:sqlserver'
-        : connectionDraft.dbType === 'mariadb'
-          ? 'jdbc:mariadb'
-          : 'jdbc:mysql'
+  const scheme = connectionSchemeForDbType(connectionDraft.dbType)
   return `${scheme}://${host}${port}${database}`
 }
 
@@ -3383,7 +3389,7 @@ function clearConnectionFeedback() {
 }
 
 function sqlConnectionRequiresSchema(connection: DatabaseConnectionInfo) {
-  return connection.dbType === 'postgresql' || connection.dbType === 'oracle' || connection.dbType === 'sqlserver'
+  return isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'oracle' || connection.dbType === 'sqlserver'
 }
 
 function defaultSchemaForSqlConnection(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined) {
@@ -3504,7 +3510,7 @@ function updateSqlTabSchema(event: Event) {
   tab.tableName = undefined
 }
 
-function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'postgresql' | 'sqlserver'>) {
+function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver'>) {
   const trimmed = name.trim()
   return trimmed ? `CREATE DATABASE ${quoteIdentForDialect(trimmed, dbType)};` : ''
 }
@@ -4790,7 +4796,7 @@ function renderDefaultSql(connection: DatabaseConnectionInfo | undefined, catalo
 
 function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
   const quotedTable = quoteSqlIdentifierForDialect(tableName, dbType)
-  if ((dbType === 'postgresql' || dbType === 'oracle' || dbType === 'sqlserver') && schemaName) {
+  if ((isPostgresCompatibleDbType(dbType) || dbType === 'oracle' || dbType === 'sqlserver') && schemaName) {
     return `${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
   }
   if (dbType === 'sqlite' && catalogName) {
@@ -6642,7 +6648,20 @@ function copyContextName() {
 
 function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[0]?.id ?? 'group-default') {
   connectionModalMode.value = 'create'
-  const defaultPort = dbType === 'postgresql' ? 5432 : dbType === 'oracle' ? 1521 : dbType === 'sqlserver' ? 1433 : dbType === 'sqlite' ? null : 3306
+  const defaultPort =
+    dbType === 'postgresql'
+      ? 5432
+      : dbType === 'kingbase'
+        ? 54321
+        : dbType === 'oceanbase'
+          ? 2881
+          : dbType === 'oracle'
+            ? 1521
+            : dbType === 'sqlserver'
+              ? 1433
+              : dbType === 'sqlite'
+                ? null
+                : 3306
   Object.assign(connectionDraft, {
     id: '',
     dbType,
@@ -6914,7 +6933,7 @@ async function refreshDatabaseConnectionViaBackend(connectionId: string): Promis
 
 function openCreateDatabaseModal(connectionId: string) {
   const connection = findConnection(connectionId)
-  if (!connection || (!isMysqlCompatibleDbType(connection.dbType) && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver')) return
+  if (!connection || (!isMysqlCompatibleDbType(connection.dbType) && !isPostgresCompatibleDbType(connection.dbType) && connection.dbType !== 'sqlserver')) return
   createDatabaseModal.open = true
   createDatabaseModal.connectionId = connectionId
   createDatabaseModal.dbType = connection.dbType
@@ -7053,7 +7072,14 @@ function dbAiBackendContextForIpc(context: DbAiBackendContext): DatabaseAiDrawer
 async function openDbAi(action: DbAiAction, sql: string, context = '', backendContextOverride: DbAiBackendContext = {}) {
   const backendContext = buildDbAiBackendContext(context, backendContextOverride)
   const activeDialect = backendContext.dbType || (activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined)
-  const normalizedDialect: DbAiTargetDialect = activeDialect === 'sqlserver' ? 'mssql' : activeDialect === 'mariadb' ? 'mysql' : activeDialect || 'postgresql'
+  const normalizedDialect: DbAiTargetDialect =
+    activeDialect === 'sqlserver'
+      ? 'mssql'
+      : activeDialect && isMysqlCompatibleDbType(activeDialect)
+        ? 'mysql'
+        : activeDialect && isPostgresCompatibleDbType(activeDialect)
+          ? 'postgresql'
+          : activeDialect || 'postgresql'
   const targetDialect: DbAiTargetDialect = action === 'convert' ? normalizedDialect : normalizedDialect
   const result = await window.aiops.createDatabaseAiDrawerRequest({
     action,
@@ -7298,6 +7324,7 @@ function isDbAiExecutableDialect(action: DbAiAction, target: DbAiTargetDialect) 
   const connection = tab ? findConnection(tab.connectionId) : undefined
   if (target === 'mssql') return connection?.dbType === 'sqlserver'
   if (target === 'mysql') return !!connection && isMysqlCompatibleDbType(connection.dbType)
+  if (target === 'postgresql') return !!connection && isPostgresCompatibleDbType(connection.dbType)
   return connection?.dbType === target
 }
 

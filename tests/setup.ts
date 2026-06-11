@@ -947,9 +947,9 @@ const databaseEngineOptionsMock: DatabaseEngineInfo[] = [
   { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
   { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
   { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
-  { code: 'oceanbase', name: 'OceanBase', enabled: false, accent: '#0ea5e9' },
+  { code: 'oceanbase', connectionCode: 'oceanbase', name: 'OceanBase', enabled: true, accent: '#0ea5e9' },
   { code: 'hive', name: 'Hive', enabled: false, accent: '#f59e0b' },
-  { code: 'kingbase', name: 'KingBase', enabled: false, accent: '#dc2626' },
+  { code: 'kingbase', connectionCode: 'kingbase', name: 'KingBase', enabled: true, accent: '#dc2626' },
   { code: 'mongodb', name: 'MongoDB', enabled: false, accent: '#4db33d' },
   { code: 'timeplus', name: 'Timeplus', enabled: false, accent: '#14b8a6' }
 ]
@@ -1392,6 +1392,12 @@ const cloneDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): Datab
   messages: state.messages.map(cloneDatabaseAiPaneMessageMock)
 })
 
+const isMysqlCompatibleDatabaseMock = (dialect: DatabaseEngineCode | TestDatabaseAiTargetDialect | '') =>
+  dialect === 'mysql' || dialect === 'mariadb' || dialect === 'oceanbase'
+
+const isPostgresCompatibleDatabaseMock = (dialect: DatabaseEngineCode | TestDatabaseAiTargetDialect | '') =>
+  dialect === 'postgresql' || dialect === 'kingbase'
+
 const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
   open: state.open === true,
   width: Math.min(720, Math.max(280, Math.round(Number(state.width) || 360))),
@@ -1399,7 +1405,7 @@ const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): D
     connectionId: databaseTrimMock(state.context?.connectionId),
     catalogName: databaseTrimMock(state.context?.catalogName),
     schemaName: databaseTrimMock(state.context?.schemaName),
-    dbType: ['mysql', 'mariadb', 'postgresql', 'sqlite', 'oracle', 'sqlserver'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
+    dbType: ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
   },
   draft: typeof state.draft === 'string' ? state.draft : '',
   messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
@@ -1460,7 +1466,13 @@ const updateDatabaseAiDrawerRequestMock = (requestId: string, patch: Partial<Pic
 }
 
 const normalizeDatabaseAiTargetDialectMock = (dialect?: TestDatabaseAiTargetDialect | ''): TestDatabaseAiTargetDialect =>
-  dialect === 'sqlserver' ? 'mssql' : dialect === 'mariadb' ? 'mysql' : dialect || 'postgresql'
+  dialect === 'sqlserver'
+    ? 'mssql'
+    : dialect && isMysqlCompatibleDatabaseMock(dialect)
+      ? 'mysql'
+      : dialect && isPostgresCompatibleDatabaseMock(dialect)
+        ? 'postgresql'
+        : dialect || 'postgresql'
 
 const databaseAiPaneContextSummaryMock = (input: { context: { contextSummary?: string; connectionId?: string; databaseName?: string; schemaName?: string; dbType?: string } }) =>
   input.context.contextSummary ||
@@ -1649,17 +1661,21 @@ const testDatabaseConnectionMock = async (input: DatabaseConnectionTestInput) =>
     }
   }
   const serverVersion =
-    input.dbType === 'postgresql'
-      ? 'PostgreSQL 16 local backend validation'
-      : input.dbType === 'mysql'
+    input.dbType === 'mysql'
         ? 'MySQL 8 local backend validation'
         : input.dbType === 'mariadb'
           ? 'MariaDB local backend validation'
-          : input.dbType === 'oracle'
-            ? 'Oracle local backend validation'
-            : input.dbType === 'sqlserver'
-              ? 'SQL Server local backend validation'
-              : 'SQLite local backend validation'
+          : input.dbType === 'oceanbase'
+            ? 'OceanBase MySQL-compatible local backend validation'
+            : input.dbType === 'postgresql'
+              ? 'PostgreSQL 16 local backend validation'
+              : input.dbType === 'kingbase'
+                ? 'KingBase PostgreSQL-compatible local backend validation'
+                : input.dbType === 'oracle'
+                  ? 'Oracle local backend validation'
+                  : input.dbType === 'sqlserver'
+                    ? 'SQL Server local backend validation'
+                    : 'SQLite local backend validation'
   return { ok: true, data: { dbType: input.dbType, serverVersion, endpoint: 'test-backend', durationMs: 1 } }
 }
 
@@ -1732,17 +1748,21 @@ const buildSavedDatabaseConnectionUrlMock = (
   const scheme =
     normalized.dbType === 'postgresql'
       ? 'jdbc:postgresql'
-      : normalized.dbType === 'sqlserver'
-        ? 'jdbc:sqlserver'
-        : normalized.dbType === 'mariadb'
-          ? 'jdbc:mariadb'
-          : 'jdbc:mysql'
+      : normalized.dbType === 'kingbase'
+        ? 'jdbc:kingbase8'
+        : normalized.dbType === 'sqlserver'
+          ? 'jdbc:sqlserver'
+          : normalized.dbType === 'mariadb'
+            ? 'jdbc:mariadb'
+            : normalized.dbType === 'oceanbase'
+              ? 'jdbc:oceanbase'
+              : 'jdbc:mysql'
   return `${scheme}://${normalized.host}${port}${database}`
 }
 
 const defaultCatalogsForSavedConnectionMock = (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): DatabaseCatalogInfo[] => {
   if (!connection.database) return []
-  if (connection.dbType === 'postgresql') {
+  if (isPostgresCompatibleDatabaseMock(connection.dbType)) {
     return [{ name: connection.database, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }]
   }
   if (connection.dbType === 'oracle') {
@@ -1755,8 +1775,8 @@ const defaultCatalogsForSavedConnectionMock = (connection: Omit<DatabaseConnecti
 }
 
 const createDatabaseCatalogForConnectionMock = (connection: DatabaseConnectionInfo, name: string): DatabaseCatalogInfo =>
-  connection.dbType === 'postgresql' || connection.dbType === 'sqlserver'
-    ? { name, schemas: [{ name: connection.dbType === 'postgresql' ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
+  isPostgresCompatibleDatabaseMock(connection.dbType) || connection.dbType === 'sqlserver'
+    ? { name, schemas: [{ name: isPostgresCompatibleDatabaseMock(connection.dbType) ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
     : { name, tables: [] }
 
 const unquoteDatabaseIdentifierMock = (value: string) => {
@@ -1779,7 +1799,7 @@ const normalizeSavedDatabaseConnectionMock = (
   const filePath = isSqlite ? databaseTrimMock(input.filePath) || sqlitePathFromUrlMock(databaseTrimMock(input.url)) : ''
   const database = isSqlite ? basenameFromDatabasePathMock(filePath) : databaseTrimMock(input.database)
   const sslMode: DatabaseConnectionInfo['sslMode'] =
-    input.dbType === 'postgresql' || input.dbType === 'sqlserver' ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
+    isPostgresCompatibleDatabaseMock(input.dbType) || input.dbType === 'sqlserver' ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
   const normalized = {
     name: databaseTrimMock(input.name),
     dbType: input.dbType,
@@ -1839,11 +1859,11 @@ const createDatabaseCatalogMock = async (input: DatabaseCreateDatabaseInput) => 
   const index = databaseConnectionsMock.findIndex((connection) => connection.id === databaseTrimMock(input.connectionId))
   const connection = index >= 0 ? databaseConnectionsMock[index] : null
   if (!connection) return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
-  if (connection.dbType !== 'mysql' && connection.dbType !== 'mariadb' && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver') {
+  if (!isMysqlCompatibleDatabaseMock(connection.dbType) && !isPostgresCompatibleDatabaseMock(connection.dbType) && connection.dbType !== 'sqlserver') {
     return {
       ok: false,
       errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED',
-      errorMessage: 'Create Database is only available for MySQL, MariaDB, PostgreSQL, and SQL Server connections.'
+      errorMessage: 'Create Database is only available for MySQL-compatible, PostgreSQL-compatible, and SQL Server connections.'
     }
   }
   const name = databaseNameFromCreateSqlMock(input.sql) || databaseTrimMock(input.requestedName)
@@ -1961,13 +1981,12 @@ function rowKeyForDatabaseMock(row: Record<string, unknown>, primaryKey: string[
 
 type DatabaseMutationDialectMock = DatabaseEngineCode
 type DatabaseMutationStatementMock = { kind: DatabaseTableMutation['kind']; sql: string; params: unknown[] }
-const isMysqlCompatibleDatabaseMock = (dialect: DatabaseMutationDialectMock | TestDatabaseAiTargetDialect | '') => dialect === 'mysql' || dialect === 'mariadb'
 
 const databaseMutationIdentifierMock = (value: string, dialect: DatabaseMutationDialectMock) =>
   isMysqlCompatibleDatabaseMock(dialect) ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
 
 const databaseMutationPlaceholderMock = (dialect: DatabaseMutationDialectMock, index: number) => {
-  if (dialect === 'postgresql') return `$${index}`
+  if (isPostgresCompatibleDatabaseMock(dialect)) return `$${index}`
   if (dialect === 'oracle') return `:${index}`
   return '?'
 }
@@ -1978,7 +1997,7 @@ const databaseMutationTableReferenceMock = (
 ) => {
   const table = databaseMutationIdentifierMock(databaseTrimMock(input.tableName), dialect)
   if (isMysqlCompatibleDatabaseMock(dialect) || dialect === 'sqlite') return `${databaseMutationIdentifierMock(databaseTrimMock(input.databaseName), dialect)}.${table}`
-  return `${databaseMutationIdentifierMock(databaseTrimMock(input.schemaName) || (dialect === 'postgresql' ? 'public' : ''), dialect)}.${table}`
+  return `${databaseMutationIdentifierMock(databaseTrimMock(input.schemaName) || (isPostgresCompatibleDatabaseMock(dialect) ? 'public' : ''), dialect)}.${table}`
 }
 
 const decodeDatabaseMutationPrimaryKeyRowKeyMock = (rowKey: string, primaryKey: string[]) => {
@@ -2042,7 +2061,7 @@ const applyDatabaseMutationSingleRowGuardMock = (
   if (usesPrimaryKey) return sql
   if (isMysqlCompatibleDatabaseMock(dialect)) return `${sql} LIMIT 1`
   if (dialect === 'sqlite') return sql.replace(`WHERE ${whereSql}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
-  if (dialect === 'postgresql') return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
+  if (isPostgresCompatibleDatabaseMock(dialect)) return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
   return sql
 }
 
@@ -2170,7 +2189,7 @@ function parseDatabaseWhereMock(whereRaw?: string | null) {
 }
 
 type TestDatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-type TestDatabaseAiTargetDialect = 'mysql' | 'mariadb' | 'postgresql' | 'sqlite' | 'oracle' | 'mssql' | 'sqlserver'
+type TestDatabaseAiTargetDialect = 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlite' | 'oracle' | 'mssql' | 'sqlserver'
 
 const stripDatabaseAiSqlTerminatorMock = (sql: string) => sql.trim().replace(/;+$/, '').trim()
 const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {
@@ -2226,7 +2245,7 @@ const databaseAiTableRefMock = (
     .filter(Boolean)
   const schemaName = input.context.schemaName || (parts.length > 1 ? parts[0] : '')
   const tableName = input.context.tableName || parts.at(-1) || 'orders'
-  if ((dialect === 'postgresql' || dialect === 'oracle' || dialect === 'mssql') && schemaName) {
+  if ((isPostgresCompatibleDatabaseMock(dialect) || dialect === 'oracle' || dialect === 'mssql') && schemaName) {
     return `${quoteDatabaseAiIdentifierMock(schemaName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
   }
   if (dialect === 'sqlite' && input.context.databaseName) {

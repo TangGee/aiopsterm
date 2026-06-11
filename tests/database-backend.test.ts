@@ -735,7 +735,9 @@ describe('database backend boundary', () => {
       'PostgreSQL',
       'SQLServer',
       'SQLite',
-      'MariaDB'
+      'MariaDB',
+      'OceanBase',
+      'KingBase'
     ])
     expect(result.data?.groups.map((group) => group.name)).toEqual(['Default Group', 'Production', 'Local Lab'])
     expect(result.data?.groupParents).toEqual({
@@ -2676,6 +2678,170 @@ WHERE status = ''open'';
     expect(state.closed).toBeGreaterThan(0)
   })
 
+  it('uses the injected PostgreSQL-compatible driver for KingBase instead of a coming-soon placeholder', async () => {
+    const { driver, state } = createPostgresDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.engines.find((engine) => engine.code === 'kingbase')).toMatchObject({
+      connectionCode: 'kingbase',
+      enabled: true
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'kingbase',
+      name: 'live-kingbase',
+      host: '127.0.0.1',
+      port: 54321,
+      user: 'ops',
+      password: 'secret',
+      database: 'orders',
+      sslMode: 'require'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'kingbase',
+      serverVersion: 'KingBase PostgreSQL 16.9 live-driver',
+      endpoint: '127.0.0.1:54321'
+    })
+    expect(state.configs[0]).toMatchObject({
+      host: '127.0.0.1',
+      port: 54321,
+      user: 'ops',
+      database: 'orders'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'kingbase',
+        name: 'live-kingbase',
+        host: '127.0.0.1',
+        port: 54321,
+        user: 'ops',
+        password: 'secret',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword',
+        sslMode: 'require'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-kingbase',
+      dbType: 'kingbase',
+      status: 'idle',
+      url: 'jdbc:kingbase8://127.0.0.1:54321/orders',
+      catalogs: [{ name: 'orders', schemas: [{ name: 'public' }] }]
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-kingbase')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    expect(connected.data?.connection.catalogs[0]?.schemas?.[0]?.tables[0]).toMatchObject({
+      name: 'orders',
+      primaryKey: ['id'],
+      columns: expect.arrayContaining([expect.objectContaining({ name: 'service', type: 'text' })])
+    })
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-kingbase',
+      dbType: 'kingbase',
+      databaseName: 'orders',
+      schemaName: 'public',
+      sql: 'select * from public.orders'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.rows).toEqual([
+      expect.objectContaining({ service: 'live-api', owner: 'nina' }),
+      expect.objectContaining({ service: 'live-worker', owner: 'omar' })
+    ])
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-kingbase',
+      dbType: 'kingbase',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }],
+      sort: null,
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data?.rows).toEqual([expect.objectContaining({ service: 'live-api' })])
+    expect(tablePage.data?.total).toBe(1)
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-kingbase',
+      dbType: 'kingbase',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE "public"."orders"')
+    expect(ddl.data?.ddl).toContain('PRIMARY KEY ("id")')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-kingbase',
+      dbType: 'kingbase',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { owner: 'kingbase-owner' } },
+        { kind: 'insert', values: { id: 3, service: 'kingbase-cron', status: 'open', owner: 'ivy', updated_at: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.statements[0]).toMatchObject({
+      kind: 'update',
+      sql: 'UPDATE "public"."orders" SET "owner" = $1 WHERE "id" = $2',
+      params: ['kingbase-owner', 1]
+    })
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-kingbase',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { owner: 'kingbase-owner' } },
+        { kind: 'insert', values: { id: 3, service: 'kingbase-cron', status: 'open', owner: 'ivy', updated_at: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(state.rows).toEqual([
+      expect.objectContaining({ id: 1, owner: 'kingbase-owner' }),
+      expect.objectContaining({ id: 3, service: 'kingbase-cron' })
+    ])
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-kingbase',
+      requestedName: 'fallback_name',
+      sql: 'CREATE DATABASE "ops_king";'
+    })
+    expect(createdDatabase.ok).toBe(true)
+    expect(state.createdDatabases).toEqual(['ops_king'])
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).toContain('ops_king')
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).not.toContain('fallback_name')
+
+    const refreshed = await refreshDatabaseConnection('conn-live-kingbase')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.schemas?.[0]?.tables[0]?.name).toBe('orders')
+    expect(state.connected).toBeGreaterThan(0)
+    expect(state.closed).toBeGreaterThan(0)
+  })
+
   it('persists live database workspace state and restores it through the backend store', async () => {
     const { driver, state } = createPostgresDriverDouble()
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-state-'))
@@ -3250,6 +3416,164 @@ WHERE status = ''open'';
     expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).not.toContain('fallback_name')
 
     const refreshed = await refreshDatabaseConnection('conn-live-mariadb')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.tables?.[0]?.name).toBe('service_health')
+    expect(state.connected).toBeGreaterThan(0)
+    expect(state.closed).toBeGreaterThan(0)
+  })
+
+  it('uses the injected MySQL-compatible driver for OceanBase instead of a coming-soon placeholder', async () => {
+    const { driver, state } = createMysqlDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, mysqlDriver: driver })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.engines.find((engine) => engine.code === 'oceanbase')).toMatchObject({
+      connectionCode: 'oceanbase',
+      enabled: true
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'oceanbase',
+      name: 'live-oceanbase',
+      host: '127.0.0.1',
+      port: 2881,
+      user: 'ops',
+      password: 'secret',
+      database: 'metrics'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'oceanbase',
+      serverVersion: 'OceanBase 8.4.0-live-driver',
+      endpoint: '127.0.0.1:2881'
+    })
+    expect(state.configs[0]).toMatchObject({
+      host: '127.0.0.1',
+      port: 2881,
+      user: 'ops',
+      database: 'metrics'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'oceanbase',
+        name: 'live-oceanbase',
+        host: '127.0.0.1',
+        port: 2881,
+        user: 'ops',
+        password: 'secret',
+        database: 'metrics',
+        env: 'Staging',
+        groupId: 'group-default',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-oceanbase',
+      dbType: 'oceanbase',
+      status: 'idle',
+      url: 'jdbc:oceanbase://127.0.0.1:2881/metrics',
+      catalogs: [{ name: 'metrics', tables: [] }]
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-oceanbase')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    expect(connected.data?.connection.catalogs[0]?.tables?.[0]).toMatchObject({
+      name: 'service_health',
+      primaryKey: ['id'],
+      columns: expect.arrayContaining([
+        expect.objectContaining({ name: 'id', type: 'int', key: 'PK' }),
+        expect.objectContaining({ name: 'service', type: 'varchar(80)' })
+      ])
+    })
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-oceanbase',
+      dbType: 'oceanbase',
+      databaseName: 'metrics',
+      sql: 'select * from service_health'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-oceanbase',
+      dbType: 'oceanbase',
+      databaseName: 'metrics',
+      tableName: 'service_health',
+      filters: [{ column: 'service', operator: 'eq', value: 'gateway' }],
+      sort: { column: 'id', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' })])
+    expect(tablePage.data?.knownColumns).toEqual(['id', 'service', 'region', 'latency_ms', 'healthy'])
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-oceanbase',
+      dbType: 'oceanbase',
+      databaseName: 'metrics',
+      tableName: 'service_health'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toBe('CREATE TABLE `service_health` (`id` int PRIMARY KEY)')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-oceanbase',
+      dbType: 'oceanbase',
+      databaseName: 'metrics',
+      tableName: 'service_health',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { latency_ms: 31 } },
+        { kind: 'insert', values: { id: 3, service: 'oceanbase-cron', region: 'shenzhen', latency_ms: 88, healthy: 1 } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.preview).toContain('UPDATE `metrics`.`service_health` SET `latency_ms` = 31 WHERE `id` = 1;')
+    expect(plan.data?.statements[0]).toMatchObject({
+      kind: 'update',
+      sql: 'UPDATE `metrics`.`service_health` SET `latency_ms` = ? WHERE `id` = ?',
+      params: [31, 1]
+    })
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-oceanbase',
+      databaseName: 'metrics',
+      tableName: 'service_health',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { latency_ms: 31 } },
+        { kind: 'insert', values: { id: 3, service: 'oceanbase-cron', region: 'shenzhen', latency_ms: 88, healthy: 1 } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(state.rows).toEqual([
+      expect.objectContaining({ id: 1, latency_ms: 31 }),
+      expect.objectContaining({ id: 3, service: 'oceanbase-cron' })
+    ])
+    expect(state.committed).toBeGreaterThan(0)
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-oceanbase',
+      requestedName: 'fallback_name',
+      sql: 'CREATE DATABASE `ops_ocean`;'
+    })
+    expect(createdDatabase.ok).toBe(true)
+    expect(state.createdDatabases).toEqual(['ops_ocean'])
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).toContain('ops_ocean')
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).not.toContain('fallback_name')
+
+    const refreshed = await refreshDatabaseConnection('conn-live-oceanbase')
     expect(refreshed.ok).toBe(true)
     expect(refreshed.data?.connection.catalogs[0]?.tables?.[0]?.name).toBe('service_health')
     expect(state.connected).toBeGreaterThan(0)
