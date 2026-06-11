@@ -62,15 +62,34 @@ type McpClient = McpStdioClient
 
 type HttpRequestHeaders = Record<string, string>
 
+type McpOperationClientCacheEntry = {
+  clientPromise: Promise<McpClient>
+}
+
 const defaultDiscoveryTimeoutMs = 8000
 const defaultOperationTimeoutMs = 60000
 const defaultOperationMaxTimeoutMs = 120000
 const minimumDiscoveryTimeoutMs = 1000
 const mcpProtocolVersion = '2024-11-05'
 
+const mcpOperationClientCache = new Map<string, McpOperationClientCacheEntry>()
+
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const stableJsonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableJsonValue)
+  if (!isRecord(value)) return value
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, stableJsonValue(value[key])])
+  )
+}
+
+const stableJsonStringify = (value: unknown) => JSON.stringify(stableJsonValue(value))
 
 const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined => {
   if (!isRecord(value)) return undefined
@@ -134,6 +153,28 @@ const operationClientOptions = (options: McpOperationOptions): Pick<McpOperation
   timeoutMs: options.timeoutMs || defaultOperationTimeoutMs,
   maxTimeoutMs: options.maxTimeoutMs || defaultOperationMaxTimeoutMs
 })
+
+const mcpOperationClientCacheKey = (
+  serverName: string,
+  server: McpConfigFileServer,
+  options: Pick<McpOperationOptions, 'clientName' | 'clientVersion' | 'timeoutMs' | 'maxTimeoutMs'>
+) =>
+  stableJsonStringify({
+    serverName,
+    protocolVersion: mcpProtocolVersion,
+    clientName: options.clientName || 'aiopsterm',
+    clientVersion: options.clientVersion || '0.1.0',
+    timeoutMs: timeoutForServer(server, options),
+    server: {
+      type: server.type,
+      command: server.command,
+      args: server.args || [],
+      cwd: server.cwd,
+      env: server.env || {},
+      url: server.url,
+      headers: server.headers || {}
+    }
+  })
 
 const fetchWithTimeout = async (url: string | URL, init: RequestInit, timeoutMs: number) => {
   const controller = new AbortController()
@@ -784,6 +825,60 @@ const initializeMcpClient = async (server: McpConfigFileServer, options: Pick<Mc
   }
 }
 
+const closeMcpClient = (client: McpClient) => {
+  try {
+    client.close()
+  } catch {
+    // Best effort close; callers are already handling the operation outcome.
+  }
+}
+
+const closeMcpOperationCacheEntry = async (entry: McpOperationClientCacheEntry) => {
+  try {
+    closeMcpClient(await entry.clientPromise)
+  } catch {
+    // Failed initializations do not leave a usable client to close.
+  }
+}
+
+export const clearMcpRuntimeClientCache = async () => {
+  const entries = [...mcpOperationClientCache.values()]
+  mcpOperationClientCache.clear()
+  await Promise.all(entries.map(closeMcpOperationCacheEntry))
+}
+
+const getCachedMcpOperationClient = async (
+  serverName: string,
+  server: McpConfigFileServer,
+  options: Pick<McpOperationOptions, 'clientName' | 'clientVersion' | 'timeoutMs' | 'maxTimeoutMs'>
+) => {
+  const cacheKey = mcpOperationClientCacheKey(serverName, server, options)
+  const existing = mcpOperationClientCache.get(cacheKey)
+  if (existing) {
+    return { cacheKey, client: await existing.clientPromise }
+  }
+
+  const entry: McpOperationClientCacheEntry = {
+    clientPromise: initializeMcpClient(server, options)
+  }
+  mcpOperationClientCache.set(cacheKey, entry)
+  try {
+    return { cacheKey, client: await entry.clientPromise }
+  } catch (error) {
+    if (mcpOperationClientCache.get(cacheKey) === entry) {
+      mcpOperationClientCache.delete(cacheKey)
+    }
+    throw error
+  }
+}
+
+const evictMcpOperationClient = async (cacheKey: string) => {
+  const entry = mcpOperationClientCache.get(cacheKey)
+  if (!entry) return
+  mcpOperationClientCache.delete(cacheKey)
+  await closeMcpOperationCacheEntry(entry)
+}
+
 const discoverMcpServer = async (
   name: string,
   config: McpConfigFileServer,
@@ -896,10 +991,11 @@ export const callMcpTool = async (config: McpConfigFile, input: McpToolCallInput
     return mutationError('MCP_TOOL_DISABLED', `MCP tool "${resolved.name}:${toolName}" is disabled.`)
   }
 
-  let client: McpClient | null = null
+  let cacheKey = ''
   try {
-    client = await initializeMcpClient(resolved.config, operationClientOptions(options))
-    const result = await client.request('tools/call', {
+    const cached = await getCachedMcpOperationClient(resolved.name, resolved.config, operationClientOptions(options))
+    cacheKey = cached.cacheKey
+    const result = await cached.client.request('tools/call', {
       name: toolName,
       arguments: cloneJsonRecord(input.arguments) || {}
     })
@@ -916,9 +1012,8 @@ export const callMcpTool = async (config: McpConfigFile, input: McpToolCallInput
       }
     }
   } catch (error) {
+    if (cacheKey) await evictMcpOperationClient(cacheKey)
     return mutationError('MCP_TOOL_CALL_FAILED', error instanceof Error ? error.message : 'MCP tool call failed.')
-  } finally {
-    client?.close()
   }
 }
 
@@ -935,10 +1030,11 @@ export const readMcpResource = async (config: McpConfigFile, input: McpResourceR
   const uri = cleanText(input.uri)
   if (!uri) return mutationError('MCP_RESOURCE_URI_REQUIRED', 'MCP resource uri is required.')
 
-  let client: McpClient | null = null
+  let cacheKey = ''
   try {
-    client = await initializeMcpClient(resolved.config, operationClientOptions(options))
-    const result = await client.request('resources/read', { uri })
+    const cached = await getCachedMcpOperationClient(resolved.name, resolved.config, operationClientOptions(options))
+    cacheKey = cached.cacheKey
+    const result = await cached.client.request('resources/read', { uri })
     return {
       ok: true,
       data: {
@@ -949,9 +1045,8 @@ export const readMcpResource = async (config: McpConfigFile, input: McpResourceR
       }
     }
   } catch (error) {
+    if (cacheKey) await evictMcpOperationClient(cacheKey)
     return mutationError('MCP_RESOURCE_READ_FAILED', error instanceof Error ? error.message : 'MCP resource read failed.')
-  } finally {
-    client?.close()
   }
 }
 

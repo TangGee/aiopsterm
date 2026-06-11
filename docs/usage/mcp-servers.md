@@ -78,7 +78,7 @@ AI chat also consumes the same stored flag. When a configured model returns a Ex
 
 ## Tool Calls And Resource Reads
 
-The main process now exposes real runtime operations for discovered `stdio`, `streamableHttp`, and legacy `sse` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. Each operation opens the configured transport, sends MCP `initialize`, calls `tools/call` or `resources/read`, returns the server response in an `ok` envelope, and closes the operation client.
+The main process now exposes real runtime operations for discovered `stdio`, `streamableHttp`, and legacy `sse` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. The backend opens and initializes a transport client for the configured server, reuses that initialized operation client for later matching tool/resource requests, calls `tools/call` or `resources/read`, and returns the server response in an `ok` envelope. Runtime clients are closed when MCP config changes, when the app quits, or after an operation failure so the next request reconnects from the latest config.
 
 Settings -> MCP also exposes those operations directly on discovered server cards. A tool row accepts a JSON object argument draft and the Run button sends that exact object to the preload bridge. A resource row exposes Read for its discovered URI. The result preview is rendered only from the backend returned `content` or `contents` payload; invalid JSON arguments, disabled servers/tools, missing bridges, malformed success envelopes, or request-mismatched responses fail closed and show an error instead of local sample output.
 

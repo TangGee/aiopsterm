@@ -121,7 +121,7 @@ import {
   configureFilesBackendRuntime,
   writeFileContent
 } from './backend/files'
-import { callMcpTool, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
+import { callMcpTool, clearMcpRuntimeClientCache, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
 import {
   addKubernetesCluster,
   cleanupKubernetesAgent,
@@ -2144,6 +2144,7 @@ const ensureMcpConfigFile = async () => {
 const shouldRunMcpDiscovery = () => process.env.NODE_ENV !== 'test' || process.env.AIOPSTERM_ENABLE_MCP_DISCOVERY === '1'
 
 const applyMcpConfigFileSnapshot = async (parsed: McpConfigFile) => {
+  await clearMcpRuntimeClientCache()
   const current = getConfig()
   const snapshot = await discoverMcpServerSnapshot(parsed, {
     existingServers: current.mcpServers || [],
@@ -3943,6 +3944,7 @@ app.on('before-quit', () => {
   keywordHighlightConfigWatcher = null
   mcpConfigWatcher?.close()
   mcpConfigWatcher = null
+  void clearMcpRuntimeClientCache()
   closeSkillsWatchers()
   if (skillsWatcherDebounce) {
     clearTimeout(skillsWatcherDebounce)

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/preload'
 
 let backend: {
+  clearMcpRuntimeClientCache: () => Promise<void>
   discoverMcpServerSnapshot: (
     config: McpConfigFile,
     options?: {
@@ -71,6 +72,10 @@ const loadBackend = async () => {
   const modulePath = '../src/main/backend/mcpRuntime'
   backend = await import(modulePath)
 }
+
+afterEach(async () => {
+  if (backend) await backend.clearMcpRuntimeClientCache()
+})
 
 const mcpFixtureScript = `
 let buffer = ''
@@ -254,7 +259,16 @@ const writeJsonRpcResponse = (response: ServerResponse, message: Record<string, 
   response.end(body)
 }
 
-const withStreamableHttpFixture = async <T>(run: (url: string) => Promise<T>) => {
+type StreamableHttpFixtureStats = {
+  methods: Record<string, number>
+  sessionHeaders: Array<string | undefined>
+}
+
+const withStreamableHttpFixture = async <T>(run: (url: string, stats: StreamableHttpFixtureStats) => Promise<T>) => {
+  const stats: StreamableHttpFixtureStats = {
+    methods: {},
+    sessionHeaders: []
+  }
   const server = createServer(async (request, response) => {
     if (request.method !== 'POST') {
       response.writeHead(405)
@@ -263,6 +277,9 @@ const withStreamableHttpFixture = async <T>(run: (url: string) => Promise<T>) =>
     }
     try {
       const message = await readJsonBody(request)
+      const method = typeof message.method === 'string' ? message.method : '<missing>'
+      stats.methods[method] = (stats.methods[method] || 0) + 1
+      stats.sessionHeaders.push(Array.isArray(request.headers['mcp-session-id']) ? request.headers['mcp-session-id'][0] : request.headers['mcp-session-id'])
       const result = mcpFixtureResultForMessage(message)
       if (!result) {
         response.writeHead(202)
@@ -279,7 +296,7 @@ const withStreamableHttpFixture = async <T>(run: (url: string) => Promise<T>) =>
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('fixture server did not bind')
   try {
-    return await run(`http://127.0.0.1:${address.port}/mcp`)
+    return await run(`http://127.0.0.1:${address.port}/mcp`, stats)
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
   }
@@ -618,7 +635,7 @@ describe('mcp runtime backend boundary', () => {
   it('calls streamable HTTP MCP tools and reads resources through the backend boundary', async () => {
     await loadBackend()
 
-    await withStreamableHttpFixture(async (url) => {
+    await withStreamableHttpFixture(async (url, stats) => {
       const config: McpConfigFile = {
         mcpServers: {
           remote: {
@@ -669,6 +686,104 @@ describe('mcp runtime backend boundary', () => {
           durationMs: expect.any(Number)
         }
       })
+
+      expect(stats.methods.initialize).toBe(1)
+      expect(stats.methods['notifications/initialized']).toBe(1)
+      expect(stats.methods['tools/call']).toBe(1)
+      expect(stats.methods['resources/read']).toBe(1)
+    })
+  })
+
+  it('reinitializes cached MCP operation clients after explicit runtime cleanup', async () => {
+    await loadBackend()
+
+    await withStreamableHttpFixture(async (url, stats) => {
+      const config: McpConfigFile = {
+        mcpServers: {
+          remote: {
+            type: 'streamableHttp',
+            url,
+            timeout: 1
+          }
+        }
+      }
+
+      await expect(
+        backend.callMcpTool(
+          config,
+          {
+            serverName: 'remote',
+            toolName: 'inspect_service',
+            arguments: { name: 'api' }
+          },
+          operationOptions()
+        )
+      ).resolves.toMatchObject({ ok: true })
+
+      expect(stats.methods.initialize).toBe(1)
+
+      await backend.clearMcpRuntimeClientCache()
+
+      await expect(
+        backend.readMcpResource(
+          config,
+          {
+            serverName: 'remote',
+            uri: 'https://runbook.local/http.md'
+          },
+          operationOptions()
+        )
+      ).resolves.toMatchObject({ ok: true })
+
+      expect(stats.methods.initialize).toBe(2)
+      expect(stats.methods['resources/read']).toBe(1)
+    })
+  })
+
+  it('evicts failed cached MCP operation clients before the next operation', async () => {
+    await loadBackend()
+
+    await withStreamableHttpFixture(async (url, stats) => {
+      const config: McpConfigFile = {
+        mcpServers: {
+          remote: {
+            type: 'streamableHttp',
+            url,
+            timeout: 1
+          }
+        }
+      }
+
+      await expect(
+        backend.callMcpTool(
+          config,
+          {
+            serverName: 'remote',
+            toolName: 'missing_tool',
+            arguments: { name: 'api' }
+          },
+          operationOptions()
+        )
+      ).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'MCP_TOOL_CALL_FAILED',
+        errorMessage: expect.stringContaining('unknown tool')
+      })
+
+      await expect(
+        backend.callMcpTool(
+          config,
+          {
+            serverName: 'remote',
+            toolName: 'inspect_service',
+            arguments: { name: 'api' }
+          },
+          operationOptions()
+        )
+      ).resolves.toMatchObject({ ok: true })
+
+      expect(stats.methods.initialize).toBe(2)
+      expect(stats.methods['tools/call']).toBe(2)
     })
   })
 
