@@ -2559,6 +2559,34 @@ const isAiChatResponseData = (source: unknown): source is AiChatResponseData =>
   isOptionalString(source.assistantMessageId) &&
   (source.message === undefined || isAiChatHistoryMessage(source.message))
 
+const aiChatRequestIdFromAssistantMessageId = (assistantMessageId: string) =>
+  assistantMessageId.endsWith('-assistant') ? assistantMessageId.slice(0, -'-assistant'.length) : ''
+
+const isAiChatExchangeRequestDataForRequest = (source: unknown): source is AiChatExchangeRequestData => {
+  if (!isAiChatExchangeRequestData(source)) return false
+  const requestId = source.requestId.trim()
+  const userMessageId = source.userMessage.id.trim()
+  const assistantMessageId = source.assistantMessage.id.trim()
+  const responseRequestId = source.responseInput.requestId?.trim()
+  const responseAssistantMessageId = source.responseInput.assistantMessageId?.trim()
+  return (
+    userMessageId === `${requestId}-user` &&
+    assistantMessageId === `${requestId}-assistant` &&
+    responseRequestId === requestId &&
+    responseAssistantMessageId === assistantMessageId
+  )
+}
+
+const isAiChatResponseDataForRequest = (source: unknown, requestId: string, assistantMessageId: string): source is AiChatResponseData => {
+  if (!isAiChatResponseData(source)) return false
+  if (source.requestId !== requestId || source.assistantMessageId !== assistantMessageId) return false
+  if (source.message && source.message.id !== assistantMessageId) return false
+  return true
+}
+
+const isAiChatCancelDataForRequest = (source: unknown, requestId: string, assistantMessageId: string): source is AiChatCancelData =>
+  isAiChatCancelData(source) && source.requestId === requestId && source.assistantMessageId === assistantMessageId
+
 const isAiMcpToolCallActionData = (source: unknown): source is AiMcpToolCallActionData =>
   isRecord(source) &&
   (source.status === 'approved' || source.status === 'rejected') &&
@@ -11556,11 +11584,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       void refreshAiTodoSnapshot()
       return
     }
+    const requestId = input.requestId?.trim() || aiChatRequestIdFromAssistantMessageId(assistantId)
+    const assistantMessageId = input.assistantMessageId?.trim() || assistantId
     const data = result.data
     if (!result.ok) {
       message.state = 'error'
       message.text = result.errorMessage || 'AI 响应生成失败'
-    } else if (!isAiChatResponseData(data)) {
+    } else if (!requestId || !isAiChatResponseDataForRequest(data, requestId, assistantMessageId)) {
       message.state = 'error'
       message.text = 'AI 响应生成结果无效'
     } else if (data.status === 'cancelled') {
@@ -11584,12 +11614,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('AI 生成取消服务不可用')
       return false
     }
-    const requestId = message.id.endsWith('-assistant') ? message.id.slice(0, -'-assistant'.length) : undefined
+    const requestId = aiChatRequestIdFromAssistantMessageId(message.id)
+    if (!requestId) {
+      setTopNotice('AI 生成取消失败')
+      return false
+    }
     const result = await cancelBridge({
       assistantMessageId: message.id,
       requestId
     })
-    if (!result?.ok || !isAiChatCancelData(result.data)) {
+    if (!result?.ok || !isAiChatCancelDataForRequest(result.data, requestId, message.id)) {
       setTopNotice(result?.errorMessage || 'AI 生成取消失败')
       return false
     }
@@ -11645,7 +11679,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       model: config.value.modelName,
       mode: mode.value === 'agents' ? 'agent' : 'command'
     })
-    if (!request.ok || !isAiChatExchangeRequestData(request.data)) {
+    if (!request.ok || !isAiChatExchangeRequestDataForRequest(request.data)) {
       setTopNotice(request.errorMessage || 'AI 请求创建失败')
       return false
     }

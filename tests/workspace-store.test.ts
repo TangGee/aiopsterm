@@ -485,6 +485,82 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('AI 生成取消失败')
   })
 
+  it('binds AI exchange, generation, and cancellation results to the active request identity', async () => {
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        requestId: 'aichat-request-wrong-exchange',
+        userMessage: {
+          id: 'aichat-request-other-user',
+          role: 'user',
+          text: '错配 user message 不能进入会话'
+        },
+        assistantMessage: {
+          id: 'aichat-request-wrong-exchange-assistant',
+          role: 'assistant',
+          text: '正在请求 aiopsterm AI 后端...',
+          state: 'streaming'
+        },
+        responseInput: {
+          requestId: 'aichat-request-wrong-exchange',
+          assistantMessageId: 'aichat-request-wrong-exchange-assistant',
+          prompt: '错配 user message 不能进入会话'
+        }
+      }
+    } as any)
+    await expect(store.sendChat('错配 user message 不能进入会话')).resolves.toBe(false)
+    expect(store.chatMessages).toEqual([])
+    expect(store.topNotice).toBe('AI 请求创建失败')
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: '另一个请求的回答不能覆盖当前 assistant',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-other',
+        assistantMessageId: 'aichat-request-other-assistant'
+      }
+    } as any)
+    await expect(store.sendChat('生成响应必须匹配当前请求')).resolves.toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.chatMessages.at(-1)).toMatchObject({
+      id: 'aichat-request-test-1-assistant',
+      role: 'assistant',
+      state: 'error',
+      text: 'AI 响应生成结果无效'
+    })
+    expect(store.chatMessages.at(-1)?.text).not.toContain('另一个请求')
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
+    await expect(store.sendChat('取消响应必须匹配当前请求')).resolves.toBe(true)
+    const streamingAssistant = store.chatMessages.at(-1)!
+    expect(streamingAssistant).toMatchObject({
+      id: 'aichat-request-test-2-assistant',
+      state: 'streaming'
+    })
+    vi.mocked(window.aiops.cancelAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'cancelled',
+        requestId: 'aichat-request-other',
+        assistantMessageId: 'aichat-request-other-assistant',
+        text: '错配取消不能停止当前 assistant',
+        active: true
+      }
+    } as any)
+    await expect(store.cancelStreamingAiChatResponse()).resolves.toBe(false)
+    expect(streamingAssistant.state).toBe('streaming')
+    expect(streamingAssistant.text).toContain('正在请求 aiopsterm AI 后端')
+    expect(streamingAssistant.text).not.toContain('错配取消')
+    expect(store.topNotice).toBe('AI 生成取消失败')
+  })
+
   it('approves and rejects AI MCP tool calls through the backend bridge', async () => {
     const store = useWorkspaceStore()
     await store.restoreConversation('conv-1')

@@ -3622,10 +3622,10 @@ describe('AppShell', () => {
         model: 'aiopsterm-local-agent',
         durationMs: 1,
         status: 'done',
-        requestId: 'aichat-request-resource-test-1',
-        assistantMessageId: 'aichat-request-resource-test-1-assistant',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: 'aichat-request-test-1-assistant',
         message: {
-          id: 'aichat-request-resource-test-1-assistant',
+          id: 'aichat-request-test-1-assistant',
           role: 'assistant',
           text: '请求访问 MCP Resource filesystem:file:///workspace。',
           state: 'done',
@@ -3664,7 +3664,7 @@ describe('AppShell', () => {
 
     expect(window.aiops.approveAiMcpResourceAccess).toHaveBeenCalledWith(
       expect.objectContaining({
-        messageId: 'aichat-request-resource-test-1-assistant'
+        messageId: 'aichat-request-test-1-assistant'
       })
     )
     expect(store.chatMessages.at(-1)).toMatchObject({
@@ -3695,10 +3695,10 @@ describe('AppShell', () => {
         model: 'aiopsterm-local-agent',
         durationMs: 1,
         status: 'done',
-        requestId: 'aichat-request-command-test-1',
-        assistantMessageId: 'aichat-request-command-test-1-assistant',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: 'aichat-request-test-1-assistant',
         message: {
-          id: 'aichat-request-command-test-1-assistant',
+          id: 'aichat-request-test-1-assistant',
           role: 'assistant',
           text: 'uptime',
           state: 'done',
@@ -3741,7 +3741,7 @@ describe('AppShell', () => {
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
-    expect(store.chatMessages.find((message) => message.id === 'aichat-request-command-test-1-assistant')).toMatchObject({
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
       executedCommand: 'uptime',
       commandExecution: {
         ip: '10.24.8.12',
@@ -4176,8 +4176,7 @@ describe('AppShell', () => {
     editSelection?.addRange(slashRange)
     await editInput.trigger('keyup')
     await editInput.trigger('keydown', { key: '/' })
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
+    await waitForSelector(wrapper, '.command-select-popup header input')
     expect(wrapper.find('.command-select-popup').exists()).toBe(true)
     await wrapper.find('.command-select-popup header input').setValue('rollback')
     await wrapper.find('.command-select-popup header input').trigger('keydown', { key: 'Enter' })
