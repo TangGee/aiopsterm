@@ -263,6 +263,7 @@ describe('workspace store', () => {
     ;(globalThis as any).__resetUserAccountStoreMock?.()
     ;(globalThis as any).__resetSkillsStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
+    ;(globalThis as any).__resetConfigStoreMock?.()
     vi.useFakeTimers()
   })
 
@@ -349,18 +350,18 @@ describe('workspace store', () => {
     await store.hydrateConfig()
     vi.mocked(window.aiops.saveConfig).mockClear()
 
-    await store.toggleMode()
+    await expect(store.toggleMode()).resolves.toBe(true)
     expect(store.mode).toBe('agents')
     expect(store.config.defaultMode).toBe('agents')
     expect(store.topNotice).toContain('Agents')
-    store.toggleLeft()
+    await expect(store.toggleLeft()).resolves.toBe(true)
     expect(store.agentsLeftOpen).toBe(false)
-    await store.toggleMode()
+    await expect(store.toggleMode()).resolves.toBe(true)
     expect(store.mode).toBe('terminal')
-    store.toggleRight()
+    await expect(store.toggleRight()).resolves.toBe(true)
     expect(store.rightPanelOpen).toBe(false)
     store.setActiveModule('database')
-    store.toggleRight()
+    await expect(store.toggleRight()).resolves.toBe(false)
     expect(store.rightPanelOpen).toBe(false)
     await store.checkTopUpdate()
     expect(store.topUpdateState).toBe('local')
@@ -767,6 +768,99 @@ describe('workspace store', () => {
     expect(document.documentElement.dataset.themeId).toBe('dark')
   })
 
+  it('persists top layout mode and sidebar toggles only after backend-confirmed config snapshots', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    const originalSaveConfig = window.aiops.saveConfig
+    vi.mocked(window.aiops.saveConfig).mockClear()
+
+    try {
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        defaultMode: 'terminal'
+      })
+      await expect(store.toggleMode()).resolves.toBe(false)
+      expect(store.mode).toBe('terminal')
+      expect(store.config.defaultMode).toBe('terminal')
+      expect(store.topNotice).toBe('布局设置保存失败')
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        defaultMode: 'agents',
+        agentsLeftOpen: true
+      })
+      await expect(store.toggleMode()).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ defaultMode: 'agents' })
+      expect(store.mode).toBe('agents')
+      expect(store.config.defaultMode).toBe('agents')
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        agentsLeftOpen: true
+      })
+      await expect(store.toggleLeft()).resolves.toBe(false)
+      expect(store.agentsLeftOpen).toBe(true)
+      expect(store.config.agentsLeftOpen).toBe(true)
+      expect(store.topNotice).toBe('布局设置保存失败')
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        agentsLeftOpen: false
+      })
+      await expect(store.toggleLeft()).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ agentsLeftOpen: false })
+      expect(store.agentsLeftOpen).toBe(false)
+      expect(store.config.agentsLeftOpen).toBe(false)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        defaultMode: 'terminal',
+        rightPanelOpen: true
+      })
+      await expect(store.toggleMode()).resolves.toBe(true)
+      expect(store.mode).toBe('terminal')
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        leftPanelOpen: true
+      })
+      await expect(store.toggleLeft()).resolves.toBe(false)
+      expect(store.leftPanelOpen).toBe(true)
+      expect(store.config.leftPanelOpen).toBe(true)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        leftPanelOpen: false
+      })
+      await expect(store.toggleLeft()).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ leftPanelOpen: false })
+      expect(store.leftPanelOpen).toBe(false)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        rightPanelOpen: true
+      })
+      await expect(store.toggleRight()).resolves.toBe(false)
+      expect(store.rightPanelOpen).toBe(true)
+      expect(store.config.rightPanelOpen).toBe(true)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        rightPanelOpen: false
+      })
+      await expect(store.toggleRight()).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelOpen: false })
+      expect(store.rightPanelOpen).toBe(false)
+
+      ;(window.aiops as any).saveConfig = undefined
+      await expect(store.toggleRight()).resolves.toBe(false)
+      expect(store.rightPanelOpen).toBe(false)
+      expect(store.topNotice).toBe('布局设置保存服务不可用')
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
   it('does not fabricate theme setting writes when the config bridge is unavailable or rejects the snapshot', async () => {
     const store = useWorkspaceStore()
     const originalSaveConfig = window.aiops.saveConfig
@@ -819,6 +913,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'mock',
       modelEndpoint: '',
       modelName: 'mock-ops-agent',
@@ -851,6 +946,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -980,6 +1076,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1056,6 +1153,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1171,6 +1269,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1307,6 +1406,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1525,6 +1625,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1627,6 +1728,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1774,6 +1876,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -1917,6 +2020,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -2018,6 +2122,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -2182,6 +2287,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -2531,6 +2637,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -2652,6 +2759,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -2733,6 +2841,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -2829,6 +2938,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -3004,6 +3114,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -3145,6 +3256,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -3247,6 +3359,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -3400,6 +3513,7 @@ describe('workspace store', () => {
       defaultMode: 'terminal',
       leftPanelOpen: true,
       rightPanelOpen: true,
+      agentsLeftOpen: true,
       modelProvider: 'local',
       modelEndpoint: '',
       modelName: 'aiopsterm-local-agent',
@@ -8955,11 +9069,10 @@ describe('workspace store', () => {
         ...store.config,
         defaultMode: 'terminal'
       })
-      await store.toggleMode()
-      expect(store.mode).toBe('agents')
+      await expect(store.toggleMode()).resolves.toBe(false)
+      expect(store.mode).toBe('terminal')
       expect(store.config.defaultMode).toBe('terminal')
-      expect(store.topNotice).toContain('默认布局保存失败')
-      expect(store.settingsNotice).toBe('基础设置保存失败')
+      expect(store.topNotice).toBe('布局设置保存失败')
 
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
         ...store.config,

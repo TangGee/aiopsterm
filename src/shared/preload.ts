@@ -1692,6 +1692,7 @@ export type UserConfig = {
   defaultMode: 'terminal' | 'agents'
   leftPanelOpen: boolean
   rightPanelOpen: boolean
+  agentsLeftOpen: boolean
   modelProvider: 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'bedrock' | 'deepseek' | 'anthropic'
   modelEndpoint: string
   modelName: string

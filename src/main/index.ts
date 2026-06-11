@@ -492,6 +492,7 @@ const defaultConfig: UserConfig = {
   defaultMode: 'terminal',
   leftPanelOpen: true,
   rightPanelOpen: true,
+  agentsLeftOpen: true,
   modelProvider: 'local',
   modelEndpoint: '',
   modelName: 'aiopsterm-local-agent',

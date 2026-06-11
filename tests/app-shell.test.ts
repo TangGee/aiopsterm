@@ -389,6 +389,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetUserAccountStoreMock?.()
     ;(globalThis as any).__resetSkillsStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
+    ;(globalThis as any).__resetConfigStoreMock?.()
   })
 
   afterEach(() => {
@@ -486,6 +487,7 @@ describe('AppShell', () => {
 
     expect(store.rightPanelOpen).toBe(true)
     expect(dispatchShortcut('A', { ctrlKey: true, shiftKey: true, code: 'KeyA' })).toBe(true)
+    await flushPromises()
     expect(store.rightPanelOpen).toBe(false)
 
     store.startShortcutRecording('newTerminal')
@@ -528,19 +530,70 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('本地版本')
 
     await wrapper.find('.mode-button').trigger('click')
+    await flushPromises()
     expect(store.mode).toBe('agents')
     expect(wrapper.find('.right-ai-toggle').exists()).toBe(false)
 
     await wrapper.find('.layout-toggle').trigger('click')
+    await flushPromises()
     expect(store.agentsLeftOpen).toBe(false)
 
     await wrapper.find('.mode-button').trigger('click')
+    await flushPromises()
     expect(store.mode).toBe('terminal')
     await wrapper.find('.right-ai-toggle').trigger('click')
+    await flushPromises()
     expect(store.rightPanelOpen).toBe(false)
 
     await wrapper.find('.window-control-button').trigger('click')
     expect(window.aiops.minimizeWindow).toHaveBeenCalled()
+  })
+
+  it('does not fabricate top layout changes when config persistence is unavailable or malformed', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TopBar, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    const originalSaveConfig = window.aiops.saveConfig
+    await wrapper.vm.$nextTick()
+
+    try {
+      vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+        ...store.config,
+        defaultMode: 'terminal'
+      })
+      await wrapper.find('.mode-button').trigger('click')
+      await flushPromises()
+      expect(store.mode).toBe('terminal')
+      expect(store.topNotice).toBe('布局设置保存失败')
+
+      vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+        ...store.config,
+        defaultMode: 'agents'
+      })
+      await wrapper.find('.mode-button').trigger('click')
+      await flushPromises()
+      expect(store.mode).toBe('agents')
+
+      ;(window.aiops as any).saveConfig = undefined
+      await wrapper.find('.layout-toggle').trigger('click')
+      await flushPromises()
+      expect(store.agentsLeftOpen).toBe(true)
+      expect(store.topNotice).toBe('布局设置保存服务不可用')
+
+      ;(window.aiops as any).saveConfig = originalSaveConfig
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        agentsLeftOpen: false
+      })
+      await wrapper.find('.layout-toggle').trigger('click')
+      await flushPromises()
+      expect(store.agentsLeftOpen).toBe(false)
+    } finally {
+      window.aiops.saveConfig = originalSaveConfig
+    }
   })
 
   it('follows External reference-style asset management navigation and filters knowledge documents', async () => {

@@ -4762,9 +4762,81 @@ const defaultMcpConfigContent = JSON.stringify(
 let mcpServersMock = defaultMcpServers.map(cloneMcpServerMock)
 let mcpConfigContentMock = defaultMcpConfigContent
 
+const createDefaultConfigMock = () => ({
+  language: 'zh-CN',
+  theme: 'dark',
+  defaultMode: 'terminal',
+  leftPanelOpen: true,
+  rightPanelOpen: true,
+  agentsLeftOpen: true,
+  modelProvider: 'local',
+  modelEndpoint: '',
+  modelName: 'aiopsterm-local-agent',
+  watermark: 'open',
+  background: {
+    mode: 'none',
+    image: '',
+    opacity: 0.15,
+    brightness: 0.45,
+    lastCustomImage: ''
+  },
+  terminal: {
+    terminalType: 'xterm-256color',
+    fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+    fontSize: 12,
+    scrollBack: 1000,
+    cursorStyle: 'block',
+    cursorBlink: true,
+    lineHeight: 1,
+    pinchZoomStatus: true,
+    showCloseButton: true,
+    sshAgentsStatus: false,
+    middleMouseEvent: 'paste',
+    rightMouseEvent: 'contextMenu'
+  },
+  workspacePreferences: {
+    expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
+    showIpMode: false
+  },
+  editorSettings: defaultEditorSettings,
+  sshProxyConfigs: defaultSshProxyConfigs,
+  sshAgentKeys: defaultSshAgentKeys,
+  extensionSettings: defaultExtensionSettings,
+  keywordHighlight: defaultKeywordHighlight,
+  securityConfig: defaultSecurityConfig,
+  privacy: defaultPrivacy,
+  aiPreferences: defaultAiPreferences,
+  modelSettings: defaultModelSettings,
+  shortcuts: defaultShortcuts,
+  rules: defaultRules,
+  skills: cloneSkills(),
+  mcpServers: mcpServersMock.map(cloneMcpServerMock),
+  mcpToolStates: getMcpToolStatesMock(mcpServersMock),
+  quickCommands: defaultQuickCommands,
+  knowledgeBase: defaultKnowledgeBase,
+  aliasCommands: defaultAliasCommands,
+  onboarding: {
+    version: 2,
+    guideTabAutoOpened: false,
+    completedModules: {
+      interfaceGuide: false,
+      systemSettings: false,
+      addAndConnectHost: false,
+      aiChat: false
+    }
+  }
+})
+
+let configStoreMock = createDefaultConfigMock()
+
+const resetConfigStoreMock = () => {
+  configStoreMock = createDefaultConfigMock()
+}
+
 const resetMcpStoreMock = () => {
   mcpServersMock = defaultMcpServers.map(cloneMcpServerMock)
   mcpConfigContentMock = defaultMcpConfigContent
+  resetConfigStoreMock()
 }
 
 const applyMcpConfigContentMock = (content: string) => {
@@ -4967,6 +5039,7 @@ Object.assign(globalThis, {
   __resetExtensionPluginStoreMock: resetExtensionPluginStoreMock,
   __setExtensionPluginStoreMock: setExtensionPluginStoreMock,
   __loadExtensionPluginStoreFixtureMock: () => setExtensionPluginStoreMock([...defaultExtensionPluginCatalog, ...extensionPluginStoreFixtureCatalog]),
+  __resetConfigStoreMock: resetConfigStoreMock,
   __resetUserAccountStoreMock: resetUserAccountStoreMock,
   __resetSkillsStoreMock: resetSkillsStoreMock,
   __setUserAccountProfileMock: (patch: Partial<TestUserProfile>) => applyUserProfileMock(patch),
@@ -5446,133 +5519,26 @@ Object.defineProperty(window, 'aiops', {
     closeWindow: vi.fn(async () => undefined),
     onMaximized: vi.fn(() => () => undefined),
     onUnmaximized: vi.fn(() => () => undefined),
-    getConfig: vi.fn(async () => ({
-      language: 'zh-CN',
-      theme: 'dark',
-      defaultMode: 'terminal',
-      leftPanelOpen: true,
-      rightPanelOpen: true,
-      modelProvider: 'local',
-      modelEndpoint: '',
-      modelName: 'aiopsterm-local-agent',
-      watermark: 'open',
-      background: {
-        mode: 'none',
-        image: '',
-        opacity: 0.15,
-        brightness: 0.45,
-        lastCustomImage: ''
-      },
-      terminal: {
-        terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
-        fontSize: 12,
-        scrollBack: 1000,
-        cursorStyle: 'block',
-        cursorBlink: true,
-        lineHeight: 1,
-        pinchZoomStatus: true,
-        showCloseButton: true,
-        sshAgentsStatus: false,
-        middleMouseEvent: 'paste',
-        rightMouseEvent: 'contextMenu'
-      },
-      workspacePreferences: {
-        expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
-        showIpMode: false
-      },
-      editorSettings: defaultEditorSettings,
-      sshProxyConfigs: defaultSshProxyConfigs,
-      sshAgentKeys: defaultSshAgentKeys,
-      extensionSettings: defaultExtensionSettings,
-      keywordHighlight: defaultKeywordHighlight,
-      securityConfig: defaultSecurityConfig,
-      privacy: defaultPrivacy,
-      aiPreferences: defaultAiPreferences,
-      modelSettings: defaultModelSettings,
-      shortcuts: defaultShortcuts,
-      rules: defaultRules,
-      skills: cloneSkills(),
-      mcpServers: mcpServersMock.map(cloneMcpServerMock),
-      mcpToolStates: getMcpToolStatesMock(mcpServersMock),
-      quickCommands: defaultQuickCommands,
-      knowledgeBase: defaultKnowledgeBase,
-      aliasCommands: defaultAliasCommands,
-      onboarding: {
-        version: 2,
-        guideTabAutoOpened: false,
-        completedModules: {
-          interfaceGuide: false,
-          systemSettings: false,
-          addAndConnectHost: false,
-          aiChat: false
-        }
+    getConfig: vi.fn(async () => JSON.parse(JSON.stringify(configStoreMock))),
+    saveConfig: vi.fn(async (patch) => {
+      configStoreMock = {
+        ...configStoreMock,
+        ...patch,
+        background: { ...configStoreMock.background, ...(patch?.background || {}) },
+        terminal: { ...configStoreMock.terminal, ...(patch?.terminal || {}) },
+        workspacePreferences: { ...configStoreMock.workspacePreferences, ...(patch?.workspacePreferences || {}) },
+        editorSettings: { ...configStoreMock.editorSettings, ...(patch?.editorSettings || {}) },
+        aiPreferences: { ...configStoreMock.aiPreferences, ...(patch?.aiPreferences || {}), proxy: { ...configStoreMock.aiPreferences.proxy, ...(patch?.aiPreferences?.proxy || {}) } },
+        modelSettings: patch?.modelSettings || configStoreMock.modelSettings,
+        shortcuts: patch?.shortcuts || configStoreMock.shortcuts,
+        rules: patch?.rules || configStoreMock.rules,
+        skills: patch?.skills || configStoreMock.skills,
+        mcpServers: patch?.mcpServers || configStoreMock.mcpServers,
+        mcpToolStates: patch?.mcpToolStates || configStoreMock.mcpToolStates,
+        onboarding: patch?.onboarding ? { ...configStoreMock.onboarding, ...patch.onboarding, completedModules: { ...configStoreMock.onboarding.completedModules, ...(patch.onboarding.completedModules || {}) } } : configStoreMock.onboarding
       }
-    })),
-    saveConfig: vi.fn(async (patch) => ({
-      language: 'zh-CN',
-      theme: 'dark',
-      defaultMode: 'terminal',
-      leftPanelOpen: true,
-      rightPanelOpen: true,
-      modelProvider: 'local',
-      modelEndpoint: '',
-      modelName: 'aiopsterm-local-agent',
-      watermark: 'open',
-      background: {
-        mode: 'none',
-        image: '',
-        opacity: 0.15,
-        brightness: 0.45,
-        lastCustomImage: ''
-      },
-      terminal: {
-        terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
-        fontSize: 12,
-        scrollBack: 1000,
-        cursorStyle: 'block',
-        cursorBlink: true,
-        lineHeight: 1,
-        pinchZoomStatus: true,
-        showCloseButton: true,
-        sshAgentsStatus: false,
-        middleMouseEvent: 'paste',
-        rightMouseEvent: 'contextMenu'
-      },
-      workspacePreferences: {
-        expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
-        showIpMode: false
-      },
-      editorSettings: defaultEditorSettings,
-      sshProxyConfigs: defaultSshProxyConfigs,
-      sshAgentKeys: defaultSshAgentKeys,
-      extensionSettings: defaultExtensionSettings,
-      keywordHighlight: defaultKeywordHighlight,
-      securityConfig: defaultSecurityConfig,
-      privacy: defaultPrivacy,
-      aiPreferences: defaultAiPreferences,
-      modelSettings: defaultModelSettings,
-      shortcuts: defaultShortcuts,
-      rules: defaultRules,
-      skills: cloneSkills(),
-      mcpServers: mcpServersMock.map(cloneMcpServerMock),
-      mcpToolStates: getMcpToolStatesMock(mcpServersMock),
-      quickCommands: defaultQuickCommands,
-      knowledgeBase: defaultKnowledgeBase,
-      aliasCommands: defaultAliasCommands,
-      onboarding: {
-        version: 2,
-        guideTabAutoOpened: false,
-        completedModules: {
-          interfaceGuide: false,
-          systemSettings: false,
-          addAndConnectHost: false,
-          aiChat: false
-        }
-      },
-      ...patch
-    })),
+      return JSON.parse(JSON.stringify(configStoreMock))
+    }),
     applyPrivacyRuntimeSettings: vi.fn(async (input: { nextPrivacy: typeof defaultPrivacy }) => ({
       ok: true as const,
       data: {

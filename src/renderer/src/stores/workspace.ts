@@ -646,6 +646,7 @@ const defaultConfig: UserConfig = {
   defaultMode: 'terminal',
   leftPanelOpen: true,
   rightPanelOpen: true,
+  agentsLeftOpen: true,
   modelProvider: 'local',
   modelEndpoint: '',
   modelName: 'aiopsterm-local-agent',
@@ -3151,6 +3152,7 @@ const normalizeCatalogModelProvider = (value: unknown): UserConfig['modelProvide
 }
 
 type GeneralBaseSettingsPatch = Partial<Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'>>
+type LayoutPreferencesPatch = Partial<Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen'>>
 type BackgroundUserConfig = UserConfig['background']
 
 const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
@@ -3158,6 +3160,8 @@ const settingsLanguageValues = settingsLanguageOptions.map((option) => option.va
 const isThemeSnapshot = (value: unknown): value is ThemeId => typeof value === 'string' && isThemeId(value)
 
 const isDefaultModeValue = (value: unknown): value is UserConfig['defaultMode'] => value === 'terminal' || value === 'agents'
+
+const isBooleanValue = (value: unknown): value is boolean => typeof value === 'boolean'
 
 const isWatermarkValue = (value: unknown): value is UserConfig['watermark'] => value === 'open' || value === 'close'
 
@@ -3189,6 +3193,42 @@ const generalBaseSettingsPatchMatches = (patch: GeneralBaseSettingsPatch, savedC
 
 const isGeneralBaseSettingsSnapshot = (source: unknown): source is Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'> =>
   isRecord(source) && isDefaultModeValue(source.defaultMode) && isSettingsLanguageValue(source.language) && isWatermarkValue(source.watermark)
+
+const normalizeLayoutPreferencesPatch = (patch: LayoutPreferencesPatch) => {
+  const normalized: LayoutPreferencesPatch = {}
+  if (patch.defaultMode !== undefined) {
+    if (!isDefaultModeValue(patch.defaultMode)) return null
+    normalized.defaultMode = patch.defaultMode
+  }
+  if (patch.leftPanelOpen !== undefined) {
+    if (!isBooleanValue(patch.leftPanelOpen)) return null
+    normalized.leftPanelOpen = patch.leftPanelOpen
+  }
+  if (patch.rightPanelOpen !== undefined) {
+    if (!isBooleanValue(patch.rightPanelOpen)) return null
+    normalized.rightPanelOpen = patch.rightPanelOpen
+  }
+  if (patch.agentsLeftOpen !== undefined) {
+    if (!isBooleanValue(patch.agentsLeftOpen)) return null
+    normalized.agentsLeftOpen = patch.agentsLeftOpen
+  }
+  return normalized
+}
+
+const layoutPreferencesPatchMatches = (patch: LayoutPreferencesPatch, savedConfig: Record<string, unknown>) => {
+  if (patch.defaultMode !== undefined && savedConfig.defaultMode !== patch.defaultMode) return false
+  if (patch.leftPanelOpen !== undefined && savedConfig.leftPanelOpen !== patch.leftPanelOpen) return false
+  if (patch.rightPanelOpen !== undefined && savedConfig.rightPanelOpen !== patch.rightPanelOpen) return false
+  if (patch.agentsLeftOpen !== undefined && savedConfig.agentsLeftOpen !== patch.agentsLeftOpen) return false
+  return true
+}
+
+const isLayoutPreferencesSnapshot = (source: unknown): source is Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen'> =>
+  isRecord(source) &&
+  isDefaultModeValue(source.defaultMode) &&
+  isBooleanValue(source.leftPanelOpen) &&
+  isBooleanValue(source.rightPanelOpen) &&
+  isBooleanValue(source.agentsLeftOpen)
 
 const backgroundModeValues = ['none', 'preset', 'custom'] as const
 
@@ -3236,6 +3276,11 @@ const backgroundSnapshotsMatch = (left: BackgroundUserConfig, right: BackgroundU
 const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
   ...patch,
+  defaultMode: isDefaultModeValue(patch.defaultMode) ? patch.defaultMode : isDefaultModeValue(base.defaultMode) ? base.defaultMode : defaultConfig.defaultMode,
+  leftPanelOpen: typeof patch.leftPanelOpen === 'boolean' ? patch.leftPanelOpen : typeof base.leftPanelOpen === 'boolean' ? base.leftPanelOpen : defaultConfig.leftPanelOpen,
+  rightPanelOpen: typeof patch.rightPanelOpen === 'boolean' ? patch.rightPanelOpen : typeof base.rightPanelOpen === 'boolean' ? base.rightPanelOpen : defaultConfig.rightPanelOpen,
+  agentsLeftOpen:
+    typeof patch.agentsLeftOpen === 'boolean' ? patch.agentsLeftOpen : typeof base.agentsLeftOpen === 'boolean' ? base.agentsLeftOpen : defaultConfig.agentsLeftOpen,
   modelProvider: normalizeUserModelProvider(patch.modelProvider || base.modelProvider),
   modelName: normalizeUserModelName(patch.modelName || base.modelName),
   background: normalizeBackgroundConfig({
@@ -4501,6 +4546,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const hydrateConfig = async () => {
     if (!window.aiops) return
     const savedConfig = await window.aiops.getConfig()
+    const missingAgentsLeftOpen = typeof savedConfig.agentsLeftOpen !== 'boolean'
     const missingTerminalConfig = !isRecord(savedConfig.terminal)
     const missingWorkspacePreferences = !isRecord(savedConfig.workspacePreferences)
     const missingEditorSettings = !isRecord(savedConfig.editorSettings)
@@ -4692,6 +4738,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       missingPrivacy ||
       aiPreferencesChanged ||
       missingAiPreferences ||
+      missingAgentsLeftOpen ||
       modelProviderChanged ||
       modelNameChanged ||
       modelSettingsChanged ||
@@ -4704,6 +4751,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       config.value = mergeGenericSavedConfig(
         config.value,
         await window.aiops.saveConfig({
+          agentsLeftOpen: config.value.agentsLeftOpen,
           modelProvider: config.value.modelProvider,
           modelName: config.value.modelName,
           terminal: normalizedTerminal,
@@ -4728,6 +4776,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     mode.value = config.value.defaultMode
     leftPanelOpen.value = config.value.leftPanelOpen
     rightPanelOpen.value = config.value.rightPanelOpen
+    agentsLeftOpen.value = config.value.agentsLeftOpen
     config.value.theme = normalizeThemeId(config.value.theme)
     applyCurrentTheme()
     applyCurrentEditorSettings()
@@ -5898,6 +5947,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateLanguage = (language: string) => saveGeneralBaseSettings({ language })
 
   const updateWatermark = (watermark: 'open' | 'close') => saveGeneralBaseSettings({ watermark })
+
+  const applyLayoutPreferencesSnapshot = (savedConfig: UserConfig) => {
+    config.value = mergeGenericSavedConfig(config.value, savedConfig)
+    mode.value = config.value.defaultMode
+    leftPanelOpen.value = config.value.leftPanelOpen
+    rightPanelOpen.value = config.value.rightPanelOpen
+    agentsLeftOpen.value = config.value.agentsLeftOpen
+  }
+
+  const persistLayoutPreferences = async (patch: LayoutPreferencesPatch) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setTopNotice('布局设置保存服务不可用')
+      return false
+    }
+    const normalizedPatch = normalizeLayoutPreferencesPatch(patch)
+    if (!normalizedPatch || !Object.keys(normalizedPatch).length) {
+      setTopNotice('布局设置保存失败')
+      return false
+    }
+    try {
+      const savedConfig = await saveConfigBridge(normalizedPatch)
+      if (!isLayoutPreferencesSnapshot(savedConfig) || !layoutPreferencesPatchMatches(normalizedPatch, savedConfig)) {
+        setTopNotice('布局设置保存失败')
+        return false
+      }
+      applyLayoutPreferencesSnapshot(savedConfig)
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : '布局设置保存失败')
+      return false
+    }
+  }
 
   const getEditorSettingsSnapshot = (): EditorUserConfig => ({ ...editorSettings.value })
 
@@ -8322,8 +8404,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (actionId === 'toggleAi') {
       mode.value = 'terminal'
       if (activeModule.value === 'database' || activeModule.value === 'user') activeModule.value = 'workspace'
-      toggleRight()
-      setTopNotice(`AI 侧栏已${rightPanelOpen.value ? '打开' : '关闭'}`)
+      void toggleRight()
       return true
     }
     if (actionId === 'switchToSpecificTab' && digit) {
@@ -8380,12 +8461,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const toggleMode = async () => {
     const nextMode = mode.value === 'terminal' ? 'agents' : 'terminal'
-    mode.value = nextMode
-    if (nextMode === 'terminal' && activeModule.value !== 'database' && activeModule.value !== 'user') {
-      rightPanelOpen.value = config.value.rightPanelOpen
+    const saved = await persistLayoutPreferences({ defaultMode: nextMode })
+    if (!saved) return false
+    if (nextMode === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) {
+      rightPanelOpen.value = false
     }
-    const saved = await saveGeneralBaseSettings({ defaultMode: nextMode })
-    setTopNotice(`已切换到 ${mode.value === 'agents' ? 'Agents' : 'Terminal'} 模式${saved ? '' : '；默认布局保存失败'}`)
+    setTopNotice(`已切换到 ${mode.value === 'agents' ? 'Agents' : 'Terminal'} 模式`)
+    return true
   }
 
   const setActiveModule = (key: ModuleKey) => {
@@ -11368,19 +11450,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       : [...k8sCollapsedBastionIds.value, uuid]
   }
 
-  const toggleLeft = () => {
+  const toggleLeft = async () => {
     if (mode.value === 'agents') {
-      agentsLeftOpen.value = !agentsLeftOpen.value
-      return
+      const nextOpen = !agentsLeftOpen.value
+      const saved = await persistLayoutPreferences({ agentsLeftOpen: nextOpen })
+      if (saved) setTopNotice(`Agents 会话侧栏已${agentsLeftOpen.value ? '打开' : '关闭'}`)
+      return saved
     }
-    leftPanelOpen.value = !leftPanelOpen.value
-    saveConfig({ leftPanelOpen: leftPanelOpen.value })
+    const nextOpen = !leftPanelOpen.value
+    const saved = await persistLayoutPreferences({ leftPanelOpen: nextOpen })
+    if (saved) setTopNotice(`左侧面板已${leftPanelOpen.value ? '打开' : '关闭'}`)
+    return saved
   }
 
-  const toggleRight = () => {
-    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return
-    rightPanelOpen.value = !rightPanelOpen.value
-    saveConfig({ rightPanelOpen: rightPanelOpen.value })
+  const toggleRight = async () => {
+    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    const nextOpen = !rightPanelOpen.value
+    const saved = await persistLayoutPreferences({ rightPanelOpen: nextOpen })
+    if (saved) setTopNotice(`AI 侧栏已${rightPanelOpen.value ? '打开' : '关闭'}`)
+    return saved
   }
 
   const createPanel = (split?: PanelDirection) => {
