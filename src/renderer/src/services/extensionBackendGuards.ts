@@ -4,6 +4,7 @@ import type {
   AliasCommandListResult,
   AliasCommandMutationResult,
   ExtensionInstallProgress,
+  ExtensionPluginCancelResult,
   ExtensionPluginListResult,
   ExtensionPluginOperation,
   ExtensionPluginOperationResult,
@@ -66,6 +67,7 @@ export const isExtensionPluginRuntimeConfig = (value: unknown): value is Extensi
 
 export type ExtensionPluginOperationData = NonNullable<ExtensionPluginOperationResult['data']>
 export type ExtensionSubscriptionData = NonNullable<ExtensionSubscriptionResult['data']>
+export type ExtensionPluginCancelData = NonNullable<ExtensionPluginCancelResult['data']>
 
 export const isExtensionPluginListData = (value: unknown): value is NonNullable<ExtensionPluginListResult['data']> =>
   Array.isArray(value) && value.every(isExtensionPluginRuntimeConfig)
@@ -82,6 +84,9 @@ export const isExtensionPluginOperationData = (
 
 export const isExtensionSubscriptionData = (value: unknown): value is ExtensionSubscriptionData =>
   isRecord(value) && isNonEmptyString(value.pluginId) && isNonEmptyString(value.url) && isNonEmptyString(value.message)
+
+export const isExtensionPluginCancelData = (value: unknown): value is ExtensionPluginCancelData =>
+  isRecord(value) && isNonEmptyString(value.pluginId) && value.stage === 'cancelled' && value.percent === 0 && isNonEmptyString(value.message)
 
 export const isExtensionInstallProgressData = (value: unknown): value is ExtensionInstallProgress => {
   if (!isRecord(value)) return false

@@ -13,6 +13,7 @@ import {
   isAliasCommandListData,
   isAliasCommandMutationData,
   isExtensionInstallProgressData,
+  isExtensionPluginCancelData,
   isExtensionPluginListData,
   isExtensionPluginOperationData,
   isExtensionSubscriptionData,
@@ -123,6 +124,7 @@ import type {
   EditorUserConfig,
   ExtensionInstallProgress as BackendExtensionInstallProgress,
   ExtensionInstallStage,
+  ExtensionPluginOperation,
   ExtensionPluginRuntimeConfig,
   ExtensionUserConfig,
   FileSessionCatalog,
@@ -3717,6 +3719,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionInstallLoadingMap = ref<Record<string, boolean>>({})
   const extensionUpdateLoadingMap = ref<Record<string, boolean>>({})
   const extensionInstallProgressMap = ref<Record<string, ExtensionInstallProgress>>({})
+  const extensionActiveOperations = ref<Record<string, ExtensionPluginOperation>>({})
+  const extensionPendingPackageOperation = ref(false)
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
   const assetManagementOpenRequest = ref<{ sequence: number; organizationId?: string }>({ sequence: 0 })
@@ -9351,8 +9355,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionInstallProgressMap.value = next
   }
 
+  const setExtensionActiveOperation = (pluginId: string, operation: ExtensionPluginOperation | null) => {
+    if (!pluginId) return
+    const next = { ...extensionActiveOperations.value }
+    if (operation) next[pluginId] = operation
+    else delete next[pluginId]
+    extensionActiveOperations.value = next
+  }
+
+  const clearExtensionActiveOperation = (pluginId: string) => {
+    setExtensionActiveOperation(pluginId, null)
+  }
+
+  const extensionHasActiveOperation = (pluginId: string) =>
+    Boolean(extensionInstallLoadingMap.value[pluginId] || extensionUpdateLoadingMap.value[pluginId] || extensionActiveOperations.value[pluginId])
+
+  const isExpectedExtensionProgress = (event: BackendExtensionInstallProgress) => {
+    const expectedOperation = extensionActiveOperations.value[event.pluginId]
+    if (expectedOperation) return expectedOperation === event.operation
+    if (extensionPendingPackageOperation.value && event.operation === 'package') {
+      setExtensionActiveOperation(event.pluginId, 'package')
+      extensionPendingPackageOperation.value = false
+      return true
+    }
+    if (!extensionInstallLoadingMap.value[event.pluginId] && !extensionUpdateLoadingMap.value[event.pluginId]) return false
+    return event.operation === 'update' ? Boolean(extensionUpdateLoadingMap.value[event.pluginId]) : Boolean(extensionInstallLoadingMap.value[event.pluginId])
+  }
+
   const handleExtensionInstallProgress = (event: BackendExtensionInstallProgress) => {
     if (!isExtensionInstallProgressData(event)) {
+      setExtensionNotice(malformedExtensionBackendResultMessage)
+      return
+    }
+    if (!isExpectedExtensionProgress(event)) {
       setExtensionNotice(malformedExtensionBackendResultMessage)
       return
     }
@@ -9362,6 +9397,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setExtensionInstallLoading(event.pluginId, !['done', 'error', 'cancelled'].includes(event.stage))
     }
     setExtensionInstallProgress(event.pluginId, event.stage, event.percent)
+    if (['done', 'error', 'cancelled'].includes(event.stage)) clearExtensionActiveOperation(event.pluginId)
   }
 
   const installExtensionInstallProgressListener = () => {
@@ -9462,6 +9498,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     installExtensionInstallProgressListener()
+    setExtensionActiveOperation(pluginId, 'install')
     setExtensionInstallLoading(pluginId, true)
     setExtensionNotice(`正在安装 ${plugin.name}`)
     try {
@@ -9489,6 +9526,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       clearExtensionInstallProgressLater(pluginId)
     } finally {
       setExtensionInstallLoading(pluginId, false)
+      clearExtensionActiveOperation(pluginId)
     }
   }
 
@@ -9501,6 +9539,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     installExtensionInstallProgressListener()
+    setExtensionActiveOperation(pluginId, 'update')
     setExtensionUpdateLoading(pluginId, true)
     setExtensionNotice(`正在更新 ${plugin.name}`)
     try {
@@ -9528,6 +9567,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       clearExtensionInstallProgressLater(pluginId)
     } finally {
       setExtensionUpdateLoading(pluginId, false)
+      clearExtensionActiveOperation(pluginId)
     }
   }
 
@@ -9581,7 +9621,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const cancelExtensionInstall = async (pluginId: string) => {
-    if (!extensionInstallLoadingMap.value[pluginId] && !extensionUpdateLoadingMap.value[pluginId]) return
+    if (!extensionHasActiveOperation(pluginId)) return
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     const cancelExtensionInstallBridge = window.aiops?.cancelExtensionInstall
     if (typeof cancelExtensionInstallBridge !== 'function') {
@@ -9594,9 +9634,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setExtensionNotice(result?.errorMessage || `${plugin?.name || '插件'} 取消失败`)
         return
       }
+      if (!isExtensionPluginCancelData(result.data) || result.data.pluginId !== pluginId) {
+        setExtensionNotice(malformedExtensionBackendResultMessage)
+        return
+      }
       setExtensionInstallLoading(pluginId, false)
       setExtensionUpdateLoading(pluginId, false)
       setExtensionInstallProgress(pluginId, 'cancelled', 0)
+      clearExtensionActiveOperation(pluginId)
       setExtensionNotice(`${plugin?.name || '插件'} 安装已取消`)
       clearExtensionInstallProgressLater(pluginId)
     } catch (error) {
@@ -9627,6 +9672,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     installExtensionInstallProgressListener()
+    extensionPendingPackageOperation.value = true
     extensionInstallingPackageName.value = packageName
     setExtensionNotice(`正在安装 ${packageName}`)
     let pendingPluginId = ''
@@ -9646,6 +9692,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       pendingPluginId = result.data.plugin.pluginId
+      setExtensionActiveOperation(pendingPluginId, 'package')
       applyExtensionPluginFromBackend(result.data.plugin)
       selectedExtensionId.value = result.data.plugin.pluginId
       setExtensionInstallProgress(result.data.plugin.pluginId, 'done', 100)
@@ -9657,6 +9704,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     } finally {
       if (pendingPluginId) setExtensionInstallLoading(pendingPluginId, false)
+      if (pendingPluginId) clearExtensionActiveOperation(pendingPluginId)
+      extensionPendingPackageOperation.value = false
       extensionInstallingPackageName.value = ''
     }
   }

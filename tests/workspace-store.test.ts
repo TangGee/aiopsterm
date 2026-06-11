@@ -6235,6 +6235,18 @@ describe('workspace store', () => {
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
       await finishPendingUpdate(backendRejectedCancelUpdate)
 
+      const malformedCancelUpdate = startPendingUpdate()
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      vi.mocked(window.aiops.cancelExtensionInstall!).mockResolvedValueOnce({
+        ok: true,
+        data: { pluginId: 'cloud-assets', stage: 'cancelled', percent: 0, message: 'wrong plugin cancellation' }
+      } as any)
+      await store.cancelExtensionInstall('ops-runbook')
+      expect(store.extensionNotice).toBe('扩展服务返回数据无效')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      expect(store.extensionInstallProgressMap['ops-runbook']?.stage).not.toBe('cancelled')
+      await finishPendingUpdate(malformedCancelUpdate)
+
       const selectedBeforePackage = store.selectedExtensionId
       const clientLocalPackage = { name: 'client-local.external-reference', path: '/tmp/client-local.external-reference', size: 2048 }
       ;(window.aiops as any).installExtensionPackage = undefined
@@ -6453,6 +6465,33 @@ describe('workspace store', () => {
       progressListener?.({ pluginId: 'cloud-assets', operation: 'install', stage: 'done' })
       expect(store.extensionNotice).toBe(malformedExtensionMessage)
       expect(JSON.stringify(store.extensionInstallProgressMap)).toBe(progressSnapshot)
+
+      const pendingUpdate = new Promise((resolve) => {
+        vi.mocked(window.aiops.updateExtensionPlugin!).mockImplementationOnce(
+          () =>
+            new Promise((operationResolve) => {
+              resolve(operationResolve)
+            }) as any
+        )
+      }) as Promise<(value: unknown) => void>
+      const updatePromise = store.updateExtensionPlugin('ops-runbook')
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      progressListener?.({ pluginId: 'ops-runbook-shadow', operation: 'update', stage: 'done', percent: 100 })
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      expect(store.extensionInstallProgressMap['ops-runbook-shadow']).toBeUndefined()
+      progressListener?.({ pluginId: 'ops-runbook', operation: 'install', stage: 'cancelled', percent: 0 })
+      expect(store.extensionNotice).toBe(malformedExtensionMessage)
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBe(true)
+      expect(store.extensionInstallProgressMap['ops-runbook']?.stage).not.toBe('cancelled')
+      const finishUpdate = await pendingUpdate
+      finishUpdate({
+        ok: false,
+        errorCode: 'EXTENSION_PLUGIN_OPERATION_CANCELLED',
+        errorMessage: 'Plugin operation cancelled.'
+      })
+      await updatePromise
+      expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
 
       vi.mocked(window.aiops.listAliasCommands!).mockResolvedValueOnce({ ok: true, data: [{ id: 'alias-broken', alias: 'broken' }] } as any)
       await expect(store.refreshAliasCommands()).resolves.toBe(false)
