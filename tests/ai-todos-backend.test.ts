@@ -14,8 +14,10 @@ type AiTodosBackend = {
 
 let backend: AiTodosBackend
 const tempDirs: string[] = []
+const originalAiTodoSeedEnv = process.env.AIOPSTERM_AI_TODO_ENABLE_SEED
 
 const loadBackend = async () => {
+  delete process.env.AIOPSTERM_AI_TODO_ENABLE_SEED
   vi.resetModules()
   const modulePath = '../src/main/backend/aiTodos'
   backend = (await import(modulePath)) as AiTodosBackend
@@ -43,6 +45,11 @@ describe('AI todo backend boundary', () => {
   })
 
   afterEach(async () => {
+    if (originalAiTodoSeedEnv === undefined) {
+      delete process.env.AIOPSTERM_AI_TODO_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_AI_TODO_ENABLE_SEED = originalAiTodoSeedEnv
+    }
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
@@ -86,6 +93,32 @@ describe('AI todo backend boundary', () => {
       source: 'backend'
     })
     expect(snapshot.todos).toEqual([])
+  })
+
+  it('does not infer todo seed mode from NODE_ENV test', async () => {
+    backend.configureAiTodoBackendRuntime()
+    backend.resetAiTodosForTests()
+
+    const snapshot = expectOkSnapshot(backend.listAiTodoSnapshot())
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(snapshot.focusedTodoId).toBeNull()
+    expect(snapshot.totalTodos).toBe(0)
+    expect(snapshot.todos).toEqual([])
+  })
+
+  it('loads todo development seeds only when the seed environment switch is enabled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-ai-todos-env-seed-'))
+    tempDirs.push(dir)
+    process.env.AIOPSTERM_AI_TODO_ENABLE_SEED = '1'
+    backend.configureAiTodoBackendRuntime({ stateFilePath: join(dir, 'ai-todos.json') })
+    backend.resetAiTodosForTests()
+
+    const snapshot = expectOkSnapshot(backend.listAiTodoSnapshot())
+
+    expect(snapshot.focusedTodoId).toBe('todo-2')
+    expect(snapshot.totalTodos).toBe(3)
+    expect(snapshot.todos.map((todo: { content: string }) => todo.content)).toEqual(['收集上下文', '生成命令建议', '等待确认'])
   })
 
   it('strips unmodified legacy seed todos from non-seed runtime state', async () => {

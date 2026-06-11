@@ -16,6 +16,7 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
       ...env,
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
+      AIOPSTERM_CHAT_HISTORY_ENABLE_SEED: '1',
       AIOPSTERM_AI_CHAT_BACKEND_DOUBLE: '1',
       AIOPSTERM_DB_AI_BACKEND_DOUBLE: '1',
       AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE: '1',

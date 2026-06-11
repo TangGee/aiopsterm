@@ -16,8 +16,10 @@ type ChatHistoryBackend = {
 
 let backend: ChatHistoryBackend
 const tempDirs: string[] = []
+const originalChatHistorySeedEnv = process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
 
 const loadBackend = async () => {
+  delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
   vi.resetModules()
   const modulePath = '../src/main/backend/chatHistory'
   backend = (await import(modulePath)) as ChatHistoryBackend
@@ -45,6 +47,11 @@ describe('AI chat history backend boundary', () => {
   })
 
   afterEach(async () => {
+    if (originalChatHistorySeedEnv === undefined) {
+      delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = originalChatHistorySeedEnv
+    }
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
@@ -59,6 +66,31 @@ describe('AI chat history backend boundary', () => {
 
     expect(data.selectedConversationId).toBe('')
     expect(data.conversations).toEqual([])
+  })
+
+  it('does not infer chat history seed mode from NODE_ENV test', async () => {
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-default-nonseed-' })
+    backend.configureChatHistoryBackendRuntime()
+    backend.resetChatHistoryForTests()
+
+    const data = expectOkData(backend.listChatConversations())
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(data.selectedConversationId).toBe('')
+    expect(data.conversations).toEqual([])
+  })
+
+  it('loads chat history development seeds only when the seed environment switch is enabled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-history-env-seed-'))
+    tempDirs.push(dir)
+    process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = '1'
+    backend.configureChatHistoryBackendRuntime({ stateFilePath: join(dir, 'chat-history.json') })
+    backend.resetChatHistoryForTests()
+
+    const data = expectOkData(backend.listChatConversations())
+
+    expect(data.selectedConversationId).toBe('conv-1')
+    expect(data.conversations.map((conversation: { id: string }) => conversation.id)).toEqual(['conv-1', 'conv-2', 'conv-3'])
   })
 
   it('strips unmodified legacy seed conversations from non-seed runtime state', async () => {

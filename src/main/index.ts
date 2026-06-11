@@ -1352,8 +1352,14 @@ setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesT
   })
 })
 configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
-configureAiTodoBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'ai-todos.json') })
-configureChatHistoryBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'chat-history.json') })
+configureAiTodoBackendRuntime({
+  stateFilePath: join(app.getPath('userData'), 'ai-todos.json'),
+  useSeedData: process.env.AIOPSTERM_AI_TODO_ENABLE_SEED === '1'
+})
+configureChatHistoryBackendRuntime({
+  stateFilePath: join(app.getPath('userData'), 'chat-history.json'),
+  useSeedData: process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED === '1'
+})
 configureQuickCommandBackendRuntime({ databasePath: join(app.getPath('userData'), 'aiopsterm-state.db') })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')

@@ -55,8 +55,7 @@ const defaultChatHistoryStateFilePath = () => {
 
 const legacyChatHistoryStateFilePath = () => resolve(dirname(runtimeConfig.stateFilePath), 'aiopsterm-chat-history.json')
 
-const defaultChatHistorySeedMode = () =>
-  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED || '').trim() === '1'
+const defaultChatHistorySeedMode = () => String(process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED || '').trim() === '1'
 
 let runtimeConfig: Required<ChatHistoryBackendRuntimeConfig> = {
   stateFilePath: defaultChatHistoryStateFilePath(),

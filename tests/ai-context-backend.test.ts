@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiContextCategoryInfo } from '../src/shared/preload'
 
 vi.mock('electron', () => ({
@@ -33,12 +33,24 @@ const loadBackend = async () => {
   return import(modulePath)
 }
 
+const originalChatHistorySeedEnv = process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+
 describe('AI context catalog backend boundary', () => {
   beforeEach(() => {
+    delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
     vi.resetModules()
   })
 
+  afterEach(() => {
+    if (originalChatHistorySeedEnv === undefined) {
+      delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = originalChatHistorySeedEnv
+    }
+  })
+
   it('builds host, chat, and default contexts from backend-owned catalogs', async () => {
+    process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = '1'
     const backend = await loadBackend()
     const result = await backend.listAiContextCatalog()
 

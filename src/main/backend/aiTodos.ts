@@ -39,7 +39,7 @@ const defaultAiTodoStateFilePath = () => {
   return envPath ? (isAbsolute(envPath) ? envPath : resolve(envPath)) : resolve(process.cwd(), '.aiopsterm-ai-todos.json')
 }
 
-const defaultAiTodoSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_AI_TODO_ENABLE_SEED || '').trim() === '1'
+const defaultAiTodoSeedMode = () => String(process.env.AIOPSTERM_AI_TODO_ENABLE_SEED || '').trim() === '1'
 
 let runtimeConfig: Required<AiTodoBackendRuntimeConfig> = {
   stateFilePath: defaultAiTodoStateFilePath(),
