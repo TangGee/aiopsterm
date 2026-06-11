@@ -228,6 +228,7 @@ import {
   getDefaultKnowledgeSeedFile,
   shouldUseKnowledgeSeedData
 } from '@shared/knowledgeBaseSeed'
+import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } from '@shared/skillsSeed'
 import type {
   AliasCommandConfig,
   AliasCommandDeleteInput,
@@ -427,6 +428,7 @@ const defaultSecurityConfig: SecurityUserConfig = {
 }
 
 const defaultKnowledgeBaseUserConfig: KnowledgeBaseUserConfig = defaultKnowledgeBaseConfig()
+const defaultSkillsUserConfig: SkillUserConfig[] = defaultSkillsConfig()
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',
@@ -570,22 +572,7 @@ const defaultConfig: UserConfig = {
     { id: 'rule-1', content: '执行生产变更前必须先给出只读检查命令和回滚点。', enabled: true },
     { id: 'rule-2', content: '不要自动执行删除、重启、扩容、写文件或修改配置类命令。', enabled: true }
   ],
-  skills: [
-    {
-      name: 'incident-triage',
-      description: 'Collect symptoms, recent changes, and affected services.',
-      enabled: true,
-      editable: true,
-      content: 'When incident triage is requested, collect scope, blast radius, and recent deployments first.'
-    },
-    {
-      name: 'k8s-rollout',
-      description: 'Guide Kubernetes rollout inspection and rollback planning.',
-      enabled: true,
-      editable: true,
-      content: 'Prefer kubectl describe, events, image pull checks, and rollback safety checks.'
-    }
-  ],
+  skills: defaultSkillsUserConfig,
   mcpServers: defaultMcpServers(),
   mcpToolStates: defaultMcpToolStates(),
   knowledgeBase: defaultKnowledgeBaseUserConfig,
@@ -1807,8 +1794,8 @@ const ensureSkillsDirectory = async () => {
   try {
     await access(getSkillsInitMarkerPath())
   } catch {
-    if (!(await hasAnySkillFile(skillsPath))) {
-      await seedSkillsFromConfig(getConfig().skills || defaultConfig.skills || [])
+    if (shouldUseSkillSeedData() && !(await hasAnySkillFile(skillsPath))) {
+      await seedSkillsFromConfig(defaultSkillSeedData())
     }
     await writeFile(getSkillsInitMarkerPath(), 'initialized\n', 'utf-8')
   }
