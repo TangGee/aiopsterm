@@ -15,6 +15,15 @@ const ssh2Mock = vi.hoisted(() => {
   const nodes = new Map<string, MockNode>()
   const connectConfigs: Array<Record<string, unknown>> = []
   const calls: Array<Record<string, unknown>> = []
+  const readFileDelays = new Map<
+    string,
+    {
+      released: Promise<void>
+      release: () => void
+      reached: Promise<void>
+      markReached: () => void
+    }
+  >()
   const writeFileDelays = new Map<
     string,
     {
@@ -96,16 +105,28 @@ const ssh2Mock = vi.hoisted(() => {
     readFile(path: string, callback: (error: Error | null, content?: Buffer) => void) {
       const normalized = normalize(path)
       calls.push({ method: 'readFile', path: normalized })
-      const node = nodes.get(normalized)
-      if (!node) {
-        callback(missingError(normalized))
+      const complete = () => {
+        const node = nodes.get(normalized)
+        if (!node) {
+          callback(missingError(normalized))
+          return
+        }
+        if (node.type !== 'file') {
+          callback(Object.assign(new Error(`${normalized} is not a file`), { code: 'EISDIR' }))
+          return
+        }
+        callback(null, Buffer.from(node.content || Buffer.alloc(0)))
+      }
+      const delay = readFileDelays.get(normalized)
+      if (!delay) {
+        complete()
         return
       }
-      if (node.type !== 'file') {
-        callback(Object.assign(new Error(`${normalized} is not a file`), { code: 'EISDIR' }))
-        return
-      }
-      callback(null, Buffer.from(node.content || Buffer.alloc(0)))
+      delay.markReached()
+      delay.released.then(() => {
+        readFileDelays.delete(normalized)
+        complete()
+      })
     },
     writeFile(path: string, content: Buffer, callback: (error?: Error | null) => void) {
       const normalized = normalize(path)
@@ -237,6 +258,8 @@ const ssh2Mock = vi.hoisted(() => {
     nodes.clear()
     connectConfigs.length = 0
     calls.length = 0
+    readFileDelays.forEach((delay) => delay.release())
+    readFileDelays.clear()
     writeFileDelays.forEach((delay) => delay.release())
     writeFileDelays.clear()
     ensureDirectory('/')
@@ -252,6 +275,19 @@ const ssh2Mock = vi.hoisted(() => {
   return {
     Client,
     reset,
+    pauseReadFile(path: string) {
+      const normalized = normalize(path)
+      let release!: () => void
+      let markReached!: () => void
+      const released = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const reached = new Promise<void>((resolve) => {
+        markReached = resolve
+      })
+      readFileDelays.set(normalized, { released, release, reached, markReached })
+      return { release, reached }
+    },
     pauseWriteFile(path: string) {
       const normalized = normalize(path)
       let release!: () => void
@@ -1308,6 +1344,143 @@ describe('files backend content boundary', () => {
         ])
       )
     } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes and cancels active asset-backed single-file downloads from the backend task boundary', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-file-download-cancel-'))
+    const localDownload = join(dir, 'remote.bin')
+    const downloadBytes = Buffer.from([255, 128, 0, 65, 10])
+    const pausedRead = ssh2Mock.pauseReadFile('/srv/archive/remote.bin')
+    try {
+      ssh2Mock.nodes.set('/srv/archive/remote.bin', { type: 'file', content: downloadBytes, mode: 0o100600, mtime: 1_717_200_400 })
+
+      const transferPromise = transferFileEntry(
+        { kind: 'download-file', remotePath: '/srv/archive/remote.bin', localPath: localDownload },
+        { kind: 'remote', sessionId, fromHost: 'sftp.example.test', toHost: '127.0.0.1' }
+      )
+
+      await pausedRead.reached
+      const activeTasks = await listFileTransferTasks()
+      expect(activeTasks).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          type: 'download',
+          name: 'remote.bin',
+          source: '/srv/archive/remote.bin',
+          target: localDownload,
+          fromHost: 'sftp.example.test',
+          toHost: '127.0.0.1',
+          progress: 0,
+          speed: 'pending',
+          status: 'running',
+          stage: 'pending'
+        })
+      ])
+
+      const cancelled = await cancelFileTransferTask({ id: activeTasks[0].id })
+      expect(cancelled).toEqual({
+        ok: true,
+        data: {
+          id: activeTasks[0].id,
+          taskIds: [activeTasks[0].id],
+          status: 'aborted'
+        }
+      })
+      await expect(listFileTransferTasks()).resolves.toEqual([])
+
+      pausedRead.release()
+      const downloaded = await transferPromise
+      expect(downloaded.ok).toBe(true)
+      expect(downloaded.data).toEqual(
+        expect.objectContaining({
+          status: 'cancelled',
+          source: '/srv/archive/remote.bin',
+          target: localDownload,
+          bytes: 0,
+          files: 1,
+          itemKind: 'file',
+          task: expect.objectContaining({
+            id: activeTasks[0].id,
+            type: 'download',
+            status: 'failed',
+            speed: '已取消'
+          })
+        })
+      )
+      await expect(readFile(localDownload)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      pausedRead.release()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes and cancels active asset-backed single-file uploads from the backend task boundary', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-file-upload-cancel-'))
+    const localUpload = join(dir, 'binary.bin')
+    const uploadBytes = Buffer.from([0, 1, 2, 3, 127, 128, 255])
+    const pausedWrite = ssh2Mock.pauseWriteFile('/srv/archive/binary.bin')
+    try {
+      await writeFile(localUpload, uploadBytes)
+
+      const transferPromise = transferFileEntry(
+        { kind: 'upload-file', localPath: localUpload, remoteDirectory: '/srv/archive' },
+        { kind: 'remote', sessionId, fromHost: '127.0.0.1', toHost: 'sftp.example.test' }
+      )
+
+      await pausedWrite.reached
+      const activeTasks = await listFileTransferTasks()
+      expect(activeTasks).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^transfer-/),
+          type: 'upload',
+          name: 'binary.bin',
+          source: localUpload,
+          target: '/srv/archive/binary.bin',
+          fromHost: '127.0.0.1',
+          toHost: 'sftp.example.test',
+          progress: 50,
+          speed: '上传中',
+          status: 'running',
+          stage: 'pending'
+        })
+      ])
+
+      const cancelled = await cancelFileTransferTask({ id: activeTasks[0].id })
+      expect(cancelled).toEqual({
+        ok: true,
+        data: {
+          id: activeTasks[0].id,
+          taskIds: [activeTasks[0].id],
+          status: 'aborted'
+        }
+      })
+      await expect(listFileTransferTasks()).resolves.toEqual([])
+
+      pausedWrite.release()
+      const uploaded = await transferPromise
+      expect(uploaded.ok).toBe(true)
+      expect(uploaded.data).toEqual(
+        expect.objectContaining({
+          status: 'cancelled',
+          source: localUpload,
+          target: '/srv/archive/binary.bin',
+          bytes: 0,
+          files: 1,
+          itemKind: 'file',
+          task: expect.objectContaining({
+            id: activeTasks[0].id,
+            type: 'upload',
+            status: 'failed',
+            speed: '已取消'
+          })
+        })
+      )
+    } finally {
+      pausedWrite.release()
       await rm(dir, { recursive: true, force: true })
     }
   })

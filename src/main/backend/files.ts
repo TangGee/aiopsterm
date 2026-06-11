@@ -1022,6 +1022,15 @@ const fileTransferCancelledResult = (
 const createCompletedBackendFileTransferTask = (input: BackendFileTransferTaskPayload) =>
   cloneFileTransferTask(createBackendFileTransferTask({ progress: 100, status: 'success', speed: '完成', ...input }))
 
+const createRunningFileTransferTask = (input: BackendFileTransferTaskPayload) =>
+  createBackendFileTransferTask({
+    progress: 0,
+    status: 'running',
+    speed: 'pending',
+    stage: 'pending',
+    ...input
+  })
+
 const fileTransferTaskHosts = (options: FileListOptions) => ({
   ...(transferFromHost(options) ? { fromHost: transferFromHost(options) } : {}),
   ...(transferToHost(options) ? { toHost: transferToHost(options) } : {})
@@ -1685,27 +1694,41 @@ const downloadRemoteFileViaSftp = async (remotePath: string, localPath: string, 
   const source = normalizeRemotePath(remotePath)
   const destination = String(localPath || '').trim()
   const mtimeMs = Date.now()
+  let task: FileTransferTask | null = null
   try {
     return await withRemoteSftp(target, async (sftp) => {
       const stats = await sftpStat(sftp, source)
       if (sftpEntryType(stats) !== 'file') return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
-      const content = await sftpReadFile(sftp, source)
-      await mkdir(getLocalDirname(destination), { recursive: true })
-      await writeFile(destination, content)
-      const task = createBackendFileTransferTask({
+      const control = createFileTransferAbortControl()
+      task = createRunningFileTransferTask({
         type: 'download',
         name: basename(source),
         source,
         target: destination,
-        progress: 100,
-        speed: '完成',
-        status: 'success',
         fromHost: transferFromHost(options),
         ...(options.toHost ? { toHost: options.toHost } : {})
       })
-      return { ok: true, data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task } }
+      registerActiveFileTransferTask(task, control)
+      control.assertActive()
+      const content = await sftpReadFile(sftp, source)
+      control.assertActive()
+      task.progress = 90
+      task.speed = '写入中'
+      updateActiveFileTransferTask(task, control)
+      await mkdir(getLocalDirname(destination), { recursive: true })
+      control.assertActive()
+      await writeFile(destination, content)
+      control.assertActive()
+      return {
+        ok: true,
+        data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task: completeRunningFileTransferTask(task, 1) }
+      }
     })
   } catch (error) {
+    if (task && isFileTransferCancelledError(error)) {
+      return fileTransferCancelledResult(source, destination, 0, 1, mtimeMs, 'file', cancelRunningFileTransferTask(task))
+    }
+    if (task) finishActiveFileTransferTask(task)
     return fileError(error, 'transfer_failed')
   }
 }
@@ -1873,26 +1896,39 @@ const uploadRemoteFileViaSftp = async (
   const source = String(localPath || '').trim()
   const destination = normalizeRemotePath(`${remoteDirectory}/${name}`)
   const mtimeMs = Date.now()
+  let task: FileTransferTask | null = null
   try {
     return await withRemoteSftp(target, async (sftp) => {
-      const content = await readFile(source)
-      await ensureRemoteParentDirs(sftp, dirname(destination))
-      await sftpWriteFile(sftp, destination, content)
-      const task = createBackendFileTransferTask({
+      const control = createFileTransferAbortControl()
+      task = createRunningFileTransferTask({
         type: 'upload',
         name,
         source,
         target: destination,
-        progress: 100,
-        speed: '完成',
-        status: 'success',
         ...(options.fromHost ? { fromHost: options.fromHost } : {}),
-        toHost: transferToHost(options),
-        stage: 'pending'
+        toHost: transferToHost(options)
       })
-      return { ok: true, data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task } }
+      registerActiveFileTransferTask(task, control)
+      control.assertActive()
+      const content = await readFile(source)
+      control.assertActive()
+      await ensureRemoteParentDirs(sftp, dirname(destination))
+      control.assertActive()
+      task.progress = 50
+      task.speed = '上传中'
+      updateActiveFileTransferTask(task, control)
+      await sftpWriteFile(sftp, destination, content)
+      control.assertActive()
+      return {
+        ok: true,
+        data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task: completeRunningFileTransferTask(task, 1) }
+      }
     })
   } catch (error) {
+    if (task && isFileTransferCancelledError(error)) {
+      return fileTransferCancelledResult(source, destination, 0, 1, mtimeMs, 'file', cancelRunningFileTransferTask(task))
+    }
+    if (task) finishActiveFileTransferTask(task)
     return fileError(error, 'transfer_failed')
   }
 }
