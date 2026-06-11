@@ -13,6 +13,7 @@ type UserBackend = {
   logoutUserAccount: () => any
   skipUserLogin: () => any
   sendUserLoginCode: (input: any) => any
+  peekUserCodeForTests: (scope: 'login' | 'contact', kind: 'email' | 'mobile', target: string) => string
   prepareUserAvatarImage: (input: any) => Promise<any>
   updateUserProfile: (input: any) => any
   sendUserContactCode: (input: any) => any
@@ -91,7 +92,18 @@ describe('user account backend boundary', () => {
       localDatabaseReady: true
     })
 
-    const email = backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })
+    expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })).toEqual({
+      ok: false,
+      errorCode: 'USER_CODE_NOT_SENT',
+      errorMessage: '请先获取验证码'
+    })
+
+    expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+    const email = backend.loginUserAccount({
+      method: 'email',
+      email: 'login@example.local',
+      code: backend.peekUserCodeForTests('login', 'email', 'login@example.local')
+    })
     expect(expectOkData(email).profile).toMatchObject({
       email: 'login@example.local',
       username: 'login',
@@ -99,7 +111,12 @@ describe('user account backend boundary', () => {
       lastLoginMethod: 'email'
     })
 
-    const mobile = backend.loginUserAccount({ method: 'mobile', mobile: '13800000001', code: '135790' })
+    expectOkData(backend.sendUserLoginCode({ kind: 'mobile', value: '13800000001' }))
+    const mobile = backend.loginUserAccount({
+      method: 'mobile',
+      mobile: '13800000001',
+      code: backend.peekUserCodeForTests('login', 'mobile', '13800000001')
+    })
     expect(expectOkData(mobile).profile).toMatchObject({
       mobile: '13800000001',
       registrationCode: 7,
@@ -133,6 +150,7 @@ describe('user account backend boundary', () => {
       const result = backend.sendUserLoginCode({ kind: 'email', value: '  login@example.local  ' })
       const first = expectOkData(result)
       expect(first).toMatchObject({
+        challengeId: expect.stringMatching(/^[a-f0-9]{24}$/),
         kind: 'email',
         target: 'login@example.local',
         countdownSeconds: 300,
@@ -143,6 +161,7 @@ describe('user account backend boundary', () => {
 
       vi.advanceTimersByTime(60_000)
       const repeated = expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+      expect(repeated.challengeId).toBe(first.challengeId)
       expect(repeated.expiresAt).toBe(first.expiresAt)
       expect(repeated.countdownSeconds).toBe(240)
       expect(repeated.remainingSeconds).toBe(240)
@@ -152,12 +171,50 @@ describe('user account backend boundary', () => {
       expect(contact.expiresAt).toBe(Date.now() + 300_000)
       expect(contact.expiresAt).not.toBe(first.expiresAt)
 
-      expect(expectOkData(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })).profile.email).toBe(
-        'login@example.local'
-      )
+      const code = backend.peekUserCodeForTests('login', 'email', 'login@example.local')
+      expect(expectOkData(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code })).profile.email).toBe('login@example.local')
       const afterLogin = expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
       expect(afterLogin.expiresAt).toBe(Date.now() + 300_000)
       expect(afterLogin.expiresAt).not.toBe(first.expiresAt)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('requires issued, unexpired, single-use login verification codes', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
+
+    try {
+      expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '000000' })).toEqual({
+        ok: false,
+        errorCode: 'USER_CODE_NOT_SENT',
+        errorMessage: '请先获取验证码'
+      })
+
+      expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+      expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '000000' })).toEqual({
+        ok: false,
+        errorCode: 'USER_CODE_INVALID',
+        errorMessage: '验证码错误'
+      })
+
+      const code = backend.peekUserCodeForTests('login', 'email', 'login@example.local')
+      expectOkData(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code }))
+      expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code })).toEqual({
+        ok: false,
+        errorCode: 'USER_CODE_NOT_SENT',
+        errorMessage: '请先获取验证码'
+      })
+
+      expectOkData(backend.sendUserLoginCode({ kind: 'mobile', value: '13800000001' }))
+      const mobileCode = backend.peekUserCodeForTests('login', 'mobile', '13800000001')
+      vi.advanceTimersByTime(300_001)
+      expect(backend.loginUserAccount({ method: 'mobile', mobile: '13800000001', code: mobileCode })).toEqual({
+        ok: false,
+        errorCode: 'USER_CODE_EXPIRED',
+        errorMessage: '验证码已过期，请重新获取'
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -223,7 +280,12 @@ describe('user account backend boundary', () => {
   })
 
   it('enforces contact binding gates based on the current login registration code', () => {
-    backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })
+    expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+    backend.loginUserAccount({
+      method: 'email',
+      email: 'login@example.local',
+      code: backend.peekUserCodeForTests('login', 'email', 'login@example.local')
+    })
 
     expect(backend.sendUserContactCode({ kind: 'email', value: 'ops@example.local' })).toEqual({
       ok: false,
@@ -233,6 +295,7 @@ describe('user account backend boundary', () => {
 
     const mobileCode = backend.sendUserContactCode({ kind: 'mobile', value: '  13800000002  ' })
     expect(expectOkData(mobileCode)).toMatchObject({
+      challengeId: expect.stringMatching(/^[a-f0-9]{24}$/),
       target: '13800000002',
       countdownSeconds: 300,
       remainingSeconds: 300,
@@ -246,10 +309,25 @@ describe('user account backend boundary', () => {
       errorMessage: '请输入手机验证码'
     })
 
-    const bound = backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '123456' })
+    expect(backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '000000' })).toEqual({
+      ok: false,
+      errorCode: 'USER_CODE_INVALID',
+      errorMessage: '验证码错误'
+    })
+
+    const bound = backend.bindUserContact({
+      kind: 'mobile',
+      value: '13800000002',
+      code: backend.peekUserCodeForTests('contact', 'mobile', '13800000002')
+    })
     expect(expectOkData(bound).profile.mobile).toBe('13800000002')
 
-    backend.loginUserAccount({ method: 'mobile', mobile: '13800000003', code: '135790' })
+    expectOkData(backend.sendUserLoginCode({ kind: 'mobile', value: '13800000003' }))
+    backend.loginUserAccount({
+      method: 'mobile',
+      mobile: '13800000003',
+      code: backend.peekUserCodeForTests('login', 'mobile', '13800000003')
+    })
     expect(backend.sendUserContactCode({ kind: 'mobile', value: '13800000004' })).toEqual({
       ok: false,
       errorCode: 'USER_MOBILE_INVALID',
@@ -441,7 +519,14 @@ describe('user account backend boundary', () => {
 
     expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
     expectOkData(backend.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead', avatarInitials: 'ol' }))
-    expectOkData(backend.bindUserContact({ kind: 'email', value: 'ops@example.local', code: '123456' }))
+    expectOkData(backend.sendUserContactCode({ kind: 'email', value: 'ops@example.local' }))
+    expectOkData(
+      backend.bindUserContact({
+        kind: 'email',
+        value: 'ops@example.local',
+        code: backend.peekUserCodeForTests('contact', 'email', 'ops@example.local')
+      })
+    )
     expectOkData(backend.resetUserPassword({ password: 'Aa123456!' }))
     expectOkData(backend.revokeTrustedDevice(2))
 

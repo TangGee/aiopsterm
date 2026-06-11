@@ -17,6 +17,7 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
       NODE_ENV: 'test',
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE: '1',
+      AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE: '1',
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'
     }
   })
@@ -960,7 +961,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.user-login-form input').first().fill('e2e-login@example.local')
     await page.locator('.user-login-form .user-code-row button').click()
     await expect(page.locator('.user-login-form .user-code-row button')).toContainText('300s')
-    await page.locator('.user-login-form input').nth(1).fill('123456')
+    await page.locator('.user-login-form input').nth(1).fill('246810')
     await page.locator('.user-login-form .primary').click()
     await expect(page.locator('.user-info-card')).toContainText('E2E Operator')
 

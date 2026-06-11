@@ -1083,6 +1083,8 @@ const isUserMutationData = (source: unknown): source is UserMutationData => {
 
 const isUserCodeData = (source: unknown): source is UserCodeData =>
   isRecord(source) &&
+  typeof source.challengeId === 'string' &&
+  /^[a-f0-9]{16,64}$/i.test(source.challengeId) &&
   userCodeKinds.includes(source.kind as UserCodeData['kind']) &&
   typeof source.target === 'string' &&
   source.target.trim() !== '' &&

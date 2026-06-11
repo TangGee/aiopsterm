@@ -585,6 +585,7 @@ export type AiopsUserAccountResult = AiopsMutationResult<AiopsUserAccountSnapsho
 export type AiopsUserMutationResult = AiopsMutationResult<AiopsUserAccountSnapshot & { message: string }>
 
 export type AiopsUserCodeResult = AiopsMutationResult<{
+  challengeId: string
   kind: 'email' | 'mobile'
   target: string
   countdownSeconds: number

@@ -15,6 +15,7 @@ import type {
   AiopsUserProfile,
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { readFile, stat } from 'fs/promises'
 import { hostname, networkInterfaces, userInfo } from 'os'
@@ -181,7 +182,11 @@ let userAccountLoadedStateFilePath = ''
 type UserCodeCooldownScope = 'login' | 'contact'
 type UserCodeKind = AiopsUserCodeInput['kind']
 type UserCodeCooldown = {
+  challengeId: string
   expiresAt: number
+  codeHash: string
+  attempts: number
+  debugCode?: string
 }
 
 const userCodeCooldownMs = 300_000
@@ -410,7 +415,33 @@ const maxAvatarBytes = 2 * 1024 * 1024
 const userCodeCooldownKey = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) =>
   [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
 
+const userCodeChallengeId = () => randomBytes(12).toString('hex')
+
 const remainingCodeCooldownSeconds = (expiresAt: number, now = Date.now()) => Math.max(0, Math.ceil((expiresAt - now) / 1000))
+
+const normalizeUserCode = (value: unknown) => trimText(value).replace(/\s+/g, '')
+
+const userCodeBackendDoubleEnabled = () => String(process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE || '').trim() === '1'
+
+const generateUserCode = (scope: UserCodeCooldownScope, kind: UserCodeKind) => {
+  if (userCodeBackendDoubleEnabled()) {
+    if (scope === 'login' && kind === 'email') return '246810'
+    if (scope === 'login' && kind === 'mobile') return '135790'
+    return '123456'
+  }
+  return randomInt(0, 1_000_000).toString().padStart(6, '0')
+}
+
+const userCodeHash = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string, code: string) =>
+  createHash('sha256')
+    .update([runtimeConfig.stateFilePath, scope, kind, kind === 'email' ? target.toLowerCase() : target, code].join('\0'))
+    .digest('hex')
+
+const secureHashEqual = (left: string, right: string) => {
+  const leftBuffer = Buffer.from(left, 'hex')
+  const rightBuffer = Buffer.from(right, 'hex')
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
+}
 
 const clearUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) => {
   userCodeCooldowns.delete(userCodeCooldownKey(scope, kind, target))
@@ -424,13 +455,28 @@ const issueUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind,
   const expiresAt = activeRemainingSeconds > 0 ? active!.expiresAt : now + userCodeCooldownMs
   const remainingSeconds = activeRemainingSeconds > 0 ? activeRemainingSeconds : remainingCodeCooldownSeconds(expiresAt, now)
 
-  if (activeRemainingSeconds <= 0) {
-    userCodeCooldowns.set(key, { expiresAt })
+  const issued = activeRemainingSeconds > 0 ? active! : null
+  const challenge =
+    issued ||
+    (() => {
+      const code = generateUserCode(scope, kind)
+      return {
+        challengeId: userCodeChallengeId(),
+        expiresAt,
+        codeHash: userCodeHash(scope, kind, target, code),
+        attempts: 0,
+        debugCode: runtimeConfig.useSeedData || process.env.NODE_ENV === 'test' ? code : undefined
+      }
+    })()
+
+  if (!issued) {
+    userCodeCooldowns.set(key, challenge)
   }
 
   return {
     ok: true,
     data: {
+      challengeId: challenge.challengeId,
       kind,
       target,
       countdownSeconds: remainingSeconds,
@@ -440,6 +486,30 @@ const issueUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind,
     }
   }
 }
+
+const verifyUserCode = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string, code: string): AiopsUserMutationResult | null => {
+  const key = userCodeCooldownKey(scope, kind, target)
+  const active = userCodeCooldowns.get(key)
+  if (!active) return errorResult('USER_CODE_NOT_SENT', '请先获取验证码')
+  if (remainingCodeCooldownSeconds(active.expiresAt) <= 0) {
+    userCodeCooldowns.delete(key)
+    return errorResult('USER_CODE_EXPIRED', '验证码已过期，请重新获取')
+  }
+  const codeHash = userCodeHash(scope, kind, target, code)
+  if (!secureHashEqual(active.codeHash, codeHash)) {
+    const attempts = active.attempts + 1
+    if (attempts >= 5) {
+      userCodeCooldowns.delete(key)
+      return errorResult('USER_CODE_LOCKED', '验证码错误次数过多，请重新获取')
+    }
+    userCodeCooldowns.set(key, { ...active, attempts })
+    return errorResult('USER_CODE_INVALID', '验证码错误')
+  }
+  return null
+}
+
+export const peekUserCodeForTests = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) =>
+  userCodeCooldowns.get(userCodeCooldownKey(scope, kind, trimText(target)))?.debugCode || ''
 
 const avatarMimeByExtension: Record<string, string> = {
   '.png': 'image/png',
@@ -575,8 +645,11 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
 
   if (input.method === 'email') {
     const email = trimText(input.email)
-    if (!email || !trimText(input.code)) return errorResult('USER_EMAIL_LOGIN_REQUIRED', '请输入邮箱和验证码')
+    const code = normalizeUserCode(input.code)
+    if (!email || !code) return errorResult('USER_EMAIL_LOGIN_REQUIRED', '请输入邮箱和验证码')
     if (!isValidEmail(email)) return errorResult('USER_EMAIL_INVALID', '邮箱格式不正确')
+    const verificationError = verifyUserCode('login', 'email', email, code)
+    if (verificationError) return verificationError
     loginProfile({
       email,
       username: email.split('@')[0] || profileStore.username,
@@ -589,8 +662,11 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
   }
 
   const mobile = trimText(input.mobile)
-  if (!mobile || !trimText(input.code)) return errorResult('USER_MOBILE_LOGIN_REQUIRED', '请输入手机号和验证码')
+  const code = normalizeUserCode(input.code)
+  if (!mobile || !code) return errorResult('USER_MOBILE_LOGIN_REQUIRED', '请输入手机号和验证码')
   if (!isValidMobile(mobile)) return errorResult('USER_MOBILE_INVALID', '手机号格式不正确')
+  const verificationError = verifyUserCode('login', 'mobile', mobile, code)
+  if (verificationError) return verificationError
   loginProfile({
     mobile,
     authProvider: 'local',
@@ -708,9 +784,12 @@ export const sendUserContactCode = (input: AiopsUserCodeInput): AiopsUserCodeRes
 
 export const bindUserContact = (input: AiopsUserContactBindInput): AiopsUserMutationResult => {
   const value = trimText(input.value)
+  const code = normalizeUserCode(input.code)
   const validation = validateContact(input.kind, value)
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
-  if (!trimText(input.code)) return errorResult('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
+  if (!code) return errorResult('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
+  const verificationError = verifyUserCode('contact', input.kind, value, code)
+  if (verificationError) return verificationError
   applyProfile({ [input.kind]: value })
   clearUserCodeCooldown('contact', input.kind, value)
   return successMutation(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')

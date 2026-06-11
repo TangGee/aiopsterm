@@ -388,7 +388,7 @@ let trustedDeviceStoreMock = defaultTrustedDevices.map(cloneTrustedDeviceMock)
 type UserCodeCooldownScopeMock = 'login' | 'contact'
 type UserCodeKindMock = 'email' | 'mobile'
 const userCodeCooldownMsMock = 300_000
-const userCodeCooldownStoreMock = new Map<string, { expiresAt: number }>()
+const userCodeCooldownStoreMock = new Map<string, { expiresAt: number; codeHash: string; attempts: number; debugCode: string }>()
 
 const userTimestampMock = (value = new Date()) => {
   const pad = (input: number) => input.toString().padStart(2, '0')
@@ -404,7 +404,24 @@ const isValidUserMobileMock = (value: string) => /^1[3-9]\d{9}$/.test(value)
 const userCodeCooldownKeyMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string) =>
   [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
 
+const userCodeChallengeIdMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string) =>
+  createHash('sha256')
+    .update(['tests/setup', scope, kind, kind === 'email' ? target.toLowerCase() : target].join('\0'))
+    .digest('hex')
+    .slice(0, 24)
+
 const remainingUserCodeCooldownSecondsMock = (expiresAt: number, now = Date.now()) => Math.max(0, Math.ceil((expiresAt - now) / 1000))
+
+const userCodeValueMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock) => {
+  if (scope === 'login' && kind === 'email') return '246810'
+  if (scope === 'login' && kind === 'mobile') return '135790'
+  return '123456'
+}
+
+const userCodeHashMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string, code: string) =>
+  createHash('sha256')
+    .update(['tests/setup', scope, kind, kind === 'email' ? target.toLowerCase() : target, code].join('\0'))
+    .digest('hex')
 
 const clearUserCodeCooldownMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string) => {
   userCodeCooldownStoreMock.delete(userCodeCooldownKeyMock(scope, kind, target))
@@ -418,11 +435,18 @@ const issueUserCodeCooldownMock = (scope: UserCodeCooldownScopeMock, kind: UserC
   const expiresAt = activeRemainingSeconds > 0 ? active!.expiresAt : now + userCodeCooldownMsMock
   const remainingSeconds = activeRemainingSeconds > 0 ? activeRemainingSeconds : remainingUserCodeCooldownSecondsMock(expiresAt, now)
   if (activeRemainingSeconds <= 0) {
-    userCodeCooldownStoreMock.set(key, { expiresAt })
+    const code = userCodeValueMock(scope, kind)
+    userCodeCooldownStoreMock.set(key, {
+      expiresAt,
+      codeHash: userCodeHashMock(scope, kind, target, code),
+      attempts: 0,
+      debugCode: code
+    })
   }
   return {
     ok: true as const,
     data: {
+      challengeId: userCodeChallengeIdMock(scope, kind, target),
       kind,
       target,
       countdownSeconds: remainingSeconds,
@@ -431,6 +455,27 @@ const issueUserCodeCooldownMock = (scope: UserCodeCooldownScopeMock, kind: UserC
       message: activeRemainingSeconds > 0 ? `验证码已发送，请 ${remainingSeconds} 秒后重试` : message
     }
   }
+}
+
+const verifyUserCodeMock = (scope: UserCodeCooldownScopeMock, kind: UserCodeKindMock, target: string, codeInput: string) => {
+  const key = userCodeCooldownKeyMock(scope, kind, target)
+  const active = userCodeCooldownStoreMock.get(key)
+  if (!active) return userErrorMock('USER_CODE_NOT_SENT', '请先获取验证码')
+  if (remainingUserCodeCooldownSecondsMock(active.expiresAt) <= 0) {
+    userCodeCooldownStoreMock.delete(key)
+    return userErrorMock('USER_CODE_EXPIRED', '验证码已过期，请重新获取')
+  }
+  const code = trimUserTextMock(codeInput).replace(/\s+/g, '')
+  if (userCodeHashMock(scope, kind, target, code) !== active.codeHash) {
+    const attempts = active.attempts + 1
+    if (attempts >= 5) {
+      userCodeCooldownStoreMock.delete(key)
+      return userErrorMock('USER_CODE_LOCKED', '验证码错误次数过多，请重新获取')
+    }
+    userCodeCooldownStoreMock.set(key, { ...active, attempts })
+    return userErrorMock('USER_CODE_INVALID', '验证码错误')
+  }
+  return null
 }
 
 const userPasswordScoreMock = (password: string) => {
@@ -5190,8 +5235,11 @@ Object.defineProperty(window, 'aiops', {
 
         if (input.method === 'email') {
           const email = trimUserTextMock(input.email)
-          if (!email || !trimUserTextMock(input.code)) return userErrorMock('USER_EMAIL_LOGIN_REQUIRED', '请输入邮箱和验证码')
+          const code = trimUserTextMock(input.code).replace(/\s+/g, '')
+          if (!email || !code) return userErrorMock('USER_EMAIL_LOGIN_REQUIRED', '请输入邮箱和验证码')
           if (!isValidUserEmailMock(email)) return userErrorMock('USER_EMAIL_INVALID', '邮箱格式不正确')
+          const verificationError = verifyUserCodeMock('login', 'email', email, code)
+          if (verificationError) return verificationError
           loginUserProfileMock({
             email,
             username: email.split('@')[0] || userProfileStoreMock.username,
@@ -5204,8 +5252,11 @@ Object.defineProperty(window, 'aiops', {
         }
 
         const mobile = trimUserTextMock(input.mobile)
-        if (!mobile || !trimUserTextMock(input.code)) return userErrorMock('USER_MOBILE_LOGIN_REQUIRED', '请输入手机号和验证码')
+        const code = trimUserTextMock(input.code).replace(/\s+/g, '')
+        if (!mobile || !code) return userErrorMock('USER_MOBILE_LOGIN_REQUIRED', '请输入手机号和验证码')
         if (!isValidUserMobileMock(mobile)) return userErrorMock('USER_MOBILE_INVALID', '手机号格式不正确')
+        const verificationError = verifyUserCodeMock('login', 'mobile', mobile, code)
+        if (verificationError) return verificationError
         loginUserProfileMock({
           mobile,
           authProvider: 'local',
@@ -5294,9 +5345,12 @@ Object.defineProperty(window, 'aiops', {
     }),
     bindUserContact: vi.fn(async (input: { kind: 'email' | 'mobile'; value: string; code: string }) => {
       const value = trimUserTextMock(input.value)
+      const code = trimUserTextMock(input.code).replace(/\s+/g, '')
       const validation = validateUserContactMock(input.kind, value)
       if (validation) return userErrorMock(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
-      if (!trimUserTextMock(input.code)) return userErrorMock('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
+      if (!code) return userErrorMock('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
+      const verificationError = verifyUserCodeMock('contact', input.kind, value, code)
+      if (verificationError) return verificationError
       applyUserProfileMock({ [input.kind]: value })
       clearUserCodeCooldownMock('contact', input.kind, value)
       return userSuccessMock(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')

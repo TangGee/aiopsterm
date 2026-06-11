@@ -9764,6 +9764,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'aaaaaaaaaaaaaaaaaaaaaaaa',
         kind: 'email',
         target: 'login@example.local',
         countdownSeconds: 300,
@@ -9781,6 +9782,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'bbbbbbbbbbbbbbbbbbbbbbbb',
         kind: 'mobile',
         target: '13800000002',
         countdownSeconds: 300,
@@ -9819,6 +9821,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'cdcdcdcdcdcdcdcdcdcdcdcd',
         kind: 'mobile',
         target: '13800000002',
         countdownSeconds: 300,
@@ -9842,6 +9845,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'cccccccccccccccccccccccc',
         kind: 'mobile',
         target: 'login@example.local',
         countdownSeconds: 300,
@@ -9861,6 +9865,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'dddddddddddddddddddddddd',
         kind: 'email',
         target: 'other@example.local',
         countdownSeconds: 300,
@@ -9879,6 +9884,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserLoginCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'eeeeeeeeeeeeeeeeeeeeeeee',
         kind: 'email',
         target: 'login@example.local',
         countdownSeconds: 300,
@@ -9900,6 +9906,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'ffffffffffffffffffffffff',
         kind: 'email',
         target: '13800000002',
         countdownSeconds: 300,
@@ -9919,6 +9926,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.sendUserContactCode).mockResolvedValueOnce({
       ok: true,
       data: {
+        challengeId: 'abababababababababababab',
         kind: 'mobile',
         target: '13800000003',
         countdownSeconds: 300,
