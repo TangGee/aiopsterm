@@ -151,6 +151,7 @@ import {
   planQuickCommandScript,
   reorderQuickCommands,
   saveQuickCommandGroup,
+  saveQuickCommandMacro,
   saveQuickCommandSnippet,
   saveQuickCommands
 } from './backend/quickCommands'
@@ -299,6 +300,7 @@ import type {
   ModelProviderCheckInput,
   ModelSettingsUserConfig,
   QuickCommandGroupSaveInput,
+  QuickCommandMacroSaveInput,
   QuickCommandReorderInput,
   QuickCommandScriptPlanInput,
   QuickCommandSnippetSaveInput,
@@ -3220,6 +3222,7 @@ const registerIpc = () => {
   ipcMain.handle('quick-commands:group:save', (_event, input: QuickCommandGroupSaveInput) => saveQuickCommandGroup(input))
   ipcMain.handle('quick-commands:group:delete', (_event, uuid: string) => deleteQuickCommandGroup(uuid))
   ipcMain.handle('quick-commands:snippet:save', (_event, input: QuickCommandSnippetSaveInput) => saveQuickCommandSnippet(input))
+  ipcMain.handle('quick-commands:macro:save', (_event, input: QuickCommandMacroSaveInput) => saveQuickCommandMacro(input))
   ipcMain.handle('quick-commands:snippet:delete', (_event, id: number) => deleteQuickCommandSnippet(id))
   ipcMain.handle('quick-commands:reorder', (_event, input: QuickCommandReorderInput) => reorderQuickCommands(input))
   ipcMain.handle('quick-commands:script:plan', (_event, input: QuickCommandScriptPlanInput) => planQuickCommandScript(input))

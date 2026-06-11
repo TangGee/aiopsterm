@@ -1298,6 +1298,18 @@ export type QuickCommandSnippetSaveInput = {
   group_uuid?: string | null
 }
 
+export type QuickCommandMacroEntryInput = {
+  command: string
+  timestamp: number
+}
+
+export type QuickCommandMacroSaveInput = {
+  snippet_name?: string
+  group_uuid?: string | null
+  entries: QuickCommandMacroEntryInput[]
+  sleepThresholdMs?: number
+}
+
 export type QuickCommandReorderInput = {
   orderedIds: number[]
   groupUuid?: string | null
@@ -1323,6 +1335,7 @@ export type QuickCommandScriptPlan = {
 export type QuickCommandGroupMutationResult = AiopsMutationResult<QuickCommandsUserConfig & { group: QuickCommandGroupConfig }>
 export type QuickCommandGroupDeleteResult = AiopsMutationResult<QuickCommandsUserConfig & { groupUuid: string }>
 export type QuickCommandSnippetMutationResult = AiopsMutationResult<QuickCommandsUserConfig & { snippet: QuickCommandSnippetConfig }>
+export type QuickCommandMacroMutationResult = QuickCommandSnippetMutationResult
 export type QuickCommandSnippetDeleteResult = AiopsMutationResult<QuickCommandsUserConfig & { id: number }>
 export type QuickCommandReorderResult = AiopsMutationResult<QuickCommandsUserConfig>
 export type QuickCommandScriptPlanResult = AiopsMutationResult<QuickCommandScriptPlan>
@@ -2742,6 +2755,7 @@ export type AiopsPreloadApi = {
   saveQuickCommandGroup: (input: QuickCommandGroupSaveInput) => Promise<QuickCommandGroupMutationResult>
   deleteQuickCommandGroup: (uuid: string) => Promise<QuickCommandGroupDeleteResult>
   saveQuickCommandSnippet: (input: QuickCommandSnippetSaveInput) => Promise<QuickCommandSnippetMutationResult>
+  saveQuickCommandMacro: (input: QuickCommandMacroSaveInput) => Promise<QuickCommandMacroMutationResult>
   deleteQuickCommandSnippet: (id: number) => Promise<QuickCommandSnippetDeleteResult>
   reorderQuickCommands: (input: QuickCommandReorderInput) => Promise<QuickCommandReorderResult>
   planQuickCommandScript: (input: QuickCommandScriptPlanInput) => Promise<QuickCommandScriptPlanResult>

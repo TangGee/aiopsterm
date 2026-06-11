@@ -33,6 +33,7 @@ import {
 import {
   isQuickCommandGroupDeleteData,
   isQuickCommandGroupSaveData,
+  isQuickCommandMacroSaveData,
   isQuickCommandReorderData,
   isQuickCommandsSnapshotData,
   isQuickCommandScriptPlanData,
@@ -8696,22 +8697,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const buildMacroSnippetContent = () => {
-    if (!macroCommandBuffer.value.length) return ''
-    const lines: string[] = []
-    macroCommandBuffer.value.forEach((entry, index) => {
-      const previous = macroCommandBuffer.value[index - 1]
-      if (previous) {
-        const delay = entry.timestamp - previous.timestamp
-        if (delay >= macroSleepThresholdMs.value) {
-          lines.push(`sleep==${delay}`)
-        }
-      }
-      lines.push(entry.command)
-    })
-    return lines.join('\n')
-  }
-
   const commitMacroCurrentLine = (timestamp = Date.now()) => {
     if (!macroCurrentLineBuffer.value.length) return true
     const added = addMacroCommandEntry(macroCurrentLineBuffer.value, timestamp)
@@ -8732,13 +8717,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const saveMacroSnippet = async (content: string, snippetName = macroDefaultName.value || createMacroSnippetName(), groupUuid = macroTargetGroupUuid.value) => {
-    if (!content.trim()) return null
-    return createQuickCommand({
-      snippet_name: snippetName,
-      snippet_content: content,
-      group_uuid: groupUuid
-    })
+  const saveMacroSnippet = async (
+    entries: MacroCommandEntry[],
+    snippetName = macroDefaultName.value || createMacroSnippetName(),
+    groupUuid = macroTargetGroupUuid.value,
+    sleepThresholdMs = macroSleepThresholdMs.value
+  ) => {
+    if (!entries.length) return null
+    if (!window.aiops?.saveQuickCommandMacro) {
+      setTopNotice('宏录制保存服务不可用')
+      return null
+    }
+    let result
+    try {
+      result = await window.aiops.saveQuickCommandMacro({
+        snippet_name: snippetName,
+        group_uuid: groupUuid,
+        entries: entries.map((entry) => ({ command: entry.command, timestamp: entry.timestamp })),
+        sleepThresholdMs
+      })
+    } catch {
+      setTopNotice('宏录制保存失败')
+      return null
+    }
+    if (!result.ok || !result.data) {
+      setTopNotice(result.errorMessage || '宏录制保存失败')
+      return null
+    }
+    if (!isQuickCommandMacroSaveData(result.data, { snippetName, groupUuid })) {
+      setTopNotice(malformedQuickCommandsBackendResultMessage)
+      return null
+    }
+    applyQuickCommandsSnapshot(result.data)
+    return result.data.snippet
   }
 
   const resetMacroRecordingState = () => {
@@ -8756,11 +8767,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!isMacroRecording.value) return null
     macroLimitReason.value = reason
     commitMacroCurrentLine()
-    const content = buildMacroSnippetContent()
+    const entries = macroCommandBuffer.value.map((entry) => ({ ...entry }))
     const snippetName = macroDefaultName.value || createMacroSnippetName()
     const groupUuid = macroTargetGroupUuid.value
+    const sleepThresholdMs = macroSleepThresholdMs.value
     resetMacroRecordingState()
-    return saveMacroSnippet(content, snippetName, groupUuid)
+    return saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
   }
 
   const startMacroRecording = (terminalId?: string | null) => {
@@ -8854,8 +8866,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const stopMacroRecording = async () => {
     if (!isMacroRecording.value) return
     commitMacroCurrentLine()
-    const content = buildMacroSnippetContent()
-    const saved = await saveMacroSnippet(content)
+    const entries = macroCommandBuffer.value.map((entry) => ({ ...entry }))
+    const snippetName = macroDefaultName.value || createMacroSnippetName()
+    const groupUuid = macroTargetGroupUuid.value
+    const sleepThresholdMs = macroSleepThresholdMs.value
+    const saved = await saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
     resetMacroRecordingState()
     return saved
   }

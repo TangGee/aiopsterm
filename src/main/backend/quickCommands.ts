@@ -8,6 +8,9 @@ import type {
   QuickCommandGroupDeleteResult,
   QuickCommandGroupMutationResult,
   QuickCommandGroupSaveInput,
+  QuickCommandMacroEntryInput,
+  QuickCommandMacroMutationResult,
+  QuickCommandMacroSaveInput,
   QuickCommandReorderInput,
   QuickCommandReorderResult,
   QuickCommandSnippetConfig,
@@ -225,6 +228,63 @@ const nextSnippetId = (snippets: QuickCommandSnippetConfig[]) => Math.max(0, ...
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
 const quickCommandsEqual = (left: QuickCommandsUserConfig, right: QuickCommandsUserConfig) => JSON.stringify(left) === JSON.stringify(right)
+
+const MACRO_MAX_COMMAND_COUNT = 50
+const MACRO_DEFAULT_SLEEP_THRESHOLD_MS = 500
+
+const createMacroSnippetName = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hour = String(now.getHours()).padStart(2, '0')
+  const minute = String(now.getMinutes()).padStart(2, '0')
+  const second = String(now.getSeconds()).padStart(2, '0')
+  return `macro-${year}${month}${day}-${hour}${minute}${second}`
+}
+
+const normalizeMacroEntry = (entry: unknown): QuickCommandMacroEntryInput | null => {
+  if (!isRecord(entry)) return null
+  const command = typeof entry.command === 'string' ? entry.command : ''
+  const timestamp = Number(entry.timestamp)
+  if (!command.trim() || command.includes('\n') || command.includes('\r') || !Number.isFinite(timestamp) || timestamp < 0) return null
+  return { command, timestamp }
+}
+
+const buildMacroSnippetContent = (input: QuickCommandMacroSaveInput): string => {
+  if (!isRecord(input)) throw new Error('Macro recording input is required')
+  if (!Array.isArray(input.entries)) throw new Error('Macro recording entries are required')
+  if (input.entries.length === 0) throw new Error('Macro recording entries are required')
+  if (input.entries.length > MACRO_MAX_COMMAND_COUNT) throw new Error('Macro recording command limit exceeded')
+
+  const entries = input.entries.map(normalizeMacroEntry)
+  if (entries.some((entry) => !entry)) throw new Error('Macro recording entries are invalid')
+  const normalizedEntries = entries as QuickCommandMacroEntryInput[]
+  const sleepThresholdMs = Number.isFinite(Number(input.sleepThresholdMs))
+    ? Math.max(0, Math.round(Number(input.sleepThresholdMs)))
+    : MACRO_DEFAULT_SLEEP_THRESHOLD_MS
+  const lines: string[] = []
+  normalizedEntries.forEach((entry, index) => {
+    const previous = normalizedEntries[index - 1]
+    if (previous) {
+      const delay = entry.timestamp - previous.timestamp
+      if (delay < 0) throw new Error('Macro recording timestamps must be ordered')
+      if (delay >= sleepThresholdMs) lines.push(`sleep==${delay}`)
+    }
+    lines.push(entry.command)
+  })
+  return lines.join('\n')
+}
+
+const macroSaveInputToSnippetInput = (input: QuickCommandMacroSaveInput): QuickCommandSnippetSaveInput => {
+  const content = buildMacroSnippetContent(input)
+  const snippetName = typeof input.snippet_name === 'string' && input.snippet_name.trim() ? input.snippet_name.trim() : createMacroSnippetName()
+  return {
+    snippet_name: snippetName,
+    snippet_content: content,
+    group_uuid: typeof input.group_uuid === 'string' && input.group_uuid.trim() ? input.group_uuid.trim() : null
+  }
+}
 
 const normalizeQuickCommands = (source?: Partial<QuickCommandsUserConfig>): QuickCommandsUserConfig => {
   const incoming = isRecord(source) ? source : {}
@@ -560,6 +620,8 @@ export const saveQuickCommandGroup = (input: QuickCommandGroupSaveInput): QuickC
 export const deleteQuickCommandGroup = (uuid: string): QuickCommandGroupDeleteResult => asResult(() => getStore().deleteGroup(uuid))
 export const saveQuickCommandSnippet = (input: QuickCommandSnippetSaveInput): QuickCommandSnippetMutationResult =>
   asResult(() => getStore().saveSnippet(input))
+export const saveQuickCommandMacro = (input: QuickCommandMacroSaveInput): QuickCommandMacroMutationResult =>
+  asResult(() => getStore().saveSnippet(macroSaveInputToSnippetInput(input)))
 export const deleteQuickCommandSnippet = (id: number): QuickCommandSnippetDeleteResult => asResult(() => getStore().deleteSnippet(id))
 export const reorderQuickCommands = (input: QuickCommandReorderInput): QuickCommandReorderResult => asResult(() => getStore().reorder(input))
 export const planQuickCommandScript = (input: QuickCommandScriptPlanInput): QuickCommandScriptPlanResult =>

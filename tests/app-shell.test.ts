@@ -5586,6 +5586,11 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.isMacroRecording).toBe(false)
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-') && command.snippet_content.includes('uptime'))).toBe(true)
+    expect(window.aiops.saveQuickCommandMacro).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entries: [expect.objectContaining({ command: 'uptime' })]
+      })
+    )
 
     await wrapper.find('button[title="宏录制"]').trigger('click')
     store.recordMacroTerminalInput(store.activePanelId, 'date')
@@ -5655,6 +5660,16 @@ describe('AppShell', () => {
     store.recordMacroTerminalInput('panel-secondary', 'ignored\n', 1700)
     const saved = await store.stopMacroRecording()
     expect(saved?.snippet_content).toBe('uptime\nsleep==600\nup\nwhoami')
+    expect(window.aiops.saveQuickCommandMacro).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sleepThresholdMs: 400,
+        entries: [
+          expect.objectContaining({ command: 'uptime', timestamp: 1000 }),
+          expect.objectContaining({ command: 'up', timestamp: 1600 }),
+          expect.objectContaining({ command: 'whoami', timestamp: 1650 })
+        ]
+      })
+    )
 
     store.startMacroRecording('panel-main')
     for (let index = 0; index < 50; index += 1) {

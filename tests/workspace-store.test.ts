@@ -4643,14 +4643,14 @@ describe('workspace store', () => {
     store.recordMacroCommand('uptime')
     await store.stopMacroRecording()
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-') && command.snippet_content.includes('uptime'))).toBe(true)
-    expect(window.aiops.saveQuickCommandSnippet).toHaveBeenCalledWith(
+    expect(window.aiops.saveQuickCommandMacro).toHaveBeenCalledWith(
       expect.objectContaining({
-        snippet_content: 'uptime'
+        entries: [expect.objectContaining({ command: 'uptime' })]
       })
     )
 
     const countBeforeMalformedMacro = store.quickCommands.length
-    vi.mocked(window.aiops.saveQuickCommandSnippet).mockResolvedValueOnce({
+    vi.mocked(window.aiops.saveQuickCommandMacro).mockResolvedValueOnce({
       ok: true,
       data: {
         groups: store.snippetGroups.map((item) => ({ ...item })),
@@ -4672,6 +4672,17 @@ describe('workspace store', () => {
     expect(store.isMacroRecording).toBe(false)
     expect(store.quickCommands).toHaveLength(countBeforeMalformedMacro)
     expect(store.quickCommands.some((command) => command.snippet_content === 'hostname')).toBe(false)
+
+    const originalSaveQuickCommandMacro = window.aiops.saveQuickCommandMacro
+    ;(window.aiops as any).saveQuickCommandMacro = undefined
+    const countBeforeMissingMacroBridge = store.quickCommands.length
+    store.startMacroRecording()
+    store.recordMacroCommand('whoami')
+    const missingMacroBridge = await store.stopMacroRecording()
+    expect(missingMacroBridge).toBeNull()
+    expect(store.topNotice).toBe('宏录制保存服务不可用')
+    expect(store.quickCommands).toHaveLength(countBeforeMissingMacroBridge)
+    ;(window.aiops as any).saveQuickCommandMacro = originalSaveQuickCommandMacro
 
     const countBeforeEmptyMacro = store.quickCommands.length
     store.startMacroRecording()

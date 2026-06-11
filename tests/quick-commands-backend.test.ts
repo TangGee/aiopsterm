@@ -8,6 +8,8 @@ import type {
   QuickCommandGroupDeleteResult,
   QuickCommandGroupMutationResult,
   QuickCommandGroupSaveInput,
+  QuickCommandMacroMutationResult,
+  QuickCommandMacroSaveInput,
   QuickCommandReorderInput,
   QuickCommandReorderResult,
   QuickCommandScriptPlanInput,
@@ -52,6 +54,7 @@ type QuickCommandsBackend = {
   saveQuickCommandGroup: (input: QuickCommandGroupSaveInput) => QuickCommandGroupMutationResult
   deleteQuickCommandGroup: (uuid: string) => QuickCommandGroupDeleteResult
   saveQuickCommandSnippet: (input: QuickCommandSnippetSaveInput) => QuickCommandSnippetMutationResult
+  saveQuickCommandMacro: (input: QuickCommandMacroSaveInput) => QuickCommandMacroMutationResult
   deleteQuickCommandSnippet: (id: number) => QuickCommandSnippetDeleteResult
   reorderQuickCommands: (input: QuickCommandReorderInput) => QuickCommandReorderResult
   planQuickCommandScript: (input: QuickCommandScriptPlanInput) => QuickCommandScriptPlanResult
@@ -367,6 +370,77 @@ describe('quick commands backend boundary', () => {
         { text: '\x03\x1b[Aecho second', delayBeforeMs: 250 }
       ]
     })
+  })
+
+  it('saves macro recordings as backend-owned snippets and script content', async () => {
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-macro-' })
+    const group = expectOkData(backend.saveQuickCommandGroup({ group_name: '宏录制' })).group
+    const result = backend.saveQuickCommandMacro({
+      snippet_name: 'macro-release-check',
+      group_uuid: group.uuid,
+      sleepThresholdMs: 400,
+      entries: [
+        { command: 'uptime', timestamp: 1000 },
+        { command: 'up', timestamp: 1600 },
+        { command: 'whoami', timestamp: 1650 }
+      ]
+    })
+
+    const saved = expectOkData(result).snippet
+    expect(saved).toEqual(
+      expect.objectContaining({
+        id: 1,
+        uuid: expect.stringMatching(/^snippet-/),
+        snippet_name: 'macro-release-check',
+        snippet_content: 'uptime\nsleep==600\nup\nwhoami',
+        group_uuid: group.uuid
+      })
+    )
+    expect(backend.getQuickCommands().snippets).toEqual([expect.objectContaining({ id: saved.id, snippet_content: saved.snippet_content })])
+
+    const planned = expectOkData(backend.planQuickCommandScript({ snippetId: saved.id, autoExecute: true }))
+    expect(planned.segments).toEqual([
+      { text: 'uptime\n', delayBeforeMs: 0 },
+      { text: '\x1b[Awhoami\n', delayBeforeMs: 600 }
+    ])
+  })
+
+  it('rejects malformed macro recordings before creating snippets', async () => {
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-macro-invalid-' })
+
+    expect(backend.saveQuickCommandMacro({ entries: [] })).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Macro recording entries are required'
+      })
+    )
+    expect(
+      backend.saveQuickCommandMacro({
+        entries: [
+          { command: 'first', timestamp: 2000 },
+          { command: 'second', timestamp: 1000 }
+        ]
+      })
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Macro recording timestamps must be ordered'
+      })
+    )
+    expect(
+      backend.saveQuickCommandMacro({
+        entries: Array.from({ length: 51 }, (_, index) => ({ command: `cmd-${index}`, timestamp: index }))
+      })
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Macro recording command limit exceeded'
+      })
+    )
+    expect(backend.getQuickCommands().snippets).toEqual([])
   })
 
   it('returns structured errors for missing script plan inputs', async () => {

@@ -3870,6 +3870,8 @@ const cloneQuickCommandSnapshot = (config: typeof defaultQuickCommands) => ({
 })
 const nextQuickCommandGroupIdMock = () => Math.max(0, ...quickCommandStoreMock.groups.map((group) => group.id)) + 1
 const nextQuickCommandSnippetIdMock = () => Math.max(0, ...quickCommandStoreMock.snippets.map((snippet) => snippet.id)) + 1
+const quickCommandMacroDefaultSleepThresholdMsMock = 500
+const quickCommandMacroMaxCommandCountMock = 50
 const quickCommandKeyMapMock = {
   esc: '\x1b',
   tab: '\t',
@@ -3968,6 +3970,37 @@ const planQuickCommandScriptMock = (scriptContent: string, autoExecute = true, f
     securityCommand: commandItems[0]?.payload || fallbackSecurityCommand
   }
 }
+
+const buildQuickCommandMacroContentMock = (input: {
+  entries: Array<{ command: string; timestamp: number }>
+  sleepThresholdMs?: number
+}) => {
+  if (!Array.isArray(input.entries) || input.entries.length === 0) throw new Error('Macro recording entries are required')
+  if (input.entries.length > quickCommandMacroMaxCommandCountMock) throw new Error('Macro recording command limit exceeded')
+  const sleepThresholdMs = Number.isFinite(Number(input.sleepThresholdMs))
+    ? Math.max(0, Math.round(Number(input.sleepThresholdMs)))
+    : quickCommandMacroDefaultSleepThresholdMsMock
+  const entries = input.entries.map((entry) => {
+    const command = typeof entry.command === 'string' ? entry.command : ''
+    const timestamp = Number(entry.timestamp)
+    if (!command.trim() || command.includes('\n') || command.includes('\r') || !Number.isFinite(timestamp) || timestamp < 0) {
+      throw new Error('Macro recording entries are invalid')
+    }
+    return { command, timestamp }
+  })
+  const lines: string[] = []
+  entries.forEach((entry, index) => {
+    const previous = entries[index - 1]
+    if (previous) {
+      const delay = entry.timestamp - previous.timestamp
+      if (delay < 0) throw new Error('Macro recording timestamps must be ordered')
+      if (delay >= sleepThresholdMs) lines.push(`sleep==${delay}`)
+    }
+    lines.push(entry.command)
+  })
+  return lines.join('\n')
+}
+
 const sanitizeKeychain = (keychain: TestKeychainRecord): TestKeychainRecord => ({
   ...keychain,
   privateKey: undefined,
@@ -6086,6 +6119,41 @@ Object.defineProperty(window, 'aiops', {
         }
         const snapshot = cloneQuickCommandSnapshot(quickCommandStoreMock)
         return { ok: true, data: { ...snapshot, snippet: snapshot.snippets.find((item) => item.id === snippet.id)! } }
+      }
+    ),
+    saveQuickCommandMacro: vi.fn(
+      async (input: {
+        snippet_name?: string
+        group_uuid?: string | null
+        entries: Array<{ command: string; timestamp: number }>
+        sleepThresholdMs?: number
+      }) => {
+        try {
+          const snippetContent = buildQuickCommandMacroContentMock(input)
+          const snippetName = String(input.snippet_name || '').trim() || `macro-test-${quickCommandSnippetSequenceMock++}`
+          const groupUuid = input.group_uuid && quickCommandStoreMock.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
+          const snippet = {
+            id: nextQuickCommandSnippetIdMock(),
+            uuid: `quick-snippet-test-${quickCommandSnippetSequenceMock++}`,
+            snippet_name: snippetName,
+            snippet_content: snippetContent,
+            group_uuid: groupUuid,
+            create_at: '刚刚',
+            update_at: '刚刚'
+          }
+          quickCommandStoreMock = {
+            groups: quickCommandStoreMock.groups.map((group) => ({ ...group })),
+            snippets: [...quickCommandStoreMock.snippets, snippet]
+          }
+          const snapshot = cloneQuickCommandSnapshot(quickCommandStoreMock)
+          return { ok: true, data: { ...snapshot, snippet: snapshot.snippets.find((item) => item.id === snippet.id)! } }
+        } catch (error) {
+          return {
+            ok: false,
+            errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+            errorMessage: error instanceof Error ? error.message : String(error)
+          }
+        }
       }
     ),
     deleteQuickCommandSnippet: vi.fn(async (id: number) => {

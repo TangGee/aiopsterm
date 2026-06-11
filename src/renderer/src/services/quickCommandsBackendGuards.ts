@@ -2,6 +2,7 @@ import type {
   QuickCommandGroupConfig,
   QuickCommandGroupDeleteResult,
   QuickCommandGroupMutationResult,
+  QuickCommandMacroMutationResult,
   QuickCommandReorderResult,
   QuickCommandScriptPlan,
   QuickCommandSnippetConfig,
@@ -15,6 +16,7 @@ export const malformedQuickCommandsBackendResultMessage = '快捷命令服务返
 export type QuickCommandGroupMutationData = NonNullable<QuickCommandGroupMutationResult['data']>
 export type QuickCommandGroupDeleteData = NonNullable<QuickCommandGroupDeleteResult['data']>
 export type QuickCommandSnippetMutationData = NonNullable<QuickCommandSnippetMutationResult['data']>
+export type QuickCommandMacroMutationData = NonNullable<QuickCommandMacroMutationResult['data']>
 export type QuickCommandSnippetDeleteData = NonNullable<QuickCommandSnippetDeleteResult['data']>
 export type QuickCommandReorderData = NonNullable<QuickCommandReorderResult['data']>
 
@@ -112,6 +114,19 @@ export const isQuickCommandSnippetSaveData = (
   const snippet = record.snippet
   if (expected.id !== undefined && snippet.id !== expected.id) return false
   return snippet.snippet_name === expected.snippetName && snippet.snippet_content === expected.snippetContent && snapshotContainsQuickCommandSnippet(record, snippet)
+}
+
+export const isQuickCommandMacroSaveData = (
+  value: unknown,
+  expected: { snippetName?: string; groupUuid?: string | null }
+): value is QuickCommandMacroMutationData => {
+  if (!isRecord(value) || !isQuickCommandsSnapshotData(value)) return false
+  const record = value as QuickCommandsUserConfig & Record<string, unknown>
+  if (!isQuickCommandSnippetData(record.snippet)) return false
+  const snippet = record.snippet
+  if (expected.snippetName !== undefined && snippet.snippet_name !== expected.snippetName) return false
+  if (expected.groupUuid !== undefined && quickCommandSnippetGroupUuid(snippet) !== expected.groupUuid) return false
+  return snapshotContainsQuickCommandSnippet(record, snippet)
 }
 
 export const isQuickCommandSnippetDeleteData = (value: unknown, id: number): value is QuickCommandSnippetDeleteData => {
