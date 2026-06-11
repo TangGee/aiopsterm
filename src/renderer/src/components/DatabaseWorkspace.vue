@@ -2293,7 +2293,7 @@ const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
 const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
 const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql']
-const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'postgresql', 'sqlite', 'oracle']
+const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'sqlserver']
 const DB_ENGINE_OPTION_CODES = [
   'mysql',
   'h2',
@@ -3039,7 +3039,7 @@ const connectionDraft = reactive({
 const createDatabaseModal = reactive({
   open: false,
   connectionId: '',
-  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'postgresql'>,
+  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'sqlserver'>,
   name: '',
   sql: '',
   userEditedSql: false,
@@ -3155,7 +3155,7 @@ const contextConnection = computed(() => {
 const contextConnectionConnected = computed(() => contextConnection.value?.status === 'connected')
 const contextConnectionCanCreateDatabase = computed(() => {
   const connection = contextConnection.value
-  return !!connection && connection.status === 'connected' && (connection.dbType === 'mysql' || connection.dbType === 'postgresql')
+  return !!connection && connection.status === 'connected' && (connection.dbType === 'mysql' || connection.dbType === 'postgresql' || connection.dbType === 'sqlserver')
 })
 const connectionMoveTargets = computed(() => {
   const connection = contextConnection.value
@@ -3356,7 +3356,7 @@ function buildConnectionUrl() {
   const port = connectionDraft.port ? `:${connectionDraft.port}` : ''
   const database = connectionDraft.database ? `/${connectionDraft.database}` : ''
   if (connectionDraft.dbType === 'oracle') return `${host}${port}${database}`
-  const scheme = connectionDraft.dbType === 'postgresql' ? 'jdbc:postgresql' : 'jdbc:mysql'
+  const scheme = connectionDraft.dbType === 'postgresql' ? 'jdbc:postgresql' : connectionDraft.dbType === 'sqlserver' ? 'jdbc:sqlserver' : 'jdbc:mysql'
   return `${scheme}://${host}${port}${database}`
 }
 
@@ -3371,7 +3371,7 @@ function clearConnectionFeedback() {
 }
 
 function sqlConnectionRequiresSchema(connection: DatabaseConnectionInfo) {
-  return connection.dbType === 'postgresql' || connection.dbType === 'oracle'
+  return connection.dbType === 'postgresql' || connection.dbType === 'oracle' || connection.dbType === 'sqlserver'
 }
 
 function defaultSchemaForSqlConnection(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined) {
@@ -3492,7 +3492,7 @@ function updateSqlTabSchema(event: Event) {
   tab.tableName = undefined
 }
 
-function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'postgresql'>) {
+function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'sqlserver'>) {
   const trimmed = name.trim()
   return trimmed ? `CREATE DATABASE ${quoteIdentForDialect(trimmed, dbType)};` : ''
 }
@@ -4771,12 +4771,14 @@ function renderDefaultSql(connection: DatabaseConnectionInfo | undefined, catalo
   const table = schemaName ? catalog?.schemas?.find((schema) => schema.name === schemaName)?.tables[0] : catalog?.tables?.[0]
   if (!table) return 'select 1;'
   const qualified = buildQualifiedTableReference(connection?.dbType ?? 'mysql', catalog?.name ?? '', schemaName, table.name)
-  return connection?.dbType === 'oracle' ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;` : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
+  if (connection?.dbType === 'oracle') return `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;`
+  if (connection?.dbType === 'sqlserver') return `SELECT TOP (100) *\nFROM ${qualified};`
+  return `SELECT *\nFROM ${qualified}\nLIMIT 100;`
 }
 
 function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
   const quotedTable = quoteSqlIdentifierForDialect(tableName, dbType)
-  if ((dbType === 'postgresql' || dbType === 'oracle') && schemaName) {
+  if ((dbType === 'postgresql' || dbType === 'oracle' || dbType === 'sqlserver') && schemaName) {
     return `${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
   }
   if (dbType === 'sqlite' && catalogName) {
@@ -4787,6 +4789,7 @@ function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: s
 
 function quoteSqlIdentifierForDialect(value: string, dbType: DatabaseEngineCode) {
   if (dbType === 'mysql') return `\`${String(value).replace(/`/g, '``')}\``
+  if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
   return `"${String(value).replace(/"/g, '""')}"`
 }
 
@@ -6344,7 +6347,11 @@ function openContextSql() {
     tab.tableName = menu.label
     const qualified = buildQualifiedTableReference(connection?.dbType ?? 'mysql', menu.catalogName, menu.schemaName, menu.label)
     tab.sql =
-      connection?.dbType === 'oracle' ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;` : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
+      connection?.dbType === 'oracle'
+        ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;`
+        : connection?.dbType === 'sqlserver'
+          ? `SELECT TOP (100) *\nFROM ${qualified};`
+          : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
   }
   closeMenus()
 }
@@ -6623,7 +6630,7 @@ function copyContextName() {
 
 function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[0]?.id ?? 'group-default') {
   connectionModalMode.value = 'create'
-  const defaultPort = dbType === 'postgresql' ? 5432 : dbType === 'oracle' ? 1521 : dbType === 'sqlite' ? null : 3306
+  const defaultPort = dbType === 'postgresql' ? 5432 : dbType === 'oracle' ? 1521 : dbType === 'sqlserver' ? 1433 : dbType === 'sqlite' ? null : 3306
   Object.assign(connectionDraft, {
     id: '',
     dbType,
@@ -6633,7 +6640,7 @@ function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[
     host: '127.0.0.1',
     port: defaultPort,
     authentication: 'UserAndPassword',
-    user: dbType === 'sqlite' ? '' : 'root',
+    user: dbType === 'sqlite' ? '' : dbType === 'sqlserver' ? 'sa' : 'root',
     password: '',
     database: '',
     filePath: '',
@@ -6895,7 +6902,7 @@ async function refreshDatabaseConnectionViaBackend(connectionId: string): Promis
 
 function openCreateDatabaseModal(connectionId: string) {
   const connection = findConnection(connectionId)
-  if (!connection || (connection.dbType !== 'mysql' && connection.dbType !== 'postgresql')) return
+  if (!connection || (connection.dbType !== 'mysql' && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver')) return
   createDatabaseModal.open = true
   createDatabaseModal.connectionId = connectionId
   createDatabaseModal.dbType = connection.dbType
@@ -7034,7 +7041,8 @@ function dbAiBackendContextForIpc(context: DbAiBackendContext): DatabaseAiDrawer
 async function openDbAi(action: DbAiAction, sql: string, context = '', backendContextOverride: DbAiBackendContext = {}) {
   const backendContext = buildDbAiBackendContext(context, backendContextOverride)
   const activeDialect = backendContext.dbType || (activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined)
-  const targetDialect: DbAiTargetDialect = action === 'convert' ? (activeDialect ?? 'postgresql') : activeDialect ?? 'postgresql'
+  const normalizedDialect: DbAiTargetDialect = activeDialect === 'sqlserver' ? 'mssql' : activeDialect || 'postgresql'
+  const targetDialect: DbAiTargetDialect = action === 'convert' ? normalizedDialect : normalizedDialect
   const result = await window.aiops.createDatabaseAiDrawerRequest({
     action,
     sourceSql: sql,
@@ -7274,10 +7282,9 @@ function formatDbAiRequestTime(time: number) {
 
 function isDbAiExecutableDialect(action: DbAiAction, target: DbAiTargetDialect) {
   if (action !== 'convert') return true
-  if (target === 'mssql') return false
   const tab = activeSqlTab.value
   const connection = tab ? findConnection(tab.connectionId) : undefined
-  return connection?.dbType === target
+  return target === 'mssql' ? connection?.dbType === 'sqlserver' : connection?.dbType === target
 }
 
 function dbAiDialectLabel(dialect: DbAiTargetDialect) {
@@ -7342,6 +7349,7 @@ function quoteIdentifier(value: string) {
 
 function quoteIdentForDialect(value: string, dbType: DatabaseEngineCode) {
   if (dbType === 'mysql') return `\`${String(value).replace(/`/g, '``')}\``
+  if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
   return `"${String(value).replace(/"/g, '""')}"`
 }
 

@@ -1988,12 +1988,11 @@ export type AiChatCancelResult = AiopsMutationResult<{
   contextUsage?: AiChatContextUsageSnapshot
 }>
 
-export type DatabaseEngineCode = 'mysql' | 'postgresql' | 'sqlite' | 'oracle'
+export type DatabaseEngineCode = 'mysql' | 'postgresql' | 'sqlite' | 'oracle' | 'sqlserver'
 
 export type DatabaseEngineOptionCode =
   | DatabaseEngineCode
   | 'h2'
-  | 'sqlserver'
   | 'mariadb'
   | 'clickhouse'
   | 'dm'

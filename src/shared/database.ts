@@ -63,7 +63,7 @@ import type {
   DatabaseSqlErrorDiagnosisResult
 } from './preload'
 
-const supportedEngines = new Set(['mysql', 'postgresql', 'sqlite', 'oracle'])
+const supportedEngines = new Set(['mysql', 'postgresql', 'sqlite', 'oracle', 'sqlserver'])
 const DEFAULT_DATABASE_GROUP_ID = 'group-default'
 const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
 const databaseStatusValues = new Set<DatabaseConnectionInfo['status']>(['idle', 'testing', 'connected', 'failed'])
@@ -73,7 +73,8 @@ const engineVersions: Record<DatabaseConnectionTestInput['dbType'], string> = {
   mysql: 'MySQL 8 local backend validation',
   postgresql: 'PostgreSQL 16 local backend validation',
   sqlite: 'SQLite local backend validation',
-  oracle: 'Oracle local backend validation'
+  oracle: 'Oracle local backend validation',
+  sqlserver: 'SQL Server local backend validation'
 }
 
 const databaseEngines: DatabaseEngineInfo[] = [
@@ -81,7 +82,7 @@ const databaseEngines: DatabaseEngineInfo[] = [
   { code: 'h2', name: 'H2', enabled: false, accent: '#7c3aed' },
   { code: 'oracle', connectionCode: 'oracle', name: 'Oracle', enabled: true, accent: '#c74634' },
   { code: 'postgresql', connectionCode: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
-  { code: 'sqlserver', name: 'SQLServer', enabled: false, accent: '#a91d22' },
+  { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
   { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
   { code: 'mariadb', name: 'MariaDB', enabled: false, accent: '#c0765c' },
   { code: 'clickhouse', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
@@ -333,11 +334,36 @@ type OracleDriver = {
   fetchAsBuffer?: unknown[]
   initOracleClient?: (config: { libDir?: string; configDir?: string; driverName?: string }) => unknown
 }
+type SqlServerRequest = {
+  input: (name: string, value: unknown) => SqlServerRequest
+  query: <T = Record<string, unknown>>(sql: string) => Promise<{
+    recordset?: T[]
+    recordsets?: T[][]
+    rowsAffected?: number[]
+    output?: Record<string, unknown>
+  }>
+}
+type SqlServerTransaction = {
+  begin: () => Promise<unknown>
+  commit: () => Promise<unknown>
+  rollback: () => Promise<unknown>
+  request: () => SqlServerRequest
+}
+type SqlServerPool = {
+  connect?: () => Promise<SqlServerPool>
+  request: () => SqlServerRequest
+  transaction?: () => SqlServerTransaction
+  close: () => Promise<unknown>
+}
+type SqlServerDriver = {
+  ConnectionPool: new (config: Record<string, unknown>) => SqlServerPool
+}
 export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
   mysqlDriver?: MySqlDriver
   postgresDriver?: PostgresDriver
   oracleDriver?: OracleDriver | null
+  sqlServerDriver?: SqlServerDriver | null
   oracleClientLibDir?: string
   oracleClientConfigDir?: string
   oracleDriverName?: string
@@ -355,6 +381,7 @@ let databaseRuntimeConfig: DatabaseRuntimeConfig = {}
 let mysqlRuntime: MySqlDriver | null | undefined
 let postgresRuntime: PostgresDriver | null | undefined
 let oracleRuntime: OracleDriver | null | undefined
+let sqlServerRuntime: SqlServerDriver | null | undefined
 let oracleClientInitialized = false
 const databaseConnectionSecrets = new Map<string, string>()
 const databaseVerifiedConnections = new Set<string>()
@@ -553,6 +580,24 @@ const loadOracleRuntime = () => {
     oracleRuntime = null
   }
   return oracleRuntime
+}
+
+const loadSqlServerRuntime = () => {
+  if ('sqlServerDriver' in databaseRuntimeConfig) return databaseRuntimeConfig.sqlServerDriver ?? null
+  if (sqlServerRuntime !== undefined) return sqlServerRuntime
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loaded = require('mssql') as unknown as SqlServerDriver & { default?: SqlServerDriver }
+    sqlServerRuntime =
+      typeof loaded.ConnectionPool === 'function'
+        ? loaded
+        : loaded.default && typeof loaded.default.ConnectionPool === 'function'
+          ? loaded.default
+          : null
+  } catch {
+    sqlServerRuntime = null
+  }
+  return sqlServerRuntime
 }
 
 const ensureOracleClientInitialized = (driver: OracleDriver) => {
@@ -834,17 +879,22 @@ const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTable
 const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string) =>
   sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
 
-type RelationalDatabaseType = Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'oracle'>
+type RelationalDatabaseType = Extract<DatabaseEngineCode, 'mysql' | 'postgresql' | 'oracle' | 'sqlserver'>
 type DatabaseMutationDialect = DatabaseEngineCode
 type DatabaseMutationStatement = Omit<DatabaseTableMutationPlanStatement, 'preview'>
 type DatabaseRowMutation = Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>
 
 const databaseMutationIdentifier = (value: string, dialect: DatabaseMutationDialect) =>
-  dialect === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
+  dialect === 'mysql'
+    ? `\`${String(value || '').replace(/`/g, '``')}\``
+    : dialect === 'sqlserver'
+      ? `[${String(value || '').replace(/]/g, ']]')}]`
+      : `"${String(value || '').replace(/"/g, '""')}"`
 
 const databaseMutationPlaceholder = (dialect: DatabaseMutationDialect, index: number) => {
   if (dialect === 'postgresql') return `$${index}`
   if (dialect === 'oracle') return `:${index}`
+  if (dialect === 'sqlserver') return `@p${index}`
   return '?'
 }
 
@@ -856,6 +906,7 @@ const databaseMutationTableReference = (
   const tableName = dialect === 'oracle' ? oracleLookupIdentifier(input.tableName) : trim(input.tableName)
   const table = databaseMutationIdentifier(tableName, dialect)
   if (dialect === 'mysql') return `${databaseMutationIdentifier(trim(input.databaseName), dialect)}.${table}`
+  if (dialect === 'sqlserver') return `${databaseMutationIdentifier(trim(input.schemaName) || 'dbo', dialect)}.${table}`
   if (dialect === 'sqlite') {
     const schemaName = connection && connection.dbType === 'sqlite' ? sqliteSchemaNameFor(connection as DatabaseConnectionInfo, input.databaseName) : trim(input.databaseName) || SQLITE_MAIN_SCHEMA
     return `${databaseMutationIdentifier(schemaName, dialect)}.${table}`
@@ -931,6 +982,7 @@ const applyDatabaseMutationSingleRowGuard = (
 ) => {
   if (usesPrimaryKey) return sql
   if (dialect === 'mysql') return `${sql} LIMIT 1`
+  if (dialect === 'sqlserver') return sql.replace(/^DELETE FROM /i, 'DELETE TOP (1) FROM ').replace(/^UPDATE /i, 'UPDATE TOP (1) ')
   if (dialect === 'sqlite') return sql.replace(`WHERE ${whereSql}`, `WHERE rowid = (SELECT rowid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
   if (dialect === 'postgresql') return sql.replace(`WHERE ${whereSql}`, `WHERE ctid = (SELECT ctid FROM ${tableRef} WHERE ${whereSql} LIMIT 1)`)
   return sql
@@ -983,13 +1035,13 @@ const formatDatabaseMutationSqlLiteral = (value: unknown) => {
 
 const formatDatabaseMutationStatementPreview = (statement: DatabaseMutationStatement) => {
   let paramIndex = 0
-  const sql = statement.sql.replace(/\$(\d+)|:(\d+)|\?/g, (match) => {
+  const sql = statement.sql.replace(/\$(\d+)|:(\d+)|@p(\d+)|\?/g, (match) => {
     if (match === '?') {
       const value = statement.params[paramIndex]
       paramIndex += 1
       return formatDatabaseMutationSqlLiteral(value)
     }
-    const index = Number(match.slice(1) || paramIndex + 1)
+    const index = Number(match.replace(/^\$|^:|^@p/i, '') || paramIndex + 1)
     return formatDatabaseMutationSqlLiteral(statement.params[index - 1])
   })
   return `${sql};`
@@ -1062,7 +1114,7 @@ const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTa
 }
 
 const isRelationalConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is DatabaseConnectionInfo =>
-  !!connection && (connection.dbType === 'mysql' || connection.dbType === 'postgresql' || connection.dbType === 'oracle')
+  !!connection && (connection.dbType === 'mysql' || connection.dbType === 'postgresql' || connection.dbType === 'oracle' || connection.dbType === 'sqlserver')
 
 const relationalErrorCode = (error: unknown, fallback: string) => {
   const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
@@ -1081,11 +1133,16 @@ const normalizeQueryRows = (rows: unknown): Array<Record<string, unknown>> =>
     : []
 
 const relationalIdentifier = (value: string, dbType: RelationalDatabaseType) =>
-  dbType === 'mysql' ? `\`${String(value || '').replace(/`/g, '``')}\`` : `"${String(value || '').replace(/"/g, '""')}"`
+  dbType === 'mysql'
+    ? `\`${String(value || '').replace(/`/g, '``')}\``
+    : dbType === 'sqlserver'
+      ? `[${String(value || '').replace(/]/g, ']]')}]`
+      : `"${String(value || '').replace(/"/g, '""')}"`
 
 const relationalPlaceholder = (dbType: RelationalDatabaseType, index: number) => {
   if (dbType === 'postgresql') return `$${index}`
   if (dbType === 'oracle') return `:${index}`
+  if (dbType === 'sqlserver') return `@p${index}`
   return '?'
 }
 
@@ -1109,6 +1166,7 @@ const relationalTableReference = (
   const tableName = dbType === 'oracle' ? oracleLookupIdentifier(input.tableName) : trim(input.tableName)
   const table = relationalIdentifier(tableName, dbType)
   if (connection.dbType === 'postgresql') return `${relationalIdentifier(trim(input.schemaName) || 'public', 'postgresql')}.${table}`
+  if (connection.dbType === 'sqlserver') return `${relationalIdentifier(trim(input.schemaName) || 'dbo', 'sqlserver')}.${table}`
   if (connection.dbType === 'oracle') {
     const schemaName = oracleSchemaNameFor(connection, input)
     return schemaName ? `${relationalIdentifier(schemaName, 'oracle')}.${table}` : table
@@ -1147,6 +1205,21 @@ const postgresConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'po
   database: trim(input.database) || undefined,
   connectionTimeoutMillis: RELATIONAL_TIMEOUT_MS,
   ...(trim(input.sslMode) && trim(input.sslMode) !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {})
+})
+
+const sqlServerConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
+  server: trim(input.host),
+  port: normalizedDatabasePort(input.port) ?? undefined,
+  user: trim(input.user),
+  password: input.password || undefined,
+  database: trim(input.database) || undefined,
+  connectionTimeout: RELATIONAL_TIMEOUT_MS,
+  requestTimeout: RELATIONAL_TIMEOUT_MS,
+  options: {
+    encrypt: trim(input.sslMode) !== 'disable',
+    trustServerCertificate: true,
+    enableArithAbort: true
+  }
 })
 
 const oracleConnectStringFromInput = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'database' | 'url'>) => {
@@ -1219,6 +1292,17 @@ const openOracleConnection = async (input: Pick<DatabaseConnectionTestInput, 'ho
   return driver.getConnection(oracleConfigFor(input))
 }
 
+const openSqlServerPool = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => {
+  const driver = loadSqlServerRuntime()
+  if (!driver) {
+    throw Object.assign(new Error('SQL Server driver is unavailable. Install mssql before connecting to SQL Server.'), {
+      code: 'DB_SQLSERVER_DRIVER_UNAVAILABLE'
+    })
+  }
+  const pool = new driver.ConnectionPool(sqlServerConfigFor(input))
+  return typeof pool.connect === 'function' ? pool.connect() : pool
+}
+
 const withMysqlConnection = async <T>(connection: DatabaseConnectionInfo, fn: (client: MySqlConnection) => Promise<T>) => {
   let client: MySqlConnection | null = null
   try {
@@ -1267,6 +1351,22 @@ const withOracleConnection = async <T>(connection: DatabaseConnectionInfo, fn: (
   }
 }
 
+const withSqlServerPool = async <T>(connection: DatabaseConnectionInfo, fn: (client: SqlServerPool) => Promise<T>) => {
+  let client: SqlServerPool | null = null
+  try {
+    client = await openSqlServerPool(connectionTestInputFromSaved(connection))
+    return await fn(client)
+  } finally {
+    if (client) {
+      try {
+        await client.close()
+      } catch {
+        /* ignore close errors */
+      }
+    }
+  }
+}
+
 const mysqlRows = async <T extends Record<string, unknown>>(client: MySqlConnection, sql: string, params: unknown[] = []) => {
   const [rows] = await client.query<T[]>(sql, params)
   return normalizeQueryRows(rows) as T[]
@@ -1285,6 +1385,23 @@ const postgresRows = async <T extends Record<string, unknown>>(client: PostgresC
 const postgresExec = async (client: PostgresClient, sql: string, params: unknown[] = []) => {
   const result = await client.query(sql, params)
   return relationalRowCount(result, Number(result.rowCount ?? 0))
+}
+
+const sqlServerRequestWithParams = (request: SqlServerRequest, params: unknown[] = []) => {
+  params.forEach((param, index) => {
+    request.input(`p${index + 1}`, param)
+  })
+  return request
+}
+
+const sqlServerRows = async <T extends Record<string, unknown>>(pool: SqlServerPool, sql: string, params: unknown[] = []) => {
+  const result = await sqlServerRequestWithParams(pool.request(), params).query<T>(sql)
+  return normalizeQueryRows(result.recordset) as T[]
+}
+
+const sqlServerExec = async (pool: SqlServerPool, sql: string, params: unknown[] = []) => {
+  const result = await sqlServerRequestWithParams(pool.request(), params).query(sql)
+  return result.rowsAffected?.reduce((sum, value) => sum + Number(value || 0), 0) ?? 0
 }
 
 const oracleExecuteOptions = () => {
@@ -1393,6 +1510,38 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
       }
     } catch (error) {
       return { ok: false, errorCode: relationalErrorCode(error, 'DB_ORACLE_CONNECTION_FAILED'), errorMessage: relationalErrorMessage(error, 'Oracle connection failed.') }
+    } finally {
+      if (client) {
+        try {
+          await client.close()
+        } catch {
+          /* ignore close errors */
+        }
+      }
+    }
+  }
+
+  if (input.dbType === 'sqlserver') {
+    let client: SqlServerPool | null = null
+    try {
+      client = await openSqlServerPool(input)
+      const rows = await sqlServerRows<Record<string, unknown>>(client, "SELECT CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS version")
+      const version = trim(rowValue(rows[0] ?? {}, 'version', 'VERSION'))
+      return {
+        ok: true,
+        data: {
+          dbType: 'sqlserver',
+          serverVersion: version ? `SQL Server ${version}` : 'SQL Server',
+          endpoint: endpointFor(input),
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: relationalErrorCode(error, 'DB_SQLSERVER_CONNECTION_FAILED'),
+        errorMessage: relationalErrorMessage(error, 'SQL Server connection failed.')
+      }
     } finally {
       if (client) {
         try {
@@ -1753,12 +1902,123 @@ const oracleCatalogsForConnection = async (connection: DatabaseConnectionInfo): 
     return [{ name: databaseName, schemas }]
   })
 
+const sqlServerColumnType = (row: Record<string, unknown>) => {
+  const dataType = trim(rowValue(row, 'DATA_TYPE', 'data_type')).toLowerCase()
+  const maxLength = Number(rowValue(row, 'CHARACTER_MAXIMUM_LENGTH', 'character_maximum_length', 'max_length'))
+  const precision = Number(rowValue(row, 'NUMERIC_PRECISION', 'numeric_precision', 'precision'))
+  const scale = Number(rowValue(row, 'NUMERIC_SCALE', 'numeric_scale', 'scale'))
+  if (['varchar', 'nvarchar', 'char', 'nchar', 'varbinary', 'binary'].includes(dataType) && Number.isFinite(maxLength)) {
+    const displayLength = ['nvarchar', 'nchar'].includes(dataType) && maxLength > 0 ? Math.floor(maxLength / 2) : maxLength
+    return `${dataType}(${displayLength < 0 ? 'max' : displayLength})`
+  }
+  if (['decimal', 'numeric'].includes(dataType) && Number.isFinite(precision) && precision > 0) {
+    return Number.isFinite(scale) && scale >= 0 ? `${dataType}(${precision}, ${scale})` : `${dataType}(${precision})`
+  }
+  return dataType || 'unknown'
+}
+
+const sqlServerCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> =>
+  withSqlServerPool(connection, async (client) => {
+    const databaseRows = await sqlServerRows<Record<string, unknown>>(client, 'SELECT DB_NAME() AS database_name').catch(() => [])
+    const databaseName = trim(rowValue(databaseRows[0] ?? {}, 'database_name', 'DATABASE_NAME')) || trim(connection.database)
+    const schemaRows = await sqlServerRows<Record<string, unknown>>(
+      client,
+      "SELECT name AS schema_name FROM sys.schemas WHERE name NOT IN ('INFORMATION_SCHEMA', 'sys') ORDER BY name"
+    )
+    const objectRows = await sqlServerRows<Record<string, unknown>>(
+      client,
+      "SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE o.type IN ('U', 'V', 'FN', 'IF', 'TF', 'P', 'PC') AND s.name NOT IN ('INFORMATION_SCHEMA', 'sys') ORDER BY s.name, o.type, o.name"
+    )
+    const columnRows = await sqlServerRows<Record<string, unknown>>(
+      client,
+      "SELECT s.name AS schema_name, o.name AS table_name, c.name AS column_name, t.name AS data_type, c.max_length AS character_maximum_length, c.precision AS numeric_precision, c.scale AS numeric_scale, c.is_nullable FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id JOIN sys.types t ON t.user_type_id = c.user_type_id WHERE o.type IN ('U', 'V') AND s.name NOT IN ('INFORMATION_SCHEMA', 'sys') ORDER BY s.name, o.name, c.column_id"
+    )
+    const primaryKeyRows = await sqlServerRows<Record<string, unknown>>(
+      client,
+      "SELECT s.name AS schema_name, o.name AS table_name, c.name AS column_name FROM sys.key_constraints kc JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id JOIN sys.objects o ON o.object_id = kc.parent_object_id JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE kc.type = 'PK' ORDER BY s.name, o.name, ic.key_ordinal"
+    )
+
+    const pkByTable = new Map<string, string[]>()
+    primaryKeyRows.forEach((row) => {
+      const schemaName = trim(rowValue(row, 'schema_name', 'SCHEMA_NAME'))
+      const tableName = trim(rowValue(row, 'table_name', 'TABLE_NAME'))
+      const column = trim(rowValue(row, 'column_name', 'COLUMN_NAME'))
+      const key = `${schemaName}.${tableName}`
+      if (schemaName && tableName && column) pkByTable.set(key, [...(pkByTable.get(key) ?? []), column])
+    })
+
+    const columnsByTable = new Map<string, DatabaseColumnInfo[]>()
+    columnRows.forEach((row) => {
+      const schemaName = trim(rowValue(row, 'schema_name', 'SCHEMA_NAME'))
+      const tableName = trim(rowValue(row, 'table_name', 'TABLE_NAME'))
+      const name = trim(rowValue(row, 'column_name', 'COLUMN_NAME'))
+      if (!schemaName || !tableName || !name) return
+      const key = `${schemaName}.${tableName}`
+      const primaryKey = pkByTable.get(key) ?? []
+      columnsByTable.set(key, [
+        ...(columnsByTable.get(key) ?? []),
+        {
+          name,
+          type: sqlServerColumnType(row),
+          nullable: Boolean(rowValue(row, 'is_nullable', 'IS_NULLABLE')),
+          ...(primaryKey.includes(name) ? { key: 'PK' as const } : {})
+        }
+      ])
+    })
+
+    const objectSchemas = new Set(objectRows.map((row) => trim(rowValue(row, 'schema_name', 'SCHEMA_NAME'))).filter(Boolean))
+    const orderedSchemas = Array.from(
+      new Set([...schemaRows.map((row) => trim(rowValue(row, 'schema_name', 'SCHEMA_NAME'))).filter(Boolean), ...Array.from(objectSchemas)])
+    ).sort((first, second) => first.localeCompare(second))
+    const schemas = orderedSchemas
+      .map((schemaName): DatabaseSchemaInfo => {
+        const schemaObjects = objectRows.filter((row) => trim(rowValue(row, 'schema_name', 'SCHEMA_NAME')) === schemaName)
+        const functions = schemaObjects
+          .filter((row) => ['FN', 'IF', 'TF'].includes(trim(rowValue(row, 'object_type', 'OBJECT_TYPE')).toUpperCase()))
+          .map((row) => trim(rowValue(row, 'object_name', 'OBJECT_NAME')))
+          .filter(Boolean)
+        const procedures = schemaObjects
+          .filter((row) => ['P', 'PC'].includes(trim(rowValue(row, 'object_type', 'OBJECT_TYPE')).toUpperCase()))
+          .map((row) => trim(rowValue(row, 'object_name', 'OBJECT_NAME')))
+          .filter(Boolean)
+        const tableFor = (row: Record<string, unknown>) => {
+          const name = trim(rowValue(row, 'object_name', 'OBJECT_NAME'))
+          const key = `${schemaName}.${name}`
+          const columns = columnsByTable.get(key) ?? []
+          return {
+            id: databaseColumnId(connection.id, `${databaseName}-${schemaName}-${name}`),
+            name,
+            columns,
+            primaryKey: pkByTable.get(key) ?? []
+          }
+        }
+        return {
+          name: schemaName,
+          tables: schemaObjects
+            .filter((row) => trim(rowValue(row, 'object_type', 'OBJECT_TYPE')).toUpperCase() === 'U')
+            .map(tableFor)
+            .filter((table) => table.name),
+          views: schemaObjects
+            .filter((row) => trim(rowValue(row, 'object_type', 'OBJECT_TYPE')).toUpperCase() === 'V')
+            .map(tableFor)
+            .filter((table) => table.name),
+          functions,
+          procedures
+        }
+      })
+      .filter(schemaHasObjects)
+
+    return [{ name: databaseName, schemas }]
+  })
+
 const relationalCatalogsForConnection = (connection: DatabaseConnectionInfo) =>
   connection.dbType === 'mysql'
     ? mysqlCatalogsForConnection(connection)
     : connection.dbType === 'oracle'
       ? oracleCatalogsForConnection(connection)
-      : postgresCatalogsForConnection(connection)
+      : connection.dbType === 'sqlserver'
+        ? sqlServerCatalogsForConnection(connection)
+        : postgresCatalogsForConnection(connection)
 
 const applyConnectionFailure = (connectionId: string, error: unknown, fallbackCode: string, fallbackMessage: string) => {
   const index = databaseConnections.findIndex((connection) => connection.id === connectionId)
@@ -1817,6 +2077,31 @@ const relationalColumnsForTable = async (
           name,
           type: oracleColumnType(row),
           nullable: trim(rowValue(row, 'NULLABLE', 'nullable')).toUpperCase() !== 'N',
+          ...(pk.includes(name) ? { key: 'PK' as const } : {})
+        }
+      })
+    })
+  }
+  if (connection.dbType === 'sqlserver') {
+    return withSqlServerPool(connection, async (client) => {
+      const schemaName = trim(input.schemaName) || 'dbo'
+      const primaryKeys = await sqlServerRows<Record<string, unknown>>(
+        client,
+        "SELECT c.name AS column_name FROM sys.key_constraints kc JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id JOIN sys.objects o ON o.object_id = kc.parent_object_id JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE kc.type = 'PK' AND s.name = @p1 AND o.name = @p2 ORDER BY ic.key_ordinal",
+        [schemaName, trim(input.tableName)]
+      )
+      const pk = primaryKeys.map((row) => trim(rowValue(row, 'column_name', 'COLUMN_NAME'))).filter(Boolean)
+      const rows = await sqlServerRows<Record<string, unknown>>(
+        client,
+        "SELECT c.name AS column_name, t.name AS data_type, c.max_length AS character_maximum_length, c.precision AS numeric_precision, c.scale AS numeric_scale, c.is_nullable FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id JOIN sys.types t ON t.user_type_id = c.user_type_id WHERE s.name = @p1 AND o.name = @p2 ORDER BY c.column_id",
+        [schemaName, trim(input.tableName)]
+      )
+      return rows.map((row) => {
+        const name = trim(rowValue(row, 'column_name', 'COLUMN_NAME'))
+        return {
+          name,
+          type: sqlServerColumnType(row),
+          nullable: Boolean(rowValue(row, 'is_nullable', 'IS_NULLABLE')),
           ...(pk.includes(name) ? { key: 'PK' as const } : {})
         }
       })
@@ -1930,14 +2215,14 @@ const relationalQueryTable = async (
     const page = Math.max(1, Math.floor(Number(input.page) || 1))
     const offset = (page - 1) * pageSize
     const tableRef = relationalTableReference(connection, input)
-    const limitPlaceholder = relationalPlaceholder(dbType, where.params.length + 1)
-    const offsetPlaceholder = relationalPlaceholder(dbType, where.params.length + 2)
+    const limitPlaceholder = relationalPlaceholder(dbType, where.params.length + (dbType === 'sqlserver' ? 2 : 1))
+    const offsetPlaceholder = relationalPlaceholder(dbType, where.params.length + (dbType === 'sqlserver' ? 1 : 2))
     const rowsSql =
-      dbType === 'oracle'
-        ? `SELECT * FROM ${tableRef}${where.sql}${orderBy} OFFSET ${offsetPlaceholder} ROWS FETCH NEXT ${limitPlaceholder} ROWS ONLY`
+      dbType === 'oracle' || dbType === 'sqlserver'
+        ? `SELECT * FROM ${tableRef}${where.sql}${orderBy || ' ORDER BY (SELECT 1)'} OFFSET ${offsetPlaceholder} ROWS FETCH NEXT ${limitPlaceholder} ROWS ONLY`
         : `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
     const countSql = `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`
-    const params = dbType === 'oracle' ? [...where.params, offset, pageSize] : [...where.params, pageSize, offset]
+    const params = dbType === 'oracle' || dbType === 'sqlserver' ? [...where.params, offset, pageSize] : [...where.params, pageSize, offset]
 
     if (connection.dbType === 'mysql') {
       return await withMysqlConnection(connection, async (client) => {
@@ -1968,6 +2253,23 @@ const relationalQueryTable = async (
             rowCount: rows.length,
             durationMs: Math.max(1, Date.now() - startedAt),
             total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'TOTAL', 'total') ?? 0) : null,
+            knownColumns
+          }
+        }
+      })
+    }
+    if (connection.dbType === 'sqlserver') {
+      return await withSqlServerPool(connection, async (client) => {
+        const rows = await sqlServerRows<Record<string, unknown>>(client, rowsSql, params)
+        const count = input.withTotal ? await sqlServerRows<Record<string, unknown>>(client, countSql, where.params) : []
+        return {
+          ok: true,
+          data: {
+            columns: knownColumns,
+            rows,
+            rowCount: rows.length,
+            durationMs: Math.max(1, Date.now() - startedAt),
+            total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'total', 'TOTAL') ?? 0) : null,
             knownColumns
           }
         }
@@ -2033,6 +2335,21 @@ const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: str
         }
       })
     }
+    if (connection.dbType === 'sqlserver') {
+      return await withSqlServerPool(connection, async (client) => {
+        const result = await client.request().query<Record<string, unknown>>(rawSql)
+        const rows = normalizeQueryRows(result.recordset)
+        return {
+          ok: true,
+          data: {
+            columns: columnsForRows(rows),
+            rows,
+            rowCount: rows.length || result.rowsAffected?.reduce((sum, value) => sum + Number(value || 0), 0) || 0,
+            durationMs: Math.max(1, Date.now() - startedAt)
+          }
+        }
+      })
+    }
     return await withPostgresClient(connection, async (client) => {
       const result = await client.query<Record<string, unknown>>(rawSql)
       const rows = normalizeQueryRows(result.rows)
@@ -2068,6 +2385,8 @@ const postgresColumnTypeDdl = (row: {
   if (row.numeric_precision && dataType === 'numeric') return row.numeric_scale ? `numeric(${row.numeric_precision}, ${row.numeric_scale})` : `numeric(${row.numeric_precision})`
   return dataType || trim(row.udt_name) || 'text'
 }
+
+const sqlServerColumnTypeDdl = (row: Record<string, unknown>) => sqlServerColumnType(row)
 
 const oracleDdlPermissionError = (error: unknown) => {
   const message = relationalErrorMessage(error, '')
@@ -2116,6 +2435,55 @@ const relationalTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
           }
           throw error
         }
+      })
+    }
+    if (connection.dbType === 'sqlserver') {
+      return await withSqlServerPool(connection, async (client) => {
+        const schemaName = trim(input.schemaName) || 'dbo'
+        const tableName = trim(input.tableName)
+        const objectRows = await sqlServerRows<Record<string, unknown>>(
+          client,
+          "SELECT o.type AS object_type FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE s.name = @p1 AND o.name = @p2 AND o.type IN ('U', 'V')",
+          [schemaName, tableName]
+        )
+        const objectType = trim(rowValue(objectRows[0] ?? {}, 'object_type', 'OBJECT_TYPE')).toUpperCase()
+        if (!objectType) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        if (objectType === 'V') {
+          const viewRows = await sqlServerRows<Record<string, unknown>>(
+            client,
+            "SELECT sm.definition AS ddl FROM sys.sql_modules sm JOIN sys.objects o ON o.object_id = sm.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE s.name = @p1 AND o.name = @p2 AND o.type = 'V'",
+            [schemaName, tableName]
+          ).catch(() => [])
+          const viewDdl = trim(rowValue(viewRows[0] ?? {}, 'ddl', 'DDL'))
+          if (!viewDdl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+          return { ok: true, data: { ddl: viewDdl } }
+        }
+        const columns = await sqlServerRows<Record<string, unknown>>(
+          client,
+          "SELECT c.name AS column_name, t.name AS data_type, c.max_length AS character_maximum_length, c.precision AS numeric_precision, c.scale AS numeric_scale, c.is_nullable, dc.definition AS column_default FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id JOIN sys.types t ON t.user_type_id = c.user_type_id LEFT JOIN sys.default_constraints dc ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id WHERE s.name = @p1 AND o.name = @p2 AND o.type = 'U' ORDER BY c.column_id",
+          [schemaName, tableName]
+        )
+        if (!columns.length) {
+          return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        }
+        const primaryKeys = await sqlServerRows<Record<string, unknown>>(
+          client,
+          "SELECT c.name AS column_name FROM sys.key_constraints kc JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id JOIN sys.objects o ON o.object_id = kc.parent_object_id JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE kc.type = 'PK' AND s.name = @p1 AND o.name = @p2 ORDER BY ic.key_ordinal",
+          [schemaName, tableName]
+        )
+        const columnLines = columns.map((row) => {
+          const pieces = [
+            `  ${relationalIdentifier(trim(rowValue(row, 'column_name', 'COLUMN_NAME')), 'sqlserver')} ${sqlServerColumnTypeDdl(row)}`,
+            Boolean(rowValue(row, 'is_nullable', 'IS_NULLABLE')) ? 'NULL' : 'NOT NULL',
+            trim(rowValue(row, 'column_default', 'COLUMN_DEFAULT')) ? `DEFAULT ${trim(rowValue(row, 'column_default', 'COLUMN_DEFAULT'))}` : ''
+          ].filter(Boolean)
+          return pieces.join(' ')
+        })
+        const pk = primaryKeys.map((row) => trim(rowValue(row, 'column_name', 'COLUMN_NAME'))).filter(Boolean)
+        if (pk.length) {
+          columnLines.push(`  PRIMARY KEY (${pk.map((column) => relationalIdentifier(column, 'sqlserver')).join(', ')})`)
+        }
+        return { ok: true, data: { ddl: `CREATE TABLE ${relationalTableReference(connection, input)} (\n${columnLines.join(',\n')}\n);` } }
       })
     }
 
@@ -2210,6 +2578,32 @@ const relationalMutateTable = async (
             await oracleCommit(client)
           } catch (error) {
             await oracleRollback(client).catch(() => undefined)
+            throw error
+          }
+        })
+      } else if (connection.dbType === 'sqlserver') {
+        await withSqlServerPool(connection, async (client) => {
+          const transaction = client.transaction?.()
+          if (transaction) {
+            await transaction.begin()
+            try {
+              for (const statement of statements) {
+                const result = await sqlServerRequestWithParams(transaction.request(), statement.params).query(statement.sql)
+                affected += result.rowsAffected?.reduce((sum, value) => sum + Number(value || 0), 0) ?? 0
+              }
+              await transaction.commit()
+            } catch (error) {
+              await transaction.rollback().catch(() => undefined)
+              throw error
+            }
+            return
+          }
+          await sqlServerExec(client, 'BEGIN TRANSACTION')
+          try {
+            for (const statement of statements) affected += await sqlServerExec(client, statement.sql, statement.params)
+            await sqlServerExec(client, 'COMMIT TRANSACTION')
+          } catch (error) {
+            await sqlServerExec(client, 'ROLLBACK TRANSACTION').catch(() => undefined)
             throw error
           }
         })
@@ -2570,7 +2964,7 @@ const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>
     database: normalizePersistedString(value.database),
     filePath: dbType === 'sqlite' ? normalizePersistedString(value.filePath) || undefined : undefined,
     readonly: dbType === 'sqlite' ? value.readonly !== false : undefined,
-    sslMode: dbType === 'postgresql' ? sslMode : '',
+    sslMode: dbType === 'postgresql' || dbType === 'sqlserver' ? sslMode : '',
     url: normalizePersistedString(value.url) || undefined,
     status:
       typeof value.status === 'string' && databaseStatusValues.has(value.status as DatabaseConnectionInfo['status'])
@@ -2833,7 +3227,7 @@ const buildSavedConnectionUrl = (
   const port = normalized.port ? `:${normalized.port}` : ''
   const database = normalized.database ? `/${normalized.database}` : ''
   if (normalized.dbType === 'oracle') return `${normalized.host}${port}${database}`
-  const scheme = normalized.dbType === 'postgresql' ? 'jdbc:postgresql' : 'jdbc:mysql'
+  const scheme = normalized.dbType === 'postgresql' ? 'jdbc:postgresql' : normalized.dbType === 'sqlserver' ? 'jdbc:sqlserver' : 'jdbc:mysql'
   return `${scheme}://${normalized.host}${port}${database}`
 }
 
@@ -2850,23 +3244,27 @@ const defaultCatalogsForSavedConnection = (connection: Omit<DatabaseConnectionIn
   if (connection.dbType === 'oracle') {
     return [{ name: catalogName, schemas: [{ name: 'OPS', tables: [], views: [], functions: [], procedures: [] }] }]
   }
+  if (connection.dbType === 'sqlserver') {
+    return [{ name: catalogName, schemas: [{ name: 'dbo', tables: [], views: [], functions: [], procedures: [] }] }]
+  }
   return [{ name: catalogName, tables: [] }]
 }
 
 const createDatabaseCatalogForConnection = (connection: DatabaseConnectionInfo, name: string): DatabaseCatalogInfo =>
-  connection.dbType === 'postgresql'
-    ? { name, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }
+  connection.dbType === 'postgresql' || connection.dbType === 'sqlserver'
+    ? { name, schemas: [{ name: connection.dbType === 'postgresql' ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
     : { name, tables: [] }
 
 const unquoteDatabaseIdentifier = (value: string) => {
   const token = trim(value)
   if (token.startsWith('`') && token.endsWith('`')) return token.slice(1, -1).replace(/``/g, '`')
   if (token.startsWith('"') && token.endsWith('"')) return token.slice(1, -1).replace(/""/g, '"')
+  if (token.startsWith('[') && token.endsWith(']')) return token.slice(1, -1).replace(/]]/g, ']')
   return token
 }
 
 const databaseNameFromCreateSql = (sql: string) => {
-  const match = trim(sql).match(/^create\s+database\s+(?:if\s+not\s+exists\s+)?(`(?:``|[^`])+`|"(?:""|[^"])+"|[A-Za-z_][A-Za-z0-9_]*)\s*;?$/i)
+  const match = trim(sql).match(/^create\s+database\s+(?:if\s+not\s+exists\s+)?(`(?:``|[^`])+`|"(?:""|[^"])+"|\[(?:]]|[^\]])+\]|[A-Za-z_][A-Za-z0-9_]*)\s*;?$/i)
   return match ? unquoteDatabaseIdentifier(match[1]) : ''
 }
 
@@ -3607,13 +4005,14 @@ const firstTableKeyForContext = (input: { connectionId: string; databaseName?: s
 const quoteIdentifier = (value: string, dbType: DatabaseConnectionTestInput['dbType']) => {
   const raw = String(value || '')
   if (dbType === 'mysql') return `\`${raw.replace(/`/g, '``')}\``
+  if (dbType === 'sqlserver') return `[${raw.replace(/]/g, ']]')}]`
   return `"${raw.replace(/"/g, '""')}"`
 }
 
 const qualifiedTableReference = (input: { dbType?: DatabaseConnectionTestInput['dbType'] | ''; databaseName?: string; schemaName?: string; tableName: string }) => {
   const dbType = input.dbType && supportedEngines.has(input.dbType) ? input.dbType : 'postgresql'
   const table = quoteIdentifier(input.tableName, dbType)
-  if ((dbType === 'postgresql' || dbType === 'oracle') && input.schemaName) return `${quoteIdentifier(input.schemaName, dbType)}.${table}`
+  if ((dbType === 'postgresql' || dbType === 'oracle' || dbType === 'sqlserver') && input.schemaName) return `${quoteIdentifier(input.schemaName, dbType)}.${table}`
   if (dbType === 'sqlite' && input.databaseName) return `${quoteIdentifier(input.databaseName, dbType)}.${table}`
   return table
 }
@@ -3632,7 +4031,9 @@ const sampleSelectForContext = (input: DatabaseAiPaneResponseInput) => {
     schemaName: parts.schemaName,
     tableName: parts.tableName
   })
-  return input.context.dbType === 'oracle' ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;` : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
+  if (input.context.dbType === 'oracle') return `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;`
+  if (input.context.dbType === 'sqlserver') return `SELECT TOP (100) *\nFROM ${qualified};`
+  return `SELECT *\nFROM ${qualified}\nLIMIT 100;`
 }
 
 const schemaSummaryForContext = (input: DatabaseAiPaneResponseInput) => {
@@ -3656,7 +4057,11 @@ const schemaSummaryForContext = (input: DatabaseAiPaneResponseInput) => {
 const drawerDbType = (input: DatabaseAiDrawerResponseInput) =>
   input.context.dbType && supportedEngines.has(input.context.dbType) ? input.context.dbType : 'postgresql'
 
-const drawerTargetDialect = (input: DatabaseAiDrawerResponseInput): DatabaseAiTargetDialect => input.targetDialect || drawerDbType(input)
+const normalizeDatabaseAiTargetDialect = (dialect: DatabaseAiTargetDialect | '' | undefined): DatabaseAiTargetDialect =>
+  dialect === 'sqlserver' ? 'mssql' : dialect || 'postgresql'
+
+const drawerTargetDialect = (input: DatabaseAiDrawerResponseInput): DatabaseAiTargetDialect =>
+  normalizeDatabaseAiTargetDialect(input.targetDialect || drawerDbType(input))
 
 const quoteDrawerIdentifier = (value: string, dialect: DatabaseAiTargetDialect) => {
   const raw = String(value || '').replace(/^[`"\[]|[`"\]]$/g, '')
@@ -3670,7 +4075,7 @@ const dialectLabel = (dialect: DatabaseAiTargetDialect) => {
   if (dialect === 'mysql') return 'MySQL'
   if (dialect === 'sqlite') return 'SQLite'
   if (dialect === 'oracle') return 'Oracle'
-  if (dialect === 'mssql') return 'SQL Server'
+  if (dialect === 'mssql' || dialect === 'sqlserver') return 'SQL Server'
   return dialect
 }
 
@@ -3700,7 +4105,7 @@ const addDialectLimit = (sql: string, dialect: DatabaseAiTargetDialect, fallback
   if (topMatch) withoutLimit = withoutLimit.replace(/^\s*select\s+top\s*\(\s*\d+\s*\)\s+/i, 'SELECT ')
   const resolvedLimit = Number(topMatch?.[1] ?? limit)
   if (dialect === 'oracle') return ensureSqlTerminated(`${withoutLimit}\nFETCH FIRST ${resolvedLimit} ROWS ONLY`)
-  if (dialect === 'mssql') return ensureSqlTerminated(withoutLimit.replace(/^\s*select\s+/i, `SELECT TOP (${resolvedLimit}) `))
+  if (dialect === 'mssql' || dialect === 'sqlserver') return ensureSqlTerminated(withoutLimit.replace(/^\s*select\s+/i, `SELECT TOP (${resolvedLimit}) `))
   return ensureSqlTerminated(`${withoutLimit}\nLIMIT ${resolvedLimit}`)
 }
 
@@ -3730,7 +4135,7 @@ const drawerTableReference = (input: DatabaseAiDrawerResponseInput, dialect: Dat
     ? tableKeyForContext({ connectionId, databaseName, schemaName, tableName: explicitTable })
     : firstTableKeyForContext({ connectionId, databaseName, schemaName })
   const parts = key ? keyParts(key) : { databaseName, schemaName, tableName: explicitTable || 'orders' }
-  if ((dialect === 'postgresql' || dialect === 'oracle' || dialect === 'mssql') && parts.schemaName) {
+  if ((dialect === 'postgresql' || dialect === 'oracle' || dialect === 'mssql' || dialect === 'sqlserver') && parts.schemaName) {
     return `${quoteDrawerIdentifier(parts.schemaName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
   }
   if (dialect === 'sqlite' && parts.databaseName) return `${quoteDrawerIdentifier(parts.databaseName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
@@ -3742,7 +4147,7 @@ const buildDrawerNl2Sql = (input: DatabaseAiDrawerResponseInput, dialect: Databa
   if (dialect === 'oracle') {
     return `SELECT id, service, status, owner, updated_at\nFROM ${tableRef}\nWHERE status = 'open'\nORDER BY updated_at DESC\nFETCH FIRST 20 ROWS ONLY;`
   }
-  if (dialect === 'mssql') {
+  if (dialect === 'mssql' || dialect === 'sqlserver') {
     return `SELECT TOP (20) id, service, status, owner, updated_at\nFROM ${tableRef}\nWHERE status = 'open'\nORDER BY updated_at DESC;`
   }
   return `SELECT id, service, status, owner, updated_at\nFROM ${tableRef}\nWHERE status = 'open'\nORDER BY updated_at DESC\nLIMIT 20;`
@@ -3779,7 +4184,7 @@ const convertDrawerSqlToDialect = (input: DatabaseAiDrawerResponseInput, dialect
 const diagnoseDrawerSql = (input: DatabaseAiDrawerResponseInput, dialect: DatabaseAiTargetDialect) => {
   const tableRef = drawerTableReference(input, dialect)
   if (dialect === 'oracle') return `SELECT *\nFROM ${tableRef}\nFETCH FIRST 100 ROWS ONLY;`
-  if (dialect === 'mssql') return `SELECT TOP (100) *\nFROM ${tableRef};`
+  if (dialect === 'mssql' || dialect === 'sqlserver') return `SELECT TOP (100) *\nFROM ${tableRef};`
   return `SELECT *\nFROM ${tableRef}\nLIMIT 100;`
 }
 
@@ -3794,7 +4199,7 @@ const buildDrawerGeneratedSql = (input: DatabaseAiDrawerResponseInput, dialect: 
 
 const isExecutableDrawerDialect = (input: DatabaseAiDrawerResponseInput, dialect: DatabaseAiTargetDialect) => {
   if (input.action !== 'convert') return true
-  if (dialect === 'mssql') return false
+  if (dialect === 'mssql') return drawerDbType(input) === 'sqlserver'
   return drawerDbType(input) === dialect
 }
 
@@ -4377,7 +4782,7 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
   }
 
   if (!shouldUseDatabaseSeedData()) {
-    if (input.dbType === 'mysql' || input.dbType === 'postgresql' || input.dbType === 'oracle') {
+    if (input.dbType === 'mysql' || input.dbType === 'postgresql' || input.dbType === 'oracle' || input.dbType === 'sqlserver') {
       return testRelationalDatabaseConnection(input, startedAt)
     }
   }
@@ -4481,8 +4886,8 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
-  if (connection.dbType !== 'mysql' && connection.dbType !== 'postgresql') {
-    return { ok: false, errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED', errorMessage: 'Create Database is only available for MySQL and PostgreSQL connections.' }
+  if (connection.dbType !== 'mysql' && connection.dbType !== 'postgresql' && connection.dbType !== 'sqlserver') {
+    return { ok: false, errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED', errorMessage: 'Create Database is only available for MySQL, PostgreSQL, and SQL Server connections.' }
   }
 
   const name = databaseNameFromCreateSql(input.sql) || trim(input.requestedName)
@@ -4502,15 +4907,26 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
         await withMysqlConnection(connection, async (client) => {
           await mysqlExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'mysql')}`)
         })
-      } else {
+      } else if (connection.dbType === 'postgresql') {
         await withPostgresClient(connection, async (client) => {
           await postgresExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'postgresql')}`)
+        })
+      } else {
+        await withSqlServerPool(connection, async (client) => {
+          await sqlServerExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'sqlserver')}`)
         })
       }
     } catch (error) {
       return {
         ok: false,
-        errorCode: relationalErrorCode(error, connection.dbType === 'mysql' ? 'DB_MYSQL_CREATE_DATABASE_FAILED' : 'DB_POSTGRES_CREATE_DATABASE_FAILED'),
+        errorCode: relationalErrorCode(
+          error,
+          connection.dbType === 'mysql'
+            ? 'DB_MYSQL_CREATE_DATABASE_FAILED'
+            : connection.dbType === 'sqlserver'
+              ? 'DB_SQLSERVER_CREATE_DATABASE_FAILED'
+              : 'DB_POSTGRES_CREATE_DATABASE_FAILED'
+        ),
         errorMessage: relationalErrorMessage(error, 'Create database failed.')
       }
     }

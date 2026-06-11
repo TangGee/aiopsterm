@@ -940,7 +940,7 @@ const databaseEngineOptionsMock: DatabaseEngineInfo[] = [
   { code: 'h2', name: 'H2', enabled: false, accent: '#7c3aed' },
   { code: 'oracle', connectionCode: 'oracle', name: 'Oracle', enabled: true, accent: '#c74634' },
   { code: 'postgresql', connectionCode: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
-  { code: 'sqlserver', name: 'SQLServer', enabled: false, accent: '#a91d22' },
+  { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
   { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
   { code: 'mariadb', name: 'MariaDB', enabled: false, accent: '#c0765c' },
   { code: 'clickhouse', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
@@ -1399,7 +1399,7 @@ const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): D
     connectionId: databaseTrimMock(state.context?.connectionId),
     catalogName: databaseTrimMock(state.context?.catalogName),
     schemaName: databaseTrimMock(state.context?.schemaName),
-    dbType: ['mysql', 'postgresql', 'sqlite', 'oracle'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
+    dbType: ['mysql', 'postgresql', 'sqlite', 'oracle', 'sqlserver'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
   },
   draft: typeof state.draft === 'string' ? state.draft : '',
   messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
@@ -2147,7 +2147,7 @@ function parseDatabaseWhereMock(whereRaw?: string | null) {
 }
 
 type TestDatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-type TestDatabaseAiTargetDialect = 'mysql' | 'postgresql' | 'sqlite' | 'oracle' | 'mssql'
+type TestDatabaseAiTargetDialect = 'mysql' | 'postgresql' | 'sqlite' | 'oracle' | 'mssql' | 'sqlserver'
 
 const stripDatabaseAiSqlTerminatorMock = (sql: string) => sql.trim().replace(/;+$/, '').trim()
 const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {

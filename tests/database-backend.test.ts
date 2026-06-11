@@ -314,6 +314,164 @@ const createOracleDriverDouble = () => {
   }
 }
 
+const createSqlServerDriverDouble = () => {
+  const state = {
+    connected: 0,
+    closed: 0,
+    committed: 0,
+    rolledBack: 0,
+    configs: [] as Array<Record<string, unknown>>,
+    createdDatabases: [] as string[],
+    sql: [] as Array<{ sql: string; params: unknown[] }>,
+    rows: [
+      { id: 1, service: 'sql-api', status: 'open', owner: 'sara', updated_at: '2026-06-09 10:00:00' },
+      { id: 2, service: 'sql-worker', status: 'closed', owner: 'tomas', updated_at: '2026-06-09 09:00:00' }
+    ] as Array<Record<string, unknown>>
+  }
+  const rowsFor = (rows: Array<Record<string, unknown>>, rowsAffected = rows.length) => ({
+    recordset: rows.map((row) => ({ ...row })),
+    rowsAffected: [rowsAffected]
+  })
+  class RequestDouble {
+    private readonly params: unknown[] = []
+
+    input(_name: string, value: unknown) {
+      this.params.push(value)
+      return this
+    }
+
+    async query<T = Record<string, unknown>>(sql: string): Promise<{ recordset?: T[]; rowsAffected?: number[] }> {
+      const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+      state.sql.push({ sql, params: this.params.slice() })
+
+      if (normalized.includes("serverproperty('productversion')")) return rowsFor([{ version: '16.0.1000.6 live-driver' }]) as { recordset: T[]; rowsAffected: number[] }
+      if (normalized.startsWith('select db_name()')) return rowsFor([{ database_name: 'opsdb' }]) as { recordset: T[]; rowsAffected: number[] }
+      if (normalized.startsWith('select name as schema_name from sys.schemas')) return rowsFor([{ schema_name: 'dbo' }]) as { recordset: T[]; rowsAffected: number[] }
+      if (normalized.includes('from sys.objects o join sys.schemas')) {
+        if (normalized.includes('select o.type as object_type')) {
+          const schemaFilter = String(this.params[0] ?? '')
+          const tableFilter = String(this.params[1] ?? '')
+          const objects = [
+            { schema_name: 'dbo', object_name: 'orders', object_type: 'U' },
+            { schema_name: 'dbo', object_name: 'open_orders_v', object_type: 'V' }
+          ]
+          return rowsFor(
+            objects
+              .filter((row) => (!schemaFilter || row.schema_name === schemaFilter) && (!tableFilter || row.object_name === tableFilter))
+              .map((row) => ({ object_type: row.object_type }))
+          ) as { recordset: T[]; rowsAffected: number[] }
+        }
+        return rowsFor([
+          { schema_name: 'dbo', object_name: 'orders', object_type: 'U' },
+          { schema_name: 'dbo', object_name: 'open_orders_v', object_type: 'V' },
+          { schema_name: 'dbo', object_name: 'order_age', object_type: 'FN' },
+          { schema_name: 'dbo', object_name: 'archive_orders', object_type: 'P' }
+        ]) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.includes('from sys.columns c')) {
+        const schemaFilter = String(this.params[0] ?? '')
+        const tableFilter = String(this.params[1] ?? '')
+        const columns = [
+          { schema_name: 'dbo', table_name: 'orders', column_name: 'id', data_type: 'int', character_maximum_length: 4, numeric_precision: 10, numeric_scale: 0, is_nullable: false },
+          { schema_name: 'dbo', table_name: 'orders', column_name: 'service', data_type: 'nvarchar', character_maximum_length: 160, numeric_precision: 0, numeric_scale: 0, is_nullable: false },
+          { schema_name: 'dbo', table_name: 'orders', column_name: 'status', data_type: 'nvarchar', character_maximum_length: 64, numeric_precision: 0, numeric_scale: 0, is_nullable: false },
+          { schema_name: 'dbo', table_name: 'orders', column_name: 'owner', data_type: 'nvarchar', character_maximum_length: 128, numeric_precision: 0, numeric_scale: 0, is_nullable: true },
+          { schema_name: 'dbo', table_name: 'orders', column_name: 'updated_at', data_type: 'datetime2', character_maximum_length: 8, numeric_precision: 0, numeric_scale: 0, is_nullable: false },
+          { schema_name: 'dbo', table_name: 'open_orders_v', column_name: 'id', data_type: 'int', character_maximum_length: 4, numeric_precision: 10, numeric_scale: 0, is_nullable: false },
+          { schema_name: 'dbo', table_name: 'open_orders_v', column_name: 'service', data_type: 'nvarchar', character_maximum_length: 160, numeric_precision: 0, numeric_scale: 0, is_nullable: false }
+        ]
+        return rowsFor(columns.filter((row) => (!schemaFilter || row.schema_name === schemaFilter) && (!tableFilter || row.table_name === tableFilter))) as {
+          recordset: T[]
+          rowsAffected: number[]
+        }
+      }
+      if (normalized.includes('from sys.key_constraints')) {
+        const schemaFilter = String(this.params[0] ?? '')
+        const tableFilter = String(this.params[1] ?? '')
+        const keys = [{ schema_name: 'dbo', table_name: 'orders', column_name: 'id' }]
+        return rowsFor(keys.filter((row) => (!schemaFilter || row.schema_name === schemaFilter) && (!tableFilter || row.table_name === tableFilter))) as {
+          recordset: T[]
+          rowsAffected: number[]
+        }
+      }
+      if (normalized.includes('from sys.sql_modules')) return rowsFor([{ ddl: 'CREATE VIEW [dbo].[open_orders_v] AS SELECT [id], [service] FROM [dbo].[orders];' }]) as { recordset: T[]; rowsAffected: number[] }
+      if (normalized.startsWith('create database')) {
+        state.createdDatabases.push(String(sql.match(/\[([^\]]+)\]/)?.[1] || 'unknown'))
+        return rowsFor([], 0) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.startsWith('select count(*)')) {
+        const status = this.params[0]
+        const total = status ? state.rows.filter((row) => row.status === status).length : state.rows.length
+        return rowsFor([{ total }]) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.startsWith('select') && normalized.includes('orders')) {
+        let rows = state.rows
+        if (this.params.length && typeof this.params[0] === 'string') rows = rows.filter((row) => row.status === this.params[0])
+        return rowsFor(rows.map((row) => ({ ...row }))) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.startsWith('update ')) {
+        const owner = this.params[0]
+        const id = this.params[1]
+        const row = state.rows.find((item) => item.id === id)
+        if (row) row.owner = owner
+        return rowsFor([], row ? 1 : 0) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.startsWith('insert ')) {
+        state.rows.push({ id: this.params[0], service: this.params[1], status: this.params[2], owner: this.params[3], updated_at: this.params[4] })
+        return rowsFor([], 1) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.startsWith('delete ')) {
+        const id = this.params[0]
+        const before = state.rows.length
+        state.rows = state.rows.filter((row) => row.id !== id)
+        return rowsFor([], before - state.rows.length) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized.startsWith('truncate ')) {
+        const affected = state.rows.length
+        state.rows = []
+        return rowsFor([], affected) as { recordset: T[]; rowsAffected: number[] }
+      }
+      if (normalized === 'begin transaction' || normalized === 'commit transaction' || normalized === 'rollback transaction') return rowsFor([], 0) as { recordset: T[]; rowsAffected: number[] }
+      throw Object.assign(new Error(`unexpected sqlserver query: ${sql}`), { code: 'SQLSERVER_FAKE_UNHANDLED' })
+    }
+  }
+  class TransactionDouble {
+    async begin() {
+      return undefined
+    }
+    async commit() {
+      state.committed += 1
+    }
+    async rollback() {
+      state.rolledBack += 1
+    }
+    request() {
+      return new RequestDouble()
+    }
+  }
+  class ConnectionPool {
+    readonly config: Record<string, unknown>
+    constructor(config: Record<string, unknown>) {
+      this.config = config
+      state.configs.push({ ...config })
+    }
+    async connect() {
+      state.connected += 1
+      return this
+    }
+    request() {
+      return new RequestDouble()
+    }
+    transaction() {
+      return new TransactionDouble()
+    }
+    async close() {
+      state.closed += 1
+    }
+  }
+  return { driver: { ConnectionPool }, state }
+}
+
 let configureDatabaseBackendRuntime: (config?: {
   getConfig?: () => UserConfig
   localBackendDouble?: boolean
@@ -530,7 +688,13 @@ describe('database backend boundary', () => {
 
     expect(result.ok).toBe(true)
     expect(result.data?.engines).toHaveLength(16)
-    expect(result.data?.engines.filter((engine) => engine.enabled).map((engine) => engine.name)).toEqual(['MySQL', 'Oracle', 'PostgreSQL', 'SQLite'])
+    expect(result.data?.engines.filter((engine) => engine.enabled).map((engine) => engine.name)).toEqual([
+      'MySQL',
+      'Oracle',
+      'PostgreSQL',
+      'SQLServer',
+      'SQLite'
+    ])
     expect(result.data?.groups.map((group) => group.name)).toEqual(['Default Group', 'Production', 'Local Lab'])
     expect(result.data?.groupParents).toEqual({
       'group-default': null,
@@ -2890,5 +3054,190 @@ WHERE status = ''open'';
     })
     expect(ddl.ok).toBe(true)
     expect(ddl.data?.ddl).toBe('CREATE TABLE `service_health` (`id` int PRIMARY KEY)')
+  })
+
+  it('uses the injected SQL Server driver in non-seed runtime instead of a coming-soon placeholder', async () => {
+    const { driver, state } = createSqlServerDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, sqlServerDriver: driver })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.engines.find((engine) => engine.code === 'sqlserver')).toMatchObject({
+      connectionCode: 'sqlserver',
+      enabled: true
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'sqlserver',
+      name: 'live-sqlserver',
+      host: '127.0.0.1',
+      port: 1433,
+      user: 'sa',
+      password: 'secret',
+      database: 'opsdb',
+      sslMode: 'disable'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'sqlserver',
+      serverVersion: 'SQL Server 16.0.1000.6 live-driver',
+      endpoint: '127.0.0.1:1433'
+    })
+    expect(state.configs[0]).toMatchObject({
+      server: '127.0.0.1',
+      port: 1433,
+      user: 'sa',
+      database: 'opsdb'
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'sqlserver',
+        name: 'live-sqlserver',
+        host: '127.0.0.1',
+        port: 1433,
+        user: 'sa',
+        password: 'secret',
+        database: 'opsdb',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword',
+        sslMode: 'disable'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-sqlserver',
+      dbType: 'sqlserver',
+      status: 'idle',
+      url: 'jdbc:sqlserver://127.0.0.1:1433/opsdb',
+      catalogs: [{ name: 'opsdb', schemas: [{ name: 'dbo' }] }]
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-sqlserver')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    const dboSchema = connected.data?.connection.catalogs[0]?.schemas?.find((schema) => schema.name === 'dbo')
+    expect(dboSchema?.tables[0]).toMatchObject({
+      name: 'orders',
+      primaryKey: ['id'],
+      columns: expect.arrayContaining([
+        expect.objectContaining({ name: 'id', type: 'int', key: 'PK' }),
+        expect.objectContaining({ name: 'service', type: 'nvarchar(80)' })
+      ])
+    })
+    expect(dboSchema?.views?.map((view) => view.name)).toEqual(['open_orders_v'])
+    expect(dboSchema?.functions).toEqual(['order_age'])
+    expect(dboSchema?.procedures).toEqual(['archive_orders'])
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-sqlserver',
+      dbType: 'sqlserver',
+      databaseName: 'opsdb',
+      schemaName: 'dbo',
+      sql: 'SELECT TOP (100) * FROM [dbo].[orders];'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data?.rows).toEqual([
+      expect.objectContaining({ service: 'sql-api', owner: 'sara' }),
+      expect.objectContaining({ service: 'sql-worker', owner: 'tomas' })
+    ])
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-sqlserver',
+      dbType: 'sqlserver',
+      databaseName: 'opsdb',
+      schemaName: 'dbo',
+      tableName: 'orders',
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }],
+      sort: { column: 'id', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data?.rows).toEqual([expect.objectContaining({ service: 'sql-api' })])
+    expect(tablePage.data?.total).toBe(1)
+    expect(state.sql.some((entry) => /offset @p2 rows fetch next @p3 rows only/i.test(entry.sql.replace(/\s+/g, ' ')))).toBe(true)
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-sqlserver',
+      dbType: 'sqlserver',
+      databaseName: 'opsdb',
+      schemaName: 'dbo',
+      tableName: 'orders'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE [dbo].[orders]')
+    expect(ddl.data?.ddl).toContain('[service] nvarchar(80) NOT NULL')
+    expect(ddl.data?.ddl).toContain('PRIMARY KEY ([id])')
+
+    const viewDdl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-sqlserver',
+      dbType: 'sqlserver',
+      databaseName: 'opsdb',
+      schemaName: 'dbo',
+      tableName: 'open_orders_v'
+    })
+    expect(viewDdl.ok).toBe(true)
+    expect(viewDdl.data?.ddl).toBe('CREATE VIEW [dbo].[open_orders_v] AS SELECT [id], [service] FROM [dbo].[orders];')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-sqlserver',
+      dbType: 'sqlserver',
+      databaseName: 'opsdb',
+      schemaName: 'dbo',
+      tableName: 'orders',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { owner: 'sql-owner' } },
+        { kind: 'insert', values: { id: 3, service: 'sql-cron', status: 'open', owner: 'uma', updated_at: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(plan.ok).toBe(true)
+    expect(plan.data?.preview).toContain("UPDATE [dbo].[orders] SET [owner] = 'sql-owner' WHERE [id] = 1;")
+    expect(plan.data?.statements[0]).toMatchObject({
+      kind: 'update',
+      sql: 'UPDATE [dbo].[orders] SET [owner] = @p1 WHERE [id] = @p2',
+      params: ['sql-owner', 1]
+    })
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-sqlserver',
+      databaseName: 'opsdb',
+      schemaName: 'dbo',
+      tableName: 'orders',
+      mutations: [
+        { kind: 'update', rowKey: JSON.stringify([1]), primaryKey: ['id'], patch: { owner: 'sql-owner' } },
+        { kind: 'insert', values: { id: 3, service: 'sql-cron', status: 'open', owner: 'uma', updated_at: '2026-06-09 11:00:00' } },
+        { kind: 'delete', rowKey: JSON.stringify([2]), primaryKey: ['id'] }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(state.rows).toEqual([
+      expect.objectContaining({ id: 1, owner: 'sql-owner' }),
+      expect.objectContaining({ id: 3, service: 'sql-cron' })
+    ])
+    expect(state.committed).toBeGreaterThan(0)
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-sqlserver',
+      requestedName: 'fallback_name',
+      sql: 'CREATE DATABASE [ops_live];'
+    })
+    expect(createdDatabase.ok).toBe(true)
+    expect(state.createdDatabases).toEqual(['ops_live'])
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).toContain('ops_live')
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).not.toContain('fallback_name')
+
+    const refreshed = await refreshDatabaseConnection('conn-live-sqlserver')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.schemas?.[0]?.tables[0]?.name).toBe('orders')
+    expect(state.connected).toBeGreaterThan(0)
+    expect(state.closed).toBeGreaterThan(0)
   })
 })
