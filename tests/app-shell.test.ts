@@ -5122,7 +5122,15 @@ describe('AppShell', () => {
       expect(window.aiops.writeFileContent).toHaveBeenCalledWith(
         '/home/staging/release-note.md',
         'changed remote note',
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2', host: '10.24.9.20', rootPath: '/home/staging' })
+        expect.objectContaining({
+          kind: 'remote',
+          sessionId: 'folder_asset-2',
+          host: '10.24.9.20',
+          rootPath: '/home/staging',
+          expectedAction: 'edit',
+          expectedMtimeMs: 1717200000000,
+          expectedSize: '/home/staging/release-note.md'.length + 64
+        })
       )
       expect(store.fileTransferTasks.find((task) => task.name === 'save release-note.md' && task.source === '/home/staging/release-note.md')).toEqual(
         expect.objectContaining({
@@ -5512,6 +5520,47 @@ describe('AppShell', () => {
     await wrapper.find('.files-editor-toolbar .primary').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('文件服务返回数据无效')
+    expect(store.fileTransferTasks).toHaveLength(tasksBefore)
+    await wrapper.find('.files-editor-toolbar button[title="关闭"]').trigger('click')
+    expect(wrapper.find('.file-modal-card.small').text()).toContain('保存确认')
+  })
+
+  it('keeps Files editor dirty when the backend rejects a stale save', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(FilesWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    await waitForSelector(wrapper, 'tbody tr')
+
+    const fileRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await fileRow.trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.find('.files-floating-editor').exists()).toBe(true)
+
+    await wrapper.find('.files-editor-body').setValue('stale editor content')
+    vi.mocked(window.aiops.writeFileContent).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'conflict',
+      errorMessage: 'File changed on disk. Reload before saving.'
+    })
+    const tasksBefore = store.fileTransferTasks.length
+    await wrapper.find('.files-editor-toolbar .primary').trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.writeFileContent).toHaveBeenCalledWith(
+      '/release-note.md',
+      'stale editor content',
+      expect.objectContaining({
+        kind: 'local',
+        sessionId: 'local',
+        expectedAction: 'edit',
+        expectedMtimeMs: 1717200000000,
+        expectedSize: '/release-note.md'.length + 64
+      })
+    )
+    expect(wrapper.text()).toContain('File changed on disk. Reload before saving.')
     expect(store.fileTransferTasks).toHaveLength(tasksBefore)
     await wrapper.find('.files-editor-toolbar button[title="关闭"]').trigger('click')
     expect(wrapper.find('.file-modal-card.small').text()).toContain('保存确认')

@@ -656,6 +656,8 @@ const writeRemoteFileViaSftp = async (filePath: string, content: Buffer, options
   const path = normalizeRemotePath(filePath)
   try {
     return await withRemoteSftp(target, async (sftp) => {
+      const conflict = await validateRemoteFileContentVersion(sftp, path, options)
+      if (conflict) return conflict
       await ensureRemoteParentDirs(sftp, dirname(path))
       await sftpWriteFile(sftp, path, content)
       const stats = await sftpStat(sftp, path)
@@ -1495,6 +1497,60 @@ const ensureTextSize = (size: number) => {
   if (size > maxTextBytes) throw new Error('File too large')
 }
 
+const hasExpectedFileVersion = (options: FileContentOptions) =>
+  options.expectedAction === 'edit' ||
+  options.expectedAction === 'create' ||
+  typeof options.expectedMtimeMs === 'number' ||
+  typeof options.expectedSize === 'number'
+
+const fileContentConflict = (message = 'File changed on disk. Reload before saving.'): FileWriteContentResult => ({
+  ok: false,
+  errorCode: 'conflict',
+  errorMessage: message
+})
+
+const nearlySameMtime = (left: number, right: number, toleranceMs = 1) => Math.abs(left - right) <= toleranceMs
+
+const validateFileContentVersion = (
+  current: { exists: boolean; type?: FileListEntry['type']; size?: number; mtimeMs?: number },
+  options: FileContentOptions
+): FileWriteContentResult | null => {
+  if (options.overwrite || !hasExpectedFileVersion(options)) return null
+
+  if (options.expectedAction === 'create') {
+    if (current.exists) return fileContentConflict('File was created by another process. Reload before saving.')
+    return null
+  }
+
+  if (!current.exists) return fileContentConflict('File was removed on disk. Reload before saving.')
+  if (current.type && current.type !== 'file') return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
+
+  if (typeof options.expectedSize === 'number' && Number(current.size ?? 0) !== options.expectedSize) return fileContentConflict()
+  if (typeof options.expectedMtimeMs === 'number' && !nearlySameMtime(Number(current.mtimeMs ?? 0), options.expectedMtimeMs)) return fileContentConflict()
+
+  return null
+}
+
+const validateRemoteFileContentVersion = async (
+  sftp: SFTPWrapper,
+  path: string,
+  options: FileContentOptions
+): Promise<FileWriteContentResult | null> => {
+  if (options.overwrite || !hasExpectedFileVersion(options)) return null
+  const stats = await sftpStatOrNull(sftp, path)
+  return validateFileContentVersion(
+    stats
+      ? {
+          exists: true,
+          type: sftpEntryType(stats),
+          size: Number(stats.size || 0),
+          mtimeMs: Number(stats.mtime || 0) ? Number(stats.mtime) * 1000 : 0
+        }
+      : { exists: false },
+    options
+  )
+}
+
 export const readFileContent = async (filePath: string, options: FileContentOptions = {}): Promise<FileReadContentResult> => {
   if (options.kind !== 'remote') {
     const path = String(filePath || '').trim()
@@ -1526,10 +1582,26 @@ export const writeFileContent = async (filePath: string, content: string, option
   ensureTextSize(size)
   if (options.kind !== 'remote') {
     try {
+      const metadata = await stat(path).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      })
+      const conflict = validateFileContentVersion(
+        metadata
+          ? {
+              exists: true,
+              type: metadata.isFile() ? 'file' : metadata.isDirectory() ? 'directory' : 'link',
+              size: metadata.size,
+              mtimeMs: metadata.mtimeMs
+            }
+          : { exists: false },
+        options
+      )
+      if (conflict) return conflict
       await mkdir(getLocalDirname(path), { recursive: true })
       await writeFile(path, text, 'utf-8')
-      const metadata = await stat(path)
-      return { ok: true, data: { size: metadata.size, mtimeMs: metadata.mtimeMs, task: writeContentTask(path, options) } }
+      const writtenMetadata = await stat(path)
+      return { ok: true, data: { size: writtenMetadata.size, mtimeMs: writtenMetadata.mtimeMs, task: writeContentTask(path, options) } }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code === 'EACCES' || code === 'EPERM') return { ok: false, errorCode: 'permission', errorMessage: 'Permission denied' }

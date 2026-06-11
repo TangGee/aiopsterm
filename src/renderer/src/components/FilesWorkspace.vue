@@ -249,6 +249,8 @@ type FileEditorState = {
   content: string
   originContent: string
   action: 'edit' | 'create'
+  originMtimeMs: number
+  originSize: number
   language: string
   loading: boolean
   dirty: boolean
@@ -362,13 +364,17 @@ const getFileLanguage = (filePath: string) => {
   return map[ext] || 'text'
 }
 
-const fileContentOptions = (payload: { sessionId: string; host: string }): FileContentOptions => {
+const fileContentOptions = (
+  payload: { sessionId: string; host: string },
+  overrides: Pick<FileContentOptions, 'expectedAction' | 'expectedMtimeMs' | 'expectedSize' | 'overwrite'> = {}
+): FileContentOptions => {
   const session = workspace.fileSessions.find((item) => item.id === payload.sessionId)
   return {
     sessionId: payload.sessionId,
     kind: session?.kind ?? (payload.sessionId === 'local' ? 'local' : 'remote'),
     host: payload.host,
-    rootPath: session?.rootPath
+    rootPath: session?.rootPath,
+    ...overrides
   }
 }
 
@@ -396,6 +402,8 @@ const openFileEditor = async (payload: { filePath: string; sessionId: string; se
     content: '',
     originContent: '',
     action: 'edit',
+    originMtimeMs: 0,
+    originSize: 0,
     language: getFileLanguage(payload.filePath),
     loading: true,
     dirty: false,
@@ -425,6 +433,8 @@ const openFileEditor = async (payload: { filePath: string; sessionId: string; se
     editor.content = data.content
     editor.originContent = data.content
     editor.action = data.action
+    editor.originMtimeMs = data.mtimeMs
+    editor.originSize = data.size
   } catch (error) {
     editor.error = error instanceof Error ? error.message : '读取文件失败'
   } finally {
@@ -516,7 +526,15 @@ const saveFileEditor = async (key: string, needClose: boolean) => {
   editor.loading = true
   editor.error = ''
   try {
-    const result = await window.aiops.writeFileContent(editor.filePath, editor.content, fileContentOptions(editor))
+    const result = await window.aiops.writeFileContent(
+      editor.filePath,
+      editor.content,
+      fileContentOptions(editor, {
+        expectedAction: editor.action,
+        expectedMtimeMs: editor.originMtimeMs,
+        expectedSize: editor.originSize
+      })
+    )
     if (!result.ok) {
       editor.error = result.errorMessage || '保存文件失败'
       return
@@ -529,6 +547,8 @@ const saveFileEditor = async (key: string, needClose: boolean) => {
     pushBackendTransferTask(data.task, '保存文件失败')
     editor.originContent = editor.content
     editor.action = 'edit'
+    editor.originMtimeMs = data.mtimeMs
+    editor.originSize = data.size
     editor.dirty = false
     editor.saved = true
   } catch (error) {

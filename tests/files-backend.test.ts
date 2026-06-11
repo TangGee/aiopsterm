@@ -798,6 +798,58 @@ describe('files backend content boundary', () => {
     )
   })
 
+  it('rejects stale remote editor saves before overwriting SFTP content', async () => {
+    const sessionId = saveSftpAsset()
+    const read = await readFileContent('/srv/note.txt', { kind: 'remote', sessionId, host: 'ui-host' })
+    expect(read.ok).toBe(true)
+    const openedVersion = read.data!
+
+    ssh2Mock.nodes.set('/srv/note.txt', {
+      type: 'file',
+      content: Buffer.from('remote note changed elsewhere\n', 'utf-8'),
+      mode: 0o100644,
+      mtime: 1_717_200_250
+    })
+    ssh2Mock.calls.length = 0
+
+    const staleSave = await writeFileContent('/srv/note.txt', 'editor stale write\n', {
+      kind: 'remote',
+      sessionId,
+      host: 'ui-host',
+      expectedAction: openedVersion.action,
+      expectedMtimeMs: openedVersion.mtimeMs,
+      expectedSize: openedVersion.size
+    })
+
+    expect(staleSave).toMatchObject({
+      ok: false,
+      errorCode: 'conflict',
+      errorMessage: 'File changed on disk. Reload before saving.'
+    })
+    expect(ssh2Mock.calls).toEqual(expect.arrayContaining([{ method: 'stat', path: '/srv/note.txt' }]))
+    expect(ssh2Mock.calls.some((call) => call.method === 'writeFile')).toBe(false)
+    expect(ssh2Mock.nodes.get('/srv/note.txt')?.content?.toString('utf-8')).toBe('remote note changed elsewhere\n')
+  })
+
+  it('allows remote editor saves when the opened SFTP file version still matches', async () => {
+    const sessionId = saveSftpAsset()
+    const read = await readFileContent('/srv/note.txt', { kind: 'remote', sessionId, host: 'ui-host' })
+    expect(read.ok).toBe(true)
+    const openedVersion = read.data!
+
+    const saved = await writeFileContent('/srv/note.txt', 'fresh editor write\n', {
+      kind: 'remote',
+      sessionId,
+      host: 'ui-host',
+      expectedAction: openedVersion.action,
+      expectedMtimeMs: openedVersion.mtimeMs,
+      expectedSize: openedVersion.size
+    })
+
+    expect(saved.ok).toBe(true)
+    expect(ssh2Mock.nodes.get('/srv/note.txt')?.content?.toString('utf-8')).toBe('fresh editor write\n')
+  })
+
   it('reuses pooled SFTP connections across sequential operations for the same asset', async () => {
     configureFilesBackendRuntime({ sftpPoolIdleTtlMs: 60_000 })
     resetFileSessionCatalog()
@@ -1485,6 +1537,63 @@ describe('files backend content boundary', () => {
       const reread = await readFileContent(filePath, { kind: 'local', sessionId: 'local', host: 'localhost' })
       expect(reread.ok).toBe(true)
       expect(reread.data).toMatchObject({ action: 'edit', content: 'local backend content\n' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects local editor saves when the opened file version is stale', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-files-conflict-'))
+    const filePath = join(dir, 'note.txt')
+    try {
+      await writeFile(filePath, 'opened local content\n', 'utf-8')
+      const opened = await readFileContent(filePath, { kind: 'local', sessionId: 'local', host: 'localhost' })
+      expect(opened.ok).toBe(true)
+
+      await writeFile(filePath, 'changed by another editor\n', 'utf-8')
+      const staleSave = await writeFileContent(filePath, 'stale overwrite attempt\n', {
+        kind: 'local',
+        sessionId: 'local',
+        host: 'localhost',
+        expectedAction: opened.data!.action,
+        expectedMtimeMs: opened.data!.mtimeMs,
+        expectedSize: opened.data!.size
+      })
+
+      expect(staleSave).toMatchObject({
+        ok: false,
+        errorCode: 'conflict',
+        errorMessage: 'File changed on disk. Reload before saving.'
+      })
+      await expect(readFile(filePath, 'utf-8')).resolves.toBe('changed by another editor\n')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects local create saves when another process creates the file first', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-files-create-conflict-'))
+    const filePath = join(dir, 'new-note.txt')
+    try {
+      const opened = await readFileContent(filePath, { kind: 'local', sessionId: 'local', host: 'localhost' })
+      expect(opened).toMatchObject({ ok: true, data: { action: 'create', content: '' } })
+
+      await writeFile(filePath, 'created externally\n', 'utf-8')
+      const createSave = await writeFileContent(filePath, 'editor create attempt\n', {
+        kind: 'local',
+        sessionId: 'local',
+        host: 'localhost',
+        expectedAction: opened.data!.action,
+        expectedMtimeMs: opened.data!.mtimeMs,
+        expectedSize: opened.data!.size
+      })
+
+      expect(createSave).toMatchObject({
+        ok: false,
+        errorCode: 'conflict',
+        errorMessage: 'File was created by another process. Reload before saving.'
+      })
+      await expect(readFile(filePath, 'utf-8')).resolves.toBe('created externally\n')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

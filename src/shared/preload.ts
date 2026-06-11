@@ -1697,7 +1697,12 @@ export type FileListOptions = {
   rootPath?: string
 }
 
-export type FileContentOptions = FileListOptions
+export type FileContentOptions = FileListOptions & {
+  expectedAction?: 'edit' | 'create'
+  expectedMtimeMs?: number
+  expectedSize?: number
+  overwrite?: boolean
+}
 
 export type FileReadContentResult = AiopsMutationResult<{
   content: string
