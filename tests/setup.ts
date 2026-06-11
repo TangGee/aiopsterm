@@ -6186,14 +6186,19 @@ Object.defineProperty(window, 'aiops', {
         try {
           const asset = findTunnelAssetMock(input.assetId)
           if (!asset) return { ok: false, errorCode: 'SSH_TUNNEL_ASSET_NOT_FOUND', errorMessage: '隧道主机不存在' }
+          const type = normalizeSshTunnelTypeMock(input.type)
           const tunnel: TestSshTunnelRecord = {
             assetId: asset.id,
             tunnelId: String(input.tunnelId || `tunnel-${asset.id}`),
-            type: normalizeSshTunnelTypeMock(input.type),
+            type,
             state: 'active',
             ...(Number.isFinite(input.localPort) ? { localPort: Number(input.localPort) } : {}),
-            remoteHost: String(input.remoteHost || asset.host || asset.ip).trim(),
-            remotePort: Number.isFinite(input.remotePort) ? Number(input.remotePort) : asset.port,
+            ...(type === 'dynamic_socks'
+              ? {}
+              : {
+                  remoteHost: String(input.remoteHost || asset.host || asset.ip).trim(),
+                  remotePort: Number.isFinite(input.remotePort) ? Number(input.remotePort) : asset.port
+                }),
             startedAt: new Date(1717200000000).toISOString()
           }
           sshTunnelStoreMock.set(tunnel.tunnelId, tunnel)

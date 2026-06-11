@@ -570,6 +570,8 @@ describe('ssh tunnel backend boundary', () => {
       state: 'active',
       localPort: 1081
     })
+    expect(started.data?.tunnel).not.toHaveProperty('remoteHost')
+    expect(started.data?.tunnel).not.toHaveProperty('remotePort')
     expect(netRuntime.servers).toHaveLength(1)
 
     const socket = netRuntime.createSocket({ remoteAddress: '127.0.0.1', remotePort: 60000 })

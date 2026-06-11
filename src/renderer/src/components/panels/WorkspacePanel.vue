@@ -187,7 +187,7 @@
         @click="toggleTunnel"
       >
         <Network />
-        隧道
+        {{ contextAsset.tunnelState === 'active' ? '停止隧道' : '隧道' }}
       </button>
       <button
         v-if="canConnectContextAsset"
@@ -561,6 +561,93 @@
     </div>
 
     <div
+      v-if="tunnelModal.visible && tunnelAsset"
+      class="files-folder-modal-backdrop"
+      @click.self="closeTunnelModal"
+    >
+      <section class="files-folder-modal workspace-tunnel-modal">
+        <header>
+          <h3>隧道 · {{ tunnelAsset.name }}</h3>
+          <button
+            type="button"
+            @click="closeTunnelModal"
+          >
+            <X />
+          </button>
+        </header>
+        <form
+          class="workspace-tunnel-form files-folder-form"
+          @submit.prevent="startTunnelFromModal"
+        >
+          <div class="workspace-tunnel-type-grid">
+            <label
+              v-for="option in tunnelTypeOptions"
+              :key="option.value"
+              class="workspace-tunnel-type-card"
+              :class="{ selected: tunnelForm.type === option.value }"
+            >
+              <input
+                v-model="tunnelForm.type"
+                type="radio"
+                name="workspace-tunnel-type"
+                :value="option.value"
+              />
+              <span>{{ option.label }}</span>
+              <small>{{ option.description }}</small>
+            </label>
+          </div>
+          <label>
+            <span>{{ tunnelForm.type === 'remote_forward' ? '本地服务端口 *' : '本地监听端口 *' }}</span>
+            <input
+              v-model="tunnelForm.localPort"
+              data-testid="workspace-tunnel-local-port"
+              inputmode="numeric"
+              placeholder="3306"
+            />
+          </label>
+          <label v-if="tunnelForm.type !== 'dynamic_socks'">
+            <span>远端主机</span>
+            <input
+              v-model="tunnelForm.remoteHost"
+              data-testid="workspace-tunnel-remote-host"
+              placeholder="localhost"
+            />
+          </label>
+          <label v-if="tunnelForm.type !== 'dynamic_socks'">
+            <span>{{ tunnelForm.type === 'remote_forward' ? '远端监听端口 *' : '远端服务端口 *' }}</span>
+            <input
+              v-model="tunnelForm.remotePort"
+              data-testid="workspace-tunnel-remote-port"
+              inputmode="numeric"
+              placeholder="3306"
+            />
+          </label>
+          <p
+            v-if="tunnelFormError"
+            class="files-folder-error"
+          >
+            {{ tunnelFormError }}
+          </p>
+          <footer>
+            <button
+              type="button"
+              @click="closeTunnelModal"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="primary"
+              :disabled="tunnelSubmitting"
+            >
+              {{ tunnelSubmitting ? '启动中' : '启动隧道' }}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div
       v-if="deleteAssetModal.visible && deleteAssetInfo"
       class="files-folder-modal-backdrop"
       @click.self="closeDeleteAssetModal"
@@ -704,7 +791,8 @@ import type {
   AiopsAssetType,
   AiopsCustomFolderRecord,
   AiopsCustomFolderSaveInput,
-  AiopsSshTunnelMutationResult
+  AiopsSshTunnelMutationResult,
+  AiopsSshTunnelType
 } from '@shared/preload'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
@@ -722,6 +810,7 @@ type WorkspaceTabKey = 'direct' | 'bastion'
 type HostModalMode = 'create' | 'edit' | 'clone'
 type FolderModalMode = 'create' | 'edit-custom' | 'edit-direct'
 type WorkspaceAssetType = AiopsAssetType
+type WorkspaceTunnelType = AiopsSshTunnelType
 
 const workspaceTabs: Array<{ key: WorkspaceTabKey; label: string }> = [
   { key: 'direct', label: '直接连接' },
@@ -790,6 +879,15 @@ const hostTestMessage = ref('')
 const hostTestOk = ref(false)
 const deleteAssetModal = reactive({ visible: false, assetId: '' })
 const managementModal = reactive({ visible: false, organizationId: '', query: '' })
+const tunnelModal = reactive({ visible: false, assetId: '' })
+const tunnelForm = reactive({
+  type: 'local_forward' as WorkspaceTunnelType,
+  localPort: '3306',
+  remoteHost: 'localhost',
+  remotePort: '3306'
+})
+const tunnelFormError = ref('')
+const tunnelSubmitting = ref(false)
 
 const localShellAssets = computed(() => workspaceAssets.value.filter((asset) => asset.isLocalShell))
 const directAssets = computed(() => workspaceAssets.value.filter((asset) => !asset.isLocalShell && (asset.asset_type === 'person' || asset.asset_type === 'switch')))
@@ -905,11 +1003,29 @@ const canMoveContextAsset = computed(
 )
 const canRemoveContextAssetFromFolder = computed(() => activeWorkspace.value === 'bastion' && !!contextAsset.value?.folderUuid && !contextAsset.value.isLocalShell)
 const canConnectContextAsset = computed(() => !!contextAsset.value && contextAsset.value.asset_type !== 'organization')
+const tunnelAsset = computed(() => findEditableAsset(tunnelModal.assetId))
 const hostModalTitle = computed(() => {
   if (hostModal.mode === 'edit') return '编辑主机'
   if (hostModal.mode === 'clone') return '克隆主机'
   return '新建主机'
 })
+const tunnelTypeOptions: Array<{ value: WorkspaceTunnelType; label: string; description: string }> = [
+  {
+    value: 'local_forward',
+    label: '访问远端服务',
+    description: '把远端服务映射成本机端口'
+  },
+  {
+    value: 'remote_forward',
+    label: '暴露本地服务',
+    description: '把本地端口暴露到远端主机'
+  },
+  {
+    value: 'dynamic_socks',
+    label: '动态 SOCKS',
+    description: '在本机启动 SOCKS5 代理'
+  }
+]
 const deleteAssetInfo = computed(() => workspaceAssets.value.find((asset) => asset.id === deleteAssetModal.assetId) || null)
 const deleteGroupInfo = computed(() => {
   const group = sourceGroups.value.find((item) => item.key === deleteGroupModal.groupKey)
@@ -1177,6 +1293,21 @@ const closeHostModal = () => {
   resetHostConnectionTest()
 }
 
+const resetTunnelForm = (type: WorkspaceTunnelType = 'local_forward') => {
+  tunnelForm.type = type
+  tunnelForm.localPort = type === 'dynamic_socks' ? '1080' : '3306'
+  tunnelForm.remoteHost = 'localhost'
+  tunnelForm.remotePort = type === 'dynamic_socks' ? '' : '3306'
+  tunnelFormError.value = ''
+  tunnelSubmitting.value = false
+}
+
+const closeTunnelModal = () => {
+  tunnelModal.visible = false
+  tunnelModal.assetId = ''
+  resetTunnelForm()
+}
+
 const closeDeleteAssetModal = () => {
   deleteAssetModal.visible = false
   deleteAssetModal.assetId = ''
@@ -1411,6 +1542,21 @@ const applyTunnelResult = (result: AiopsSshTunnelMutationResult, fallbackMessage
   notice.value = result.data.message || fallbackMessage
 }
 
+const parseTunnelPort = (value: string, label: string) => {
+  const port = Number(value.trim())
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    tunnelFormError.value = `${label}必须是 1-65535 的整数`
+    return null
+  }
+  return port
+}
+
+const openTunnelModal = (asset: WorkspaceAsset) => {
+  tunnelModal.visible = true
+  tunnelModal.assetId = asset.id
+  resetTunnelForm('local_forward')
+}
+
 const toggleTunnel = async () => {
   const asset = findEditableAsset(contextMenuAssetId.value || '')
   closeContextMenu()
@@ -1425,14 +1571,48 @@ const toggleTunnel = async () => {
       applyTunnelResult(await stopTunnel({ assetId: asset.id }), '隧道停止失败')
       return
     }
-    const startTunnel = window.aiops?.startSshTunnel
-    if (typeof startTunnel !== 'function') {
-      notice.value = '隧道运行时服务不可用'
-      return
-    }
-    applyTunnelResult(await startTunnel({ assetId: asset.id }), '隧道连接失败')
+    openTunnelModal(asset)
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '隧道运行失败'
+  }
+}
+
+const startTunnelFromModal = async () => {
+  const asset = tunnelAsset.value
+  if (!asset) {
+    tunnelFormError.value = '隧道主机不存在'
+    return
+  }
+  const startTunnel = window.aiops?.startSshTunnel
+  if (typeof startTunnel !== 'function') {
+    tunnelFormError.value = '隧道运行时服务不可用'
+    return
+  }
+  const localPort = parseTunnelPort(tunnelForm.localPort, tunnelForm.type === 'remote_forward' ? '本地服务端口' : '本地监听端口')
+  if (localPort === null) return
+  const remotePort =
+    tunnelForm.type === 'dynamic_socks'
+      ? undefined
+      : parseTunnelPort(tunnelForm.remotePort, tunnelForm.type === 'remote_forward' ? '远端监听端口' : '远端服务端口')
+  if (remotePort === null) return
+  const remoteHost = tunnelForm.remoteHost.trim() || 'localhost'
+  tunnelSubmitting.value = true
+  tunnelFormError.value = ''
+  try {
+    applyTunnelResult(
+      await startTunnel({
+        assetId: asset.id,
+        type: tunnelForm.type,
+        localPort,
+        ...(tunnelForm.type === 'dynamic_socks' ? {} : { remoteHost, remotePort })
+      }),
+      '隧道连接失败'
+    )
+    closeTunnelModal()
+  } catch (error) {
+    tunnelFormError.value = error instanceof Error ? error.message : '隧道连接失败'
+  } finally {
+    tunnelSubmitting.value = false
   }
 }
 
@@ -1774,10 +1954,22 @@ watch(activeWorkspace, () => {
   closeFolderModal()
   closeDeleteGroupModal()
   closeHostModal()
+  closeTunnelModal()
   closeDeleteAssetModal()
   closeManagementModal()
   cancelComment()
   searchValue.value = ''
   selectedAssetId.value = null
 })
+
+watch(
+  () => tunnelForm.type,
+  (type, previousType) => {
+    if (!tunnelModal.visible || type === previousType) return
+    tunnelForm.localPort = type === 'dynamic_socks' ? '1080' : '3306'
+    tunnelForm.remoteHost = 'localhost'
+    tunnelForm.remotePort = type === 'dynamic_socks' ? '' : '3306'
+    tunnelFormError.value = ''
+  }
+)
 </script>

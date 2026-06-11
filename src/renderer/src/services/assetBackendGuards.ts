@@ -208,6 +208,7 @@ const isAiopsSshTunnelRecord = (value: unknown): value is AiopsSshTunnelRecord =
   if (!isNonEmptyString(value.assetId) || !isNonEmptyString(value.tunnelId)) return false
   if (!sshTunnelTypes.has(String(value.type)) || !sshTunnelStates.has(String(value.state))) return false
   if (value.localPort !== undefined && !isPort(value.localPort)) return false
+  if (value.type === 'dynamic_socks' && (value.remoteHost !== undefined || value.remotePort !== undefined)) return false
   if (value.remoteHost !== undefined && !isNonEmptyString(value.remoteHost)) return false
   if (value.remotePort !== undefined && !isPort(value.remotePort)) return false
   if (!isOptionalString(value.startedAt) || !isOptionalString(value.stoppedAt)) return false

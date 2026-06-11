@@ -1131,6 +1131,10 @@ em {
   max-height: min(640px, calc(100vh - 48px));
 }
 
+.workspace-tunnel-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
 .workspace-host-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   overflow: auto;
@@ -1150,6 +1154,53 @@ em {
 
 .workspace-host-form-wide {
   grid-column: 1 / -1;
+}
+
+.workspace-tunnel-form {
+  overflow: auto;
+}
+
+.workspace-tunnel-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-tunnel-type-card {
+  min-height: 82px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  padding: 9px;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.workspace-tunnel-type-card input,
+.files-folder-form .workspace-tunnel-type-card input {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+}
+
+.workspace-tunnel-type-card span {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.workspace-tunnel-type-card small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.workspace-tunnel-type-card.selected {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
 }
 
 .workspace-management-modal {
@@ -1241,7 +1292,8 @@ em {
 }
 
 @media (max-width: 560px) {
-  .workspace-host-form {
+  .workspace-host-form,
+  .workspace-tunnel-type-grid {
     grid-template-columns: 1fr;
   }
 }

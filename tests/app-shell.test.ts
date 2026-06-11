@@ -1664,8 +1664,23 @@ describe('AppShell', () => {
     await hostRow('staging-api').trigger('contextmenu')
     await contextButton('隧道').trigger('click')
     await flushPromises()
-    expect(window.aiops.startSshTunnel).toHaveBeenCalledWith({ assetId: 'asset-2' })
+    expect(window.aiops.startSshTunnel).not.toHaveBeenCalled()
+    expect(wrapper.find('.workspace-tunnel-modal').exists()).toBe(true)
+    expect(wrapper.find('.workspace-tunnel-modal').text()).toContain('访问远端服务')
+    await wrapper.find('[data-testid="workspace-tunnel-local-port"]').setValue('15432')
+    await wrapper.find('[data-testid="workspace-tunnel-remote-host"]').setValue('127.0.0.1')
+    await wrapper.find('[data-testid="workspace-tunnel-remote-port"]').setValue('5432')
+    await wrapper.find('.workspace-tunnel-form').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.startSshTunnel).toHaveBeenCalledWith({
+      assetId: 'asset-2',
+      type: 'local_forward',
+      localPort: 15432,
+      remoteHost: '127.0.0.1',
+      remotePort: 5432
+    })
     expect(wrapper.text()).toContain('隧道已连接 staging-api')
+    expect(wrapper.find('.workspace-tunnel-modal').exists()).toBe(false)
     expect(hostRow('staging-api').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
 
     await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
@@ -1687,6 +1702,58 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.find('.workspace-comment-edit').exists()).toBe(false)
     expect(wrapper.text()).toContain('(后端备注)')
+  })
+
+  it('starts Workspace SSH tunnels with External reference-style typed parameters from the modal', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    const hostRow = (name: string) => {
+      const row = wrapper.findAll('.workspace-host-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace host row not found: ${name}`)
+      return row
+    }
+    const contextButton = (label: string) => {
+      const button = wrapper.find('.workspace-node-menu').findAll('button').find((item) => item.text().includes(label))
+      if (!button) throw new Error(`Workspace context button not found: ${label}`)
+      return button
+    }
+
+    vi.mocked(window.aiops.startSshTunnel).mockClear()
+    await hostRow('prod-bastion').trigger('contextmenu')
+    await contextButton('隧道').trigger('click')
+    await flushPromises()
+    expect(window.aiops.startSshTunnel).not.toHaveBeenCalled()
+    expect(wrapper.find('.workspace-tunnel-modal').text()).toContain('动态 SOCKS')
+
+    await wrapper.find('[data-testid="workspace-tunnel-local-port"]').setValue('0')
+    await wrapper.find('.workspace-tunnel-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('本地监听端口必须是 1-65535 的整数')
+    expect(window.aiops.startSshTunnel).not.toHaveBeenCalled()
+    expect(hostRow('prod-bastion').find('.tunnel-icon').exists()).toBe(false)
+
+    const socksOption = wrapper.findAll('.workspace-tunnel-type-card').find((option) => option.text().includes('动态 SOCKS'))
+    if (!socksOption) throw new Error('SOCKS tunnel option not found')
+    await socksOption.find('input').setValue(true)
+    await flushPromises()
+    expect((wrapper.find('[data-testid="workspace-tunnel-local-port"]').element as HTMLInputElement).value).toBe('1080')
+    expect(wrapper.find('[data-testid="workspace-tunnel-remote-port"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="workspace-tunnel-local-port"]').setValue('11080')
+    await wrapper.find('.workspace-tunnel-form').trigger('submit')
+    await flushPromises()
+
+    expect(window.aiops.startSshTunnel).toHaveBeenCalledWith({
+      assetId: 'asset-1',
+      type: 'dynamic_socks',
+      localPort: 11080
+    })
+    expect(wrapper.text()).toContain('隧道已连接 prod-bastion')
+    expect(hostRow('prod-bastion').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
   })
 
   it('fails closed on malformed successful Workspace asset result envelopes', async () => {
