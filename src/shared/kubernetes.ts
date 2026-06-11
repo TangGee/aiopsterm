@@ -60,8 +60,7 @@ const defaultKubernetesStateDir = () => {
   return envRoot ? (isAbsolute(envRoot) ? envRoot : resolve(envRoot)) : join(process.cwd(), '.aiopsterm-kubernetes')
 }
 
-const defaultKubernetesSeedMode = () =>
-  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED || '').trim() === '1'
+const defaultKubernetesSeedMode = () => String(process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED || '').trim() === '1'
 
 let runtimeConfig: Required<KubernetesBackendRuntimeConfig> = {
   stateDir: defaultKubernetesStateDir(),

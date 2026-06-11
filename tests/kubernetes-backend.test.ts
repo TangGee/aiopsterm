@@ -28,11 +28,13 @@ import { tmpdir } from 'os'
 describe('kubernetes backend boundary', () => {
   const tempDirs: string[] = []
   const originalKubectlPath = process.env.AIOPSTERM_KUBECTL_PATH
+  const originalKubernetesSeedEnv = process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED
 
   beforeEach(async () => {
+    delete process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED
     const stateDir = await mkdtemp(join(tmpdir(), 'aiopsterm-k8s-state-'))
     tempDirs.push(stateDir)
-    configureKubernetesBackendRuntime({ stateDir, defaultKubeconfigPath: null })
+    configureKubernetesBackendRuntime({ stateDir, useSeedData: true, defaultKubeconfigPath: null })
     __resetKubernetesCatalogForTests()
     setKubernetesTerminalEventSink(null)
   })
@@ -40,6 +42,8 @@ describe('kubernetes backend boundary', () => {
   afterEach(async () => {
     if (originalKubectlPath === undefined) delete process.env.AIOPSTERM_KUBECTL_PATH
     else process.env.AIOPSTERM_KUBECTL_PATH = originalKubectlPath
+    if (originalKubernetesSeedEnv === undefined) delete process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED
+    else process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED = originalKubernetesSeedEnv
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
@@ -67,6 +71,32 @@ describe('kubernetes backend boundary', () => {
     '    cluster: qa-cluster',
     '    namespace: qa'
   ].join('\n')
+
+  it('does not infer Kubernetes seed mode from NODE_ENV test', async () => {
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], defaultKubeconfigPath: null })
+    __resetKubernetesCatalogForTests()
+
+    const catalog = await listKubernetesCatalog()
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.clusters).toEqual([])
+    expect(catalog.data?.contexts).toEqual([])
+    expect(catalog.data?.bastions).toEqual([])
+  })
+
+  it('loads Kubernetes development seeds only when the seed environment switch is enabled', async () => {
+    process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED = '1'
+    configureKubernetesBackendRuntime({ stateDir: tempDirs[0], defaultKubeconfigPath: null })
+    __resetKubernetesCatalogForTests()
+
+    const catalog = await listKubernetesCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.clusters.map((cluster) => cluster.id)).toEqual(expect.arrayContaining(['k8s-1', 'k8s-2']))
+    expect(catalog.data?.contexts.map((context) => context.name)).toEqual(expect.arrayContaining(['prod/admin', 'staging/devops']))
+    expect(catalog.data?.bastions.map((bastion) => bastion.uuid)).toEqual(expect.arrayContaining(['org-1']))
+  })
 
   it('creates backend-owned terminal session records before renderer output handling', async () => {
     const created = await createKubernetesTerminal({

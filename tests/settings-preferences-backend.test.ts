@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { storeState } = vi.hoisted(() => ({
   storeState: new Map<string, Record<string, unknown>>()
@@ -51,12 +51,27 @@ const loadBackend = async () => {
   return import(modulePath)
 }
 
+const originalSettingsPreferencesSeedEnv = process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED
+
+const restoreSettingsPreferencesSeedEnv = () => {
+  if (originalSettingsPreferencesSeedEnv === undefined) {
+    delete process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED
+  } else {
+    process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED = originalSettingsPreferencesSeedEnv
+  }
+}
+
 describe('settings preferences backend boundary', () => {
   beforeEach(() => {
     storeState.clear()
+    delete process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED
   })
 
-  it('loads backend-owned default rules and shortcut rows', async () => {
+  afterEach(() => {
+    restoreSettingsPreferencesSeedEnv()
+  })
+
+  it('loads backend-owned default shortcuts without development seed rules', async () => {
     const backend = await loadBackend()
     const result = backend.getSettingsPreferences()
 
@@ -68,7 +83,29 @@ describe('settings preferences backend boundary', () => {
       { id: 'switchToSpecificTab', action: '切换到指定标签', shortcut: 'Alt', suffix: '1-9' },
       { id: 'quickCommand', action: '打开快捷命令', shortcut: 'Ctrl+Shift+P' }
     ])
-    expect(result.data.rules).toEqual([
+    expect(result.data.rules).toEqual([])
+  })
+
+  it('does not infer settings preference seed rules from NODE_ENV test', async () => {
+    const backend = await loadBackend()
+    backend.configureSettingsPreferencesBackendRuntime()
+
+    const result = backend.getSettingsPreferences()
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(result.ok).toBe(true)
+    expect(result.data?.rules).toEqual([])
+  })
+
+  it('loads settings preference seed rules only when the seed environment switch is enabled', async () => {
+    process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED = '1'
+    const backend = await loadBackend()
+    backend.configureSettingsPreferencesBackendRuntime()
+
+    const result = backend.getSettingsPreferences()
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.rules).toEqual([
       { id: 'rule-1', content: '执行生产变更前必须先给出只读检查命令和回滚点。', enabled: true },
       { id: 'rule-2', content: '不要自动执行删除、重启、扩容、写文件或修改配置类命令。', enabled: true }
     ])

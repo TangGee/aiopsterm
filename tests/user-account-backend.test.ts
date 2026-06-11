@@ -26,6 +26,8 @@ type UserBackend = {
 
 let backend: UserBackend
 const tempDirs: string[] = []
+const originalUserAccountSeedEnv = process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED
+const originalUserAccountCodeBackendDoubleEnv = process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/userAccount'
@@ -33,6 +35,16 @@ beforeAll(async () => {
 })
 
 afterEach(async () => {
+  if (originalUserAccountSeedEnv === undefined) {
+    delete process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED
+  } else {
+    process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED = originalUserAccountSeedEnv
+  }
+  if (originalUserAccountCodeBackendDoubleEnv === undefined) {
+    delete process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE
+  } else {
+    process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE = originalUserAccountCodeBackendDoubleEnv
+  }
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
@@ -44,6 +56,8 @@ const expectOkData = <T extends { ok: boolean; data?: unknown }>(result: T) => {
 
 describe('user account backend boundary', () => {
   beforeEach(async () => {
+    delete process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED
+    process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE = '1'
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-'))
     tempDirs.push(dir)
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: true })
@@ -447,6 +461,64 @@ describe('user account backend boundary', () => {
     expect(data.trustedDevices).toHaveLength(1)
     expect(data.trustedDevices[0]).toMatchObject({ id: 1, current: true })
     expect(data.trustedDevices.some((device: { deviceName: string }) => device.deviceName === 'MacBook')).toBe(false)
+  })
+
+  it('does not infer user account seed mode from NODE_ENV test', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-default-nonseed-'))
+    tempDirs.push(dir)
+    backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json') })
+    backend.resetUserAccountForTests()
+
+    const data = expectOkData(backend.getUserAccount())
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(data.profile).toMatchObject({
+      uid: 0,
+      subscription: 'free',
+      skippedLogin: true,
+      localDatabaseReady: false,
+      lastLoginMethod: 'skip'
+    })
+    expect(data.trustedDevices).toHaveLength(1)
+    expect(data.trustedDevices.some((device: { deviceName: string }) => device.deviceName === 'MacBook')).toBe(false)
+  })
+
+  it('loads user account development seeds only when the seed environment switch is enabled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-env-seed-'))
+    tempDirs.push(dir)
+    process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED = '1'
+    backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json') })
+    backend.resetUserAccountForTests()
+
+    const data = expectOkData(backend.getUserAccount())
+
+    expect(data.profile).toMatchObject({
+      name: 'Local Operator',
+      username: 'local_ops',
+      subscription: 'pro',
+      localDatabaseReady: true
+    })
+    expect(data.trustedDevices.map((device: { deviceName: string }) => device.deviceName)).toEqual(['Linux Workstation', 'MacBook'])
+  })
+
+  it('keeps issued verification debug codes behind explicit seed or code-double mode', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-code-double-'))
+    tempDirs.push(dir)
+    delete process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE
+    backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: false })
+    backend.resetUserAccountForTests()
+
+    expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(backend.peekUserCodeForTests('login', 'email', 'login@example.local')).toBe('')
+
+    process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE = '1'
+    backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account-double.json'), useSeedData: false })
+    backend.resetUserAccountForTests()
+    expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
+
+    expect(backend.peekUserCodeForTests('login', 'email', 'login@example.local')).toBe('246810')
   })
 
   it('strips unmodified legacy seed profile and trusted devices in non-seed runtime state', async () => {

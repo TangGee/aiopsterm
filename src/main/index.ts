@@ -9,6 +9,7 @@ import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFi
 import Store from 'electron-store'
 import AdmZip from 'adm-zip'
 import {
+  configureAssetBackendRuntime,
   configureAssetConnectionRuntime,
   confirmAssetImport,
   deleteAsset,
@@ -162,6 +163,7 @@ import {
   saveQuickCommands
 } from './backend/quickCommands'
 import {
+  configureSettingsPreferencesBackendRuntime,
   deleteSettingsRule,
   getSettingsPreferences,
   resetSettingsShortcuts,
@@ -1327,7 +1329,13 @@ configureDatabaseBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'database-workspace.json')
 })
 configureVoiceBackendRuntime({ getConfig })
-configureFilesBackendRuntime({ getConfig })
+configureAssetBackendRuntime({
+  useSeedData: process.env.AIOPSTERM_ASSETS_ENABLE_SEED === '1'
+})
+configureFilesBackendRuntime({
+  getConfig,
+  useSeedData: process.env.AIOPSTERM_FILES_ENABLE_SEED === '1'
+})
 configurePrivacyRuntime({
   dataSyncStateFilePath: join(app.getPath('userData'), 'data-sync-runtime.json'),
   useDataSyncBackendDouble: process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE === '1'
@@ -1344,14 +1352,23 @@ configureExtensionBackendRuntime({
   extensionRootDir: join(app.getPath('userData'), 'extensions'),
   fetch: (url, init) => net.fetch(url, init)
 })
-configureKubernetesBackendRuntime({ stateDir: join(app.getPath('userData'), 'kubernetes') })
+configureKubernetesBackendRuntime({
+  stateDir: join(app.getPath('userData'), 'kubernetes'),
+  useSeedData: process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED === '1'
+})
 setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => {
   const channel = 'data' in event ? 'kubernetes:terminal:data' : 'kubernetes:terminal:exit'
   BrowserWindow.getAllWindows().forEach((window) => {
     window.webContents.send(channel, event)
   })
 })
-configureUserAccountBackendRuntime({ stateFilePath: join(app.getPath('userData'), 'user-account.json') })
+configureUserAccountBackendRuntime({
+  stateFilePath: join(app.getPath('userData'), 'user-account.json'),
+  useSeedData: process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED === '1'
+})
+configureSettingsPreferencesBackendRuntime({
+  useSeedData: process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED === '1'
+})
 configureAiTodoBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'ai-todos.json'),
   useSeedData: process.env.AIOPSTERM_AI_TODO_ENABLE_SEED === '1'

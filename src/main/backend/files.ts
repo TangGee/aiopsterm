@@ -80,7 +80,7 @@ type FilesBackendRuntimeConfig = {
   sftpPoolIdleTtlMs?: number
 }
 
-const defaultFileSessionSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_FILES_ENABLE_SEED || '').trim() === '1'
+const defaultFileSessionSeedMode = () => String(process.env.AIOPSTERM_FILES_ENABLE_SEED || '').trim() === '1'
 
 const defaultFileSessionDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_FILES_DB_PATH || '').trim()

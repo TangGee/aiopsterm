@@ -165,7 +165,7 @@ const defaultKeychainSecrets: Record<string, AssetSecret> = {
   }
 }
 
-const defaultAssetSeedMode = () => process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_ASSETS_ENABLE_SEED || '').trim() === '1'
+const defaultAssetSeedMode = () => String(process.env.AIOPSTERM_ASSETS_ENABLE_SEED || '').trim() === '1'
 
 const defaultAssetDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_ASSETS_DB_PATH || '').trim()

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -38,13 +38,25 @@ vi.mock('better-sqlite3', () => {
   throw new Error('force electron-store asset backend in tests')
 })
 
-const loadBackend = async () => {
+const originalAssetsSeedEnv = process.env.AIOPSTERM_ASSETS_ENABLE_SEED
+
+const restoreAssetsSeedEnv = () => {
+  if (originalAssetsSeedEnv === undefined) {
+    delete process.env.AIOPSTERM_ASSETS_ENABLE_SEED
+  } else {
+    process.env.AIOPSTERM_ASSETS_ENABLE_SEED = originalAssetsSeedEnv
+  }
+}
+
+const loadBackend = async (options: { useDefaultRuntime?: boolean } = {}) => {
   vi.resetModules()
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
   storeModule.__resetMockStores?.()
   const modulePath = '../src/main/backend/assets'
   const backend = await import(modulePath)
-  backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+  if (!options.useDefaultRuntime) {
+    backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+  }
   return backend
 }
 
@@ -95,6 +107,11 @@ const createSshRuntime = (options: { fail?: Error } = {}) => {
 describe('assets backend boundary', () => {
   beforeEach(() => {
     vi.resetModules()
+    delete process.env.AIOPSTERM_ASSETS_ENABLE_SEED
+  })
+
+  afterEach(() => {
+    restoreAssetsSeedEnv()
   })
 
   it('starts non-seed asset runtime with only the backend-owned local shell asset', async () => {
@@ -108,6 +125,35 @@ describe('assets backend boundary', () => {
     expect(snapshot.assets.some((asset: { id: string }) => ['asset-1', 'asset-2', 'asset-3', 'asset-4', 'asset-5'].includes(asset.id))).toBe(false)
     expect(snapshot.folders).toEqual([])
     expect(backend.listSshAgentKeychainOptions()).toEqual([])
+  })
+
+  it('does not infer asset seed mode from NODE_ENV test', async () => {
+    const backend = await loadBackend({ useDefaultRuntime: true })
+    backend.configureAssetBackendRuntime({ forceFallbackStore: true })
+
+    const snapshot = backend.listAssets()
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(snapshot.assets).toHaveLength(1)
+    expect(snapshot.assets[0]).toEqual(expect.objectContaining({ id: 'local-127-1', isLocalShell: true }))
+    expect(snapshot.assets.some((asset: { id: string }) => asset.id === 'asset-1')).toBe(false)
+    expect(snapshot.folders).toEqual([])
+  })
+
+  it('loads asset development seeds only when the seed environment switch is enabled', async () => {
+    process.env.AIOPSTERM_ASSETS_ENABLE_SEED = '1'
+    const backend = await loadBackend({ useDefaultRuntime: true })
+    backend.configureAssetBackendRuntime({ forceFallbackStore: true })
+
+    const snapshot = backend.listAssets()
+
+    expect(snapshot.assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'asset-1', title: 'prod-bastion' }),
+        expect.objectContaining({ id: 'asset-5', title: 'jumpserver-org', asset_type: 'organization' })
+      ])
+    )
+    expect(snapshot.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'custom-folder-a' })]))
   })
 
   it('keeps development asset seeds available only when seed mode is enabled', async () => {

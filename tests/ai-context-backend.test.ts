@@ -34,10 +34,12 @@ const loadBackend = async () => {
 }
 
 const originalChatHistorySeedEnv = process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+const originalAssetsSeedEnv = process.env.AIOPSTERM_ASSETS_ENABLE_SEED
 
 describe('AI context catalog backend boundary', () => {
   beforeEach(() => {
     delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+    delete process.env.AIOPSTERM_ASSETS_ENABLE_SEED
     vi.resetModules()
   })
 
@@ -47,10 +49,16 @@ describe('AI context catalog backend boundary', () => {
     } else {
       process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = originalChatHistorySeedEnv
     }
+    if (originalAssetsSeedEnv === undefined) {
+      delete process.env.AIOPSTERM_ASSETS_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_ASSETS_ENABLE_SEED = originalAssetsSeedEnv
+    }
   })
 
   it('builds host, chat, and default contexts from backend-owned catalogs', async () => {
     process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = '1'
+    process.env.AIOPSTERM_ASSETS_ENABLE_SEED = '1'
     const backend = await loadBackend()
     const result = await backend.listAiContextCatalog()
 

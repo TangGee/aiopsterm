@@ -84,8 +84,7 @@ const defaultUserAccountStateFilePath = () => {
   return envPath ? (isAbsolute(envPath) ? envPath : resolve(envPath)) : resolve(process.cwd(), '.aiopsterm-user-account.json')
 }
 
-const defaultUserAccountSeedMode = () =>
-  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED || '').trim() === '1'
+const defaultUserAccountSeedMode = () => String(process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED || '').trim() === '1'
 
 let runtimeConfig: Required<UserAccountBackendRuntimeConfig> = {
   stateFilePath: defaultUserAccountStateFilePath(),
@@ -479,7 +478,7 @@ const issueUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind,
         expiresAt,
         codeHash: userCodeHash(scope, kind, target, code),
         attempts: 0,
-        debugCode: runtimeConfig.useSeedData || process.env.NODE_ENV === 'test' ? code : undefined
+        debugCode: runtimeConfig.useSeedData || userCodeBackendDoubleEnabled() ? code : undefined
       }
     })()
 

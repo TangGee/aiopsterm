@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const ssh2Mock = vi.hoisted(() => {
   type MockNode = {
@@ -377,6 +377,15 @@ let resetMockStores: (() => void) | undefined
 let saveAsset: (asset: any) => any
 let saveKeychain: (keychain: any) => any
 let filesBackendExports: Record<string, unknown>
+const originalFilesSeedEnv = process.env.AIOPSTERM_FILES_ENABLE_SEED
+
+const restoreFilesSeedEnv = () => {
+  if (originalFilesSeedEnv === undefined) {
+    delete process.env.AIOPSTERM_FILES_ENABLE_SEED
+  } else {
+    process.env.AIOPSTERM_FILES_ENABLE_SEED = originalFilesSeedEnv
+  }
+}
 
 beforeAll(async () => {
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
@@ -412,11 +421,16 @@ beforeAll(async () => {
 
 beforeEach(() => {
   resetMockStores?.()
+  delete process.env.AIOPSTERM_FILES_ENABLE_SEED
   configureAssetBackendRuntime?.({ useSeedData: true, forceFallbackStore: true })
-  configureFilesBackendRuntime?.()
+  configureFilesBackendRuntime?.({ useSeedData: true })
   resetFileSessionCatalog?.()
   ssh2Mock.reset()
   sshProxyMock.reset()
+})
+
+afterEach(() => {
+  restoreFilesSeedEnv()
 })
 
 describe('files backend content boundary', () => {
@@ -618,6 +632,36 @@ describe('files backend content boundary', () => {
     expect(catalog.data.sessions).toEqual([expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' })])
     expect(catalog.data.sessions.some((session: any) => ['asset-1', 'folder_asset-2'].includes(session.id))).toBe(false)
     expect(catalog.data.folders).toEqual([])
+  })
+
+  it('does not infer file session seed mode from NODE_ENV test', async () => {
+    configureFilesBackendRuntime({ forceFallbackStore: true })
+    resetFileSessionCatalog()
+
+    const catalog = await listFileSessionCatalog()
+
+    expect(process.env.NODE_ENV).toBe('test')
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data.sessions).toEqual([expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' })])
+    expect(catalog.data.sessions.some((session: any) => session.id === 'asset-1')).toBe(false)
+    expect(catalog.data.folders).toEqual([])
+  })
+
+  it('loads file session development seeds only when the seed environment switch is enabled', async () => {
+    process.env.AIOPSTERM_FILES_ENABLE_SEED = '1'
+    configureFilesBackendRuntime({ forceFallbackStore: true })
+    resetFileSessionCatalog()
+
+    const catalog = await listFileSessionCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion' }),
+        expect.objectContaining({ id: 'folder_asset-2', label: 'staging-files', folderUuid: 'files-folder-a' })
+      ])
+    )
+    expect(catalog.data.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'files-folder-a' })]))
   })
 
   it('keeps development file session seeds available only when seed mode is enabled', async () => {

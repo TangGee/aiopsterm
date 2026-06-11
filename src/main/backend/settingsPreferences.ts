@@ -49,8 +49,7 @@ const defaultRules: UserRuleConfig[] = [
   { id: 'rule-2', content: '不要自动执行删除、重启、扩容、写文件或修改配置类命令。', enabled: true }
 ]
 
-const defaultSettingsPreferencesSeedMode = () =>
-  process.env.NODE_ENV === 'test' || String(process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED || '').trim() === '1'
+const defaultSettingsPreferencesSeedMode = () => String(process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED || '').trim() === '1'
 
 let runtimeConfig: Required<SettingsPreferencesRuntimeConfig> = {
   useSeedData: defaultSettingsPreferencesSeedMode()
