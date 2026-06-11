@@ -127,6 +127,12 @@ import mermaid from 'mermaid'
 import 'highlight.js/styles/atom-one-dark.css'
 import { Eye, Maximize2, Pencil, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import KnowledgeMonacoEditor from '@/components/knowledge/KnowledgeMonacoEditor.vue'
+import {
+  isKnowledgePastedImageResultData,
+  isKnowledgeReadResultData,
+  isKnowledgeWriteResultData,
+  malformedKnowledgeBackendResultMessage
+} from '@/services/knowledgeBackendGuards'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{
@@ -327,10 +333,12 @@ const loadFile = async () => {
     if (isImage.value) {
       const result = await window.aiops.kbReadFile(relPath.value, 'base64')
       if (token !== loadToken) return
+      if (!isKnowledgeReadResultData(result, 'base64')) throw new Error(malformedKnowledgeBackendResultMessage)
       imageDataUrl.value = `data:${result.mimeType || 'application/octet-stream'};base64,${result.content}`
     } else {
       const result = await window.aiops.kbReadFile(relPath.value)
       if (token !== loadToken) return
+      if (!isKnowledgeReadResultData(result)) throw new Error(malformedKnowledgeBackendResultMessage)
       content.value = result.content
       if (isMarkdown.value) void renderMarkdownPreview()
       void jumpToRequestedLineRange()
@@ -355,7 +363,8 @@ const saveNow = async () => {
     if (!window.aiops?.kbWriteFile) {
       throw new Error('Knowledge bridge unavailable')
     }
-    await window.aiops.kbWriteFile(relPath.value, content.value)
+    const result = await window.aiops.kbWriteFile(relPath.value, content.value)
+    if (!isKnowledgeWriteResultData(result)) throw new Error(malformedKnowledgeBackendResultMessage)
     dirty.value = false
   } catch (saveError) {
     error.value = saveError instanceof Error ? saveError.message : String(saveError)
@@ -417,6 +426,7 @@ const loadMarkdownImage = async (src: string) => {
   if (!window.aiops?.kbReadFile) return null
   try {
     const result = await window.aiops.kbReadFile(imageRelPath, 'base64')
+    if (!isKnowledgeReadResultData(result, 'base64')) throw new Error(malformedKnowledgeBackendResultMessage)
     const mimeType =
       result.mimeType && result.mimeType !== 'application/octet-stream'
         ? result.mimeType
@@ -633,9 +643,7 @@ const handlePaste = async (event: ClipboardEvent) => {
   }
   try {
     const result = await pasteImage(getParentRelDir(relPath.value))
-    if (!result?.relPath || !result.fileName || !result.dataUrl) {
-      throw new Error('Knowledge image paste returned invalid result')
-    }
+    if (!isKnowledgePastedImageResultData(result)) throw new Error(malformedKnowledgeBackendResultMessage)
     imageCache.set(result.relPath, result.dataUrl)
     insertAtCursor(`![](${result.fileName})`)
     dirty.value = true

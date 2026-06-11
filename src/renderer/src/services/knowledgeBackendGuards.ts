@@ -1,5 +1,6 @@
 import type {
   KnowledgeBaseEntry,
+  KnowledgeBasePastedImageResult,
   KnowledgeBaseReadResult,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
@@ -46,6 +47,15 @@ export const isKnowledgeReadResultData = (value: unknown, encoding?: 'utf-8' | '
   if (encoding === 'base64' && !isNonEmptyString(value.content)) return false
   return true
 }
+
+export const isKnowledgePastedImageResultData = (value: unknown): value is KnowledgeBasePastedImageResult =>
+  isRecord(value) &&
+  isNonEmptyString(value.relPath) &&
+  isNonEmptyString(value.fileName) &&
+  isNonEmptyString(value.mimeType) &&
+  isNonEmptyString(value.dataUrl) &&
+  isNonNegativeNumber(value.size) &&
+  isFiniteNumber(value.mtimeMs)
 
 export const isKnowledgeSearchResultData = (value: unknown): value is KnowledgeBaseSearchResult => {
   if (!isRecord(value)) return false

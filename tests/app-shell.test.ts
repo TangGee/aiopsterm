@@ -6302,6 +6302,103 @@ describe('AppShell', () => {
     }
   })
 
+  it('fails closed on malformed Knowledge editor read, save, and image paste results', async () => {
+    const malformedMessage = '知识库服务返回数据无效'
+    const originalAiops = {
+      kbReadFile: window.aiops.kbReadFile,
+      kbWriteFile: window.aiops.kbWriteFile,
+      kbPasteImageFromClipboard: window.aiops.kbPasteImageFromClipboard
+    }
+
+    const mountEditor = async (props: { relPath: string; isImage?: boolean }) => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(KnowledgeCenterEditor, {
+        attachTo: document.body,
+        props,
+        global: {
+          plugins: [pinia],
+          stubs: {
+            KnowledgeMonacoEditor: {
+              props: ['modelValue'],
+              emits: ['update:modelValue', 'save'],
+              template:
+                '<textarea class="kb-editor-textarea" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @keydown.ctrl.s.prevent="$emit(\'save\')" />'
+            }
+          }
+        }
+      })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      return wrapper
+    }
+
+    const createImagePasteEvent = () => {
+      const pastedFile = new File(['image-bytes'], 'clip.png', { type: 'image/png' })
+      const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+      Object.defineProperty(event, 'clipboardData', {
+        configurable: true,
+        value: {
+          items: [
+            {
+              type: 'image/png',
+              getAsFile: () => pastedFile
+            }
+          ]
+        }
+      })
+      return event
+    }
+
+    try {
+      vi.mocked(window.aiops.kbReadFile).mockResolvedValueOnce({ content: 42, mtimeMs: 1717200000000 } as any)
+      const malformedTextRead = await mountEditor({ relPath: 'runbooks/broken.md' })
+      expect(malformedTextRead.text()).toContain(malformedMessage)
+      expect(malformedTextRead.find('.kb-editor-textarea').exists()).toBe(false)
+      malformedTextRead.unmount()
+
+      vi.mocked(window.aiops.kbReadFile).mockResolvedValueOnce({ content: '', mtimeMs: 1717200000000, mimeType: 'image/png', isImage: true } as any)
+      const malformedImageRead = await mountEditor({ relPath: 'images/broken.png', isImage: true })
+      expect(malformedImageRead.text()).toContain(malformedMessage)
+      expect(malformedImageRead.find('.kb-editor-image img').exists()).toBe(false)
+      malformedImageRead.unmount()
+
+      const malformedSave = await mountEditor({ relPath: 'runbooks/save.md' })
+      await malformedSave.find('.kb-editor-textarea').setValue('dirty backend-only content')
+      await malformedSave.vm.$nextTick()
+      expect(malformedSave.text()).toContain('unsaved')
+      vi.mocked(window.aiops.kbWriteFile).mockResolvedValueOnce({ mtimeMs: Number.NaN } as any)
+      await malformedSave.findAll('.kb-editor-actions > button').find((button) => button.text().includes('保存'))!.trigger('click')
+      await flushPromises()
+      await malformedSave.vm.$nextTick()
+      expect(malformedSave.text()).toContain(malformedMessage)
+      expect(malformedSave.text()).toContain('unsaved')
+      malformedSave.unmount()
+
+      const malformedPaste = await mountEditor({ relPath: 'runbooks/paste.md' })
+      vi.mocked(window.aiops.kbPasteImageFromClipboard).mockResolvedValueOnce({
+        relPath: 'runbooks/pasted.png',
+        fileName: '',
+        dataUrl: 'data:image/png;base64,cGFzdGU=',
+        mimeType: 'image/png',
+        size: 12,
+        mtimeMs: 1717200000000
+      } as any)
+      vi.mocked(window.aiops.kbWriteFile).mockClear()
+      const pasteEvent = createImagePasteEvent()
+      malformedPaste.find('.kb-editor-root').element.dispatchEvent(pasteEvent)
+      await flushPromises()
+      await malformedPaste.vm.$nextTick()
+      expect(pasteEvent.defaultPrevented).toBe(true)
+      expect(malformedPaste.text()).toContain(malformedMessage)
+      expect(malformedPaste.text()).not.toContain('pasted-image')
+      expect(window.aiops.kbWriteFile).not.toHaveBeenCalled()
+      malformedPaste.unmount()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('matches External reference-style extension list, plugin details, built-ins, and Alias CRUD', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
