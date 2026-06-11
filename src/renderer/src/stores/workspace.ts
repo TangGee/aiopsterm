@@ -3419,6 +3419,12 @@ const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<st
 const appUpdateChannels: AppUpdateCheckResult['channel'][] = ['local', 'manual', 'auto']
 const appUpdateStatusMessage = '更新后端返回了无效结果'
 
+const isAppUpdateSignatureInfo = (source: unknown) =>
+  isRecord(source) &&
+  (source.algorithm === 'ed25519' || source.algorithm === 'rsa-sha256') &&
+  source.verified === true &&
+  (source.keyId === undefined || typeof source.keyId === 'string')
+
 const isAppUpdateCheckResult = (source: unknown): source is AppUpdateCheckResult => {
   if (!isRecord(source)) return false
   if (typeof source.available !== 'boolean' || !appUpdateChannels.includes(source.channel as AppUpdateCheckResult['channel'])) return false
@@ -3435,6 +3441,7 @@ const isAppUpdateCheckResult = (source: unknown): source is AppUpdateCheckResult
     if (updateSize !== undefined && (typeof updateSize !== 'number' || !Number.isFinite(updateSize) || updateSize < 0)) return false
     if (source.updateInfo.sha256 !== undefined && typeof source.updateInfo.sha256 !== 'string') return false
     if (source.updateInfo.notes !== undefined && typeof source.updateInfo.notes !== 'string') return false
+    if (source.updateInfo.signature !== undefined && !isAppUpdateSignatureInfo(source.updateInfo.signature)) return false
   }
   return true
 }
@@ -3453,6 +3460,7 @@ const isAppUpdateDownloadData = (source: unknown, version: string): source is Ap
   Number.isFinite(source.size) &&
   source.size >= 0 &&
   (source.sha256 === undefined || typeof source.sha256 === 'string') &&
+  (source.signature === undefined || isAppUpdateSignatureInfo(source.signature)) &&
   isNonEmptyString(source.message)
 
 const isAppUpdateInstallData = (source: unknown, version: string): source is AppUpdateInstallData =>
@@ -3464,6 +3472,7 @@ const isAppUpdateInstallData = (source: unknown, version: string): source is App
   Number.isFinite(source.size) &&
   source.size >= 0 &&
   (source.sha256 === undefined || typeof source.sha256 === 'string') &&
+  (source.signature === undefined || isAppUpdateSignatureInfo(source.signature)) &&
   isNonEmptyString(source.requestedAt) &&
   isNonEmptyString(source.message)
 

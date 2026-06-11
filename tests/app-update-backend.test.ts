@@ -1,4 +1,4 @@
-import { createHash } from 'crypto'
+import { createHash, generateKeyPairSync, sign } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -8,6 +8,8 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 type AppUpdateTestOptions = {
   manifestPath?: string
   cacheDir?: string
+  trustedPublicKey?: string
+  trustedPublicKeyPath?: string
 }
 
 let checkAppUpdate: (currentVersion: string, options?: AppUpdateTestOptions) => any
@@ -21,6 +23,28 @@ let resetAppUpdateStateForTests: () => void
 
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex')
 
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+const updateSignaturePayload = (input: { version: string; channel: string; fileName: string; size: number; sha256: string; notes?: string }) =>
+  stableJson({
+    version: input.version,
+    channel: input.channel,
+    fileName: input.fileName,
+    size: input.size,
+    sha256: input.sha256,
+    ...(input.notes ? { notes: input.notes } : {})
+  })
+
 const createUpdateFixture = async (input: {
   version?: string
   channel?: string
@@ -28,6 +52,9 @@ const createUpdateFixture = async (input: {
   packageContent?: string
   sha256?: string
   size?: number
+  signature?: string
+  signatureAlgorithm?: string
+  signatureKeyId?: string
 }) => {
   const root = await mkdtemp(join(tmpdir(), 'aiopsterm-update-test-'))
   const packageContent = input.packageContent || 'aiopsterm update package'
@@ -45,7 +72,10 @@ const createUpdateFixture = async (input: {
         packagePath: packageName,
         size: input.size ?? Buffer.byteLength(packageContent),
         sha256: input.sha256 ?? sha256(packageContent),
-        notes: 'test update'
+        notes: 'test update',
+        ...(input.signature ? { signature: input.signature } : {}),
+        ...(input.signatureAlgorithm ? { signatureAlgorithm: input.signatureAlgorithm } : {}),
+        ...(input.signatureKeyId ? { signatureKeyId: input.signatureKeyId } : {})
       },
       null,
       2
@@ -58,6 +88,38 @@ const createUpdateFixture = async (input: {
     manifestPath,
     cacheDir,
     packageName
+  }
+}
+
+const createSignedUpdateFixture = async (input: { version?: string; packageContent?: string; tamperSignaturePayload?: boolean } = {}) => {
+  const version = input.version || '0.2.1'
+  const packageContent = input.packageContent || 'signed update package'
+  const packageName = 'aiopsterm-signed.bin'
+  const digest = sha256(packageContent)
+  const size = Buffer.byteLength(packageContent)
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+  const payload = updateSignaturePayload({
+    version: input.tamperSignaturePayload ? `${version}.tampered` : version,
+    channel: 'manual',
+    fileName: packageName,
+    size,
+    sha256: digest,
+    notes: 'test update'
+  })
+  const signature = sign(null, Buffer.from(payload, 'utf-8'), privateKey).toString('base64')
+  const fixture = await createUpdateFixture({
+    version,
+    packageName,
+    packageContent,
+    sha256: digest,
+    size,
+    signature,
+    signatureAlgorithm: 'ed25519',
+    signatureKeyId: 'release-key-1'
+  })
+  return {
+    ...fixture,
+    trustedPublicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString()
   }
 }
 
@@ -230,6 +292,104 @@ describe('app update backend boundary', () => {
         message: 'Update 0.1.5 install requested with cached package.'
       })
       expect(result.data.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('verifies signed update manifests with a trusted public key before download and install', async () => {
+    const fixture = await createSignedUpdateFixture({ version: '0.2.2', packageContent: 'signed package v022' })
+
+    try {
+      expect(checkAppUpdate('0.2.1', { manifestPath: fixture.manifestPath, trustedPublicKey: fixture.trustedPublicKey })).toMatchObject({
+        available: true,
+        updateInfo: {
+          version: '0.2.2',
+          signature: {
+            algorithm: 'ed25519',
+            verified: true,
+            keyId: 'release-key-1'
+          }
+        }
+      })
+
+      const downloaded = await downloadAppUpdate({ version: '0.2.2' }, undefined, {
+        manifestPath: fixture.manifestPath,
+        cacheDir: fixture.cacheDir,
+        trustedPublicKey: fixture.trustedPublicKey
+      })
+      expect(downloaded.ok).toBe(true)
+      expect(downloaded.data?.signature).toEqual({
+        algorithm: 'ed25519',
+        verified: true,
+        keyId: 'release-key-1'
+      })
+
+      const installed = await installAppUpdate({ version: '0.2.2' })
+      expect(installed.ok).toBe(true)
+      expect(installed.data?.signature).toEqual({
+        algorithm: 'ed25519',
+        verified: true,
+        keyId: 'release-key-1'
+      })
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects tampered signed update manifests and leaves no installable package state', async () => {
+    const fixture = await createSignedUpdateFixture({ version: '0.2.3', packageContent: 'signed package v023', tamperSignaturePayload: true })
+    const progress: Array<{ status: string; percent: number; message?: string }> = []
+
+    try {
+      await expect(
+        downloadAppUpdate({ version: '0.2.3' }, (event) => progress.push(event), {
+          manifestPath: fixture.manifestPath,
+          cacheDir: fixture.cacheDir,
+          trustedPublicKey: fixture.trustedPublicKey
+        })
+      ).resolves.toEqual({
+        ok: false,
+        errorCode: 'APP_UPDATE_MANIFEST_INVALID',
+        errorMessage: 'aiopsterm update manifest signature is invalid.'
+      })
+      expect(progress.at(-1)).toMatchObject({
+        status: 'error',
+        percent: 0,
+        message: 'aiopsterm update manifest signature is invalid.'
+      })
+      await expect(installAppUpdate({ version: '0.2.3' })).resolves.toEqual({
+        ok: false,
+        errorCode: 'APP_UPDATE_DOWNLOAD_REQUIRED',
+        errorMessage: 'Update package must be downloaded before install.'
+      })
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects malformed signature fields instead of treating them as unsigned manifests', async () => {
+    const { publicKey } = generateKeyPairSync('ed25519')
+    const fixture = await createUpdateFixture({
+      version: '0.2.4',
+      packageContent: 'malformed signature package',
+      signature: 'not valid base64 ***',
+      signatureAlgorithm: 'ed25519',
+      signatureKeyId: 'release-key-1'
+    })
+
+    try {
+      await expect(
+        downloadAppUpdate({ version: '0.2.4' }, undefined, {
+          manifestPath: fixture.manifestPath,
+          cacheDir: fixture.cacheDir,
+          trustedPublicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString()
+        })
+      ).resolves.toEqual({
+        ok: false,
+        errorCode: 'APP_UPDATE_MANIFEST_INVALID',
+        errorMessage: 'aiopsterm update manifest signature is required.'
+      })
     } finally {
       await rm(fixture.root, { recursive: true, force: true })
     }

@@ -1,4 +1,4 @@
-import { createHash } from 'crypto'
+import { createHash, verify as verifyCryptoSignature } from 'crypto'
 import { createReadStream, createWriteStream, readFileSync, statSync } from 'fs'
 import { mkdir, rename, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -14,6 +14,17 @@ type AppUpdateManifest = {
   sha256?: unknown
   size?: unknown
   notes?: unknown
+  signature?: unknown
+  signatureAlgorithm?: unknown
+  signatureKeyId?: unknown
+}
+
+type AppUpdateSignatureAlgorithm = 'ed25519' | 'rsa-sha256'
+
+type AppUpdateSignatureInfo = {
+  algorithm: AppUpdateSignatureAlgorithm
+  verified: true
+  keyId?: string
 }
 
 type ResolvedUpdateManifest = {
@@ -25,6 +36,7 @@ type ResolvedUpdateManifest = {
   size: number
   sha256?: string
   notes?: string
+  signature?: AppUpdateSignatureInfo
 }
 
 type DownloadedUpdate = {
@@ -32,6 +44,7 @@ type DownloadedUpdate = {
   filePath: string
   size: number
   sha256?: string
+  signature?: AppUpdateSignatureInfo
   downloadedAt: string
 }
 
@@ -39,6 +52,8 @@ type AppUpdateOptions = {
   currentVersion?: string
   manifestPath?: string
   cacheDir?: string
+  trustedPublicKey?: string
+  trustedPublicKeyPath?: string
 }
 
 type AppUpdateProgressEmitter = (event: AppUpdateProgressEvent) => void
@@ -52,6 +67,25 @@ const normalizeText = (value: unknown) => String(value || '').trim()
 const normalizeChannel = (value: unknown): AppUpdateCheckResult['channel'] => {
   const channel = normalizeText(value)
   return channel === 'auto' || channel === 'local' ? channel : 'manual'
+}
+
+const normalizeSignatureAlgorithm = (value: unknown): AppUpdateSignatureAlgorithm | '' => {
+  const algorithm = normalizeText(value).toLowerCase().replace(/_/g, '-')
+  if (algorithm === 'ed25519') return 'ed25519'
+  if (algorithm === 'rsa-sha256' || algorithm === 'rs256') return 'rsa-sha256'
+  return ''
+}
+
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
 }
 
 const compareVersions = (left: string, right: string) => {
@@ -94,6 +128,93 @@ const resolvePackagePath = (manifestPath: string, value: unknown) => {
   return isAbsolute(packagePath) ? packagePath : resolve(dirname(manifestPath), packagePath)
 }
 
+const configuredTrustedPublicKey = (options: AppUpdateOptions) => {
+  const inlineKey = normalizeText(options.trustedPublicKey) || normalizeText(process.env.AIOPSTERM_UPDATE_PUBLIC_KEY)
+  if (inlineKey) return inlineKey
+
+  const configuredPath = normalizeText(options.trustedPublicKeyPath) || normalizeText(process.env.AIOPSTERM_UPDATE_PUBLIC_KEY_FILE)
+  if (!configuredPath) return ''
+  const publicKeyPath = isAbsolute(configuredPath) ? configuredPath : resolve(configuredPath)
+  try {
+    return readFileSync(publicKeyPath, 'utf-8')
+  } catch (error) {
+    throw new Error(`Unable to read aiopsterm update public key: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+const appUpdateSignaturePayload = (metadata: {
+  version: string
+  channel: AppUpdateCheckResult['channel']
+  fileName: string
+  size: number
+  sha256?: string
+  notes?: string
+}) =>
+  stableJson({
+    version: metadata.version,
+    channel: metadata.channel,
+    fileName: metadata.fileName,
+    size: metadata.size,
+    ...(metadata.sha256 ? { sha256: metadata.sha256 } : {}),
+    ...(metadata.notes ? { notes: metadata.notes } : {})
+  })
+
+const signatureBufferFromManifest = (value: unknown) => {
+  const signature = normalizeText(value)
+  if (!signature) return null
+  const normalized = signature.replace(/-/g, '+').replace(/_/g, '/')
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return null
+  return Buffer.from(normalized, 'base64')
+}
+
+const verifyManifestSignature = (input: {
+  manifest: AppUpdateManifest
+  version: string
+  channel: AppUpdateCheckResult['channel']
+  fileName: string
+  size: number
+  sha256?: string
+  notes?: string
+  options: AppUpdateOptions
+}): AppUpdateSignatureInfo | undefined => {
+  const rawAlgorithm = normalizeText(input.manifest.signatureAlgorithm)
+  const rawSignature = normalizeText(input.manifest.signature)
+  const algorithm = normalizeSignatureAlgorithm(rawAlgorithm)
+  const signature = signatureBufferFromManifest(input.manifest.signature)
+  const keyId = normalizeText(input.manifest.signatureKeyId)
+  const hasSignatureFields = Boolean(rawAlgorithm || rawSignature || keyId)
+  const trustedPublicKey = configuredTrustedPublicKey(input.options)
+
+  if (!hasSignatureFields && !trustedPublicKey) return undefined
+  if (!algorithm) throw new Error('aiopsterm update manifest signature algorithm is required.')
+  if (!signature?.length) throw new Error('aiopsterm update manifest signature is required.')
+  if (!trustedPublicKey) throw new Error('aiopsterm update trusted public key is not configured.')
+  if (!input.sha256) throw new Error('Signed aiopsterm update manifests must include a package SHA-256 checksum.')
+
+  const payload = Buffer.from(
+    appUpdateSignaturePayload({
+      version: input.version,
+      channel: input.channel,
+      fileName: input.fileName,
+      size: input.size,
+      sha256: input.sha256,
+      notes: input.notes
+    }),
+    'utf-8'
+  )
+  const verified =
+    algorithm === 'ed25519'
+      ? verifyCryptoSignature(null, payload, trustedPublicKey, signature)
+      : verifyCryptoSignature('sha256', payload, trustedPublicKey, signature)
+  if (!verified) throw new Error('aiopsterm update manifest signature is invalid.')
+
+  return {
+    algorithm,
+    verified: true,
+    ...(keyId ? { keyId } : {})
+  }
+}
+
 const readManifest = (options: AppUpdateOptions = {}): ResolvedUpdateManifest | null => {
   const manifestPath = configuredManifestPath(options)
   if (!manifestPath) return null
@@ -132,15 +253,27 @@ const readManifest = (options: AppUpdateOptions = {}): ResolvedUpdateManifest | 
 
   const sha256 = normalizeText(rawManifest.sha256).toLowerCase()
   const notes = normalizeText(rawManifest.notes)
+  const channel = normalizeChannel(rawManifest.channel)
+  const signature = verifyManifestSignature({
+    manifest: rawManifest,
+    version,
+    channel,
+    fileName: basename(packagePath),
+    size: packageStats.size,
+    sha256,
+    notes,
+    options
+  })
   return {
     manifestPath,
     version,
-    channel: normalizeChannel(rawManifest.channel),
+    channel,
     packagePath,
     fileName: basename(packagePath),
     size: packageStats.size,
     ...(sha256 ? { sha256 } : {}),
-    ...(notes ? { notes } : {})
+    ...(notes ? { notes } : {}),
+    ...(signature ? { signature } : {})
   }
 }
 
@@ -150,7 +283,8 @@ const packageInfoFor = (manifest: ResolvedUpdateManifest) => ({
   fileName: manifest.fileName,
   size: manifest.size,
   ...(manifest.sha256 ? { sha256: manifest.sha256 } : {}),
-  ...(manifest.notes ? { notes: manifest.notes } : {})
+  ...(manifest.notes ? { notes: manifest.notes } : {}),
+  ...(manifest.signature ? { signature: manifest.signature } : {})
 })
 
 const defaultCacheDir = (options: AppUpdateOptions) => {
@@ -299,6 +433,7 @@ export const downloadAppUpdate = async (
       filePath: targetPath,
       size: manifest.size,
       sha256: copied.sha256,
+      ...(manifest.signature ? { signature: manifest.signature } : {}),
       downloadedAt: new Date().toISOString()
     }
 
@@ -317,6 +452,7 @@ export const downloadAppUpdate = async (
         filePath: targetPath,
         size: manifest.size,
         sha256: copied.sha256,
+        ...(manifest.signature ? { signature: manifest.signature } : {}),
         message: `Update ${version} downloaded to aiopsterm update cache.`
       }
     }
@@ -351,6 +487,7 @@ export const installAppUpdate = async (input: { version?: string } = {}): Promis
       filePath: downloadedUpdate.filePath,
       size: downloadedUpdate.size,
       ...(downloadedUpdate.sha256 ? { sha256: downloadedUpdate.sha256 } : {}),
+      ...(downloadedUpdate.signature ? { signature: downloadedUpdate.signature } : {}),
       requestedAt: new Date().toISOString(),
       message: `Update ${version} install requested with cached package.`
     }

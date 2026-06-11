@@ -1581,8 +1581,15 @@ export type AppUpdateCheckResult = {
     size?: number
     sha256?: string
     notes?: string
+    signature?: {
+      algorithm: 'ed25519' | 'rsa-sha256'
+      verified: true
+      keyId?: string
+    }
   } | null
 }
+
+export type AppUpdateSignatureInfo = NonNullable<NonNullable<AppUpdateCheckResult['updateInfo']>['signature']>
 
 export type AppUpdateProgressEvent = {
   status: 'downloading' | 'downloaded' | 'error'
@@ -1598,6 +1605,7 @@ export type AppUpdateDownloadResult = AiopsMutationResult<{
   filePath: string
   size: number
   sha256?: string
+  signature?: AppUpdateSignatureInfo
   message: string
 }>
 
@@ -1607,6 +1615,7 @@ export type AppUpdateInstallResult = AiopsMutationResult<{
   filePath: string
   size: number
   sha256?: string
+  signature?: AppUpdateSignatureInfo
   requestedAt: string
   message: string
 }>
