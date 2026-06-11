@@ -61,6 +61,58 @@ describe('AI chat history backend boundary', () => {
     expect(data.conversations).toEqual([])
   })
 
+  it('strips unmodified legacy seed conversations from non-seed runtime state', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: true, prefix: 'aiopsterm-chat-history-legacy-seed-empty-' })
+    backend.restoreChatConversation('conv-1')
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).conversations.map((conversation: { id: string }) => conversation.id)).toEqual(['conv-1', 'conv-2', 'conv-3'])
+
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    const list = expectOkData(backend.listChatConversations())
+
+    expect(list.selectedConversationId).toBe('')
+    expect(list.conversations).toEqual([])
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8'))).toMatchObject({
+      selectedConversationId: '',
+      conversations: [],
+      messagesByConversationId: {}
+    })
+  })
+
+  it('preserves user-edited seed-derived conversations while stripping unchanged seeds', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: true, prefix: 'aiopsterm-chat-history-legacy-seed-edited-' })
+    expectOkData(
+      backend.updateChatConversation({
+        id: 'conv-1',
+        title: '我的生产巡检',
+        summary: '保留用户编辑过的历史',
+        favorite: true,
+        messages: [
+          { id: 'hist-conv-1-user', role: 'user', text: '保留这条生产巡检记录', hosts: [{ id: 'history-host-conv-1', kind: 'hosts', label: '10.24.8.12' }] },
+          { id: 'hist-conv-1-assistant', role: 'assistant', text: '这是用户编辑后的历史快照。', state: 'done' }
+        ]
+      })
+    )
+
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    const list = expectOkData(backend.listChatConversations())
+
+    expect(list.selectedConversationId).toBe('conv-1')
+    expect(list.conversations).toEqual([
+      expect.objectContaining({
+        id: 'conv-1',
+        title: '我的生产巡检',
+        summary: '保留用户编辑过的历史',
+        favorite: true
+      })
+    ])
+    const restored = expectOkData(backend.restoreChatConversation('conv-1'))
+    expect(restored.messages).toEqual([
+      { id: 'hist-conv-1-user', role: 'user', text: '保留这条生产巡检记录', hosts: [{ id: 'history-host-conv-1', kind: 'hosts', label: '10.24.8.12' }] },
+      { id: 'hist-conv-1-assistant', role: 'assistant', text: '这是用户编辑后的历史快照。', state: 'done' }
+    ])
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).conversations.map((conversation: { id: string }) => conversation.id)).toEqual(['conv-1'])
+  })
+
   it('validates rename input and persists title/favorite mutations', async () => {
     expect(backend.updateChatConversation({ id: 'conv-2', title: '   ' })).toEqual({
       ok: false,

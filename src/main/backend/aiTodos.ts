@@ -65,11 +65,25 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 
 const normalizeText = (value: unknown) => String(value || '').trim()
 
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!isRecord(value)) return value
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, unknown>>((result, key) => {
+      const nextValue = stableValue(value[key])
+      if (nextValue !== undefined) result[key] = nextValue
+      return result
+    }, {})
+}
+
+const stableJson = (value: unknown) => JSON.stringify(stableValue(value))
+
 const normalizeTodoStatus = (value: unknown): AiTodoItem['status'] =>
   value === 'completed' || value === 'in_progress' || value === 'pending' ? value : 'pending'
 
-const normalizeTodos = (value: unknown): AiTodoItem[] => {
-  if (!Array.isArray(value)) return runtimeConfig.useSeedData ? cloneTodos(defaultTodos) : []
+const normalizeTodoRows = (value: unknown, fallback: AiTodoItem[] = runtimeConfig.useSeedData ? cloneTodos(defaultTodos) : []): AiTodoItem[] => {
+  if (!Array.isArray(value)) return fallback
   const seenIds = new Set<string>()
   const todos: AiTodoItem[] = []
   value.forEach((item, index) => {
@@ -106,6 +120,21 @@ const normalizeTodos = (value: unknown): AiTodoItem[] => {
   return todos.map((todo, index) => ({ ...todo, isFocused: focusedIndex === -1 ? todo.isFocused : index === focusedIndex || undefined }))
 }
 
+const normalizedSeedTodos = () => normalizeTodoRows(defaultTodos, cloneTodos(defaultTodos))
+
+const stripLegacySeedTodos = (todos: AiTodoItem[]) => {
+  if (runtimeConfig.useSeedData) return todos
+  const seedTodos = new Map(normalizedSeedTodos().map((todo) => [todo.id, todo]))
+  const strippedTodos = todos.filter((todo) => {
+    const seedTodo = seedTodos.get(todo.id)
+    return !seedTodo || stableJson(todo) !== stableJson(seedTodo)
+  })
+  const focusedIndex = strippedTodos.findIndex((todo) => todo.isFocused)
+  return strippedTodos.map((todo, index) => ({ ...todo, isFocused: focusedIndex === -1 ? todo.isFocused : index === focusedIndex || undefined }))
+}
+
+const normalizeTodos = (value: unknown): AiTodoItem[] => stripLegacySeedTodos(normalizeTodoRows(value))
+
 const normalizePersistedState = (value: unknown): AiTodoPersistedState | null => {
   if (!isRecord(value)) return null
   return {
@@ -135,7 +164,10 @@ const ensureTodoStateLoaded = () => {
   try {
     const parsed = JSON.parse(readFileSync(runtimeConfig.stateFilePath, 'utf-8')) as unknown
     const restored = normalizePersistedState(parsed)
-    if (restored) todoState = restored
+    if (restored) {
+      todoState = restored
+      if (!runtimeConfig.useSeedData) persistTodoState()
+    }
   } catch {
     /* Keep the backend-owned default when the persisted todo state is corrupt. */
   }

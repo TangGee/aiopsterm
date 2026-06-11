@@ -27,13 +27,19 @@ const expectOkSnapshot = (result: any) => {
   return result.data as Record<string, any>
 }
 
+const useTempRuntime = async (options: { useSeedData: boolean; prefix?: string }) => {
+  const dir = await mkdtemp(join(tmpdir(), options.prefix || 'aiopsterm-ai-todos-'))
+  tempDirs.push(dir)
+  const stateFilePath = join(dir, 'ai-todos.json')
+  backend.configureAiTodoBackendRuntime({ stateFilePath, useSeedData: options.useSeedData })
+  backend.resetAiTodosForTests()
+  return stateFilePath
+}
+
 describe('AI todo backend boundary', () => {
   beforeEach(async () => {
     await loadBackend()
-    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-ai-todos-'))
-    tempDirs.push(dir)
-    backend.configureAiTodoBackendRuntime({ stateFilePath: join(dir, 'ai-todos.json'), useSeedData: true })
-    backend.resetAiTodosForTests()
+    await useTempRuntime({ useSeedData: true })
   })
 
   afterEach(async () => {
@@ -80,6 +86,91 @@ describe('AI todo backend boundary', () => {
       source: 'backend'
     })
     expect(snapshot.todos).toEqual([])
+  })
+
+  it('strips unmodified legacy seed todos from non-seed runtime state', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: true, prefix: 'aiopsterm-ai-todos-legacy-seed-empty-' })
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        todos: [
+          { id: 'todo-1', content: '收集上下文', description: '读取终端输出、资产和知识库引用', status: 'completed' },
+          {
+            id: 'todo-2',
+            content: '生成命令建议',
+            description: '只生成需要确认的只读命令',
+            status: 'in_progress',
+            isFocused: true,
+            subtasks: [
+              { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+              { id: 'todo-2-2', content: '生成回滚步骤' }
+            ]
+          },
+          { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
+        ],
+        updatedAt: 'legacy-seed'
+      }),
+      'utf-8'
+    )
+
+    backend.configureAiTodoBackendRuntime({ stateFilePath, useSeedData: false })
+    const snapshot = expectOkSnapshot(backend.listAiTodoSnapshot())
+
+    expect(snapshot.focusedTodoId).toBeNull()
+    expect(snapshot.totalTodos).toBe(0)
+    expect(snapshot.todos).toEqual([])
+  })
+
+  it('preserves user-edited seed-derived todos while stripping unchanged seeds', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-ai-todos-legacy-seed-edited-' })
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        todos: [
+          { id: 'todo-1', content: '收集上下文', description: '读取终端输出、资产和知识库引用', status: 'completed' },
+          {
+            id: 'todo-2',
+            content: '生成用户确认命令',
+            description: '用户已经改过的执行计划',
+            status: 'in_progress',
+            isFocused: true,
+            subtasks: [
+              { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+              { id: 'todo-2-2', content: '保留用户补充的回滚步骤' }
+            ]
+          },
+          { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
+        ],
+        requestId: 'legacy-request',
+        assistantMessageId: 'legacy-assistant',
+        prompt: 'legacy prompt',
+        updatedAt: 'legacy-edited'
+      }),
+      'utf-8'
+    )
+
+    backend.configureAiTodoBackendRuntime({ stateFilePath, useSeedData: false })
+    const snapshot = expectOkSnapshot(backend.listAiTodoSnapshot())
+
+    expect(snapshot.focusedTodoId).toBe('todo-2')
+    expect(snapshot.totalTodos).toBe(1)
+    expect(snapshot.completedTodos).toBe(0)
+    expect(snapshot.updatedAt).toBe('legacy-edited')
+    expect(snapshot.todos).toEqual([
+      expect.objectContaining({
+        id: 'todo-2',
+        content: '生成用户确认命令',
+        description: '用户已经改过的执行计划',
+        status: 'in_progress',
+        isFocused: true,
+        subtasks: [
+          { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+          { id: 'todo-2-2', content: '保留用户补充的回滚步骤' }
+        ]
+      })
+    ])
   })
 
   it('returns cloned todo rows so callers cannot mutate the backend snapshot', async () => {

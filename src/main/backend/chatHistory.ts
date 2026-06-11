@@ -126,6 +126,20 @@ const normalizeText = (value: unknown) => String(value || '').trim()
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!isRecord(value)) return value
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, unknown>>((result, key) => {
+      const nextValue = stableValue(value[key])
+      if (nextValue !== undefined) result[key] = nextValue
+      return result
+    }, {})
+}
+
+const stableJson = (value: unknown) => JSON.stringify(stableValue(value))
+
 const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
   if (!Array.isArray(messages)) return []
   return messages
@@ -214,8 +228,7 @@ const uniqueId = (value: string, fallback: string, seenIds: Set<string>) => {
   return id
 }
 
-const normalizeState = (source?: Partial<ChatHistoryStoreShape> | null): ChatHistoryStoreShape => {
-  const fallback = runtimeConfig.useSeedData ? seedState() : emptyState()
+const normalizeStateShape = (source?: Partial<ChatHistoryStoreShape> | null, fallback = runtimeConfig.useSeedData ? seedState() : emptyState()): ChatHistoryStoreShape => {
   const rawConversations = Array.isArray(source?.conversations) ? source.conversations : fallback.conversations
   const seenConversationIds = new Set<string>()
   const conversations = rawConversations
@@ -246,6 +259,30 @@ const normalizeState = (source?: Partial<ChatHistoryStoreShape> | null): ChatHis
   return { version: 1, conversations, messagesByConversationId: nextMessages, selectedConversationId }
 }
 
+const stripLegacySeedChatHistoryState = (state: ChatHistoryStoreShape): ChatHistoryStoreShape => {
+  const normalizedSeedState = normalizeStateShape(seedState(), seedState())
+  const seedConversations = new Map(normalizedSeedState.conversations.map((conversation) => [conversation.id, conversation]))
+  const conversations = state.conversations.filter((conversation) => {
+    const seedConversation = seedConversations.get(conversation.id)
+    if (!seedConversation) return true
+    return (
+      stableJson(conversation) !== stableJson(seedConversation) ||
+      stableJson(state.messagesByConversationId[conversation.id] || []) !== stableJson(normalizedSeedState.messagesByConversationId[conversation.id] || [])
+    )
+  })
+  const messagesByConversationId: Record<string, AiChatHistoryMessage[]> = {}
+  conversations.forEach((conversation) => {
+    messagesByConversationId[conversation.id] = state.messagesByConversationId[conversation.id] || []
+  })
+  const selectedConversationId = conversations.some((conversation) => conversation.id === state.selectedConversationId) ? state.selectedConversationId : conversations[0]?.id || ''
+  return { version: 1, conversations, messagesByConversationId, selectedConversationId }
+}
+
+const normalizeState = (source?: Partial<ChatHistoryStoreShape> | null): ChatHistoryStoreShape => {
+  const normalized = normalizeStateShape(source)
+  return runtimeConfig.useSeedData ? normalized : stripLegacySeedChatHistoryState(normalized)
+}
+
 const applyInitialState = () => {
   chatHistoryState = runtimeConfig.useSeedData ? seedState() : emptyState()
 }
@@ -264,7 +301,7 @@ const ensureStateLoaded = () => {
   if (!existsSync(stateFilePath)) return
   try {
     chatHistoryState = readPersistedState(stateFilePath)
-    if (stateFilePath !== runtimeConfig.stateFilePath) saveState(chatHistoryState)
+    if (stateFilePath !== runtimeConfig.stateFilePath || !runtimeConfig.useSeedData) saveState(chatHistoryState)
   } catch {
     /* Keep the backend-owned empty or seed state when persisted chat history is corrupt. */
   }
