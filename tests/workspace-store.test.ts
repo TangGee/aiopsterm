@@ -8558,6 +8558,7 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     await store.hydrateConfig()
     const originalSaveConfig = window.aiops.saveConfig
+    const originalApplyPrivacyRuntime = window.aiops.applyPrivacyRuntimeSettings
     const initialSnapshot = JSON.stringify({
       privacy: store.config.privacy,
       settings: {
@@ -8607,8 +8608,68 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('privacy save offline')
       assertPrivacyUnchanged()
 
+      ;(window.aiops as any).applyPrivacyRuntimeSettings = undefined
+      await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(false)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({
+        privacy: {
+          telemetry: 'enabled',
+          secretRedaction: 'disabled',
+          dataSync: 'disabled'
+        }
+      })
+      expect(store.settingsNotice).toBe('隐私运行时服务不可用')
+      assertPrivacyUnchanged()
+
+      ;(window.aiops as any).applyPrivacyRuntimeSettings = originalApplyPrivacyRuntime
+      vi.mocked(window.aiops.applyPrivacyRuntimeSettings!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'DATA_SYNC_UNAVAILABLE',
+        errorMessage: '数据同步服务未配置，无法启用'
+      })
+      await expect(store.updatePrivacySettings({ dataSync: 'enabled' })).resolves.toBe(false)
+      expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
+        previousPrivacy: {
+          telemetry: 'enabled',
+          secretRedaction: 'disabled',
+          dataSync: 'disabled'
+        },
+        nextPrivacy: {
+          telemetry: 'enabled',
+          secretRedaction: 'disabled',
+          dataSync: 'enabled'
+        }
+      })
+      expect(store.settingsNotice).toBe('数据同步服务未配置，无法启用')
+      assertPrivacyUnchanged()
+
+      vi.mocked(window.aiops.applyPrivacyRuntimeSettings!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          telemetry: 'enabled',
+          dataSync: 'enabled',
+          dataSyncRuntime: 'backend-double',
+          appliedAt: '',
+          message: 'bad runtime'
+        }
+      } as any)
+      await expect(store.updatePrivacySettings({ dataSync: 'enabled' })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('隐私运行时服务返回数据无效')
+      assertPrivacyUnchanged()
+
       await expect(store.updatePrivacySettings({ telemetry: 'disabled', secretRedaction: 'enabled', dataSync: 'enabled' })).resolves.toBe(true)
       expect(store.settingsNotice).toBe('隐私设置已保存')
+      expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
+        previousPrivacy: {
+          telemetry: 'enabled',
+          secretRedaction: 'disabled',
+          dataSync: 'disabled'
+        },
+        nextPrivacy: {
+          telemetry: 'disabled',
+          secretRedaction: 'enabled',
+          dataSync: 'enabled'
+        }
+      })
       expect(store.privacySettings.telemetry).toBe('disabled')
       expect(store.privacySettings.secretRedaction).toBe('enabled')
       expect(store.privacySettings.dataSync).toBe('enabled')
@@ -8619,7 +8680,39 @@ describe('workspace store', () => {
       })
     } finally {
       window.aiops.saveConfig = originalSaveConfig
+      window.aiops.applyPrivacyRuntimeSettings = originalApplyPrivacyRuntime
     }
+  })
+
+  it('keeps secret redaction as config-only while telemetry and data sync use the privacy runtime bridge', async () => {
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+    vi.mocked(window.aiops.applyPrivacyRuntimeSettings!).mockClear()
+
+    await expect(store.updatePrivacySettings({ secretRedaction: 'enabled' })).resolves.toBe(true)
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith({
+      privacy: {
+        telemetry: 'enabled',
+        secretRedaction: 'enabled',
+        dataSync: 'disabled'
+      }
+    })
+    expect(window.aiops.applyPrivacyRuntimeSettings).not.toHaveBeenCalled()
+
+    await expect(store.updatePrivacySettings({ telemetry: 'disabled' })).resolves.toBe(true)
+    expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenCalledWith({
+      previousPrivacy: {
+        telemetry: 'enabled',
+        secretRedaction: 'enabled',
+        dataSync: 'disabled'
+      },
+      nextPrivacy: {
+        telemetry: 'disabled',
+        secretRedaction: 'enabled',
+        dataSync: 'disabled'
+      }
+    })
   })
 
   it('does not fabricate account deactivation from the Privacy page without backend confirmation', async () => {

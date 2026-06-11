@@ -167,6 +167,7 @@ import {
   saveSettingsRule,
   saveSettingsShortcut
 } from './backend/settingsPreferences'
+import { applyPrivacyRuntimeSettings, configurePrivacyRuntime } from './backend/privacyRuntime'
 import { configureSshTunnelBackendRuntime, startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { configureSshTerminalBackendRuntime, createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
 import {
@@ -248,6 +249,7 @@ import type {
   AiopsUserLoginInput,
   AiopsUserPasswordInput,
   AiopsUserProfileUpdateInput,
+  PrivacyRuntimeApplyInput,
   EditorUserConfig,
   DatabaseConnectionSaveInput,
   DatabaseConnectionTestInput,
@@ -1282,6 +1284,9 @@ configureAssetConnectionRuntime({ getConfig })
 configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('userData'), 'database-workspace.json') })
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
+configurePrivacyRuntime({
+  useDataSyncBackendDouble: process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE === '1'
+})
 configureSshTunnelBackendRuntime({ getConfig })
 configureSshTerminalBackendRuntime({
   getConfig,
@@ -2664,6 +2669,7 @@ const registerIpc = () => {
     store.set('config', next)
     return next
   })
+  ipcMain.handle('privacy:runtime:apply', (_event, input: PrivacyRuntimeApplyInput) => applyPrivacyRuntimeSettings(input))
   ipcMain.handle('settings-preferences:get', () => {
     const result = getSettingsPreferences(getConfig())
     if (result.ok && result.data) {

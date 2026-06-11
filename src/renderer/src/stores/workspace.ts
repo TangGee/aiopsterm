@@ -169,6 +169,7 @@ import type {
   ModelOptionUserConfig,
   ModelSettingsUserConfig,
   PrivacyUserConfig,
+  PrivacyRuntimeSnapshot,
   QuickCommandGroupConfig,
   QuickCommandScriptPlan,
   QuickCommandScriptSegment,
@@ -239,6 +240,7 @@ type UserMutationData = NonNullable<AiopsUserMutationResult['data']>
 type UserCodeData = NonNullable<AiopsUserCodeResult['data']>
 type UserAvatarPrepareData = NonNullable<AiopsUserAvatarPrepareResult['data']>
 type UserTrustedDeviceRevokeData = NonNullable<AiopsTrustedDeviceRevokeResult['data']>
+type PrivacyRuntimeApplyData = PrivacyRuntimeSnapshot
 
 type TerminalOutputScope = 'output' | 'input'
 type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
@@ -1777,6 +1779,19 @@ const normalizePrivacyConfig = (source?: Partial<PrivacyUserConfig>) => {
     changed
   }
 }
+
+const privacyRuntimeValues = ['disabled', 'service', 'backend-double'] as const
+
+const isPrivacyRuntimeSnapshotForRequest = (source: unknown, expectedPrivacy: PrivacyUserConfig): source is PrivacyRuntimeApplyData =>
+  isRecord(source) &&
+  source.telemetry === expectedPrivacy.telemetry &&
+  source.dataSync === expectedPrivacy.dataSync &&
+  typeof source.appliedAt === 'string' &&
+  source.appliedAt.trim() !== '' &&
+  privacyRuntimeValues.includes(source.dataSyncRuntime as (typeof privacyRuntimeValues)[number]) &&
+  (expectedPrivacy.dataSync === 'enabled' || source.dataSyncRuntime === 'disabled') &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== ''
 
 const reasoningEffortValues = ['low', 'medium', 'high'] as const
 const proxyTypeValues: AiPreferenceSettings['proxy']['type'][] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
@@ -4912,7 +4927,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     dataSync: privacySettings.value.dataSync
   })
 
-  const persistPrivacySettings = async (nextPrivacy: PrivacyUserConfig) => {
+  const privacySnapshotsMatch = (left: PrivacyUserConfig, right: PrivacyUserConfig) =>
+    left.telemetry === right.telemetry && left.secretRedaction === right.secretRedaction && left.dataSync === right.dataSync
+
+  const validatedSavedPrivacy = (savedConfig: unknown, expectedPrivacy: PrivacyUserConfig) => {
+    if (!isRecord(savedConfig) || !isRecord(savedConfig.privacy)) return null
+    const savedPrivacy = normalizePrivacyConfig(savedConfig.privacy).normalized
+    if (!privacySnapshotsMatch(savedPrivacy, expectedPrivacy)) return null
+    return {
+      savedConfig: savedConfig as Partial<UserConfig>,
+      savedPrivacy
+    }
+  }
+
+  const rollbackPrivacyConfig = async (saveConfigBridge: NonNullable<AiopsPreloadApi['saveConfig']>, previousPrivacy: PrivacyUserConfig) => {
+    try {
+      const rolledBackConfig = await saveConfigBridge({
+        privacy: { ...previousPrivacy }
+      })
+      const rollback = validatedSavedPrivacy(rolledBackConfig, previousPrivacy)
+      if (!rollback) return false
+      config.value = mergeGenericSavedConfig(config.value, rollback.savedConfig, {
+        privacy: rollback.savedPrivacy
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const failPrivacyRuntime = async (
+    saveConfigBridge: NonNullable<AiopsPreloadApi['saveConfig']>,
+    previousPrivacy: PrivacyUserConfig,
+    message: string
+  ) => {
+    const rolledBack = await rollbackPrivacyConfig(saveConfigBridge, previousPrivacy)
+    setSettingsNotice(rolledBack ? message : `${message}；隐私设置回滚失败`)
+    return false
+  }
+
+  const persistPrivacySettings = async (previousPrivacy: PrivacyUserConfig, nextPrivacy: PrivacyUserConfig) => {
     const saveConfigBridge = window.aiops?.saveConfig
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('隐私设置保存服务不可用')
@@ -4922,25 +4976,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const savedConfig = await saveConfigBridge({
         privacy: { ...nextPrivacy }
       })
-      if (!isRecord(savedConfig) || !isRecord(savedConfig.privacy)) {
+      const saved = validatedSavedPrivacy(savedConfig, nextPrivacy)
+      if (!saved) {
         setSettingsNotice('隐私设置保存失败')
         return false
       }
-      const savedPrivacy = normalizePrivacyConfig(savedConfig.privacy).normalized
-      if (
-        savedPrivacy.telemetry !== nextPrivacy.telemetry ||
-        savedPrivacy.secretRedaction !== nextPrivacy.secretRedaction ||
-        savedPrivacy.dataSync !== nextPrivacy.dataSync
-      ) {
-        setSettingsNotice('隐私设置保存失败')
-        return false
+
+      const runtimeChanged = previousPrivacy.telemetry !== nextPrivacy.telemetry || previousPrivacy.dataSync !== nextPrivacy.dataSync
+      if (runtimeChanged) {
+        const runtimeBridge = window.aiops?.applyPrivacyRuntimeSettings
+        if (typeof runtimeBridge !== 'function') {
+          return failPrivacyRuntime(saveConfigBridge, previousPrivacy, '隐私运行时服务不可用')
+        }
+        try {
+          const runtimeResult = await runtimeBridge({
+            previousPrivacy: { ...previousPrivacy },
+            nextPrivacy: { ...nextPrivacy }
+          })
+          if (!isRecord(runtimeResult) || runtimeResult.ok !== true || !isPrivacyRuntimeSnapshotForRequest(runtimeResult.data, nextPrivacy)) {
+            const message =
+              isRecord(runtimeResult) && runtimeResult.ok === false && typeof runtimeResult.errorMessage === 'string' && runtimeResult.errorMessage.trim()
+                ? runtimeResult.errorMessage
+                : '隐私运行时服务返回数据无效'
+            return failPrivacyRuntime(saveConfigBridge, previousPrivacy, message)
+          }
+        } catch (error) {
+          return failPrivacyRuntime(saveConfigBridge, previousPrivacy, error instanceof Error ? error.message : '隐私运行时设置应用失败')
+        }
       }
-      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
-        privacy: savedPrivacy
+
+      config.value = mergeGenericSavedConfig(config.value, saved.savedConfig, {
+        privacy: saved.savedPrivacy
       })
       privacySettings.value = {
         ...privacySettings.value,
-        ...savedPrivacy
+        ...saved.savedPrivacy
       }
       return true
     } catch (error) {
@@ -6605,8 +6675,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!hasPersistentPatch) {
       return true
     }
-    const nextPersistent = normalizePrivacyConfig({ ...getPrivacySnapshot(), ...patch }).normalized
-    const saved = await persistPrivacySettings(nextPersistent)
+    const previousPersistent = getPrivacySnapshot()
+    const nextPersistent = normalizePrivacyConfig({ ...previousPersistent, ...patch }).normalized
+    const saved = await persistPrivacySettings(previousPersistent, nextPersistent)
     if (!saved) return false
     setSettingsNotice('隐私设置已保存')
     return true

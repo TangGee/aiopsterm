@@ -1067,6 +1067,21 @@ export type PrivacyUserConfig = {
   dataSync: 'enabled' | 'disabled'
 }
 
+export type PrivacyRuntimeApplyInput = {
+  previousPrivacy: PrivacyUserConfig
+  nextPrivacy: PrivacyUserConfig
+}
+
+export type PrivacyRuntimeSnapshot = {
+  telemetry: PrivacyUserConfig['telemetry']
+  dataSync: PrivacyUserConfig['dataSync']
+  appliedAt: string
+  dataSyncRuntime: 'disabled' | 'service' | 'backend-double'
+  message: string
+}
+
+export type PrivacyRuntimeApplyResult = AiopsMutationResult<PrivacyRuntimeSnapshot>
+
 export type AiPreferencesUserConfig = {
   enableExtendedThinking: boolean
   thinkingBudgetTokens: number
@@ -2748,6 +2763,7 @@ export type AiopsPreloadApi = {
   onUnmaximized: (listener: () => void) => () => void
   getConfig: () => Promise<UserConfig>
   saveConfig: (patch: Partial<UserConfig>) => Promise<UserConfig>
+  applyPrivacyRuntimeSettings: (input: PrivacyRuntimeApplyInput) => Promise<PrivacyRuntimeApplyResult>
   getSettingsPreferences: () => Promise<SettingsPreferencesResult>
   saveSettingsRule: (input: SettingsRuleSaveInput) => Promise<SettingsPreferencesMutationResult>
   deleteSettingsRule: (id: string) => Promise<SettingsRuleDeleteResult>
