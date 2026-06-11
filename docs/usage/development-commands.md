@@ -27,7 +27,7 @@ Run Electron end-to-end checks and generate acceptance screenshots under `test-r
 npm run e2e
 ```
 
-The Playwright launcher sets `AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE=1` for deterministic SSH tab creation in E2E runs. This switch lives in the main/backend SSH terminal runtime only; renderer code still consumes `createTerminal()` results and `terminal:data` events, and the normal development/production path opens real `ssh2` sessions.
+The Playwright launcher sets explicit backend-double switches for deterministic E2E runs: `AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE=1`, `AIOPSTERM_AI_CHAT_BACKEND_DOUBLE=1`, `AIOPSTERM_DB_AI_BACKEND_DOUBLE=1`, and `AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE=1`. These switches live in main/backend runtimes only; renderer code still consumes preload/main results and runtime events. The normal development/production path does not infer backend doubles from `NODE_ENV=test`: SSH opens real `ssh2` sessions, AI chat requires a configured provider or real local model backend, and Database AI requires a configured provider before generated responses are available.
 
 `npm run e2e` is an alias for the longer script name:
 

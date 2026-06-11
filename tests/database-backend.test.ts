@@ -1531,6 +1531,43 @@ describe('database backend boundary', () => {
     })
   })
 
+  it('allows local DB AI pane responses when the backend double environment switch is enabled', async () => {
+    process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE = '1'
+    const created = await createDatabaseAiPaneRequest({
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        contextSummary: 'orders-postgres · postgresql · orders · public'
+      }
+    })
+
+    const result = await generateDatabaseAiPaneResponse({
+      requestId: created.data!.requestId,
+      assistantMessageId: created.data!.assistantMessage.id,
+      prompt: 'Summarize schema',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        contextSummary: 'orders-postgres · postgresql · orders · public'
+      }
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      provider: 'aiopsterm-local',
+      assistantMessage: {
+        id: created.data!.assistantMessage.id,
+        status: 'done'
+      }
+    })
+    expect(result.data?.text).toContain('当前响应由 aiopsterm DB AI 本地后端生成')
+  })
+
   it('keeps DB AI pane lifecycle status behind the database backend boundary', async () => {
     configureDatabaseAiRuntime({ localBackendDouble: true })
     const created = await createDatabaseAiPaneRequest({

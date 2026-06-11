@@ -661,6 +661,31 @@ describe('ai chat backend response boundary', () => {
     expect(wait).not.toHaveBeenCalled()
   })
 
+  it('allows local assistant generation when the backend double environment switch is enabled', async () => {
+    process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE = '1'
+    let nowMs = 70_000
+    const wait = vi.fn(async (durationMs: number) => {
+      nowMs += durationMs
+    })
+    configureAiChatRuntime({
+      now: () => nowMs,
+      wait
+    })
+
+    const result = await generateAiChatResponse({
+      prompt: '检查生产磁盘',
+      model: 'aiopsterm-local-agent'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      provider: 'aiopsterm-local',
+      model: 'aiopsterm-local-agent',
+      status: 'done'
+    })
+    expect(wait).toHaveBeenCalledWith(localAiChatResponseMinDelayMs)
+  })
+
   it('cancels active local responses at the backend boundary', async () => {
     let nowMs = 50_000
     const waits: Array<{ durationMs: number; resolve: () => void }> = []

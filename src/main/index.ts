@@ -1323,7 +1323,7 @@ configureTerminalSuggestionsRuntime({ getConfig })
 configureAssetConnectionRuntime({ getConfig })
 configureDatabaseBackendRuntime({
   getConfig,
-  localBackendDouble: process.env.NODE_ENV === 'test',
+  localBackendDouble: process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE === '1',
   stateFilePath: join(app.getPath('userData'), 'database-workspace.json')
 })
 configureVoiceBackendRuntime({ getConfig })
@@ -1980,7 +1980,7 @@ configureAiCommandBackendRuntime({
 configureAiChatRuntime({
   getConfig,
   listSkills: () => loadSkillsFromDisk(),
-  localBackendDouble: process.env.NODE_ENV === 'test',
+  localBackendDouble: process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE === '1',
   callMcpTool: async (input) => {
     const current = getConfig()
     return callMcpTool(await loadCurrentMcpConfigFile(), input, {
