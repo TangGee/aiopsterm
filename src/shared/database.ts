@@ -1,5 +1,5 @@
-import { randomUUID } from 'crypto'
-import { dirname } from 'path'
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'crypto'
+import { dirname, isAbsolute, join, resolve } from 'path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type {
   DatabaseColumnFilter,
@@ -342,6 +342,7 @@ export type DatabaseRuntimeConfig = {
   oracleClientConfigDir?: string
   oracleDriverName?: string
   stateFilePath?: string
+  credentialKeyPath?: string
 }
 type SqliteSchemaTableRow = { name?: string; type?: string }
 type SqliteTableColumnRow = { cid?: number; name?: string; type?: string; notnull?: number; pk?: number; hidden?: number }
@@ -361,6 +362,8 @@ const databaseVerifiedConnections = new Set<string>()
 export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
   databaseRuntimeConfig = config ? { ...config } : {}
   databaseLoadedStateFilePath = ''
+  cachedDatabaseCredentialKeyPath = ''
+  cachedDatabaseCredentialKey = null
   oracleClientInitialized = false
 }
 
@@ -385,6 +388,118 @@ const isNodeTestRuntime = () => {
 }
 
 const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? isNodeTestRuntime()
+
+type SafeStorageLike = {
+  isEncryptionAvailable: () => boolean
+  encryptString: (plain: string) => Buffer
+  decryptString: (cipher: Buffer) => string
+}
+
+const databaseSafeStorageCredentialPrefix = 'ds1:'
+const databaseLocalKeyCredentialPrefix = 'dk1:'
+let cachedDatabaseCredentialKeyPath = ''
+let cachedDatabaseCredentialKey: Buffer | null = null
+
+const resolveDatabaseSafeStorage = (): SafeStorageLike | null => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const electron = require('electron') as { safeStorage?: SafeStorageLike }
+    return electron.safeStorage || null
+  } catch {
+    return null
+  }
+}
+
+const defaultDatabaseCredentialKeyPath = () => {
+  const envPath = trim(typeof process !== 'undefined' ? process.env?.AIOPSTERM_DATABASE_CREDENTIAL_KEY_FILE : '')
+  if (envPath) return isAbsolute(envPath) ? envPath : resolve(envPath)
+  const statePath = databaseStateFilePath()
+  if (statePath) return join(dirname(statePath), 'database-credential.key')
+  return join(typeof process !== 'undefined' ? process.cwd() : '.', '.aiopsterm-database-credential.key')
+}
+
+const databaseCredentialKeyPath = () => {
+  const configured = trim(databaseRuntimeConfig.credentialKeyPath)
+  return configured ? (isAbsolute(configured) ? configured : resolve(configured)) : defaultDatabaseCredentialKeyPath()
+}
+
+const readOrCreateDatabaseCredentialKey = () => {
+  const keyPath = databaseCredentialKeyPath()
+  if (cachedDatabaseCredentialKey && cachedDatabaseCredentialKeyPath === keyPath) return cachedDatabaseCredentialKey
+  cachedDatabaseCredentialKeyPath = keyPath
+  cachedDatabaseCredentialKey = null
+  if (existsSync(keyPath)) {
+    const current = readFileSync(keyPath)
+    if (current.length === 32) {
+      cachedDatabaseCredentialKey = current
+      return cachedDatabaseCredentialKey
+    }
+  }
+  mkdirSync(dirname(keyPath), { recursive: true })
+  cachedDatabaseCredentialKey = randomBytes(32)
+  writeFileSync(keyPath, cachedDatabaseCredentialKey, { mode: 0o600 })
+  return cachedDatabaseCredentialKey
+}
+
+const isDatabaseCredentialCiphertext = (value: unknown) =>
+  typeof value === 'string' && (value.startsWith(databaseSafeStorageCredentialPrefix) || value.startsWith(databaseLocalKeyCredentialPrefix))
+
+const databaseSafeStorageAvailable = (safeStorage = resolveDatabaseSafeStorage()) => {
+  try {
+    return Boolean(safeStorage?.isEncryptionAvailable?.())
+  } catch {
+    return false
+  }
+}
+
+const encryptDatabaseCredentialWithLocalKey = (plain: string) => {
+  const key = readOrCreateDatabaseCredentialKey()
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const encrypted = Buffer.concat([cipher.update(plain, 'utf-8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return `${databaseLocalKeyCredentialPrefix}${iv.toString('base64')}.${encrypted.toString('base64')}.${tag.toString('base64')}`
+}
+
+const decryptDatabaseCredentialWithLocalKey = (cipherText: string) => {
+  const body = cipherText.slice(databaseLocalKeyCredentialPrefix.length)
+  const [ivB64, encryptedB64, tagB64] = body.split('.')
+  if (!ivB64 || !encryptedB64 || !tagB64) throw new Error('Malformed local database credential ciphertext')
+  const decipher = createDecipheriv('aes-256-gcm', readOrCreateDatabaseCredentialKey(), Buffer.from(ivB64, 'base64'))
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64'))
+  return Buffer.concat([decipher.update(Buffer.from(encryptedB64, 'base64')), decipher.final()]).toString('utf-8')
+}
+
+const encryptDatabaseCredentialForStorage = (value: unknown) => {
+  if (typeof value !== 'string') return ''
+  if (!value) return ''
+  if (isDatabaseCredentialCiphertext(value)) return value
+  const safeStorage = resolveDatabaseSafeStorage()
+  if (databaseSafeStorageAvailable(safeStorage)) {
+    return `${databaseSafeStorageCredentialPrefix}${safeStorage!.encryptString(value).toString('base64')}`
+  }
+  return encryptDatabaseCredentialWithLocalKey(value)
+}
+
+const decryptDatabaseCredentialFromStorage = (value: unknown) => {
+  if (typeof value !== 'string') return ''
+  if (!value) return ''
+  if (value.startsWith(databaseSafeStorageCredentialPrefix)) {
+    try {
+      return resolveDatabaseSafeStorage()?.decryptString(Buffer.from(value.slice(databaseSafeStorageCredentialPrefix.length), 'base64')) || ''
+    } catch {
+      return ''
+    }
+  }
+  if (value.startsWith(databaseLocalKeyCredentialPrefix)) {
+    try {
+      return decryptDatabaseCredentialWithLocalKey(value)
+    } catch {
+      return ''
+    }
+  }
+  return value
+}
 
 const loadMysqlRuntime = () => {
   if (databaseRuntimeConfig.mysqlDriver) return databaseRuntimeConfig.mysqlDriver
@@ -2353,6 +2468,7 @@ type DatabasePersistedState = {
   connections: DatabaseConnectionInfo[]
   secrets: Record<string, { password?: string }>
   aiPaneState?: DatabaseAiPaneStateSnapshot
+  needsSecretMigration?: boolean
 }
 
 const normalizePersistedString = (value: unknown, fallback = '') => {
@@ -2486,11 +2602,16 @@ const normalizePersistedState = (value: unknown): DatabasePersistedState | null 
     : []
   const secrets: DatabasePersistedState['secrets'] = {}
   const rawSecrets = isRecord(value.secrets) ? value.secrets : {}
+  let needsSecretMigration = false
   connections.forEach((connection) => {
     const secret = rawSecrets[connection.id]
     if (isRecord(secret) && typeof secret.password === 'string' && secret.password) {
-      secrets[connection.id] = { password: secret.password }
-      connection.hasPassword = true
+      const password = decryptDatabaseCredentialFromStorage(secret.password)
+      if (password) {
+        secrets[connection.id] = { password }
+        connection.hasPassword = true
+        if (!isDatabaseCredentialCiphertext(secret.password)) needsSecretMigration = true
+      }
     }
   })
   return {
@@ -2499,7 +2620,8 @@ const normalizePersistedState = (value: unknown): DatabasePersistedState | null 
     groupParents,
     connections,
     secrets,
-    aiPaneState: isRecord(value.aiPaneState) ? normalizeDatabaseAiPaneState(value.aiPaneState) : undefined
+    aiPaneState: isRecord(value.aiPaneState) ? normalizeDatabaseAiPaneState(value.aiPaneState) : undefined,
+    needsSecretMigration
   }
 }
 
@@ -2524,7 +2646,10 @@ const ensureDatabaseStateLoaded = () => {
   try {
     const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
     const state = normalizePersistedState(parsed)
-    if (state) applyPersistedDatabaseState(state)
+    if (state) {
+      applyPersistedDatabaseState(state)
+      if (state.needsSecretMigration) persistDatabaseState()
+    }
   } catch {
     /* Ignore corrupt local state and keep the backend fallback catalog. */
   }
@@ -2533,15 +2658,17 @@ const ensureDatabaseStateLoaded = () => {
 const persistDatabaseState = () => {
   const filePath = databaseStateFilePath()
   if (!filePath) return
-  const state: DatabasePersistedState = {
-    version: 1,
-    groups: databaseGroups.map((group) => ({ ...group })),
-    groupParents: { ...databaseGroupParents },
-    connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
-    secrets: Object.fromEntries(Array.from(databaseConnectionSecrets.entries()).map(([connectionId, password]) => [connectionId, { password }])),
-    aiPaneState: cloneDatabaseAiPaneState(databaseAiPaneState)
-  }
   try {
+    const state: DatabasePersistedState = {
+      version: 1,
+      groups: databaseGroups.map((group) => ({ ...group })),
+      groupParents: { ...databaseGroupParents },
+      connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
+      secrets: Object.fromEntries(
+        Array.from(databaseConnectionSecrets.entries()).map(([connectionId, password]) => [connectionId, { password: encryptDatabaseCredentialForStorage(password) }])
+      ),
+      aiPaneState: cloneDatabaseAiPaneState(databaseAiPaneState)
+    }
     mkdirSync(dirname(filePath), { recursive: true })
     const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
     writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')

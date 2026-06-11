@@ -14,6 +14,7 @@ type DatabaseBackendRuntimeConfig = {
   now?: () => number
   timeoutMs?: number
   stateFilePath?: string
+  credentialKeyPath?: string
 }
 
 const normalizeText = (value: unknown) => String(value || '').trim()
@@ -79,7 +80,14 @@ async function generateDatabaseProviderText(
 }
 
 export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeConfig) {
-  configureDatabaseRuntime(config?.stateFilePath ? { stateFilePath: config.stateFilePath } : undefined)
+  configureDatabaseRuntime(
+    config
+      ? {
+          ...(config.stateFilePath ? { stateFilePath: config.stateFilePath } : {}),
+          ...(config.credentialKeyPath ? { credentialKeyPath: config.credentialKeyPath } : {})
+        }
+      : undefined
+  )
   configureDatabaseAiRuntime(
     config
       ? {

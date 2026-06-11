@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
@@ -2350,7 +2350,9 @@ WHERE status = ''open'';
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-state-'))
     tempDirs.push(dir)
     const stateFilePath = join(dir, 'database-workspace.json')
-    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath })
+    const credentialKeyPath = join(dir, 'database-credential.key')
+    const persistedPassword = 'persisted-db-secret-value'
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath, credentialKeyPath })
 
     const group = await createDatabaseGroup({ name: 'Persisted DB Ops', parentId: null })
     expect(group.ok).toBe(true)
@@ -2363,7 +2365,7 @@ WHERE status = ''open'';
         host: '127.0.0.1',
         port: 5432,
         user: 'ops',
-        password: 'secret',
+        password: persistedPassword,
         database: 'orders',
         env: 'Production',
         groupId: 'group-persisted-db-ops',
@@ -2412,12 +2414,14 @@ WHERE status = ''open'';
     expect(persisted.connections.map((item) => item.id)).toEqual(['conn-persisted-postgres'])
     expect(persisted.connections[0]).toMatchObject({ status: 'connected' })
     expect(persisted.connections[0].catalogs).toHaveLength(1)
-    expect(persisted.secrets['conn-persisted-postgres']).toEqual({ password: 'secret' })
+    expect(persisted.secrets['conn-persisted-postgres'].password).toMatch(/^dk1:/)
+    expect(await readFile(stateFilePath, 'utf-8')).not.toContain(persistedPassword)
+    expect(await readFile(credentialKeyPath)).toHaveLength(32)
     expect(persisted.aiPaneState).toMatchObject({ open: true, draft: 'persist this database context' })
     expect(persisted.aiPaneState.messages.map((message) => message.content)).toContain('Remember this DB question')
 
     resetDatabaseBackendSeed()
-    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath })
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath, credentialKeyPath })
 
     const restoredCatalog = await listDatabaseCatalog()
     expect(restoredCatalog.data?.groups.find((item) => item.id === 'group-persisted-db-ops')?.name).toBe('Persisted DB Ops')
@@ -2455,7 +2459,79 @@ WHERE status = ''open'';
       }
     })
     expect(edited.ok).toBe(true)
-    expect(state.configs.at(-1)).toMatchObject({ password: 'secret' })
+    expect(state.configs.at(-1)).toMatchObject({ password: persistedPassword })
+  })
+
+  it('migrates legacy plaintext database connection secrets to encrypted storage', async () => {
+    const { driver, state } = createPostgresDriverDouble()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-legacy-state-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-workspace.json')
+    const credentialKeyPath = join(dir, 'database-credential.key')
+    await writeFile(
+      stateFilePath,
+      JSON.stringify(
+        {
+          version: 1,
+          groups: [{ id: 'group-default', name: 'Default Group' }],
+          groupParents: { 'group-default': null },
+          connections: [
+            {
+              id: 'conn-legacy-postgres',
+              name: 'legacy-postgres',
+              dbType: 'postgresql',
+              env: 'Production',
+              groupId: 'group-default',
+              host: '127.0.0.1',
+              port: 5432,
+              authentication: 'UserAndPassword',
+              user: 'ops',
+              hasPassword: true,
+              database: 'orders',
+              sslMode: 'require',
+              status: 'connected',
+              catalogs: [{ name: 'orders', schemas: [{ name: 'public', tables: [{ id: 'tbl-orders', name: 'orders', columns: [], primaryKey: [] }] }] }]
+            }
+          ],
+          secrets: { 'conn-legacy-postgres': { password: 'legacy-secret' } },
+          aiPaneState: { open: false, width: 360, context: null, draft: '', messages: [] }
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    )
+
+    resetDatabaseBackendSeed()
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver, stateFilePath, credentialKeyPath })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.data?.connections).toContainEqual(expect.objectContaining({ id: 'conn-legacy-postgres', hasPassword: true, status: 'idle' }))
+    const migratedText = await readFile(stateFilePath, 'utf-8')
+    const migrated = JSON.parse(migratedText) as { secrets: Record<string, { password?: string }> }
+    expect(migratedText).not.toContain('legacy-secret')
+    expect(migrated.secrets['conn-legacy-postgres'].password).toMatch(/^dk1:/)
+    expect(await readFile(credentialKeyPath)).toHaveLength(32)
+
+    const edited = await saveDatabaseConnection({
+      mode: 'edit',
+      id: 'conn-legacy-postgres',
+      connection: {
+        dbType: 'postgresql',
+        name: 'legacy-postgres-renamed',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'ops',
+        password: '',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-default',
+        authentication: 'UserAndPassword',
+        sslMode: 'require'
+      }
+    })
+    expect(edited.ok).toBe(true)
+    expect(state.configs.at(-1)).toMatchObject({ password: 'legacy-secret' })
   })
 
   it('uses the injected Oracle driver in non-seed runtime instead of backend seed rows', async () => {
