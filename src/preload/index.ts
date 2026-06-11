@@ -84,6 +84,7 @@ const api: AiopsPreloadApi = {
   getConfig: () => ipcRenderer.invoke('config:get') as Promise<UserConfig>,
   saveConfig: (patch: Partial<UserConfig>) => ipcRenderer.invoke('config:save', patch) as Promise<UserConfig>,
   applyPrivacyRuntimeSettings: (input) => ipcRenderer.invoke('privacy:runtime:apply', input),
+  applyKnowledgeSearchRuntimeSetting: (input) => ipcRenderer.invoke('knowledge-search:runtime:apply', input),
   getSettingsPreferences: () => ipcRenderer.invoke('settings-preferences:get'),
   saveSettingsRule: (input) => ipcRenderer.invoke('settings-preferences:save-rule', input),
   deleteSettingsRule: (id: string) => ipcRenderer.invoke('settings-preferences:delete-rule', id),

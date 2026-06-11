@@ -57,6 +57,7 @@ import {
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
 } from './backend/chatImageAttachment'
+import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import {
   cancelDatabaseAiDrawerResponse,
@@ -302,6 +303,7 @@ import type {
   KubernetesTerminalDataEvent,
   KubernetesTerminalExitEvent,
   KnowledgeBaseUserConfig,
+  KnowledgeSearchRuntimeApplyInput,
   McpConfigFile,
   McpResourceReadInput,
   McpServerUserConfig,
@@ -2670,6 +2672,7 @@ const registerIpc = () => {
     return next
   })
   ipcMain.handle('privacy:runtime:apply', (_event, input: PrivacyRuntimeApplyInput) => applyPrivacyRuntimeSettings(input))
+  ipcMain.handle('knowledge-search:runtime:apply', (_event, input: KnowledgeSearchRuntimeApplyInput) => applyKnowledgeSearchRuntimeSetting(input))
   ipcMain.handle('settings-preferences:get', () => {
     const result = getSettingsPreferences(getConfig())
     if (result.ok && result.data) {

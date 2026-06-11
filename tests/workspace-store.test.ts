@@ -9061,6 +9061,7 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     await store.hydrateConfig()
     const originalSaveConfig = window.aiops.saveConfig
+    const originalApplyKnowledgeSearchRuntime = window.aiops.applyKnowledgeSearchRuntimeSetting
     const initialSnapshot = JSON.stringify({
       config: store.config.aiPreferences,
       settings: store.aiPreferences,
@@ -9104,8 +9105,47 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('ai preferences save offline')
       assertAiPreferencesUnchanged()
 
+      ;(window.aiops as any).applyKnowledgeSearchRuntimeSetting = undefined
+      await expect(store.updateAiPreferences({ kbSearchEnabled: false })).resolves.toBe(false)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({
+        aiPreferences: expect.objectContaining({
+          kbSearchEnabled: true
+        })
+      })
+      expect(store.settingsNotice).toBe('知识库搜索运行时服务不可用')
+      assertAiPreferencesUnchanged()
+
+      ;(window.aiops as any).applyKnowledgeSearchRuntimeSetting = originalApplyKnowledgeSearchRuntime
+      vi.mocked(window.aiops.applyKnowledgeSearchRuntimeSetting!).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'KB_SEARCH_RUNTIME_OFFLINE',
+        errorMessage: '知识库搜索运行时离线'
+      })
+      await expect(store.updateAiPreferences({ kbSearchEnabled: false })).resolves.toBe(false)
+      expect(window.aiops.applyKnowledgeSearchRuntimeSetting).toHaveBeenLastCalledWith({
+        previousEnabled: true,
+        nextEnabled: false
+      })
+      expect(store.settingsNotice).toBe('知识库搜索运行时离线')
+      assertAiPreferencesUnchanged()
+
+      vi.mocked(window.aiops.applyKnowledgeSearchRuntimeSetting!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          enabled: false,
+          appliedAt: '',
+          source: 'settings',
+          message: 'bad runtime'
+        }
+      } as any)
+      await expect(store.updateAiPreferences({ kbSearchEnabled: false })).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('知识库搜索运行时服务返回数据无效')
+      assertAiPreferencesUnchanged()
+
+      vi.mocked(window.aiops.applyKnowledgeSearchRuntimeSetting!).mockClear()
       await expect(store.updateAiPreferences({ autoApproval: true, needProxy: true, proxy: { host: '10.0.0.3', port: 18080 } })).resolves.toBe(true)
       expect(store.settingsNotice).toBe('AI 偏好设置已保存')
+      expect(window.aiops.applyKnowledgeSearchRuntimeSetting).not.toHaveBeenCalled()
       expect(store.aiPreferences.autoApproval).toBe(true)
       expect(store.aiPreferences.needProxy).toBe(true)
       expect(store.aiPreferences.proxy.host).toBe('10.0.0.3')
@@ -9121,8 +9161,17 @@ describe('workspace store', () => {
           })
         })
       )
+
+      await expect(store.updateAiPreferences({ kbSearchEnabled: false })).resolves.toBe(true)
+      expect(window.aiops.applyKnowledgeSearchRuntimeSetting).toHaveBeenLastCalledWith({
+        previousEnabled: true,
+        nextEnabled: false
+      })
+      expect(store.aiPreferences.kbSearchEnabled).toBe(false)
+      expect(store.config.aiPreferences?.kbSearchEnabled).toBe(false)
     } finally {
       window.aiops.saveConfig = originalSaveConfig
+      window.aiops.applyKnowledgeSearchRuntimeSetting = originalApplyKnowledgeSearchRuntime
     }
   })
 

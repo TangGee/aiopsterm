@@ -5573,6 +5573,15 @@ Object.defineProperty(window, 'aiops', {
         message: '隐私运行时设置已应用'
       }
     })),
+    applyKnowledgeSearchRuntimeSetting: vi.fn(async (input: { nextEnabled: boolean }) => ({
+      ok: true as const,
+      data: {
+        enabled: input.nextEnabled,
+        appliedAt: '2026-06-10T00:00:00.000Z',
+        source: 'settings' as const,
+        message: input.nextEnabled ? '知识库搜索运行时已启用' : '知识库搜索运行时已禁用'
+      }
+    })),
     getSettingsPreferences: vi.fn(async () => {
       if (!settingsPreferencesStoreMock) {
         settingsPreferencesStoreMock = normalizeSettingsPreferencesMock()

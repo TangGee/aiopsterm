@@ -141,6 +141,7 @@ import type {
   KnowledgeBaseSearchStatus,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseUserConfig,
+  KnowledgeSearchRuntimeSnapshot,
   KnowledgeNode,
   KnowledgeNodeType,
   KubernetesAgentProxyConfig,
@@ -241,6 +242,7 @@ type UserCodeData = NonNullable<AiopsUserCodeResult['data']>
 type UserAvatarPrepareData = NonNullable<AiopsUserAvatarPrepareResult['data']>
 type UserTrustedDeviceRevokeData = NonNullable<AiopsTrustedDeviceRevokeResult['data']>
 type PrivacyRuntimeApplyData = PrivacyRuntimeSnapshot
+type KnowledgeSearchRuntimeApplyData = KnowledgeSearchRuntimeSnapshot
 
 type TerminalOutputScope = 'output' | 'input'
 type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
@@ -1821,6 +1823,15 @@ const isAiPreferencesSnapshot = (source: unknown): source is AiPreferencesUserCo
     Number.isFinite(source.shellIntegrationTimeout)
   )
 }
+
+const isKnowledgeSearchRuntimeSnapshotForRequest = (source: unknown, expectedEnabled: boolean): source is KnowledgeSearchRuntimeApplyData =>
+  isRecord(source) &&
+  source.enabled === expectedEnabled &&
+  source.source === 'settings' &&
+  typeof source.appliedAt === 'string' &&
+  source.appliedAt.trim() !== '' &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== ''
 
 const normalizeThinkingBudget = (value: unknown, fallback: number) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
@@ -5032,7 +5043,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const aiPreferencesSnapshotsMatch = (left: AiPreferenceSettings, right: AiPreferenceSettings) =>
     JSON.stringify(cloneAiPreferencesSnapshot(left)) === JSON.stringify(cloneAiPreferencesSnapshot(right))
 
-  const persistAiPreferences = async (nextPreferences: AiPreferenceSettings) => {
+  const validatedSavedAiPreferences = (savedConfig: unknown, expectedPreferences: AiPreferenceSettings) => {
+    if (!isRecord(savedConfig) || !isAiPreferencesSnapshot(savedConfig.aiPreferences)) return null
+    const savedPreferences = normalizeAiPreferencesConfig(savedConfig.aiPreferences).normalized
+    if (!aiPreferencesSnapshotsMatch(savedPreferences, expectedPreferences)) return null
+    return {
+      savedConfig: savedConfig as Partial<UserConfig>,
+      savedPreferences
+    }
+  }
+
+  const rollbackAiPreferencesConfig = async (saveConfigBridge: NonNullable<AiopsPreloadApi['saveConfig']>, previousPreferences: AiPreferenceSettings) => {
+    try {
+      const rolledBackConfig = await saveConfigBridge({
+        aiPreferences: cloneAiPreferencesSnapshot(previousPreferences)
+      })
+      const rollback = validatedSavedAiPreferences(rolledBackConfig, previousPreferences)
+      if (!rollback) return false
+      config.value = mergeGenericSavedConfig(config.value, rollback.savedConfig, {
+        aiPreferences: cloneAiPreferencesSnapshot(rollback.savedPreferences)
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const failAiPreferencesRuntime = async (
+    saveConfigBridge: NonNullable<AiopsPreloadApi['saveConfig']>,
+    previousPreferences: AiPreferenceSettings,
+    message: string
+  ) => {
+    const rolledBack = await rollbackAiPreferencesConfig(saveConfigBridge, previousPreferences)
+    setSettingsNotice(rolledBack ? message : `${message}；AI 偏好设置回滚失败`)
+    return false
+  }
+
+  const persistAiPreferences = async (previousPreferences: AiPreferenceSettings, nextPreferences: AiPreferenceSettings) => {
     const saveConfigBridge = window.aiops?.saveConfig
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('AI 偏好设置保存服务不可用')
@@ -5043,19 +5090,38 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const savedConfig = await saveConfigBridge({
         aiPreferences: cloneAiPreferencesSnapshot(normalizedPreferences)
       })
-      if (!isRecord(savedConfig) || !isAiPreferencesSnapshot(savedConfig.aiPreferences)) {
+      const saved = validatedSavedAiPreferences(savedConfig, normalizedPreferences)
+      if (!saved) {
         setSettingsNotice('AI 偏好设置保存失败')
         return false
       }
-      const savedPreferences = normalizeAiPreferencesConfig(savedConfig.aiPreferences).normalized
-      if (!aiPreferencesSnapshotsMatch(savedPreferences, normalizedPreferences)) {
-        setSettingsNotice('AI 偏好设置保存失败')
-        return false
+
+      if (previousPreferences.kbSearchEnabled !== normalizedPreferences.kbSearchEnabled) {
+        const runtimeBridge = window.aiops?.applyKnowledgeSearchRuntimeSetting
+        if (typeof runtimeBridge !== 'function') {
+          return failAiPreferencesRuntime(saveConfigBridge, previousPreferences, '知识库搜索运行时服务不可用')
+        }
+        try {
+          const runtimeResult = await runtimeBridge({
+            previousEnabled: previousPreferences.kbSearchEnabled,
+            nextEnabled: normalizedPreferences.kbSearchEnabled
+          })
+          if (!isRecord(runtimeResult) || runtimeResult.ok !== true || !isKnowledgeSearchRuntimeSnapshotForRequest(runtimeResult.data, normalizedPreferences.kbSearchEnabled)) {
+            const message =
+              isRecord(runtimeResult) && runtimeResult.ok === false && typeof runtimeResult.errorMessage === 'string' && runtimeResult.errorMessage.trim()
+                ? runtimeResult.errorMessage
+                : '知识库搜索运行时服务返回数据无效'
+            return failAiPreferencesRuntime(saveConfigBridge, previousPreferences, message)
+          }
+        } catch (error) {
+          return failAiPreferencesRuntime(saveConfigBridge, previousPreferences, error instanceof Error ? error.message : '知识库搜索运行时设置应用失败')
+        }
       }
-      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
-        aiPreferences: cloneAiPreferencesSnapshot(savedPreferences)
+
+      config.value = mergeGenericSavedConfig(config.value, saved.savedConfig, {
+        aiPreferences: cloneAiPreferencesSnapshot(saved.savedPreferences)
       })
-      aiPreferences.value = cloneAiPreferencesSnapshot(savedPreferences)
+      aiPreferences.value = cloneAiPreferencesSnapshot(saved.savedPreferences)
       return true
     } catch (error) {
       setSettingsNotice(error instanceof Error ? error.message : 'AI 偏好设置保存失败')
@@ -6291,11 +6357,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateAiPreferences = async (patch: AiPreferencePatch) => {
     const previousPreferences = getAiPreferencesSnapshot()
     const nextPreferences = normalizeAiPreferencesConfig({
-      ...getAiPreferencesSnapshot(),
+      ...previousPreferences,
       ...patch,
       proxy: patch.proxy ? { ...aiPreferences.value.proxy, ...patch.proxy } : aiPreferences.value.proxy
     }).normalized
-    const saved = await persistAiPreferences(nextPreferences)
+    const saved = await persistAiPreferences(previousPreferences, nextPreferences)
     if (!saved) return false
     const enablesAutoApproval = nextPreferences.autoApproval && !previousPreferences.autoApproval
     if (enablesAutoApproval) {

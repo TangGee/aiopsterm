@@ -1064,7 +1064,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByTestId('ai-file-upload-button')).toHaveAttribute('title', '上传文件')
     await page.getByTestId('ai-file-upload-button').click()
     await expect(page.locator('.input-placeholder-notice')).toContainText('已添加文件')
-    await expect(page.locator('.chat-editable .mention-chip-doc')).toContainText(/\.md/)
+    await expect(page.locator('.chat-editable .mention-chip-doc').filter({ hasText: 'e2e-chat-attachment.md' })).toBeVisible()
     await expect(page.getByTestId('ai-voice-button')).toBeVisible()
     await expect(page.getByTestId('ai-voice-button')).toHaveAttribute('title', '开始语音输入')
     await configureVoiceTranscriptionProvider(page, voiceServer.baseUrl)

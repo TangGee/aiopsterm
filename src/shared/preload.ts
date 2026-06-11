@@ -1103,6 +1103,20 @@ export type AiPreferencesUserConfig = {
   shellIntegrationTimeout: number
 }
 
+export type KnowledgeSearchRuntimeApplyInput = {
+  previousEnabled: boolean
+  nextEnabled: boolean
+}
+
+export type KnowledgeSearchRuntimeSnapshot = {
+  enabled: boolean
+  appliedAt: string
+  source: 'settings'
+  message: string
+}
+
+export type KnowledgeSearchRuntimeApplyResult = AiopsMutationResult<KnowledgeSearchRuntimeSnapshot>
+
 export type ModelProviderUserConfig = {
   baseUrl: string
   apiKey: string
@@ -2764,6 +2778,7 @@ export type AiopsPreloadApi = {
   getConfig: () => Promise<UserConfig>
   saveConfig: (patch: Partial<UserConfig>) => Promise<UserConfig>
   applyPrivacyRuntimeSettings: (input: PrivacyRuntimeApplyInput) => Promise<PrivacyRuntimeApplyResult>
+  applyKnowledgeSearchRuntimeSetting: (input: KnowledgeSearchRuntimeApplyInput) => Promise<KnowledgeSearchRuntimeApplyResult>
   getSettingsPreferences: () => Promise<SettingsPreferencesResult>
   saveSettingsRule: (input: SettingsRuleSaveInput) => Promise<SettingsPreferencesMutationResult>
   deleteSettingsRule: (id: string) => Promise<SettingsRuleDeleteResult>
