@@ -5578,7 +5578,9 @@ Object.defineProperty(window, 'aiops', {
       data: {
         telemetry: input.nextPrivacy.telemetry,
         dataSync: input.nextPrivacy.dataSync,
-        dataSyncRuntime: input.nextPrivacy.dataSync === 'enabled' ? ('backend-double' as const) : ('disabled' as const),
+        dataSyncRuntime: input.nextPrivacy.dataSync === 'enabled' ? ('local-file' as const) : ('disabled' as const),
+        stateFilePath: '/tmp/aiopsterm/data-sync-runtime.json',
+        lastSyncAt: input.nextPrivacy.dataSync === 'enabled' ? '2026-06-10T00:00:00.000Z' : '',
         appliedAt: '2026-06-10T00:00:00.000Z',
         message: '隐私运行时设置已应用'
       }

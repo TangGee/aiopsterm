@@ -8661,12 +8661,7 @@ describe('workspace store', () => {
       assertPrivacyUnchanged()
 
       ;(window.aiops as any).applyPrivacyRuntimeSettings = originalApplyPrivacyRuntime
-      vi.mocked(window.aiops.applyPrivacyRuntimeSettings!).mockResolvedValueOnce({
-        ok: false,
-        errorCode: 'DATA_SYNC_UNAVAILABLE',
-        errorMessage: '数据同步服务未配置，无法启用'
-      })
-      await expect(store.updatePrivacySettings({ dataSync: 'enabled' })).resolves.toBe(false)
+      await expect(store.updatePrivacySettings({ dataSync: 'enabled' })).resolves.toBe(true)
       expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenLastCalledWith({
         previousPrivacy: {
           telemetry: 'enabled',
@@ -8679,15 +8674,19 @@ describe('workspace store', () => {
           dataSync: 'enabled'
         }
       })
-      expect(store.settingsNotice).toBe('数据同步服务未配置，无法启用')
-      assertPrivacyUnchanged()
+      expect(store.settingsNotice).toBe('隐私设置已保存')
+      expect(store.privacySettings.dataSync).toBe('enabled')
+      expect(store.config.privacy).toMatchObject({ dataSync: 'enabled' })
+      await expect(store.updatePrivacySettings({ dataSync: 'disabled' })).resolves.toBe(true)
+      expect(store.privacySettings.dataSync).toBe('disabled')
+      expect(store.config.privacy).toMatchObject({ dataSync: 'disabled' })
 
       vi.mocked(window.aiops.applyPrivacyRuntimeSettings!).mockResolvedValueOnce({
         ok: true,
         data: {
           telemetry: 'enabled',
           dataSync: 'enabled',
-          dataSyncRuntime: 'backend-double',
+          dataSyncRuntime: 'local-file',
           appliedAt: '',
           message: 'bad runtime'
         }

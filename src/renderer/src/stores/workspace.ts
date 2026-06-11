@@ -1789,7 +1789,7 @@ const normalizePrivacyConfig = (source?: Partial<PrivacyUserConfig>) => {
   }
 }
 
-const privacyRuntimeValues = ['disabled', 'service', 'backend-double'] as const
+const privacyRuntimeValues = ['disabled', 'service', 'backend-double', 'local-file'] as const
 
 const isPrivacyRuntimeSnapshotForRequest = (source: unknown, expectedPrivacy: PrivacyUserConfig): source is PrivacyRuntimeApplyData =>
   isRecord(source) &&

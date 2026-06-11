@@ -8,3 +8,4 @@ playwright-report/
 .DS_Store
 npm-debug.log*
 aiopsterm-state.db
+.aiopsterm-data-sync-runtime.json

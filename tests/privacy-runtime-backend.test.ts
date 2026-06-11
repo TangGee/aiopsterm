@@ -1,19 +1,29 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { dirname, join } from 'path'
 
 type PrivacyRuntimeBackend = {
-  configurePrivacyRuntime: (config?: { dataSyncBackendUrl?: string; useDataSyncBackendDouble?: boolean }) => void
+  configurePrivacyRuntime: (config?: { dataSyncBackendUrl?: string; dataSyncStateFilePath?: string; useDataSyncBackendDouble?: boolean }) => void
   resetPrivacyRuntimeForTests: () => void
   getPrivacyRuntimeSnapshot: () => any
   applyPrivacyRuntimeSettings: (input: any) => any
 }
 
 let backend: PrivacyRuntimeBackend
+let stateFilePath = ''
 
 beforeEach(async () => {
   const modulePath = '../src/main/backend/privacyRuntime'
   backend = (await import(modulePath)) as PrivacyRuntimeBackend
-  backend.configurePrivacyRuntime({ useDataSyncBackendDouble: false, dataSyncBackendUrl: '' })
+  const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-privacy-runtime-'))
+  stateFilePath = join(dir, 'data-sync-runtime.json')
+  backend.configurePrivacyRuntime({ useDataSyncBackendDouble: false, dataSyncBackendUrl: '', dataSyncStateFilePath: stateFilePath })
   backend.resetPrivacyRuntimeForTests()
+})
+
+afterEach(async () => {
+  if (stateFilePath) await rm(dirname(stateFilePath), { recursive: true, force: true })
 })
 
 const previousPrivacy = {
@@ -45,7 +55,6 @@ describe('privacy runtime backend boundary', () => {
   })
 
   it('disables data sync without requiring a remote service', () => {
-    backend.configurePrivacyRuntime({ useDataSyncBackendDouble: true })
     const enabled = backend.applyPrivacyRuntimeSettings({
       previousPrivacy,
       nextPrivacy: {
@@ -70,7 +79,7 @@ describe('privacy runtime backend boundary', () => {
     })
   })
 
-  it('fails closed when data sync enable is requested without a configured backend service', () => {
+  it('enables data sync through a backend-owned local runtime state file', async () => {
     const result = backend.applyPrivacyRuntimeSettings({
       previousPrivacy,
       nextPrivacy: {
@@ -80,20 +89,34 @@ describe('privacy runtime backend boundary', () => {
       }
     })
 
-    expect(result).toEqual({
-      ok: false,
-      errorCode: 'DATA_SYNC_UNAVAILABLE',
-      errorMessage: '数据同步服务未配置，无法启用'
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      telemetry: 'disabled',
+      dataSync: 'enabled',
+      dataSyncRuntime: 'local-file',
+      stateFilePath,
+      message: '隐私运行时设置已应用，数据同步已启用'
     })
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as Record<string, unknown>
+    expect(persisted).toMatchObject({
+      version: 1,
+      enabled: true,
+      runtime: 'local-file',
+      telemetry: 'disabled',
+      dataSync: 'enabled'
+    })
+
+    backend.configurePrivacyRuntime({ useDataSyncBackendDouble: false, dataSyncBackendUrl: '', dataSyncStateFilePath: stateFilePath })
     expect(backend.getPrivacyRuntimeSnapshot()).toMatchObject({
-      telemetry: 'enabled',
-      dataSync: 'disabled',
-      dataSyncRuntime: 'disabled'
+      telemetry: 'disabled',
+      dataSync: 'enabled',
+      dataSyncRuntime: 'local-file',
+      stateFilePath
     })
   })
 
   it('allows data sync enable through a backend-owned test double', () => {
-    backend.configurePrivacyRuntime({ useDataSyncBackendDouble: true })
+    backend.configurePrivacyRuntime({ useDataSyncBackendDouble: true, dataSyncStateFilePath: stateFilePath })
 
     const result = backend.applyPrivacyRuntimeSettings({
       previousPrivacy,

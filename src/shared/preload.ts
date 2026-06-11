@@ -1076,7 +1076,9 @@ export type PrivacyRuntimeSnapshot = {
   telemetry: PrivacyUserConfig['telemetry']
   dataSync: PrivacyUserConfig['dataSync']
   appliedAt: string
-  dataSyncRuntime: 'disabled' | 'service' | 'backend-double'
+  dataSyncRuntime: 'disabled' | 'service' | 'backend-double' | 'local-file'
+  stateFilePath?: string
+  lastSyncAt?: string
   message: string
 }
 

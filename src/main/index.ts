@@ -1315,6 +1315,7 @@ configureDatabaseBackendRuntime({ getConfig, stateFilePath: join(app.getPath('us
 configureVoiceBackendRuntime({ getConfig })
 configureFilesBackendRuntime({ getConfig })
 configurePrivacyRuntime({
+  dataSyncStateFilePath: join(app.getPath('userData'), 'data-sync-runtime.json'),
   useDataSyncBackendDouble: process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE === '1'
 })
 configureSshTunnelBackendRuntime({ getConfig })
