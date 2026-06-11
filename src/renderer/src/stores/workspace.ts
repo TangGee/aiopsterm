@@ -450,7 +450,14 @@ type K8sKubeconfigImportResult = {
   kubeconfigPath: string
   kubeconfigContent: string
   currentContext: string
+  stale?: boolean
   error?: string
+}
+
+type K8sKubeconfigImportRequest = {
+  requestId: number
+  kubeconfigPath?: string
+  kubeconfigContent?: string
 }
 
 export type TodoItem = AiTodoItem
@@ -2216,6 +2223,20 @@ const isK8sKubeconfigImportData = (source: unknown): source is K8sKubeconfigImpo
   typeof source.kubeconfigContent === 'string' &&
   typeof source.currentContext === 'string'
 
+const isK8sKubeconfigImportDataForRequest = (source: unknown, expected: K8sKubeconfigImportRequest): source is K8sKubeconfigImportData => {
+  if (!isK8sKubeconfigImportData(source)) return false
+  if (!source.contexts.length) return false
+  if (expected.kubeconfigPath !== undefined && source.kubeconfigPath !== expected.kubeconfigPath) return false
+  if (expected.kubeconfigContent !== undefined && source.kubeconfigContent !== expected.kubeconfigContent) return false
+  if (source.currentContext && !source.contexts.some((context) => context.name === source.currentContext)) return false
+  return source.contexts.every((context) => {
+    if (!context.name.trim() || !context.cluster.trim()) return false
+    if (context.server.trim() === '') return false
+    if (source.currentContext && context.name === source.currentContext) return true
+    return true
+  })
+}
+
 const isK8sClusterTestData = (source: unknown): source is K8sClusterTestData =>
   isRecord(source) &&
   typeof source.success === 'boolean' &&
@@ -2227,6 +2248,14 @@ const isK8sClusterTestData = (source: unknown): source is K8sClusterTestData =>
   isK8sOptionalString(source.output) &&
   isK8sOptionalString(source.error) &&
   isK8sOptionalNonNegativeNumber(source.durationMs)
+
+const isK8sClusterTestDataForRequest = (source: unknown, expected: Partial<KubernetesClusterTestInput>): source is K8sClusterTestData => {
+  if (!isK8sClusterTestData(source)) return false
+  if (source.success !== source.isValid) return false
+  if (expected.contextName !== undefined && source.contextName !== expected.contextName) return false
+  if (expected.serverUrl !== undefined && expected.serverUrl !== null && expected.serverUrl.trim() && source.serverUrl !== expected.serverUrl.trim()) return false
+  return true
+}
 
 const normalizeK8sCommandText = (value: string) => value.trim().replace(/\s+/g, ' ')
 const expectedK8sResourceNamespace = (resource: K8sResource) => (resource.kind === 'nodes' ? 'all' : resource.namespace)
@@ -3882,6 +3911,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let removeMcpConfigFileListener: (() => void) | null = null
   let mcpConfigLoadRequest = 0
   let kbSearchRequest = 0
+  let k8sKubeconfigImportRequest = 0
+  let k8sAgentCleanupRequest = 0
   let removeSkillsUpdateListener: (() => void) | null = null
   let removeKnowledgeProgressListener: (() => void) | null = null
   let removeExtensionInstallProgressListener: (() => void) | null = null
@@ -10464,6 +10495,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('Kubernetes Agent cleanup API 不可用')
       return false
     }
+    const requestId = ++k8sAgentCleanupRequest
+    const requestedClusterId = k8sAgentClusterId.value
+    const requestedContextName = k8sAgentContextName.value
     try {
       const result = await window.aiops.cleanupKubernetesAgent()
       if (!result?.ok) {
@@ -10474,6 +10508,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice('Kubernetes Agent cleanup backend returned malformed result data.')
         return false
       }
+      if (requestId !== k8sAgentCleanupRequest || requestedClusterId !== k8sAgentClusterId.value || requestedContextName !== k8sAgentContextName.value) return false
     } catch (error) {
       setK8sNotice(error instanceof Error ? error.message : 'Kubernetes Agent 清理失败')
       return false
@@ -10621,18 +10656,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('Kubernetes cluster test API 不可用')
       return false
     }
-    const result = await window.aiops.testKubernetesClusterConnection({
+    const request = {
       contextName: input.contextName || '',
       serverUrl: input.serverUrl,
       kubeconfigPath: input.kubeconfigPath,
       kubeconfigContent: input.kubeconfigContent
-    })
-    if (result?.ok && !isK8sClusterTestData(result.data)) {
+    }
+    const result = await window.aiops.testKubernetesClusterConnection(request)
+    if (result?.ok && !isK8sClusterTestDataForRequest(result.data, request)) {
       k8sTestResult.value = false
       setK8sNotice('Kubernetes cluster test backend returned malformed result data.')
       return false
     }
-    const ok = Boolean(result?.ok && isK8sClusterTestData(result.data) && result.data.isValid)
+    const ok = Boolean(result?.ok && isK8sClusterTestDataForRequest(result.data, request) && result.data.isValid)
     k8sTestResult.value = ok
     setK8sNotice(ok ? result.data?.message || '连接测试成功' : result?.errorMessage || result?.data?.message || '连接测试失败，请确认 Context 和 Server URL')
     return ok
@@ -10642,9 +10678,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return k8sImportContexts.value.find((context) => context.name === contextName) || null
   }
 
-  const normalizeK8sKubeconfigImportResult = (result: Awaited<ReturnType<AiopsPreloadApi['importKubernetesKubeconfig']>>): K8sKubeconfigImportResult => {
+  const normalizeK8sKubeconfigImportResult = (
+    result: Awaited<ReturnType<AiopsPreloadApi['importKubernetesKubeconfig']>>,
+    expected: K8sKubeconfigImportRequest
+  ): K8sKubeconfigImportResult => {
+    if (expected.requestId !== k8sKubeconfigImportRequest) {
+      return {
+        success: false,
+        contexts: [],
+        kubeconfigPath: '',
+        kubeconfigContent: '',
+        currentContext: '',
+        stale: true,
+        error: 'Kubeconfig backend returned stale result data.'
+      }
+    }
     if (result?.ok) {
-      if (!isK8sKubeconfigImportData(result.data)) {
+      if (!isK8sKubeconfigImportDataForRequest(result.data, expected)) {
         return {
           success: false,
           contexts: [],
@@ -10686,10 +10736,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('Kubeconfig 导入服务不可用')
       return failed
     }
-    const result = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigContent: content }))
+    const request: K8sKubeconfigImportRequest = { requestId: ++k8sKubeconfigImportRequest, kubeconfigContent: content }
+    const result = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigContent: content }), request)
     if (result.success) {
       k8sImportContexts.value = result.contexts
       setK8sNotice(`已发现 ${result.contexts.length} 个 kubeconfig Context`)
+    } else if (result.stale) {
+      return result
     } else {
       setK8sNotice(result.error || 'Kubeconfig 导入失败')
     }
@@ -10697,7 +10750,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const importK8sKubeconfigFile = async (filePath: string) => {
-    if (!filePath.trim()) {
+    const kubeconfigPath = filePath.trim()
+    if (!kubeconfigPath) {
       const emptyResult: K8sKubeconfigImportResult = {
         success: false,
         contexts: [],
@@ -10723,10 +10777,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice('Kubeconfig 导入服务不可用')
         return failed
       }
-      const imported = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigPath: filePath }))
+      const request: K8sKubeconfigImportRequest = { requestId: ++k8sKubeconfigImportRequest, kubeconfigPath }
+      const imported = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigPath }), request)
       if (imported.success) {
         k8sImportContexts.value = imported.contexts
         setK8sNotice(`已选择 kubeconfig 文件，发现 ${imported.contexts.length} 个 Context`)
+      } else if (imported.stale) {
+        return imported
       } else {
         setK8sNotice(`Kubeconfig 导入失败：${imported.error}`)
       }

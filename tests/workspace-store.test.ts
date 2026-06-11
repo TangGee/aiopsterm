@@ -6890,6 +6890,123 @@ describe('workspace store', () => {
     }
   })
 
+  it('rejects stale or request-mismatched Kubernetes backend results before mutating UI state', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    const originalImportContexts = JSON.stringify(store.k8sImportContexts)
+
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        contexts: [{ name: 'shadow/admin', cluster: 'shadow-cluster', server: 'https://shadow.k8s.local:6443', namespace: 'shadow' }],
+        kubeconfigPath: '',
+        kubeconfigContent: 'different kubeconfig content',
+        currentContext: 'shadow/admin'
+      }
+    })
+    const mismatchedContentImport = await store.importK8sKubeconfigContent('requested kubeconfig content')
+    expect(mismatchedContentImport).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: 'Kubeconfig backend returned malformed result data.'
+      })
+    )
+    expect(store.k8sClusterNotice).toBe('Kubeconfig backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sImportContexts)).toBe(originalImportContexts)
+
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        contexts: [{ name: 'shadow/admin', cluster: 'shadow-cluster', server: 'https://shadow.k8s.local:6443', namespace: 'shadow' }],
+        kubeconfigPath: '/tmp/shadow-kubeconfig.yaml',
+        kubeconfigContent: 'shadow kubeconfig',
+        currentContext: 'shadow/admin'
+      }
+    })
+    const mismatchedFileImport = await store.importK8sKubeconfigFile('/tmp/requested-kubeconfig.yaml')
+    expect(mismatchedFileImport.success).toBe(false)
+    expect(mismatchedFileImport.error).toBe('Kubeconfig backend returned malformed result data.')
+    expect(store.k8sClusterNotice).toBe('Kubeconfig 导入失败：Kubeconfig backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sImportContexts)).toBe(originalImportContexts)
+
+    let resolveSlowImport: ((value: Awaited<ReturnType<typeof window.aiops.importKubernetesKubeconfig>>) => void) | undefined
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSlowImport = resolve
+        }) as ReturnType<typeof window.aiops.importKubernetesKubeconfig>
+    )
+    const stalePromise = store.importK8sKubeconfigContent('slow kubeconfig content')
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        contexts: [{ name: 'fast/admin', cluster: 'fast-cluster', server: 'https://fast.k8s.local:6443', namespace: 'fast' }],
+        kubeconfigPath: '',
+        kubeconfigContent: 'fast kubeconfig content',
+        currentContext: 'fast/admin'
+      }
+    })
+    const fastImport = await store.importK8sKubeconfigContent('fast kubeconfig content')
+    expect(fastImport.success).toBe(true)
+    expect(store.k8sImportContexts).toEqual([{ name: 'fast/admin', cluster: 'fast-cluster', server: 'https://fast.k8s.local:6443', namespace: 'fast' }])
+    resolveSlowImport?.({
+      ok: true,
+      data: {
+        contexts: [{ name: 'slow/admin', cluster: 'slow-cluster', server: 'https://slow.k8s.local:6443', namespace: 'slow' }],
+        kubeconfigPath: '',
+        kubeconfigContent: 'slow kubeconfig content',
+        currentContext: 'slow/admin'
+      }
+    })
+    const staleImport = await stalePromise
+    expect(staleImport).toEqual(expect.objectContaining({ success: false, stale: true }))
+    expect(store.k8sImportContexts).toEqual([{ name: 'fast/admin', cluster: 'fast-cluster', server: 'https://fast.k8s.local:6443', namespace: 'fast' }])
+
+    vi.mocked(window.aiops.testKubernetesClusterConnection).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        success: true,
+        isValid: true,
+        contextName: 'shadow/admin',
+        serverUrl: 'https://shadow.k8s.local:6443',
+        message: 'shadow success'
+      }
+    })
+    await expect(store.testK8sClusterConnection({ contextName: 'fast/admin', serverUrl: 'https://fast.k8s.local:6443' })).resolves.toBe(false)
+    expect(store.k8sTestResult).toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster test backend returned malformed result data.')
+
+    vi.mocked(window.aiops.testKubernetesClusterConnection).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        success: false,
+        isValid: true,
+        contextName: 'fast/admin',
+        serverUrl: 'https://fast.k8s.local:6443',
+        message: 'conflicting success flags'
+      }
+    })
+    await expect(store.testK8sClusterConnection({ contextName: 'fast/admin', serverUrl: 'https://fast.k8s.local:6443' })).resolves.toBe(false)
+    expect(store.k8sTestResult).toBe(false)
+    expect(store.k8sClusterNotice).toBe('Kubernetes cluster test backend returned malformed result data.')
+
+    expect(store.setK8sAgentCluster('k8s-1')).toBe(true)
+    let resolveCleanup: ((value: Awaited<ReturnType<typeof window.aiops.cleanupKubernetesAgent>>) => void) | undefined
+    vi.mocked(window.aiops.cleanupKubernetesAgent).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCleanup = resolve
+        }) as ReturnType<typeof window.aiops.cleanupKubernetesAgent>
+    )
+    const cleanupPromise = store.cleanupK8sAgent()
+    expect(store.setK8sAgentCluster('k8s-2')).toBe(true)
+    resolveCleanup?.({ ok: true, data: { cleared: true, cleanedAt: '刚刚' } })
+    await expect(cleanupPromise).resolves.toBe(false)
+    expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-2', contextName: 'staging/devops' })
+    expect(store.k8sAgentStatus).toBe('ready')
+    expect(store.k8sClusterNotice).toBe('Kubernetes Agent 已切换到 staging-cluster')
+  })
+
   it('surfaces unsupported Kubernetes seed commands as backend failures', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()
