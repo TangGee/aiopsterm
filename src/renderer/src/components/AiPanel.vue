@@ -2033,65 +2033,8 @@ const selectedCommandRef = computed(() => {
   return null
 })
 
-const estimateTextTokens = (value: string | undefined | null) => {
-  const text = (value || '').replace(/\s+/g, ' ').trim()
-  if (!text) return 0
-  const cjkCount = text.match(/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/g)?.length || 0
-  return Math.ceil(cjkCount * 0.75 + (text.length - cjkCount) / 4)
-}
-
-const estimateImageTokens = (part: { data?: string }) => 85 + Math.ceil((part.data?.length || 0) / 2048)
-
-const estimateChipTokens = (part: AiChipContentPart) => {
-  if (part.chipType === 'doc') return estimateTextTokens(`${part.ref.name || ''} ${part.ref.relPath || part.ref.absPath}`)
-  if (part.chipType === 'chat') return estimateTextTokens(`${part.ref.taskId} ${part.ref.title || ''}`)
-  if (part.chipType === 'command') return estimateTextTokens(`${part.ref.command} ${part.ref.label || ''} ${part.ref.path || ''}`)
-  return estimateTextTokens(`${part.ref.skillName} ${part.ref.description || ''}`)
-}
-
-const estimateContentPartTokens = (part: AiContentPart) => {
-  if (part.type === 'text') return estimateTextTokens(part.text)
-  if (part.type === 'image') return estimateImageTokens(part)
-  return estimateChipTokens(part)
-}
-
-const estimateContextTokens = (context: AiContextOption) => {
-  const metadataTokens = estimateTextTokens(`${context.kind} ${context.label} ${context.detail || ''} ${context.relPath || ''}`)
-  return context.kind === 'images' && context.data ? metadataTokens + estimateImageTokens({ data: context.data }) : metadataTokens
-}
-
-const estimateMessageTokens = (message: { role: string; text: string; contentParts?: AiContentPart[]; hosts?: AiContextOption[] }) => {
-  if (message.role === 'user' && message.contentParts?.length) {
-    return (
-      message.contentParts.reduce((sum, part) => sum + estimateContentPartTokens(part), 0) +
-      (message.hosts || []).reduce((sum, context) => sum + estimateContextTokens(context), 0)
-    )
-  }
-  return estimateTextTokens(message.text)
-}
-
-const resolveLocalContextWindow = (modelName: string) => {
-  const normalized = modelName.toLowerCase()
-  if (normalized.includes('mini') || normalized.includes('small')) return 64000
-  if (normalized.includes('long')) return 200000
-  return 128000
-}
-
 const contextUsage = computed(() => {
-  const contextWindow = resolveLocalContextWindow(workspace.config.modelName)
-  const historyTokens = workspace.chatMessages.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
-  const draftTokens = estimateTextTokens(draft.value)
-  const selectedContextTokens = workspace.selectedContexts.reduce((sum, context) => sum + estimateContextTokens(context), 0)
-  const selectedImageTokens = imageInputParts.value.reduce((sum, part) => sum + estimateImageTokens(part), 0)
-  const selectedCommandTokens = selectedCommandRef.value
-    ? estimateTextTokens(`${selectedCommandRef.value.command} ${selectedCommandRef.value.label || ''} ${selectedCommandRef.value.path || ''}`)
-    : 0
-  const used = historyTokens + draftTokens + selectedContextTokens + selectedImageTokens + selectedCommandTokens
-  return {
-    used,
-    contextWindow,
-    percent: Math.min(100, Math.round((used / contextWindow) * 100))
-  }
+  return workspace.aiContextUsage || { used: 0, contextWindow: 0, percent: 0 }
 })
 
 const contextUsageColor = computed(() => {

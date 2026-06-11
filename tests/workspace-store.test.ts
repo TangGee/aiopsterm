@@ -394,6 +394,13 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-2)?.contentParts).toBeUndefined()
     expect(store.chatMessages.at(-1)?.text).toContain('正在请求 aiopsterm AI 后端')
     expect(store.chatMessages.at(-1)?.state).toBe('streaming')
+    expect(store.aiContextUsage).toMatchObject({
+      source: 'backend',
+      requestId: 'aichat-request-test-1',
+      assistantMessageId: 'aichat-request-test-1-assistant',
+      contextWindow: 128000,
+      tokensOut: 0
+    })
     const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
     expect(exchangeInput).toMatchObject({
       text: '检查生产磁盘',
@@ -413,6 +420,10 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-1)?.state).toBe('done')
     expect(store.chatMessages.at(-1)?.text).toContain('Activated Skill: incident-triage')
     expect(store.chatMessages.at(-1)?.text).toContain('aiopsterm 本地后端生成')
+    expect(store.aiContextUsage?.source).toBe('backend')
+    expect(store.aiContextUsage?.requestId).toBe('aichat-request-test-1')
+    expect(store.aiContextUsage?.assistantMessageId).toBe('aichat-request-test-1-assistant')
+    expect(store.aiContextUsage?.tokensOut).toBeGreaterThan(0)
   })
 
   it('cancels streaming ai responses through the backend bridge and ignores late generation results', async () => {
@@ -436,6 +447,11 @@ describe('workspace store', () => {
     })
     expect(store.chatMessages.at(-1)?.state).toBe('cancelled')
     expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
+    expect(store.aiContextUsage).toMatchObject({
+      source: 'backend',
+      requestId: 'aichat-request-test-1',
+      assistantMessageId: 'aichat-request-test-1-assistant'
+    })
 
     await vi.runAllTimersAsync()
     expect(store.chatMessages.at(-1)?.state).toBe('cancelled')
@@ -453,6 +469,40 @@ describe('workspace store', () => {
     } as any)
     await expect(store.sendChat('客户端不能伪造 AI 交换')).resolves.toBe(false)
     expect(store.chatMessages).toEqual([])
+    expect(store.aiContextUsage).toBeNull()
+    expect(store.topNotice).toBe('AI 请求创建失败')
+
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        requestId: 'aichat-request-bad-usage',
+        userMessage: {
+          id: 'aichat-request-bad-usage-user',
+          role: 'user',
+          text: '坏 usage 不能进入会话'
+        },
+        assistantMessage: {
+          id: 'aichat-request-bad-usage-assistant',
+          role: 'assistant',
+          text: '正在请求 aiopsterm AI 后端...',
+          state: 'streaming'
+        },
+        responseInput: {
+          requestId: 'aichat-request-bad-usage',
+          assistantMessageId: 'aichat-request-bad-usage-assistant',
+          prompt: '坏 usage 不能进入会话'
+        },
+        contextUsage: {
+          used: 10,
+          contextWindow: 0,
+          percent: 10,
+          source: 'renderer'
+        }
+      }
+    } as any)
+    await expect(store.sendChat('坏 usage 不能进入会话')).resolves.toBe(false)
+    expect(store.chatMessages).toEqual([])
+    expect(store.aiContextUsage).toBeNull()
     expect(store.topNotice).toBe('AI 请求创建失败')
 
     vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
@@ -468,6 +518,36 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-1)?.state).toBe('error')
     expect(store.chatMessages.at(-1)?.text).toBe('AI 响应生成结果无效')
     expect(store.chatMessages.at(-1)?.text).not.toContain('provider/model')
+    expect(store.aiContextUsage).toMatchObject({
+      source: 'backend',
+      requestId: 'aichat-request-test-1',
+      assistantMessageId: 'aichat-request-test-1-assistant'
+    })
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: '坏 usage 响应不能进入可见消息',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-test-2',
+        assistantMessageId: 'aichat-request-test-2-assistant',
+        contextUsage: {
+          used: 10,
+          contextWindow: 128000,
+          percent: 120,
+          source: 'backend'
+        }
+      }
+    } as any)
+    await expect(store.sendChat('坏 usage 响应')).resolves.toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.chatMessages.at(-1)?.id).toBe('aichat-request-test-2-assistant')
+    expect(store.chatMessages.at(-1)?.state).toBe('error')
+    expect(store.chatMessages.at(-1)?.text).toBe('AI 响应生成结果无效')
 
     vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
     await expect(store.sendChat('取消一条坏响应')).resolves.toBe(true)
@@ -477,7 +557,16 @@ describe('workspace store', () => {
       ok: true,
       data: {
         status: 'cancelled',
-        active: true
+        requestId: 'aichat-request-test-3',
+        assistantMessageId: 'aichat-request-test-3-assistant',
+        text: '已停止生成。',
+        active: true,
+        contextUsage: {
+          used: 10,
+          contextWindow: 128000,
+          percent: 200,
+          source: 'backend'
+        }
       }
     } as any)
     await expect(store.cancelStreamingAiChatResponse()).resolves.toBe(false)

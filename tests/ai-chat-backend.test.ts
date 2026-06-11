@@ -76,6 +76,16 @@ describe('ai chat backend response boundary', () => {
       prompt: '检查生产磁盘',
       messages: [{ role: 'user', text: '检查生产磁盘' }]
     })
+    expect(result.data?.contextUsage).toMatchObject({
+      source: 'backend',
+      requestId: result.data?.requestId,
+      assistantMessageId: result.data?.assistantMessage.id,
+      contextWindow: 128000,
+      percent: expect.any(Number),
+      tokensIn: expect.any(Number),
+      tokensOut: 0
+    })
+    expect(result.data?.contextUsage?.used).toBeGreaterThan(0)
 
     const todoSnapshot = listAiTodoSnapshot()
     expect(todoSnapshot.ok).toBe(true)
@@ -198,6 +208,13 @@ describe('ai chat backend response boundary', () => {
     })
     expect(result.data?.text).toContain('hosts:prod-1')
     expect(result.data?.text).toContain('当前响应由 aiopsterm 本地后端生成')
+    expect(result.data?.contextUsage).toMatchObject({
+      source: 'backend',
+      contextWindow: 128000,
+      tokensIn: expect.any(Number),
+      tokensOut: expect.any(Number)
+    })
+    expect(result.data?.contextUsage?.used).toBeGreaterThan(result.data?.contextUsage?.tokensIn || 0)
     expect(wait).toHaveBeenCalledWith(localAiChatResponseMinDelayMs)
 
     const todoSnapshot = listAiTodoSnapshot()
@@ -272,6 +289,13 @@ describe('ai chat backend response boundary', () => {
       status: 'done',
       text: '先执行 df -h 和 journalctl -n 120 --no-pager，确认磁盘与错误日志后再给变更建议。'
     })
+    expect(result.data?.contextUsage).toMatchObject({
+      source: 'backend',
+      contextWindow: 128000,
+      tokensIn: expect.any(Number),
+      tokensOut: expect.any(Number)
+    })
+    expect(result.data?.contextUsage?.used).toBeGreaterThan(result.data?.contextUsage?.tokensIn || 0)
     expect(fetchMock).toHaveBeenCalledWith(
       'http://127.0.0.1:4010/v1/chat/completions',
       expect.objectContaining({

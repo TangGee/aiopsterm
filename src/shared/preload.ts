@@ -1919,6 +1919,19 @@ export type AiChatSkillInput = {
   content?: string
 }
 
+export type AiChatContextUsageSnapshot = {
+  used: number
+  contextWindow: number
+  percent: number
+  tokensIn?: number
+  tokensOut?: number
+  cacheWrites?: number
+  cacheReads?: number
+  source: 'backend'
+  requestId?: string
+  assistantMessageId?: string
+}
+
 export type AiChatExchangeRequestInput = {
   text: string
   hosts?: AiChatHistoryHostContext[]
@@ -1934,6 +1947,7 @@ export type AiChatExchangeRequestResult = AiopsMutationResult<{
   userMessage: AiChatHistoryMessage
   assistantMessage: AiChatHistoryMessage
   responseInput: AiChatResponseInput
+  contextUsage?: AiChatContextUsageSnapshot
 }>
 
 export type AiChatResponseInput = {
@@ -1957,6 +1971,7 @@ export type AiChatResponseResult = AiopsMutationResult<{
   requestId?: string
   assistantMessageId?: string
   message?: AiChatHistoryMessage
+  contextUsage?: AiChatContextUsageSnapshot
 }>
 
 export type AiChatCancelInput = {
@@ -1970,6 +1985,7 @@ export type AiChatCancelResult = AiopsMutationResult<{
   assistantMessageId?: string
   text: string
   active: boolean
+  contextUsage?: AiChatContextUsageSnapshot
 }>
 
 export type DatabaseEngineCode = 'mysql' | 'postgresql' | 'sqlite' | 'oracle'

@@ -92,6 +92,7 @@ import type {
   AiCommandChipRef,
   AiContextCatalog,
   AiContextOption,
+  AiChatContextUsageSnapshot,
   AiPreferencesUserConfig,
   AiChatConversationRecord,
   AiChatExchangeRequestInput,
@@ -202,6 +203,7 @@ import type {
 export type {
   AiChatChipContentPart,
   AiChatChipRef,
+  AiChatContextUsageSnapshot,
   AiChipContentPart,
   AiCommandChipContentPart,
   AiCommandChipRef,
@@ -301,6 +303,7 @@ type AiMcpResourceAccessActionData = NonNullable<Awaited<ReturnType<AiopsPreload
 type AiChatExchangeRequestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createAiChatExchangeRequest']>>['data']>
 type AiChatResponseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['generateAiChatResponse']>>['data']>
 type AiChatCancelData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['cancelAiChatResponse']>>['data']>
+type AiContextUsage = AiChatContextUsageSnapshot
 const defaultK8sProxyConfig: K8sProxyConfig = {
   enabled: false,
   type: 'SOCKS5',
@@ -2639,6 +2642,23 @@ const isAiChatCommandInput = (source: unknown): source is NonNullable<AiChatResp
 const isAiChatSkillInput = (source: unknown): source is NonNullable<AiChatResponseInput['skills']>[number] =>
   isRecord(source) && isNonEmptyString(source.name) && isOptionalString(source.description) && isOptionalString(source.content)
 
+const isAiContextUsageSnapshot = (source: unknown): source is AiContextUsage =>
+  isRecord(source) &&
+  isNonNegativeFiniteNumber(source.used) &&
+  isPositiveFiniteNumber(source.contextWindow) &&
+  isNonNegativeFiniteNumber(source.percent) &&
+  source.percent <= 100 &&
+  (source.tokensIn === undefined || isNonNegativeFiniteNumber(source.tokensIn)) &&
+  (source.tokensOut === undefined || isNonNegativeFiniteNumber(source.tokensOut)) &&
+  (source.cacheWrites === undefined || isNonNegativeFiniteNumber(source.cacheWrites)) &&
+  (source.cacheReads === undefined || isNonNegativeFiniteNumber(source.cacheReads)) &&
+  source.source === 'backend' &&
+  isOptionalString(source.requestId) &&
+  isOptionalString(source.assistantMessageId)
+
+const isAiContextUsageForRequest = (source: unknown, requestId: string, assistantMessageId: string): source is AiContextUsage =>
+  isAiContextUsageSnapshot(source) && source.requestId === requestId && source.assistantMessageId === assistantMessageId
+
 const isAiChatResponseInput = (source: unknown): source is AiChatResponseInput =>
   isRecord(source) &&
   isOptionalString(source.requestId) &&
@@ -2658,7 +2678,8 @@ const isAiChatExchangeRequestData = (source: unknown): source is AiChatExchangeR
   source.userMessage.role === 'user' &&
   isAiChatHistoryMessage(source.assistantMessage) &&
   source.assistantMessage.role === 'assistant' &&
-  isAiChatResponseInput(source.responseInput)
+  isAiChatResponseInput(source.responseInput) &&
+  (source.contextUsage === undefined || isAiContextUsageSnapshot(source.contextUsage))
 
 const isAiChatResponseData = (source: unknown): source is AiChatResponseData =>
   isRecord(source) &&
@@ -2669,7 +2690,8 @@ const isAiChatResponseData = (source: unknown): source is AiChatResponseData =>
   (source.status === undefined || source.status === 'done' || source.status === 'cancelled') &&
   isOptionalString(source.requestId) &&
   isOptionalString(source.assistantMessageId) &&
-  (source.message === undefined || isAiChatHistoryMessage(source.message))
+  (source.message === undefined || isAiChatHistoryMessage(source.message)) &&
+  (source.contextUsage === undefined || isAiContextUsageSnapshot(source.contextUsage))
 
 const aiChatRequestIdFromAssistantMessageId = (assistantMessageId: string) =>
   assistantMessageId.endsWith('-assistant') ? assistantMessageId.slice(0, -'-assistant'.length) : ''
@@ -2724,7 +2746,8 @@ const isAiChatCancelData = (source: unknown): source is AiChatCancelData =>
   isOptionalString(source.requestId) &&
   isOptionalString(source.assistantMessageId) &&
   isNonEmptyString(source.text) &&
-  typeof source.active === 'boolean'
+  typeof source.active === 'boolean' &&
+  (source.contextUsage === undefined || isAiContextUsageSnapshot(source.contextUsage))
 
 const isTerminalCommandGenerationContext = (source: unknown): source is TerminalCommandGenerationContext =>
   isRecord(source) &&
@@ -4137,6 +4160,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   const todoItems = ref<TodoItem[]>([])
   const chatMessages = ref<ChatMessage[]>([])
+  const aiContextUsage = ref<AiContextUsage | null>(null)
   const terminalSecurityPrompt = ref<TerminalSecurityPrompt>(null)
   const terminalCommandGenerationRecords = ref<TerminalCommandGenerationRecord[]>([])
   let keywordHighlightSaveTimer: number | null = null
@@ -4173,6 +4197,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       percent: total === 0 ? 0 : Math.round((completed / total) * 100)
     }
   })
+
+  const clearAiContextUsage = () => {
+    aiContextUsage.value = null
+  }
+
+  const applyAiContextUsage = (usage: AiContextUsage) => {
+    aiContextUsage.value = cloneStructuredValue(usage)
+  }
 
   const cloneConversationRecord = (conversation: AiChatConversationRecord): ConversationItem => ({
     id: conversation.id,
@@ -4266,6 +4298,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       : [nextConversation, ...conversations.value]
     selectedConversationId.value = nextConversation.id
     chatMessages.value = data.messages.map(chatHistoryMessageToChatMessage)
+    clearAiContextUsage()
     return true
   }
 
@@ -12179,6 +12212,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       message.state = 'done'
       message.text = data.text
     }
+    if (requestId && isAiContextUsageForRequest(data?.contextUsage, requestId, assistantMessageId)) {
+      applyAiContextUsage(data.contextUsage)
+    }
     void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
   }
@@ -12207,6 +12243,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (message.state !== 'streaming') return true
     message.state = 'cancelled'
     message.text = result.data.text
+    if (isAiContextUsageForRequest(result.data.contextUsage, requestId, message.id)) {
+      applyAiContextUsage(result.data.contextUsage)
+    }
     void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
     return true
@@ -12260,6 +12299,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(request.errorMessage || 'AI 请求创建失败')
       return false
     }
+    if (isAiContextUsageForRequest(request.data.contextUsage, request.data.requestId, request.data.assistantMessage.id)) {
+      applyAiContextUsage(request.data.contextUsage)
+    }
     const userMessage = chatHistoryMessageToChatMessage(request.data.userMessage)
     userMessage.contentParts = safeContentParts.length || hasStructuredParts ? safeContentParts : undefined
     userMessage.hosts = hostContexts
@@ -12288,6 +12330,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const hasStructuredParts = contentParts.some((part) => part.type !== 'text')
     if (!prompt && !hasStructuredParts) return false
     chatMessages.value.splice(index)
+    clearAiContextUsage()
     return appendChatExchange(prompt, contentParts, overrideHosts ?? originalHosts)
   }
 
@@ -12315,12 +12358,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       await restoreChatMessagesFromBackend(selectedConversationId.value)
     } else {
       chatMessages.value = []
+      clearAiContextUsage()
     }
     return true
   }
 
   const selectConversation = (id: string) => {
     selectedConversationId.value = id
+    clearAiContextUsage()
   }
 
   const renameConversation = async (id: string, title: string) => {
@@ -12410,6 +12455,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const applyChatMessageSnapshot = (messages: AiChatHistoryMessage[]) => {
     chatMessages.value = messages.map(chatHistoryMessageToChatMessage)
+    clearAiContextUsage()
   }
 
   const applyAiMcpToolCallResult = (data: AiMcpToolCallActionData) => {
@@ -12720,6 +12766,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sortedConversations,
     selectedConversationId,
     chatMessages,
+    aiContextUsage,
     terminalSecurityPrompt,
     terminalCommandGenerationRecords,
     selectedContexts,

@@ -3635,6 +3635,46 @@ const promptSummaryMock = (value: unknown) => {
 
 const normalizeAiChatTextMock = (value: unknown) => String(value || '').trim()
 
+const estimateAiChatTextTokensMock = (value: unknown) => {
+  const text = normalizeAiChatTextMock(value).replace(/\s+/g, ' ')
+  if (!text) return 0
+  const cjkCount = text.match(/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/g)?.length || 0
+  return Math.max(1, Math.ceil(cjkCount * 0.75 + (text.length - cjkCount) / 4))
+}
+
+const createAiChatContextUsageMock = (input: {
+  requestId?: string
+  assistantMessageId?: string
+  prompt?: string
+  messages?: TestAiChatMessageInput[]
+  contexts?: TestAiChatContextInput[]
+  skills?: Array<{ name: string; description?: string; content?: string }>
+  command?: TestAiChatCommandInput | null
+  outputText?: string
+}) => {
+  const tokensIn =
+    estimateAiChatTextTokensMock(input.prompt) +
+    (input.messages || []).reduce((sum, message) => sum + estimateAiChatTextTokensMock(message.text), 0) +
+    (input.contexts || []).reduce((sum, context) => sum + estimateAiChatTextTokensMock(`${context.kind} ${context.label} ${context.detail || ''} ${context.relPath || ''}`), 0) +
+    (input.skills || []).reduce((sum, skill) => sum + estimateAiChatTextTokensMock(`${skill.name} ${skill.description || ''} ${skill.content || ''}`), 0) +
+    estimateAiChatTextTokensMock(`${input.command?.id || ''} ${input.command?.label || ''} ${input.command?.command || ''} ${input.command?.path || ''}`)
+  const tokensOut = estimateAiChatTextTokensMock(input.outputText)
+  const used = tokensIn + tokensOut
+  const contextWindow = 128000
+  return {
+    used,
+    contextWindow,
+    percent: Math.min(100, Math.round((used / contextWindow) * 100)),
+    tokensIn,
+    tokensOut,
+    cacheWrites: 0,
+    cacheReads: 0,
+    source: 'backend' as const,
+    requestId: input.requestId,
+    assistantMessageId: input.assistantMessageId
+  }
+}
+
 const normalizeAiChatContextsMock = (contexts?: TestAiChatContextInput[]) =>
   (contexts || [])
     .map((context): TestAiChatContextInput | null => {
@@ -3746,9 +3786,10 @@ type TestAiTodoResponseInput = {
   requestId?: string
   assistantMessageId?: string
   prompt?: string
-  contexts?: Array<{ id: string; kind: string; label: string }>
-  skills?: Array<{ name: string }>
-  command?: { label?: string; command?: string } | null
+  messages?: TestAiChatMessageInput[]
+  contexts?: TestAiChatContextInput[]
+  skills?: Array<{ name: string; description?: string; content?: string }>
+  command?: TestAiChatCommandInput | null
 }
 
 const recordAiTodoResponseMock = (input: TestAiTodoResponseInput, status: 'done' | 'cancelled' | 'error') => {
@@ -5299,7 +5340,16 @@ Object.defineProperty(window, 'aiops', {
               text: '正在请求 aiopsterm AI 后端...',
               state: 'streaming' as const
             },
-            responseInput
+            responseInput,
+            contextUsage: createAiChatContextUsageMock({
+              requestId,
+              assistantMessageId,
+              prompt,
+              messages: responseInput.messages,
+              contexts,
+              skills,
+              command
+            })
           }
         }
       }
@@ -7000,33 +7050,54 @@ Object.defineProperty(window, 'aiops', {
                   durationMs: 1,
                   status: 'cancelled' as const,
                   requestId: input.requestId,
-                  assistantMessageId: input.assistantMessageId
+                  assistantMessageId: input.assistantMessageId,
+                  contextUsage: createAiChatContextUsageMock({
+                    requestId: input.requestId,
+                    assistantMessageId: input.assistantMessageId,
+                    prompt: input.prompt,
+                    messages: input.messages,
+                    contexts: input.contexts,
+                    skills: input.skills,
+                    command: input.command,
+                    outputText: '已停止生成。'
+                  })
                 }
               })
               return
             }
             recordAiTodoResponseMock(input, 'done')
+            const text = [
+              ...(input.skills || []).map((skill) => `Activated Skill: ${skill.name}`),
+              (input.skills || []).length ? '' : '',
+              '正在读取当前终端、资产和知识库上下文...',
+              '',
+              '计划：',
+              '1. 确认目标环境。',
+              '2. 生成只读检查命令。',
+              '3. 等待用户确认后执行。',
+              '',
+              '当前响应由 aiopsterm 本地后端生成，未连接远端 AI 服务。'
+            ].join('\n')
             resolve({
               ok: true,
               data: {
-                text: [
-                  ...(input.skills || []).map((skill) => `Activated Skill: ${skill.name}`),
-                  (input.skills || []).length ? '' : '',
-                  '正在读取当前终端、资产和知识库上下文...',
-                  '',
-                  '计划：',
-                  '1. 确认目标环境。',
-                  '2. 生成只读检查命令。',
-                  '3. 等待用户确认后执行。',
-                  '',
-                  '当前响应由 aiopsterm 本地后端生成，未连接远端 AI 服务。'
-                ].join('\n'),
+                text,
                 provider: 'aiopsterm-local' as const,
                 model: 'aiopsterm-local-agent',
                 durationMs: 1,
                 status: 'done' as const,
                 requestId: input.requestId,
-                assistantMessageId: input.assistantMessageId
+                assistantMessageId: input.assistantMessageId,
+                contextUsage: createAiChatContextUsageMock({
+                  requestId: input.requestId,
+                  assistantMessageId: input.assistantMessageId,
+                  prompt: input.prompt,
+                  messages: input.messages,
+                  contexts: input.contexts,
+                  skills: input.skills,
+                  command: input.command,
+                  outputText: text
+                })
               }
             })
           }, 700)
@@ -7052,7 +7123,12 @@ Object.defineProperty(window, 'aiops', {
           requestId,
           assistantMessageId,
           text: '已停止生成。',
-          active: true
+          active: true,
+          contextUsage: createAiChatContextUsageMock({
+            requestId,
+            assistantMessageId,
+            outputText: '已停止生成。'
+          })
         }
       }
     }),

@@ -4,6 +4,7 @@ import type {
   AiChatCancelResult,
   AiChatCommandInput,
   AiChatContextInput,
+  AiChatContextUsageSnapshot,
   AiChatExchangeRequestInput,
   AiChatExchangeRequestResult,
   AiChatHistoryHostContext,
@@ -110,7 +111,16 @@ const unregisterAiChatResponseControl = (control: AiChatResponseControl) => {
 
 const isAiChatResponseCancelled = (control: AiChatResponseControl) => control.cancelled || control.controller.signal.aborted
 
-const cancelledAiChatResponse = (control: AiChatResponseControl, modelName: string, startedAt: number): AiChatResponseResult => ({
+const contextUsageForResponse = (input: AiChatResponseInput, control: AiChatResponseControl, modelName: string, text = '') =>
+  buildBackendContextUsageSnapshot({
+    ...input,
+    requestId: control.requestId || input.requestId,
+    assistantMessageId: control.assistantMessageId || input.assistantMessageId,
+    model: modelName,
+    tokensOut: estimateTextTokens(text)
+  })
+
+const cancelledAiChatResponse = (input: AiChatResponseInput, control: AiChatResponseControl, modelName: string, startedAt: number): AiChatResponseResult => ({
   ok: true,
   data: {
     text: AI_CHAT_CANCELLED_TEXT,
@@ -119,7 +129,8 @@ const cancelledAiChatResponse = (control: AiChatResponseControl, modelName: stri
     durationMs: Math.max(1, now() - startedAt),
     status: 'cancelled',
     requestId: control.requestId,
-    assistantMessageId: control.assistantMessageId
+    assistantMessageId: control.assistantMessageId,
+    contextUsage: contextUsageForResponse(input, control, modelName, AI_CHAT_CANCELLED_TEXT)
   }
 })
 
@@ -235,6 +246,63 @@ const resolveSelectedSkills = async (contexts: AiChatContextInput[]): Promise<Ai
 
 const commandDisplay = (command?: AiChatCommandInput | null) => normalizeText(command?.label || command?.command || command?.id)
 
+const estimateTextTokens = (value: string | undefined | null) => {
+  const text = normalizeText(value).replace(/\s+/g, ' ')
+  if (!text) return 0
+  const cjkCount = text.match(/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/g)?.length || 0
+  return Math.max(1, Math.ceil(cjkCount * 0.75 + (text.length - cjkCount) / 4))
+}
+
+const estimateContextWindow = (modelName: string) => {
+  const normalized = normalizeText(modelName).toLowerCase()
+  if (normalized.includes('mini') || normalized.includes('small')) return 64000
+  if (normalized.includes('long')) return 200000
+  if (normalized.includes('gpt-5') || normalized.includes('claude') || normalized.includes('qwen')) return 128000
+  return 128000
+}
+
+const estimateContextTokens = (context: AiChatContextInput) =>
+  estimateTextTokens(`${context.kind} ${context.label} ${context.detail || ''} ${context.relPath || ''} ${context.mediaType || ''}`)
+
+const estimateSkillTokens = (skill: AiChatSkillInput) => estimateTextTokens(`${skill.name} ${skill.description || ''}\n${skill.content || ''}`)
+
+const estimateCommandTokens = (command?: AiChatCommandInput | null) =>
+  command ? estimateTextTokens(`${command.id || ''} ${command.label || ''} ${command.command || ''} ${command.path || ''}`) : 0
+
+const buildBackendContextUsageSnapshot = (input: {
+  requestId?: string
+  assistantMessageId?: string
+  model?: string
+  prompt: string
+  messages?: AiChatMessageInput[]
+  contexts?: AiChatContextInput[]
+  skills?: AiChatSkillInput[]
+  command?: AiChatCommandInput | null
+  tokensOut?: number
+}): AiChatContextUsageSnapshot => {
+  const tokensIn =
+    estimateTextTokens(input.prompt) +
+    (input.messages || []).reduce((sum, message) => sum + estimateTextTokens(message.text), 0) +
+    (input.contexts || []).reduce((sum, context) => sum + estimateContextTokens(context), 0) +
+    (input.skills || []).reduce((sum, skill) => sum + estimateSkillTokens(skill), 0) +
+    estimateCommandTokens(input.command)
+  const tokensOut = Math.max(0, Math.round(input.tokensOut || 0))
+  const contextWindow = estimateContextWindow(input.model || normalizeText(runtimeConfig.getConfig?.().modelName) || 'aiopsterm-local-agent')
+  const used = tokensIn + tokensOut
+  return {
+    used,
+    contextWindow,
+    percent: Math.min(100, Math.round((used / contextWindow) * 100)),
+    tokensIn,
+    tokensOut,
+    cacheWrites: 0,
+    cacheReads: 0,
+    source: 'backend',
+    requestId: normalizeText(input.requestId) || undefined,
+    assistantMessageId: normalizeText(input.assistantMessageId) || undefined
+  }
+}
+
 const buildExchangePrompt = (text: string, contexts: AiChatContextInput[], skills: AiChatSkillInput[], command: AiChatCommandInput | null) => {
   const contextLabel = contexts.length ? `\n\n上下文：${contexts.map((item) => `${item.kind}:${item.label}`).join('、')}` : ''
   const commandLabel = commandDisplay(command) ? `\n命令：${commandDisplay(command)}` : ''
@@ -293,6 +361,12 @@ export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestIn
     model: normalizeText(input.model) || undefined,
     mode: normalizeMode(input.mode)
   }
+  const contextUsage = buildBackendContextUsageSnapshot({
+    ...responseInput,
+    requestId,
+    assistantMessageId: assistantMessage.id,
+    model: responseInput.model
+  })
   recordAiTodoExchangeRequest({ ...input, text: prompt, contexts, command, model: responseInput.model, mode: responseInput.mode }, requestId, assistantMessage.id)
   return {
     ok: true,
@@ -305,7 +379,8 @@ export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestIn
         hosts: normalizeHostContexts(input.hosts)
       },
       assistantMessage,
-      responseInput
+      responseInput,
+      contextUsage
     }
   }
 }
@@ -570,6 +645,7 @@ export const formatMcpResourceReadContent = (contents: NonNullable<McpResourceRe
 }
 
 const resolveMcpToolResponse = async (
+  input: AiChatResponseInput,
   text: string,
   config: UserConfig | undefined,
   modelName: string,
@@ -607,7 +683,8 @@ const resolveMcpToolResponse = async (
         status: 'done',
         requestId: control.requestId,
         assistantMessageId: control.assistantMessageId,
-        message
+        message,
+        contextUsage: contextUsageForResponse(input, control, modelName, message.text)
       }
     }
   }
@@ -623,7 +700,8 @@ const resolveMcpToolResponse = async (
         status: 'done',
         requestId: control.requestId,
         assistantMessageId: control.assistantMessageId,
-        message
+        message,
+        contextUsage: contextUsageForResponse(input, control, modelName, message.text)
       }
     }
   }
@@ -647,12 +725,14 @@ const resolveMcpToolResponse = async (
       status: 'done',
       requestId: control.requestId,
       assistantMessageId: control.assistantMessageId,
-      message
+      message,
+      contextUsage: contextUsageForResponse(input, control, modelName, message.text)
     }
   }
 }
 
 const resolveCommandExecutionResponse = (
+  input: AiChatResponseInput,
   text: string,
   modelName: string,
   startedAt: number,
@@ -671,12 +751,14 @@ const resolveCommandExecutionResponse = (
       status: 'done',
       requestId: control.requestId,
       assistantMessageId: control.assistantMessageId,
-      message
+      message,
+      contextUsage: contextUsageForResponse(input, control, modelName, message.text)
     }
   }
 }
 
 const resolveMcpResourceAccessResponse = async (
+  input: AiChatResponseInput,
   text: string,
   config: UserConfig | undefined,
   modelName: string,
@@ -705,7 +787,8 @@ const resolveMcpResourceAccessResponse = async (
         status: 'done',
         requestId: control.requestId,
         assistantMessageId: control.assistantMessageId,
-        message
+        message,
+        contextUsage: contextUsageForResponse(input, control, modelName, message.text)
       }
     }
   }
@@ -720,7 +803,8 @@ const resolveMcpResourceAccessResponse = async (
       status: 'done',
       requestId: control.requestId,
       assistantMessageId: control.assistantMessageId,
-      message
+      message,
+      contextUsage: contextUsageForResponse(input, control, modelName, message.text)
     }
   }
 }
@@ -749,7 +833,7 @@ async function generateProviderAiChatResponse(
     errorCodePrefix: 'AI_CHAT_PROVIDER',
     signal: control.controller.signal
   })
-  if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(control, modelName, startedAt)
+  if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(input, control, modelName, startedAt)
   if (!response.ok) {
     return {
       ok: false,
@@ -757,11 +841,11 @@ async function generateProviderAiChatResponse(
       errorMessage: response.errorMessage
     }
   }
-  const commandResponse = resolveCommandExecutionResponse(response.text, modelName, startedAt, control)
+  const commandResponse = resolveCommandExecutionResponse(input, response.text, modelName, startedAt, control)
   if (commandResponse) return commandResponse
-  const mcpResponse = await resolveMcpToolResponse(response.text, config, modelName, startedAt, control)
+  const mcpResponse = await resolveMcpToolResponse(input, response.text, config, modelName, startedAt, control)
   if (mcpResponse) return mcpResponse
-  const mcpResourceResponse = await resolveMcpResourceAccessResponse(response.text, config, modelName, startedAt, control)
+  const mcpResourceResponse = await resolveMcpResourceAccessResponse(input, response.text, config, modelName, startedAt, control)
   if (mcpResourceResponse) return mcpResourceResponse
   return {
     ok: true,
@@ -772,7 +856,8 @@ async function generateProviderAiChatResponse(
       durationMs: Math.max(1, now() - startedAt),
       status: 'done',
       requestId: control.requestId,
-      assistantMessageId: control.assistantMessageId
+      assistantMessageId: control.assistantMessageId,
+      contextUsage: contextUsageForResponse(input, control, modelName, response.text)
     }
   }
 }
@@ -791,13 +876,13 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
     }
 
     const modelName = normalizeText(input.model) || normalizeText(runtimeConfig.getConfig?.().modelName) || 'aiopsterm-local-agent'
-    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(control, modelName, startedAt))
+    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(input, control, modelName, startedAt))
     const config = runtimeConfig.getConfig?.()
     if (config) {
       const providerResponse = await generateProviderAiChatResponse(input, config, modelName, startedAt, control)
       if (providerResponse) return complete(providerResponse)
     }
-    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(control, modelName, startedAt))
+    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(input, control, modelName, startedAt))
     if (modelName !== 'aiopsterm-local-agent') {
       return complete({
         ok: false,
@@ -827,7 +912,7 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
     if (elapsedMs < LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS) {
       await wait(LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS - elapsedMs)
     }
-    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(control, modelName, startedAt))
+    if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(input, control, modelName, startedAt))
 
     return complete({
       ok: true,
@@ -838,7 +923,8 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
         durationMs: Math.max(1, now() - startedAt),
         status: 'done',
         requestId: control.requestId,
-        assistantMessageId: control.assistantMessageId
+        assistantMessageId: control.assistantMessageId,
+        contextUsage: contextUsageForResponse(input, control, modelName, lines.join('\n'))
       }
     })
   } finally {

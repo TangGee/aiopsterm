@@ -4062,11 +4062,7 @@ describe('AppShell', () => {
     expect(store.selectedCommandId).toBe('commands/rollback-plan.md')
     expect(store.selectedCommandRef).toEqual({ command: '/rollback-plan', label: '/rollback-plan', path: 'commands/rollback-plan.md' })
     expect(wrapper.find('.chat-editable .mention-chip-command').text()).toContain('/rollback-plan')
-    const contextUsageRing = wrapper.find('[data-testid="ai-context-usage-ring"]')
-    expect(contextUsageRing.exists()).toBe(true)
-    expect(contextUsageRing.attributes('title')).toMatch(/^\d+% - .+ \/ 128\.0K context used$/)
-    expect(wrapper.find('.context-usage-progress').attributes('stroke-dasharray')).toMatch(/^\d+(\.\d+)? 56\.55$/)
-    expect(wrapper.find('.context-usage-progress').attributes('stroke')).toBe('#3b82f6')
+    expect(wrapper.find('[data-testid="ai-context-usage-ring"]').exists()).toBe(false)
 
     await wrapper.find('.chat-editable .mention-chip-command button').trigger('click')
     expect(store.selectedCommandId).toBeNull()
@@ -4184,7 +4180,7 @@ describe('AppShell', () => {
     expect(window.aiops.prepareChatImageAttachment).not.toHaveBeenCalled()
     expect(window.aiops.prepareChatImageAttachmentFromFile).toHaveBeenCalledWith({ filePath: '/tmp/input.png' })
     expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-context-usage-ring"]').attributes('title')).toContain('context used')
+    expect(wrapper.find('[data-testid="ai-context-usage-ring"]').exists()).toBe(false)
     const sendSlashTextNode = document.createTextNode('/')
     mainInput.element.appendChild(sendSlashTextNode)
     const sendSlashRange = document.createRange()
@@ -4221,6 +4217,11 @@ describe('AppShell', () => {
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')).toBe(true)
+    const contextUsageRingAfterSend = wrapper.find('[data-testid="ai-context-usage-ring"]')
+    expect(contextUsageRingAfterSend.exists()).toBe(true)
+    expect(contextUsageRingAfterSend.attributes('title')).toMatch(/^\d+% - .+ \/ 128\.0K context used$/)
+    expect(wrapper.find('.context-usage-progress').attributes('stroke-dasharray')).toMatch(/^\d+(\.\d+)? 56\.55$/)
+    expect(wrapper.find('.context-usage-progress').attributes('stroke')).toBe('#3b82f6')
     expect(wrapper.find('.message.user .mention-chip-doc').exists()).toBe(true)
     expect(wrapper.find('.message.user .message-image-part img').exists()).toBe(true)
     expect(wrapper.find('.message.user .mention-chip-command').exists()).toBe(true)
@@ -4419,31 +4420,29 @@ describe('AppShell', () => {
     expect(wrapper.find('.todo-item.is-focused .todo-text').text()).toContain('显式焦点')
     expect(wrapper.find('.todo-item.in-progress.is-focused').exists()).toBe(false)
     expect(wrapper.find('[data-testid="todo-context-usage-indicator"]').exists()).toBe(false)
-    store.selectedContexts = [
-      ...store.selectedContexts,
-      {
-        id: 'large-context',
-        kind: 'docs',
-        label: '大上下文',
-        detail: 'x'.repeat(270000)
-      }
-    ]
+    store.aiContextUsage = {
+      used: 64000,
+      contextWindow: 128000,
+      percent: 50,
+      tokensIn: 64000,
+      tokensOut: 0,
+      source: 'backend',
+      requestId: 'aichat-request-test-ui',
+      assistantMessageId: 'aichat-request-test-ui-assistant'
+    }
     await wrapper.vm.$nextTick()
     const todoContextUsageIndicator = wrapper.find('[data-testid="todo-context-usage-indicator"]')
     expect(todoContextUsageIndicator.exists()).toBe(true)
     expect(todoContextUsageIndicator.classes()).toContain('warning')
     expect(todoContextUsageIndicator.find('.context-text').text()).toMatch(/^\d+%$/)
-    store.selectedContexts = [
-      {
-        id: 'huge-context',
-        kind: 'docs',
-        label: '超大上下文',
-        detail: 'x'.repeat(470000)
-      }
-    ]
+    store.aiContextUsage = {
+      ...store.aiContextUsage,
+      used: 122000,
+      percent: 95
+    }
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="todo-context-usage-indicator"]').classes()).toContain('maximum')
-    store.selectedContexts = store.selectedContexts.filter((context) => context.id !== 'huge-context')
+    store.aiContextUsage = null
     await wrapper.vm.$nextTick()
 
     await wrapper.find('.todo-inline-header').trigger('click')
