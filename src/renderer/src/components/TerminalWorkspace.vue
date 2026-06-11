@@ -494,6 +494,9 @@ const commandDialog = reactive({
 
 type TerminalSuggestion = TerminalCommandSuggestion
 
+const terminalSuggestionSources = new Set<TerminalSuggestion['source']>(['base', 'history', 'ai'])
+const malformedTerminalSuggestionMessage = '终端命令建议服务返回数据无效'
+const failedTerminalSuggestionMessage = '终端命令建议加载失败'
 const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
 const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
@@ -518,6 +521,24 @@ const zmodemProgress = reactive<TerminalZmodemProgress>(emptyZmodemProgress())
 const zmodemPercent = computed(() =>
   zmodemProgress.total > 0 ? Math.max(0, Math.min(100, Math.round((zmodemProgress.transferred / zmodemProgress.total) * 100))) : 0
 )
+
+const isTerminalSuggestionData = (value: unknown): value is TerminalSuggestion => {
+  if (!isRecord(value)) return false
+  if (typeof value.command !== 'string' || !value.command.trim()) return false
+  if (!terminalSuggestionSources.has(value.source as TerminalSuggestion['source'])) return false
+  if (value.explanation !== undefined && typeof value.explanation !== 'string') return false
+  return true
+}
+
+const normalizeTerminalSuggestions = (value: unknown): TerminalSuggestion[] | null => {
+  if (!Array.isArray(value)) return null
+  if (!value.every(isTerminalSuggestionData)) return null
+  return value.map((item) => ({
+    command: item.command.trim(),
+    source: item.source,
+    ...(item.explanation !== undefined ? { explanation: item.explanation } : {})
+  }))
+}
 
 const formatZmodemBytes = (bytes: number) => {
   const value = Math.max(0, Number(bytes) || 0)
@@ -1205,14 +1226,24 @@ const updateSuggestions = async (panelId: string) => {
     return
   }
   let base: TerminalSuggestion[] = []
+  let suggestionErrorMessage = failedTerminalSuggestionMessage
+  let suggestionNotice = ''
   try {
-    base = window.aiops?.getTerminalCommandSuggestions
+    const result = window.aiops?.getTerminalCommandSuggestions
       ? await window.aiops.getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'base'))
       : []
+    const normalized = normalizeTerminalSuggestions(result)
+    if (!normalized) {
+      suggestionErrorMessage = malformedTerminalSuggestionMessage
+      throw new Error(malformedTerminalSuggestionMessage)
+    }
+    base = normalized
   } catch {
     base = []
+    suggestionNotice = suggestionErrorMessage
   }
   if (requestId !== suggestionRequestId || suggestionPanel.panelId !== panelId || command.value.trim().toLowerCase() !== query) return
+  if (suggestionNotice) workspace.setTopNotice(suggestionNotice)
   suggestionItems.value = base.slice(0, 6)
   nextTick(() => updateSuggestionsPosition(panelId))
 }
@@ -1254,14 +1285,22 @@ const triggerAiSuggestion = async () => {
   const requestId = ++suggestionRequestId
   aiSuggestLoading.value = true
   updateSuggestionsPosition()
+  let suggestionErrorMessage = failedTerminalSuggestionMessage
   try {
-    const aiSuggestions = window.aiops?.getTerminalCommandSuggestions
+    const result = window.aiops?.getTerminalCommandSuggestions
       ? await window.aiops.getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'ai'))
       : []
+    const aiSuggestions = normalizeTerminalSuggestions(result)
+    if (!aiSuggestions) {
+      suggestionErrorMessage = malformedTerminalSuggestionMessage
+      throw new Error(malformedTerminalSuggestionMessage)
+    }
     if (requestId !== suggestionRequestId || command.value.trim().toLowerCase() !== query) return
     suggestionItems.value = [...aiSuggestions, ...suggestionItems.value].slice(0, 6)
   } catch {
     if (requestId !== suggestionRequestId) return
+    suggestionItems.value = suggestionItems.value.filter((item) => item.source !== 'ai')
+    workspace.setTopNotice(suggestionErrorMessage)
   } finally {
     if (requestId !== suggestionRequestId) return
     aiSuggestLoading.value = false
