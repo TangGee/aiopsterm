@@ -341,8 +341,13 @@ import type {
   SettingsRuleSaveInput,
   SettingsShortcutSaveInput,
   ShortcutUserConfig,
+  SkillDeleteResult,
+  SkillEnabledResult,
+  SkillExportResult,
+  SkillImportResult,
   SkillMetadataConfig,
   SkillUserConfig,
+  SkillWriteResult,
   SshAgentKeyConfig,
   SshProxyConfig,
   TerminalCommandGenerationInput,
@@ -374,13 +379,6 @@ type TerminalSession = {
   window: BrowserWindow
   kind: 'local' | 'ssh'
   host?: string
-}
-
-type SkillImportResult = {
-  success: boolean
-  skillName?: string
-  error?: string
-  errorCode?: 'INVALID_ZIP' | 'NO_SKILL_MD' | 'INVALID_METADATA' | 'DIR_EXISTS' | 'EXTRACT_FAILED' | 'UNKNOWN'
 }
 
 type KnowledgeBaseEntry = {
@@ -1822,6 +1820,20 @@ const syncSkillsConfigFromDisk = async () => {
   return skills
 }
 
+const createSkillWriteResult = async (skill: SkillUserConfig, filePath = skill.path): Promise<SkillWriteResult> => {
+  if (!filePath) {
+    throw new Error(`Skill file path missing: ${skill.name}`)
+  }
+  const [metadata, content] = await Promise.all([stat(filePath), readFile(filePath)])
+  return {
+    skill,
+    filePath,
+    bytes: Buffer.byteLength(content),
+    size: metadata.size,
+    mtimeMs: metadata.mtimeMs
+  }
+}
+
 const closeSkillsWatchers = () => {
   skillsWatchers.forEach((watcher) => watcher.close())
   skillsWatchers = []
@@ -1950,8 +1962,7 @@ const importSkillZip = async (zipPath: string, overwrite = false): Promise<Skill
   const userSkillsPath = await ensureSkillsDirectory()
   const skillDirName = normalizeSkillNameForDirectory(metadata.name)
   const targetDir = join(userSkillsPath, skillDirName)
-  try {
-    await access(targetDir)
+  if (await pathExists(targetDir)) {
     if (!overwrite) {
       return {
         success: false,
@@ -1961,12 +1972,15 @@ const importSkillZip = async (zipPath: string, overwrite = false): Promise<Skill
       }
     }
     await rm(targetDir, { recursive: true, force: true })
-  } catch {
-    // Directory does not exist.
+    if (await pathExists(targetDir)) {
+      return { success: false, skillName: metadata.name, error: 'Failed to replace existing skill directory', errorCode: 'EXTRACT_FAILED' }
+    }
   }
 
   try {
     await mkdir(targetDir, { recursive: true })
+    let writtenFiles = 0
+    let writtenBytes = 0
     for (const entry of entries) {
       const entryName = normalizeZipEntryName(entry.entryName)
       if (isUnsafeZipEntryName(entryName)) {
@@ -1988,10 +2002,23 @@ const importSkillZip = async (zipPath: string, overwrite = false): Promise<Skill
         throw new Error(`Invalid ZIP entry path: ${entryName}`)
       }
       await mkdir(dirname(targetPath), { recursive: true })
-      await writeFile(targetPath, entry.getData())
+      const data = entry.getData()
+      await writeFile(targetPath, data)
+      writtenFiles += 1
+      writtenBytes += data.byteLength
     }
     await startSkillsWatcher()
-    return { success: true, skillName: metadata.name }
+    const imported = await findSkillByName(metadata.name)
+    if (!imported?.path) throw new Error(`Imported skill not found: ${metadata.name}`)
+    return {
+      success: true,
+      skillName: metadata.name,
+      skill: imported,
+      importedPath: imported.path,
+      bytes: writtenBytes,
+      files: writtenFiles,
+      importedAt: new Date().toISOString()
+    }
   } catch {
     await rm(targetDir, { recursive: true, force: true })
     return { success: false, skillName: metadata.name, error: 'Failed to extract skill files', errorCode: 'EXTRACT_FAILED' }
@@ -2026,7 +2053,7 @@ const exportSkillZipBuffer = async (skillName: string) => {
   }
   const zip = new AdmZip()
   await addSkillDirectoryToZip(zip, skillDir, skillDir)
-  return zip.toBuffer()
+  return { skill, zipBuffer: zip.toBuffer() }
 }
 
 const removeJsonComments = (content: string) =>
@@ -2783,6 +2810,15 @@ const registerIpc = () => {
     const nextSkills = skills.map((skill) => (skill.name === skillName ? { ...skill, enabled: Boolean(enabled) } : skill))
     store.set('config', mergeConfig(getConfig(), { skills: nextSkills }))
     broadcastSkillsUpdate(nextSkills)
+    const updated = nextSkills.find((skill) => skill.name === skillName)
+    if (!updated) throw new Error(`Failed to update skill state: ${skillName}`)
+    const result: SkillEnabledResult = {
+      skill: updated,
+      skills: nextSkills,
+      enabled: updated.enabled,
+      updatedAt: new Date().toISOString()
+    }
+    return result
   })
   ipcMain.handle('skills:get-user-path', async () => ensureSkillsDirectory())
   ipcMain.handle('skills:reload', async () => syncSkillsConfigFromDisk())
@@ -2813,14 +2849,26 @@ const registerIpc = () => {
     await startSkillsWatcher()
     const created = await findSkillByName(normalized.name)
     if (!created) throw new Error(`Failed to create skill: ${normalized.name}`)
-    return created
+    return createSkillWriteResult(created, skillPath)
   })
   ipcMain.handle('skills:delete', async (_event, skillName: string) => {
     const skill = await findSkillByName(skillName)
     if (!skill || !skill.path) throw new Error(`Skill not found: ${skillName}`)
     if (!isEditableSkill(skill)) throw new Error('Can only delete user-created skills')
-    await rm(dirname(skill.path), { recursive: true, force: true })
+    const deletedPath = dirname(skill.path)
+    await rm(deletedPath, { recursive: true, force: true })
+    if (await pathExists(deletedPath)) throw new Error(`Failed to delete skill: ${skillName}`)
     await startSkillsWatcher()
+    const remainingSkills = await loadSkillsFromDisk()
+    if (remainingSkills.some((item) => item.name === skillName)) throw new Error(`Failed to delete skill: ${skillName}`)
+    const result: SkillDeleteResult = {
+      skillName,
+      deleted: true,
+      deletedPath,
+      remainingSkills,
+      deletedAt: new Date().toISOString()
+    }
+    return result
   })
   ipcMain.handle('skills:open-folder', async () => {
     const skillsPath = await ensureSkillsDirectory()
@@ -2849,9 +2897,12 @@ const registerIpc = () => {
     if (!skillContent) throw new Error('Skill content is required')
     await writeFile(skill.path, buildSkillFile(normalized, skillContent), 'utf-8')
     await startSkillsWatcher()
+    const updated = await findSkillByName(skillName)
+    if (!updated) throw new Error(`Failed to update skill: ${skillName}`)
+    return createSkillWriteResult(updated, skill.path)
   })
-  ipcMain.handle('skills:export-zip', async (event, skillName: string) => {
-    const zipBuffer = await exportSkillZipBuffer(skillName)
+  ipcMain.handle('skills:export-zip', async (event, skillName: string): Promise<SkillExportResult> => {
+    const { skill, zipBuffer } = await exportSkillZipBuffer(skillName)
     const owner = BrowserWindow.fromWebContents(event.sender)
     const saveOptions = {
       defaultPath: `${skillName}.zip`,
@@ -2862,7 +2913,14 @@ const registerIpc = () => {
       return { success: false, error: 'cancelled' }
     }
     await writeFile(result.filePath, zipBuffer)
-    return { success: true, filePath: result.filePath }
+    const metadata = await stat(result.filePath)
+    return {
+      success: true,
+      skillName: skill.name,
+      filePath: result.filePath,
+      bytes: metadata.size,
+      exportedAt: new Date().toISOString()
+    }
   })
   ipcMain.handle('assets:list', () => listAssets())
   ipcMain.handle('assets:groups:list', (_event, input?: AiopsAssetGroupListInput) => listAssetGroups(input))

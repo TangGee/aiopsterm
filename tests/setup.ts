@@ -3540,6 +3540,25 @@ const cloneSkills = () => skillsStoreMock.map((skill) => ({ ...skill }))
 const resetSkillsStoreMock = () => {
   skillsStoreMock = cloneDefaultSkills()
 }
+const createSkillWriteResultMock = (skill: (typeof defaultSkills)[number]) => {
+  const bytes = Buffer.byteLength(skill.content, 'utf8')
+  return {
+    skill: { ...skill },
+    filePath: skill.path,
+    bytes,
+    size: bytes,
+    mtimeMs: Date.parse('2026-06-04T12:00:00+08:00')
+  }
+}
+const createSkillImportResultMock = (skill: (typeof defaultSkills)[number]) => ({
+  success: true,
+  skillName: skill.name,
+  skill: { ...skill },
+  importedPath: skill.path,
+  bytes: Buffer.byteLength(skill.content, 'utf8'),
+  files: 1,
+  importedAt: '2026-06-04T12:00:00+08:00'
+})
 
 const defaultMcpServers: McpServerUserConfig[] = [
   {
@@ -6094,6 +6113,14 @@ Object.defineProperty(window, 'aiops', {
     getEnabledSkills: vi.fn(async () => cloneSkills().filter((skill) => skill.enabled)),
     setSkillEnabled: vi.fn(async (skillName: string, enabled: boolean) => {
       skillsStoreMock = skillsStoreMock.map((skill) => (skill.name === skillName ? { ...skill, enabled } : skill))
+      const skill = skillsStoreMock.find((item) => item.name === skillName)
+      if (!skill) throw new Error(`Skill not found: ${skillName}`)
+      return {
+        skill: { ...skill },
+        skills: cloneSkills(),
+        enabled: skill.enabled,
+        updatedAt: '2026-06-04T12:00:00+08:00'
+      }
     }),
     getSkillsUserPath: vi.fn(async () => '/tmp/aiopsterm/skills'),
     reloadSkills: vi.fn(async () => cloneSkills()),
@@ -6107,13 +6134,33 @@ Object.defineProperty(window, 'aiops', {
         path: `/tmp/aiopsterm/skills/${metadata.name}/SKILL.md`
       }
       skillsStoreMock = [created, ...skillsStoreMock.filter((skill) => skill.name !== metadata.name)]
-      return { ...created }
+      return createSkillWriteResultMock(created)
     }),
     deleteSkill: vi.fn(async (skillName: string) => {
+      const deleted = skillsStoreMock.find((skill) => skill.name === skillName)
+      if (!deleted) throw new Error(`Skill not found: ${skillName}`)
       skillsStoreMock = skillsStoreMock.filter((skill) => skill.name !== skillName)
+      return {
+        skillName,
+        deleted: true,
+        deletedPath: deleted.path.replace(/\/SKILL\.md$/, ''),
+        remainingSkills: cloneSkills(),
+        deletedAt: '2026-06-04T12:00:00+08:00'
+      }
     }),
     openSkillsFolder: vi.fn(async () => ({ path: '/tmp/aiopsterm/skills' })),
-    importSkillZip: vi.fn(async () => ({ success: true, skillName: 'imported-skill' })),
+    importSkillZip: vi.fn(async () => {
+      const skill = {
+        name: 'imported-skill',
+        description: 'Imported skill',
+        enabled: true,
+        editable: true,
+        content: 'Imported content',
+        path: '/tmp/aiopsterm/skills/imported-skill/SKILL.md'
+      }
+      skillsStoreMock = [skill, ...skillsStoreMock.filter((item) => item.name !== skill.name)]
+      return createSkillImportResultMock(skill)
+    }),
     readSkillContent: vi.fn(async (skillName: string) => {
       const skill = skillsStoreMock.find((item) => item.name === skillName)
       return {
@@ -6135,8 +6182,11 @@ Object.defineProperty(window, 'aiops', {
             }
           : skill
       )
+      const skill = skillsStoreMock.find((item) => item.name === skillName)
+      if (!skill) throw new Error(`Skill not found: ${skillName}`)
+      return createSkillWriteResultMock(skill)
     }),
-    exportSkillZip: vi.fn(async (skillName: string) => ({ success: true, filePath: `/tmp/${skillName}.zip` })),
+    exportSkillZip: vi.fn(async (skillName: string) => ({ success: true, skillName, filePath: `/tmp/${skillName}.zip`, bytes: 256, exportedAt: '2026-06-04T12:00:00+08:00' })),
     onSkillsUpdate: vi.fn(() => () => undefined),
     getPathForFile: vi.fn((file: File & { path?: string }) => String(file?.path || '')),
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/tmp/imported-note.md'] })),

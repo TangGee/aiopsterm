@@ -69,10 +69,12 @@ import {
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import {
   isSkillContentResultData,
+  isSkillDeleteResultForRequest,
+  isSkillEnabledResultForRequest,
   isSkillExportResultData,
   isSkillImportResultData,
   isSkillsSnapshotData,
-  isSkillUserConfigData,
+  isSkillWriteResultForRequest,
   malformedSkillsBackendResultMessage,
   snapshotContainsSkill
 } from '@/services/skillsBackendGuards'
@@ -8369,7 +8371,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       try {
-        await window.aiops.updateSkill(name, { name, description }, content)
+        const result = await window.aiops.updateSkill(name, { name, description }, content)
+        if (!isSkillWriteResultForRequest(result, { name, description, content })) {
+          setSettingsNotice(malformedSkillsBackendResultMessage)
+          return false
+        }
         const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, description, content }))
         if (!refreshed) return false
         setSettingsNotice(`${name} 已保存`)
@@ -8394,7 +8400,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const created = await window.aiops.createSkill({ name, description }, content)
-      if (!isSkillUserConfigData(created) || !snapshotContainsSkill([created], { name, description, content, enabled: true })) {
+      if (!isSkillWriteResultForRequest(created, { name, description, content, enabled: true })) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return false
       }
@@ -8419,7 +8425,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const previous = skill.enabled
     const nextEnabled = !skill.enabled
     try {
-      await window.aiops.setSkillEnabled(name, nextEnabled)
+      const result = await window.aiops.setSkillEnabled(name, nextEnabled)
+      if (!isSkillEnabledResultForRequest(result, { name, enabled: nextEnabled })) {
+        skill.enabled = previous
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return
+      }
       const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, enabled: nextEnabled }))
       if (!refreshed) {
         skill.enabled = previous
@@ -8444,7 +8455,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     try {
-      await window.aiops.deleteSkill(name)
+      const result = await window.aiops.deleteSkill(name)
+      if (!isSkillDeleteResultForRequest(result, name)) {
+        setSettingsNotice(malformedSkillsBackendResultMessage)
+        return
+      }
       const refreshed = await refreshSkillsAfterMutation((skills) => !skills.some((item) => item.name === name))
       if (!refreshed) return
       setSettingsNotice(`${name} 已删除`)
@@ -8536,7 +8551,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const result = await exportSkillZipBridge(name)
-      if (!isSkillExportResultData(result)) {
+      if (!isSkillExportResultData(result) || (result.success && result.skillName !== name)) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return false
       }
@@ -13167,13 +13182,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       const created = await window.aiops.createSkill({ name: skill.name, description: skill.description }, skill.content)
-      if (!isSkillUserConfigData(created) || !snapshotContainsSkill([created], { name: skill.name, description: skill.description, content: skill.content, enabled: true })) {
+      if (!isSkillWriteResultForRequest(created, { name: skill.name, description: skill.description, content: skill.content, enabled: true })) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return null
       }
       const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: skill.name, description: skill.description, content: skill.content }))
       if (!refreshed) return null
-      return created
+      return created.skill
     } catch {
       setSettingsNotice(`${name} 创建失败`)
       return null

@@ -1570,6 +1570,29 @@ export type SkillContentResult = {
   content: string
 }
 
+export type SkillWriteResult = {
+  skill: SkillUserConfig
+  filePath: string
+  bytes: number
+  size: number
+  mtimeMs: number
+}
+
+export type SkillEnabledResult = {
+  skill: SkillUserConfig
+  skills: SkillUserConfig[]
+  enabled: boolean
+  updatedAt: string
+}
+
+export type SkillDeleteResult = {
+  skillName: string
+  deleted: true
+  deletedPath: string
+  remainingSkills: SkillUserConfig[]
+  deletedAt: string
+}
+
 export type FileDialogFilter = {
   name: string
   extensions: string[]
@@ -1729,6 +1752,11 @@ export type SkillImportErrorCode = 'INVALID_ZIP' | 'NO_SKILL_MD' | 'INVALID_META
 export type SkillImportResult = {
   success: boolean
   skillName?: string
+  skill?: SkillUserConfig
+  importedPath?: string
+  bytes?: number
+  files?: number
+  importedAt?: string
   error?: string
   errorCode?: SkillImportErrorCode
 }
@@ -1736,6 +1764,9 @@ export type SkillImportResult = {
 export type SkillExportResult = {
   success: boolean
   filePath?: string
+  skillName?: string
+  bytes?: number
+  exportedAt?: string
   error?: string
 }
 
@@ -2943,15 +2974,15 @@ export type AiopsPreloadApi = {
   onMcpConfigFileChanged: (listener: (content: string) => void) => () => void
   getSkills: () => Promise<SkillUserConfig[]>
   getEnabledSkills: () => Promise<SkillUserConfig[]>
-  setSkillEnabled: (skillName: string, enabled: boolean) => Promise<void>
+  setSkillEnabled: (skillName: string, enabled: boolean) => Promise<SkillEnabledResult>
   getSkillsUserPath: () => Promise<string>
   reloadSkills: () => Promise<SkillUserConfig[]>
-  createSkill: (metadata: SkillMetadataConfig, content: string) => Promise<SkillUserConfig>
-  deleteSkill: (skillName: string) => Promise<void>
+  createSkill: (metadata: SkillMetadataConfig, content: string) => Promise<SkillWriteResult>
+  deleteSkill: (skillName: string) => Promise<SkillDeleteResult>
   openSkillsFolder: () => Promise<OpenPathResult>
   importSkillZip: (zipPath: string, overwrite?: boolean) => Promise<SkillImportResult>
   readSkillContent: (skillName: string) => Promise<SkillContentResult>
-  updateSkill: (skillName: string, metadata: SkillMetadataConfig, content: string) => Promise<void>
+  updateSkill: (skillName: string, metadata: SkillMetadataConfig, content: string) => Promise<SkillWriteResult>
   exportSkillZip: (skillName: string) => Promise<SkillExportResult>
   onSkillsUpdate: (listener: (skills: SkillUserConfig[]) => void) => () => void
   showOpenDialog: (options: OpenDialogOptions) => Promise<OpenDialogResult | undefined>

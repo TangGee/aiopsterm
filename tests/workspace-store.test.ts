@@ -167,6 +167,27 @@ const defaultSkills = [
   }
 ]
 
+const skillWriteResult = (skill: (typeof defaultSkills)[number] & { path: string }) => {
+  const bytes = Buffer.byteLength(skill.content, 'utf8')
+  return {
+    skill: { ...skill },
+    filePath: skill.path,
+    bytes,
+    size: bytes,
+    mtimeMs: Date.parse('2026-06-04T12:00:00+08:00')
+  }
+}
+
+const skillImportResult = (skill: (typeof defaultSkills)[number]) => ({
+  success: true,
+  skillName: skill.name,
+  skill: { ...skill },
+  importedPath: skill.path,
+  bytes: Buffer.byteLength(skill.content, 'utf8'),
+  files: 1,
+  importedAt: '2026-06-04T12:00:00+08:00'
+})
+
 const addQwenOllamaModelToStore = async (store: ReturnType<typeof useWorkspaceStore>) => {
   store.updateModelProviderConfig('ollama', { modelId: 'qwen2.5-coder' })
   const nextSettings = {
@@ -10802,17 +10823,18 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.settingsSkills.find((skill) => skill.name === 'new-skill')?.enabled).toBe(false)
     expect(window.aiops.setSkillEnabled).toHaveBeenCalledWith('new-skill', false)
 
+    const importedSkill = {
+      name: 'imported-skill',
+      description: 'Imported skill',
+      enabled: true,
+      editable: true,
+      content: 'Imported content',
+      path: '/tmp/aiopsterm/skills/imported-skill/SKILL.md'
+    }
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/release-check.zip'] })
-    vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce({ success: true, skillName: 'imported-skill' })
+    vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce(skillImportResult(importedSkill))
     vi.mocked(window.aiops.getSkills).mockResolvedValueOnce([
-      {
-        name: 'imported-skill',
-        description: 'Imported skill',
-        enabled: true,
-        editable: true,
-        content: 'Imported content',
-        path: '/tmp/aiopsterm/skills/imported-skill/SKILL.md'
-      },
+      importedSkill,
       { ...createdSkill, enabled: false }
     ])
     await store.importSkillZip()
@@ -10827,9 +10849,9 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce({ success: false, skillName: 'imported-skill', errorCode: 'DIR_EXISTS' })
     await store.importSkillZip()
     expect(store.settingsNotice).toBe('Skill 已存在，再次点击 Import 覆盖')
-    vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce({ success: true, skillName: 'imported-skill' })
+    vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce(skillImportResult(importedSkill))
     vi.mocked(window.aiops.getSkills).mockResolvedValueOnce([
-      { ...createdSkill, name: 'imported-skill' },
+      importedSkill,
       { ...createdSkill, enabled: false, description: 'updated skill description', content: 'updated skill content' }
     ])
     await store.importSkillZip()
@@ -12286,16 +12308,17 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       ;(window.aiops as any).importSkillZip = originalAiops.importSkillZip
       vi.mocked(window.aiops.showOpenDialog!).mockClear()
       vi.mocked(window.aiops.importSkillZip!).mockClear()
-      vi.mocked(window.aiops.importSkillZip!).mockResolvedValueOnce({ success: true, skillName: 'existing-skill' })
+      const existingSkill = {
+        name: 'existing-skill',
+        description: 'Existing skill',
+        enabled: true,
+        editable: true,
+        content: 'Existing content',
+        path: '/tmp/aiopsterm/skills/existing-skill/SKILL.md'
+      }
+      vi.mocked(window.aiops.importSkillZip!).mockResolvedValueOnce(skillImportResult(existingSkill))
       vi.mocked(window.aiops.getSkills!).mockResolvedValueOnce([
-        {
-          name: 'existing-skill',
-          description: 'Existing skill',
-          enabled: true,
-          editable: true,
-          content: 'Existing content',
-          path: '/tmp/aiopsterm/skills/existing-skill/SKILL.md'
-        }
+        existingSkill
       ])
       await expect(store.importSkillZip()).resolves.toBe(true)
       expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
@@ -12414,13 +12437,14 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       store.skillModal.name = 'detached-created-skill'
       store.skillModal.description = 'detached created description'
       store.skillModal.content = 'detached created content'
-      vi.mocked(window.aiops.createSkill).mockResolvedValueOnce({
+      vi.mocked(window.aiops.createSkill).mockResolvedValueOnce(skillWriteResult({
         name: 'detached-created-skill',
         description: 'detached created description',
         enabled: true,
         editable: true,
-        content: 'detached created content'
-      })
+        content: 'detached created content',
+        path: '/tmp/aiopsterm/skills/detached-created-skill/SKILL.md'
+      }))
       vi.mocked(window.aiops.getSkills).mockResolvedValueOnce(defaultSkills)
       await expect(store.saveSkillModal()).resolves.toBe(false)
       expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
@@ -12434,6 +12458,27 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       await store.openSkillModal('edit', 'incident-triage')
       store.skillModal.description = 'malformed save description'
       store.skillModal.content = 'malformed save content'
+      vi.mocked(window.aiops.updateSkill).mockResolvedValueOnce(undefined as any)
+      await expect(store.saveSkillModal()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
+      expect(store.settingsSkills.find((skill) => skill.name === 'incident-triage')?.content).toBe(originalIncident!.content)
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      vi.mocked(window.aiops.readSkillContent).mockResolvedValueOnce({
+        metadata: { name: 'incident-triage', description: originalIncident!.description },
+        content: originalIncident!.content
+      })
+      await store.openSkillModal('edit', 'incident-triage')
+      store.skillModal.description = 'detached save description'
+      store.skillModal.content = 'detached save content'
+      vi.mocked(window.aiops.updateSkill).mockResolvedValueOnce(
+        skillWriteResult({
+          ...originalIncident!,
+          description: 'detached save description',
+          content: 'detached save content',
+          path: originalIncident!.path!
+        })
+      )
       vi.mocked(window.aiops.getSkills).mockResolvedValueOnce(defaultSkills)
       await expect(store.saveSkillModal()).resolves.toBe(false)
       expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
@@ -12446,6 +12491,25 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.settingsSkills.find((skill) => skill.name === 'incident-triage')?.enabled).toBe(originalIncident!.enabled)
       expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
 
+      vi.mocked(window.aiops.setSkillEnabled).mockResolvedValueOnce({
+        skill: { ...originalIncident!, enabled: false },
+        skills: [{ ...originalIncident!, enabled: false }, defaultSkills[1]],
+        enabled: false,
+        updatedAt: '2026-06-04T12:00:00+08:00'
+      })
+      vi.mocked(window.aiops.getSkills).mockResolvedValueOnce(defaultSkills)
+      await store.toggleSkillEnabled('incident-triage')
+      expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
+      expect(store.settingsSkills.find((skill) => skill.name === 'incident-triage')?.enabled).toBe(originalIncident!.enabled)
+      expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
+
+      vi.mocked(window.aiops.deleteSkill).mockResolvedValueOnce({
+        skillName: 'incident-triage',
+        deleted: true,
+        deletedPath: '/tmp/aiopsterm/skills/incident-triage',
+        remainingSkills: [defaultSkills[1]],
+        deletedAt: '2026-06-04T12:00:00+08:00'
+      })
       vi.mocked(window.aiops.getSkills).mockResolvedValueOnce(defaultSkills)
       await store.deleteSkill('incident-triage')
       expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
@@ -12459,7 +12523,16 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
 
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/detached-import.zip'] })
-      vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce({ success: true, skillName: 'detached-import' })
+      vi.mocked(window.aiops.importSkillZip).mockResolvedValueOnce(
+        skillImportResult({
+          name: 'detached-import',
+          description: 'Detached import',
+          enabled: true,
+          editable: true,
+          content: 'Detached import content',
+          path: '/tmp/aiopsterm/skills/detached-import/SKILL.md'
+        })
+      )
       vi.mocked(window.aiops.getSkills).mockResolvedValueOnce(defaultSkills)
       await expect(store.importSkillZip()).resolves.toBe(false)
       expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
@@ -12467,6 +12540,16 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(JSON.stringify(store.settingsSkills)).toBe(originalSkills)
 
       vi.mocked(window.aiops.exportSkillZip).mockResolvedValueOnce({ success: true } as any)
+      await expect(store.exportSkillZip('incident-triage')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
+
+      vi.mocked(window.aiops.exportSkillZip).mockResolvedValueOnce({
+        success: true,
+        skillName: 'other-skill',
+        filePath: '/tmp/incident-triage.zip',
+        bytes: 256,
+        exportedAt: '2026-06-04T12:00:00+08:00'
+      })
       await expect(store.exportSkillZip('incident-triage')).resolves.toBe(false)
       expect(store.settingsNotice).toBe(malformedSkillsBackendResultMessage)
 
