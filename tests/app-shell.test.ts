@@ -1302,6 +1302,81 @@ describe('AppShell', () => {
     expect(assets.text()).toContain('proxy-unit')
   })
 
+  it('routes Database connection drafts through backend-confirmed SSH proxy configs', async () => {
+    const releaseProxy = {
+      name: 'release-proxy',
+      type: 'SOCKS5' as const,
+      host: '10.0.0.8',
+      port: 1080,
+      enableProxyIdentity: true,
+      username: 'ops',
+      password: 'secret'
+    }
+    const baseConfig = await window.aiops.getConfig()
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      ...baseConfig,
+      sshProxyConfigs: [releaseProxy]
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await waitForDatabaseCatalog()
+
+    await wrapper.find('button[title="Add"]').trigger('click')
+    await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('PostgreSQL'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.db-connection-modal').text()).toContain('SSH Proxy')
+    const modalInputs = wrapper.findAll('.db-connection-modal input')
+    await modalInputs.at(0)!.setValue('proxy-postgres')
+    await modalInputs.at(1)!.setValue('10.20.0.10')
+    const proxyCheckbox = modalInputs.find((input) => (input.element as HTMLInputElement).type === 'checkbox' && !(input.element as HTMLInputElement).disabled)!
+    await proxyCheckbox.setValue(true)
+    await flushPromises()
+
+    const proxySelect = wrapper.findAll('.db-connection-modal select').find((select) => select.text().includes('release-proxy'))!
+    expect(proxySelect.text()).toContain('release-proxy')
+    expect(proxySelect.text()).toContain('SOCKS5 10.0.0.8:1080')
+    await proxySelect.setValue('release-proxy')
+
+    vi.mocked(window.aiops.testDatabaseConnection).mockClear()
+    await wrapper.find('.db-connection-modal footer button').trigger('click')
+    await flushPromises()
+    expect(window.aiops.testDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dbType: 'postgresql',
+        name: 'proxy-postgres',
+        host: '10.20.0.10',
+        needProxy: true,
+        proxyName: 'release-proxy'
+      })
+    )
+
+    vi.mocked(window.aiops.saveDatabaseConnection).mockClear()
+    await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.saveDatabaseConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'create',
+        connection: expect.objectContaining({
+          dbType: 'postgresql',
+          name: 'proxy-postgres',
+          needProxy: true,
+          proxyName: 'release-proxy'
+        })
+      })
+    )
+    expect(wrapper.text()).toContain('proxy-postgres')
+
+    wrapper.unmount()
+  })
+
   it('opens Terminal proxy settings when the asset form has no SSH proxy configs', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -7136,33 +7211,33 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-connection-modal').text()).toContain('SQLServer')
     const sqlServerOverviewInputs = wrapper.findAll('.db-connection-modal input')
     expect((sqlServerOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('1433')
-    expect((sqlServerOverviewInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:sqlserver://127.0.0.1:1433')
+    expect((sqlServerOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:sqlserver://127.0.0.1:1433')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('MariaDB'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('MariaDB')
     const mariaDbOverviewInputs = wrapper.findAll('.db-connection-modal input')
     expect((mariaDbOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('3306')
-    expect((mariaDbOverviewInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:mariadb://127.0.0.1:3306')
+    expect((mariaDbOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:mariadb://127.0.0.1:3306')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('ClickHouse'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('ClickHouse')
     const clickHouseOverviewInputs = wrapper.findAll('.db-connection-modal input')
     expect((clickHouseOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('8123')
     expect((clickHouseOverviewInputs.at(3)!.element as HTMLInputElement).value).toBe('default')
-    expect((clickHouseOverviewInputs.at(6)!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8123')
+    expect((clickHouseOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8123')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('OceanBase'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('OceanBase')
     const oceanBaseOverviewInputs = wrapper.findAll('.db-connection-modal input')
     expect((oceanBaseOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('2881')
-    expect((oceanBaseOverviewInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:oceanbase://127.0.0.1:2881')
+    expect((oceanBaseOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:oceanbase://127.0.0.1:2881')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('KingBase'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('KingBase')
     expect(wrapper.find('.db-connection-modal').text()).toContain('SSL Mode')
     const kingBaseOverviewInputs = wrapper.findAll('.db-connection-modal input')
     expect((kingBaseOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('54321')
-    expect((kingBaseOverviewInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:kingbase8://127.0.0.1:54321')
+    expect((kingBaseOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:kingbase8://127.0.0.1:54321')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('PostgreSQL'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('PostgreSQL')
@@ -7203,10 +7278,10 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-connection-modal').text()).toContain('SSL Mode')
     const pgModalSelects = wrapper.findAll('.db-connection-modal select')
     await pgModalSelects.at(3)!.setValue('verify-full')
-    expect((pgModalInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://127.0.0.1:5432')
-    await pgModalInputs.at(6)!.setValue('jdbc:postgresql://manual-host:15432/manualdb')
+    expect((pgModalInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://127.0.0.1:5432')
+    await pgModalInputs.at(7)!.setValue('jdbc:postgresql://manual-host:15432/manualdb')
     await pgModalInputs.at(1)!.setValue('10.10.10.20')
-    expect((wrapper.findAll('.db-connection-modal input').at(6)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://manual-host:15432/manualdb')
+    expect((wrapper.findAll('.db-connection-modal input').at(7)!.element as HTMLInputElement).value).toBe('jdbc:postgresql://manual-host:15432/manualdb')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
     await flushPromises()
     expect(window.aiops.testDatabaseConnection).toHaveBeenCalledWith(
@@ -7342,7 +7417,7 @@ describe('AppShell', () => {
     await oracleInputs.at(3)!.setValue('hr')
     await oracleInputs.at(4)!.setValue('secret')
     await oracleInputs.at(5)!.setValue('ORCLPDB1')
-    await oracleInputs.at(6)!.setValue('jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1')
+    await oracleInputs.at(7)!.setValue('jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1')
     await wrapper.find('.db-connection-modal footer button').trigger('click')
     await flushPromises()
     expect(window.aiops.testDatabaseConnection).toHaveBeenCalledWith(
@@ -7394,28 +7469,28 @@ describe('AppShell', () => {
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('MariaDB'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('MariaDB')
     const mariaDbGroupInputs = wrapper.findAll('.db-connection-modal input')
-    expect((mariaDbGroupInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:mariadb://127.0.0.1:3306')
+    expect((mariaDbGroupInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:mariadb://127.0.0.1:3306')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await defaultGroupRow.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('New Connection'))!.trigger('mouseenter')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('ClickHouse'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('ClickHouse')
     const clickHouseGroupInputs = wrapper.findAll('.db-connection-modal input')
-    expect((clickHouseGroupInputs.at(6)!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8123')
+    expect((clickHouseGroupInputs.at(7)!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8123')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await defaultGroupRow.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('New Connection'))!.trigger('mouseenter')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('OceanBase'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('OceanBase')
     const oceanBaseGroupInputs = wrapper.findAll('.db-connection-modal input')
-    expect((oceanBaseGroupInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:oceanbase://127.0.0.1:2881')
+    expect((oceanBaseGroupInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:oceanbase://127.0.0.1:2881')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await defaultGroupRow.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('New Connection'))!.trigger('mouseenter')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('KingBase'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('KingBase')
     const kingBaseGroupInputs = wrapper.findAll('.db-connection-modal input')
-    expect((kingBaseGroupInputs.at(6)!.element as HTMLInputElement).value).toBe('jdbc:kingbase8://127.0.0.1:54321')
+    expect((kingBaseGroupInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:kingbase8://127.0.0.1:54321')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await defaultGroupRow.trigger('contextmenu')
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('New Connection'))!.trigger('mouseenter')

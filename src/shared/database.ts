@@ -363,6 +363,13 @@ type SqlServerDriver = {
   ConnectionPool: new (config: Record<string, unknown>) => SqlServerPool
 }
 type DatabaseFetch = typeof fetch
+type DatabaseProxySocket = {
+  destroy?: () => unknown
+}
+type DatabaseProxySocketResult = {
+  proxyName: string
+  socket: DatabaseProxySocket
+}
 export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
   mysqlDriver?: MySqlDriver
@@ -370,6 +377,7 @@ export type DatabaseRuntimeConfig = {
   oracleDriver?: OracleDriver | null
   sqlServerDriver?: SqlServerDriver | null
   fetch?: DatabaseFetch
+  createProxySocket?: (input: DatabaseConnectionTestInput, targetHost: string, targetPort: number, options?: { timeoutMs?: number }) => Promise<DatabaseProxySocketResult | null>
   oracleClientLibDir?: string
   oracleClientConfigDir?: string
   oracleDriverName?: string
@@ -1549,27 +1557,82 @@ const clickHouseMutationUnsupported = () => ({
   errorMessage: 'ClickHouse table editing is not supported by this aiopsterm backend yet.'
 })
 
-const mysqlConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
+const databaseProxyRequested = (input: Pick<DatabaseConnectionTestInput, 'needProxy' | 'proxyName'>) => !!input.needProxy || !!trim(input.proxyName)
+
+const databaseProxyUnsupportedFor = (dbType: DatabaseConnectionTestInput['dbType']) => {
+  if (dbType === 'oracle') {
+    return {
+      errorCode: 'DB_PROXY_ORACLE_UNSUPPORTED',
+      errorMessage: 'Database SSH proxy is not supported for Oracle connect strings in this version.'
+    }
+  }
+  if (dbType === 'clickhouse') {
+    return {
+      errorCode: 'DB_PROXY_CLICKHOUSE_UNSUPPORTED',
+      errorMessage: 'Database SSH proxy is not supported for ClickHouse HTTP connections in this version.'
+    }
+  }
+  return null
+}
+
+const databaseProxyUnsupportedError = (dbType: DatabaseConnectionTestInput['dbType']) => {
+  const unsupported = databaseProxyUnsupportedFor(dbType)
+  return unsupported ? Object.assign(new Error(unsupported.errorMessage), { code: unsupported.errorCode }) : null
+}
+
+const databaseProxyTarget = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port'>) => {
+  const host = trim(input.host)
+  const port = normalizedDatabasePort(input.port)
+  if (!host || !port) return null
+  return { host, port }
+}
+
+const createDatabaseProxySocket = async (input: DatabaseConnectionTestInput) => {
+  if (!databaseProxyRequested(input)) return null
+  const unsupported = databaseProxyUnsupportedError(input.dbType)
+  if (unsupported) throw unsupported
+  const createProxySocket = databaseRuntimeConfig.createProxySocket
+  if (!createProxySocket) {
+    throw Object.assign(new Error('Database SSH proxy runtime is unavailable.'), { code: 'DB_PROXY_RUNTIME_UNAVAILABLE' })
+  }
+  const target = databaseProxyTarget(input)
+  if (!target) {
+    throw Object.assign(new Error('Database proxy requires a host and port target.'), { code: 'DB_PROXY_TARGET_INVALID' })
+  }
+  return createProxySocket(input, target.host, target.port, { timeoutMs: RELATIONAL_TIMEOUT_MS })
+}
+
+const closeDatabaseProxySocket = (proxy: DatabaseProxySocketResult | null | undefined) => {
+  try {
+    proxy?.socket.destroy?.()
+  } catch {
+    /* ignore proxy socket close errors */
+  }
+}
+
+const mysqlConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>, proxy?: DatabaseProxySocketResult | null) => ({
   host: trim(input.host),
   port: normalizedDatabasePort(input.port) ?? undefined,
   user: trim(input.user),
   password: input.password || undefined,
   database: trim(input.database) || undefined,
   connectTimeout: RELATIONAL_TIMEOUT_MS,
+  ...(proxy ? { stream: proxy.socket } : {}),
   ...(trim(input.sslMode) && trim(input.sslMode) !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {})
 })
 
-const postgresConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
+const postgresConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>, proxy?: DatabaseProxySocketResult | null) => ({
   host: trim(input.host),
   port: normalizedDatabasePort(input.port) ?? undefined,
   user: trim(input.user),
   password: input.password || undefined,
   database: trim(input.database) || undefined,
   connectionTimeoutMillis: RELATIONAL_TIMEOUT_MS,
+  ...(proxy ? { stream: proxy.socket } : {}),
   ...(trim(input.sslMode) && trim(input.sslMode) !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {})
 })
 
-const sqlServerConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
+const sqlServerConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>, proxy?: DatabaseProxySocketResult | null) => ({
   server: trim(input.host),
   port: normalizedDatabasePort(input.port) ?? undefined,
   user: trim(input.user),
@@ -1580,7 +1643,8 @@ const sqlServerConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'p
   options: {
     encrypt: trim(input.sslMode) !== 'disable',
     trustServerCertificate: true,
-    enableArithAbort: true
+    enableArithAbort: true,
+    ...(proxy ? { connector: () => Promise.resolve(proxy.socket) } : {})
   }
 })
 
@@ -1618,11 +1682,13 @@ const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): Datab
   filePath: connection.filePath,
   readonly: connection.readonly,
   sslMode: connection.sslMode,
+  needProxy: connection.needProxy,
+  proxyName: connection.proxyName,
   url: connection.url
 })
 
 const openMysqlConnection = async (
-  input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>,
+  input: DatabaseConnectionTestInput,
   dbType: DatabaseEngineCode | '' = 'mysql'
 ) => {
   const driver = loadMysqlRuntime()
@@ -1632,11 +1698,18 @@ const openMysqlConnection = async (
       code: mysqlCompatibleDriverErrorCode(dbType)
     })
   }
-  return driver.createConnection(mysqlConfigFor(input))
+  const proxy = await createDatabaseProxySocket(input)
+  try {
+    const client = await driver.createConnection(mysqlConfigFor(input, proxy))
+    return { client, proxy }
+  } catch (error) {
+    closeDatabaseProxySocket(proxy)
+    throw error
+  }
 }
 
 const openPostgresClient = async (
-  input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>,
+  input: DatabaseConnectionTestInput,
   dbType: DatabaseEngineCode | '' = 'postgresql'
 ) => {
   const driver = loadPostgresRuntime()
@@ -1646,9 +1719,15 @@ const openPostgresClient = async (
       code: postgresCompatibleDriverErrorCode(dbType)
     })
   }
-  const client = new driver.Client(postgresConfigFor(input))
-  await client.connect()
-  return client
+  const proxy = await createDatabaseProxySocket(input)
+  const client = new driver.Client(postgresConfigFor(input, proxy))
+  try {
+    await client.connect()
+    return { client, proxy }
+  } catch (error) {
+    closeDatabaseProxySocket(proxy)
+    throw error
+  }
 }
 
 const openOracleConnection = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'url'>) => {
@@ -1662,21 +1741,31 @@ const openOracleConnection = async (input: Pick<DatabaseConnectionTestInput, 'ho
   return driver.getConnection(oracleConfigFor(input))
 }
 
-const openSqlServerPool = async (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => {
+const openSqlServerPool = async (input: DatabaseConnectionTestInput) => {
   const driver = loadSqlServerRuntime()
   if (!driver) {
     throw Object.assign(new Error('SQL Server driver is unavailable. Install mssql before connecting to SQL Server.'), {
       code: 'DB_SQLSERVER_DRIVER_UNAVAILABLE'
     })
   }
-  const pool = new driver.ConnectionPool(sqlServerConfigFor(input))
-  return typeof pool.connect === 'function' ? pool.connect() : pool
+  const proxy = await createDatabaseProxySocket(input)
+  const pool = new driver.ConnectionPool(sqlServerConfigFor(input, proxy))
+  try {
+    const connectedPool = typeof pool.connect === 'function' ? await pool.connect() : pool
+    return { pool: connectedPool, proxy }
+  } catch (error) {
+    closeDatabaseProxySocket(proxy)
+    throw error
+  }
 }
 
 const withMysqlConnection = async <T>(connection: DatabaseConnectionInfo, fn: (client: MySqlConnection) => Promise<T>) => {
   let client: MySqlConnection | null = null
+  let proxy: DatabaseProxySocketResult | null = null
   try {
-    client = await openMysqlConnection(connectionTestInputFromSaved(connection), connection.dbType)
+    const opened = await openMysqlConnection(connectionTestInputFromSaved(connection), connection.dbType)
+    client = opened.client
+    proxy = opened.proxy
     return await fn(client)
   } finally {
     if (client) {
@@ -1686,13 +1775,17 @@ const withMysqlConnection = async <T>(connection: DatabaseConnectionInfo, fn: (c
         client.destroy?.()
       }
     }
+    closeDatabaseProxySocket(proxy)
   }
 }
 
 const withPostgresClient = async <T>(connection: DatabaseConnectionInfo, fn: (client: PostgresClient) => Promise<T>) => {
   let client: PostgresClient | null = null
+  let proxy: DatabaseProxySocketResult | null = null
   try {
-    client = await openPostgresClient(connectionTestInputFromSaved(connection), connection.dbType)
+    const opened = await openPostgresClient(connectionTestInputFromSaved(connection), connection.dbType)
+    client = opened.client
+    proxy = opened.proxy
     return await fn(client)
   } finally {
     if (client) {
@@ -1702,6 +1795,7 @@ const withPostgresClient = async <T>(connection: DatabaseConnectionInfo, fn: (cl
         /* ignore close errors */
       }
     }
+    closeDatabaseProxySocket(proxy)
   }
 }
 
@@ -1723,8 +1817,11 @@ const withOracleConnection = async <T>(connection: DatabaseConnectionInfo, fn: (
 
 const withSqlServerPool = async <T>(connection: DatabaseConnectionInfo, fn: (client: SqlServerPool) => Promise<T>) => {
   let client: SqlServerPool | null = null
+  let proxy: DatabaseProxySocketResult | null = null
   try {
-    client = await openSqlServerPool(connectionTestInputFromSaved(connection))
+    const opened = await openSqlServerPool(connectionTestInputFromSaved(connection))
+    client = opened.pool
+    proxy = opened.proxy
     return await fn(client)
   } finally {
     if (client) {
@@ -1734,6 +1831,7 @@ const withSqlServerPool = async <T>(connection: DatabaseConnectionInfo, fn: (cli
         /* ignore close errors */
       }
     }
+    closeDatabaseProxySocket(proxy)
   }
 }
 
@@ -1827,9 +1925,12 @@ const rowValue = (row: Record<string, unknown>, ...names: string[]) => {
 const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInput, startedAt: number): Promise<DatabaseConnectionTestResult> => {
   if (isMysqlCompatibleDbType(input.dbType)) {
     let client: MySqlConnection | null = null
+    let proxy: DatabaseProxySocketResult | null = null
     const label = mysqlCompatibleLabel(input.dbType)
     try {
-      client = await openMysqlConnection(input, input.dbType)
+      const opened = await openMysqlConnection(input, input.dbType)
+      client = opened.client
+      proxy = opened.proxy
       const rows = await mysqlRows<{ version?: string; v?: string }>(client, 'SELECT VERSION() AS version')
       const version = trim(rows[0]?.version || rows[0]?.v)
       return {
@@ -1855,14 +1956,18 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
           client.destroy?.()
         }
       }
+      closeDatabaseProxySocket(proxy)
     }
   }
 
   if (isPostgresCompatibleDbType(input.dbType)) {
     let client: PostgresClient | null = null
+    let proxy: DatabaseProxySocketResult | null = null
     const label = postgresCompatibleLabel(input.dbType)
     try {
-      client = await openPostgresClient(input, input.dbType)
+      const opened = await openPostgresClient(input, input.dbType)
+      client = opened.client
+      proxy = opened.proxy
       const rows = await postgresRows<{ version?: string }>(client, 'SELECT version() AS version')
       const version = trim(rows[0]?.version)
       return {
@@ -1888,6 +1993,7 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
           /* ignore close errors */
         }
       }
+      closeDatabaseProxySocket(proxy)
     }
   }
 
@@ -1931,8 +2037,11 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
 
   if (input.dbType === 'sqlserver') {
     let client: SqlServerPool | null = null
+    let proxy: DatabaseProxySocketResult | null = null
     try {
-      client = await openSqlServerPool(input)
+      const opened = await openSqlServerPool(input)
+      client = opened.pool
+      proxy = opened.proxy
       const rows = await sqlServerRows<Record<string, unknown>>(client, "SELECT CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS version")
       const version = trim(rowValue(rows[0] ?? {}, 'version', 'VERSION'))
       return {
@@ -1958,6 +2067,7 @@ const testRelationalDatabaseConnection = async (input: DatabaseConnectionTestInp
           /* ignore close errors */
         }
       }
+      closeDatabaseProxySocket(proxy)
     }
   }
 
@@ -3342,6 +3452,7 @@ const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>
   if (!id || !name || !dbType) return null
   const port = normalizedDatabasePort(typeof value.port === 'number' ? value.port : Number(value.port))
   const sslMode = postgresSslModeValues.has(String(value.sslMode ?? '')) ? (String(value.sslMode ?? '') as DatabaseConnectionInfo['sslMode']) : ''
+  const proxyName = dbType !== 'sqlite' && value.needProxy === true ? normalizePersistedString(value.proxyName) : ''
   return {
     id,
     name,
@@ -3357,6 +3468,8 @@ const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>
     filePath: dbType === 'sqlite' ? normalizePersistedString(value.filePath) || undefined : undefined,
     readonly: dbType === 'sqlite' ? value.readonly !== false : undefined,
     sslMode: isPostgresCompatibleDbType(dbType) || dbType === 'sqlserver' ? sslMode : '',
+    needProxy: proxyName ? true : undefined,
+    proxyName: proxyName || undefined,
     url: normalizePersistedString(value.url) || undefined,
     status:
       typeof value.status === 'string' && databaseStatusValues.has(value.status as DatabaseConnectionInfo['status'])
@@ -3672,6 +3785,7 @@ const normalizeDatabaseConnectionSaveDraft = (
   const port = isSqlite || hasOracleConnectString ? null : normalizedDatabasePort(input.port)
   const sslMode: DatabaseConnectionInfo['sslMode'] =
     isPostgresCompatibleDbType(input.dbType) && postgresSslModeValues.has(input.sslMode ?? '') ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
+  const proxyName = !isSqlite && databaseProxyRequested(input) ? trim(input.proxyName) : ''
   const normalized = {
     name: trim(input.name),
     dbType: input.dbType,
@@ -3684,7 +3798,9 @@ const normalizeDatabaseConnectionSaveDraft = (
     database,
     filePath: isSqlite ? filePath : undefined,
     readonly: isSqlite ? !!input.readonly : undefined,
-    sslMode
+    sslMode,
+    needProxy: !isSqlite && !!proxyName ? true : undefined,
+    proxyName: !isSqlite && proxyName ? proxyName : undefined
   }
   return {
     ...normalized,
@@ -5223,6 +5339,13 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
     if (!trim(input.user)) {
       return { ok: false, errorCode: 'DB_USER_REQUIRED', errorMessage: 'Database user is required.' }
     }
+    if (databaseProxyRequested(input) && !trim(input.proxyName)) {
+      return { ok: false, errorCode: 'DB_PROXY_REQUIRED', errorMessage: 'Database SSH proxy name is required.' }
+    }
+    if (databaseProxyRequested(input)) {
+      const unsupported = databaseProxyUnsupportedFor(input.dbType)
+      if (unsupported) return { ok: false, ...unsupported }
+    }
   }
 
   if (!shouldUseDatabaseSeedData()) {
@@ -5294,7 +5417,15 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
       id: existing.id,
       ...normalized,
       hasPassword: connectionSecret ? true : existing.hasPassword,
-      status: existing.dbType === normalized.dbType && existing.host === normalized.host && existing.port === normalized.port && existing.database === normalized.database ? existing.status : 'idle',
+      status:
+        existing.dbType === normalized.dbType &&
+        existing.host === normalized.host &&
+        existing.port === normalized.port &&
+        existing.database === normalized.database &&
+        existing.needProxy === normalized.needProxy &&
+        existing.proxyName === normalized.proxyName
+          ? existing.status
+          : 'idle',
       catalogs:
         existing.dbType === normalized.dbType && existing.database === normalized.database && shouldUseDatabaseSeedData()
           ? existing.catalogs.map((catalog) => cloneDatabaseCatalog(existing.id, catalog))

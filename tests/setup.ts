@@ -1806,6 +1806,7 @@ const normalizeSavedDatabaseConnectionMock = (
   const database = isSqlite ? basenameFromDatabasePathMock(filePath) : databaseTrimMock(input.database)
   const sslMode: DatabaseConnectionInfo['sslMode'] =
     isPostgresCompatibleDatabaseMock(input.dbType) || input.dbType === 'sqlserver' ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
+  const proxyName = !isSqlite && (input.needProxy || databaseTrimMock(input.proxyName)) ? databaseTrimMock(input.proxyName) : ''
   const normalized = {
     name: databaseTrimMock(input.name),
     dbType: input.dbType,
@@ -1818,7 +1819,9 @@ const normalizeSavedDatabaseConnectionMock = (
     database,
     filePath: isSqlite ? filePath : undefined,
     readonly: isSqlite ? !!input.readonly : undefined,
-    sslMode
+    sslMode,
+    needProxy: !isSqlite && !!proxyName ? true : undefined,
+    proxyName: !isSqlite && proxyName ? proxyName : undefined
   }
   return {
     ...normalized,

@@ -2063,6 +2063,8 @@ export type DatabaseConnectionInfo = {
   filePath?: string
   readonly?: boolean
   sslMode?: '' | 'disable' | 'require' | 'verify-ca' | 'verify-full'
+  needProxy?: boolean
+  proxyName?: string
   url?: string
   status: 'idle' | 'testing' | 'connected' | 'failed'
   catalogs: DatabaseCatalogInfo[]
@@ -2103,6 +2105,8 @@ export type DatabaseConnectionTestInput = {
   filePath?: string
   readonly?: boolean
   sslMode?: string
+  needProxy?: boolean
+  proxyName?: string
   url?: string
 }
 

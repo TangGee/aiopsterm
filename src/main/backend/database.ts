@@ -2,15 +2,22 @@ import {
   configureDatabaseAiRuntime,
   configureDatabaseRuntime,
   type DatabaseAiProviderTextInput,
-  type DatabaseAiProviderTextResult
+  type DatabaseAiProviderTextResult,
+  type DatabaseRuntimeConfig
 } from '@shared/database'
-import type { UserConfig } from '@shared/preload'
+import type { DatabaseConnectionTestInput, UserConfig } from '@shared/preload'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
+import { createSshProxySocket, type SshProxySocket } from './sshProxy'
 
 type DatabaseBackendRuntimeConfig = {
   getConfig?: () => UserConfig
   localBackendDouble?: boolean
+  mysqlDriver?: DatabaseRuntimeConfig['mysqlDriver']
+  postgresDriver?: DatabaseRuntimeConfig['postgresDriver']
+  oracleDriver?: DatabaseRuntimeConfig['oracleDriver']
+  sqlServerDriver?: DatabaseRuntimeConfig['sqlServerDriver']
   fetch?: typeof fetch
+  createSshProxySocket?: typeof createSshProxySocket
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
   timeoutMs?: number
@@ -20,6 +27,28 @@ type DatabaseBackendRuntimeConfig = {
 }
 
 const normalizeText = (value: unknown) => String(value || '').trim()
+
+const databaseProxyError = (message: string, code: string) => Object.assign(new Error(message), { code })
+
+async function createDatabaseProxySocket(
+  input: DatabaseConnectionTestInput,
+  config: DatabaseBackendRuntimeConfig,
+  targetHost: string,
+  targetPort: number,
+  options?: { timeoutMs?: number }
+): Promise<{ proxyName: string; socket: SshProxySocket } | null> {
+  const proxyName = normalizeText(input.proxyName)
+  if (!proxyName) return null
+  const proxyConfig = (config.getConfig?.().sshProxyConfigs || []).find((item) => normalizeText(item.name) === proxyName)
+  if (!proxyConfig) {
+    throw databaseProxyError(`Database SSH proxy config "${proxyName}" is not available.`, 'DB_PROXY_CONFIG_NOT_FOUND')
+  }
+  const socketFactory = config.createSshProxySocket || createSshProxySocket
+  return {
+    proxyName,
+    socket: await socketFactory(proxyConfig, targetHost, targetPort, options)
+  }
+}
 
 async function generateDatabaseProviderText(
   input: DatabaseAiProviderTextInput,
@@ -87,7 +116,12 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
       ? {
           ...(config.stateFilePath ? { stateFilePath: config.stateFilePath } : {}),
           ...(config.credentialKeyPath ? { credentialKeyPath: config.credentialKeyPath } : {}),
+          ...(config.mysqlDriver ? { mysqlDriver: config.mysqlDriver } : {}),
+          ...(config.postgresDriver ? { postgresDriver: config.postgresDriver } : {}),
+          ...('oracleDriver' in config ? { oracleDriver: config.oracleDriver } : {}),
+          ...('sqlServerDriver' in config ? { sqlServerDriver: config.sqlServerDriver } : {}),
           ...(config.fetch ? { fetch: config.fetch } : {}),
+          createProxySocket: (input, targetHost, targetPort, options) => createDatabaseProxySocket(input, config, targetHost, targetPort, options),
           ...(typeof config.useSeedData === 'boolean' ? { useSeedData: config.useSeedData } : {})
         }
       : undefined

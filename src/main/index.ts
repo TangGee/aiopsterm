@@ -173,6 +173,7 @@ import {
   saveSettingsShortcut
 } from './backend/settingsPreferences'
 import { applyPrivacyRuntimeSettings, configurePrivacyRuntime } from './backend/privacyRuntime'
+import { createSshProxySocket } from './backend/sshProxy'
 import { configureSshTunnelBackendRuntime, startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { configureSshTerminalBackendRuntime, createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
 import {
@@ -1157,6 +1158,7 @@ configureAssetConnectionRuntime({ getConfig })
 configureDatabaseBackendRuntime({
   getConfig,
   fetch,
+  createSshProxySocket,
   localBackendDouble: process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE === '1',
   stateFilePath: join(app.getPath('userData'), 'database-workspace.json'),
   useSeedData: process.env.AIOPSTERM_DATABASE_ENABLE_SEED === '1'

@@ -598,10 +598,18 @@ const createSqlServerDriverDouble = () => {
 let configureDatabaseBackendRuntime: (config?: {
   getConfig?: () => UserConfig
   localBackendDouble?: boolean
+  mysqlDriver?: any
+  postgresDriver?: any
+  oracleDriver?: any
+  sqlServerDriver?: any
   fetch?: typeof fetch
+  createSshProxySocket?: (config: any, targetHost: string, targetPort: number, options?: { timeoutMs?: number }) => Promise<any>
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
   timeoutMs?: number
+  stateFilePath?: string
+  credentialKeyPath?: string
+  useSeedData?: boolean
 }) => void
 let exportDatabaseRowsBackend: (
   input: DatabaseExportInput,
@@ -681,6 +689,171 @@ describe('database backend boundary', () => {
       endpoint: '127.0.0.1:5432'
     })
     expect(result.data?.durationMs).toBeGreaterThan(0)
+  })
+
+  it('opens relational database drivers through configured SSH proxy sockets from the main backend boundary', async () => {
+    const pg = createPostgresDriverDouble()
+    const mysql = createMysqlDriverDouble()
+    const sqlserver = createSqlServerDriverDouble()
+    const sockets: Array<{ label: string; destroyed: boolean; destroy: () => void }> = []
+    const proxyCalls: Array<Record<string, unknown>> = []
+    configureDatabaseBackendRuntime({
+      getConfig: () =>
+        ({
+          modelName: 'aiopsterm-local-agent',
+          sshProxyConfigs: [
+            {
+              name: 'release-proxy',
+              type: 'SOCKS5',
+              host: '10.0.0.8',
+              port: 1080,
+              enableProxyIdentity: true,
+              username: 'proxy-user',
+              password: 'proxy-pass'
+            }
+          ]
+        }) as UserConfig,
+      useSeedData: false,
+      postgresDriver: pg.driver,
+      mysqlDriver: mysql.driver,
+      sqlServerDriver: sqlserver.driver,
+      createSshProxySocket: async (config, targetHost, targetPort, options) => {
+        const socket = {
+          label: `${targetHost}:${targetPort}`,
+          destroyed: false,
+          destroy() {
+            socket.destroyed = true
+          }
+        }
+        sockets.push(socket)
+        proxyCalls.push({ config, targetHost, targetPort, options })
+        return socket
+      }
+    })
+
+    const pgProbe = await testDatabaseConnection({
+      dbType: 'postgresql',
+      name: 'proxy-postgres',
+      host: '10.20.0.10',
+      port: 5432,
+      user: 'ops',
+      password: 'secret',
+      database: 'orders',
+      needProxy: true,
+      proxyName: 'release-proxy'
+    })
+    expect(pgProbe.ok).toBe(true)
+    expect(pg.state.configs.at(-1)).toMatchObject({ stream: sockets[0] })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'postgresql',
+        name: 'proxy-postgres',
+        host: '10.20.0.10',
+        port: 5432,
+        user: 'ops',
+        password: 'secret',
+        database: 'orders',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword',
+        needProxy: true,
+        proxyName: 'release-proxy'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({ needProxy: true, proxyName: 'release-proxy' })
+    expect(saved.data?.connections.find((connection) => connection.id === 'conn-proxy-postgres')).toMatchObject({ needProxy: true, proxyName: 'release-proxy' })
+
+    const mysqlProbe = await testDatabaseConnection({
+      dbType: 'mysql',
+      name: 'proxy-mysql',
+      host: '10.20.0.11',
+      port: 3306,
+      user: 'ops',
+      password: 'secret',
+      database: 'metrics',
+      needProxy: true,
+      proxyName: 'release-proxy'
+    })
+    expect(mysqlProbe.ok).toBe(true)
+    expect(mysql.state.configs.at(-1)).toMatchObject({ stream: sockets.at(-1) })
+
+    const sqlServerProbe = await testDatabaseConnection({
+      dbType: 'sqlserver',
+      name: 'proxy-sqlserver',
+      host: '10.20.0.12',
+      port: 1433,
+      user: 'sa',
+      password: 'secret',
+      database: 'opsdb',
+      needProxy: true,
+      proxyName: 'release-proxy'
+    })
+    expect(sqlServerProbe.ok).toBe(true)
+    expect(sqlserver.state.configs.at(-1)?.options).toMatchObject({ connector: expect.any(Function) })
+    await expect((sqlserver.state.configs.at(-1)?.options as any).connector()).resolves.toBe(sockets.at(-1))
+
+    expect(proxyCalls.map((call) => [call.targetHost, call.targetPort])).toEqual([
+      ['10.20.0.10', 5432],
+      ['10.20.0.10', 5432],
+      ['10.20.0.11', 3306],
+      ['10.20.0.12', 1433]
+    ])
+    expect(proxyCalls.every((call) => (call.config as any).name === 'release-proxy')).toBe(true)
+    expect(proxyCalls.every((call) => (call.options as any).timeoutMs === 10_000)).toBe(true)
+    expect(sockets.every((socket) => socket.destroyed)).toBe(true)
+
+    const missingProxy = await testDatabaseConnection({
+      dbType: 'postgresql',
+      name: 'missing-proxy',
+      host: '10.20.0.10',
+      port: 5432,
+      user: 'ops',
+      database: 'orders',
+      needProxy: true,
+      proxyName: 'missing-proxy'
+    })
+    expect(missingProxy).toEqual({
+      ok: false,
+      errorCode: 'DB_PROXY_CONFIG_NOT_FOUND',
+      errorMessage: 'Database SSH proxy config "missing-proxy" is not available.'
+    })
+
+    await expect(
+      testDatabaseConnection({
+        dbType: 'oracle',
+        name: 'proxy-oracle',
+        host: '10.20.0.13',
+        port: 1521,
+        user: 'ops',
+        database: 'ORCLPDB1',
+        needProxy: true,
+        proxyName: 'release-proxy'
+      })
+    ).resolves.toEqual({
+      ok: false,
+      errorCode: 'DB_PROXY_ORACLE_UNSUPPORTED',
+      errorMessage: 'Database SSH proxy is not supported for Oracle connect strings in this version.'
+    })
+
+    await expect(
+      testDatabaseConnection({
+        dbType: 'clickhouse',
+        name: 'proxy-clickhouse',
+        host: '10.20.0.14',
+        port: 8123,
+        user: 'default',
+        database: 'ops',
+        needProxy: true,
+        proxyName: 'release-proxy'
+      })
+    ).resolves.toEqual({
+      ok: false,
+      errorCode: 'DB_PROXY_CLICKHOUSE_UNSUPPORTED',
+      errorMessage: 'Database SSH proxy is not supported for ClickHouse HTTP connections in this version.'
+    })
   })
 
   it('exports visible database rows through the backend CSV file boundary', async () => {

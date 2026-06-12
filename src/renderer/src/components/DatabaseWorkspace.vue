@@ -1901,6 +1901,44 @@
               @input="markConnectionUrlAuto"
             />
           </label>
+          <label>
+            SSH Proxy
+            <span class="db-connection-check">
+              <input
+                v-model="connectionDraft.needProxy"
+                type="checkbox"
+              />
+              <span>Route database traffic through a configured proxy</span>
+            </span>
+          </label>
+          <label v-if="connectionDraft.needProxy && databaseProxyAvailable">
+            Proxy
+            <select
+              v-model="connectionDraft.proxyName"
+              :class="{ error: connectionErrors.includes('proxyName') }"
+            >
+              <option value="">Select proxy</option>
+              <option
+                v-for="proxy in databaseSshProxyOptions"
+                :key="proxy.name"
+                :value="proxy.name"
+              >
+                {{ proxy.name }} · {{ proxy.type }} {{ proxy.host }}:{{ proxy.port }}
+              </option>
+            </select>
+          </label>
+          <p
+            v-else-if="connectionDraft.needProxy"
+            class="db-modal-hint"
+          >
+            No SSH proxy config is available.
+            <button
+              type="button"
+              @click="workspaceStore.openSshProxyConfig(); workspaceStore.openAddSshProxyConfig()"
+            >
+              Add Proxy
+            </button>
+          </p>
           <label v-if="isPostgresCompatibleDbType(connectionDraft.dbType)">
             SSL Mode
             <select v-model="connectionDraft.sslMode">
@@ -3049,6 +3087,8 @@ const connectionDraft = reactive({
   filePath: '',
   readonly: false,
   sslMode: '' as NonNullable<DatabaseConnectionInfo['sslMode']>,
+  needProxy: false,
+  proxyName: '',
   url: ''
 })
 
@@ -3163,6 +3203,10 @@ const activeSqlRequiresSchema = computed(() => {
   const connection = tab ? findConnection(tab.connectionId) : undefined
   return !!connection && sqlConnectionRequiresSchema(connection)
 })
+
+const databaseSshProxyOptions = computed(() => workspaceStore.sshProxyConfigs.map((config) => ({ ...config })).sort((first, second) => first.name.localeCompare(second.name)))
+const databaseSshProxyNames = computed(() => new Set(databaseSshProxyOptions.value.map((config) => config.name)))
+const databaseProxyAvailable = computed(() => connectionDraft.dbType !== 'sqlite' && databaseSshProxyOptions.value.length > 0)
 
 const contextConnection = computed(() => {
   const menu = contextMenu.value
@@ -3566,6 +3610,20 @@ watch(
   }
 )
 
+watch(
+  [() => connectionDraft.dbType, databaseSshProxyNames],
+  () => {
+    if (connectionDraft.dbType === 'sqlite') {
+      connectionDraft.needProxy = false
+      connectionDraft.proxyName = ''
+      return
+    }
+    if (connectionDraft.proxyName && !databaseSshProxyNames.value.has(connectionDraft.proxyName)) {
+      connectionDraft.proxyName = ''
+    }
+  }
+)
+
 watch(activeTabId, (tabId) => {
   scrollActiveWorkspaceTabIntoView(tabId)
   if (dbAiPaneOpen.value && !dbAiPaneContextTouched) applyDbAiPaneContext(resolveDbAiPaneContextFromWorkspace(), false)
@@ -3852,6 +3910,8 @@ function isDatabaseConnectionInfo(value: unknown): value is DatabaseConnectionIn
       value.sslMode === 'require' ||
       value.sslMode === 'verify-ca' ||
       value.sslMode === 'verify-full') &&
+    (value.needProxy === undefined || typeof value.needProxy === 'boolean') &&
+    (value.proxyName === undefined || typeof value.proxyName === 'string') &&
     (value.url === undefined || typeof value.url === 'string') &&
     isDatabaseConnectionStatus(value.status) &&
     Array.isArray(value.catalogs) &&
@@ -6308,6 +6368,8 @@ function editConnection(connectionId: string) {
     filePath: connection.filePath ?? '',
     readonly: !!connection.readonly,
     sslMode: connection.sslMode ?? '',
+    needProxy: !!connection.needProxy,
+    proxyName: connection.proxyName ?? '',
     url: connection.url ?? ''
   })
   connectionErrors.value = []
@@ -6692,6 +6754,8 @@ function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[
     filePath: '',
     readonly: dbType === 'sqlite',
     sslMode: '',
+    needProxy: false,
+    proxyName: '',
     url: ''
   })
   connectionErrors.value = []
@@ -6759,6 +6823,9 @@ function validateConnectionDraft() {
       if (!hasPort) errors.push('port')
     }
     if (!connectionDraft.user.trim()) errors.push('user')
+    if (connectionDraft.needProxy && (!connectionDraft.proxyName.trim() || !databaseSshProxyNames.value.has(connectionDraft.proxyName.trim()))) {
+      errors.push('proxyName')
+    }
   }
   connectionErrors.value = errors
   return errors.length === 0
@@ -6803,6 +6870,8 @@ function databaseConnectionTestInput(): DatabaseConnectionTestInput {
     filePath: connectionDraft.filePath,
     readonly: connectionDraft.readonly,
     sslMode: connectionDraft.sslMode,
+    needProxy: connectionDraft.dbType !== 'sqlite' && connectionDraft.needProxy,
+    proxyName: connectionDraft.dbType !== 'sqlite' && connectionDraft.needProxy ? connectionDraft.proxyName.trim() : '',
     url: connectionDraft.url || connectionUrl.value
   }
 }

@@ -759,7 +759,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(dbConnectionModal).toContainText('SSL Mode')
     await dbConnectionModal.locator('input').first().fill('e2e-postgres')
     await dbConnectionModal.locator('select').nth(3).selectOption('verify-full')
-    await expect(dbConnectionModal.locator('input').nth(6)).toHaveValue('jdbc:postgresql://127.0.0.1:5432')
+    await expect(dbConnectionModal.locator('input').nth(7)).toHaveValue('jdbc:postgresql://127.0.0.1:5432')
     await dbConnectionModal.locator('footer button').filter({ hasText: 'Test Connection' }).click()
     await expect(dbConnectionModal).toContainText('PostgreSQL 16 local backend validation')
     await dbConnectionModal.locator('button[type="submit"]').click()
