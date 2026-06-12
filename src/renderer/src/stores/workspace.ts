@@ -5554,6 +5554,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { servers, toolStates }
   }
 
+  const restoreMcpServersSnapshot = (snapshot: ReturnType<typeof getMcpSnapshot>) => {
+    applyMcpServersSnapshot(normalizeMcpServersConfig(snapshot.servers, snapshot.toolStates))
+  }
+
+  const mcpServerDisabledMatches = (serverName: string, disabled: boolean) =>
+    mcpServers.value.some((server) => server.name === serverName && server.disabled === disabled)
+
+  const mcpServerDeletedMatches = (serverName: string) => !mcpServers.value.some((server) => server.name === serverName)
+
+  const mcpToolEnabledMatches = (serverName: string, toolName: string, enabled: boolean) =>
+    mcpServers.value.some((server) => server.name === serverName && server.tools.some((tool) => tool.name === toolName && tool.enabled === enabled))
+
+  const mcpToolAutoApproveMatches = (serverName: string, toolName: string, autoApprove: boolean) =>
+    mcpServers.value.some((server) => server.name === serverName && server.tools.some((tool) => tool.name === toolName && Boolean(tool.autoApprove) === autoApprove))
+
+  const failMcpMutationRefresh = (snapshot: ReturnType<typeof getMcpSnapshot>, message: string) => {
+    restoreMcpServersSnapshot(snapshot)
+    if (mcpConfigEditorOpen.value) mcpConfigEditorLastSaved.value = false
+    setSettingsNotice(message)
+    return false
+  }
+
   const readMcpServersSnapshotFromBridge = async (currentServers: McpServerUserConfig[], currentToolStates: McpToolStatesUserConfig) => {
     if (window.aiops?.getMcpServers) {
       try {
@@ -7842,14 +7864,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const nextDisabled = !server.disabled
+    const previousSnapshot = getMcpSnapshot()
     try {
       await window.aiops.toggleMcpServer(name, nextDisabled)
       const refreshed = await refreshMcpServersFromBridge()
       if (!refreshed) {
-        setSettingsNotice(`MCP ${name} 状态更新后刷新失败`)
-        return false
+        return failMcpMutationRefresh(previousSnapshot, `MCP ${name} 状态更新后刷新失败`)
+      }
+      if (!mcpServerDisabledMatches(name, nextDisabled)) {
+        return failMcpMutationRefresh(previousSnapshot, `MCP ${name} 状态更新后刷新结果不匹配`)
       }
     } catch {
+      restoreMcpServersSnapshot(previousSnapshot)
       setSettingsNotice(`MCP ${name} 状态更新失败`)
       return false
     }
@@ -7862,14 +7888,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('MCP 删除服务不可用')
       return false
     }
+    const previousSnapshot = getMcpSnapshot()
     try {
       await window.aiops.deleteMcpServer(name)
       const refreshed = await refreshMcpServersFromBridge()
       if (!refreshed) {
-        setSettingsNotice(`${name} 删除后刷新失败`)
-        return false
+        return failMcpMutationRefresh(previousSnapshot, `${name} 删除后刷新失败`)
+      }
+      if (!mcpServerDeletedMatches(name)) {
+        return failMcpMutationRefresh(previousSnapshot, `${name} 删除后刷新结果不匹配`)
       }
     } catch {
+      restoreMcpServersSnapshot(previousSnapshot)
       setSettingsNotice(`${name} 删除失败`)
       return false
     }
@@ -7885,14 +7915,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const nextEnabled = !tool.enabled
+    const previousSnapshot = getMcpSnapshot()
     try {
       await window.aiops.setMcpToolState(serverName, toolName, nextEnabled)
       const refreshed = await refreshMcpServersFromBridge()
       if (!refreshed) {
-        setSettingsNotice(`${toolName} 状态更新后刷新失败`)
-        return false
+        return failMcpMutationRefresh(previousSnapshot, `${toolName} 状态更新后刷新失败`)
+      }
+      if (!mcpToolEnabledMatches(serverName, toolName, nextEnabled)) {
+        return failMcpMutationRefresh(previousSnapshot, `${toolName} 状态更新后刷新结果不匹配`)
       }
     } catch {
+      restoreMcpServersSnapshot(previousSnapshot)
       setSettingsNotice(`${toolName} 状态更新失败`)
       return false
     }
@@ -7908,10 +7942,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const nextAutoApprove = !tool.autoApprove
+    const previousSnapshot = getMcpSnapshot()
     try {
       const result = await window.aiops.setMcpToolAutoApprove(serverName, toolName, nextAutoApprove)
       if (!applyMcpConfigMutationResult(result, 'Auto Approve failed')) return false
+      if (!mcpToolAutoApproveMatches(serverName, toolName, nextAutoApprove)) {
+        mcpConfigEditorError.value = 'Auto Approve failed: MCP Auto Approve 更新后刷新结果不匹配'
+        return failMcpMutationRefresh(previousSnapshot, 'MCP Auto Approve 更新后刷新结果不匹配')
+      }
     } catch {
+      restoreMcpServersSnapshot(previousSnapshot)
       setSettingsNotice(`${toolName} Auto Approve 更新失败`)
       return false
     }

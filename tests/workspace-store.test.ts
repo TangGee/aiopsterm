@@ -12146,6 +12146,57 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(JSON.stringify(store.config.mcpServers)).toBe(originalConfigServers)
   })
 
+  it('does not fabricate MCP mutation success when refreshed backend state does not match the request', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshMcpServersFromBridge()
+    const originalServers = JSON.stringify(store.mcpServers)
+    const staleServers = store.mcpServers.map((server) => ({
+      ...server,
+      tools: server.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })),
+      resources: server.resources.map((resource) => ({ ...resource }))
+    }))
+
+    vi.mocked(window.aiops.getMcpServers).mockResolvedValueOnce(staleServers)
+    await expect(store.toggleMcpServerDisabled('filesystem')).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('MCP filesystem 状态更新后刷新结果不匹配')
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+
+    vi.mocked(window.aiops.getMcpServers).mockResolvedValueOnce(staleServers)
+    await expect(store.toggleMcpTool('filesystem', 'read_file')).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('read_file 状态更新后刷新结果不匹配')
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+
+    vi.mocked(window.aiops.getMcpServers).mockResolvedValueOnce(staleServers)
+    await expect(store.deleteMcpServer('ops-inventory')).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('ops-inventory 删除后刷新结果不匹配')
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+
+    const staleAutoApproveData = {
+      mcpConfig: {
+        mcpServers: {
+          filesystem: {
+            type: 'stdio' as const,
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+            timeout: 60
+          },
+          'ops-inventory': {
+            type: 'streamableHttp' as const,
+            url: 'https://ops.example.com/mcp',
+            timeout: 45
+          }
+        }
+      },
+      mcpServers: staleServers,
+      mcpToolStates: Object.fromEntries(staleServers.flatMap((server) => server.tools.map((tool) => [`${server.name}:${tool.name}`, tool.enabled])))
+    }
+    vi.mocked(window.aiops.setMcpToolAutoApprove).mockResolvedValueOnce({ ok: true, data: staleAutoApproveData })
+    await expect(store.toggleMcpToolAutoApprove('filesystem', 'read_file')).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('MCP Auto Approve 更新后刷新结果不匹配')
+    expect(store.mcpConfigEditorError).toBe('Auto Approve failed: MCP Auto Approve 更新后刷新结果不匹配')
+    expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+  })
+
   it('runs MCP tools and reads resources only through preload operation bridges', async () => {
     const store = useWorkspaceStore()
     await store.refreshMcpServersFromBridge()
