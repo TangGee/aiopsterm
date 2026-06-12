@@ -803,7 +803,7 @@ import {
   isAiopsAssetSnapshot,
   isAiopsDeletedAssetData,
   isAiopsDeletedCustomFolderData,
-  isAiopsOrganizationAssetRefreshData,
+  isAiopsJumpserverOrganizationAssetRefreshData,
   isAiopsSavedAssetRecord,
   isAiopsSavedCustomFolderRecord,
   isAiopsSshTunnelMutationData,
@@ -1716,7 +1716,7 @@ const refreshGroup = async (groupKey: string) => {
     if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用')
     const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
-    if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+    if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
     const groups = await loadDirectGroupOptions()
     applyWorkspaceAssetState(result.data, groups)
     if (organization) await expandGroup(organization.uuid)

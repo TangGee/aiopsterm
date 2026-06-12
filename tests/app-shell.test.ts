@@ -231,6 +231,22 @@ const waitForDatabaseDbAiDone = async () => {
   await flushPromises()
 }
 
+const buildNonJumpserverOrganizationRefreshData = async () => {
+  const snapshot = await window.aiops.listAssets()
+  return {
+    ...snapshot,
+    assets: snapshot.assets.map((asset) =>
+      asset.id === 'asset-5' || asset.uuid === 'org-1'
+        ? { ...asset, name: 'not-jumpserver-org', title: 'not-jumpserver-org', tags: asset.tags.filter((tag) => tag.toLowerCase() !== 'jumpserver') }
+        : asset
+    ),
+    organizationId: 'asset-5',
+    refreshed: 1,
+    created: 1,
+    updated: 0
+  }
+}
+
 const waitForDatabaseCatalog = async () => {
   await flushPromises()
   await new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -1732,6 +1748,18 @@ describe('AppShell', () => {
     expect(organization.text()).toContain(malformedMessage)
     expect(organization.text()).not.toContain('已刷新堡垒机资源 jumpserver-org')
     expect(organization.text()).not.toContain('jumpserver-org-synced-asset')
+
+    await organization.findAll('.host-card').find((button) => button.text().includes('jumpserver-org'))!.trigger('contextmenu')
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: await buildNonJumpserverOrganizationRefreshData()
+    } as any)
+    await organization.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('刷新资产'))!.trigger('click')
+    await flushPromises()
+    expect(organization.text()).toContain(malformedMessage)
+    expect(organization.text()).toContain('jumpserver-org')
+    expect(organization.text()).not.toContain('not-jumpserver-org')
+    expect(organization.text()).not.toContain('jumpserver-org-synced-asset')
   })
 
   it('fails closed when Assets host management cannot trust asset groups or mutation refreshes', async () => {
@@ -2071,6 +2099,18 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.text()).toContain(malformedMessage)
     expect(wrapper.text()).not.toContain('jumpserver-org 资源已刷新')
+    expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
+
+    await groupRow('jumpserver-org').trigger('contextmenu')
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: await buildNonJumpserverOrganizationRefreshData()
+    } as any)
+    await menuButton('刷新').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(malformedMessage)
+    expect(wrapper.text()).toContain('jumpserver-org')
+    expect(wrapper.text()).not.toContain('not-jumpserver-org')
     expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
   })
 
@@ -7672,6 +7712,16 @@ describe('AppShell', () => {
     await flushPromises()
     expect(window.aiops.refreshOrganizationAssets).toHaveBeenCalledWith({ organizationId: 'asset-5' })
     expect(workspace.text()).toContain('资产服务返回数据无效')
+    expect(workspace.text()).not.toContain('jumpserver-org-synced-asset')
+    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
+      ok: true,
+      data: await buildNonJumpserverOrganizationRefreshData()
+    } as any)
+    await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
+    await flushPromises()
+    expect(workspace.text()).toContain('资产服务返回数据无效')
+    expect(workspace.text()).toContain('jumpserver-org')
+    expect(workspace.text()).not.toContain('not-jumpserver-org')
     expect(workspace.text()).not.toContain('jumpserver-org-synced-asset')
     await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
     await flushPromises()

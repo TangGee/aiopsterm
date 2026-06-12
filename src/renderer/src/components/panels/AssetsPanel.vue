@@ -920,7 +920,7 @@ import {
   isAiopsKeychainDeleteData,
   isAiopsKeychainListData,
   isAiopsKeychainRecord,
-  isAiopsOrganizationAssetRefreshData,
+  isAiopsJumpserverOrganizationAssetRefreshData,
   isAiopsSavedAssetRecord,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
@@ -1603,7 +1603,7 @@ const refreshOrganizationAsset = async () => {
       if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用。')
       const result = await refreshOrganizationAssets({ organizationId: expectedOrganizationId })
       if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
-      if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+      if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
       applyAssetSnapshot(result.data)
       importNotice.value = `已刷新堡垒机资源 ${contextAsset.value.title}。`
     } catch (error) {
@@ -1697,7 +1697,7 @@ const refreshManagedAssets = async () => {
     if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用。')
     const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新资产表失败。')
-    if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+    if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
     const data = result.data
     applyAssetSnapshot(data)
     selectedRows.value = selectedRows.value.filter((id) => data.assets.some((asset) => asset.id === id))

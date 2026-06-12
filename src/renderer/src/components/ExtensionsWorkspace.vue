@@ -364,7 +364,12 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { isAiopsAssetSnapshot, isAiopsOrganizationAssetRefreshData, malformedAssetBackendResultMessage } from '@/services/assetBackendGuards'
+import {
+  isAiopsAssetSnapshot,
+  isAiopsJumpserverOrganization,
+  isAiopsJumpserverOrganizationAssetRefreshData,
+  malformedAssetBackendResultMessage
+} from '@/services/assetBackendGuards'
 import type { AiopsAssetRecord, AiopsAssetSnapshot, ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
 
 type ExtensionPlugin = ExtensionPluginRuntimeConfig
@@ -430,10 +435,7 @@ const updateButtonText = computed(() => {
   return selectedStageText.value || 'Updating'
 })
 
-const isJumpserverOrganization = (asset: AiopsAssetRecord) =>
-  asset.asset_type === 'organization' && asset.tags.some((tag) => tag.toLowerCase() === 'jumpserver')
-
-const jumpserverOrganizations = computed(() => jumpserverAssetSnapshot.value.assets.filter(isJumpserverOrganization))
+const jumpserverOrganizations = computed(() => jumpserverAssetSnapshot.value.assets.filter(isAiopsJumpserverOrganization))
 const jumpserverOrganizationIds = computed(() => new Set(jumpserverOrganizations.value.flatMap((asset) => [asset.id, asset.uuid])))
 const jumpserverSyncedAssets = computed(() =>
   jumpserverAssetSnapshot.value.assets.filter(
@@ -495,7 +497,7 @@ const refreshJumpserverAssets = async (organizationId?: string) => {
   try {
     const result = await refreshOrganizationAssets({ organizationId: targetOrganizationId })
     if (!result?.ok) throw new Error(result?.errorMessage || '组织资产刷新失败')
-    if (!isAiopsOrganizationAssetRefreshData(result.data, targetOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
+    if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, targetOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
     applyJumpserverRefreshSnapshot(result.data)
     const created = result.data.created
     const updated = result.data.updated

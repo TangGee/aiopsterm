@@ -189,6 +189,14 @@ export const findAiopsOrganizationInSnapshot = (snapshot: AiopsAssetSnapshot, or
   return snapshot.assets.find((asset) => asset.asset_type === 'organization' && (asset.id === requestedId || asset.uuid === requestedId)) || null
 }
 
+export const isAiopsJumpserverOrganization = (asset: AiopsAssetRecord) =>
+  asset.asset_type === 'organization' && asset.tags.some((tag) => tag.trim().toLowerCase() === 'jumpserver')
+
+export const findAiopsJumpserverOrganizationInSnapshot = (snapshot: AiopsAssetSnapshot, organizationId: string): AiopsAssetRecord | null => {
+  const organization = findAiopsOrganizationInSnapshot(snapshot, organizationId)
+  return organization && isAiopsJumpserverOrganization(organization) ? organization : null
+}
+
 export const isAiopsOrganizationAssetRefreshData = (
   value: unknown,
   expectedOrganizationId?: string
@@ -214,6 +222,20 @@ export const isAiopsOrganizationAssetRefreshData = (
     return false
   }
   return true
+}
+
+export const isAiopsJumpserverOrganizationAssetRefreshData = (
+  value: unknown,
+  expectedOrganizationId?: string
+): value is AiopsOrganizationAssetRefreshData => {
+  if (!isAiopsOrganizationAssetRefreshData(value, expectedOrganizationId)) return false
+  const requestedId = expectedOrganizationId?.trim()
+  if (!requestedId) {
+    const record = value as Record<string, unknown>
+    const returnedId = typeof record.organizationId === 'string' ? record.organizationId.trim() : ''
+    return !returnedId || findAiopsJumpserverOrganizationInSnapshot(value, returnedId) !== null
+  }
+  return findAiopsJumpserverOrganizationInSnapshot(value, requestedId) !== null
 }
 
 export const isAiopsAssetConnectionTestInfo = (value: unknown): value is AiopsAssetConnectionTestInfo => {
