@@ -6165,7 +6165,13 @@ Object.defineProperty(window, 'aiops', {
         size: content.length
       }
     }),
-    writeLocalFile: vi.fn(async () => undefined),
+    writeLocalFile: vi.fn(async (filePath: string, content: string) => ({
+      ok: true,
+      data: {
+        filePath,
+        bytes: new TextEncoder().encode(String(content ?? '')).byteLength
+      }
+    })),
     readFileContent: vi.fn(async (filePath: string) => ({
       ok: true,
       data: {

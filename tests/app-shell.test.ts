@@ -9191,6 +9191,17 @@ describe('AppShell', () => {
       expect(window.aiops.writeLocalFile).toHaveBeenCalledWith('/tmp/aiopsterm-sql/failing.sql', 'select * from public.orders;')
       expect(wrapper.find('.db-sql-save-state').text()).toContain('disk denied')
 
+      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/aiopsterm-sql/malformed.sql' })
+      vi.mocked(window.aiops.writeLocalFile).mockResolvedValueOnce({
+        ok: true,
+        data: { filePath: '/tmp/aiopsterm-sql/other.sql', bytes: 1 }
+      } as any)
+      await wrapper.find('button[title="Save As"]').trigger('click')
+      await flushPromises()
+      expect(window.aiops.writeLocalFile).toHaveBeenCalledWith('/tmp/aiopsterm-sql/malformed.sql', 'select * from public.orders;')
+      expect(wrapper.find('.db-sql-save-state').text()).toContain('SQL file writer returned malformed result data.')
+      expect(wrapper.find('.db-sql-save-state').text()).not.toContain('Saved: malformed.sql')
+
       ;(window.aiops as any).writeLocalFile = undefined
       await wrapper.find('button[title="Save"]').trigger('click')
       await flushPromises()

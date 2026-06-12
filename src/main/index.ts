@@ -3015,8 +3015,10 @@ const registerIpc = () => {
   ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => {
     if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
     if (!isAbsolute(filePath)) throw new Error('filePath must be absolute')
+    const text = typeof content === 'string' ? content : String(content)
     await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, typeof content === 'string' ? content : String(content), 'utf-8')
+    await writeFile(filePath, text, 'utf-8')
+    return { ok: true, data: { filePath, bytes: Buffer.byteLength(text, 'utf-8') } }
   })
   ipcMain.handle('chat:stage-attachment', async (_event, payload: { taskId: string; srcAbsPath: string }) => {
     return stageChatAttachment(payload, getChatAttachmentsPath())

@@ -1562,6 +1562,11 @@ export type LocalFileReadResult = {
   size: number
 }
 
+export type LocalFileWriteResult = AiopsMutationResult<{
+  filePath: string
+  bytes: number
+}>
+
 export type ChatAttachmentStageResult = {
   mode: 'local'
   taskId: string
@@ -2906,7 +2911,7 @@ export type AiopsPreloadApi = {
   showSaveDialog: (options: SaveDialogOptions) => Promise<SaveDialogResult | undefined>
   saveCustomBackground: (srcAbsPath: string) => Promise<CustomBackgroundSaveResult>
   readLocalFile: (filePath: string) => Promise<LocalFileReadResult>
-  writeLocalFile: (filePath: string, content: string) => Promise<void>
+  writeLocalFile: (filePath: string, content: string) => Promise<LocalFileWriteResult>
   stageChatAttachment: (payload: { taskId: string; srcAbsPath: string }) => Promise<ChatAttachmentStageResult>
   validateChatImageAttachment: (input: ChatImageAttachmentValidateInput) => Promise<ChatImageAttachmentValidateResult>
   prepareChatImageAttachment: (input: ChatImageAttachmentPrepareInput) => Promise<ChatImageAttachmentPrepareResult>

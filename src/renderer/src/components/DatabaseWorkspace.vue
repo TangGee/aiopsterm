@@ -2386,6 +2386,7 @@ import type {
   DatabaseGroupDeleteResult,
   DatabaseGroupMutationResult,
   DatabaseGroupUpdateInput,
+  LocalFileWriteResult,
   DatabasePageCommentKey,
   DatabasePageCommentRecord,
   DatabaseSqlExecutionRecord,
@@ -2532,6 +2533,7 @@ const DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE = 'Database group backend return
 const DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE = 'Database connection backend returned malformed result data.'
 const DATABASE_CREATE_DATABASE_MALFORMED_MESSAGE = 'Create database backend returned malformed result data.'
 const DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE = 'Backend table mutation returned malformed result data.'
+const SQL_FILE_WRITE_MALFORMED_MESSAGE = 'SQL file writer returned malformed result data.'
 const workspaceStore = useWorkspaceStore()
 
 type SqlResult = {
@@ -4002,6 +4004,21 @@ function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+function utf8ByteLength(value: string) {
+  return new TextEncoder().encode(value).byteLength
+}
+
+function isLocalFileWriteData(value: unknown, expectedPath: string, expectedContent: string): value is NonNullable<LocalFileWriteResult['data']> {
+  return (
+    isRecord(value) &&
+    value.filePath === expectedPath &&
+    typeof value.bytes === 'number' &&
+    Number.isInteger(value.bytes) &&
+    value.bytes >= 0 &&
+    value.bytes === utf8ByteLength(expectedContent)
+  )
+}
+
 function isDbAiStatus(value: unknown): value is DbAiStatus {
   return value === 'queued' || value === 'streaming' || value === 'done' || value === 'error' || value === 'cancelled'
 }
@@ -5388,7 +5405,17 @@ async function saveActiveSql(forceSaveAs: boolean) {
       }
       targetPath = picked.filePath
     }
-    await writeLocalFile(targetPath, tab.sql)
+    const result = await writeLocalFile(targetPath, tab.sql)
+    if (result?.ok !== true) {
+      tab.saveError = result?.errorMessage || 'SQL file save failed'
+      showNotice(tab.saveError)
+      return
+    }
+    if (!isLocalFileWriteData(result.data, targetPath, tab.sql)) {
+      tab.saveError = SQL_FILE_WRITE_MALFORMED_MESSAGE
+      showNotice(tab.saveError)
+      return
+    }
     tab.filePath = targetPath
     tab.savedSql = tab.sql
     tab.saveError = null
