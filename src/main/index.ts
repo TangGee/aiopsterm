@@ -1190,7 +1190,8 @@ configureExtensionBackendRuntime({
 })
 configureKubernetesBackendRuntime({
   stateDir: join(app.getPath('userData'), 'kubernetes'),
-  useSeedData: process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED === '1'
+  useSeedData: process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED === '1',
+  refreshOrganizationAssets
 })
 setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => {
   const channel = 'data' in event ? 'kubernetes:terminal:data' : 'kubernetes:terminal:exit'

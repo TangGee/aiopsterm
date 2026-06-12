@@ -1158,7 +1158,7 @@ describe('kubernetes backend boundary', () => {
     })
   })
 
-  it('fails closed for non-seed JumpServer Kubernetes sync without fabricating clusters', async () => {
+  it('fails closed for non-seed JumpServer Kubernetes sync when the asset refresh provider is unavailable', async () => {
     const statePath = join(tempDirs[0], 'catalog.json')
     const persistedCatalog = {
       version: 1,
@@ -1193,6 +1193,210 @@ describe('kubernetes backend boundary', () => {
     expect(after.data?.clusters).toEqual([])
     expect(after.data?.bastions).toEqual(before.data?.bastions)
     expect(JSON.parse(await readFile(statePath, 'utf-8'))).toEqual(persistedCatalog)
+  })
+
+  it('syncs non-seed JumpServer Kubernetes clusters from backend organization assets', async () => {
+    const statePath = join(tempDirs[0], 'catalog.json')
+    const persistedCatalog = {
+      version: 1,
+      contexts: [
+        {
+          name: 'legacy/context',
+          cluster: 'legacy-k8s',
+          namespace: 'ops',
+          server: '10.90.0.15:6443',
+          isActive: true
+        }
+      ],
+      clusters: [
+        {
+          id: 'k8s-existing',
+          name: 'legacy-k8s',
+          kubeconfig_path: null,
+          kubeconfig_content: null,
+          context_name: 'legacy/context',
+          server_url: '10.90.0.15:6443',
+          auth_type: 'jumpserver',
+          is_active: 1,
+          connection_status: 'connected',
+          auto_connect: 1,
+          default_namespace: 'ops',
+          created_at: '2026-06-01 08:00',
+          updated_at: '2026-06-01 08:00',
+          source_type: 'jumpserver',
+          bastion_uuid: 'org-1',
+          bastion_asset_address: '10.90.0.15',
+          bastion_asset_name: 'jumpserver-org-synced-asset',
+          bastion_asset_id_last: 15
+        }
+      ],
+      bastions: [{ uuid: 'org-1', label: 'jumpserver-org', ip: 'bastion.internal' }],
+      namespaces: [],
+      resources: [],
+      importContexts: [
+        {
+          name: 'legacy/context',
+          cluster: 'legacy-k8s',
+          namespace: 'ops',
+          server: '10.90.0.15:6443'
+        }
+      ]
+    }
+    await writeFile(statePath, JSON.stringify(persistedCatalog, null, 2), 'utf-8')
+    const refreshCalls: Array<{ organizationId?: string }> = []
+    configureKubernetesBackendRuntime({
+      stateDir: tempDirs[0],
+      useSeedData: false,
+      defaultKubeconfigPath: null,
+      refreshOrganizationAssets: (input) => {
+        refreshCalls.push(input)
+        return {
+          ok: true,
+          data: {
+            organizationId: 'org-1',
+            refreshed: 2,
+            created: 1,
+            updated: 1,
+            folders: [],
+            assets: [
+              {
+                id: 'asset-5',
+                uuid: 'org-1',
+                name: 'jumpserver-org',
+                title: 'jumpserver-org',
+                host: 'bastion.internal',
+                ip: 'bastion.internal',
+                group: '企业',
+                group_name: '企业',
+                status: 'online',
+                tags: ['jumpserver'],
+                username: 'sync',
+                port: 22,
+                asset_type: 'organization',
+                auth_type: 'keyBased',
+                comment: '',
+                data_source: 'refresh'
+              },
+              {
+                id: '15',
+                uuid: '15',
+                name: 'jumpserver-org-synced-asset',
+                title: 'jumpserver-org-synced-asset',
+                host: '10.90.0.15',
+                ip: '10.90.0.15',
+                group: '企业',
+                group_name: '企业',
+                status: 'online',
+                tags: ['jumpserver', 'synced'],
+                username: 'jump',
+                port: 22,
+                asset_type: 'person',
+                auth_type: 'keyBased',
+                comment: '',
+                data_source: 'refresh',
+                organizationId: 'org-1'
+              },
+              {
+                id: '16',
+                uuid: '16',
+                name: 'prod-worker-k8s',
+                title: 'prod-worker-k8s',
+                host: '10.90.0.16',
+                ip: '10.90.0.16',
+                group: '企业',
+                group_name: '企业',
+                status: 'online',
+                tags: ['kubernetes', 'synced'],
+                username: 'jump',
+                port: 22,
+                asset_type: 'person',
+                auth_type: 'keyBased',
+                comment: '',
+                data_source: 'refresh',
+                organizationId: 'org-1'
+              },
+              {
+                id: 'other-asset',
+                uuid: 'other-asset',
+                name: 'other-org-host',
+                title: 'other-org-host',
+                host: '10.90.9.10',
+                ip: '10.90.9.10',
+                group: '企业',
+                group_name: '企业',
+                status: 'online',
+                tags: ['jumpserver', 'synced'],
+                username: 'jump',
+                port: 22,
+                asset_type: 'person',
+                auth_type: 'keyBased',
+                comment: '',
+                data_source: 'refresh',
+                organizationId: 'other-org'
+              }
+            ]
+          }
+        }
+      }
+    })
+    __resetKubernetesCatalogForTests()
+
+    const synced = await syncKubernetesBastion('org-1')
+
+    expect(refreshCalls).toEqual([{ organizationId: 'org-1' }])
+    expect(synced).toMatchObject({
+      ok: true,
+      data: {
+        syncedCount: 1,
+        updatedCount: 1
+      }
+    })
+    expect(synced.data?.clusters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'k8s-existing',
+          name: 'jumpserver-org-synced-asset',
+          context_name: 'jumpserver-org-synced-asset',
+          server_url: '10.90.0.15:6443',
+          is_active: 1,
+          connection_status: 'disconnected',
+          auto_connect: 1,
+          default_namespace: 'ops',
+          bastion_asset_id_last: 15
+        }),
+        expect.objectContaining({
+          id: 'k8s-js-org-1-16',
+          name: 'prod-worker-k8s',
+          context_name: 'prod-worker-k8s',
+          server_url: '10.90.0.16:6443',
+          source_type: 'jumpserver',
+          bastion_uuid: 'org-1',
+          bastion_asset_address: '10.90.0.16',
+          bastion_asset_name: 'prod-worker-k8s',
+          bastion_asset_id_last: 16
+        })
+      ])
+    )
+    expect(synced.data?.clusters.some((cluster) => cluster.bastion_asset_name === 'other-org-host')).toBe(false)
+    expect(synced.data?.contexts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'jumpserver-org-synced-asset', cluster: 'jumpserver-org-synced-asset', namespace: 'ops' }),
+        expect.objectContaining({ name: 'prod-worker-k8s', cluster: 'prod-worker-k8s', namespace: 'default' })
+      ])
+    )
+    const persisted = JSON.parse(await readFile(statePath, 'utf-8')) as { clusters: Array<{ id: string }>; contexts: Array<{ name: string }> }
+    expect(persisted.clusters.map((cluster) => cluster.id)).toEqual(expect.arrayContaining(['k8s-existing', 'k8s-js-org-1-16']))
+    expect(persisted.contexts.map((context) => context.name)).toEqual(expect.arrayContaining(['jumpserver-org-synced-asset', 'prod-worker-k8s']))
+
+    const syncedAgain = await syncKubernetesBastion('org-1')
+    expect(syncedAgain).toMatchObject({
+      ok: true,
+      data: {
+        syncedCount: 0,
+        updatedCount: 2
+      }
+    })
+    expect(syncedAgain.data?.clusters.filter((cluster) => cluster.bastion_uuid === 'org-1')).toHaveLength(2)
   })
 
   it('keeps explicit seed JumpServer Kubernetes sync available for development fixtures', async () => {

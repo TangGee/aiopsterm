@@ -2951,6 +2951,103 @@ const upsertKubernetesContextMock = (cluster: TestKubernetesCluster, isActive = 
 const findKubernetesClusterMock = (id: string) => kubernetesCatalogMock.clusters.find((cluster) => cluster.id === id) || null
 const findKubernetesResourceMock = (id: string) => kubernetesCatalogMock.resources.find((resource) => resource.id === id) || null
 
+const k8sIdPartMock = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item'
+const jumpserverKubernetesAssetAddressMock = (asset: TestAssetRecord) => trimMock(asset.host) || trimMock(asset.ip)
+const jumpserverKubernetesAssetNameMock = (asset: TestAssetRecord, address: string) => trimMock(asset.title) || trimMock(asset.name) || address
+const jumpserverKubernetesServerUrlMock = (address: string) => {
+  if (/^https?:\/\//i.test(address)) return address
+  if (/^\[[^\]]+\]:\d+$/.test(address) || /^[^:]+:\d+$/.test(address)) return address
+  return `${address}:6443`
+}
+const numericAssetIdMock = (asset: TestAssetRecord) => {
+  const rawId = [asset.id, asset.uuid].map(trimMock).find((value) => /^\d+$/.test(value))
+  return rawId ? Number(rawId) : null
+}
+const isJumpserverKubernetesAssetMock = (asset: TestAssetRecord, organizationIds: Set<string>) => {
+  if (asset.asset_type === 'organization' || asset.isLocalShell) return false
+  if (!organizationIds.has(trimMock(asset.organizationId))) return false
+  const address = jumpserverKubernetesAssetAddressMock(asset)
+  if (!address) return false
+  const tags = new Set((Array.isArray(asset.tags) ? asset.tags : []).map((tag) => tag.toLowerCase()))
+  return asset.data_source === 'refresh' || tags.has('jumpserver') || tags.has('synced') || tags.has('k8s') || tags.has('kubernetes')
+}
+const upsertJumpserverKubernetesClustersMock = (bastion: TestKubernetesCatalog['bastions'][number], assets: TestAssetRecord[]) => {
+  const existingByKey = new Map<string, TestKubernetesCluster>()
+  const keyFor = (address: string, name: string) => `${bastion.uuid}\u0000${address}\u0000${name}`
+  kubernetesCatalogMock.clusters
+    .filter((cluster) => cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastion.uuid)
+    .forEach((cluster) => {
+      if (cluster.bastion_asset_address && cluster.bastion_asset_name) {
+        existingByKey.set(keyFor(cluster.bastion_asset_address, cluster.bastion_asset_name), cluster)
+      }
+    })
+
+  const updates = new Map<string, TestKubernetesCluster>()
+  const inserted: TestKubernetesCluster[] = []
+  const seenKeys = new Set<string>()
+  let syncedCount = 0
+  let updatedCount = 0
+
+  assets.forEach((asset) => {
+    const address = jumpserverKubernetesAssetAddressMock(asset)
+    if (!address) return
+    const name = jumpserverKubernetesAssetNameMock(asset, address)
+    const key = keyFor(address, name)
+    if (seenKeys.has(key)) return
+    seenKeys.add(key)
+
+    const existing = existingByKey.get(key)
+    if (existing) {
+      const next: TestKubernetesCluster = {
+        ...existing,
+        name,
+        context_name: name,
+        server_url: jumpserverKubernetesServerUrlMock(address),
+        auth_type: 'jumpserver',
+        default_namespace: existing.default_namespace || 'default',
+        source_type: 'jumpserver',
+        bastion_uuid: bastion.uuid,
+        bastion_asset_address: address,
+        bastion_asset_name: name,
+        bastion_asset_id_last: numericAssetIdMock(asset),
+        updated_at: '刚刚'
+      }
+      updates.set(existing.id, next)
+      upsertKubernetesContextMock(next)
+      updatedCount += 1
+      return
+    }
+
+    const identity = trimMock(asset.uuid) || trimMock(asset.id) || `${address}-${name}`
+    const cluster: TestKubernetesCluster = {
+      id: `k8s-js-${k8sIdPartMock(bastion.uuid)}-${k8sIdPartMock(identity)}`,
+      name,
+      kubeconfig_path: null,
+      kubeconfig_content: null,
+      context_name: name,
+      server_url: jumpserverKubernetesServerUrlMock(address),
+      auth_type: 'jumpserver',
+      is_active: 0,
+      connection_status: 'disconnected',
+      auto_connect: 0,
+      default_namespace: 'default',
+      created_at: '刚刚',
+      updated_at: '刚刚',
+      source_type: 'jumpserver',
+      bastion_uuid: bastion.uuid,
+      bastion_asset_address: address,
+      bastion_asset_name: name,
+      bastion_asset_id_last: numericAssetIdMock(asset)
+    }
+    inserted.push(cluster)
+    upsertKubernetesContextMock(cluster, false)
+    syncedCount += 1
+  })
+
+  kubernetesCatalogMock.clusters = [...inserted, ...kubernetesCatalogMock.clusters.map((cluster) => updates.get(cluster.id) || cluster)]
+  return { syncedCount, updatedCount }
+}
+
 const k8sResourceTypeByKindMock: Record<TestKubernetesResourceKind, string> = {
   pods: 'pod',
   deployments: 'deployment',
@@ -4148,6 +4245,26 @@ const defaultAssets: TestAssetRecord[] = [
     data_source: 'refresh',
     favorite: true,
     hasPrivateKey: true
+  },
+  {
+    id: 'asset-6',
+    uuid: 'org-prod',
+    name: 'prod-jumpserver-org',
+    title: 'prod-jumpserver-org',
+    host: '10.24.8.12',
+    ip: '10.24.8.12',
+    group: '企业',
+    group_name: '企业',
+    status: 'online',
+    tags: ['jumpserver'],
+    username: 'sync',
+    port: 22,
+    asset_type: 'organization',
+    auth_type: 'keyBased',
+    keychainId: 'key-1',
+    comment: '生产同步资产',
+    data_source: 'refresh',
+    hasPrivateKey: true
   }
 ]
 
@@ -4739,6 +4856,38 @@ const assetSnapshotMock = () => ({
   assets: assetStoreMock.map(cloneAsset),
   folders: assetFolderStoreMock.map(cloneAssetFolder)
 })
+
+const refreshOrganizationAssetsMock = (input?: { organizationId?: string }) => {
+  const organizations = assetStoreMock.filter(
+    (asset) =>
+      asset.asset_type === 'organization' &&
+      (!input?.organizationId || asset.id === input.organizationId || asset.uuid === input.organizationId)
+  )
+  if (input?.organizationId && organizations.length === 0) {
+    return { ok: false as const, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: `Organization asset not found: ${input.organizationId}` }
+  }
+  let created = 0
+  let updated = 0
+  organizations.forEach((organization, index) => {
+    const draft = refreshedAssetForOrganizationMock(organization, index)
+    const existingIndex = assetStoreMock.findIndex((asset) => asset.id === draft.id)
+    const asset = normalizeAssetInputMock(draft, existingIndex >= 0 ? assetStoreMock[existingIndex] : undefined)
+    assetStoreMock =
+      existingIndex >= 0 ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
+    if (existingIndex >= 0) updated += 1
+    else created += 1
+  })
+  return {
+    ok: true as const,
+    data: {
+      ...assetSnapshotMock(),
+      ...(input?.organizationId && organizations[0] ? { organizationId: organizations[0].uuid || organizations[0].id } : {}),
+      refreshed: created + updated,
+      created,
+      updated
+    }
+  }
+}
 
 const localFileContentMock = (filePath: string) => {
   const localPath = String(filePath || '')
@@ -6222,38 +6371,7 @@ Object.defineProperty(window, 'aiops', {
       assetStoreMock = assetStoreMock.filter((asset) => asset.id !== id)
       return { ok: true, data: { id } }
     }),
-    refreshOrganizationAssets: vi.fn(async (input?: { organizationId?: string }) => {
-      const organizations = assetStoreMock.filter(
-        (asset) =>
-          asset.asset_type === 'organization' &&
-          (!input?.organizationId || asset.id === input.organizationId || asset.uuid === input.organizationId)
-      )
-      if (input?.organizationId && organizations.length === 0) {
-        return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: `Organization asset not found: ${input.organizationId}` }
-      }
-      let created = 0
-      let updated = 0
-      organizations.forEach((organization, index) => {
-        const draft = refreshedAssetForOrganizationMock(organization, index)
-        const existingIndex = assetStoreMock.findIndex((asset) => asset.id === draft.id)
-        const asset = normalizeAssetInputMock(draft, existingIndex >= 0 ? assetStoreMock[existingIndex] : undefined)
-        assetStoreMock =
-          existingIndex >= 0 ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
-        if (existingIndex >= 0) updated += 1
-        else created += 1
-      })
-      return {
-        ok: true,
-        data: {
-          assets: assetStoreMock.map(cloneAsset),
-          folders: assetFolderStoreMock.map(cloneAssetFolder),
-          ...(input?.organizationId && organizations[0] ? { organizationId: organizations[0].uuid || organizations[0].id } : {}),
-          refreshed: created + updated,
-          created,
-          updated
-        }
-      }
-    }),
+    refreshOrganizationAssets: vi.fn(async (input?: { organizationId?: string }) => refreshOrganizationAssetsMock(input)),
     previewAssetImport: vi.fn(async (input: { filePath: string }) => {
       try {
         const { filePath, fileName, drafts } = readAssetImportDraftsMock(input)
@@ -6949,36 +7067,44 @@ Object.defineProperty(window, 'aiops', {
     syncKubernetesBastion: vi.fn(async (bastionUuid: string) => {
       const bastion = kubernetesCatalogMock.bastions.find((item) => item.uuid === bastionUuid)
       if (!bastion) return { ok: false, errorCode: 'K8S_BASTION_NOT_FOUND', errorMessage: 'Kubernetes bastion not found.' }
-      const existing = kubernetesCatalogMock.clusters.filter((cluster) => cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastionUuid)
-      if (existing.length) {
-        kubernetesCatalogMock.clusters = kubernetesCatalogMock.clusters.map((cluster) =>
-          cluster.source_type === 'jumpserver' && cluster.bastion_uuid === bastionUuid ? { ...cluster, updated_at: '刚刚' } : cluster
-        )
-        return k8sCatalogResultMock({ syncedCount: 0, updatedCount: existing.length })
+      const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+      if (typeof refreshOrganizationAssets !== 'function') {
+        return {
+          ok: false,
+          errorCode: 'K8S_BASTION_SYNC_UNAVAILABLE',
+          errorMessage: 'JumpServer Kubernetes asset sync requires the live JumpServer backend integration.'
+        }
       }
-      const cluster: TestKubernetesCluster = {
-        id: `k8s-test-${kubernetesCatalogMock.clusters.length + 1}`,
-        name: `${bastion.label}-k8s`,
-        kubeconfig_path: null,
-        kubeconfig_content: null,
-        context_name: `${bastion.label}/synced`,
-        server_url: `${bastion.ip}:6443`,
-        auth_type: 'jumpserver',
-        is_active: 0,
-        connection_status: 'disconnected',
-        auto_connect: 0,
-        default_namespace: 'default',
-        created_at: '刚刚',
-        updated_at: '刚刚',
-        source_type: 'jumpserver',
-        bastion_uuid: bastion.uuid,
-        bastion_asset_address: bastion.ip,
-        bastion_asset_name: bastion.label,
-        bastion_asset_id_last: null
+      const refreshed = await refreshOrganizationAssets({ organizationId: bastionUuid })
+      if (!refreshed?.ok || !refreshed.data) {
+        return {
+          ok: false,
+          errorCode: refreshed?.errorCode || 'K8S_BASTION_SYNC_FAILED',
+          errorMessage: refreshed?.errorMessage || 'JumpServer Kubernetes asset refresh failed.'
+        }
       }
-      kubernetesCatalogMock.clusters = [cluster, ...kubernetesCatalogMock.clusters]
-      upsertKubernetesContextMock(cluster, false)
-      return k8sCatalogResultMock({ syncedCount: 1, updatedCount: 0 })
+      const refreshedData = refreshed.data
+      const organizationRows = refreshedData.assets.filter(
+        (asset) =>
+          asset.asset_type === 'organization' &&
+          (asset.id === bastionUuid || asset.uuid === bastionUuid) &&
+          (!refreshedData.organizationId || asset.id === refreshedData.organizationId || asset.uuid === refreshedData.organizationId)
+      )
+      if (refreshedData.organizationId && refreshedData.organizationId !== bastionUuid && organizationRows.length === 0) {
+        return {
+          ok: false,
+          errorCode: 'K8S_BASTION_SYNC_MISMATCH',
+          errorMessage: 'JumpServer Kubernetes asset refresh returned a different organization.'
+        }
+      }
+      const organizationIds = new Set(
+        [bastionUuid, refreshedData.organizationId, ...organizationRows.flatMap((asset) => [asset.id, asset.uuid])]
+          .map(trimMock)
+          .filter(Boolean)
+      )
+      const assets = refreshedData.assets.filter((asset) => isJumpserverKubernetesAssetMock(asset, organizationIds))
+      const { syncedCount, updatedCount } = upsertJumpserverKubernetesClustersMock(bastion, assets)
+      return k8sCatalogResultMock({ syncedCount, updatedCount })
     }),
     createKubernetesTerminal: vi.fn(async (input: { clusterId: string; namespace?: string; cols?: number; rows?: number }) => {
       const cluster = findKubernetesClusterMock(input.clusterId)
