@@ -1,13 +1,18 @@
 import type {
   AiopsAssetConnectionTestInfo,
   AiopsAssetExportResult,
+  AiopsAssetGroupDeleteInput,
+  AiopsAssetGroupRecord,
+  AiopsAssetGroupRenameInput,
   AiopsAssetImportConfirmResult,
   AiopsAssetImportPreviewRecord,
   AiopsAssetImportPreviewResult,
+  AiopsAssetInput,
   AiopsAssetRecord,
   AiopsAssetSnapshot,
   AiopsOrganizationAssetRefreshResult,
   AiopsCustomFolderRecord,
+  AiopsCustomFolderSaveInput,
   AiopsKeychainRecord,
   AiopsSshTunnelMutationResult,
   AiopsSshTunnelRecord
@@ -27,6 +32,10 @@ const keychainTypes = new Set(['rsa', 'ed25519', 'ecdsa'])
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
+
+const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const hasOwn = (source: object, key: string) => Object.prototype.hasOwnProperty.call(source, key)
 
 const isOptionalString = (value: unknown) => value === undefined || typeof value === 'string'
 
@@ -71,6 +80,105 @@ export const isAiopsCustomFolderRecord = (value: unknown): value is AiopsCustomF
 export const isAiopsAssetSnapshot = (value: unknown): value is AiopsAssetSnapshot => {
   if (!isRecord(value)) return false
   return Array.isArray(value.assets) && Array.isArray(value.folders) && value.assets.every(isAiopsAssetRecord) && value.folders.every(isAiopsCustomFolderRecord)
+}
+
+export const isAiopsAssetGroupRecord = (value: unknown): value is AiopsAssetGroupRecord => {
+  if (!isRecord(value)) return false
+  return isNonEmptyString(value.key) && isNonEmptyString(value.name) && isNonNegativeInteger(value.count)
+}
+
+export const isAiopsAssetGroupListData = (value: unknown): value is AiopsAssetGroupRecord[] =>
+  Array.isArray(value) && value.every(isAiopsAssetGroupRecord)
+
+const optionalTextMatches = (actual: unknown, expected: unknown) => {
+  if (expected === undefined) return true
+  return text(actual) === text(expected)
+}
+
+const optionalExactMatches = (actual: unknown, expected: unknown) => expected === undefined || actual === expected
+
+const optionalPortMatches = (actual: unknown, expected: unknown) => expected === undefined || Number(actual) === Number(expected)
+
+const optionalBooleanMatches = (actual: unknown, expected: unknown) => expected === undefined || Boolean(actual) === Boolean(expected)
+
+const optionalPresentStringMatches = (actual: unknown, input: object, key: keyof AiopsAssetInput) =>
+  !hasOwn(input, key) || (input as AiopsAssetInput)[key] === undefined
+    ? !hasOwn(input, key) || actual === undefined || text(actual) === ''
+    : text(actual) === text((input as AiopsAssetInput)[key])
+
+export const isAiopsSavedAssetRecord = (value: unknown, input: AiopsAssetInput): value is AiopsAssetRecord => {
+  if (!isAiopsAssetRecord(value)) return false
+  const expectedId = text(input.id)
+  if (expectedId && value.id !== expectedId) return false
+  const expectedName = text(input.name)
+  if (expectedName && value.name !== expectedName) return false
+  const expectedTitle = text(input.title || input.name)
+  if (expectedTitle && value.title !== expectedTitle) return false
+  if (!optionalTextMatches(value.host, input.host)) return false
+  if (!optionalTextMatches(value.ip, input.ip || input.host)) return false
+  if (!optionalTextMatches(value.group, input.group || input.group_name)) return false
+  if (!optionalTextMatches(value.group_name, input.group_name || input.group)) return false
+  if (!optionalTextMatches(value.username, input.username)) return false
+  if (!optionalPortMatches(value.port, input.port)) return false
+  if (!optionalExactMatches(value.status, input.status)) return false
+  if (!optionalExactMatches(value.asset_type, input.asset_type)) return false
+  if (!optionalExactMatches(value.auth_type, input.auth_type)) return false
+  if (!optionalTextMatches(value.comment, input.comment)) return false
+  if (!optionalExactMatches(value.data_source, input.data_source)) return false
+  if (!optionalBooleanMatches(value.favorite, input.favorite)) return false
+  if (!optionalPresentStringMatches(value.folderUuid, input, 'folderUuid')) return false
+  if (!optionalPresentStringMatches(value.organizationId, input, 'organizationId')) return false
+  if (!optionalExactMatches(value.tunnelState, input.tunnelState)) return false
+  if (!optionalBooleanMatches(value.needProxy, input.needProxy)) return false
+  if (!optionalPresentStringMatches(value.proxyName, input, 'proxyName')) return false
+  if (!optionalPresentStringMatches(value.keychainId, input, 'keychainId')) return false
+  return true
+}
+
+export const isAiopsDeletedAssetData = (value: unknown, expectedId: string): value is { id: string } => {
+  if (!isRecord(value)) return false
+  return value.id === expectedId
+}
+
+export const isAiopsSavedCustomFolderRecord = (
+  value: unknown,
+  input: AiopsCustomFolderSaveInput
+): value is AiopsCustomFolderRecord => {
+  if (!isAiopsCustomFolderRecord(value)) return false
+  if (input.uuid && value.uuid !== input.uuid) return false
+  if (value.name !== text(input.name)) return false
+  if (hasOwn(input, 'description') && value.description !== text(input.description)) return false
+  return true
+}
+
+export const isAiopsDeletedCustomFolderData = (value: unknown, expectedUuid: string): value is { uuid: string } => {
+  if (!isRecord(value)) return false
+  return value.uuid === expectedUuid
+}
+
+const shouldIncludeAssetForGroupMutation = (
+  asset: AiopsAssetRecord,
+  input: Pick<AiopsAssetGroupRenameInput | AiopsAssetGroupDeleteInput, 'assetTypes'>
+) => !asset.isLocalShell && (!input.assetTypes?.length || input.assetTypes.includes(asset.asset_type))
+
+const assetGroupName = (asset: AiopsAssetRecord) => text(asset.group || asset.group_name) || 'Hosts'
+
+export const isAiopsAssetGroupRenameSnapshot = (value: unknown, input: AiopsAssetGroupRenameInput): value is AiopsAssetSnapshot => {
+  if (!isAiopsAssetSnapshot(value)) return false
+  const oldName = text(input.oldName)
+  const newName = text(input.newName)
+  if (!oldName || !newName) return false
+  const groupAssets = value.assets.filter((asset) => shouldIncludeAssetForGroupMutation(asset, input))
+  if (oldName === newName) return groupAssets.some((asset) => assetGroupName(asset) === newName)
+  return groupAssets.some((asset) => assetGroupName(asset) === newName) && !groupAssets.some((asset) => assetGroupName(asset) === oldName)
+}
+
+export const isAiopsAssetGroupDeleteSnapshot = (value: unknown, input: AiopsAssetGroupDeleteInput): value is AiopsAssetSnapshot => {
+  if (!isAiopsAssetSnapshot(value)) return false
+  const name = text(input.name)
+  if (!name) return false
+  const groupAssets = value.assets.filter((asset) => shouldIncludeAssetForGroupMutation(asset, input))
+  return !groupAssets.some((asset) => assetGroupName(asset) === name)
 }
 
 export type AiopsOrganizationAssetRefreshData = NonNullable<AiopsOrganizationAssetRefreshResult['data']>

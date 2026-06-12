@@ -1204,6 +1204,7 @@ describe('AppShell', () => {
     await managed.find('.managed-asset-form textarea').setValue('手动组织资产')
     vi.mocked(window.aiops.saveAsset).mockClear()
     await managed.find('.managed-asset-form .asset-submit-button').trigger('click')
+    await flushPromises()
     const managedAddPayload = vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]
     expect(managedAddPayload).not.toHaveProperty('id')
     expect(managedAddPayload).toEqual(expect.objectContaining({ host: '10.77.0.7', title: 'managed-unit' }))
@@ -1243,6 +1244,7 @@ describe('AppShell', () => {
     expect((organization.findAll('.managed-asset-form input').at(1)!.element as HTMLInputElement).disabled).toBe(true)
     await organization.find('.managed-asset-form textarea').setValue('刷新备注')
     await organization.find('.managed-asset-form .asset-submit-button').trigger('click')
+    await flushPromises()
     expect(organization.text()).toContain('刷新备注')
   })
 
@@ -1673,6 +1675,82 @@ describe('AppShell', () => {
     expect(organization.text()).not.toContain('jumpserver-org-synced-asset')
   })
 
+  it('fails closed when Assets host management cannot trust asset groups or mutation refreshes', async () => {
+    const malformedMessage = '资产服务返回数据无效'
+    const originalAiops = {
+      listAssets: window.aiops.listAssets,
+      listAssetGroups: window.aiops.listAssetGroups,
+      saveAsset: window.aiops.saveAsset,
+      deleteAsset: window.aiops.deleteAsset
+    }
+    const mountHostManagement = async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(AssetsPanel, {
+        props: { query: '' },
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+      await wrapper.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+    const fillNewHostForm = async (wrapper: ReturnType<typeof mount>, name: string) => {
+      await wrapper.find('[data-testid="asset-new-host-button"]').trigger('click')
+      const inputs = () => wrapper.findAll('.asset-form-panel input')
+      await inputs().at(0)!.setValue(name)
+      await inputs().at(1)!.setValue('10.88.77.66')
+      await inputs().at(2)!.setValue('ops')
+      await inputs().at(4)!.setValue('测试')
+      await inputs().at(5)!.setValue('2222')
+    }
+
+    try {
+      ;(window.aiops as any).listAssetGroups = undefined
+      const missingGroups = await mountHostManagement()
+      expect(missingGroups.text()).toContain('资产分组服务不可用')
+      expect(missingGroups.findAll('.host-card').some((card) => card.text().includes('prod-bastion'))).toBe(false)
+      missingGroups.unmount()
+
+      ;(window.aiops as any).listAssetGroups = vi.fn(async () => [{ key: 'broken-group', name: '生产' }] as any)
+      const malformedGroups = await mountHostManagement()
+      expect(malformedGroups.text()).toContain(malformedMessage)
+      expect(malformedGroups.findAll('.host-card').some((card) => card.text().includes('prod-bastion'))).toBe(false)
+      malformedGroups.unmount()
+
+      ;(window.aiops as any).listAssetGroups = originalAiops.listAssetGroups
+      const saveRefreshMissing = await mountHostManagement()
+      await fillNewHostForm(saveRefreshMissing, 'snapshot-missing-host')
+      vi.mocked(window.aiops.saveAsset).mockImplementationOnce(async (input: any) => {
+        const savedResult = await originalAiops.saveAsset(input)
+        vi.mocked(window.aiops.listAssets).mockResolvedValueOnce({
+          assets: (await originalAiops.listAssets()).assets.filter((asset) => asset.id !== savedResult.data?.id),
+          folders: (await originalAiops.listAssets()).folders
+        })
+        return savedResult
+      })
+      await saveRefreshMissing.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+      await flushPromises()
+      expect(saveRefreshMissing.text()).toContain(malformedMessage)
+      expect(saveRefreshMissing.find('.asset-form-panel').exists()).toBe(true)
+      expect(saveRefreshMissing.findAll('.host-card').some((card) => card.text().includes('snapshot-missing-host'))).toBe(false)
+      saveRefreshMissing.unmount()
+
+      const wrongDelete = await mountHostManagement()
+      const prodCard = wrongDelete.findAll('.host-card').find((card) => card.text().includes('prod-bastion'))!
+      await prodCard.find('button[title="删除"]').trigger('click')
+      await wrongDelete.find('.asset-confirm-modal input').setValue('prod-bastion')
+      vi.mocked(window.aiops.deleteAsset).mockResolvedValueOnce({ ok: true, data: { id: 'different-asset' } } as any)
+      await wrongDelete.find('.asset-confirm-modal footer .danger').trigger('click')
+      await flushPromises()
+      expect(wrongDelete.text()).toContain(malformedMessage)
+      expect(wrongDelete.findAll('.host-card').some((card) => card.text().includes('prod-bastion'))).toBe(true)
+      wrongDelete.unmount()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
+  })
+
   it('does not fabricate Workspace host favorite, comment, or tunnel state before asset writes succeed', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -1933,6 +2011,138 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain(malformedMessage)
     expect(wrapper.text()).not.toContain('jumpserver-org 资源已刷新')
     expect(wrapper.text()).not.toContain('jumpserver-org-synced-asset')
+  })
+
+  it('fails closed when Workspace cannot trust asset groups, folders, or deletion snapshots', async () => {
+    const malformedMessage = '资产服务返回数据无效'
+    const originalAiops = {
+      listAssets: window.aiops.listAssets,
+      listAssetGroups: window.aiops.listAssetGroups,
+      saveAsset: window.aiops.saveAsset,
+      deleteAsset: window.aiops.deleteAsset,
+      saveAssetFolder: window.aiops.saveAssetFolder,
+      deleteAssetFolder: window.aiops.deleteAssetFolder,
+      deleteAssetGroup: window.aiops.deleteAssetGroup
+    }
+    const mountWorkspace = async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(WorkspacePanel, {
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+      return wrapper
+    }
+    const hostRow = (wrapper: ReturnType<typeof mount>, name: string) => {
+      const row = wrapper.findAll('.workspace-host-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace host row not found: ${name}`)
+      return row
+    }
+    const groupRow = (wrapper: ReturnType<typeof mount>, name: string) => {
+      const row = wrapper.findAll('.workspace-folder-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace group row not found: ${name}`)
+      return row
+    }
+    const menuButton = (wrapper: ReturnType<typeof mount>, label: string) => {
+      const button = wrapper.find('.workspace-node-menu').findAll('button').find((item) => item.text().includes(label))
+      if (!button) throw new Error(`Workspace menu button not found: ${label}`)
+      return button
+    }
+
+    try {
+      ;(window.aiops as any).listAssetGroups = undefined
+      const missingGroups = await mountWorkspace()
+      expect(missingGroups.text()).toContain('资产分组服务不可用')
+      expect(missingGroups.findAll('.workspace-host-row').some((row) => row.text().includes('prod-bastion'))).toBe(false)
+      missingGroups.unmount()
+
+      ;(window.aiops as any).listAssetGroups = originalAiops.listAssetGroups
+      vi.mocked(window.aiops.listAssetGroups).mockResolvedValueOnce([{ key: 'broken-group', name: '生产' }] as any)
+      const malformedGroups = await mountWorkspace()
+      expect(malformedGroups.text()).toContain(malformedMessage)
+      expect(malformedGroups.findAll('.workspace-host-row').some((row) => row.text().includes('prod-bastion'))).toBe(false)
+      malformedGroups.unmount()
+
+      const saveRefreshMissing = await mountWorkspace()
+      await saveRefreshMissing.find('.workspace-button[title="主机"]').trigger('click')
+      const hostInputs = () => saveRefreshMissing.findAll('.workspace-host-form input')
+      await hostInputs().at(0)!.setValue('workspace-missing-refresh')
+      await hostInputs().at(1)!.setValue('10.88.66.55')
+      await hostInputs().at(2)!.setValue('ops')
+      await hostInputs().at(4)!.setValue('测试')
+      await hostInputs().at(5)!.setValue('2202')
+      vi.mocked(window.aiops.saveAsset).mockImplementationOnce(async (input: any) => {
+        const savedResult = await originalAiops.saveAsset(input)
+        const snapshot = await originalAiops.listAssets()
+        vi.mocked(window.aiops.listAssets).mockResolvedValueOnce({
+          assets: snapshot.assets.filter((asset) => asset.id !== savedResult.data?.id),
+          folders: snapshot.folders
+        })
+        return savedResult
+      })
+      await saveRefreshMissing.find('.workspace-host-form').trigger('submit')
+      await flushPromises()
+      expect(saveRefreshMissing.text()).toContain(malformedMessage)
+      expect(saveRefreshMissing.find('.workspace-host-modal').exists()).toBe(true)
+      expect(saveRefreshMissing.findAll('.workspace-host-row').some((row) => row.text().includes('workspace-missing-refresh'))).toBe(false)
+      saveRefreshMissing.unmount()
+
+      const wrongAssetDelete = await mountWorkspace()
+      await hostRow(wrongAssetDelete, 'prod-bastion').trigger('contextmenu')
+      await menuButton(wrongAssetDelete, '删除').trigger('click')
+      vi.mocked(window.aiops.deleteAsset).mockResolvedValueOnce({ ok: true, data: { id: 'different-asset' } } as any)
+      await wrongAssetDelete.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(wrongAssetDelete.text()).toContain(malformedMessage)
+      expect(wrongAssetDelete.findAll('.workspace-host-row').some((row) => row.text().includes('prod-bastion'))).toBe(true)
+      wrongAssetDelete.unmount()
+
+      const wrongFolderSave = await mountWorkspace()
+      await wrongFolderSave.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+      await groupRow(wrongFolderSave, '核心业务').trigger('contextmenu')
+      await menuButton(wrongFolderSave, '编辑文件夹').trigger('click')
+      await wrongFolderSave.find('.workspace-folder-modal .files-folder-form input').setValue('核心归档')
+      vi.mocked(window.aiops.saveAssetFolder).mockResolvedValueOnce({
+        ok: true,
+        data: { uuid: 'different-folder', name: '核心归档', description: '常用堡垒机业务资产' }
+      } as any)
+      await wrongFolderSave.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      await flushPromises()
+      expect(wrongFolderSave.text()).toContain(malformedMessage)
+      expect(wrongFolderSave.find('.workspace-folder-modal').exists()).toBe(true)
+      expect(wrongFolderSave.findAll('.workspace-folder-row').some((row) => row.text().includes('核心归档'))).toBe(false)
+      expect(wrongFolderSave.findAll('.workspace-folder-row').some((row) => row.text().includes('核心业务'))).toBe(true)
+      wrongFolderSave.unmount()
+
+      const staleFolderDelete = await mountWorkspace()
+      await staleFolderDelete.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+      const staleSnapshot = await originalAiops.listAssets()
+      await groupRow(staleFolderDelete, '核心业务').trigger('contextmenu')
+      await menuButton(staleFolderDelete, '删除文件夹').trigger('click')
+      vi.mocked(window.aiops.deleteAssetFolder).mockImplementationOnce(async (uuid: string) => {
+        vi.mocked(window.aiops.listAssets).mockResolvedValueOnce(staleSnapshot)
+        return { ok: true, data: { uuid } }
+      })
+      await staleFolderDelete.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(staleFolderDelete.text()).toContain(malformedMessage)
+      expect(staleFolderDelete.findAll('.workspace-folder-row').some((row) => row.text().includes('核心业务'))).toBe(true)
+      expect(staleFolderDelete.findAll('.workspace-host-row').some((row) => row.text().includes('prod-bastion'))).toBe(true)
+      staleFolderDelete.unmount()
+
+      const staleGroupDelete = await mountWorkspace()
+      const staleDirectSnapshot = await originalAiops.listAssets()
+      await groupRow(staleGroupDelete, '生产').trigger('contextmenu')
+      await menuButton(staleGroupDelete, '删除文件夹').trigger('click')
+      vi.mocked(window.aiops.deleteAssetGroup).mockResolvedValueOnce({ ok: true, data: staleDirectSnapshot } as any)
+      await staleGroupDelete.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(staleGroupDelete.text()).toContain(malformedMessage)
+      expect(staleGroupDelete.findAll('.workspace-folder-row').some((row) => row.text().includes('生产'))).toBe(true)
+      staleGroupDelete.unmount()
+    } finally {
+      Object.assign(window.aiops, originalAiops)
+    }
   })
 
   it('does not visually commit Workspace and Files resource tree preferences before config saves return matching snapshots', async () => {

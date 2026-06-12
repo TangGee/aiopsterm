@@ -911,15 +911,17 @@ import type {
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   isAiopsAssetConnectionTestInfo,
+  isAiopsAssetGroupListData,
   isAiopsAssetExportData,
   isAiopsAssetImportConfirmData,
   isAiopsAssetImportPreviewData,
-  isAiopsAssetRecord,
   isAiopsAssetSnapshot,
+  isAiopsDeletedAssetData,
   isAiopsKeychainDeleteData,
   isAiopsKeychainListData,
   isAiopsKeychainRecord,
   isAiopsOrganizationAssetRefreshData,
+  isAiopsSavedAssetRecord,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
 
@@ -976,6 +978,7 @@ const form = reactive({
 
 const keychains = ref<AiopsKeychainRecord[]>([])
 const assetGroupOptions = ref<AiopsAssetGroupRecord[]>([])
+const assetGroupOptionsReady = ref(false)
 const keyQuery = ref('')
 const keyEditorOpen = ref(false)
 const keyEditMode = ref(false)
@@ -1034,19 +1037,55 @@ const filteredManagementEntries = computed(() => {
 
 const firstAssetGroupName = computed(() => assetGroupOptions.value[0]?.name || '')
 
-const refreshAssets = async () => {
+const loadAssetGroupOptions = async () => {
+  const listAssetGroups = window.aiops?.listAssetGroups
+  if (typeof listAssetGroups !== 'function') throw new Error('资产分组服务不可用。')
+  const groups = await listAssetGroups({
+    assetTypes: ['person', 'switch']
+  })
+  if (!isAiopsAssetGroupListData(groups)) throw new Error(malformedAssetBackendResultMessage)
+  return groups.map((group) => ({ ...group }))
+}
+
+const loadAssetSnapshot = async () => {
   const listAssets = window.aiops?.listAssets
   if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用。')
   const snapshot = await listAssets()
-  if (!applyAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
-  await refreshAssetGroupOptions()
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  return snapshot
+}
+
+const refreshAssets = async () => {
+  const snapshot = await loadAssetSnapshot()
+  applyAssetSnapshot(snapshot)
+  return snapshot
+}
+
+const loadHostManagementRefresh = async () => {
+  const snapshot = await loadAssetSnapshot()
+  const groups = await loadAssetGroupOptions()
+  return { snapshot, groups }
+}
+
+const applyAssetGroups = (groups: AiopsAssetGroupRecord[]) => {
+  assetGroupOptions.value = groups
+  assetGroupOptionsReady.value = true
+}
+
+const invalidateAssetGroups = () => {
+  assetGroupOptions.value = []
+  assetGroupOptionsReady.value = false
 }
 
 const refreshAssetGroupOptions = async () => {
-  assetGroupOptions.value =
-    (await window.aiops?.listAssetGroups?.({
-      assetTypes: ['person', 'switch']
-    })) || []
+  applyAssetGroups(await loadAssetGroupOptions())
+}
+
+const refreshHostManagement = async () => {
+  const { snapshot, groups } = await loadHostManagementRefresh()
+  applyAssetSnapshot(snapshot)
+  applyAssetGroups(groups)
+  return snapshot
 }
 
 const refreshKeychains = async () => {
@@ -1092,12 +1131,20 @@ const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}):
   ...patch
 })
 
-const saveAssetRecord = async (input: AiopsAssetInput) => {
-  const result = await window.aiops?.saveAsset?.(input)
+const saveAssetRecord = async (input: AiopsAssetInput, options: { requireGroups?: boolean } = {}) => {
+  const saveAsset = window.aiops?.saveAsset
+  if (typeof saveAsset !== 'function') throw new Error('资产保存服务不可用。')
+  const result = await saveAsset(input)
   if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
-  if (!isAiopsAssetRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
-  await refreshAssets()
-  return result.data
+  const saved = result.data
+  if (!isAiopsSavedAssetRecord(saved, input)) throw new Error(malformedAssetBackendResultMessage)
+  const refresh = options.requireGroups === false ? { snapshot: await loadAssetSnapshot(), groups: null } : await loadHostManagementRefresh()
+  const snapshot = refresh.snapshot
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  if (!snapshot.assets.some((asset) => asset.id === saved.id)) throw new Error(malformedAssetBackendResultMessage)
+  applyAssetSnapshot(snapshot)
+  if (refresh.groups) applyAssetGroups(refresh.groups)
+  return saved
 }
 
 const applyAssetSnapshot = (snapshot: unknown) => {
@@ -1106,15 +1153,24 @@ const applyAssetSnapshot = (snapshot: unknown) => {
   return true
 }
 
-const deleteAssetRecords = async (assetIds: string[]) => {
+const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?: boolean } = {}) => {
+  const deleteAsset = window.aiops?.deleteAsset
+  if (typeof deleteAsset !== 'function') throw new Error('资产删除服务不可用。')
   for (const id of assetIds) {
-    const result = await window.aiops?.deleteAsset?.(id)
+    const result = await deleteAsset(id)
     if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
+    if (!isAiopsDeletedAssetData(result.data, id)) throw new Error(malformedAssetBackendResultMessage)
   }
-  await refreshAssets()
+  const refresh = options.requireGroups === false ? { snapshot: await loadAssetSnapshot(), groups: null } : await loadHostManagementRefresh()
+  const snapshot = refresh.snapshot
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  if (assetIds.some((id) => snapshot.assets.some((asset) => asset.id === id))) throw new Error(malformedAssetBackendResultMessage)
+  applyAssetSnapshot(snapshot)
+  if (refresh.groups) applyAssetGroups(refresh.groups)
 }
 
 const assetGroups = computed<AssetGroup[]>(() => {
+  if (!assetGroupOptionsReady.value) return []
   const groupNames = Array.from(new Set(assets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
   return groupNames.map((group) => ({
     key: `group-${group}`,
@@ -1233,7 +1289,21 @@ const openNewPanel = () => {
   editorOpen.value = true
 }
 
+const openHostManagement = async () => {
+  activeAssetView.value = 'assetConfig'
+  try {
+    await refreshHostManagement()
+  } catch (error) {
+    invalidateAssetGroups()
+    importNotice.value = error instanceof Error ? error.message : '资产加载失败。'
+  }
+}
+
 const openManagementEntry = (entryKey: string) => {
+  if (entryKey === 'assetConfig') {
+    void openHostManagement()
+    return
+  }
   if (entryKey === 'assetManagement') {
     managedOrganizationId.value = null
     selectedRows.value = []
@@ -1337,7 +1407,7 @@ const removeAsset = (assetId: string | null) => {
 
 const deleteAssets = async (assetIds: string[]) => {
   try {
-    await deleteAssetRecords(assetIds)
+    await deleteAssetRecords(assetIds, { requireGroups: activeAssetView.value === 'assetConfig' })
     const idSet = new Set(assetIds)
     selectedRows.value = selectedRows.value.filter((id) => !idSet.has(id))
     selectedAssetId.value = selectedAssetId.value && idSet.has(selectedAssetId.value) ? null : selectedAssetId.value
@@ -1521,7 +1591,9 @@ const refreshOrganizationAsset = async () => {
   if (contextAsset.value) {
     try {
       const expectedOrganizationId = contextAsset.value.id
-      const result = await window.aiops?.refreshOrganizationAssets?.({ organizationId: expectedOrganizationId })
+      const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+      if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用。')
+      const result = await refreshOrganizationAssets({ organizationId: expectedOrganizationId })
       if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
       if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
       applyAssetSnapshot(result.data)
@@ -1585,23 +1657,26 @@ const submitManagedForm = async () => {
       ip: editable ? host : asset.ip,
       comment: managedForm.comment
     }
-    await saveAssetRecord(toAssetInput(asset, nextPatch))
+    await saveAssetRecord(toAssetInput(asset, nextPatch), { requireGroups: false })
     importNotice.value = `已更新资产 ${editable ? title : asset.title}。`
   } else {
-    await saveAssetRecord({
-      name: title,
-      title,
-      host,
-      ip: host,
-      group: managedOrganization.value?.group_name || '企业',
-      group_name: managedOrganization.value?.group_name || '企业',
-      status: 'online',
-      tags: ['managed'],
-      asset_type: 'person',
-      auth_type: 'password',
-      comment: managedForm.comment,
-      data_source: 'manual'
-    })
+    await saveAssetRecord(
+      {
+        name: title,
+        title,
+        host,
+        ip: host,
+        group: managedOrganization.value?.group_name || '企业',
+        group_name: managedOrganization.value?.group_name || '企业',
+        status: 'online',
+        tags: ['managed'],
+        asset_type: 'person',
+        auth_type: 'password',
+        comment: managedForm.comment,
+        data_source: 'manual'
+      },
+      { requireGroups: false }
+    )
     importNotice.value = `已添加资产 ${title}。`
   }
   managedEditorOpen.value = false
@@ -1610,7 +1685,9 @@ const submitManagedForm = async () => {
 const refreshManagedAssets = async () => {
   try {
     const expectedOrganizationId = managedOrganization.value?.id
-    const result = await window.aiops?.refreshOrganizationAssets?.(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
+    const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+    if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用。')
+    const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新资产表失败。')
     if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
     const data = result.data
@@ -2067,7 +2144,7 @@ watch(
     const request = workspace.onboardingAssetRequest
     if (sequence === 0 && request.action === 'none') return
     if (request.action === 'open-host-management') {
-      activeAssetView.value = 'assetConfig'
+      void openHostManagement()
       return
     }
     if (request.action === 'open-create-form') {
@@ -2094,6 +2171,10 @@ watch(
 onMounted(() => {
   refreshAssets().catch((error) => {
     importNotice.value = error instanceof Error ? error.message : '资产加载失败。'
+  })
+  refreshAssetGroupOptions().catch((error) => {
+    invalidateAssetGroups()
+    importNotice.value = error instanceof Error ? error.message : '资产分组加载失败。'
   })
   refreshKeychains().catch((error) => {
     keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'

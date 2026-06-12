@@ -797,10 +797,15 @@ import type {
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   isAiopsAssetConnectionTestInfo,
-  isAiopsAssetRecord,
+  isAiopsAssetGroupDeleteSnapshot,
+  isAiopsAssetGroupListData,
+  isAiopsAssetGroupRenameSnapshot,
   isAiopsAssetSnapshot,
-  isAiopsCustomFolderRecord,
+  isAiopsDeletedAssetData,
+  isAiopsDeletedCustomFolderData,
   isAiopsOrganizationAssetRefreshData,
+  isAiopsSavedAssetRecord,
+  isAiopsSavedCustomFolderRecord,
   isAiopsSshTunnelMutationData,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
@@ -1083,19 +1088,29 @@ const applyWorkspaceAssetSnapshot = (snapshot: unknown) => {
   return true
 }
 
+const loadDirectGroupOptions = async () => {
+  const listAssetGroups = window.aiops?.listAssetGroups
+  if (typeof listAssetGroups !== 'function') throw new Error('资产分组服务不可用')
+  const groups = await listAssetGroups({
+    assetTypes: ['person', 'switch']
+  })
+  if (!isAiopsAssetGroupListData(groups)) throw new Error(malformedAssetBackendResultMessage)
+  return groups.map((group) => ({ ...group }))
+}
+
 const refreshDirectGroupOptions = async () => {
-  directGroupOptions.value =
-    (await window.aiops?.listAssetGroups?.({
-      assetTypes: ['person', 'switch']
-    })) || []
+  directGroupOptions.value = await loadDirectGroupOptions()
 }
 
 const refreshAssets = async () => {
   const listAssets = window.aiops?.listAssets
   if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用')
   const snapshot = await listAssets()
-  if (!applyWorkspaceAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
-  await refreshDirectGroupOptions()
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  const groups = await loadDirectGroupOptions()
+  applyWorkspaceAssetSnapshot(snapshot)
+  directGroupOptions.value = groups
+  return snapshot
 }
 
 const resetHostConnectionTest = () => {
@@ -1111,29 +1126,44 @@ const saveAssetRecord = async (input: AiopsAssetInput) => {
   }
   const result = await saveAsset(input)
   if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
-  if (!isAiopsAssetRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
-  await refreshAssets()
-  return result.data
+  const saved = result.data
+  if (!isAiopsSavedAssetRecord(saved, input)) throw new Error(malformedAssetBackendResultMessage)
+  const snapshot = await refreshAssets()
+  if (!snapshot.assets.some((asset) => asset.id === saved.id)) throw new Error(malformedAssetBackendResultMessage)
+  return saved
 }
 
 const deleteAssetRecord = async (assetId: string) => {
-  const result = await window.aiops?.deleteAsset?.(assetId)
+  const deleteAsset = window.aiops?.deleteAsset
+  if (typeof deleteAsset !== 'function') throw new Error('资产删除服务不可用')
+  const result = await deleteAsset(assetId)
   if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
-  await refreshAssets()
+  if (!isAiopsDeletedAssetData(result.data, assetId)) throw new Error(malformedAssetBackendResultMessage)
+  const snapshot = await refreshAssets()
+  if (snapshot.assets.some((asset) => asset.id === assetId)) throw new Error(malformedAssetBackendResultMessage)
 }
 
 const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
-  const result = await window.aiops?.saveAssetFolder?.(folder)
+  const saveAssetFolder = window.aiops?.saveAssetFolder
+  if (typeof saveAssetFolder !== 'function') throw new Error('文件夹保存服务不可用')
+  const result = await saveAssetFolder(folder)
   if (!result?.ok) throw new Error(result?.errorMessage || '文件夹保存失败')
-  if (!isAiopsCustomFolderRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
-  await refreshAssets()
-  return result.data
+  const saved = result.data
+  if (!isAiopsSavedCustomFolderRecord(saved, folder)) throw new Error(malformedAssetBackendResultMessage)
+  const snapshot = await refreshAssets()
+  if (!snapshot.folders.some((item) => item.uuid === saved.uuid)) throw new Error(malformedAssetBackendResultMessage)
+  return saved
 }
 
 const deleteFolderRecord = async (folderUuid: string) => {
-  const result = await window.aiops?.deleteAssetFolder?.(folderUuid)
+  const deleteAssetFolder = window.aiops?.deleteAssetFolder
+  if (typeof deleteAssetFolder !== 'function') throw new Error('文件夹删除服务不可用')
+  const result = await deleteAssetFolder(folderUuid)
   if (!result?.ok) throw new Error(result?.errorMessage || '文件夹删除失败')
-  await refreshAssets()
+  if (!isAiopsDeletedCustomFolderData(result.data, folderUuid)) throw new Error(malformedAssetBackendResultMessage)
+  const snapshot = await refreshAssets()
+  if (snapshot.folders.some((folder) => folder.uuid === folderUuid)) throw new Error(malformedAssetBackendResultMessage)
+  if (snapshot.assets.some((asset) => asset.folderUuid === folderUuid)) throw new Error(malformedAssetBackendResultMessage)
 }
 
 const isGroupExpanded = (key: string) => !!searchValue.value.trim() || expandedGroups.value.includes(key)
@@ -1365,14 +1395,18 @@ const saveFolderForm = async () => {
   const oldGroupName = folderModal.targetKey.replace(/^group-/, '')
   const oldKey = `group-${oldGroupName}`
   const newKey = `group-${name}`
+  const input = {
+    oldName: oldGroupName,
+    newName: name,
+    assetTypes: ['person' as const, 'switch' as const]
+  }
   try {
-    const result = await window.aiops?.renameAssetGroup?.({
-      oldName: oldGroupName,
-      newName: name,
-      assetTypes: ['person', 'switch']
-    })
+    const renameAssetGroup = window.aiops?.renameAssetGroup
+    if (typeof renameAssetGroup !== 'function') throw new Error('资产分组保存服务不可用')
+    const result = await renameAssetGroup(input)
     if (!result?.ok) throw new Error(result?.errorMessage || '分组保存失败')
-    if (!applyWorkspaceAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+    if (!isAiopsAssetGroupRenameSnapshot(result.data, input)) throw new Error(malformedAssetBackendResultMessage)
+    applyWorkspaceAssetSnapshot(result.data)
     await refreshDirectGroupOptions()
     await replaceExpandedGroup(oldKey, newKey)
     notice.value = `已更新分组 ${name}`
@@ -1663,7 +1697,9 @@ const refreshGroup = async (groupKey: string) => {
   const organization = organizationAssets.value.find((asset) => asset.uuid === groupKey)
   try {
     const expectedOrganizationId = organization?.id
-    const result = await window.aiops?.refreshOrganizationAssets?.(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
+    const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+    if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用')
+    const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
     if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
     applyWorkspaceAssetSnapshot(result.data)
@@ -1740,15 +1776,21 @@ const confirmDeleteGroup = () => {
     return
   }
   if (group.type === 'direct-group' && group.groupName) {
-    window.aiops
-      ?.deleteAssetGroup?.({
-        name: group.groupName,
-        fallbackName: '未分组',
-        assetTypes: ['person', 'switch']
-      })
+    const deleteAssetGroup = window.aiops?.deleteAssetGroup
+    if (typeof deleteAssetGroup !== 'function') {
+      notice.value = '资产分组删除服务不可用'
+      return
+    }
+    const input = {
+      name: group.groupName,
+      fallbackName: '未分组',
+      assetTypes: ['person' as const, 'switch' as const]
+    }
+    deleteAssetGroup(input)
       .then(async (result) => {
         if (!result?.ok) throw new Error(result?.errorMessage || '删除分组失败')
-        if (!applyWorkspaceAssetSnapshot(result.data)) throw new Error(malformedAssetBackendResultMessage)
+        if (!isAiopsAssetGroupDeleteSnapshot(result.data, input)) throw new Error(malformedAssetBackendResultMessage)
+        applyWorkspaceAssetSnapshot(result.data)
         await refreshDirectGroupOptions()
         await removeExpandedGroup(group.key)
         notice.value = `已删除分组 ${group.title}`
