@@ -4030,7 +4030,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionUpdateLoadingMap = ref<Record<string, boolean>>({})
   const extensionInstallProgressMap = ref<Record<string, ExtensionInstallProgress>>({})
   const extensionActiveOperations = ref<Record<string, ExtensionPluginOperation>>({})
-  const extensionPendingPackageOperation = ref(false)
+  const extensionPendingPackageRequestId = ref('')
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
   const assetManagementOpenRequest = ref<{ sequence: number; organizationId?: string }>({ sequence: 0 })
@@ -4198,6 +4198,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let k8sKubeconfigImportRequestSequence = 0
   let k8sKubeconfigImportRequestId = ''
   const nextK8sKubeconfigImportRequestId = () => `k8s-kubeconfig-import-${(k8sKubeconfigImportRequestSequence += 1)}`
+  let extensionPackageInstallRequestSequence = 0
+  const nextExtensionPackageInstallRequestId = () => `extension-package-install-${(extensionPackageInstallRequestSequence += 1)}`
   let k8sAgentCleanupRequest = 0
   let removeSkillsUpdateListener: (() => void) | null = null
   let removeKnowledgeProgressListener: (() => void) | null = null
@@ -10184,13 +10186,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     Boolean(extensionInstallLoadingMap.value[pluginId] || extensionUpdateLoadingMap.value[pluginId] || extensionActiveOperations.value[pluginId])
 
   const isExpectedExtensionProgress = (event: BackendExtensionInstallProgress) => {
+    if (event.operation === 'package') {
+      const expectedRequestId = extensionPendingPackageRequestId.value
+      if (expectedRequestId) {
+        if (event.requestId !== expectedRequestId) return false
+        setExtensionActiveOperation(event.pluginId, 'package')
+        return true
+      }
+    }
     const expectedOperation = extensionActiveOperations.value[event.pluginId]
     if (expectedOperation) return expectedOperation === event.operation
-    if (extensionPendingPackageOperation.value && event.operation === 'package') {
-      setExtensionActiveOperation(event.pluginId, 'package')
-      extensionPendingPackageOperation.value = false
-      return true
-    }
     if (!extensionInstallLoadingMap.value[event.pluginId] && !extensionUpdateLoadingMap.value[event.pluginId]) return false
     return event.operation === 'update' ? Boolean(extensionUpdateLoadingMap.value[event.pluginId]) : Boolean(extensionInstallLoadingMap.value[event.pluginId])
   }
@@ -10485,7 +10490,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     installExtensionInstallProgressListener()
-    extensionPendingPackageOperation.value = true
+    const requestId = nextExtensionPackageInstallRequestId()
+    extensionPendingPackageRequestId.value = requestId
     extensionInstallingPackageName.value = packageName
     setExtensionNotice(`正在安装 ${packageName}`)
     let pendingPluginId = ''
@@ -10494,7 +10500,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         fileName,
         filePath,
         size,
-        existingPluginIds: extensionPlugins.value.map((plugin) => plugin.pluginId)
+        existingPluginIds: extensionPlugins.value.map((plugin) => plugin.pluginId),
+        requestId
       })
       if (!result?.ok) {
         setExtensionNotice(result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED' ? `${packageName} 安装已取消` : result?.errorMessage || `${packageName} 安装失败`)
@@ -10518,7 +10525,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } finally {
       if (pendingPluginId) setExtensionInstallLoading(pendingPluginId, false)
       if (pendingPluginId) clearExtensionActiveOperation(pendingPluginId)
-      extensionPendingPackageOperation.value = false
+      if (extensionPendingPackageRequestId.value === requestId) extensionPendingPackageRequestId.value = ''
       extensionInstallingPackageName.value = ''
     }
   }

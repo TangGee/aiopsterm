@@ -7841,12 +7841,12 @@ describe('AppShell', () => {
     panel.element.dispatchEvent(validDrop)
     await panel.vm.$nextTick()
     expect(store.extensionDragActive).toBe(false)
-    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({
+    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith(expect.objectContaining({
       fileName: 'local-tools.external-reference',
       filePath: '/tmp/local-tools.external-reference',
       size: 4096,
       existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'Alias', 'cloud-assets'])
-    })
+    }))
     expect(store.extensionInstallLoadingMap['local-local-tools']).toBe(true)
     expect(store.extensionInstallProgressMap['local-local-tools']).toMatchObject({ stage: 'installing', percent: 100 })
     expect(panel.text()).toContain('正在安装 local tools')

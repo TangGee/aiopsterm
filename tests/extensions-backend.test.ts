@@ -40,12 +40,13 @@ type ExtensionProgress = {
   stage: string
   percent: number
   operation: string
+  requestId?: string
 }
 
 let installExtensionPlugin: (input: { plugin: ExtensionPlugin }, emit?: (progress: ExtensionProgress) => void, options?: { stepDelayMs?: number }) => Promise<any>
 let updateExtensionPlugin: (input: { plugin: ExtensionPlugin }, emit?: (progress: ExtensionProgress) => void, options?: { stepDelayMs?: number }) => Promise<any>
 let installExtensionPackage: (
-  input: { fileName: string; filePath?: string; existingPluginIds?: string[]; size?: number },
+  input: { fileName: string; filePath?: string; existingPluginIds?: string[]; size?: number; requestId?: string },
   emit?: (progress: ExtensionProgress) => void,
   options?: { stepDelayMs?: number }
 ) => Promise<any>
@@ -846,7 +847,8 @@ describe('extension plugin backend boundary', () => {
           fileName: localPackage.fileName,
           filePath: localPackage.filePath,
           existingPluginIds: ['local-local-tools'],
-          size: 4096
+          size: 4096,
+          requestId: 'extension-package-install-backend-test'
         },
         (event) => progress.push(event),
         { stepDelayMs: 0 }
@@ -871,6 +873,7 @@ describe('extension plugin backend boundary', () => {
       })
       expect(progress.map((event) => event.stage)).toEqual(['verifying', 'installing', 'done'])
       expect(progress.every((event) => event.pluginId === 'local-tools' && event.operation === 'package')).toBe(true)
+      expect(progress.every((event) => event.requestId === 'extension-package-install-backend-test')).toBe(true)
       await access(join(result.data.plugin.packagePath, 'plugin.json'))
       await access(join(result.data.plugin.packagePath, 'main.js'))
       expect(await readFile(join(result.data.plugin.packagePath, 'README.md'), 'utf8')).toContain('Real package readme.')

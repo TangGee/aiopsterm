@@ -6938,12 +6938,13 @@ describe('workspace store', () => {
     expect(store.extensionInstallingPackageName).toBe('local pack')
     await vi.runOnlyPendingTimersAsync()
     await expect(dropPromise).resolves.toBe(true)
-    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({
+    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith(expect.objectContaining({
       fileName: 'local-pack.external-reference',
       filePath: '/tmp/local-pack.external-reference',
       size: 4096,
-      existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook'])
-    })
+      existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook']),
+      requestId: expect.stringMatching(/^extension-package-install-\d+$/)
+    }))
     expect(store.selectedExtensionId).toContain('local-local-pack')
 
     vi.mocked(window.aiops.saveConfig).mockClear()
@@ -7220,6 +7221,91 @@ describe('workspace store', () => {
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
+  })
+
+  it('requires package progress request identity before mutating extension install state', async () => {
+    const store = useWorkspaceStore()
+    ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
+    await store.refreshExtensionPlugins()
+
+    let packageInput: any
+    let finishPackageInstall!: (value: unknown) => void
+    vi.mocked(window.aiops.installExtensionPackage!).mockImplementationOnce(
+      (input: any) =>
+        new Promise((resolve) => {
+          packageInput = input
+          finishPackageInstall = resolve
+        }) as any
+    )
+
+    const dropPromise = store.dropExtensionPackage({ name: 'race-pack.external-reference', path: '/tmp/race-pack.external-reference', size: 8192 })
+    expect(store.extensionInstallingPackageName).toBe('race pack')
+    expect(packageInput).toEqual(
+      expect.objectContaining({
+        fileName: 'race-pack.external-reference',
+        filePath: '/tmp/race-pack.external-reference',
+        size: 8192,
+        requestId: expect.stringMatching(/^extension-package-install-\d+$/)
+      })
+    )
+
+    const progressListener = vi.mocked(window.aiops.onExtensionInstallProgress!).mock.calls.at(-1)?.[0] as ((event: any) => void) | undefined
+    expect(progressListener).toBeTypeOf('function')
+    progressListener?.({ pluginId: 'local-race-pack', operation: 'package', stage: 'installing', percent: 25 })
+    expect(store.extensionNotice).toBe('扩展服务返回数据无效')
+    expect(store.extensionInstallLoadingMap['local-race-pack']).toBeUndefined()
+    expect(store.extensionInstallProgressMap['local-race-pack']).toBeUndefined()
+
+    progressListener?.({
+      pluginId: 'local-forged-pack',
+      operation: 'package',
+      stage: 'installing',
+      percent: 80,
+      requestId: 'extension-package-install-forged'
+    })
+    expect(store.extensionInstallLoadingMap['local-forged-pack']).toBeUndefined()
+    expect(store.extensionInstallProgressMap['local-forged-pack']).toBeUndefined()
+
+    progressListener?.({
+      pluginId: 'local-race-pack',
+      operation: 'package',
+      stage: 'installing',
+      percent: 60,
+      requestId: packageInput.requestId
+    })
+    expect(store.extensionInstallLoadingMap['local-race-pack']).toBe(true)
+    expect(store.extensionInstallProgressMap['local-race-pack']).toMatchObject({ stage: 'installing', percent: 60 })
+
+    const packagePlugin = {
+      pluginId: 'local-race-pack',
+      name: 'race pack',
+      description: 'Installed from a local .external-reference package.',
+      iconKey: 'local' as const,
+      tabName: 'race pack',
+      show: true,
+      isPlugin: true,
+      installed: true,
+      hasUpdate: false,
+      installedVersion: '1.0.0',
+      latestVersion: '1.0.0',
+      installable: true,
+      source: 'local' as const,
+      categories: ['Local', 'Tools'],
+      functions: [{ title: 'Local plugin', desc: 'Installed from a .external-reference package through the backend boundary.' }]
+    }
+    finishPackageInstall({
+      ok: true,
+      data: {
+        operation: 'package',
+        plugin: packagePlugin,
+        message: 'race pack installed by test backend.'
+      }
+    })
+    await expect(dropPromise).resolves.toBe(true)
+    expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'local-race-pack')).toMatchObject({ installed: true })
+    expect(store.extensionInstallLoadingMap['local-race-pack']).toBeUndefined()
+    expect(store.extensionInstallProgressMap['local-race-pack']).toMatchObject({ stage: 'done', percent: 100 })
+    expect(store.selectedExtensionId).toBe('local-race-pack')
   })
 
   it('does not mutate persisted aliases when required backend operations are unavailable or fail', async () => {

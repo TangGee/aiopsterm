@@ -963,6 +963,7 @@ export type ExtensionPackageInstallInput = {
   filePath?: string
   size?: number
   existingPluginIds?: string[]
+  requestId?: string
 }
 
 export type ExtensionPackageDownloadInput = {
@@ -990,6 +991,7 @@ export type ExtensionInstallProgress = {
   percent: number
   operation: ExtensionPluginOperation
   message?: string
+  requestId?: string
 }
 
 export type ExtensionPluginOperationResult = AiopsMutationResult<{

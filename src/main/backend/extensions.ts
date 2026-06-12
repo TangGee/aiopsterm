@@ -636,7 +636,8 @@ const emitProgress = (
   operation: ExtensionPluginOperation,
   stage: ExtensionInstallStage,
   percent: number,
-  message?: string
+  message?: string,
+  requestId?: string
 ) => {
   if (!emit || !stage) return
   emit({
@@ -644,7 +645,8 @@ const emitProgress = (
     operation,
     stage,
     percent: Math.max(0, Math.min(100, Math.round(percent))),
-    message
+    message,
+    requestId
   })
 }
 
@@ -1554,6 +1556,7 @@ export const installExtensionPackage = async (
   if ('ok' in packageConfig) return packageConfig
 
   const pluginId = packageConfig.plugin.pluginId
+  const requestId = trimText(input?.requestId)
   if (activeOperations.has(pluginId)) {
     return errorResult('EXTENSION_PLUGIN_OPERATION_BUSY', 'Plugin operation is already running.')
   }
@@ -1562,7 +1565,7 @@ export const installExtensionPackage = async (
   activeOperations.set(pluginId, activeOperation)
   const stepDelayMs = Math.max(0, options?.stepDelayMs ?? EXTENSION_INSTALL_STEP_DELAY_MS)
   const cancelledResult = (): ExtensionPluginOperationResult => {
-    emitProgress(emit, pluginId, 'package', 'cancelled', 0, 'Plugin operation cancelled.')
+    emitProgress(emit, pluginId, 'package', 'cancelled', 0, 'Plugin operation cancelled.', requestId)
     activeOperations.delete(pluginId)
     return {
       ok: false,
@@ -1571,15 +1574,15 @@ export const installExtensionPackage = async (
     }
   }
 
-  emitProgress(emit, pluginId, 'package', 'verifying', 100, 'Verified local package manifest.')
+  emitProgress(emit, pluginId, 'package', 'verifying', 100, 'Verified local package manifest.', requestId)
   if (stepDelayMs > 0) await wait(stepDelayMs)
   if (activeOperation.cancelled) return cancelledResult()
 
-  emitProgress(emit, pluginId, 'package', 'installing', 100, 'Installing local package.')
+  emitProgress(emit, pluginId, 'package', 'installing', 100, 'Installing local package.', requestId)
   const installedPlugin = installLocalPackageToDisk(packageConfig)
   if ('ok' in installedPlugin) {
     activeOperations.delete(pluginId)
-    emitProgress(emit, pluginId, 'package', 'error', 0, installedPlugin.errorMessage)
+    emitProgress(emit, pluginId, 'package', 'error', 0, installedPlugin.errorMessage, requestId)
     return installedPlugin
   }
   if (stepDelayMs > 0) await wait(stepDelayMs)
@@ -1587,7 +1590,7 @@ export const installExtensionPackage = async (
 
   const next = applyOperation('package', installedPlugin)
   upsertExtensionCatalogPlugin(next)
-  emitProgress(emit, pluginId, 'package', 'done', 100, `${next.name} operation completed.`)
+  emitProgress(emit, pluginId, 'package', 'done', 100, `${next.name} operation completed.`, requestId)
   activeOperations.delete(pluginId)
   return successResult('package', next, `${next.name} installed by aiopsterm backend.`)
 }

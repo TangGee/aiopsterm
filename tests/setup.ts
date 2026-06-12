@@ -808,6 +808,7 @@ type TestExtensionProgress = {
   percent: number
   operation: 'install' | 'update' | 'uninstall' | 'package'
   message?: string
+  requestId?: string
 }
 
 const extensionProgressListeners = new Set<(event: TestExtensionProgress) => void>()
@@ -850,7 +851,8 @@ const emitExtensionProgressMock = (event: TestExtensionProgress) => {
 const finishExtensionOperationMock = (
   operation: 'install' | 'update' | 'package',
   plugin: TestExtensionPlugin,
-  delayMs = 120
+  delayMs = 120,
+  requestId = ''
 ) =>
   new Promise((resolve) => {
     cancelledExtensionOperationIds.delete(plugin.pluginId)
@@ -858,12 +860,13 @@ const finishExtensionOperationMock = (
       pluginId: plugin.pluginId,
       operation,
       stage: operation === 'package' ? 'installing' : 'downloading',
-      percent: operation === 'package' ? 100 : 8
+      percent: operation === 'package' ? 100 : 8,
+      requestId: requestId || undefined
     })
     window.setTimeout(() => {
       if (cancelledExtensionOperationIds.has(plugin.pluginId)) {
         cancelledExtensionOperationIds.delete(plugin.pluginId)
-        emitExtensionProgressMock({ pluginId: plugin.pluginId, operation, stage: 'cancelled', percent: 0 })
+        emitExtensionProgressMock({ pluginId: plugin.pluginId, operation, stage: 'cancelled', percent: 0, requestId: requestId || undefined })
         resolve({
           ok: false,
           errorCode: 'EXTENSION_PLUGIN_OPERATION_CANCELLED',
@@ -877,7 +880,7 @@ const finishExtensionOperationMock = (
       next.installedVersion = next.latestVersion || next.installedVersion || '1.0.0'
       next.source = next.source || (operation === 'package' ? 'local' : 'store')
       upsertExtensionPluginStoreMock(next)
-      emitExtensionProgressMock({ pluginId: next.pluginId, operation, stage: 'done', percent: 100 })
+      emitExtensionProgressMock({ pluginId: next.pluginId, operation, stage: 'done', percent: 100, requestId: requestId || undefined })
       resolve({
         ok: true,
         data: {
@@ -7289,16 +7292,18 @@ Object.defineProperty(window, 'aiops', {
     })),
     installExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => storePackageUnavailableMock(input.plugin)),
     updateExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => storePackageUnavailableMock(input.plugin)),
-    installExtensionPackage: vi.fn(async (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[] }) => {
-      if (!input.fileName.toLowerCase().endsWith('.external-reference')) {
-        return { ok: false, errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID', errorMessage: 'Plugin package must use the .external-reference extension.' }
+    installExtensionPackage: vi.fn(
+      async (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[]; requestId?: string }) => {
+        if (!input.fileName.toLowerCase().endsWith('.external-reference')) {
+          return { ok: false, errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID', errorMessage: 'Plugin package must use the .external-reference extension.' }
+        }
+        if (!input.filePath) {
+          return { ok: false, errorCode: 'EXTENSION_PACKAGE_PATH_REQUIRED', errorMessage: 'Plugin package file path is required.' }
+        }
+        const plugin = createPackagePluginMock(input)
+        return finishExtensionOperationMock('package', plugin, 120, input.requestId)
       }
-      if (!input.filePath) {
-        return { ok: false, errorCode: 'EXTENSION_PACKAGE_PATH_REQUIRED', errorMessage: 'Plugin package file path is required.' }
-      }
-      const plugin = createPackagePluginMock(input)
-      return finishExtensionOperationMock('package', plugin)
-    }),
+    ),
     downloadExtensionPackage: vi.fn(async (input: { url: string }) => {
       if (!/^https?:\/\//i.test(input.url || '')) {
         return { ok: false, errorCode: 'EXTENSION_PACKAGE_DOWNLOAD_URL_INVALID', errorMessage: 'Plugin package download URL must be http or https.' }

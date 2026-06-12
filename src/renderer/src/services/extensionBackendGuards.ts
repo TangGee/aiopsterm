@@ -91,7 +91,13 @@ export const isExtensionPluginCancelData = (value: unknown): value is ExtensionP
 export const isExtensionInstallProgressData = (value: unknown): value is ExtensionInstallProgress => {
   if (!isRecord(value)) return false
   if (!isNonEmptyString(value.pluginId) || !extensionOperations.has(value.operation as ExtensionPluginOperation)) return false
-  return extensionInstallStages.has(String(value.stage)) && isNonNegativeFiniteNumber(value.percent) && value.percent <= 100 && isOptionalString(value.message)
+  return (
+    extensionInstallStages.has(String(value.stage)) &&
+    isNonNegativeFiniteNumber(value.percent) &&
+    value.percent <= 100 &&
+    isOptionalString(value.message) &&
+    isOptionalString(value.requestId)
+  )
 }
 
 export const isAliasCommandConfig = (value: unknown): value is AliasCommandConfig => {
