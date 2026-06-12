@@ -1006,21 +1006,15 @@ const defaultDatabaseTableDdl: Record<string, { ddl: string; error?: { code: 'pe
 
 const databaseEngineOptionsMock: DatabaseEngineInfo[] = [
   { code: 'mysql', connectionCode: 'mysql', name: 'MySQL', enabled: true, accent: '#00758f' },
-  { code: 'h2', name: 'H2', enabled: false, accent: '#7c3aed' },
   { code: 'oracle', connectionCode: 'oracle', name: 'Oracle', enabled: true, accent: '#c74634' },
   { code: 'postgresql', connectionCode: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
   { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
   { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
   { code: 'mariadb', connectionCode: 'mariadb', name: 'MariaDB', enabled: true, accent: '#c0765c' },
   { code: 'clickhouse', connectionCode: 'clickhouse', name: 'ClickHouse', enabled: true, accent: '#fdd835' },
-  { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
   { code: 'presto', connectionCode: 'presto', name: 'Presto', enabled: true, accent: '#7c2d12' },
-  { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
   { code: 'oceanbase', connectionCode: 'oceanbase', name: 'OceanBase', enabled: true, accent: '#0ea5e9' },
-  { code: 'hive', name: 'Hive', enabled: false, accent: '#f59e0b' },
-  { code: 'kingbase', connectionCode: 'kingbase', name: 'KingBase', enabled: true, accent: '#dc2626' },
-  { code: 'mongodb', name: 'MongoDB', enabled: false, accent: '#4db33d' },
-  { code: 'timeplus', name: 'Timeplus', enabled: false, accent: '#14b8a6' }
+  { code: 'kingbase', connectionCode: 'kingbase', name: 'KingBase', enabled: true, accent: '#dc2626' }
 ]
 
 const databaseGroupsMock: DatabaseGroupInfo[] = [

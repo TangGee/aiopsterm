@@ -1304,8 +1304,9 @@ describe('database backend boundary', () => {
     const result = await listDatabaseCatalog()
 
     expect(result.ok).toBe(true)
-    expect(result.data?.engines).toHaveLength(16)
-    expect(result.data?.engines.filter((engine) => engine.enabled).map((engine) => engine.name)).toEqual([
+    expect(result.data?.engines).toHaveLength(10)
+    expect(result.data?.engines.every((engine) => engine.enabled && engine.connectionCode)).toBe(true)
+    expect(result.data?.engines.map((engine) => engine.name)).toEqual([
       'MySQL',
       'Oracle',
       'PostgreSQL',

@@ -7872,16 +7872,16 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-overview-hero').text()).toContain('Explore schemas')
     expect(wrapper.find('.db-overview-hero').text()).toContain('Query console')
     expect(wrapper.find('.db-engine-grid').text()).toContain('MySQL')
-    expect(wrapper.find('.db-engine-grid').text()).toContain('H2')
     expect(wrapper.find('.db-engine-grid').text()).toContain('SQLServer')
     expect(wrapper.find('.db-engine-grid').text()).toContain('MariaDB')
     expect(wrapper.find('.db-engine-grid').text()).toContain('ClickHouse')
     expect(wrapper.find('.db-engine-grid').text()).toContain('Presto')
     expect(wrapper.find('.db-engine-grid').text()).toContain('OceanBase')
     expect(wrapper.find('.db-engine-grid').text()).toContain('KingBase')
-    expect(wrapper.find('.db-engine-grid').text()).toContain('Timeplus')
-    expect(wrapper.findAll('.db-engine-grid button')).toHaveLength(16)
-    expect(wrapper.findAll('.db-engine-grid button').filter((button) => button.classes().includes('disabled'))).toHaveLength(6)
+    expect(wrapper.find('.db-engine-grid').text()).not.toContain('H2')
+    expect(wrapper.find('.db-engine-grid').text()).not.toContain('Timeplus')
+    expect(wrapper.findAll('.db-engine-grid button')).toHaveLength(10)
+    expect(wrapper.findAll('.db-engine-grid button').filter((button) => button.classes().includes('disabled'))).toHaveLength(0)
     await wrapper.findAll('.db-overview-tips button').find((button) => button.text().includes('Explore schemas'))!.trigger('click')
     expect(document.activeElement).toBe(wrapper.find('.db-search input').element)
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('SQLServer'))!.trigger('click')
@@ -7940,15 +7940,14 @@ describe('AppShell', () => {
 
     await wrapper.find('button[title="Add"]').trigger('click')
     expect(wrapper.find('.db-add-menu').exists()).toBe(true)
-    expect(wrapper.find('.db-add-menu').text()).toContain('H2')
+    expect(wrapper.find('.db-add-menu').text()).not.toContain('H2')
     expect(wrapper.find('.db-add-menu').text()).toContain('SQLServer')
     expect(wrapper.find('.db-add-menu').text()).toContain('ClickHouse')
     expect(wrapper.find('.db-add-menu').text()).toContain('Presto')
     expect(wrapper.find('.db-add-menu').text()).toContain('OceanBase')
     expect(wrapper.find('.db-add-menu').text()).toContain('KingBase')
-    expect(wrapper.find('.db-add-menu').text()).toContain('Timeplus')
-    expect(wrapper.find('.db-add-menu').findAll('button')).toHaveLength(17)
-    expect(wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('H2'))!.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.db-add-menu').text()).not.toContain('Timeplus')
+    expect(wrapper.find('.db-add-menu').findAll('button')).toHaveLength(11)
     expect(wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('ClickHouse'))!.attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('Presto'))!.attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('OceanBase'))!.attributes('disabled')).toBeUndefined()
@@ -8141,8 +8140,8 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-popup-submenu').text()).toContain('Presto')
     expect(wrapper.find('.db-popup-submenu').text()).toContain('OceanBase')
     expect(wrapper.find('.db-popup-submenu').text()).toContain('KingBase')
-    expect(wrapper.find('.db-popup-submenu').text()).toContain('Timeplus')
-    expect(wrapper.find('.db-popup-submenu').findAll('button')).toHaveLength(16)
+    expect(wrapper.find('.db-popup-submenu').text()).not.toContain('Timeplus')
+    expect(wrapper.find('.db-popup-submenu').findAll('button')).toHaveLength(10)
     expect(wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('SQLServer'))!.attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('MariaDB'))!.attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('ClickHouse'))!.attributes('disabled')).toBeUndefined()
@@ -9438,6 +9437,32 @@ describe('AppShell', () => {
     expect(malformedCatalogWrapper.text()).not.toContain('SQL Console')
     expect(malformedCatalogWrapper.text()).not.toContain('select id, service, status, owner')
     malformedCatalogWrapper.unmount()
+
+    const mixedEngineCatalogImplementation = vi.mocked(window.aiops.listDatabaseCatalog).getMockImplementation()
+    expect(mixedEngineCatalogImplementation).toBeDefined()
+    vi.mocked(window.aiops.listDatabaseCatalog).mockImplementationOnce(async () => {
+      const result = await mixedEngineCatalogImplementation!()
+      if (!result.ok || !result.data) return result
+      return {
+        ...result,
+        data: {
+          ...result.data,
+          engines: [
+            ...result.data.engines,
+            { code: 'h2' as const, name: 'H2', enabled: false, accent: '#7c3aed' }
+          ]
+        }
+      }
+    })
+    const mixedEngineWrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+    expect(mixedEngineWrapper.find('.db-engine-grid').text()).not.toContain('H2')
+    await mixedEngineWrapper.find('button[title="Add"]').trigger('click')
+    expect(mixedEngineWrapper.find('.db-add-menu').text()).not.toContain('H2')
+    mixedEngineWrapper.unmount()
 
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,

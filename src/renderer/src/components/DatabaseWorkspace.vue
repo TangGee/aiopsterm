@@ -479,8 +479,7 @@
               v-for="engine in databaseEngines"
               :key="`${engine.name}-${engine.code}`"
               type="button"
-              :class="{ disabled: !engine.enabled }"
-              :title="engine.enabled ? `New ${engine.name} connection` : `${engine.name} coming soon`"
+              :title="`New ${engine.name} connection`"
               @click="openOverviewEngine(engine)"
             >
               <span
@@ -488,7 +487,6 @@
                 :style="{ background: engine.accent }"
               />
               <span class="db-engine-name">{{ engine.name }}</span>
-              <small v-if="!engine.enabled">Coming Soon</small>
             </button>
           </div>
         </div>
@@ -1502,9 +1500,7 @@
         v-for="engine in databaseEngines"
         :key="engine.name"
         type="button"
-        :class="{ disabled: !engine.enabled }"
-        :disabled="!engine.enabled"
-        :title="engine.enabled ? `New ${engine.name} connection` : `${engine.name} coming soon`"
+        :title="`New ${engine.name} connection`"
         @click="openConnectionModalFromEngine(engine)"
       >
         <span
@@ -1512,7 +1508,6 @@
           :style="{ background: engine.accent }"
         />
         {{ engine.name }}
-        <small v-if="!engine.enabled">Coming Soon</small>
       </button>
     </div>
 
@@ -1539,9 +1534,7 @@
               v-for="engine in databaseEngines"
               :key="`ctx-${engine.name}`"
               type="button"
-              :class="{ disabled: !engine.enabled }"
-              :disabled="!engine.enabled"
-              :title="engine.enabled ? `New ${engine.name} connection` : `${engine.name} coming soon`"
+              :title="`New ${engine.name} connection`"
               @click="openConnectionModalFromEngine(engine, contextMenu.groupId)"
             >
               <span
@@ -1549,7 +1542,6 @@
                 :style="{ background: engine.accent }"
               />
               {{ engine.name }}
-              <small v-if="!engine.enabled">Coming Soon</small>
             </button>
           </div>
         </div>
@@ -4062,6 +4054,10 @@ function isDatabaseEngineInfo(value: unknown): value is DatabaseEngineInfo {
   )
 }
 
+function isConnectableDatabaseEngineInfo(value: DatabaseEngineInfo): value is DatabaseEngineInfo & { connectionCode: DatabaseEngineCode } {
+  return value.enabled && isDatabaseEngineCode(value.connectionCode)
+}
+
 function isDatabaseColumnInfo(value: unknown): value is DatabaseColumnInfo {
   return (
     isRecord(value) &&
@@ -4538,7 +4534,7 @@ function databaseNodeExists(id: string | null) {
 }
 
 function applyDatabaseCatalog(catalog: DatabaseWorkspaceCatalog) {
-  databaseEngines.value = cloneDatabaseCatalog(catalog.engines)
+  databaseEngines.value = cloneDatabaseCatalog(catalog.engines).filter(isConnectableDatabaseEngineInfo)
   groups.value = cloneDatabaseCatalog(catalog.groups)
   replaceRecord(groupParentById, cloneDatabaseCatalog(catalog.groupParents))
   connections.value = cloneDatabaseCatalog(catalog.connections)
@@ -6937,16 +6933,16 @@ function clearDatabaseSearch() {
 }
 
 function openOverviewEngine(engine: DatabaseEngineInfo) {
-  if (!engine.enabled || !engine.connectionCode) {
-    showNotice(`${engine.name} connection is coming soon`)
+  if (!isConnectableDatabaseEngineInfo(engine)) {
+    showNotice(`${engine.name} connection is unavailable`)
     return
   }
   openConnectionModalFromEngine(engine)
 }
 
 function openConnectionModalFromEngine(engine: DatabaseEngineInfo, groupId?: string) {
-  if (!engine.enabled || !engine.connectionCode) {
-    showNotice(`${engine.name} connection is coming soon`)
+  if (!isConnectableDatabaseEngineInfo(engine)) {
+    showNotice(`${engine.name} connection is unavailable`)
     return
   }
   openConnectionModal(engine.connectionCode, groupId)
