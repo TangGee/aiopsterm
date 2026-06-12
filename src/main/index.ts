@@ -95,6 +95,7 @@ import {
   startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from './backend/database'
+import { configureDatabaseCommentsRuntime, getDatabasePageComment, saveDatabasePageComment } from './backend/databaseComments'
 import { exportDatabaseRows } from './backend/databaseExport'
 import {
   cancelExtensionInstall,
@@ -278,6 +279,8 @@ import type {
   DatabaseAiPaneResponseInput,
   DatabaseAiPaneStateSnapshot,
   DatabaseExportInput,
+  DatabasePageCommentKey,
+  DatabasePageCommentSaveInput,
   DatabaseSqlErrorDiagnosisInput,
   DatabaseSqlExecuteInput,
   DatabaseTableDdlInput,
@@ -1157,6 +1160,9 @@ configureDatabaseBackendRuntime({
   localBackendDouble: process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE === '1',
   stateFilePath: join(app.getPath('userData'), 'database-workspace.json'),
   useSeedData: process.env.AIOPSTERM_DATABASE_ENABLE_SEED === '1'
+})
+configureDatabaseCommentsRuntime({
+  stateFilePath: join(app.getPath('userData'), 'database-comments.json')
 })
 configureVoiceBackendRuntime({ getConfig })
 configureAssetBackendRuntime({
@@ -3519,6 +3525,8 @@ const registerIpc = () => {
       }
     })
   )
+  ipcMain.handle('database:comment:get', (_event, input: DatabasePageCommentKey) => getDatabasePageComment(input))
+  ipcMain.handle('database:comment:save', (_event, input: DatabasePageCommentSaveInput) => saveDatabasePageComment(input))
   ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
   ipcMain.handle('database:ai-pane-state:save', (_event, input: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(input))
   ipcMain.handle('database:ai-pane-request', (_event, input: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(input))

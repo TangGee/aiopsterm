@@ -13,6 +13,8 @@ import type {
   DatabaseGroupCreateInput,
   DatabaseGroupInfo,
   DatabaseGroupUpdateInput,
+  DatabasePageCommentKey,
+  DatabasePageCommentRecord,
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneMessageRecord,
   DatabaseAiPaneStateSnapshot,
@@ -1198,6 +1200,7 @@ let databaseAiPaneRequestSequenceMock = 1
 let databaseAiDrawerRequestSequenceMock = 1
 const databaseAiPaneMessagesMock = new Map<string, DatabaseAiPaneMessageRecord>()
 const databaseAiDrawerRequestsMock = new Map<string, DatabaseAiDrawerRequestRecord>()
+const databasePageCommentsMock = new Map<string, DatabasePageCommentRecord>()
 const defaultDatabaseAiPaneStateMock = (): DatabaseAiPaneStateSnapshot => ({
   open: false,
   width: 360,
@@ -1296,7 +1299,20 @@ function resetDatabaseTableRowsMock() {
   databaseAiPaneMessagesMock.clear()
   databaseAiPaneStateMock = defaultDatabaseAiPaneStateMock()
   databaseAiDrawerRequestsMock.clear()
+  databasePageCommentsMock.clear()
   resetDatabaseConnectionsMock()
+}
+
+function databasePageCommentKeyMock(key: DatabasePageCommentKey) {
+  return [
+    key.scope,
+    key.connectionId,
+    key.databaseName,
+    key.schemaName || '',
+    key.tableName || '',
+    key.resultId || '',
+    key.sql || ''
+  ].join('\u001f')
 }
 
 function databaseTableKey(input: { connectionId: string; databaseName: string; schemaName?: string; tableName: string }) {
@@ -5925,6 +5941,34 @@ Object.defineProperty(window, 'aiops', {
         csv: buildDatabaseExportCsv(input)
       }
     })),
+    getDatabasePageComment: vi.fn(async (input: DatabasePageCommentKey) => {
+      const existing = databasePageCommentsMock.get(databasePageCommentKeyMock(input))
+      return {
+        ok: true as const,
+        data: {
+          record: existing || {
+            ...input,
+            comment: '',
+            updatedAt: 0
+          }
+        }
+      }
+    }),
+    saveDatabasePageComment: vi.fn(async (input: { key: DatabasePageCommentKey; comment: string }) => {
+      const record = {
+        ...input.key,
+        comment: input.comment,
+        updatedAt: Date.now()
+      }
+      databasePageCommentsMock.set(databasePageCommentKeyMock(input.key), record)
+      return {
+        ok: true as const,
+        data: {
+          record,
+          message: input.comment.trim() ? 'Comment saved' : 'Comment cleared'
+        }
+      }
+    }),
     saveCustomBackground: vi.fn(async (srcAbsPath: string) => {
       const name = srcAbsPath.split(/[/\\]/).pop() || 'custom-bg.png'
       return {

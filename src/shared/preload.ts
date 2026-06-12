@@ -2316,6 +2316,37 @@ export type DatabaseExportResult = AiopsMutationResult<{
   csv?: string
 }>
 
+export type DatabasePageCommentScope = 'sql-result' | 'table-page'
+
+export type DatabasePageCommentKey = {
+  scope: DatabasePageCommentScope
+  connectionId: string
+  databaseName: string
+  schemaName?: string
+  tableName?: string
+  resultId?: string
+  sql?: string
+}
+
+export type DatabasePageCommentRecord = DatabasePageCommentKey & {
+  comment: string
+  updatedAt: number
+}
+
+export type DatabasePageCommentGetResult = AiopsMutationResult<{
+  record: DatabasePageCommentRecord
+}>
+
+export type DatabasePageCommentSaveInput = {
+  key: DatabasePageCommentKey
+  comment: string
+}
+
+export type DatabasePageCommentSaveResult = AiopsMutationResult<{
+  record: DatabasePageCommentRecord
+  message: string
+}>
+
 export type DatabaseAiPaneMessageInput = {
   role: 'user' | 'assistant'
   content: string
@@ -2959,6 +2990,8 @@ export type AiopsPreloadApi = {
   planDatabaseTableMutation: (input: DatabaseTableMutationPlanInput) => Promise<DatabaseTableMutationPlanResult>
   mutateDatabaseTable: (input: DatabaseTableMutationInput) => Promise<DatabaseTableMutationResult>
   exportDatabaseRows: (input: DatabaseExportInput) => Promise<DatabaseExportResult>
+  getDatabasePageComment: (input: DatabasePageCommentKey) => Promise<DatabasePageCommentGetResult>
+  saveDatabasePageComment: (input: DatabasePageCommentSaveInput) => Promise<DatabasePageCommentSaveResult>
   getDatabaseAiPaneState: () => Promise<DatabaseAiPaneStateResult>
   saveDatabaseAiPaneState: (input: DatabaseAiPaneStateSnapshot) => Promise<DatabaseAiPaneStateResult>
   createDatabaseAiPaneRequest: (input: DatabaseAiPaneRequestInput) => Promise<DatabaseAiPaneRequestResult>

@@ -948,10 +948,16 @@
                   :hide-refresh="true"
                   :can-export="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
                   export-title="Export current SQL result page"
+                  :can-chart="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
+                  chart-title="Chart current SQL result page"
+                  :can-comment="activeSqlResult.status === 'ok'"
+                  comment-title="Comment current SQL result"
                   @goto-page="(page) => updateSqlResultPage(page)"
                   @goto-last-page="gotoLastSqlResultPage"
                   @change-page-size="(size) => updateSqlResultPageSize(size)"
                   @export="exportActiveSqlResultPage"
+                  @chart="openActiveSqlResultChart"
+                  @comment="openActiveSqlResultComment"
                 />
                 <ResultGrid
                   class="db-sql-result-grid"
@@ -991,6 +997,10 @@
           :edit-disabled-reason="dataEditDisabledReason(activeDataTab)"
           :can-export="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
           export-title="Export current table page"
+          :can-chart="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
+          chart-title="Chart current table page"
+          :can-comment="!activeDataTab.loading && !activeDataTab.error"
+          comment-title="Comment current table page"
           @goto-page="(page) => updateDataPage(page)"
           @goto-last-page="gotoLastDataPage"
           @change-page-size="(size) => updateDataPageSize(size)"
@@ -1001,6 +1011,8 @@
           @undo="undoDataChanges"
           @save="saveDataChanges"
           @export="exportActiveDataPage"
+          @chart="openActiveDataChart"
+          @comment="openActiveDataComment"
         />
         <div class="db-where-bar">
           <span class="db-where-table"><Table2 /> {{ activeDataTab.tableName }}</span>
@@ -2067,6 +2079,113 @@
     </div>
 
     <div
+      v-if="chartModal.open"
+      class="db-modal-overlay"
+      @click.self="closeChartModal"
+    >
+      <section class="db-chart-modal">
+        <header>
+          <div>
+            <h2>{{ chartModal.summary?.title || 'Chart' }}</h2>
+            <span>{{ chartModal.summary?.scopeLabel }}</span>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            @click="closeChartModal"
+          >
+            <X />
+          </button>
+        </header>
+        <div
+          v-if="chartModal.summary"
+          class="db-chart-body"
+        >
+          <div class="db-chart-metrics">
+            <span><strong>{{ chartModal.summary.rowCount }}</strong> Rows</span>
+            <span><strong>{{ chartModal.summary.valueColumn }}</strong> Value</span>
+            <span><strong>{{ chartModal.summary.categoryColumn }}</strong> Category</span>
+          </div>
+          <div class="db-chart-bars">
+            <div
+              v-for="bar in chartModal.summary.bars"
+              :key="bar.label"
+              class="db-chart-bar-row"
+            >
+              <span :title="bar.label">{{ bar.label }}</span>
+              <div class="db-chart-track">
+                <i :style="{ width: `${bar.width}%` }" />
+              </div>
+              <strong>{{ formatChartNumber(bar.value) }}</strong>
+            </div>
+          </div>
+          <p class="db-chart-footnote">
+            Numeric columns: {{ chartModal.summary.numericColumns.join(', ') }}
+          </p>
+        </div>
+        <p
+          v-else
+          class="db-chart-empty"
+        >
+          {{ chartModal.error || 'Current page does not contain a numeric column to chart.' }}
+        </p>
+      </section>
+    </div>
+
+    <div
+      v-if="commentModal.open"
+      class="db-modal-overlay"
+      @click.self="closeCommentModal"
+    >
+      <section class="db-comment-modal">
+        <header>
+          <div>
+            <h2>{{ commentModal.title }}</h2>
+            <span>{{ commentModal.scopeLabel }}</span>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            @click="closeCommentModal"
+          >
+            <X />
+          </button>
+        </header>
+        <p
+          v-if="commentModal.error"
+          class="db-comment-error"
+        >
+          {{ commentModal.error }}
+        </p>
+        <textarea
+          v-model="commentModal.draft"
+          :disabled="commentModal.loading || commentModal.saving"
+          maxlength="5000"
+          spellcheck="false"
+        />
+        <footer>
+          <span>{{ commentModal.updatedAt ? `Saved ${formatCommentTime(commentModal.updatedAt)}` : 'Not saved' }}</span>
+          <div>
+            <button
+              type="button"
+              :disabled="commentModal.loading || commentModal.saving"
+              @click="closeCommentModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              :disabled="commentModal.loading || commentModal.saving"
+              @click="saveActiveComment"
+            >
+              {{ commentModal.saving ? 'Saving' : 'Save' }}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div
       v-if="ddlModal.open"
       class="db-modal-overlay"
       @click.self="ddlModal.open = false"
@@ -2264,6 +2383,8 @@ import type {
   DatabaseGroupDeleteResult,
   DatabaseGroupMutationResult,
   DatabaseGroupUpdateInput,
+  DatabasePageCommentKey,
+  DatabasePageCommentRecord,
   DatabaseSqlExecuteResult,
   DatabaseTableDdlResult,
   DatabaseTableInfo,
@@ -2311,6 +2432,26 @@ type DataMutationPlanState = {
   preview: string
   warning: string
   error: string
+}
+type DatabaseChartSource = {
+  title: string
+  scopeLabel: string
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+}
+type DatabaseChartBar = {
+  label: string
+  value: number
+  width: number
+}
+type DatabaseChartSummary = {
+  title: string
+  scopeLabel: string
+  categoryColumn: string
+  valueColumn: string
+  rowCount: number
+  bars: DatabaseChartBar[]
+  numericColumns: string[]
 }
 type DbAiAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
 type DbAiTargetDialect = DatabaseEngineCode | 'mssql'
@@ -2523,9 +2664,13 @@ const DataGridToolbar = defineComponent({
     editDisabledReason: { type: String, default: '' },
     hideRefresh: { type: Boolean, default: false },
     canExport: { type: Boolean, default: false },
-    exportTitle: { type: String, default: 'Export CSV' }
+    exportTitle: { type: String, default: 'Export CSV' },
+    canChart: { type: Boolean, default: false },
+    chartTitle: { type: String, default: 'Chart' },
+    canComment: { type: Boolean, default: false },
+    commentTitle: { type: String, default: 'Comment' }
   },
-  emits: ['gotoPage', 'gotoLastPage', 'changePageSize', 'refreshTotal', 'refresh', 'add-row', 'delete-row', 'undo', 'save', 'export'],
+  emits: ['gotoPage', 'gotoLastPage', 'changePageSize', 'refreshTotal', 'refresh', 'add-row', 'delete-row', 'undo', 'save', 'export', 'chart', 'comment'],
   setup(props, { emit }) {
     const pageSizes = [10, 50, 100, 500, 1000, 5000, 10000]
     const pageCount = computed(() =>
@@ -2588,8 +2733,8 @@ const DataGridToolbar = defineComponent({
           h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-delete-row', disabled: !props.canEdit || !props.hasSelection, title: deleteRowTitle.value, onClick: () => emit('delete-row') }, '-'),
           h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-undo', disabled: !props.canUndo, title: undoTitle.value, onClick: () => emit('undo') }, '↶'),
           h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-save', disabled: !props.canEdit || !props.isDirty, title: saveTitle.value, onClick: () => emit('save') }, '💾'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-chart', disabled: true, title: 'Chart' }, '📊'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-comment', disabled: true, title: 'Comment' }, '💬')
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-chart', disabled: !props.canChart, title: props.canChart ? props.chartTitle : 'No rows to chart', onClick: () => emit('chart') }, '📊'),
+          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-comment', disabled: !props.canComment, title: props.canComment ? props.commentTitle : 'No page context for comment', onClick: () => emit('comment') }, '💬')
         ]),
         h('span', { class: 'db-toolbar-spacer' }),
         h(
@@ -3136,6 +3281,22 @@ const ddlModal = reactive({
   loading: false,
   error: '',
   errorCode: '' as '' | 'permission' | 'other'
+})
+const chartModal = reactive({
+  open: false,
+  summary: null as DatabaseChartSummary | null,
+  error: ''
+})
+const commentModal = reactive({
+  open: false,
+  title: '',
+  scopeLabel: '',
+  key: null as DatabasePageCommentKey | null,
+  draft: '',
+  updatedAt: 0,
+  loading: false,
+  saving: false,
+  error: ''
 })
 const dbAiPaneOpen = ref(false)
 const dbAiPaneWidth = ref(DB_AI_PANE_DEFAULT_WIDTH)
@@ -4204,6 +4365,41 @@ function isDatabaseExportData(value: unknown): value is NonNullable<DatabaseExpo
     (value.canceled === undefined || typeof value.canceled === 'boolean') &&
     (value.csv === undefined || typeof value.csv === 'string')
   )
+}
+
+function isDatabasePageCommentKey(value: unknown, expected?: DatabasePageCommentKey | null): value is DatabasePageCommentKey {
+  if (!isRecord(value)) return false
+  if (value.scope !== 'sql-result' && value.scope !== 'table-page') return false
+  if (typeof value.connectionId !== 'string' || typeof value.databaseName !== 'string') return false
+  if (value.schemaName !== undefined && typeof value.schemaName !== 'string') return false
+  if (value.tableName !== undefined && typeof value.tableName !== 'string') return false
+  if (value.resultId !== undefined && typeof value.resultId !== 'string') return false
+  if (value.sql !== undefined && typeof value.sql !== 'string') return false
+  const key: DatabasePageCommentKey = {
+    scope: value.scope,
+    connectionId: value.connectionId,
+    databaseName: value.databaseName,
+    ...(value.schemaName ? { schemaName: value.schemaName } : {}),
+    ...(value.tableName ? { tableName: value.tableName } : {}),
+    ...(value.resultId ? { resultId: value.resultId } : {}),
+    ...(value.sql ? { sql: value.sql } : {})
+  }
+  if (!expected) return true
+  return databasePageCommentKeyId(key) === databasePageCommentKeyId(expected)
+}
+
+function isDatabasePageCommentRecord(value: unknown, expected?: DatabasePageCommentKey | null): value is DatabasePageCommentRecord {
+  if (!isRecord(value) || !isDatabasePageCommentKey(value, expected)) return false
+  const record = value as Record<string, unknown>
+  return typeof record.comment === 'string' && isNonNegativeNumber(record.updatedAt)
+}
+
+function isDatabasePageCommentGetData(value: unknown, expected: DatabasePageCommentKey): value is { record: DatabasePageCommentRecord } {
+  return isRecord(value) && isDatabasePageCommentRecord(value.record, expected)
+}
+
+function isDatabasePageCommentSaveData(value: unknown, expected: DatabasePageCommentKey): value is { record: DatabasePageCommentRecord; message: string } {
+  return isRecord(value) && isDatabasePageCommentRecord(value.record, expected) && typeof value.message === 'string'
 }
 
 function tableNodeExists(tableId: string) {
@@ -5944,6 +6140,234 @@ function exportActiveDataPage() {
       total: tab.total
     }
   })
+}
+
+function databasePageCommentKeyId(key: DatabasePageCommentKey) {
+  return [
+    key.scope,
+    key.connectionId,
+    key.databaseName,
+    key.schemaName || '',
+    key.tableName || '',
+    key.resultId || '',
+    key.sql || ''
+  ].join('\u001f')
+}
+
+function sqlResultCommentKey(tab: Extract<WorkspaceTab, { kind: 'sql' }>, result: SqlResult): DatabasePageCommentKey {
+  return {
+    scope: 'sql-result',
+    connectionId: tab.connectionId,
+    databaseName: tab.catalogName,
+    ...(tab.schemaName ? { schemaName: tab.schemaName } : {}),
+    resultId: result.id,
+    sql: result.sql
+  }
+}
+
+function dataPageCommentKey(tab: Extract<WorkspaceTab, { kind: 'data' }>): DatabasePageCommentKey {
+  return {
+    scope: 'table-page',
+    connectionId: tab.connectionId,
+    databaseName: tab.catalogName,
+    ...(tab.schemaName ? { schemaName: tab.schemaName } : {}),
+    tableName: tab.tableName
+  }
+}
+
+function labelForChartValue(value: unknown, fallback: string) {
+  if (value === null || value === undefined || value === '') return fallback
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function numberForChartValue(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+  return null
+}
+
+function buildChartSummary(source: DatabaseChartSource): DatabaseChartSummary | null {
+  const rows = source.rows.filter((row) => row && typeof row === 'object')
+  const numericColumns = source.columns.filter((column) => rows.some((row) => numberForChartValue(row[column]) !== null))
+  const valueColumn = numericColumns[0]
+  if (!valueColumn) return null
+  const categoryColumn = source.columns.find((column) => column !== valueColumn && rows.some((row) => row[column] !== null && row[column] !== undefined && row[column] !== '')) || valueColumn
+  const grouped = new Map<string, number>()
+  rows.forEach((row, index) => {
+    const numeric = numberForChartValue(row[valueColumn])
+    if (numeric === null) return
+    const label = labelForChartValue(row[categoryColumn], `Row ${index + 1}`)
+    grouped.set(label, (grouped.get(label) || 0) + numeric)
+  })
+  const sorted = [...grouped.entries()].sort((first, second) => Math.abs(second[1]) - Math.abs(first[1])).slice(0, 12)
+  if (!sorted.length) return null
+  const max = Math.max(...sorted.map(([, value]) => Math.abs(value)), 1)
+  return {
+    title: source.title,
+    scopeLabel: source.scopeLabel,
+    categoryColumn,
+    valueColumn,
+    rowCount: rows.length,
+    bars: sorted.map(([label, value]) => ({ label, value, width: Math.max(4, Math.round((Math.abs(value) / max) * 100)) })),
+    numericColumns
+  }
+}
+
+function openChartModal(source: DatabaseChartSource) {
+  chartModal.summary = buildChartSummary(source)
+  chartModal.error = chartModal.summary ? '' : 'Current page does not contain a numeric column to chart.'
+  chartModal.open = true
+  if (!chartModal.summary) showNotice(chartModal.error)
+}
+
+function closeChartModal() {
+  chartModal.open = false
+}
+
+function openActiveSqlResultChart() {
+  const tab = activeSqlTab.value
+  const result = activeSqlResult.value
+  if (!tab || !result || result.status !== 'ok' || !pagedSqlRows.value.length) {
+    showNotice('No SQL result rows to chart')
+    return
+  }
+  openChartModal({
+    title: `${tab.title} - ${result.title}`,
+    scopeLabel: `SQL page ${activeSqlResultViewState.value.page}`,
+    columns: result.columns,
+    rows: pagedSqlRows.value
+  })
+}
+
+function openActiveDataChart() {
+  const tab = activeDataTab.value
+  if (!tab || tab.loading || tab.error || !pagedDataRows.value.length) {
+    showNotice('No table rows to chart')
+    return
+  }
+  openChartModal({
+    title: `${tab.title} - page ${tab.page}`,
+    scopeLabel: [tab.catalogName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
+    columns: tab.columns,
+    rows: pagedDataRows.value
+  })
+}
+
+async function openCommentModal(input: { title: string; scopeLabel: string; key: DatabasePageCommentKey }) {
+  commentModal.open = true
+  commentModal.title = input.title
+  commentModal.scopeLabel = input.scopeLabel
+  commentModal.key = input.key
+  commentModal.draft = ''
+  commentModal.updatedAt = 0
+  commentModal.loading = true
+  commentModal.saving = false
+  commentModal.error = ''
+  if (typeof window.aiops.getDatabasePageComment !== 'function') {
+    commentModal.loading = false
+    commentModal.error = 'Database comment service unavailable'
+    showNotice(commentModal.error)
+    return
+  }
+  try {
+    const result = await window.aiops.getDatabasePageComment(input.key)
+    if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
+    commentModal.loading = false
+    if (!result.ok) {
+      commentModal.error = result.errorMessage || 'Database comment load failed'
+      showNotice(commentModal.error)
+      return
+    }
+    if (!isDatabasePageCommentGetData(result.data, input.key)) {
+      commentModal.error = 'Database comment backend returned malformed result data.'
+      showNotice(commentModal.error)
+      return
+    }
+    commentModal.draft = result.data.record.comment
+    commentModal.updatedAt = result.data.record.updatedAt
+  } catch (error) {
+    if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
+    commentModal.loading = false
+    commentModal.error = bridgeErrorMessage(error, 'Database comment load failed')
+    showNotice(commentModal.error)
+  }
+}
+
+function openActiveSqlResultComment() {
+  const tab = activeSqlTab.value
+  const result = activeSqlResult.value
+  if (!tab || !result || result.status !== 'ok') {
+    showNotice('No SQL result context to comment')
+    return
+  }
+  void openCommentModal({
+    title: `${tab.title} - ${result.title}`,
+    scopeLabel: `SQL result / ${tab.catalogName}${tab.schemaName ? ` / ${tab.schemaName}` : ''}`,
+    key: sqlResultCommentKey(tab, result)
+  })
+}
+
+function openActiveDataComment() {
+  const tab = activeDataTab.value
+  if (!tab || tab.loading || tab.error) {
+    showNotice('No table page context to comment')
+    return
+  }
+  void openCommentModal({
+    title: `${tab.title} - page ${tab.page}`,
+    scopeLabel: [tab.catalogName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
+    key: dataPageCommentKey(tab)
+  })
+}
+
+async function saveActiveComment() {
+  const key = commentModal.key
+  if (!key || commentModal.loading || commentModal.saving) return
+  if (typeof window.aiops.saveDatabasePageComment !== 'function') {
+    commentModal.error = 'Database comment service unavailable'
+    showNotice(commentModal.error)
+    return
+  }
+  commentModal.saving = true
+  commentModal.error = ''
+  try {
+    const result = await window.aiops.saveDatabasePageComment({ key, comment: commentModal.draft })
+    if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
+    commentModal.saving = false
+    if (!result.ok) {
+      commentModal.error = result.errorMessage || 'Database comment save failed'
+      showNotice(commentModal.error)
+      return
+    }
+    if (!isDatabasePageCommentSaveData(result.data, key)) {
+      commentModal.error = 'Database comment backend returned malformed result data.'
+      showNotice(commentModal.error)
+      return
+    }
+    commentModal.draft = result.data.record.comment
+    commentModal.updatedAt = result.data.record.updatedAt
+    showNotice(result.data.message || 'Comment saved')
+  } catch (error) {
+    if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
+    commentModal.saving = false
+    commentModal.error = bridgeErrorMessage(error, 'Database comment save failed')
+    showNotice(commentModal.error)
+  }
+}
+
+function closeCommentModal() {
+  if (commentModal.saving) return
+  commentModal.open = false
+}
+
+function formatChartNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function formatCommentTime(value: number) {
+  if (!value) return ''
+  return new Date(value).toLocaleString()
 }
 
 function discardDataChanges() {

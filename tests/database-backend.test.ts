@@ -3,7 +3,15 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DatabaseExportInput, DatabaseExportResult, UserConfig } from '@shared/preload'
+import type {
+  DatabaseExportInput,
+  DatabaseExportResult,
+  DatabasePageCommentKey,
+  DatabasePageCommentSaveInput,
+  DatabasePageCommentGetResult,
+  DatabasePageCommentSaveResult,
+  UserConfig
+} from '@shared/preload'
 import { sanitizeDatabaseExportFileName } from '../src/shared/databaseExport'
 import {
   cancelDatabaseAiDrawerResponse,
@@ -619,6 +627,9 @@ let exportDatabaseRowsBackend: (
     now?: () => Date
   }
 ) => Promise<DatabaseExportResult>
+let configureDatabaseCommentsRuntimeBackend: (config?: { stateFilePath?: string; now?: () => number }) => void
+let getDatabasePageCommentBackend: (input: DatabasePageCommentKey) => Promise<DatabasePageCommentGetResult>
+let saveDatabasePageCommentBackend: (input: DatabasePageCommentSaveInput) => Promise<DatabasePageCommentSaveResult>
 const originalDbAiBackendDouble = process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
 const originalDatabaseSeed = process.env.AIOPSTERM_DATABASE_ENABLE_SEED
 
@@ -629,6 +640,15 @@ beforeAll(async () => {
   const exportModulePath = '../src/main/backend/databaseExport'
   const exportBackend = (await import(exportModulePath)) as { exportDatabaseRows: typeof exportDatabaseRowsBackend }
   exportDatabaseRowsBackend = exportBackend.exportDatabaseRows
+  const commentsModulePath = '../src/main/backend/databaseComments'
+  const commentsBackend = (await import(commentsModulePath)) as {
+    configureDatabaseCommentsRuntime: typeof configureDatabaseCommentsRuntimeBackend
+    getDatabasePageComment: typeof getDatabasePageCommentBackend
+    saveDatabasePageComment: typeof saveDatabasePageCommentBackend
+  }
+  configureDatabaseCommentsRuntimeBackend = commentsBackend.configureDatabaseCommentsRuntime
+  getDatabasePageCommentBackend = commentsBackend.getDatabasePageComment
+  saveDatabasePageCommentBackend = commentsBackend.saveDatabasePageComment
 })
 
 describe('database backend boundary', () => {
@@ -650,12 +670,14 @@ describe('database backend boundary', () => {
     delete process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
     process.env.AIOPSTERM_DATABASE_ENABLE_SEED = '1'
     configureDatabaseBackendRuntime()
+    configureDatabaseCommentsRuntimeBackend()
     resetDatabaseBackendSeed()
     tempDirs = []
   })
 
   afterEach(async () => {
     configureDatabaseBackendRuntime()
+    configureDatabaseCommentsRuntimeBackend()
     if (originalDatabaseSeed === undefined) {
       delete process.env.AIOPSTERM_DATABASE_ENABLE_SEED
     } else {
@@ -977,6 +999,106 @@ describe('database backend boundary', () => {
       errorCode: 'DATABASE_EXPORT_EMPTY_ROWS'
     })
     expect(showSaveDialog).not.toHaveBeenCalled()
+  })
+
+  it('persists database page comments through the backend state file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-comments-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-comments.json')
+    const key: DatabasePageCommentKey = {
+      scope: 'table-page',
+      connectionId: 'conn-prod-pg',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    }
+    configureDatabaseCommentsRuntimeBackend({ stateFilePath, now: () => 1717462800000 })
+
+    const empty = await getDatabasePageCommentBackend(key)
+    expect(empty).toEqual({
+      ok: true,
+      data: {
+        record: {
+          ...key,
+          comment: '',
+          updatedAt: 0
+        }
+      }
+    })
+
+    const saved = await saveDatabasePageCommentBackend({ key, comment: 'Investigate outlier rows before export.' })
+    expect(saved).toEqual({
+      ok: true,
+      data: {
+        record: {
+          ...key,
+          comment: 'Investigate outlier rows before export.',
+          updatedAt: 1717462800000
+        },
+        message: 'Comment saved'
+      }
+    })
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).records).toBeTruthy()
+
+    configureDatabaseCommentsRuntimeBackend({ stateFilePath, now: () => 1717462801000 })
+    expect(saved.ok).toBe(true)
+    const savedRecord = saved.data!.record
+    await expect(getDatabasePageCommentBackend(key)).resolves.toEqual({
+      ok: true,
+      data: {
+        record: savedRecord
+      }
+    })
+  })
+
+  it('rejects malformed database page comment keys and oversized comments', async () => {
+    await expect(
+      getDatabasePageCommentBackend({
+        scope: 'table-page',
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders'
+      } as DatabasePageCommentKey)
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_COMMENT_INVALID_KEY'
+    })
+
+    await expect(
+      saveDatabasePageCommentBackend({
+        key: {
+          scope: 'sql-result',
+          connectionId: 'conn-prod-pg',
+          databaseName: 'orders',
+          sql: 'select * from public.orders'
+        },
+        comment: 'x'.repeat(5001)
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_COMMENT_TOO_LONG'
+    })
+  })
+
+  it('fails closed when the database page comment state file is corrupt', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-comments-corrupt-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-comments.json')
+    await writeFile(stateFilePath, '{not-json', 'utf-8')
+    configureDatabaseCommentsRuntimeBackend({ stateFilePath })
+
+    await expect(
+      getDatabasePageCommentBackend({
+        scope: 'sql-result',
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        resultId: 'result-1',
+        sql: 'select * from public.orders'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_COMMENT_STATE_UNAVAILABLE'
+    })
   })
 
   it('lists the database workspace catalog through the backend boundary', async () => {

@@ -8120,6 +8120,27 @@ describe('AppShell', () => {
     const sqlExportButton = wrapper.find('.db-sql-results .db-toolbar-export')
     expect(sqlExportButton.attributes('disabled')).toBeUndefined()
     expect(sqlExportButton.attributes('title')).toBe('Export current SQL result page')
+    const sqlChartButton = wrapper.find('.db-sql-results .db-toolbar-btn-chart')
+    expect(sqlChartButton.attributes('disabled')).toBeUndefined()
+    await sqlChartButton.trigger('click')
+    expect(wrapper.find('.db-chart-modal').text()).toContain('SQL page 1')
+    expect(wrapper.find('.db-chart-modal').text()).toContain('id')
+    await wrapper.find('.db-chart-modal header button').trigger('click')
+    vi.mocked(window.aiops.getDatabasePageComment).mockClear()
+    const sqlCommentButton = wrapper.find('.db-sql-results .db-toolbar-btn-comment')
+    expect(sqlCommentButton.attributes('disabled')).toBeUndefined()
+    await sqlCommentButton.trigger('click')
+    await flushPromises()
+    expect(window.aiops.getDatabasePageComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: 'sql-result',
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        sql: expect.stringContaining('public.orders')
+      })
+    )
+    await wrapper.find('.db-comment-modal header button').trigger('click')
     await sqlExportButton.trigger('click')
     await flushPromises()
     expect(window.aiops.exportDatabaseRows).toHaveBeenCalledWith(
@@ -8402,8 +8423,43 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-toolbar-btn-undo').attributes('title')).toContain('Nothing to undo')
     expect(wrapper.find('.db-toolbar-btn-save').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.db-toolbar-btn-save').attributes('title')).toContain('No changes to save')
-    expect(wrapper.find('.db-toolbar button[title="Chart"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.db-toolbar button[title="Comment"]').attributes('disabled')).toBeDefined()
+    const tableChartButton = wrapper.find('.db-data-workspace .db-toolbar-btn-chart')
+    expect(tableChartButton.attributes('disabled')).toBeUndefined()
+    expect(tableChartButton.attributes('title')).toBe('Chart current table page')
+    await tableChartButton.trigger('click')
+    expect(wrapper.find('.db-chart-modal').text()).toContain('orders - page 1')
+    expect(wrapper.find('.db-chart-modal').text()).toContain('Rows')
+    expect(wrapper.find('.db-chart-modal').text()).toContain('payment-api')
+    await wrapper.find('.db-chart-modal header button').trigger('click')
+    vi.mocked(window.aiops.getDatabasePageComment).mockClear()
+    vi.mocked(window.aiops.saveDatabasePageComment).mockClear()
+    const tableCommentButton = wrapper.find('.db-data-workspace .db-toolbar-btn-comment')
+    expect(tableCommentButton.attributes('disabled')).toBeUndefined()
+    expect(tableCommentButton.attributes('title')).toBe('Comment current table page')
+    await tableCommentButton.trigger('click')
+    await flushPromises()
+    expect(window.aiops.getDatabasePageComment).toHaveBeenCalledWith({
+      scope: 'table-page',
+      connectionId: 'conn-prod-pg',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    })
+    await wrapper.find('.db-comment-modal textarea').setValue('Review rows with stale owners before paging.')
+    await wrapper.find('.db-comment-modal footer button:last-child').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveDatabasePageComment).toHaveBeenCalledWith({
+      key: {
+        scope: 'table-page',
+        connectionId: 'conn-prod-pg',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      },
+      comment: 'Review rows with stale owners before paging.'
+    })
+    expect(wrapper.text()).toContain('Comment saved')
+    await wrapper.find('.db-comment-modal header button').trigger('click')
     const tableExportButton = wrapper.find('.db-data-workspace .db-toolbar-export')
     expect(tableExportButton.attributes('disabled')).toBeUndefined()
     expect(tableExportButton.attributes('title')).toBe('Export current table page')
@@ -8866,6 +8922,16 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Database export backend returned malformed result data.')
     expect(wrapper.text()).not.toContain('Exported 1 row to')
+
+    vi.mocked(window.aiops.saveDatabasePageComment).mockResolvedValueOnce({ ok: true, data: { message: 'Comment saved' } } as any)
+    await wrapper.find('.db-data-workspace .db-toolbar-btn-comment').trigger('click')
+    await flushPromises()
+    await wrapper.find('.db-comment-modal textarea').setValue('Malformed save should not be accepted.')
+    await wrapper.find('.db-comment-modal footer button:last-child').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database comment backend returned malformed result data.')
+    expect(wrapper.text()).not.toContain('Saved ')
+    await wrapper.find('.db-comment-modal header button').trigger('click')
 
     vi.mocked(window.aiops.queryDatabaseTable).mockResolvedValueOnce({ ok: true } as any)
     await wrapper.find('.db-data-workspace .db-toolbar button[title="Refresh"]').trigger('click')
