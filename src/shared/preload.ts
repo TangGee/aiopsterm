@@ -589,6 +589,16 @@ export type AiopsUserAccountResult = AiopsMutationResult<AiopsUserAccountSnapsho
 
 export type AiopsUserMutationResult = AiopsMutationResult<AiopsUserAccountSnapshot & { message: string }>
 
+export type AiopsUserExternalAction = 'login' | 'account-center'
+
+export type AiopsUserExternalActionResult = AiopsMutationResult<{
+  action: AiopsUserExternalAction
+  url: string
+  opened: true
+  openedAt: string
+  message: string
+}>
+
 export type AiopsUserCodeResult = AiopsMutationResult<{
   challengeId: string
   kind: 'email' | 'mobile'
@@ -2875,7 +2885,8 @@ export type AiopsPreloadApi = {
   listAiContextCatalog: () => Promise<AiContextCatalogResult>
   listAiCommandCatalog: () => Promise<AiCommandCatalogResult>
   getUserAccount: () => Promise<AiopsUserAccountResult>
-  openUserLogin: () => Promise<AiopsUserMutationResult>
+  openUserLogin: () => Promise<AiopsUserExternalActionResult>
+  openUserAccountCenter: () => Promise<AiopsUserExternalActionResult>
   loginUserAccount: (input: AiopsUserLoginInput) => Promise<AiopsUserMutationResult>
   logoutUserAccount: () => Promise<AiopsUserMutationResult>
   skipUserLogin: () => Promise<AiopsUserMutationResult>

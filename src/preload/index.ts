@@ -45,6 +45,7 @@ const api: AiopsPreloadApi = {
   listAiCommandCatalog: () => ipcRenderer.invoke('ai:command-catalog'),
   getUserAccount: () => ipcRenderer.invoke('user:get-account'),
   openUserLogin: () => ipcRenderer.invoke('user:open-login'),
+  openUserAccountCenter: () => ipcRenderer.invoke('user:open-account-center'),
   loginUserAccount: (input) => ipcRenderer.invoke('user:login', input),
   logoutUserAccount: () => ipcRenderer.invoke('user:logout'),
   skipUserLogin: () => ipcRenderer.invoke('user:skip-login'),

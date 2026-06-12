@@ -10902,15 +10902,18 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.userNotice).toBe('可信设备已移除')
 
     vi.mocked(window.aiops.getUserAccount).mockClear()
+    vi.mocked(window.aiops.openUserAccountCenter).mockClear()
     await expect(store.openAccountCenter()).resolves.toBe(true)
     expect(window.aiops.getUserAccount).toHaveBeenCalled()
+    expect(window.aiops.openUserAccountCenter).toHaveBeenCalled()
     expect(store.userAccountCenterOpen).toBe(true)
     store.closeAccountCenter()
     expect(store.userAccountCenterOpen).toBe(false)
 
+    const loginProfileBefore = { ...store.userProfile }
     await store.openUserLogin()
     expect(store.activeModule).toBe('user')
-    expect(store.userProfile.skippedLogin).toBe(true)
+    expect(store.userProfile).toEqual(loginProfileBefore)
     expect(store.userLoginTab).toBe('account')
     store.setUserLoginTab('email')
     expect(store.userLoginTab).toBe('email')
@@ -11088,7 +11091,8 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       openSettingsDocumentation: window.aiops.openSettingsDocumentation,
       submitSettingsFeedbackReport: window.aiops.submitSettingsFeedbackReport,
       openLogDir: window.aiops.openLogDir,
-      getUserAccount: window.aiops.getUserAccount
+      getUserAccount: window.aiops.getUserAccount,
+      openUserAccountCenter: window.aiops.openUserAccountCenter
     }
 
     try {
@@ -11148,6 +11152,12 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       vi.mocked(window.aiops.getUserAccount).mockRejectedValueOnce(new Error('account offline'))
       await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('账户中心打开失败')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.activeModule).toBe('settings')
+
+      ;(window.aiops as any).openUserAccountCenter = undefined
+      await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('账户中心服务不可用')
       expect(store.userAccountCenterOpen).toBe(false)
       expect(store.activeModule).toBe('settings')
     } finally {
@@ -11328,8 +11338,11 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     const trustedDevicesBefore = store.trustedDevices.map((device) => ({ ...device }))
     const originalGetUserAccount = window.aiops.getUserAccount
     const originalOpenLogin = window.aiops.openUserLogin
+    const originalOpenAccountCenter = window.aiops.openUserAccountCenter
     const originalLogout = window.aiops.logoutUserAccount
     const originalRevokeTrustedDevice = window.aiops.revokeTrustedDevice
+    const activeModuleBefore = store.activeModule
+    const userLoginTabBefore = store.userLoginTab
 
     try {
       ;(window.aiops as any).getUserAccount = undefined
@@ -11347,10 +11360,27 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.userProfile).toEqual(profileBefore)
       expect(store.billingSettings).toEqual(billingBefore)
 
+      ;(window.aiops as any).openUserAccountCenter = undefined
+      await expect(store.openAccountCenter({ activateUserModule: true })).resolves.toBe(false)
+      expect(store.userNotice).toBe('账号中心服务不可用')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.activeModule).toBe(activeModuleBefore)
+      expect(store.userProfile).toEqual(profileBefore)
+      expect(store.billingSettings).toEqual(billingBefore)
+
+      ;(window.aiops as any).openUserAccountCenter = originalOpenAccountCenter
+      vi.mocked(window.aiops.openUserAccountCenter).mockRejectedValueOnce(new Error('account center opener offline'))
+      await expect(store.openAccountCenter({ activateUserModule: true })).resolves.toBe(false)
+      expect(store.userNotice).toBe('账号中心打开失败')
+      expect(store.userAccountCenterOpen).toBe(false)
+      expect(store.activeModule).toBe(activeModuleBefore)
+      expect(store.userProfile).toEqual(profileBefore)
+      expect(store.billingSettings).toEqual(billingBefore)
+
       ;(window.aiops as any).openUserLogin = undefined
       await expect(store.openUserLogin()).resolves.toBe(false)
-      expect(store.activeModule).toBe('user')
-      expect(store.userLoginTab).toBe('account')
+      expect(store.activeModule).toBe(activeModuleBefore)
+      expect(store.userLoginTab).toBe(userLoginTabBefore)
       expect(store.userNotice).toBe('登录服务不可用')
       expect(store.userProfile).toEqual(profileBefore)
       expect(store.billingSettings).toEqual(billingBefore)
@@ -11375,6 +11405,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     } finally {
       ;(window.aiops as any).getUserAccount = originalGetUserAccount
       ;(window.aiops as any).openUserLogin = originalOpenLogin
+      ;(window.aiops as any).openUserAccountCenter = originalOpenAccountCenter
       ;(window.aiops as any).logoutUserAccount = originalLogout
       ;(window.aiops as any).revokeTrustedDevice = originalRevokeTrustedDevice
     }
@@ -11599,6 +11630,21 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     await expect(store.openUserLogin()).resolves.toBe(false)
     expect(store.userNotice).toBe('用户后端返回了无效结果')
     expect(store.userLoginLoading).toBe(false)
+    assertUserSnapshotUnchanged()
+
+    vi.mocked(window.aiops.openUserAccountCenter).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        action: 'login',
+        url: 'https://accounts.aiopsterm.local/account',
+        opened: true,
+        openedAt: '2026-06-09 10:00',
+        message: 'wrong action'
+      }
+    } as any)
+    await expect(store.openAccountCenter({ activateUserModule: true })).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    expect(store.userAccountCenterOpen).toBe(false)
     assertUserSnapshotUnchanged()
 
     vi.mocked(window.aiops.loginUserAccount).mockResolvedValueOnce({

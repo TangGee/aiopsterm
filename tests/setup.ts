@@ -594,6 +594,17 @@ const userSuccessMock = (message: string) => ({
   }
 })
 
+const userExternalActionSuccessMock = (action: 'login' | 'account-center', url = `https://accounts.aiopsterm.local/${action}`) => ({
+  ok: true as const,
+  data: {
+    action,
+    url,
+    opened: true as const,
+    openedAt: userTimestampMock(),
+    message: action === 'login' ? '登录页面已打开' : '账号中心已打开'
+  }
+})
+
 const applyUserProfileMock = (patch: Partial<TestUserProfile>) => {
   userProfileStoreMock = {
     ...userProfileStoreMock,
@@ -5679,9 +5690,9 @@ Object.defineProperty(window, 'aiops', {
       data: userAccountSnapshotMock()
     })),
     openUserLogin: vi.fn(async () => {
-      applyUserProfileMock({ skippedLogin: true })
-      return userSuccessMock('已打开本地登录页')
+      return userExternalActionSuccessMock('login', 'https://accounts.aiopsterm.local/login')
     }),
+    openUserAccountCenter: vi.fn(async () => userExternalActionSuccessMock('account-center', 'https://accounts.aiopsterm.local/account-center')),
     loginUserAccount: vi.fn(
       async (
         input:

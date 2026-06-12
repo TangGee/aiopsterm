@@ -61,7 +61,7 @@ import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRun
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
-import { shouldRunMcpDiscovery, shouldUseE2eDialogFixtures } from '@shared/runtimeSwitches'
+import { shouldRunMcpDiscovery, shouldUseE2eDialogFixtures, shouldUseUserExternalOpenBackendDouble } from '@shared/runtimeSwitches'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import {
   cancelDatabaseAiDrawerResponse,
@@ -200,6 +200,7 @@ import {
   getUserAccount,
   loginUserAccount,
   logoutUserAccount,
+  openUserAccountCenter,
   openUserLogin,
   prepareUserAvatarImage,
   resolveUserAvatarAssetPath,
@@ -1167,7 +1168,10 @@ setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesT
 })
 configureUserAccountBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'user-account.json'),
-  useSeedData: process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED === '1'
+  useSeedData: process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED === '1',
+  loginUrl: process.env.AIOPSTERM_USER_LOGIN_URL,
+  accountCenterUrl: process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL,
+  openExternal: shouldUseUserExternalOpenBackendDouble() ? async () => undefined : (url) => shell.openExternal(url)
 })
 configureSettingsPreferencesBackendRuntime({
   useSeedData: process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED === '1'
@@ -2536,6 +2540,7 @@ const registerIpc = () => {
   ipcMain.handle('ai:command-catalog', () => listAiCommandCatalog())
   ipcMain.handle('user:get-account', () => getUserAccount())
   ipcMain.handle('user:open-login', () => openUserLogin())
+  ipcMain.handle('user:open-account-center', () => openUserAccountCenter())
   ipcMain.handle('user:login', (_event, input: AiopsUserLoginInput) => loginUserAccount(input))
   ipcMain.handle('user:logout', () => logoutUserAccount())
   ipcMain.handle('user:skip-login', () => skipUserLogin())

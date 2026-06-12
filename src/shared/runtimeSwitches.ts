@@ -9,3 +9,5 @@ const envFlagEnabled = (name: string) => {
 export const shouldUseE2eDialogFixtures = () => envFlagEnabled('AIOPSTERM_E2E_DIALOG_FIXTURES')
 
 export const shouldRunMcpDiscovery = () => !envFlagEnabled('AIOPSTERM_MCP_DISCOVERY_DISABLE')
+
+export const shouldUseUserExternalOpenBackendDouble = () => envFlagEnabled('AIOPSTERM_USER_EXTERNAL_OPEN_BACKEND_DOUBLE')

@@ -36,6 +36,9 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
       AIOPSTERM_DB_AI_BACKEND_DOUBLE: '1',
       AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE: '1',
       AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE: '1',
+      AIOPSTERM_USER_EXTERNAL_OPEN_BACKEND_DOUBLE: '1',
+      AIOPSTERM_USER_LOGIN_URL: 'https://accounts.aiopsterm.local/e2e-login',
+      AIOPSTERM_USER_ACCOUNT_CENTER_URL: 'https://accounts.aiopsterm.local/e2e-account-center',
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'
     }
   })

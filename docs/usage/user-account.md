@@ -4,6 +4,10 @@ aiopsterm mirrors External reference's user entry, login tabs, account center, u
 
 The renderer never treats typed account credentials as a successful login by itself. Account-password login calls `window.aiops.loginUserAccount()` and succeeds only when the main-process user account backend has a matching credential record. Unknown usernames and wrong passwords return `USER_LOGIN_INVALID`.
 
+External login and account-center entry points are also backend-owned. Configure `AIOPSTERM_USER_LOGIN_URL` and `AIOPSTERM_USER_ACCOUNT_CENTER_URL` with HTTP(S) URLs when the runtime should open those pages. The main process validates the URL and calls the OS external opener; the renderer accepts success only from the structured `openUserLogin()` / `openUserAccountCenter()` result and does not change account or billing state just because a button was clicked.
+
+Playwright can set `AIOPSTERM_USER_EXTERNAL_OPEN_BACKEND_DOUBLE=1` so the main-process backend accepts those configured URLs without launching a real browser. That switch is for deterministic E2E runs only.
+
 ## Account Credentials
 
 - Non-seed runtime starts without development account-password credentials. Users can still use backend-owned email/mobile code login, skip-login, or a future real account provisioning flow.

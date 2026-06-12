@@ -10,12 +10,15 @@ import type {
   AiopsUserCodeResult,
   AiopsUserContactBindInput,
   AiopsUserDeactivateInput,
+  AiopsUserExternalAction,
+  AiopsUserExternalActionResult,
   AiopsUserLoginInput,
   AiopsUserMutationResult,
   AiopsUserPasswordInput,
   AiopsUserProfile,
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
+import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
 import { copyFile, readFile, stat } from 'fs/promises'
@@ -71,6 +74,17 @@ const defaultTrustedDevices: AiopsTrustedDevice[] = [
 type UserAccountBackendRuntimeConfig = {
   stateFilePath?: string
   useSeedData?: boolean
+  loginUrl?: string
+  accountCenterUrl?: string
+  openExternal?: (url: string) => Promise<void> | void
+}
+
+type UserAccountBackendRuntime = {
+  stateFilePath: string
+  useSeedData: boolean
+  loginUrl: string
+  accountCenterUrl: string
+  openExternal?: (url: string) => Promise<void> | void
 }
 
 type UserAccountPersistedState = {
@@ -101,9 +115,11 @@ const defaultUserAccountStateFilePath = () => {
 
 const defaultUserAccountSeedMode = () => String(process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED || '').trim() === '1'
 
-let runtimeConfig: Required<UserAccountBackendRuntimeConfig> = {
+let runtimeConfig: UserAccountBackendRuntime = {
   stateFilePath: defaultUserAccountStateFilePath(),
-  useSeedData: defaultUserAccountSeedMode()
+  useSeedData: defaultUserAccountSeedMode(),
+  loginUrl: String(process.env.AIOPSTERM_USER_LOGIN_URL || '').trim(),
+  accountCenterUrl: String(process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL || '').trim()
 }
 
 const firstLocalInterface = () => {
@@ -777,6 +793,45 @@ const successMutation = (message: string): AiopsUserMutationResult => {
   }
 }
 
+const externalActionUrl = (action: AiopsUserExternalAction) =>
+  action === 'login' ? runtimeConfig.loginUrl : runtimeConfig.accountCenterUrl
+
+const externalActionUnavailableCode = (action: AiopsUserExternalAction) =>
+  action === 'login' ? 'USER_LOGIN_EXTERNAL_UNAVAILABLE' : 'USER_ACCOUNT_CENTER_EXTERNAL_UNAVAILABLE'
+
+const externalActionFailedCode = (action: AiopsUserExternalAction) =>
+  action === 'login' ? 'USER_LOGIN_EXTERNAL_FAILED' : 'USER_ACCOUNT_CENTER_EXTERNAL_FAILED'
+
+const externalActionMessage = (action: AiopsUserExternalAction) => (action === 'login' ? '登录页面已打开' : '账号中心已打开')
+
+const externalActionOpenFailureMessage = (action: AiopsUserExternalAction) => (action === 'login' ? '登录服务打开失败' : '账号中心打开失败')
+
+const openUserExternalAction = async (action: AiopsUserExternalAction): Promise<AiopsUserExternalActionResult> => {
+  const normalized = normalizeExternalHttpUrl(externalActionUrl(action))
+  if (!normalized.valid || typeof runtimeConfig.openExternal !== 'function') {
+    return errorResult(externalActionUnavailableCode(action), action === 'login' ? '登录服务不可用' : '账号中心服务不可用')
+  }
+
+  try {
+    await runtimeConfig.openExternal(normalized.url)
+    return {
+      ok: true,
+      data: {
+        action,
+        url: normalized.url,
+        opened: true,
+        openedAt: timestamp(),
+        message: externalActionMessage(action)
+      }
+    }
+  } catch (error) {
+    return errorResult(
+      externalActionFailedCode(action),
+      error instanceof Error && error.message.trim() ? error.message : externalActionOpenFailureMessage(action)
+    )
+  }
+}
+
 export const configureUserAccountBackendRuntime = (config: UserAccountBackendRuntimeConfig = {}) => {
   runtimeConfig = {
     stateFilePath: config.stateFilePath
@@ -784,7 +839,10 @@ export const configureUserAccountBackendRuntime = (config: UserAccountBackendRun
         ? config.stateFilePath
         : resolve(config.stateFilePath)
       : defaultUserAccountStateFilePath(),
-    useSeedData: config.useSeedData ?? defaultUserAccountSeedMode()
+    useSeedData: config.useSeedData ?? defaultUserAccountSeedMode(),
+    loginUrl: String(config.loginUrl ?? process.env.AIOPSTERM_USER_LOGIN_URL ?? '').trim(),
+    accountCenterUrl: String(config.accountCenterUrl ?? process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL ?? '').trim(),
+    openExternal: config.openExternal
   }
   userCodeCooldowns.clear()
   userAccountStateLoaded = false
@@ -809,12 +867,9 @@ export const getUserAccount = (): AiopsUserAccountResult => ({
   data: snapshot()
 })
 
-export const openUserLogin = (): AiopsUserMutationResult => {
-  applyProfile({
-    skippedLogin: true
-  })
-  return successMutation('已打开本地登录页')
-}
+export const openUserLogin = () => openUserExternalAction('login')
+
+export const openUserAccountCenter = () => openUserExternalAction('account-center')
 
 export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationResult => {
   if (input.method === 'account') {

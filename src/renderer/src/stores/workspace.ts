@@ -123,6 +123,8 @@ import type {
   AiopsUserAccountSnapshot,
   AiopsUserAvatarPrepareResult,
   AiopsUserCodeResult,
+  AiopsUserExternalAction,
+  AiopsUserExternalActionResult,
   AiopsUserMutationResult,
   AiopsUserProfile,
   EditorUserConfig,
@@ -264,6 +266,7 @@ type OnboardingAiRequest =
   | 'open-context-hosts'
   | 'prepare-send'
 type OnboardingAssetRequest = 'none' | 'open-host-management' | 'open-create-form'
+type UserExternalActionData = NonNullable<AiopsUserExternalActionResult['data']>
 type UserMutationData = NonNullable<AiopsUserMutationResult['data']>
 type UserCodeData = NonNullable<AiopsUserCodeResult['data']>
 type UserAvatarPrepareData = NonNullable<AiopsUserAvatarPrepareResult['data']>
@@ -1035,6 +1038,7 @@ const userRegistrationTypes: AiopsUserProfile['registrationType'][] = ['enterpri
 const userAuthProviders: AiopsUserProfile['authProvider'][] = ['local', 'sso', 'oauth']
 const userSubscriptions: AiopsUserProfile['subscription'][] = ['free', 'pro', 'ultra']
 const userLastLoginMethods: AiopsUserProfile['lastLoginMethod'][] = ['account', 'email', 'mobile', 'skip', 'external']
+const userExternalActions: AiopsUserExternalAction[] = ['login', 'account-center']
 const userCodeKinds: UserCodeData['kind'][] = ['email', 'mobile']
 const userAvatarMimeTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
 const userAvatarAssetUrlPattern = /^aiopsterm-user-avatar:\/\/[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i
@@ -1086,6 +1090,27 @@ const isUserMutationData = (source: unknown): source is UserMutationData => {
   if (!isRecord(source) || !isUserAccountSnapshot(source)) return false
   return typeof (source as Record<string, unknown>).message === 'string'
 }
+
+const isHttpUrl = (value: unknown) => {
+  if (typeof value !== 'string' || !value.trim() || value.trim().startsWith('//')) return false
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname.trim()) && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
+
+const isUserExternalActionData = (source: unknown, action: AiopsUserExternalAction): source is UserExternalActionData =>
+  isRecord(source) &&
+  source.action === action &&
+  userExternalActions.includes(source.action as AiopsUserExternalAction) &&
+  isHttpUrl(source.url) &&
+  source.opened === true &&
+  typeof source.openedAt === 'string' &&
+  source.openedAt.trim() !== '' &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== ''
 
 const isUserCodeData = (source: unknown): source is UserCodeData =>
   isRecord(source) &&
@@ -7204,6 +7229,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false
   }
 
+  const applyUserExternalActionResult = (
+    result: AiopsUserExternalActionResult | undefined,
+    action: AiopsUserExternalAction,
+    fallbackNotice: string,
+    invalidNotice = '用户后端返回了无效结果'
+  ) => {
+    if (!result) {
+      setUserNotice(fallbackNotice)
+      userLoginLoading.value = false
+      return false
+    }
+    if (!result.ok) {
+      setUserNotice(result.errorMessage || fallbackNotice)
+      userLoginLoading.value = false
+      return false
+    }
+    if (!isUserExternalActionData(result.data, action)) {
+      setUserNotice(invalidNotice)
+      userLoginLoading.value = false
+      return false
+    }
+    setUserNotice(result.data.message)
+    userLoginLoading.value = false
+    return true
+  }
+
   const refreshUserAccount = async () => {
     if (!window.aiops?.getUserAccount) return false
     try {
@@ -7265,15 +7316,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (options.notifySettings) setSettingsNotice('账户中心服务不可用')
       return false
     }
+    const openUserAccountCenterBridge = window.aiops?.openUserAccountCenter
+    if (typeof openUserAccountCenterBridge !== 'function') {
+      setUserNotice('账号中心服务不可用')
+      if (options.notifySettings) setSettingsNotice('账户中心服务不可用')
+      return false
+    }
     const refreshed = await refreshUserAccount()
     if (!refreshed) {
       if (options.notifySettings) setSettingsNotice('账户中心打开失败')
       return false
     }
+    let opened = false
+    try {
+      opened = applyUserExternalActionResult(await openUserAccountCenterBridge(), 'account-center', '账号中心打开失败')
+    } catch {
+      setUserNotice('账号中心打开失败')
+      userLoginLoading.value = false
+      opened = false
+    }
+    if (!opened) {
+      if (options.notifySettings) setSettingsNotice(userNotice.value || '账户中心打开失败')
+      return false
+    }
     userAccountCenterOpen.value = true
     if (options.activateUserModule) activeModule.value = 'user'
-    setUserNotice('账号中心已打开')
-    if (options.notifySettings) setSettingsNotice('账号中心已打开')
+    if (options.notifySettings) setSettingsNotice(userNotice.value || '账号中心已打开')
     return true
   }
 
@@ -7282,18 +7350,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openUserLogin = async () => {
-    activeModule.value = 'user'
-    userLoginTab.value = 'account'
-    resetUserCodeState('login')
     const openUserLoginBridge = window.aiops?.openUserLogin
     if (typeof openUserLoginBridge !== 'function') {
       setUserNotice('登录服务不可用')
       return false
     }
     try {
-      return applyUserMutationResult(await openUserLoginBridge())
+      const opened = applyUserExternalActionResult(await openUserLoginBridge(), 'login', '登录服务打开失败')
+      if (!opened) return false
+      activeModule.value = 'user'
+      userLoginTab.value = 'account'
+      resetUserCodeState('login')
+      return true
     } catch {
       setUserNotice('登录服务打开失败')
+      userLoginLoading.value = false
       return false
     }
   }

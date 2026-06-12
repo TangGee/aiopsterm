@@ -4,11 +4,18 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 type UserBackend = {
-  configureUserAccountBackendRuntime: (config?: { stateFilePath?: string; useSeedData?: boolean }) => void
+  configureUserAccountBackendRuntime: (config?: {
+    stateFilePath?: string
+    useSeedData?: boolean
+    loginUrl?: string
+    accountCenterUrl?: string
+    openExternal?: (url: string) => Promise<void> | void
+  }) => void
   resetUserAccountForTests: () => void
   patchUserAccountForTests: (patch: Record<string, unknown>) => void
   getUserAccount: () => any
-  openUserLogin: () => any
+  openUserLogin: () => Promise<any>
+  openUserAccountCenter: () => Promise<any>
   loginUserAccount: (input: any) => any
   logoutUserAccount: () => any
   skipUserLogin: () => any
@@ -80,6 +87,107 @@ describe('user account backend boundary', () => {
         expect.objectContaining({ id: 2, deviceName: 'MacBook', current: false })
       ])
     )
+  })
+
+  it('opens login and account center only through configured external actions', async () => {
+    const initialSnapshot = backend.getUserAccount().data
+    await expect(backend.openUserLogin()).resolves.toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_EXTERNAL_UNAVAILABLE',
+      errorMessage: '登录服务不可用'
+    })
+    await expect(backend.openUserAccountCenter()).resolves.toEqual({
+      ok: false,
+      errorCode: 'USER_ACCOUNT_CENTER_EXTERNAL_UNAVAILABLE',
+      errorMessage: '账号中心服务不可用'
+    })
+    expect(backend.getUserAccount().data).toEqual(initialSnapshot)
+
+    const openedUrls: string[] = []
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-external-action-'))
+    tempDirs.push(dir)
+    backend.configureUserAccountBackendRuntime({
+      stateFilePath: join(dir, 'user-account.json'),
+      useSeedData: true,
+      loginUrl: 'https://accounts.aiopsterm.local/login?client_id=aiopsterm',
+      accountCenterUrl: 'https://accounts.aiopsterm.local/account',
+      openExternal: async (url) => {
+        openedUrls.push(url)
+      }
+    })
+    backend.resetUserAccountForTests()
+    const profileBefore = backend.getUserAccount().data.profile
+
+    const login = expectOkData(await backend.openUserLogin())
+    expect(login).toMatchObject({
+      action: 'login',
+      opened: true,
+      url: 'https://accounts.aiopsterm.local/login?client_id=aiopsterm',
+      message: '登录页面已打开'
+    })
+    expect(login.openedAt).toEqual(expect.any(String))
+    expect(backend.getUserAccount().data.profile).toEqual(profileBefore)
+
+    const accountCenter = expectOkData(await backend.openUserAccountCenter())
+    expect(accountCenter).toMatchObject({
+      action: 'account-center',
+      opened: true,
+      url: 'https://accounts.aiopsterm.local/account',
+      message: '账号中心已打开'
+    })
+    expect(openedUrls).toEqual(['https://accounts.aiopsterm.local/login?client_id=aiopsterm', 'https://accounts.aiopsterm.local/account'])
+    expect(backend.getUserAccount().data.profile).toEqual(profileBefore)
+  })
+
+  it('rejects malformed or failing external user action runtime configuration', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-bad-external-action-'))
+    tempDirs.push(dir)
+    const openedUrls: string[] = []
+    backend.configureUserAccountBackendRuntime({
+      stateFilePath: join(dir, 'user-account.json'),
+      useSeedData: true,
+      loginUrl: 'file:///tmp/login.html',
+      accountCenterUrl: 'https://user:secret@accounts.aiopsterm.local/account',
+      openExternal: async (url) => {
+        openedUrls.push(url)
+      }
+    })
+    backend.resetUserAccountForTests()
+    const profileBefore = backend.getUserAccount().data.profile
+
+    await expect(backend.openUserLogin()).resolves.toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_EXTERNAL_UNAVAILABLE',
+      errorMessage: '登录服务不可用'
+    })
+    await expect(backend.openUserAccountCenter()).resolves.toEqual({
+      ok: false,
+      errorCode: 'USER_ACCOUNT_CENTER_EXTERNAL_UNAVAILABLE',
+      errorMessage: '账号中心服务不可用'
+    })
+    expect(openedUrls).toEqual([])
+
+    backend.configureUserAccountBackendRuntime({
+      stateFilePath: join(dir, 'user-account-reject.json'),
+      useSeedData: true,
+      loginUrl: 'https://accounts.aiopsterm.local/login',
+      accountCenterUrl: 'https://accounts.aiopsterm.local/account',
+      openExternal: async () => {
+        throw new Error('os browser unavailable')
+      }
+    })
+    backend.resetUserAccountForTests()
+    await expect(backend.openUserLogin()).resolves.toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_EXTERNAL_FAILED',
+      errorMessage: 'os browser unavailable'
+    })
+    await expect(backend.openUserAccountCenter()).resolves.toEqual({
+      ok: false,
+      errorCode: 'USER_ACCOUNT_CENTER_EXTERNAL_FAILED',
+      errorMessage: 'os browser unavailable'
+    })
+    expect(backend.getUserAccount().data.profile).toEqual(profileBefore)
   })
 
   it('keeps device verification state behind the login boundary', () => {
