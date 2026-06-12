@@ -8589,6 +8589,7 @@ describe('AppShell', () => {
     await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Copy Table'))!.trigger('mouseenter')
     expect(wrapper.find('.db-popup-submenu').text()).toContain('Copy Table SELECT')
     await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Copy Table SELECT'))!.trigger('click')
+    await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('SELECT * FROM "public"."orders"')
     expect(wrapper.text()).toContain('SELECT copied')
 
@@ -8798,6 +8799,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-edit-summary').text()).toContain('1 Deleted')
     expect(wrapper.find('.db-edit-summary pre').text()).toContain('DELETE FROM "public"."orders"')
     await wrapper.findAll('.db-edit-summary-actions button').find((button) => button.text().includes('Copy Preview'))!.trigger('click')
+    await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM "public"."orders"'))
     await wrapper.findAll('.db-edit-summary-actions button').find((button) => button.text().includes('Discard All'))!.trigger('click')
     expect(wrapper.find('.db-result-table tbody tr.deleted').exists()).toBe(false)
@@ -8896,6 +8898,7 @@ describe('AppShell', () => {
     )
     expect((wrapper.find('.db-ddl-modal textarea').element as HTMLTextAreaElement).value).toContain('CREATE TABLE')
     await wrapper.find('.db-ddl-toolbar').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
+    await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE public.orders'))
     expect(wrapper.find('.db-ddl-toolbar').findAll('button').some((button) => button.text().includes('Open SQL Tab'))).toBe(false)
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('DDL: orders'))).toBe(false)
@@ -8977,6 +8980,28 @@ describe('AppShell', () => {
       Reflect.deleteProperty(document, 'execCommand')
     }
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('DROP TABLE public.orders;')
+    expect(wrapper.text()).toContain('Generated SQL copied')
+
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable again'))
+    const originalExecCommandForFailedCopy = document.execCommand
+    const failedExecCommandSpy = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: failedExecCommandSpy
+    })
+    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
+    await flushPromises()
+    expect(failedExecCommandSpy).toHaveBeenCalledWith('copy')
+    if (originalExecCommandForFailedCopy) {
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: originalExecCommandForFailedCopy
+      })
+    } else {
+      Reflect.deleteProperty(document, 'execCommand')
+    }
+    expect(wrapper.text()).toContain('Copy failed')
+    expect(wrapper.text()).not.toContain('Generated SQL copied')
     await expect(
       window.aiops.queryDatabaseTable({
         connectionId: 'conn-prod-pg',

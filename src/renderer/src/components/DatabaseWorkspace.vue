@@ -6415,11 +6415,10 @@ function discardDataChanges() {
   showNotice('Local data edits discarded')
 }
 
-function copyDataMutationPreview() {
+async function copyDataMutationPreview() {
   const summary = activeDataEditSummary.value
   if (!summary?.preview) return
-  copyText(summary.preview)
-  showNotice('Mutation preview copied')
+  if (await copyText(summary.preview)) showNotice('Mutation preview copied')
 }
 
 function refreshDataTab() {
@@ -7162,13 +7161,12 @@ function formatDdlError(result: Extract<TableDdlResult, { ok: false }>) {
   return `DDL fetch failed: ${result.errorMessage}`
 }
 
-function copySelectSql() {
+async function copySelectSql() {
   const menu = contextMenu.value
   if (!menu || menu.type !== 'table') return
   const connection = findConnection(menu.connectionId)
   const qualified = buildQualifiedTableReference(connection?.dbType ?? 'mysql', menu.catalogName, menu.schemaName, menu.label)
-  copyText(`SELECT * FROM ${qualified}`)
-  showNotice('SELECT copied')
+  if (await copyText(`SELECT * FROM ${qualified}`)) showNotice('SELECT copied')
   closeMenus()
 }
 
@@ -7187,8 +7185,7 @@ async function copyTableDdlFromContext() {
     closeMenus()
     return
   }
-  copyText(result.ddl)
-  showNotice('DDL copied')
+  if (await copyText(result.ddl)) showNotice('DDL copied')
   closeMenus()
 }
 
@@ -7359,10 +7356,9 @@ async function confirmOperation() {
   }
 }
 
-function copyContextName() {
+async function copyContextName() {
   if (!contextMenu.value) return
-  copyText(contextMenu.value.label)
-  showNotice('Name copied')
+  if (await copyText(contextMenu.value.label)) showNotice('Name copied')
   closeMenus()
 }
 
@@ -7739,13 +7735,12 @@ function parseCreateDatabaseName(sql: string) {
   return token
 }
 
-function copyDdl() {
+async function copyDdl() {
   if (!ddlModal.ddl.trim()) {
     showNotice('DDL is empty')
     return
   }
-  copyText(ddlModal.ddl)
-  showNotice('DDL copied')
+  if (await copyText(ddlModal.ddl)) showNotice('DDL copied')
 }
 
 function openDbAiFromToolbar(action: Extract<DbAiAction, 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete'>) {
@@ -7932,9 +7927,8 @@ function setActiveDbAiRequest(reqId: string) {
   dbAiOpen.value = true
 }
 
-function copyDbAiSql() {
-  copyText(dbAiSql.value)
-  showNotice('Generated SQL copied')
+async function copyDbAiSql() {
+  if (await copyText(dbAiSql.value)) showNotice('Generated SQL copied')
 }
 
 function insertDbAiSql() {
@@ -8190,22 +8184,32 @@ function showNotice(text: string) {
 }
 
 async function copyText(value: string) {
+  const text = String(value ?? '')
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value)
-      return
+      await navigator.clipboard.writeText(text)
+      return true
     }
   } catch {
     // Fall through to the textarea fallback used for older Electron contexts.
   }
   const textarea = document.createElement('textarea')
-  textarea.value = value
+  textarea.value = text
   textarea.style.position = 'fixed'
   textarea.style.opacity = '0'
   document.body.appendChild(textarea)
   textarea.select()
   try {
-    if (typeof document.execCommand === 'function') document.execCommand('copy')
+    if (typeof document.execCommand !== 'function') {
+      showNotice('Copy failed')
+      return false
+    }
+    const copied = document.execCommand('copy')
+    if (!copied) showNotice('Copy failed')
+    return copied
+  } catch {
+    showNotice('Copy failed')
+    return false
   } finally {
     document.body.removeChild(textarea)
   }
