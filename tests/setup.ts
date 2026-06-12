@@ -1386,6 +1386,20 @@ const databaseRowsForSqlMock = (input: { sql: string; connectionId: string; data
   }
 }
 
+let databaseSqlExecutionSeqMock = 0
+
+const createDatabaseSqlExecutionMock = (input: { status: 'ok' | 'error'; message: string; durationMs?: number; rowCount?: number }) => {
+  databaseSqlExecutionSeqMock += 1
+  return {
+    id: `sql-exec-test-${databaseSqlExecutionSeqMock}`,
+    status: input.status,
+    message: input.message,
+    durationMs: input.durationMs ?? 1,
+    rowCount: input.rowCount ?? 0,
+    createdAt: `2026-06-10T00:00:${String(databaseSqlExecutionSeqMock).padStart(2, '0')}.000Z`
+  }
+}
+
 const cloneDatabaseCatalogColumnMock = (column: DatabaseColumnInfo): DatabaseColumnInfo => ({ ...column })
 
 const cloneDatabaseCatalogTableMock = (table: DatabaseTableInfo): DatabaseTableInfo => ({
@@ -5364,9 +5378,12 @@ Object.assign(globalThis, {
   __setAiTodoSnapshotMock: setAiTodoSnapshotMock,
   __resetAssetStoreMock: resetAssetStoreMock,
   __resetKubernetesCatalogMock: resetKubernetesCatalogMock,
-  __resetFileSessionCatalogMock: resetFileSessionCatalogMock,
-  __resetDatabaseTableRowsMock: resetDatabaseTableRowsMock,
-  __resetExtensionPluginStoreMock: resetExtensionPluginStoreMock,
+	  __resetFileSessionCatalogMock: resetFileSessionCatalogMock,
+	  __resetDatabaseTableRowsMock: resetDatabaseTableRowsMock,
+	  __resetDatabaseSqlExecutionMock: () => {
+	    databaseSqlExecutionSeqMock = 0
+	  },
+	  __resetExtensionPluginStoreMock: resetExtensionPluginStoreMock,
   __setExtensionPluginStoreMock: setExtensionPluginStoreMock,
   __loadExtensionPluginStoreFixtureMock: () => setExtensionPluginStoreMock([...defaultExtensionPluginCatalog, ...extensionPluginStoreFixtureCatalog]),
   __resetConfigStoreMock: resetConfigStoreMock,
@@ -7492,13 +7509,46 @@ Object.defineProperty(window, 'aiops', {
     createDatabaseCatalog: vi.fn(createDatabaseCatalogMock),
     executeDatabaseSql: vi.fn(async (input: { sql: string; connectionId: string; databaseName?: string; schemaName?: string }) => {
       const sql = input.sql.trim().replace(/\s+/g, ' ')
-      if (!sql) return { ok: false, errorCode: 'DB_SQL_EMPTY', errorMessage: 'SQL is required.' }
+      if (!sql) {
+        return {
+          ok: false,
+          errorCode: 'DB_SQL_EMPTY',
+          errorMessage: 'SQL is required.',
+          execution: createDatabaseSqlExecutionMock({ status: 'error', message: 'SQL is required.' })
+        }
+      }
       if (/drop\s+database|syntax_error/i.test(sql)) {
-        return { ok: false, errorCode: 'DB_SQL_REJECTED', errorMessage: 'Backend SQL executor rejected this statement.' }
+        return {
+          ok: false,
+          errorCode: 'DB_SQL_REJECTED',
+          errorMessage: 'Backend SQL executor rejected this statement.',
+          execution: createDatabaseSqlExecutionMock({ status: 'error', message: 'Backend SQL executor rejected this statement.' })
+        }
       }
       const resolved = databaseRowsForSqlMock({ ...input, sql })
-      if (!resolved.ok) return { ok: false, errorCode: resolved.errorCode, errorMessage: resolved.errorMessage }
-      return { ok: true, data: { columns: Object.keys(resolved.rows[0] || {}), rows: resolved.rows, rowCount: resolved.rows.length, durationMs: 1 } }
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          errorCode: resolved.errorCode,
+          errorMessage: resolved.errorMessage,
+          execution: createDatabaseSqlExecutionMock({ status: 'error', message: resolved.errorMessage })
+        }
+      }
+      const execution = createDatabaseSqlExecutionMock({
+        status: 'ok',
+        message: `Execution OK (${resolved.rows.length} row${resolved.rows.length === 1 ? '' : 's'})`,
+        rowCount: resolved.rows.length
+      })
+      return {
+        ok: true,
+        data: {
+          columns: Object.keys(resolved.rows[0] || {}),
+          rows: resolved.rows,
+          rowCount: resolved.rows.length,
+          durationMs: 1,
+          execution
+        }
+      }
     }),
     getDatabaseTableDdl: vi.fn(
       async (input: { connectionId: string; databaseName: string; schemaName?: string; tableName: string }) => {

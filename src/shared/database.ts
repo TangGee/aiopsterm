@@ -47,6 +47,7 @@ import type {
   DatabaseWorkspaceCatalog,
   DatabaseAiPaneResponseInput,
   DatabaseAiPaneResponseResult,
+  DatabaseSqlExecutionRecord,
   DatabaseSqlExecuteInput,
   DatabaseSqlExecuteResult,
   DatabaseTableDdlInput,
@@ -68,6 +69,13 @@ const DEFAULT_DATABASE_GROUP_ID = 'group-default'
 const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
 const databaseStatusValues = new Set<DatabaseConnectionInfo['status']>(['idle', 'testing', 'connected', 'failed'])
 const postgresSslModeValues = new Set(['', 'disable', 'require', 'verify-ca', 'verify-full'])
+type DatabaseSqlExecuteRawData = Omit<NonNullable<DatabaseSqlExecuteResult['data']>, 'execution'>
+type DatabaseSqlExecuteRawResult = {
+  ok: boolean
+  data?: DatabaseSqlExecuteRawData
+  errorCode?: string
+  errorMessage?: string
+}
 
 const engineVersions: Record<DatabaseConnectionTestInput['dbType'], string> = {
   mysql: 'MySQL 8 local backend validation',
@@ -731,7 +739,7 @@ const sqliteCatalogsForConnection = (connection: DatabaseConnectionInfo): Databa
   }
 }
 
-const sqliteExecute = (connection: DatabaseConnectionInfo, sql: string, startedAt: number): DatabaseSqlExecuteResult => {
+const sqliteExecute = (connection: DatabaseConnectionInfo, sql: string, startedAt: number): DatabaseSqlExecuteRawResult => {
   let db: SqliteDatabase | null = null
   try {
     db = openSqliteDatabase(sqliteFilePathFromConnection(connection), !!connection.readonly)
@@ -1587,7 +1595,7 @@ const clickHouseOrderByFor = (sort: DatabaseColumnSort | null | undefined, known
   return ` ORDER BY ${clickHouseIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
 }
 
-const clickHouseExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteResult> => {
+const clickHouseExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteRawResult> => {
   try {
     if (!clickHouseReturnsRows(rawSql)) {
       await clickHouseQueryText(clickHouseConnectionInput(connection), rawSql, trim(connection.database))
@@ -2035,7 +2043,7 @@ const prestoOrderByFor = (sort: DatabaseColumnSort | null | undefined, knownColu
   return ` ORDER BY ${prestoIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
 }
 
-const prestoExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteResult> => {
+const prestoExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteRawResult> => {
   try {
     const query = await prestoQuery<Record<string, unknown>>(prestoConnectionInput(connection), rawSql, {
       databaseName: trim(connection.database),
@@ -3376,7 +3384,7 @@ const relationalQueryTable = async (
   }
 }
 
-const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteResult> => {
+const relationalExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteRawResult> => {
   const dbType = connection.dbType as RelationalDatabaseType
   try {
     if (isMysqlCompatibleDbType(connection.dbType)) {
@@ -5837,6 +5845,60 @@ const resolveSeedSqlRows = (input: DatabaseSqlExecuteInput, sql: string) => {
   }
 }
 
+const sqlExecutionTimestamp = () => new Date().toISOString()
+
+const createDatabaseSqlExecutionRecord = (input: {
+  status: DatabaseSqlExecutionRecord['status']
+  message: string
+  durationMs: number
+  rowCount: number
+}): DatabaseSqlExecutionRecord => ({
+  id: `sql-exec-${randomUUID()}`,
+  status: input.status,
+  message: input.message,
+  durationMs: Math.max(0, Math.round(Number(input.durationMs) || 0)),
+  rowCount: Math.max(0, Math.round(Number(input.rowCount) || 0)),
+  createdAt: sqlExecutionTimestamp()
+})
+
+const databaseSqlExecutionMessage = (rowCount: number) => `Execution OK (${rowCount} row${rowCount === 1 ? '' : 's'})`
+
+const withDatabaseSqlExecutionRecord = (result: DatabaseSqlExecuteRawResult, startedAt: number): DatabaseSqlExecuteResult => {
+  if (result.ok && result.data) {
+    const durationMs = Math.max(1, Math.round(Number(result.data.durationMs) || Date.now() - startedAt))
+    const rowCount = Math.max(0, Math.round(Number(result.data.rowCount) || 0))
+    const execution = createDatabaseSqlExecutionRecord({
+      status: 'ok',
+      message: databaseSqlExecutionMessage(rowCount),
+      durationMs,
+      rowCount
+    })
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        durationMs,
+        rowCount,
+        execution
+      }
+    }
+  }
+
+  const durationMs = Math.max(1, Date.now() - startedAt)
+  const execution = createDatabaseSqlExecutionRecord({
+      status: 'error',
+      message: result.errorMessage || result.errorCode || 'Database SQL execution failed.',
+      durationMs,
+      rowCount: 0
+  })
+  return {
+    ok: false,
+    errorCode: result.errorCode,
+    errorMessage: result.errorMessage,
+    execution
+  }
+}
+
 const normalizeFilterValue = (value: unknown) => {
   if (value === null || value === undefined) return null
   return String(value)
@@ -6226,48 +6288,57 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
   const rawSql = trim(input.sql)
   const sql = normalizeSql(input.sql || '')
   if (!trim(input.connectionId)) {
-    return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
+    return withDatabaseSqlExecutionRecord({ ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }, startedAt)
   }
   if (!rawSql) {
-    return { ok: false, errorCode: 'DB_SQL_EMPTY', errorMessage: 'SQL is required.' }
+    return withDatabaseSqlExecutionRecord({ ok: false, errorCode: 'DB_SQL_EMPTY', errorMessage: 'SQL is required.' }, startedAt)
   }
   if (/drop\s+database|syntax_error/i.test(sql)) {
-    return { ok: false, errorCode: 'DB_SQL_REJECTED', errorMessage: 'Backend SQL executor rejected this statement.' }
+    return withDatabaseSqlExecutionRecord({ ok: false, errorCode: 'DB_SQL_REJECTED', errorMessage: 'Backend SQL executor rejected this statement.' }, startedAt)
   }
 
   const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return sqliteExecute(connection, rawSql, startedAt)
+    return withDatabaseSqlExecutionRecord(sqliteExecute(connection, rawSql, startedAt), startedAt)
   }
   if (!connection) {
-    return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+    return withDatabaseSqlExecutionRecord({ ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }, startedAt)
   }
   if (!shouldUseDatabaseSeedData()) {
-    if (isClickHouseConnection(connection)) return clickHouseExecute(connection, rawSql, startedAt)
-    if (isPrestoConnection(connection)) return prestoExecute(connection, rawSql, startedAt)
-    if (isRelationalConnection(connection)) return relationalExecute(connection, rawSql, startedAt)
-    return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine execution is not wired in this aiopsterm backend yet.' }
+    if (isClickHouseConnection(connection)) return withDatabaseSqlExecutionRecord(await clickHouseExecute(connection, rawSql, startedAt), startedAt)
+    if (isPrestoConnection(connection)) return withDatabaseSqlExecutionRecord(await prestoExecute(connection, rawSql, startedAt), startedAt)
+    if (isRelationalConnection(connection)) return withDatabaseSqlExecutionRecord(await relationalExecute(connection, rawSql, startedAt), startedAt)
+    return withDatabaseSqlExecutionRecord(
+      { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine execution is not wired in this aiopsterm backend yet.' },
+      startedAt
+    )
   }
 
   const resolved = resolveSeedSqlRows(input, sql)
   if (!resolved.ok) {
-    return {
-      ok: false,
-      errorCode: resolved.errorCode,
-      errorMessage: resolved.errorMessage
-    }
+    return withDatabaseSqlExecutionRecord(
+      {
+        ok: false,
+        errorCode: resolved.errorCode,
+        errorMessage: resolved.errorMessage
+      },
+      startedAt
+    )
   }
   const rows = resolved.rows
 
-  return {
-    ok: true,
-    data: {
-      columns: columnsForRows(rows),
-      rows,
-      rowCount: rows.length,
-      durationMs: Math.max(1, Date.now() - startedAt)
-    }
-  }
+  return withDatabaseSqlExecutionRecord(
+    {
+      ok: true,
+      data: {
+        columns: columnsForRows(rows),
+        rows,
+        rowCount: rows.length,
+        durationMs: Math.max(1, Date.now() - startedAt)
+      }
+    },
+    startedAt
+  )
 }
 
 export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> {

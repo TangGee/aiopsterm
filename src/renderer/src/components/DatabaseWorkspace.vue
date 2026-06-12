@@ -875,6 +875,8 @@
                     v-for="history in activeTab.history"
                     :key="history.id"
                     :class="{ closed: isSqlHistoryClosed(history), error: history.status === 'error' }"
+                    :data-execution-id="history.id"
+                    :title="history.createdAt"
                     @click="openSqlHistoryResult(history)"
                   >
                     <td>
@@ -974,6 +976,7 @@
               <DataStatusBar
                 :status="activeSqlResult.status"
                 :error="activeSqlResult.error || undefined"
+                :message="activeSqlResult.message"
                 :duration-ms="activeSqlResult.durationMs"
                 :row-count="activeSqlResult.rowCount"
               />
@@ -2385,6 +2388,7 @@ import type {
   DatabaseGroupUpdateInput,
   DatabasePageCommentKey,
   DatabasePageCommentRecord,
+  DatabaseSqlExecutionRecord,
   DatabaseSqlExecuteResult,
   DatabaseTableDdlResult,
   DatabaseTableInfo,
@@ -2540,8 +2544,13 @@ type SqlResult = {
   rowCount: number
   durationMs: number
   error: string | null
+  message: string
 }
 type SqlExecutionPayload = Omit<SqlResult, 'id' | 'title' | 'sql'>
+type SqlExecutionOutcome = {
+  payload: SqlExecutionPayload
+  execution: DatabaseSqlExecutionRecord | null
+}
 
 type SqlResultViewState = {
   page: number
@@ -2756,6 +2765,7 @@ const DataStatusBar = defineComponent({
   props: {
     status: { type: String as PropType<ResultStatus>, default: 'ok' },
     error: { type: String, default: '' },
+    message: { type: String, default: 'Execution OK' },
     durationMs: { type: Number, default: 0 },
     rowCount: { type: Number, default: 0 }
   },
@@ -2772,7 +2782,7 @@ const DataStatusBar = defineComponent({
                 h('span', [h('b', '【Rows】'), `${props.rowCount} row`])
               ]
           : [
-              h('span', [h('b', '【Result】'), 'Execution OK']),
+              h('span', [h('b', '【Result】'), props.message]),
               h('span', [h('b', '【Time】'), `${props.durationMs}ms`]),
               h('span', [h('b', '【Rows】'), `${props.rowCount} row`])
             ]
@@ -4334,13 +4344,30 @@ function isDbAiDrawerResponseData(value: unknown, expectedId: string): value is 
   )
 }
 
+function isDatabaseSqlExecutionRecord(value: unknown): value is DatabaseSqlExecutionRecord {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.id.trim() !== '' &&
+    (value.status === 'ok' || value.status === 'error') &&
+    typeof value.message === 'string' &&
+    value.message.trim() !== '' &&
+    isNonNegativeNumber(value.durationMs) &&
+    isNonNegativeNumber(value.rowCount) &&
+    typeof value.createdAt === 'string' &&
+    value.createdAt.trim() !== ''
+  )
+}
+
 function isDatabaseSqlExecuteData(value: unknown): value is NonNullable<DatabaseSqlExecuteResult['data']> {
   return (
     isRecord(value) &&
     isStringArray(value.columns) &&
     isDatabaseRows(value.rows) &&
     isNonNegativeNumber(value.rowCount) &&
-    isNonNegativeNumber(value.durationMs)
+    isNonNegativeNumber(value.durationMs) &&
+    isDatabaseSqlExecutionRecord(value.execution) &&
+    value.execution.status === 'ok'
   )
 }
 
@@ -5207,27 +5234,29 @@ async function appendSqlExecution(tab: Extract<WorkspaceTab, { kind: 'sql' }>, s
   tab.resultTabs.push(result)
   tab.activeResultTabId = result.id
 
-  let payload: SqlExecutionPayload
+  let outcome: SqlExecutionOutcome
   try {
     const response = await executeSqlThroughBackend(tab, sql)
-    payload = sqlPayloadFromBackendResult(response)
+    outcome = sqlOutcomeFromBackendResult(response)
   } catch (error) {
-    payload = createSqlErrorPayload(errorToMessage(error))
+    outcome = { payload: createSqlErrorPayload(errorToMessage(error)), execution: null }
   }
 
-  patchSqlResult(tab, result.id, payload)
-  const resultTabId = tab.resultTabs.some((item) => item.id === result.id) ? result.id : null
-  tab.history.push({
-    id: `hist-${result.id}`,
-    resultTabId,
-    title: result.title,
-    sql,
-    message: payload.error ? payload.error : 'Execution OK',
-    status: payload.status === 'error' ? 'error' : 'ok',
-    durationMs: payload.durationMs,
-    rowCount: payload.rowCount,
-    createdAt: formatSqlHistoryTime(new Date())
-  })
+  patchSqlResult(tab, result.id, outcome.payload)
+  if (outcome.execution) {
+    const resultTabId = tab.resultTabs.some((item) => item.id === result.id) ? result.id : null
+    tab.history.push({
+      id: outcome.execution.id,
+      resultTabId,
+      title: result.title,
+      sql,
+      message: outcome.execution.message,
+      status: outcome.execution.status,
+      durationMs: outcome.execution.durationMs,
+      rowCount: outcome.execution.rowCount,
+      createdAt: outcome.execution.createdAt
+    })
+  }
 }
 
 function runSqlFromShortcut() {
@@ -5255,7 +5284,8 @@ function createRunningSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql
     rows: [],
     rowCount: 0,
     durationMs: 0,
-    error: null
+    error: null,
+    message: 'Running'
   }
 }
 
@@ -5270,24 +5300,32 @@ async function executeSqlThroughBackend(tab: Extract<WorkspaceTab, { kind: 'sql'
   })
 }
 
-function sqlPayloadFromBackendResult(result: DatabaseSqlExecuteResult | undefined): SqlExecutionPayload {
+function sqlOutcomeFromBackendResult(result: DatabaseSqlExecuteResult | undefined): SqlExecutionOutcome {
   if (!result || typeof result !== 'object') {
-    return createSqlErrorPayload('Backend SQL executor returned an empty response.')
+    return { payload: createSqlErrorPayload('Backend SQL executor returned an empty response.'), execution: null }
   }
   if (!result.ok) {
-    return createSqlErrorPayload(result.errorMessage || 'Backend SQL executor failed.')
+    const execution = isDatabaseSqlExecutionRecord(result.execution) && result.execution.status === 'error' ? result.execution : null
+    return {
+      payload: createSqlErrorPayload(execution?.message || result.errorMessage || 'Backend SQL executor failed.', execution?.durationMs ?? 0),
+      execution
+    }
   }
   if (!isDatabaseSqlExecuteData(result.data)) {
-    return createSqlErrorPayload('Backend SQL executor returned malformed result data.')
+    return { payload: createSqlErrorPayload('Backend SQL executor returned malformed result data.'), execution: null }
   }
   const data = result.data
   return {
-    status: 'ok',
-    columns: data.columns,
-    rows: data.rows,
-    rowCount: data.rowCount,
-    durationMs: data.durationMs,
-    error: null
+    payload: {
+      status: 'ok',
+      columns: data.columns,
+      rows: data.rows,
+      rowCount: data.rowCount,
+      durationMs: data.durationMs,
+      error: null,
+      message: data.execution.message
+    },
+    execution: data.execution
   }
 }
 
@@ -5298,7 +5336,8 @@ function createSqlErrorPayload(message: string, durationMs = 0): SqlExecutionPay
     rows: [],
     rowCount: 0,
     durationMs,
-    error: message
+    error: message,
+    message
   }
 }
 
@@ -5692,10 +5731,6 @@ function isSqlHistoryClosed(history: SqlHistory) {
   const tab = activeSqlTab.value
   if (!tab || !history.resultTabId) return true
   return !tab.resultTabs.some((result) => result.id === history.resultTabId)
-}
-
-function formatSqlHistoryTime(date: Date) {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
 }
 
 function updateSqlResultPage(page: number) {

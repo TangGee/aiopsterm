@@ -2205,12 +2205,24 @@ export type DatabaseSqlExecuteInput = {
   schemaName?: string
 }
 
+export type DatabaseSqlExecutionRecord = {
+  id: string
+  status: 'ok' | 'error'
+  message: string
+  durationMs: number
+  rowCount: number
+  createdAt: string
+}
+
 export type DatabaseSqlExecuteResult = AiopsMutationResult<{
   columns: string[]
   rows: Array<Record<string, unknown>>
   rowCount: number
   durationMs: number
-}>
+  execution: DatabaseSqlExecutionRecord
+}> & {
+  execution?: DatabaseSqlExecutionRecord
+}
 
 export type DatabaseTableDdlInput = {
   connectionId: string

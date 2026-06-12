@@ -50,6 +50,22 @@ import {
 
 const fieldsForRows = (rows: Array<Record<string, unknown>>) => Object.keys(rows[0] ?? {}).map((name) => ({ name }))
 
+const expectSqlExecutionRecord = (
+  execution: unknown,
+  expected: { status: 'ok' | 'error'; rowCount?: number; message?: string | RegExp }
+) => {
+  expect(execution).toMatchObject({
+    id: expect.stringMatching(/^sql-exec-/),
+    status: expected.status,
+    durationMs: expect.any(Number),
+    rowCount: expected.rowCount ?? expect.any(Number),
+    createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/)
+  })
+  if (expected.message instanceof RegExp) expect(execution).toMatchObject({ message: expect.stringMatching(expected.message) })
+  else if (expected.message) expect(execution).toMatchObject({ message: expected.message })
+  else expect(execution).toMatchObject({ message: expect.any(String) })
+}
+
 const createClickHouseFetchDouble = () => {
   const state = {
     requests: [] as Array<{ url: string; sql: string; authorization?: string }>,
@@ -1556,9 +1572,10 @@ describe('database backend boundary', () => {
         expect.objectContaining({ service: 'payment-api', status: 'investigating' }),
         expect.objectContaining({ service: 'orders-worker', status: 'mitigated' })
       ])
-    )
-    expect(result.data?.durationMs).toBeGreaterThan(0)
-  })
+	    )
+	    expect(result.data?.durationMs).toBeGreaterThan(0)
+	    expectSqlExecutionRecord(result.data?.execution, { status: 'ok', rowCount: result.data?.rowCount, message: /^Execution OK \(/ })
+	  })
 
   it('returns backend explain-plan rows without renderer result generation', async () => {
     const result = await executeDatabaseSql({
@@ -1569,10 +1586,11 @@ describe('database backend boundary', () => {
       sql: 'EXPLAIN select * from public.orders'
     })
 
-    expect(result.ok).toBe(true)
-    expect(result.data?.columns).toEqual(['step', 'operation', 'relation', 'cost', 'rows'])
-    expect(result.data?.rows[0]).toMatchObject({ operation: 'Seq Scan', relation: 'orders' })
-  })
+	    expect(result.ok).toBe(true)
+	    expect(result.data?.columns).toEqual(['step', 'operation', 'relation', 'cost', 'rows'])
+	    expect(result.data?.rows[0]).toMatchObject({ operation: 'Seq Scan', relation: 'orders' })
+	    expectSqlExecutionRecord(result.data?.execution, { status: 'ok', rowCount: result.data?.rowCount, message: /^Execution OK \(/ })
+	  })
 
   it('fails closed for unknown seed SQL tables instead of returning generic success rows', async () => {
     const result = await executeDatabaseSql({
@@ -1583,12 +1601,13 @@ describe('database backend boundary', () => {
       sql: 'select * from public.audit_events'
     })
 
-    expect(result).toEqual({
-      ok: false,
-      errorCode: 'DB_TABLE_NOT_FOUND',
-      errorMessage: 'Table not found: audit_events'
-    })
-  })
+	    expect(result).toMatchObject({
+	      ok: false,
+	      errorCode: 'DB_TABLE_NOT_FOUND',
+	      errorMessage: 'Table not found: audit_events'
+	    })
+	    expectSqlExecutionRecord(result.execution, { status: 'error', rowCount: 0, message: 'Table not found: audit_events' })
+	  })
 
   it('keeps backend-owned constant SQL results without using sample message rows', async () => {
     const result = await executeDatabaseSql({
@@ -1599,10 +1618,11 @@ describe('database backend boundary', () => {
       sql: 'select 1'
     })
 
-    expect(result.ok).toBe(true)
-    expect(result.data?.columns).toEqual(['result'])
-    expect(result.data?.rows).toEqual([{ result: 1 }])
-  })
+	    expect(result.ok).toBe(true)
+	    expect(result.data?.columns).toEqual(['result'])
+	    expect(result.data?.rows).toEqual([{ result: 1 }])
+	    expectSqlExecutionRecord(result.data?.execution, { status: 'ok', rowCount: 1, message: 'Execution OK (1 row)' })
+	  })
 
   it('rejects empty SQL before execution', async () => {
     const result = await executeDatabaseSql({
@@ -1610,12 +1630,13 @@ describe('database backend boundary', () => {
       sql: ''
     })
 
-    expect(result).toEqual({
-      ok: false,
-      errorCode: 'DB_SQL_EMPTY',
-      errorMessage: 'SQL is required.'
-    })
-  })
+	    expect(result).toMatchObject({
+	      ok: false,
+	      errorCode: 'DB_SQL_EMPTY',
+	      errorMessage: 'SQL is required.'
+	    })
+	    expectSqlExecutionRecord(result.execution, { status: 'error', rowCount: 0, message: 'SQL is required.' })
+	  })
 
   it('reports backend SQL rejections as mutation errors', async () => {
     const result = await executeDatabaseSql({
@@ -1625,12 +1646,13 @@ describe('database backend boundary', () => {
       sql: 'syntax_error'
     })
 
-    expect(result).toEqual({
-      ok: false,
-      errorCode: 'DB_SQL_REJECTED',
-      errorMessage: 'Backend SQL executor rejected this statement.'
-    })
-  })
+	    expect(result).toMatchObject({
+	      ok: false,
+	      errorCode: 'DB_SQL_REJECTED',
+	      errorMessage: 'Backend SQL executor rejected this statement.'
+	    })
+	    expectSqlExecutionRecord(result.execution, { status: 'error', rowCount: 0, message: 'Backend SQL executor rejected this statement.' })
+	  })
 
   it('fetches table DDL through the database backend boundary', async () => {
     const result = await getDatabaseTableDdl({
@@ -1717,14 +1739,15 @@ describe('database backend boundary', () => {
       sql: 'SELECT key, value FROM cache_entries ORDER BY key'
     })
     expect(result.ok).toBe(true)
-    expect(result.data).toMatchObject({
-      columns: ['key', 'value'],
-      rowCount: 2,
-      rows: [
-        { key: 'feature:checkout', value: 'enabled' },
-        { key: 'feature:search', value: 'disabled' }
-      ]
-    })
+	    expect(result.data).toMatchObject({
+	      columns: ['key', 'value'],
+	      rowCount: 2,
+	      rows: [
+	        { key: 'feature:checkout', value: 'enabled' },
+	        { key: 'feature:search', value: 'disabled' }
+	      ]
+	    })
+	    expectSqlExecutionRecord(result.data?.execution, { status: 'ok', rowCount: 2, message: 'Execution OK (2 rows)' })
 
     const ddl = await getDatabaseTableDdl({
       connectionId: 'conn-real-sqlite',
@@ -1811,11 +1834,12 @@ describe('database backend boundary', () => {
       databaseName: 'main',
       sql: 'SELECT key, value, ttl_seconds FROM cache_entries ORDER BY key'
     })
-    expect(rows.ok).toBe(true)
-    expect(rows.data?.rows).toEqual([
-      { key: 'feature:billing', value: 'enabled', ttl_seconds: 45 },
-      { key: 'feature:checkout', value: 'rolled-out', ttl_seconds: 300 }
-    ])
+	    expect(rows.ok).toBe(true)
+	    expect(rows.data?.rows).toEqual([
+	      { key: 'feature:billing', value: 'enabled', ttl_seconds: 45 },
+	      { key: 'feature:checkout', value: 'rolled-out', ttl_seconds: 300 }
+	    ])
+	    expectSqlExecutionRecord(rows.data?.execution, { status: 'ok', rowCount: 2, message: 'Execution OK (2 rows)' })
 
     const failed = await mutateDatabaseTable({
       connectionId: 'conn-mutating-sqlite',
@@ -1834,9 +1858,10 @@ describe('database backend boundary', () => {
       dbType: 'sqlite',
       databaseName: 'main',
       sql: "SELECT key FROM cache_entries WHERE key = 'feature:rollback'"
-    })
-    expect(rolledBack.ok).toBe(true)
-    expect(rolledBack.data?.rows).toEqual([])
+	    })
+	    expect(rolledBack.ok).toBe(true)
+	    expect(rolledBack.data?.rows).toEqual([])
+	    expectSqlExecutionRecord(rolledBack.data?.execution, { status: 'ok', rowCount: 0, message: 'Execution OK (0 rows)' })
 
     const truncate = await mutateDatabaseTable({
       connectionId: 'conn-mutating-sqlite',
@@ -3170,11 +3195,12 @@ WHERE status = ''open'';
       sql: 'select * from public.orders'
     })
     expect(sql.ok).toBe(true)
-    expect(sql.data?.rows).toEqual([
-      expect.objectContaining({ service: 'live-api', owner: 'nina' }),
-      expect.objectContaining({ service: 'live-worker', owner: 'omar' })
-    ])
-    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+	    expect(sql.data?.rows).toEqual([
+	      expect.objectContaining({ service: 'live-api', owner: 'nina' }),
+	      expect.objectContaining({ service: 'live-worker', owner: 'omar' })
+	    ])
+	    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-postgres',
@@ -3311,11 +3337,12 @@ WHERE status = ''open'';
       sql: 'SELECT event_id, service FROM `ops`.`events`'
     })
     expect(sql.ok).toBe(true)
-    expect(sql.data).toMatchObject({
-      columns: ['event_id', 'service'],
-      rows: [{ event_id: 42, service: 'clickhouse-api' }]
-    })
-    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+	    expect(sql.data).toMatchObject({
+	      columns: ['event_id', 'service'],
+	      rows: [{ event_id: 42, service: 'clickhouse-api' }]
+	    })
+	    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-clickhouse',
@@ -3553,11 +3580,12 @@ WHERE status = ''open'';
       sql: 'SELECT event_id, service FROM "hive"."ops"."events"'
     })
     expect(sql.ok).toBe(true)
-    expect(sql.data).toMatchObject({
-      columns: ['event_id', 'service'],
-      rows: [{ event_id: 77, service: 'presto-api' }]
-    })
-    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+	    expect(sql.data).toMatchObject({
+	      columns: ['event_id', 'service'],
+	      rows: [{ event_id: 77, service: 'presto-api' }]
+	    })
+	    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-presto',
@@ -3699,10 +3727,11 @@ WHERE status = ''open'';
       sql: 'select * from public.orders'
     })
     expect(sql.ok).toBe(true)
-    expect(sql.data?.rows).toEqual([
-      expect.objectContaining({ service: 'live-api', owner: 'nina' }),
-      expect.objectContaining({ service: 'live-worker', owner: 'omar' })
-    ])
+	    expect(sql.data?.rows).toEqual([
+	      expect.objectContaining({ service: 'live-api', owner: 'nina' }),
+	      expect.objectContaining({ service: 'live-worker', owner: 'omar' })
+	    ])
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-kingbase',
@@ -4053,12 +4082,13 @@ WHERE status = ''open'';
       schemaName: 'OPS',
       sql: 'select * from ops.audit_log'
     })
-    expect(sql.ok).toBe(true)
-    expect(sql.data?.columns).toEqual(['EVENT_ID', 'ACTOR', 'ACTION', 'CREATED_AT'])
-    expect(sql.data?.rows).toEqual([
-      expect.objectContaining({ EVENT_ID: 501, ACTION: 'RELEASE_START' }),
-      expect.objectContaining({ EVENT_ID: 502, ACTION: 'MANUAL_APPROVE' })
-    ])
+	    expect(sql.ok).toBe(true)
+	    expect(sql.data?.columns).toEqual(['EVENT_ID', 'ACTOR', 'ACTION', 'CREATED_AT'])
+	    expect(sql.data?.rows).toEqual([
+	      expect.objectContaining({ EVENT_ID: 501, ACTION: 'RELEASE_START' }),
+	      expect.objectContaining({ EVENT_ID: 502, ACTION: 'MANUAL_APPROVE' })
+	    ])
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-oracle',
@@ -4195,9 +4225,10 @@ WHERE status = ''open'';
       dbType: 'mysql',
       databaseName: 'metrics',
       sql: 'select * from service_health'
-    })
-    expect(sql.ok).toBe(true)
-    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+	    })
+	    expect(sql.ok).toBe(true)
+	    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const ddl = await getDatabaseTableDdl({
       connectionId: 'conn-live-mysql',
@@ -4283,9 +4314,10 @@ WHERE status = ''open'';
       dbType: 'mariadb',
       databaseName: 'metrics',
       sql: 'select * from service_health'
-    })
-    expect(sql.ok).toBe(true)
-    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+	    })
+	    expect(sql.ok).toBe(true)
+	    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-mariadb',
@@ -4441,9 +4473,10 @@ WHERE status = ''open'';
       dbType: 'oceanbase',
       databaseName: 'metrics',
       sql: 'select * from service_health'
-    })
-    expect(sql.ok).toBe(true)
-    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+	    })
+	    expect(sql.ok).toBe(true)
+	    expect(sql.data?.rows).toEqual([expect.objectContaining({ service: 'gateway' }), expect.objectContaining({ service: 'worker' })])
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-oceanbase',
@@ -4608,10 +4641,11 @@ WHERE status = ''open'';
       sql: 'SELECT TOP (100) * FROM [dbo].[orders];'
     })
     expect(sql.ok).toBe(true)
-    expect(sql.data?.rows).toEqual([
-      expect.objectContaining({ service: 'sql-api', owner: 'sara' }),
-      expect.objectContaining({ service: 'sql-worker', owner: 'tomas' })
-    ])
+	    expect(sql.data?.rows).toEqual([
+	      expect.objectContaining({ service: 'sql-api', owner: 'sara' }),
+	      expect.objectContaining({ service: 'sql-worker', owner: 'tomas' })
+	    ])
+	    expectSqlExecutionRecord(sql.data?.execution, { status: 'ok', rowCount: sql.data?.rowCount, message: /^Execution OK \(/ })
 
     const tablePage = await queryDatabaseTable({
       connectionId: 'conn-live-sqlserver',
