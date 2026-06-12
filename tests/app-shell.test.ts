@@ -9978,13 +9978,28 @@ describe('AppShell', () => {
       vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/aiopsterm-sql/malformed.sql' })
       vi.mocked(window.aiops.writeLocalFile).mockResolvedValueOnce({
         ok: true,
-        data: { filePath: '/tmp/aiopsterm-sql/other.sql', bytes: 1 }
+        data: { filePath: '/tmp/aiopsterm-sql/other.sql', bytes: 1, size: 1, mtimeMs: 1717200000000 }
       } as any)
       await wrapper.find('button[title="Save As"]').trigger('click')
       await flushPromises()
       expect(window.aiops.writeLocalFile).toHaveBeenCalledWith('/tmp/aiopsterm-sql/malformed.sql', 'select * from public.orders;')
       expect(wrapper.find('.db-sql-save-state').text()).toContain('SQL file writer returned malformed result data.')
       expect(wrapper.find('.db-sql-save-state').text()).not.toContain('Saved: malformed.sql')
+
+      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/aiopsterm-sql/unverified.sql' })
+      vi.mocked(window.aiops.writeLocalFile).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          filePath: '/tmp/aiopsterm-sql/unverified.sql',
+          bytes: new TextEncoder().encode('select * from public.orders;').byteLength,
+          size: 1,
+          mtimeMs: 1717200000000
+        }
+      } as any)
+      await wrapper.find('button[title="Save As"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-sql-save-state').text()).toContain('SQL file writer returned malformed result data.')
+      expect(wrapper.find('.db-sql-save-state').text()).not.toContain('Saved: unverified.sql')
 
       ;(window.aiops as any).writeLocalFile = undefined
       await wrapper.find('button[title="Save"]').trigger('click')
@@ -11376,7 +11391,9 @@ describe('AppShell', () => {
       filePath: '/tmp/aiopsterm/backgrounds/settings-custom-bg.webp',
       url: 'file:///tmp/aiopsterm/backgrounds/settings-custom-bg.webp',
       name: 'settings-custom-bg.webp',
-      size: 256
+      size: 256,
+      bytes: 256,
+      mtimeMs: 1717200000000
     })
     await workspace.find('.settings-bg-tile.upload').trigger('click')
     await flushPromises()
@@ -11828,7 +11845,9 @@ describe('AppShell', () => {
       filePath: '/tmp/aiopsterm/backgrounds/rejected-bg.webp',
       url: 'file:///tmp/aiopsterm/backgrounds/rejected-bg.webp',
       name: 'rejected-bg.webp',
-      size: 256
+      size: 256,
+      bytes: 256,
+      mtimeMs: 1717200000000
     })
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
       ...store.config,

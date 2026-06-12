@@ -1569,6 +1569,8 @@ export type LocalFileReadResult = {
 export type LocalFileWriteResult = AiopsMutationResult<{
   filePath: string
   bytes: number
+  size: number
+  mtimeMs: number
 }>
 
 export type ChatAttachmentStageResult = {
@@ -1682,6 +1684,8 @@ export type CustomBackgroundSaveResult = {
   url: string
   name: string
   size: number
+  bytes: number
+  mtimeMs: number
 }
 
 export type SkillImportErrorCode = 'INVALID_ZIP' | 'NO_SKILL_MD' | 'INVALID_METADATA' | 'DIR_EXISTS' | 'EXTRACT_FAILED' | 'UNKNOWN'

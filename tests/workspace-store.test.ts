@@ -8995,7 +8995,18 @@ describe('workspace store', () => {
         url: '',
         name: 'empty-bg.png',
         size: 128
-      })
+      } as any)
+      await expect(store.uploadCustomBackground()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('自定义背景保存失败')
+      expect(store.config.background).toEqual(originalBackground)
+
+      vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/unverified-bg.png'] })
+      vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
+        filePath: '/tmp/aiopsterm/backgrounds/unverified-bg.png',
+        url: 'file:///tmp/aiopsterm/backgrounds/unverified-bg.png',
+        name: 'unverified-bg.png',
+        size: 128
+      } as any)
       await expect(store.uploadCustomBackground()).resolves.toBe(false)
       expect(store.settingsNotice).toBe('自定义背景保存失败')
       expect(store.config.background).toEqual(originalBackground)
@@ -9005,7 +9016,9 @@ describe('workspace store', () => {
         filePath: '/tmp/aiopsterm/backgrounds/offline-config-bg.png',
         url: 'file:///tmp/aiopsterm/backgrounds/offline-config-bg.png',
         name: 'offline-config-bg.png',
-        size: 128
+        size: 128,
+        bytes: 128,
+        mtimeMs: 1717200000000
       })
       ;(window.aiops as any).saveConfig = undefined
       await expect(store.uploadCustomBackground()).resolves.toBe(false)
@@ -9018,7 +9031,9 @@ describe('workspace store', () => {
         filePath: '/tmp/aiopsterm/backgrounds/malformed-config-bg.png',
         url: 'file:///tmp/aiopsterm/backgrounds/malformed-config-bg.png',
         name: 'malformed-config-bg.png',
-        size: 128
+        size: 128,
+        bytes: 128,
+        mtimeMs: 1717200000000
       })
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
       await expect(store.uploadCustomBackground()).resolves.toBe(false)
@@ -9156,7 +9171,9 @@ describe('workspace store', () => {
       filePath: '/tmp/aiopsterm/backgrounds/settings-bg.png',
       url: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png',
       name: 'settings-bg.png',
-      size: 512
+      size: 512,
+      bytes: 512,
+      mtimeMs: 1717200000000
     })
     expect(await store.uploadCustomBackground()).toBe(true)
     expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({

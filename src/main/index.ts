@@ -127,6 +127,7 @@ import {
   configureFilesBackendRuntime,
   writeFileContent
 } from './backend/files'
+import { saveCustomBackgroundFile, writeLocalTextFile } from './backend/localFileWrites'
 import { callMcpTool, clearMcpRuntimeClientCache, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
 import {
   addKubernetesCluster,
@@ -1317,16 +1318,6 @@ let knowledgeSearchIndex: KnowledgeSearchIndex | null = null
 
 const invalidateKnowledgeSearchIndex = () => {
   knowledgeSearchIndex = null
-}
-
-const sanitizeCustomBackgroundName = (name: string) => {
-  const ext = extname(name).toLowerCase()
-  const base = basename(name, ext)
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
-  return `${base || `background-${Date.now()}`}${ext}`
 }
 
 const isSafeKnowledgeBasename = (name: string) => {
@@ -2962,25 +2953,11 @@ const registerIpc = () => {
     return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
   })
   ipcMain.handle('settings:save-custom-background', async (_event, srcAbsPath: string) => {
-    if (!srcAbsPath || typeof srcAbsPath !== 'string') throw new Error('srcAbsPath is required')
-    if (!isAbsolute(srcAbsPath)) throw new Error('srcAbsPath must be absolute')
-    const metadata = await stat(srcAbsPath)
-    if (!metadata.isFile()) throw new Error('Background source must be a file')
-    if (metadata.size > maxCustomBackgroundBytes) throw new Error('Background file too large')
-    const ext = extname(srcAbsPath).toLowerCase()
-    if (!allowedCustomBackgroundExtensions.has(ext)) throw new Error('Background file type not allowed')
-
-    const backgroundDir = getCustomBackgroundsPath()
-    await mkdir(backgroundDir, { recursive: true })
-    const finalName = await ensureUniqueKnowledgeName(backgroundDir, sanitizeCustomBackgroundName(basename(srcAbsPath)))
-    const finalPath = join(backgroundDir, finalName)
-    await cp(srcAbsPath, finalPath)
-    return {
-      filePath: finalPath,
-      url: pathToFileURL(finalPath).href,
-      name: finalName,
-      size: metadata.size
-    }
+    return saveCustomBackgroundFile(srcAbsPath, {
+      backgroundDir: getCustomBackgroundsPath(),
+      maxBytes: maxCustomBackgroundBytes,
+      allowedExtensions: allowedCustomBackgroundExtensions
+    })
   })
   ipcMain.handle('files:read-local', async (_event, filePath: string) => {
     if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
@@ -2995,12 +2972,7 @@ const registerIpc = () => {
     }
   })
   ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => {
-    if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
-    if (!isAbsolute(filePath)) throw new Error('filePath must be absolute')
-    const text = typeof content === 'string' ? content : String(content)
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, text, 'utf-8')
-    return { ok: true, data: { filePath, bytes: Buffer.byteLength(text, 'utf-8') } }
+    return writeLocalTextFile(filePath, content)
   })
   ipcMain.handle('chat:stage-attachment', async (_event, payload: { taskId: string; srcAbsPath: string }) => {
     return stageChatAttachment(payload, getChatAttachmentsPath())

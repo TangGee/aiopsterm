@@ -3216,6 +3216,7 @@ type LayoutPreferencesPatch = Partial<
   Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen' | 'leftPanelWidth' | 'rightPanelWidth' | 'agentsLeftWidth'>
 >
 type BackgroundUserConfig = UserConfig['background']
+type CustomBackgroundSaveData = Awaited<ReturnType<AiopsPreloadApi['saveCustomBackground']>>
 
 const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
 
@@ -3362,6 +3363,21 @@ const cloneBackgroundSnapshot = (background: BackgroundUserConfig): BackgroundUs
 
 const backgroundSnapshotsMatch = (left: BackgroundUserConfig, right: BackgroundUserConfig) =>
   JSON.stringify(cloneBackgroundSnapshot(left)) === JSON.stringify(cloneBackgroundSnapshot(right))
+
+const isCustomBackgroundSaveResult = (source: unknown): source is CustomBackgroundSaveData =>
+  isRecord(source) &&
+  isNonEmptyString(source.filePath) &&
+  isNonEmptyString(source.url) &&
+  isNonEmptyString(source.name) &&
+  typeof source.size === 'number' &&
+  Number.isInteger(source.size) &&
+  source.size > 0 &&
+  typeof source.bytes === 'number' &&
+  Number.isInteger(source.bytes) &&
+  source.bytes === source.size &&
+  typeof source.mtimeMs === 'number' &&
+  Number.isFinite(source.mtimeMs) &&
+  source.mtimeMs > 0
 
 const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => ({
   ...base,
@@ -6076,7 +6092,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
       if (!result || result.canceled || !result.filePaths.length) return false
       const saved = await saveCustomBackground(result.filePaths[0])
-      if (!saved?.url) {
+      if (!isCustomBackgroundSaveResult(saved)) {
         setSettingsNotice('自定义背景保存失败')
         return false
       }

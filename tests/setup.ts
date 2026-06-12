@@ -6176,7 +6176,9 @@ Object.defineProperty(window, 'aiops', {
         filePath: `/tmp/aiopsterm/backgrounds/${name}`,
         url: `file:///tmp/aiopsterm/backgrounds/${name}`,
         name,
-        size: 128
+        size: 128,
+        bytes: 128,
+        mtimeMs: 1717200000000
       }
     }),
     readLocalFile: vi.fn(async (filePath: string) => {
@@ -6192,7 +6194,9 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: {
         filePath,
-        bytes: new TextEncoder().encode(String(content ?? '')).byteLength
+        bytes: new TextEncoder().encode(String(content ?? '')).byteLength,
+        size: new TextEncoder().encode(String(content ?? '')).byteLength,
+        mtimeMs: 1717200000000
       }
     })),
     readFileContent: vi.fn(async (filePath: string) => ({

@@ -4019,13 +4019,19 @@ function utf8ByteLength(value: string) {
 }
 
 function isLocalFileWriteData(value: unknown, expectedPath: string, expectedContent: string): value is NonNullable<LocalFileWriteResult['data']> {
+  const expectedBytes = utf8ByteLength(expectedContent)
   return (
     isRecord(value) &&
     value.filePath === expectedPath &&
     typeof value.bytes === 'number' &&
     Number.isInteger(value.bytes) &&
-    value.bytes >= 0 &&
-    value.bytes === utf8ByteLength(expectedContent)
+    value.bytes === expectedBytes &&
+    typeof value.size === 'number' &&
+    Number.isInteger(value.size) &&
+    value.size === expectedBytes &&
+    typeof value.mtimeMs === 'number' &&
+    Number.isFinite(value.mtimeMs) &&
+    value.mtimeMs > 0
   )
 }
 
