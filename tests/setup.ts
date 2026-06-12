@@ -6125,15 +6125,19 @@ Object.defineProperty(window, 'aiops', {
         markdown: buildChatExportMarkdown(input, new Date('2026-06-04T12:00:00+08:00'))
       }
     })),
-    exportDatabaseRows: vi.fn(async (input: DatabaseExportInput) => ({
-      ok: true,
-      data: {
-        exported: input.rows.length,
-        fileName: sanitizeDatabaseExportFileName(input, new Date('2026-06-04T12:00:00+08:00')),
-        filePath: '/tmp/database-export.csv',
-        csv: buildDatabaseExportCsv(input)
+    exportDatabaseRows: vi.fn(async (input: DatabaseExportInput) => {
+      const csv = buildDatabaseExportCsv(input)
+      return {
+        ok: true,
+        data: {
+          exported: input.rows.length,
+          fileName: sanitizeDatabaseExportFileName(input, new Date('2026-06-04T12:00:00+08:00')),
+          filePath: '/tmp/database-export.csv',
+          bytes: Buffer.byteLength(csv, 'utf8'),
+          csv
+        }
       }
-    })),
+    }),
     getDatabasePageComment: vi.fn(async (input: DatabasePageCommentKey) => {
       const existing = databasePageCommentsMock.get(databasePageCommentKeyMock(input))
       return {

@@ -1,10 +1,18 @@
-import { writeFile } from 'fs/promises'
+import { stat, writeFile } from 'fs/promises'
+import { isAbsolute } from 'path'
 import type { DatabaseExportInput, DatabaseExportResult } from '@shared/preload'
 import { buildDatabaseExportCsv, sanitizeDatabaseExportFileName } from '@shared/databaseExport'
 
+type DatabaseExportWriteResult =
+  | void
+  | {
+      filePath?: string
+      bytes?: number
+    }
+
 type DatabaseExportRuntime = {
   showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
-  writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
+  writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<DatabaseExportWriteResult>
   now?: () => Date
 }
 
@@ -26,6 +34,9 @@ const databaseExportErrorResult = (error: unknown): DatabaseExportResult => ({
 
 const normalizeRows = (rows: unknown) => (Array.isArray(rows) ? rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object' && !Array.isArray(row))) : [])
 
+const isWriteMetadata = (value: DatabaseExportWriteResult): value is Exclude<DatabaseExportWriteResult, void> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
 export const exportDatabaseRows = async (input: DatabaseExportInput, runtime: DatabaseExportRuntime): Promise<DatabaseExportResult> => {
   try {
     if (!runtime?.showSaveDialog) throw new DatabaseExportError('DATABASE_EXPORT_SAVE_DIALOG_UNAVAILABLE', 'Database export save dialog is unavailable.')
@@ -45,7 +56,7 @@ export const exportDatabaseRows = async (input: DatabaseExportInput, runtime: Da
       defaultPath: fileName,
       filters: [{ name: 'CSV Files', extensions: ['csv'] }]
     })
-    if (saveResult?.canceled || !saveResult?.filePath) {
+    if (saveResult?.canceled) {
       return {
         ok: true,
         data: {
@@ -55,14 +66,37 @@ export const exportDatabaseRows = async (input: DatabaseExportInput, runtime: Da
         }
       }
     }
+    const filePath = typeof saveResult.filePath === 'string' ? saveResult.filePath : ''
+    if (!filePath.trim() || !isAbsolute(filePath)) {
+      throw new DatabaseExportError('DATABASE_EXPORT_SAVE_PATH_INVALID', 'Database export save path must be absolute.')
+    }
     const csv = buildDatabaseExportCsv(normalizedInput)
-    await (runtime.writeFile || writeFile)(saveResult.filePath, csv, 'utf-8')
+    const expectedBytes = Buffer.byteLength(csv, 'utf8')
+    const writeResult = await (runtime.writeFile || writeFile)(filePath, csv, 'utf-8')
+    if (isWriteMetadata(writeResult)) {
+      if (writeResult.filePath !== filePath) {
+        throw new DatabaseExportError('DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID', 'Database export writer returned a different file path.')
+      }
+      if (writeResult.bytes !== expectedBytes) {
+        throw new DatabaseExportError('DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID', 'Database export writer returned an unexpected byte count.')
+      }
+    }
+    let writtenSize = -1
+    try {
+      writtenSize = (await stat(filePath)).size
+    } catch {
+      throw new DatabaseExportError('DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID', 'Database export file could not be verified after write.')
+    }
+    if (writtenSize !== expectedBytes) {
+      throw new DatabaseExportError('DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID', 'Database export file size does not match the generated CSV byte count.')
+    }
     return {
       ok: true,
       data: {
         exported: rows.length,
         fileName,
-        filePath: saveResult.filePath,
+        filePath,
+        bytes: expectedBytes,
         csv
       }
     }

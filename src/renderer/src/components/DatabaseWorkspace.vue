@@ -4465,14 +4465,19 @@ function isDatabaseTableQueryData(value: unknown): value is NonNullable<Database
 }
 
 function isDatabaseExportData(value: unknown): value is NonNullable<DatabaseExportResult['data']> {
+  if (!isRecord(value)) return false
+  if (!isNonNegativeNumber(value.exported)) return false
+  if (typeof value.fileName !== 'string' || !value.fileName.trim().endsWith('.csv')) return false
+  if (value.canceled !== undefined && typeof value.canceled !== 'boolean') return false
+  if (value.csv !== undefined && typeof value.csv !== 'string') return false
+  if (value.canceled) return value.exported === 0 && value.filePath === undefined && value.bytes === undefined
   return (
-    isRecord(value) &&
-    isNonNegativeNumber(value.exported) &&
-    typeof value.fileName === 'string' &&
-    value.fileName.trim().endsWith('.csv') &&
-    (value.filePath === undefined || typeof value.filePath === 'string') &&
-    (value.canceled === undefined || typeof value.canceled === 'boolean') &&
-    (value.csv === undefined || typeof value.csv === 'string')
+    typeof value.filePath === 'string' &&
+    value.filePath.trim().length > 0 &&
+    typeof value.bytes === 'number' &&
+    Number.isInteger(value.bytes) &&
+    value.bytes >= 0 &&
+    (typeof value.csv !== 'string' || value.bytes === utf8ByteLength(value.csv))
   )
 }
 

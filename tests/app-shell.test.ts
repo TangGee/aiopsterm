@@ -9863,6 +9863,19 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('Database export backend returned malformed result data.')
     expect(wrapper.text()).not.toContain('Exported 1 row to')
 
+    vi.mocked(window.aiops.exportDatabaseRows).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        exported: 1,
+        fileName: 'orders-page.csv',
+        filePath: '/tmp/orders-page.csv'
+      }
+    } as any)
+    await wrapper.find('.db-data-workspace .db-toolbar-export').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database export backend returned malformed result data.')
+    expect(wrapper.text()).not.toContain('Exported 1 row to orders-page.csv')
+
     vi.mocked(window.aiops.saveDatabasePageComment).mockResolvedValueOnce({ ok: true, data: { message: 'Comment saved' } } as any)
     await wrapper.find('.db-data-workspace .db-toolbar-btn-comment').trigger('click')
     await flushPromises()

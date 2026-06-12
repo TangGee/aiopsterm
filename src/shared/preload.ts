@@ -2336,6 +2336,7 @@ export type DatabaseExportResult = AiopsMutationResult<{
   exported: number
   fileName: string
   filePath?: string
+  bytes?: number
   canceled?: boolean
   csv?: string
 }>

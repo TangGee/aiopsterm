@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
@@ -822,7 +822,17 @@ let exportDatabaseRowsBackend: (
   input: DatabaseExportInput,
   runtime: {
     showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
-    writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
+    writeFile?: (
+      filePath: string,
+      content: string,
+      encoding: 'utf-8'
+    ) => Promise<
+      | void
+      | {
+          filePath?: string
+          bytes?: number
+        }
+    >
     now?: () => Date
   }
 ) => Promise<DatabaseExportResult>
@@ -1120,7 +1130,8 @@ describe('database backend boundary', () => {
     expect(result.data).toMatchObject({
       exported: 2,
       fileName: sanitizeDatabaseExportFileName(input, now()),
-      filePath: outputFile
+      filePath: outputFile,
+      bytes: expect.any(Number)
     })
     expect(showSaveDialog).toHaveBeenCalledWith({
       defaultPath: sanitizeDatabaseExportFileName(input, now()),
@@ -1128,6 +1139,8 @@ describe('database backend boundary', () => {
     })
     const csv = await readFile(outputFile, 'utf-8')
     expect(csv).toBe(result.data?.csv)
+    expect(result.data?.bytes).toBe(Buffer.byteLength(csv, 'utf8'))
+    await expect(stat(outputFile)).resolves.toMatchObject({ size: result.data?.bytes })
     expect(csv).toContain('# aiopsterm database export\n')
     expect(csv).toContain('# kind,table-page\n')
     expect(csv).toContain('# connection,orders-postgres\n')
@@ -1198,6 +1211,87 @@ describe('database backend boundary', () => {
       errorCode: 'DATABASE_EXPORT_EMPTY_ROWS'
     })
     expect(showSaveDialog).not.toHaveBeenCalled()
+  })
+
+  it('rejects database export save paths that cannot be written as absolute files', async () => {
+    const writeFileMock = vi.fn(async () => undefined)
+    const input = {
+      title: 'orders',
+      kind: 'table-page' as const,
+      columns: ['id'],
+      rows: [{ id: 1 }]
+    }
+
+    await expect(
+      exportDatabaseRowsBackend(input, {
+        showSaveDialog: async () => ({ canceled: false, filePath: '   ' }),
+        writeFile: writeFileMock
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_SAVE_PATH_INVALID'
+    })
+
+    await expect(
+      exportDatabaseRowsBackend(input, {
+        showSaveDialog: async () => ({ canceled: false, filePath: 'relative/orders.csv' }),
+        writeFile: writeFileMock
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_SAVE_PATH_INVALID'
+    })
+
+    expect(writeFileMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects database export writers that cannot confirm the written file', async () => {
+    const outputFile = await createTempCsvFile()
+    const otherFile = await createTempCsvFile()
+    const input = {
+      title: 'orders',
+      kind: 'table-page' as const,
+      columns: ['id'],
+      rows: [{ id: 1 }]
+    }
+
+    await expect(
+      exportDatabaseRowsBackend(input, {
+        showSaveDialog: async () => ({ canceled: false, filePath: outputFile }),
+        writeFile: async (filePath, content) => {
+          await writeFile(filePath, content, 'utf-8')
+          return { filePath: otherFile, bytes: Buffer.byteLength(content, 'utf8') }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID'
+    })
+
+    await expect(
+      exportDatabaseRowsBackend(input, {
+        showSaveDialog: async () => ({ canceled: false, filePath: outputFile }),
+        writeFile: async (filePath, content) => {
+          await writeFile(filePath, content, 'utf-8')
+          return { filePath, bytes: 1 }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID'
+    })
+
+    await expect(
+      exportDatabaseRowsBackend(input, {
+        showSaveDialog: async () => ({ canceled: false, filePath: outputFile }),
+        writeFile: async (filePath) => {
+          await writeFile(filePath, 'not the generated csv', 'utf-8')
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DATABASE_EXPORT_WRITE_CONFIRMATION_INVALID'
+    })
   })
 
   it('persists database page comments through the backend state file', async () => {
