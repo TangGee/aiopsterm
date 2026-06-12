@@ -51,7 +51,7 @@
       <button
         class="file-icon-button"
         title="刷新"
-        @click="loadEntries"
+        @click="() => loadEntries()"
       >
         <RefreshCw />
       </button>
@@ -727,34 +727,39 @@ const clearTargetSubDirs = () => {
   })
 }
 
-const loadEntries = async () => {
+const loadEntries = async (path = currentPath.value, options: { preserveOnFailure?: boolean } = {}) => {
+  const normalizedPath = normalizePath(path)
   loading.value = true
   error.value = ''
   try {
-    entries.value = await loadDirectoryEntries(currentPath.value)
+    entries.value = await loadDirectoryEntries(normalizedPath)
+    currentPath.value = normalizedPath
+    pathInput.value = normalizedPath
+    return true
   } catch (fileError) {
     error.value = fileError instanceof Error ? fileError.message : '读取文件失败'
-    entries.value = []
+    if (options.preserveOnFailure === false) entries.value = []
+    return false
   } finally {
     loading.value = false
   }
 }
 
+const requireEntriesReload = async (path = currentPath.value) => {
+  if (!(await loadEntries(path))) throw new Error(error.value || '文件列表加载失败')
+}
+
 const commitPath = async () => {
-  currentPath.value = normalizePath(pathInput.value)
-  await loadEntries()
+  const loaded = await loadEntries(pathInput.value)
+  if (!loaded) pathInput.value = currentPath.value
 }
 
 const openDirectory = async (entry: FileBrowserEntry) => {
-  currentPath.value = normalizePath(entry.path)
-  pathInput.value = currentPath.value
-  await loadEntries()
+  await loadEntries(entry.path)
 }
 
 const goBack = async () => {
-  currentPath.value = dirname(currentPath.value)
-  pathInput.value = currentPath.value
-  await loadEntries()
+  await loadEntries(dirname(currentPath.value))
 }
 
 const openLocalFolder = async () => {
@@ -767,10 +772,8 @@ const openLocalFolder = async () => {
     '打开文件夹对话框失败'
   )
   if (!pickedPath) return
-  currentPath.value = normalizePath(pickedPath)
-  pathInput.value = currentPath.value
-  await loadEntries()
-  fileNotice.value = `已打开 ${currentPath.value}`
+  const loaded = await loadEntries(pickedPath)
+  if (loaded) fileNotice.value = `已打开 ${currentPath.value}`
 }
 
 const queueUpload = async (kind: 'file' | 'directory') => {
@@ -795,7 +798,7 @@ const queueUpload = async (kind: 'file' | 'directory') => {
       getListOptions()
     )
     if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
-    await loadEntries()
+    await requireEntriesReload()
     fileNotice.value = `${name} 上传成功`
   } catch (uploadError) {
     fileNotice.value = uploadError instanceof Error ? uploadError.message : '上传失败'
@@ -877,10 +880,8 @@ const handleOsFileDrop = async (event: DragEvent) => {
     return
   }
   if (props.session.kind === 'local') {
-    currentPath.value = normalizePath(dirname(localPath))
-    pathInput.value = currentPath.value
-    await loadEntries()
-    fileNotice.value = `已打开 ${currentPath.value}`
+    const loaded = await loadEntries(dirname(localPath))
+    if (loaded) fileNotice.value = `已打开 ${currentPath.value}`
     return
   }
 
@@ -889,7 +890,7 @@ const handleOsFileDrop = async (event: DragEvent) => {
   try {
     const transfer = await runObservedFileTransfer({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
     if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
-    await loadEntries()
+    await requireEntriesReload()
     fileNotice.value = `${name} 上传成功`
   } catch (uploadError) {
     fileNotice.value = uploadError instanceof Error ? uploadError.message : '上传失败'
@@ -924,7 +925,7 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
       transferOptions
     )
     if (!applyTransferResult(transfer, '传输失败', `${payload.name} 传输已取消`, `${payload.name} 传输已跳过`)) return
-    await loadEntries()
+    await requireEntriesReload()
     fileNotice.value = `${payload.name} 传输成功`
   } catch (transferError) {
     fileNotice.value = transferError instanceof Error ? transferError.message : '传输失败'
@@ -1006,7 +1007,7 @@ const confirmRename = async (entry: FileBrowserEntry) => {
   try {
     await mutateEntry({ kind: 'rename', oldPath: entry.path, newPath }, '重命名失败')
     cancelRename()
-    await loadEntries()
+    await requireEntriesReload()
     fileNotice.value = '重命名成功'
   } catch (renameError) {
     fileNotice.value = renameError instanceof Error ? renameError.message : '重命名失败'
@@ -1049,7 +1050,7 @@ const confirmPermissions = async () => {
   loading.value = true
   try {
     await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value }, '权限更新失败')
-    await loadEntries()
+    await requireEntriesReload()
     fileNotice.value = `权限已更新为 ${permissionCode.value}`
     permissionsTarget.value = null
   } catch (permissionError) {
@@ -1202,7 +1203,7 @@ const queueMoveTarget = async (name: string, overwrite = false) => {
       { kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite },
       moveDialog.type === 'copy' ? '复制失败' : '移动失败'
     )
-    if (dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await loadEntries()
+    if (dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await requireEntriesReload()
     fileNotice.value = moveDialog.type === 'copy' ? '复制成功' : '移动成功'
     closeMoveDialog()
   } catch (moveError) {
@@ -1246,7 +1247,7 @@ const confirmDeleteEntry = async () => {
   loading.value = true
   try {
     await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' }, '删除失败')
-    await loadEntries()
+    await requireEntriesReload()
     fileNotice.value = '删除成功'
     closeDeleteDialog()
   } catch (deleteError) {
@@ -1284,9 +1285,10 @@ const onGlobalClick = (event: MouseEvent) => {
 watch(
   () => props.session.id,
   async () => {
-    pathInput.value = props.session.rootPath
-    currentPath.value = props.session.rootPath
-    await loadEntries()
+    currentPath.value = normalizePath(props.session.rootPath)
+    pathInput.value = currentPath.value
+    entries.value = []
+    await loadEntries(currentPath.value, { preserveOnFailure: false })
   }
 )
 

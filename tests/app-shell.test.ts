@@ -6439,6 +6439,74 @@ describe('AppShell', () => {
     deleteBrowser.unmount()
   })
 
+  it('preserves confirmed Files browser rows and paths when directory refresh fails closed', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const localSession = await loadTestFileSession('local')
+    const browser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await browser.vm.$nextTick()
+    const pathInput = () => browser.find('.file-path-input').element as HTMLInputElement
+
+    expect(pathInput().value).toBe('/')
+    expect(browser.text()).toContain('release-note.md')
+
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('files list backend rejected'))
+    await browser.findAll('.file-icon-button').find((button) => button.attributes('title') === '刷新')!.trigger('click')
+    await flushPromises()
+    expect(browser.text()).toContain('files list backend rejected')
+    expect(browser.text()).toContain('release-note.md')
+    expect(pathInput().value).toBe('/')
+
+    const bootRow = browser.findAll('tbody tr').find((row) => row.text().includes('boot'))!
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      {
+        name: 'bad-entry-without-path',
+        type: 'file',
+        size: 1,
+        modifiedAt: Date.now()
+      }
+    ] as any)
+    await bootRow.find('.file-name-cell').trigger('click')
+    await flushPromises()
+    expect(browser.text()).toContain('文件服务返回数据无效')
+    expect(browser.text()).toContain('release-note.md')
+    expect(browser.text()).toContain('boot')
+    expect(browser.text()).not.toContain('bad-entry-without-path')
+    expect(pathInput().value).toBe('/')
+
+    await browser.find('.file-path-input').setValue('/tmp/local-picked')
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('manual path list failed'))
+    await browser.find('.file-path-input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(browser.text()).toContain('manual path list failed')
+    expect(browser.text()).toContain('release-note.md')
+    expect(pathInput().value).toBe('/')
+
+    const releaseRow = browser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await releaseRow.find('.file-row-actions button[title="重命名"]').trigger('click')
+    await releaseRow.find('.file-rename-row input').setValue('release-note-v2.md')
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('post-rename list failed'))
+    await releaseRow.find('.file-rename-row button[title="确认"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'rename', oldPath: '/release-note.md', newPath: '/release-note-v2.md' },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
+    expect(browser.text()).toContain('post-rename list failed')
+    expect(browser.text()).not.toContain('重命名成功')
+    expect(browser.text()).toContain('release-note.md')
+    expect(pathInput().value).toBe('/')
+
+    browser.unmount()
+  })
+
   it('keeps Files editor dirty when save succeeds without a backend-owned task', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
