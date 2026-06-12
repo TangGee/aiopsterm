@@ -1,4 +1,5 @@
 import type { AiChatCancelInput, AiChatCancelResult, AiChatExchangeRequestInput, AiChatResponseInput, AiChatResponseResult, AiTodoItem, AiTodoSnapshot, AiTodoSnapshotResult } from '@shared/preload'
+import { shouldUseAiTodoSeedData } from '@shared/runtimeSwitches'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'
 
@@ -39,7 +40,7 @@ const defaultAiTodoStateFilePath = () => {
   return envPath ? (isAbsolute(envPath) ? envPath : resolve(envPath)) : resolve(process.cwd(), '.aiopsterm-ai-todos.json')
 }
 
-const defaultAiTodoSeedMode = () => String(process.env.AIOPSTERM_AI_TODO_ENABLE_SEED || '').trim() === '1'
+const defaultAiTodoSeedMode = shouldUseAiTodoSeedData
 
 let runtimeConfig: Required<AiTodoBackendRuntimeConfig> = {
   stateFilePath: defaultAiTodoStateFilePath(),

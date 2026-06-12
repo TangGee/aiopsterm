@@ -1,4 +1,5 @@
 import type { UserRuleConfig } from './preload'
+import { shouldUseSettingsPreferencesSeedData as runtimeShouldUseSettingsPreferencesSeedData } from './runtimeSwitches'
 
 const defaultSettingsRuleSeeds: UserRuleConfig[] = [
   { id: 'rule-1', content: '执行生产变更前必须先给出只读检查命令和回滚点。', enabled: true },
@@ -9,14 +10,6 @@ const cloneRule = (rule: UserRuleConfig): UserRuleConfig => ({ ...rule })
 
 export const defaultSettingsRuleSeedData = () => defaultSettingsRuleSeeds.map(cloneRule)
 
-const isExplicitSettingsPreferencesSeedEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-export const shouldUseSettingsPreferencesSeedData = () => isExplicitSettingsPreferencesSeedEnabled()
+export const shouldUseSettingsPreferencesSeedData = runtimeShouldUseSettingsPreferencesSeedData
 
 export const defaultSettingsRulesConfig = () => (shouldUseSettingsPreferencesSeedData() ? defaultSettingsRuleSeedData() : [])

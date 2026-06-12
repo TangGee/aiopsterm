@@ -48,6 +48,7 @@ import type {
   KubernetesTerminalRecord,
   KubernetesTerminalWriteResult
 } from './preload'
+import { shouldUseKubernetesSeedData as runtimeShouldUseKubernetesSeedData } from './runtimeSwitches'
 
 const nowLabel = () => '刚刚'
 
@@ -65,7 +66,7 @@ const defaultKubernetesStateDir = () => {
   return envRoot ? (isAbsolute(envRoot) ? envRoot : resolve(envRoot)) : join(process.cwd(), '.aiopsterm-kubernetes')
 }
 
-const defaultKubernetesSeedMode = () => String(process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED || '').trim() === '1'
+const defaultKubernetesSeedMode = runtimeShouldUseKubernetesSeedData
 
 let runtimeConfig: Required<KubernetesBackendRuntimeConfig> = {
   stateDir: defaultKubernetesStateDir(),

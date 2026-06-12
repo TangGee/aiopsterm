@@ -37,6 +37,7 @@ import type {
   UserConfig
 } from '@shared/preload'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
+import { shouldUseAssetsSeedData } from '@shared/runtimeSwitches'
 import { createConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
@@ -175,7 +176,7 @@ const defaultKeychainSecrets: Record<string, AssetSecret> = {
   }
 }
 
-const defaultAssetSeedMode = () => String(process.env.AIOPSTERM_ASSETS_ENABLE_SEED || '').trim() === '1'
+const defaultAssetSeedMode = shouldUseAssetsSeedData
 
 const defaultAssetDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_ASSETS_DB_PATH || '').trim()

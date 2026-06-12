@@ -13,6 +13,7 @@ import type {
   AiChatMessageMetadataResult,
   AiopsMutationResult
 } from '@shared/preload'
+import { shouldUseChatHistorySeedData } from '@shared/runtimeSwitches'
 
 type ChatHistoryBackendRuntimeConfig = {
   stateFilePath?: string
@@ -55,7 +56,7 @@ const defaultChatHistoryStateFilePath = () => {
 
 const legacyChatHistoryStateFilePath = () => resolve(dirname(runtimeConfig.stateFilePath), 'aiopsterm-chat-history.json')
 
-const defaultChatHistorySeedMode = () => String(process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED || '').trim() === '1'
+const defaultChatHistorySeedMode = shouldUseChatHistorySeedData
 
 let runtimeConfig: Required<ChatHistoryBackendRuntimeConfig> = {
   stateFilePath: defaultChatHistoryStateFilePath(),

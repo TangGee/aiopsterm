@@ -29,6 +29,7 @@ import type {
   FileWriteContentResult,
   UserConfig
 } from '@shared/preload'
+import { shouldUseFilesSeedData } from '@shared/runtimeSwitches'
 import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'
 import { getAsset, getAssetSecret, getKeychainSecret } from './assets'
 import { loadSsh2 } from './ssh2Runtime'
@@ -88,7 +89,7 @@ type FilesBackendRuntimeConfig = {
   sftpPoolIdleTtlMs?: number
 }
 
-const defaultFileSessionSeedMode = () => String(process.env.AIOPSTERM_FILES_ENABLE_SEED || '').trim() === '1'
+const defaultFileSessionSeedMode = shouldUseFilesSeedData
 
 const defaultFileSessionDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_FILES_DB_PATH || '').trim()

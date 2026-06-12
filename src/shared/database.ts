@@ -63,6 +63,7 @@ import type {
   DatabaseSqlErrorDiagnosisInput,
   DatabaseSqlErrorDiagnosisResult
 } from './preload'
+import { shouldUseDatabaseAiBackendDouble, shouldUseDatabaseSeedData as runtimeShouldUseDatabaseSeedData } from './runtimeSwitches'
 
 const supportedEngines = new Set(['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto'])
 const DEFAULT_DATABASE_GROUP_ID = 'group-default'
@@ -423,15 +424,7 @@ const loadSqliteRuntime = () => {
   return sqliteRuntime
 }
 
-const isExplicitDatabaseSeedDataEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_DATABASE_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? isExplicitDatabaseSeedDataEnabled()
+const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? runtimeShouldUseDatabaseSeedData()
 
 type SafeStorageLike = {
   isEncryptionAvailable: () => boolean
@@ -5139,15 +5132,7 @@ const databaseAiModelName = () => trim(databaseAiRuntime.getModelName?.()) || 'a
 
 const shouldUseDatabaseAiProvider = (modelName: string) => trim(modelName) !== '' && trim(modelName) !== 'aiopsterm-local-agent'
 
-const isExplicitDatabaseAiLocalDoubleEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_DB_AI_BACKEND_DOUBLE || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-const isDatabaseAiLocalDoubleEnabled = () => databaseAiRuntime.localBackendDouble === true || isExplicitDatabaseAiLocalDoubleEnabled()
+const isDatabaseAiLocalDoubleEnabled = () => databaseAiRuntime.localBackendDouble === true || shouldUseDatabaseAiBackendDouble()
 
 const unquoteIdentifier = (value: string) => value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
 

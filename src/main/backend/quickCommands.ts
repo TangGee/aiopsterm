@@ -23,6 +23,7 @@ import type {
   QuickCommandScriptSegment,
   QuickCommandsUserConfig
 } from '@shared/preload'
+import { shouldUseQuickCommandsSeedData } from '@shared/runtimeSwitches'
 
 type QuickCommandStoreShape = {
   quickCommands: QuickCommandsUserConfig
@@ -216,7 +217,7 @@ const emptyQuickCommands = (): QuickCommandsUserConfig => ({
   snippets: []
 })
 
-const defaultQuickCommandSeedMode = () => String(process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED || '').trim() === '1'
+const defaultQuickCommandSeedMode = shouldUseQuickCommandsSeedData
 
 const defaultQuickCommandDatabasePath = () => {
   const envPath = String(process.env.AIOPSTERM_QUICK_COMMANDS_DB_PATH || '').trim()

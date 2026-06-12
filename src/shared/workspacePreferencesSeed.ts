@@ -1,4 +1,5 @@
 import { defaultWorkspacePreferencesData } from './workspacePreferencesDefaults'
+import { shouldUseWorkspacePreferencesSeedData as runtimeShouldUseWorkspacePreferencesSeedData } from './runtimeSwitches'
 
 const developmentSeedExpandedGroups = [
   'recent_connections',
@@ -14,15 +15,7 @@ const cloneWorkspacePreferences = (expandedGroups: string[]) => ({
   showIpMode: false
 })
 
-const isExplicitWorkspacePreferencesSeedEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-export const shouldUseWorkspacePreferencesSeedData = () => isExplicitWorkspacePreferencesSeedEnabled()
+export const shouldUseWorkspacePreferencesSeedData = runtimeShouldUseWorkspacePreferencesSeedData
 
 export { defaultWorkspacePreferencesData } from './workspacePreferencesDefaults'
 

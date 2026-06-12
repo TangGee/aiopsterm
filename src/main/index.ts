@@ -61,7 +61,25 @@ import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRun
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
-import { shouldRunMcpDiscovery, shouldUseE2eDialogFixtures, shouldUseUserExternalOpenBackendDouble } from '@shared/runtimeSwitches'
+import {
+  shouldRunMcpDiscovery,
+  shouldUseAiChatBackendDouble,
+  shouldUseAliasesSeedData,
+  shouldUseAiTodoSeedData,
+  shouldUseAssetsSeedData,
+  shouldUseChatHistorySeedData,
+  shouldUseDataSyncBackendDouble,
+  shouldUseDatabaseAiBackendDouble,
+  shouldUseDatabaseSeedData,
+  shouldUseE2eDialogFixtures,
+  shouldUseFilesSeedData,
+  shouldUseKubernetesSeedData,
+  shouldUseQuickCommandsSeedData,
+  shouldUseSettingsPreferencesSeedData,
+  shouldUseSshTerminalBackendDouble,
+  shouldUseUserAccountSeedData,
+  shouldUseUserExternalOpenBackendDouble
+} from '@shared/runtimeSwitches'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import {
   cancelDatabaseAiDrawerResponse,
@@ -1117,24 +1135,24 @@ configureDatabaseBackendRuntime({
   getConfig,
   fetch,
   createSshProxySocket,
-  localBackendDouble: process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE === '1',
+  localBackendDouble: shouldUseDatabaseAiBackendDouble(),
   stateFilePath: join(app.getPath('userData'), 'database-workspace.json'),
-  useSeedData: process.env.AIOPSTERM_DATABASE_ENABLE_SEED === '1'
+  useSeedData: shouldUseDatabaseSeedData()
 })
 configureDatabaseCommentsRuntime({
   stateFilePath: join(app.getPath('userData'), 'database-comments.json')
 })
 configureVoiceBackendRuntime({ getConfig })
 configureAssetBackendRuntime({
-  useSeedData: process.env.AIOPSTERM_ASSETS_ENABLE_SEED === '1'
+  useSeedData: shouldUseAssetsSeedData()
 })
 configureFilesBackendRuntime({
   getConfig,
-  useSeedData: process.env.AIOPSTERM_FILES_ENABLE_SEED === '1'
+  useSeedData: shouldUseFilesSeedData()
 })
 configurePrivacyRuntime({
   dataSyncStateFilePath: join(app.getPath('userData'), 'data-sync-runtime.json'),
-  useDataSyncBackendDouble: process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE === '1'
+  useDataSyncBackendDouble: shouldUseDataSyncBackendDouble()
 })
 configureSshTunnelBackendRuntime({ getConfig })
 configureLocalTerminalBackendRuntime({
@@ -1147,7 +1165,7 @@ configureSshTerminalBackendRuntime({
   getAsset,
   getAssetSecret,
   getKeychainSecret,
-  useBackendDouble: process.env.AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE === '1'
+  useBackendDouble: shouldUseSshTerminalBackendDouble()
 })
 configureExtensionBackendRuntime({
   extensionRootDir: join(app.getPath('userData'), 'extensions'),
@@ -1155,7 +1173,7 @@ configureExtensionBackendRuntime({
 })
 configureKubernetesBackendRuntime({
   stateDir: join(app.getPath('userData'), 'kubernetes'),
-  useSeedData: process.env.AIOPSTERM_KUBERNETES_ENABLE_SEED === '1',
+  useSeedData: shouldUseKubernetesSeedData(),
   refreshOrganizationAssets
 })
 setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => {
@@ -1166,29 +1184,29 @@ setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesT
 })
 configureUserAccountBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'user-account.json'),
-  useSeedData: process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED === '1',
+  useSeedData: shouldUseUserAccountSeedData(),
   loginUrl: process.env.AIOPSTERM_USER_LOGIN_URL,
   accountCenterUrl: process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL,
   openExternal: shouldUseUserExternalOpenBackendDouble() ? async () => undefined : (url) => shell.openExternal(url)
 })
 configureSettingsPreferencesBackendRuntime({
-  useSeedData: process.env.AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED === '1'
+  useSeedData: shouldUseSettingsPreferencesSeedData()
 })
 configureAiTodoBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'ai-todos.json'),
-  useSeedData: process.env.AIOPSTERM_AI_TODO_ENABLE_SEED === '1'
+  useSeedData: shouldUseAiTodoSeedData()
 })
 configureChatHistoryBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'chat-history.json'),
-  useSeedData: process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED === '1'
+  useSeedData: shouldUseChatHistorySeedData()
 })
 configureQuickCommandBackendRuntime({
   databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
-  useSeedData: process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED === '1'
+  useSeedData: shouldUseQuickCommandsSeedData()
 })
 configureAliasBackendRuntime({
   databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
-  useSeedData: process.env.AIOPSTERM_ALIASES_ENABLE_SEED === '1'
+  useSeedData: shouldUseAliasesSeedData()
 })
 configureAppUpdateRuntime({
   installer: async (update) => {
@@ -1886,7 +1904,7 @@ configureAiCommandBackendRuntime({
 configureAiChatRuntime({
   getConfig,
   listSkills: () => loadSkillsFromDisk(),
-  localBackendDouble: process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE === '1',
+  localBackendDouble: shouldUseAiChatBackendDouble(),
   callMcpTool: async (input) => {
     const current = getConfig()
     return callMcpTool(await loadCurrentMcpConfigFile(), input, {

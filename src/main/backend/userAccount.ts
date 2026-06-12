@@ -19,6 +19,7 @@ import type {
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
+import { shouldUseUserAccountCodeBackendDouble, shouldUseUserAccountSeedData } from '@shared/runtimeSwitches'
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
 import { copyFile, readFile, stat } from 'fs/promises'
@@ -113,7 +114,7 @@ const defaultUserAccountStateFilePath = () => {
   return envPath ? (isAbsolute(envPath) ? envPath : resolve(envPath)) : resolve(process.cwd(), '.aiopsterm-user-account.json')
 }
 
-const defaultUserAccountSeedMode = () => String(process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED || '').trim() === '1'
+const defaultUserAccountSeedMode = shouldUseUserAccountSeedData
 
 let runtimeConfig: UserAccountBackendRuntime = {
   stateFilePath: defaultUserAccountStateFilePath(),
@@ -564,7 +565,7 @@ const remainingCodeCooldownSeconds = (expiresAt: number, now = Date.now()) => Ma
 
 const normalizeUserCode = (value: unknown) => trimText(value).replace(/\s+/g, '')
 
-const userCodeBackendDoubleEnabled = () => String(process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE || '').trim() === '1'
+const userCodeBackendDoubleEnabled = shouldUseUserAccountCodeBackendDouble
 
 const generateUserCode = (scope: UserCodeCooldownScope, kind: UserCodeKind) => {
   if (userCodeBackendDoubleEnabled()) {

@@ -1,5 +1,6 @@
 import type { ModelOptionUserConfig } from './preload'
 import { defaultModelSettingsData } from './modelSettingsDefaults'
+import { shouldUseModelSettingsSeedData as runtimeShouldUseModelSettingsSeedData } from './runtimeSwitches'
 
 const developmentSeedModelOptions: ModelOptionUserConfig[] = [
   { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
@@ -10,17 +11,9 @@ const developmentSeedModelOptions: ModelOptionUserConfig[] = [
 
 const cloneModelOptions = (options: ModelOptionUserConfig[]) => options.map((option) => ({ ...option }))
 
-const isExplicitModelSettingsSeedEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_MODEL_SETTINGS_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-export const shouldUseModelSettingsSeedData = () => isExplicitModelSettingsSeedEnabled()
-
 export { defaultModelSettingsData } from './modelSettingsDefaults'
+
+export const shouldUseModelSettingsSeedData = runtimeShouldUseModelSettingsSeedData
 
 export const defaultModelSettingsSeedData = () => ({
   ...defaultModelSettingsData(),

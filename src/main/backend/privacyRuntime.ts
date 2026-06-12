@@ -1,4 +1,5 @@
 import type { PrivacyRuntimeApplyInput, PrivacyRuntimeApplyResult, PrivacyRuntimeSnapshot, PrivacyUserConfig } from '@shared/preload'
+import { shouldUseDataSyncBackendDouble } from '@shared/runtimeSwitches'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'
 
@@ -32,7 +33,7 @@ const defaultDataSyncStateFilePath = () => {
 let runtimeConfig: PrivacyRuntimeConfig = {
   dataSyncBackendUrl: String(process.env.AIOPSTERM_DATA_SYNC_BACKEND_URL || '').trim(),
   dataSyncStateFilePath: defaultDataSyncStateFilePath(),
-  useDataSyncBackendDouble: String(process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE || '').trim() === '1'
+  useDataSyncBackendDouble: shouldUseDataSyncBackendDouble()
 }
 
 let runtimeSnapshot: PrivacyRuntimeSnapshot = {
@@ -219,7 +220,7 @@ export const configurePrivacyRuntime = (config: PrivacyRuntimeConfig = {}) => {
     useDataSyncBackendDouble:
       config.useDataSyncBackendDouble !== undefined
         ? Boolean(config.useDataSyncBackendDouble)
-        : String(process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE || '').trim() === '1'
+        : shouldUseDataSyncBackendDouble()
   }
   runtimeStateLoaded = false
   runtimeLoadedStateFilePath = ''

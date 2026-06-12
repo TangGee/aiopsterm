@@ -1,5 +1,6 @@
 import type { ClientChannel, ConnectConfig } from 'ssh2'
 import type { AiopsAssetRecord, SshProxyConfig, TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent, UserConfig } from '@shared/preload'
+import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 import { loadSsh2 } from './ssh2Runtime'
@@ -132,8 +133,7 @@ const resolveAssetSecret = (assetId: string) => runtimeConfig.getAssetSecret?.(a
 
 const resolveKeychainSecret = (keychainId: string) => runtimeConfig.getKeychainSecret?.(keychainId) || {}
 
-const shouldUseBackendDouble = () =>
-  runtimeConfig.useBackendDouble === true || String(process.env.AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE || '').trim() === '1'
+const shouldUseBackendDouble = () => runtimeConfig.useBackendDouble === true || shouldUseSshTerminalBackendDouble()
 
 export const resolveSshTerminalTarget = (options: TerminalCreateOptions): SshTerminalTarget => {
   const asset = options.assetId ? resolveAsset(options.assetId) : null

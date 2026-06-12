@@ -21,6 +21,7 @@ import type {
   SkillUserConfig,
   UserConfig
 } from '@shared/preload'
+import { shouldUseAiChatBackendDouble } from '@shared/runtimeSwitches'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
 import { recordAiTodoCancelResult, recordAiTodoExchangeRequest, recordAiTodoResponseResult } from './aiTodos'
 
@@ -58,15 +59,7 @@ const wait = (durationMs: number) => {
 
 const now = () => (runtimeConfig.now ? runtimeConfig.now() : Date.now())
 
-const isExplicitAiChatLocalDoubleEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-const isAiChatLocalDoubleEnabled = () => runtimeConfig.localBackendDouble === true || isExplicitAiChatLocalDoubleEnabled()
+const isAiChatLocalDoubleEnabled = () => runtimeConfig.localBackendDouble === true || shouldUseAiChatBackendDouble()
 
 export const configureAiChatRuntime = (config?: AiChatRuntimeConfig) => {
   runtimeConfig = config ? { ...config } : {}

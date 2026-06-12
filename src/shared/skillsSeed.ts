@@ -1,4 +1,5 @@
 import type { SkillUserConfig } from './preload'
+import { shouldUseSkillsSeedData } from './runtimeSwitches'
 
 const defaultSkillSeeds: SkillUserConfig[] = [
   {
@@ -21,14 +22,6 @@ const cloneSkill = (skill: SkillUserConfig): SkillUserConfig => ({ ...skill })
 
 export const defaultSkillSeedData = () => defaultSkillSeeds.map(cloneSkill)
 
-const isExplicitSkillSeedEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_SKILLS_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-export const shouldUseSkillSeedData = () => isExplicitSkillSeedEnabled()
+export const shouldUseSkillSeedData = shouldUseSkillsSeedData
 
 export const defaultSkillsConfig = () => (shouldUseSkillSeedData() ? defaultSkillSeedData() : [])

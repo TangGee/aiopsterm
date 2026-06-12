@@ -1,3 +1,5 @@
+import { shouldUseKnowledgeSeedData as runtimeShouldUseKnowledgeSeedData } from './runtimeSwitches'
+
 const utf8ByteLength = (value: string) => {
   let bytes = 0
   for (let index = 0; index < value.length; index += 1) {
@@ -123,15 +125,7 @@ export const defaultKnowledgeSeedTree = () => [
   }
 ]
 
-const isExplicitKnowledgeSeedEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_KNOWLEDGE_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-export const shouldUseKnowledgeSeedData = () => isExplicitKnowledgeSeedEnabled()
+export const shouldUseKnowledgeSeedData = runtimeShouldUseKnowledgeSeedData
 
 export const defaultKnowledgeBaseConfig = () => ({
   tree: shouldUseKnowledgeSeedData() ? defaultKnowledgeSeedTree() : [],

@@ -1,14 +1,7 @@
 import type { McpServerUserConfig, McpToolStatesUserConfig } from './preload'
+import { shouldUseMcpSeedData as runtimeShouldUseMcpSeedData } from './runtimeSwitches'
 
-const isExplicitMcpSeedEnabled = () => {
-  try {
-    return typeof process !== 'undefined' && String(process.env?.AIOPSTERM_MCP_ENABLE_SEED || '').trim() === '1'
-  } catch {
-    return false
-  }
-}
-
-export const shouldUseMcpSeedData = () => isExplicitMcpSeedEnabled()
+export const shouldUseMcpSeedData = runtimeShouldUseMcpSeedData
 
 export const mcpSeedServers = (): McpServerUserConfig[] => [
   {
