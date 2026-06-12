@@ -87,6 +87,7 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
       ? {
           ...(config.stateFilePath ? { stateFilePath: config.stateFilePath } : {}),
           ...(config.credentialKeyPath ? { credentialKeyPath: config.credentialKeyPath } : {}),
+          ...(config.fetch ? { fetch: config.fetch } : {}),
           ...(typeof config.useSeedData === 'boolean' ? { useSeedData: config.useSeedData } : {})
         }
       : undefined

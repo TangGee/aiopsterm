@@ -943,7 +943,7 @@ const databaseEngineOptionsMock: DatabaseEngineInfo[] = [
   { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
   { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
   { code: 'mariadb', connectionCode: 'mariadb', name: 'MariaDB', enabled: true, accent: '#c0765c' },
-  { code: 'clickhouse', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
+  { code: 'clickhouse', connectionCode: 'clickhouse', name: 'ClickHouse', enabled: true, accent: '#fdd835' },
   { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
   { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
   { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
@@ -1675,7 +1675,9 @@ const testDatabaseConnectionMock = async (input: DatabaseConnectionTestInput) =>
                   ? 'Oracle local backend validation'
                   : input.dbType === 'sqlserver'
                     ? 'SQL Server local backend validation'
-                    : 'SQLite local backend validation'
+                    : input.dbType === 'clickhouse'
+                      ? 'ClickHouse local backend validation'
+                      : 'SQLite local backend validation'
   return { ok: true, data: { dbType: input.dbType, serverVersion, endpoint: 'test-backend', durationMs: 1 } }
 }
 
@@ -1742,6 +1744,10 @@ const buildSavedDatabaseConnectionUrlMock = (
   const rawUrl = databaseTrimMock(input.url)
   if (rawUrl) return rawUrl
   if (normalized.dbType === 'sqlite') return `sqlite://${normalized.filePath || ''}`
+  if (normalized.dbType === 'clickhouse') {
+    const port = normalized.port || 8123
+    return `http://${normalized.host}${port ? `:${port}` : ''}`
+  }
   const port = normalized.port ? `:${normalized.port}` : ''
   const database = normalized.database ? `/${normalized.database}` : ''
   if (normalized.dbType === 'oracle') return `${normalized.host}${port}${database}`
@@ -2189,7 +2195,17 @@ function parseDatabaseWhereMock(whereRaw?: string | null) {
 }
 
 type TestDatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-type TestDatabaseAiTargetDialect = 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlite' | 'oracle' | 'mssql' | 'sqlserver'
+type TestDatabaseAiTargetDialect =
+  | 'mysql'
+  | 'mariadb'
+  | 'oceanbase'
+  | 'postgresql'
+  | 'kingbase'
+  | 'sqlite'
+  | 'oracle'
+  | 'mssql'
+  | 'sqlserver'
+  | 'clickhouse'
 
 const stripDatabaseAiSqlTerminatorMock = (sql: string) => sql.trim().replace(/;+$/, '').trim()
 const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {
@@ -2198,7 +2214,7 @@ const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {
 }
 const quoteDatabaseAiIdentifierMock = (value: string, dialect: TestDatabaseAiTargetDialect) => {
   const raw = String(value || '').replace(/^[`"\[]|[`"\]]$/g, '')
-  if (isMysqlCompatibleDatabaseMock(dialect)) return `\`${raw.replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDatabaseMock(dialect) || dialect === 'clickhouse') return `\`${raw.replace(/`/g, '``')}\``
   if (dialect === 'mssql') return `[${raw.replace(/]/g, ']]')}]`
   return `"${raw.replace(/"/g, '""')}"`
 }
@@ -2249,6 +2265,9 @@ const databaseAiTableRefMock = (
     return `${quoteDatabaseAiIdentifierMock(schemaName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
   }
   if (dialect === 'sqlite' && input.context.databaseName) {
+    return `${quoteDatabaseAiIdentifierMock(input.context.databaseName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
+  }
+  if (dialect === 'clickhouse' && input.context.databaseName) {
     return `${quoteDatabaseAiIdentifierMock(input.context.databaseName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
   }
   return quoteDatabaseAiIdentifierMock(tableName, dialect)

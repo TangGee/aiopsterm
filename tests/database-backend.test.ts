@@ -42,6 +42,88 @@ import {
 
 const fieldsForRows = (rows: Array<Record<string, unknown>>) => Object.keys(rows[0] ?? {}).map((name) => ({ name }))
 
+const createClickHouseFetchDouble = () => {
+  const state = {
+    requests: [] as Array<{ url: string; sql: string; authorization?: string }>,
+    createdDatabases: [] as string[]
+  }
+  const response = (payload: Record<string, unknown>) =>
+    new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  const rowsFor = (rows: Array<Record<string, unknown>>, meta?: Array<{ name: string; type: string }>) =>
+    response({
+      meta: meta ?? fieldsForRows(rows).map((field) => ({ name: field.name, type: 'String' })),
+      data: rows,
+      rows: rows.length
+    })
+  const fetchDouble: typeof fetch = async (url, init = {}) => {
+    const sql = String(init.body ?? '')
+    const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers as HeadersInit)
+    state.requests.push({ url: String(url), sql, authorization: headers.get('Authorization') || undefined })
+    const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+    if (normalized.startsWith('select version()')) return rowsFor([{ version: '24.8.1.1' }], [{ name: 'version', type: 'String' }])
+    if (normalized.includes('from system.databases')) return rowsFor([{ name: 'ops' }], [{ name: 'name', type: 'String' }])
+    if (normalized.includes('from system.tables')) {
+      return rowsFor(
+        [
+          { name: 'events', engine: 'MergeTree' },
+          { name: 'events_mv', engine: 'MaterializedView' }
+        ],
+        [
+          { name: 'name', type: 'String' },
+          { name: 'engine', type: 'String' }
+        ]
+      )
+    }
+    if (normalized.includes('from system.columns')) {
+      return rowsFor(
+        [
+          { name: 'event_id', type: 'UInt64', is_in_primary_key: 1 },
+          { name: 'service', type: 'String', is_in_primary_key: 0 },
+          { name: 'status', type: 'LowCardinality(String)', is_in_primary_key: 0 },
+          { name: 'created_at', type: 'DateTime', is_in_primary_key: 0 }
+        ],
+        [
+          { name: 'name', type: 'String' },
+          { name: 'type', type: 'String' },
+          { name: 'is_in_primary_key', type: 'UInt8' }
+        ]
+      )
+    }
+    if (normalized.startsWith('show create table')) {
+      return rowsFor([{ statement: 'CREATE TABLE `ops`.`events` (`event_id` UInt64, `service` String) ENGINE = MergeTree ORDER BY event_id' }], [
+        { name: 'statement', type: 'String' }
+      ])
+    }
+    if (normalized.startsWith('select count()')) return rowsFor([{ total: 1 }], [{ name: 'total', type: 'UInt64' }])
+    if (normalized.startsWith('select * from')) {
+      return rowsFor(
+        [{ event_id: 42, service: 'clickhouse-api', status: 'open', created_at: '2026-06-09 12:00:00' }],
+        [
+          { name: 'event_id', type: 'UInt64' },
+          { name: 'service', type: 'String' },
+          { name: 'status', type: 'String' },
+          { name: 'created_at', type: 'DateTime' }
+        ]
+      )
+    }
+    if (normalized.startsWith('select event_id')) {
+      return rowsFor([{ event_id: 42, service: 'clickhouse-api' }], [
+        { name: 'event_id', type: 'UInt64' },
+        { name: 'service', type: 'String' }
+      ])
+    }
+    if (normalized.startsWith('create database')) {
+      state.createdDatabases.push(sql.match(/`([^`]+)`/)?.[1] || 'unknown')
+      return new Response('', { status: 200 })
+    }
+    return new Response(`unexpected clickhouse query: ${sql}`, { status: 500 })
+  }
+  return { fetch: fetchDouble, state }
+}
+
 const createPostgresDriverDouble = () => {
   const state = {
     connected: 0,
@@ -736,6 +818,7 @@ describe('database backend boundary', () => {
       'SQLServer',
       'SQLite',
       'MariaDB',
+      'ClickHouse',
       'OceanBase',
       'KingBase'
     ])
@@ -2676,6 +2759,143 @@ WHERE status = ''open'';
     expect(disconnected.data?.connection.status).toBe('idle')
     expect(state.connected).toBeGreaterThan(0)
     expect(state.closed).toBeGreaterThan(0)
+  })
+
+  it('uses the ClickHouse HTTP backend in non-seed runtime instead of a coming-soon placeholder', async () => {
+    const clickhouse = createClickHouseFetchDouble()
+    configureDatabaseRuntime({ useSeedData: false, fetch: clickhouse.fetch })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.engines.find((engine) => engine.code === 'clickhouse')).toMatchObject({
+      connectionCode: 'clickhouse',
+      enabled: true
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'clickhouse',
+      name: 'live-clickhouse',
+      host: '127.0.0.1',
+      port: 8123,
+      user: 'default',
+      password: 'secret',
+      database: 'ops'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'clickhouse',
+      serverVersion: 'ClickHouse 24.8.1.1',
+      endpoint: 'http://127.0.0.1:8123'
+    })
+    expect(clickhouse.state.requests.at(-1)?.authorization).toMatch(/^Basic /)
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'clickhouse',
+        name: 'live-clickhouse',
+        host: '127.0.0.1',
+        port: 8123,
+        user: 'default',
+        password: 'secret',
+        database: 'ops',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      status: 'idle',
+      url: 'http://127.0.0.1:8123',
+      catalogs: [{ name: 'ops', tables: [] }]
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-clickhouse')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    expect(connected.data?.connection.catalogs[0]?.tables?.[0]).toMatchObject({
+      name: 'events',
+      primaryKey: ['event_id'],
+      columns: expect.arrayContaining([expect.objectContaining({ name: 'service', type: 'String' })])
+    })
+    expect(connected.data?.connection.catalogs[0]?.schemas?.[0]?.views?.[0]).toMatchObject({
+      name: 'events_mv'
+    })
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      databaseName: 'ops',
+      sql: 'SELECT event_id, service FROM `ops`.`events`'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data).toMatchObject({
+      columns: ['event_id', 'service'],
+      rows: [{ event_id: 42, service: 'clickhouse-api' }]
+    })
+    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }],
+      sort: { column: 'event_id', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data).toMatchObject({
+      knownColumns: ['event_id', 'service', 'status', 'created_at'],
+      rows: [expect.objectContaining({ event_id: 42, service: 'clickhouse-api' })],
+      total: 1
+    })
+    expect(clickhouse.state.requests.some((request) => request.sql.includes('ORDER BY `event_id` DESC'))).toBe(true)
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      databaseName: 'ops',
+      tableName: 'events'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE `ops`.`events`')
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-clickhouse',
+      requestedName: 'ops_archive',
+      sql: 'CREATE DATABASE `ops_archive`;'
+    })
+    expect(createdDatabase.ok).toBe(true)
+    expect(clickhouse.state.createdDatabases).toEqual(['ops_archive'])
+    expect(createdDatabase.data?.connection.catalogs.map((item) => item.name)).toContain('ops_archive')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
+      knownColumns: ['event_id', 'service'],
+      mutations: [{ kind: 'insert', values: { event_id: 43, service: 'new-event' } }]
+    })
+    expect(plan.ok).toBe(false)
+    expect(plan.errorCode).toBe('DB_CLICKHOUSE_MUTATION_UNSUPPORTED')
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
+      mutations: [{ kind: 'truncate' }]
+    })
+    expect(mutation.ok).toBe(false)
+    expect(mutation.errorCode).toBe('DB_CLICKHOUSE_MUTATION_UNSUPPORTED')
   })
 
   it('uses the injected PostgreSQL-compatible driver for KingBase instead of a coming-soon placeholder', async () => {

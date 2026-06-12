@@ -2292,8 +2292,8 @@ const DB_AI_PANE_DEFAULT_WIDTH = 360
 const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
 const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
-const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql']
-const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver']
+const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql', 'clickhouse']
+const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse']
 const DB_ENGINE_OPTION_CODES = [
   'mysql',
   'h2',
@@ -2321,11 +2321,13 @@ const connectionSchemeForDbType = (dbType: DatabaseEngineCode) =>
       ? 'jdbc:kingbase8'
       : dbType === 'sqlserver'
         ? 'jdbc:sqlserver'
-        : dbType === 'mariadb'
-          ? 'jdbc:mariadb'
-          : dbType === 'oceanbase'
-            ? 'jdbc:oceanbase'
-            : 'jdbc:mysql'
+        : dbType === 'clickhouse'
+          ? 'http'
+          : dbType === 'mariadb'
+            ? 'jdbc:mariadb'
+            : dbType === 'oceanbase'
+              ? 'jdbc:oceanbase'
+              : 'jdbc:mysql'
 const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
 const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -3053,7 +3055,7 @@ const connectionDraft = reactive({
 const createDatabaseModal = reactive({
   open: false,
   connectionId: '',
-  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver'>,
+  dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver' | 'clickhouse'>,
   name: '',
   sql: '',
   userEditedSql: false,
@@ -3107,7 +3109,8 @@ const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }> = [
   { value: 'mysql', label: 'MySQL' },
   { value: 'sqlite', label: 'SQLite' },
   { value: 'oracle', label: 'Oracle' },
-  { value: 'mssql', label: 'SQL Server' }
+  { value: 'mssql', label: 'SQL Server' },
+  { value: 'clickhouse', label: 'ClickHouse' }
 ]
 const dangerConfirm = reactive({
   open: false,
@@ -3172,7 +3175,10 @@ const contextConnectionCanCreateDatabase = computed(() => {
   return (
     !!connection &&
     connection.status === 'connected' &&
-    (isMysqlCompatibleDbType(connection.dbType) || isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'sqlserver')
+    (isMysqlCompatibleDbType(connection.dbType) ||
+      isPostgresCompatibleDbType(connection.dbType) ||
+      connection.dbType === 'sqlserver' ||
+      connection.dbType === 'clickhouse')
   )
 })
 const connectionMoveTargets = computed(() => {
@@ -3375,6 +3381,7 @@ function buildConnectionUrl() {
   const database = connectionDraft.database ? `/${connectionDraft.database}` : ''
   if (connectionDraft.dbType === 'oracle') return `${host}${port}${database}`
   const scheme = connectionSchemeForDbType(connectionDraft.dbType)
+  if (connectionDraft.dbType === 'clickhouse') return `${scheme}://${host}${port}`
   return `${scheme}://${host}${port}${database}`
 }
 
@@ -3510,7 +3517,10 @@ function updateSqlTabSchema(event: Event) {
   tab.tableName = undefined
 }
 
-function renderCreateDatabaseTemplate(name: string, dbType: Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver'>) {
+function renderCreateDatabaseTemplate(
+  name: string,
+  dbType: Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver' | 'clickhouse'>
+) {
   const trimmed = name.trim()
   return trimmed ? `CREATE DATABASE ${quoteIdentForDialect(trimmed, dbType)};` : ''
 }
@@ -4796,6 +4806,9 @@ function renderDefaultSql(connection: DatabaseConnectionInfo | undefined, catalo
 
 function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
   const quotedTable = quoteSqlIdentifierForDialect(tableName, dbType)
+  if (dbType === 'clickhouse' && catalogName) {
+    return `${quoteSqlIdentifierForDialect(catalogName, dbType)}.${quotedTable}`
+  }
   if ((isPostgresCompatibleDbType(dbType) || dbType === 'oracle' || dbType === 'sqlserver') && schemaName) {
     return `${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
   }
@@ -4806,7 +4819,7 @@ function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: s
 }
 
 function quoteSqlIdentifierForDialect(value: string, dbType: DatabaseEngineCode) {
-  if (isMysqlCompatibleDbType(dbType)) return `\`${String(value).replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDbType(dbType) || dbType === 'clickhouse') return `\`${String(value).replace(/`/g, '``')}\``
   if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
   return `"${String(value).replace(/"/g, '""')}"`
 }
@@ -6659,9 +6672,11 @@ function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[
             ? 1521
             : dbType === 'sqlserver'
               ? 1433
-              : dbType === 'sqlite'
-                ? null
-                : 3306
+              : dbType === 'clickhouse'
+                ? 8123
+                : dbType === 'sqlite'
+                  ? null
+                  : 3306
   Object.assign(connectionDraft, {
     id: '',
     dbType,
@@ -6671,7 +6686,7 @@ function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[
     host: '127.0.0.1',
     port: defaultPort,
     authentication: 'UserAndPassword',
-    user: dbType === 'sqlite' ? '' : dbType === 'sqlserver' ? 'sa' : 'root',
+    user: dbType === 'sqlite' ? '' : dbType === 'sqlserver' ? 'sa' : dbType === 'clickhouse' ? 'default' : 'root',
     password: '',
     database: '',
     filePath: '',
@@ -7372,7 +7387,7 @@ function setEditorSql(nextSql: string, selectionStart: number, selectionEnd = se
 }
 
 function extractSql(text: string) {
-  const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql)?\s*\n([\s\S]*?)```/i)
+  const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse)?\s*\n([\s\S]*?)```/i)
   return match?.[1].trim() ?? text
 }
 
@@ -7389,7 +7404,7 @@ function quoteIdentifier(value: string) {
 }
 
 function quoteIdentForDialect(value: string, dbType: DatabaseEngineCode) {
-  if (isMysqlCompatibleDbType(dbType)) return `\`${String(value).replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDbType(dbType) || dbType === 'clickhouse') return `\`${String(value).replace(/`/g, '``')}\``
   if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
   return `"${String(value).replace(/"/g, '""')}"`
 }

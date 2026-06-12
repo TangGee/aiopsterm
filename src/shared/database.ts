@@ -63,7 +63,7 @@ import type {
   DatabaseSqlErrorDiagnosisResult
 } from './preload'
 
-const supportedEngines = new Set(['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver'])
+const supportedEngines = new Set(['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse'])
 const DEFAULT_DATABASE_GROUP_ID = 'group-default'
 const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
 const databaseStatusValues = new Set<DatabaseConnectionInfo['status']>(['idle', 'testing', 'connected', 'failed'])
@@ -77,7 +77,8 @@ const engineVersions: Record<DatabaseConnectionTestInput['dbType'], string> = {
   kingbase: 'KingBase PostgreSQL-compatible local backend validation',
   sqlite: 'SQLite local backend validation',
   oracle: 'Oracle local backend validation',
-  sqlserver: 'SQL Server local backend validation'
+  sqlserver: 'SQL Server local backend validation',
+  clickhouse: 'ClickHouse local backend validation'
 }
 
 const databaseEngines: DatabaseEngineInfo[] = [
@@ -88,7 +89,7 @@ const databaseEngines: DatabaseEngineInfo[] = [
   { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
   { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
   { code: 'mariadb', connectionCode: 'mariadb', name: 'MariaDB', enabled: true, accent: '#c0765c' },
-  { code: 'clickhouse', name: 'ClickHouse', enabled: false, accent: '#fdd835' },
+  { code: 'clickhouse', connectionCode: 'clickhouse', name: 'ClickHouse', enabled: true, accent: '#fdd835' },
   { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
   { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
   { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
@@ -361,12 +362,14 @@ type SqlServerPool = {
 type SqlServerDriver = {
   ConnectionPool: new (config: Record<string, unknown>) => SqlServerPool
 }
+type DatabaseFetch = typeof fetch
 export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
   mysqlDriver?: MySqlDriver
   postgresDriver?: PostgresDriver
   oracleDriver?: OracleDriver | null
   sqlServerDriver?: SqlServerDriver | null
+  fetch?: DatabaseFetch
   oracleClientLibDir?: string
   oracleClientConfigDir?: string
   oracleDriverName?: string
@@ -883,7 +886,9 @@ const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tabl
   sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
 
 type RelationalDatabaseType = Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'oracle' | 'sqlserver'>
-type DatabaseMutationDialect = DatabaseEngineCode
+type RelationalDatabaseConnection = DatabaseConnectionInfo & { dbType: RelationalDatabaseType }
+type ClickHouseDatabaseConnection = DatabaseConnectionInfo & { dbType: 'clickhouse' }
+type DatabaseMutationDialect = Exclude<DatabaseEngineCode, 'clickhouse'>
 type DatabaseMutationStatement = Omit<DatabaseTableMutationPlanStatement, 'preview'>
 type DatabaseRowMutation = Extract<DatabaseTableMutationInput['mutations'][number], { kind: 'delete' | 'update' }>
 
@@ -1137,7 +1142,7 @@ const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTa
   }
 }
 
-const isRelationalConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is DatabaseConnectionInfo =>
+const isRelationalConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is RelationalDatabaseConnection =>
   !!connection &&
   (connection.dbType === 'mysql' ||
     connection.dbType === 'mariadb' ||
@@ -1218,6 +1223,331 @@ const relationalRowCount = (result: unknown, fallback = 0) => {
   }
   return fallback
 }
+
+type ClickHouseJsonResponse = {
+  meta?: Array<{ name?: string; type?: string }>
+  data?: Array<Record<string, unknown>>
+  rows?: number
+  statistics?: Record<string, unknown>
+}
+
+const isClickHouseConnection = (connection: DatabaseConnectionInfo | null | undefined): connection is ClickHouseDatabaseConnection =>
+  connection?.dbType === 'clickhouse'
+
+const loadClickHouseFetch = () => {
+  if (databaseRuntimeConfig.fetch) return databaseRuntimeConfig.fetch
+  const runtimeFetch = globalThis.fetch
+  return typeof runtimeFetch === 'function' ? (runtimeFetch.bind(globalThis) as DatabaseFetch) : null
+}
+
+const clickHouseBaseUrlFrom = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'url'>) => {
+  const rawUrl = trim(input.url)
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl.replace(/\/+$/, '')
+  const host = trim(input.host)
+  const port = normalizedDatabasePort(input.port) ?? 8123
+  return `http://${host}:${port}`
+}
+
+const clickHouseAuthorizationHeader = (input: Pick<DatabaseConnectionTestInput, 'user' | 'password'>) => {
+  const user = trim(input.user)
+  const password = input.password ?? ''
+  if (!user && !password) return ''
+  return `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
+}
+
+const clickHouseConnectionInput = (connection: DatabaseConnectionInfo): DatabaseConnectionTestInput => connectionTestInputFromSaved(connection)
+
+const clickHouseEndpointFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'url'>) => clickHouseBaseUrlFrom(input)
+
+const clickHouseEnsureJsonFormat = (sql: string) => (/\bformat\s+json\b/i.test(sql) ? sql : `${sql.replace(/;+$/, '')} FORMAT JSON`)
+const clickHouseReturnsRows = (sql: string) => /^\s*(select|with|show|describe|desc|explain)\b/i.test(sql)
+
+const clickHouseLiteral = (value: string) => `'${String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+
+const clickHouseIdentifier = (value: string) => `\`${String(value || '').replace(/`/g, '``')}\``
+
+const clickHouseTableReference = (input: Pick<DatabaseTableQueryInput, 'databaseName' | 'tableName'>) =>
+  `${clickHouseIdentifier(trim(input.databaseName))}.${clickHouseIdentifier(trim(input.tableName))}`
+
+const clickHouseErrorCode = (error: unknown, fallback: string) => {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+  return code.startsWith('DB_') ? code : fallback
+}
+
+const clickHouseErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
+
+const clickHouseQueryText = async (input: DatabaseConnectionTestInput, sql: string, databaseName?: string) => {
+  const fetchImpl = loadClickHouseFetch()
+  if (!fetchImpl) {
+    throw Object.assign(new Error('ClickHouse HTTP runtime is unavailable. Use a Node/Electron runtime with fetch support.'), {
+      code: 'DB_CLICKHOUSE_FETCH_UNAVAILABLE'
+    })
+  }
+  const url = new URL(clickHouseBaseUrlFrom(input))
+  const database = trim(databaseName) || trim(input.database)
+  if (database) url.searchParams.set('database', database)
+  const authorization = clickHouseAuthorizationHeader(input)
+  const response = await fetchImpl(url.toString(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      ...(authorization ? { Authorization: authorization } : {})
+    },
+    body: sql
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw Object.assign(new Error(text.trim() || response.statusText || `ClickHouse HTTP ${response.status}`), {
+      code: 'DB_CLICKHOUSE_HTTP_FAILED'
+    })
+  }
+  return text
+}
+
+const clickHouseQueryJson = async <T extends Record<string, unknown>>(
+  input: DatabaseConnectionTestInput,
+  sql: string,
+  databaseName?: string
+): Promise<{ columns: string[]; rows: T[]; raw: ClickHouseJsonResponse }> => {
+  const text = await clickHouseQueryText(input, clickHouseEnsureJsonFormat(sql), databaseName)
+  let parsed: ClickHouseJsonResponse
+  try {
+    parsed = JSON.parse(text) as ClickHouseJsonResponse
+  } catch {
+    throw Object.assign(new Error('ClickHouse returned a non-JSON response.'), { code: 'DB_CLICKHOUSE_JSON_INVALID' })
+  }
+  const rows = normalizeQueryRows(parsed.data) as T[]
+  const columns = Array.isArray(parsed.meta) ? parsed.meta.map((field) => trim(field.name)).filter(Boolean) : columnsForRows(rows)
+  return { columns, rows, raw: parsed }
+}
+
+const clickHouseRows = async <T extends Record<string, unknown>>(connection: DatabaseConnectionInfo, sql: string, databaseName?: string) =>
+  clickHouseQueryJson<T>(clickHouseConnectionInput(connection), sql, databaseName).then((result) => result.rows)
+
+const clickHouseColumnsForTable = async (
+  connection: DatabaseConnectionInfo,
+  input: Pick<DatabaseTableQueryInput, 'databaseName' | 'tableName'>
+): Promise<DatabaseColumnInfo[]> => {
+  const rows = await clickHouseRows<Record<string, unknown>>(
+    connection,
+    [
+      'SELECT name, type, is_in_primary_key',
+      'FROM system.columns',
+      `WHERE database = ${clickHouseLiteral(trim(input.databaseName))} AND table = ${clickHouseLiteral(trim(input.tableName))}`,
+      'ORDER BY position'
+    ].join(' '),
+    trim(input.databaseName)
+  )
+  return rows
+    .flatMap((row) => {
+      const name = trim(rowValue(row, 'name', 'NAME'))
+      if (!name) return []
+      const inPrimaryKey = Number(rowValue(row, 'is_in_primary_key', 'IS_IN_PRIMARY_KEY') ?? 0) > 0
+      const type = trim(rowValue(row, 'type', 'TYPE')) || 'unknown'
+      const column: DatabaseColumnInfo = {
+        name,
+        type,
+        nullable: /^Nullable\(/i.test(type),
+        ...(inPrimaryKey ? { key: 'PK' as const } : {})
+      }
+      return [column]
+    })
+}
+
+const clickHouseCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> => {
+  const databaseRows = await clickHouseRows<Record<string, unknown>>(
+    connection,
+    "SELECT name FROM system.databases WHERE name NOT IN ('INFORMATION_SCHEMA', 'information_schema', 'system') ORDER BY name"
+  )
+  const selected = trim(connection.database)
+  const catalogNames = Array.from(new Set([selected, ...databaseRows.map((row) => trim(rowValue(row, 'name', 'NAME')))].filter(Boolean)))
+  const catalogs: DatabaseCatalogInfo[] = []
+  for (const catalogName of catalogNames) {
+    const tableRows = await clickHouseRows<Record<string, unknown>>(
+      connection,
+      [
+        'SELECT name, engine',
+        'FROM system.tables',
+        `WHERE database = ${clickHouseLiteral(catalogName)}`,
+        'ORDER BY name'
+      ].join(' '),
+      catalogName
+    )
+    const tables: DatabaseTableInfo[] = []
+    const views: DatabaseTableInfo[] = []
+    for (const row of tableRows) {
+      const name = trim(rowValue(row, 'name', 'NAME'))
+      if (!name) continue
+      const engine = trim(rowValue(row, 'engine', 'ENGINE')).toLowerCase()
+      const columns = await clickHouseColumnsForTable(connection, { databaseName: catalogName, tableName: name })
+      const table = {
+        id: databaseColumnId(connection.id, `${catalogName}-${name}`),
+        name,
+        columns,
+        primaryKey: sqlitePrimaryKeyForColumns(columns)
+      }
+      if (engine.includes('view')) views.push(table)
+      else tables.push(table)
+    }
+    catalogs.push({
+      name: catalogName,
+      tables,
+      ...(views.length ? { schemas: [{ name: 'default', tables: [], views, functions: [], procedures: [] }] } : {})
+    })
+  }
+  return catalogs
+}
+
+const clickHouseWhereForFilters = (filters: DatabaseColumnFilter[], knownColumns: string[]) => {
+  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
+  const clauses: string[] = []
+  filters.forEach((filter) => {
+    const column = known.get(trim(filter.column).toLowerCase())
+    if (!column) return
+    const quoted = clickHouseIdentifier(column)
+    if (filter.operator === 'isnull') {
+      clauses.push(`${quoted} IS NULL`)
+      return
+    }
+    if (filter.operator === 'notnull') {
+      clauses.push(`${quoted} IS NOT NULL`)
+      return
+    }
+    if (filter.operator === 'like') {
+      clauses.push(`${quoted} LIKE ${clickHouseLiteral(`%${String(filter.value ?? '')}%`)}`)
+      return
+    }
+    if (filter.operator === 'eq') {
+      clauses.push(`${quoted} = ${clickHouseLiteral(String(filter.value ?? ''))}`)
+      return
+    }
+    if (filter.operator === 'neq') {
+      clauses.push(`${quoted} != ${clickHouseLiteral(String(filter.value ?? ''))}`)
+      return
+    }
+    const values = (filter.values ?? []).map(String)
+    if (!values.length) {
+      clauses.push('0 = 1')
+      return
+    }
+    clauses.push(`${quoted} IN (${values.map(clickHouseLiteral).join(', ')})`)
+  })
+  return clauses.length ? ` WHERE ${clauses.join(' AND ')}` : ''
+}
+
+const clickHouseOrderByFor = (sort: DatabaseColumnSort | null | undefined, knownColumns: string[]) => {
+  if (!sort) return ''
+  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
+  const column = known.get(trim(sort.column).toLowerCase())
+  if (!column) return ''
+  return ` ORDER BY ${clickHouseIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+}
+
+const clickHouseExecute = async (connection: DatabaseConnectionInfo, rawSql: string, startedAt: number): Promise<DatabaseSqlExecuteResult> => {
+  try {
+    if (!clickHouseReturnsRows(rawSql)) {
+      await clickHouseQueryText(clickHouseConnectionInput(connection), rawSql, trim(connection.database))
+      return {
+        ok: true,
+        data: {
+          columns: [],
+          rows: [],
+          rowCount: 0,
+          durationMs: Math.max(1, Date.now() - startedAt)
+        }
+      }
+    }
+    const query = await clickHouseQueryJson<Record<string, unknown>>(clickHouseConnectionInput(connection), rawSql, trim(connection.database))
+    return {
+      ok: true,
+      data: {
+        columns: query.columns.length ? query.columns : columnsForRows(query.rows),
+        rows: query.rows,
+        rowCount: query.rows.length,
+        durationMs: Math.max(1, Date.now() - startedAt)
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_QUERY_FAILED'),
+      errorMessage: clickHouseErrorMessage(error, 'ClickHouse query failed.')
+    }
+  }
+}
+
+const clickHouseQueryTable = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableQueryInput,
+  startedAt: number
+): Promise<DatabaseTableQueryResult> => {
+  try {
+    const columns = await clickHouseColumnsForTable(connection, input)
+    if (!columns.length) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const knownColumns = columns.map((column) => column.name)
+    const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
+    const where = clickHouseWhereForFilters(filters, knownColumns)
+    const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
+    const orderBy = clickHouseOrderByFor(sort, knownColumns)
+    const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(input.pageSize) || 100)))
+    const page = Math.max(1, Math.floor(Number(input.page) || 1))
+    const offset = (page - 1) * pageSize
+    const tableRef = clickHouseTableReference(input)
+    const rowsQuery = await clickHouseQueryJson<Record<string, unknown>>(
+      clickHouseConnectionInput(connection),
+      `SELECT * FROM ${tableRef}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+      trim(input.databaseName)
+    )
+    const countRows = input.withTotal
+      ? await clickHouseRows<Record<string, unknown>>(connection, `SELECT count() AS total FROM ${tableRef}${where}`, trim(input.databaseName))
+      : []
+    return {
+      ok: true,
+      data: {
+        columns: rowsQuery.columns.length ? rowsQuery.columns : knownColumns,
+        rows: rowsQuery.rows,
+        rowCount: rowsQuery.rows.length,
+        durationMs: Math.max(1, Date.now() - startedAt),
+        total: input.withTotal ? Number(rowValue(countRows[0] ?? {}, 'total', 'TOTAL') ?? 0) : null,
+        knownColumns
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_QUERY_FAILED'),
+      errorMessage: clickHouseErrorMessage(error, 'ClickHouse table query failed.')
+    }
+  }
+}
+
+const clickHouseTableDdl = async (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> => {
+  try {
+    const rows = await clickHouseRows<Record<string, unknown>>(
+      connection,
+      `SHOW CREATE TABLE ${clickHouseTableReference(input)}`,
+      trim(input.databaseName)
+    )
+    const values = Object.values(rows[0] ?? {})
+    const ddl = values.find((value) => typeof value === 'string' && trim(value).toLowerCase().startsWith('create'))
+    if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    return { ok: true, data: { ddl: String(ddl) } }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_DDL_FAILED'),
+      errorMessage: clickHouseErrorMessage(error, 'ClickHouse DDL lookup failed.')
+    }
+  }
+}
+
+const clickHouseMutationUnsupported = () => ({
+  ok: false as const,
+  errorCode: 'DB_CLICKHOUSE_MUTATION_UNSUPPORTED',
+  errorMessage: 'ClickHouse table editing is not supported by this aiopsterm backend yet.'
+})
 
 const mysqlConfigFor = (input: Pick<DatabaseConnectionTestInput, 'host' | 'port' | 'user' | 'password' | 'database' | 'sslMode'>) => ({
   host: trim(input.host),
@@ -2821,7 +3151,12 @@ const databaseMutationPlanData = (
   input: DatabaseTableMutationPlanInput,
   knownColumns: string[]
 ): DatabaseTableMutationPlanResult['data'] => {
-  const dialect = connection.dbType
+  if (connection.dbType === 'clickhouse') {
+    throw Object.assign(new Error('ClickHouse table editing is not supported by this aiopsterm backend yet.'), {
+      code: 'DB_CLICKHOUSE_MUTATION_UNSUPPORTED'
+    })
+  }
+  const dialect: DatabaseMutationDialect = connection.dbType
   const tableRef = databaseMutationTableReference(connection, input, dialect)
   const statements = input.mutations
     .map((mutation) => buildDatabaseMutationStatement(dialect, tableRef, knownColumns, mutation))
@@ -2895,7 +3230,10 @@ const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo
 const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseConnectionInfo => ({
   ...connection,
   status:
-    !shouldUseDatabaseSeedData() && isRelationalConnection(connection) && connection.status === 'connected' && !databaseVerifiedConnections.has(connection.id)
+    !shouldUseDatabaseSeedData() &&
+    (isRelationalConnection(connection) || isClickHouseConnection(connection)) &&
+    connection.status === 'connected' &&
+    !databaseVerifiedConnections.has(connection.id)
       ? 'idle'
       : connection.status,
   catalogs:
@@ -3278,6 +3616,7 @@ const buildSavedConnectionUrl = (
   const rawUrl = trim(input.url)
   if (rawUrl) return rawUrl
   if (normalized.dbType === 'sqlite') return `sqlite://${normalized.filePath || ''}`
+  if (normalized.dbType === 'clickhouse') return clickHouseBaseUrlFrom(normalized)
   const port = normalized.port ? `:${normalized.port}` : ''
   const database = normalized.database ? `/${normalized.database}` : ''
   if (normalized.dbType === 'oracle') return `${normalized.host}${port}${database}`
@@ -3569,6 +3908,25 @@ export async function connectDatabaseConnection(connectionId: string): Promise<D
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
+  if (!shouldUseDatabaseSeedData() && isClickHouseConnection(connection)) {
+    try {
+      const catalogs = await clickHouseCatalogsForConnection(connection)
+      databaseVerifiedConnections.add(id)
+      return databaseConnectionMutation(id, 'Connection opened', (current) => ({
+        ...current,
+        status: 'connected',
+        catalogs
+      }))
+    } catch (error) {
+      const failed = applyConnectionFailure(
+        id,
+        error,
+        'DB_CLICKHOUSE_CONNECTION_FAILED',
+        'Database connection failed.'
+      )
+      return failed
+    }
+  }
   if (!shouldUseDatabaseSeedData() && isRelationalConnection(connection)) {
     try {
       const catalogs = await relationalCatalogsForConnection(connection)
@@ -3609,6 +3967,25 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
   const connection = databaseConnections.find((item) => item.id === id)
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  }
+  if (!shouldUseDatabaseSeedData() && isClickHouseConnection(connection)) {
+    try {
+      const catalogs = await clickHouseCatalogsForConnection(connection)
+      databaseVerifiedConnections.add(id)
+      return databaseConnectionMutation(id, 'Connection schema refreshed', (current) => ({
+        ...current,
+        status: 'connected',
+        catalogs
+      }))
+    } catch (error) {
+      const failed = applyConnectionFailure(
+        id,
+        error,
+        'DB_CLICKHOUSE_REFRESH_FAILED',
+        'Database schema refresh failed.'
+      )
+      return failed
+    }
   }
   if (!shouldUseDatabaseSeedData() && isRelationalConnection(connection)) {
     try {
@@ -4125,7 +4502,7 @@ const drawerTargetDialect = (input: DatabaseAiDrawerResponseInput): DatabaseAiTa
 
 const quoteDrawerIdentifier = (value: string, dialect: DatabaseAiTargetDialect) => {
   const raw = String(value || '').replace(/^[`"\[]|[`"\]]$/g, '')
-  if (isMysqlCompatibleDbType(dialect)) return `\`${raw.replace(/`/g, '``')}\``
+  if (isMysqlCompatibleDbType(dialect) || dialect === 'clickhouse') return `\`${raw.replace(/`/g, '``')}\``
   if (dialect === 'mssql') return `[${raw.replace(/]/g, ']]')}]`
   return `"${raw.replace(/"/g, '""')}"`
 }
@@ -4138,6 +4515,7 @@ const dialectLabel = (dialect: DatabaseAiTargetDialect) => {
   if (dialect === 'kingbase') return 'KingBase'
   if (dialect === 'sqlite') return 'SQLite'
   if (dialect === 'oracle') return 'Oracle'
+  if (dialect === 'clickhouse') return 'ClickHouse'
   if (dialect === 'mssql' || dialect === 'sqlserver') return 'SQL Server'
   return dialect
 }
@@ -4201,6 +4579,7 @@ const drawerTableReference = (input: DatabaseAiDrawerResponseInput, dialect: Dat
   if ((isPostgresCompatibleDbType(dialect) || dialect === 'oracle' || dialect === 'mssql' || dialect === 'sqlserver') && parts.schemaName) {
     return `${quoteDrawerIdentifier(parts.schemaName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
   }
+  if (dialect === 'clickhouse' && parts.databaseName) return `${quoteDrawerIdentifier(parts.databaseName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
   if (dialect === 'sqlite' && parts.databaseName) return `${quoteDrawerIdentifier(parts.databaseName, dialect)}.${quoteDrawerIdentifier(parts.tableName, dialect)}`
   return quoteDrawerIdentifier(parts.tableName, dialect)
 }
@@ -4393,7 +4772,7 @@ const drawerProviderMessages = (input: DatabaseAiDrawerResponseInput, dialect: D
 }
 
 const extractFencedSqlBlock = (text: string) => {
-  const match = text.match(/```(?:sql|mysql|postgresql|sqlite|oracle|mssql|tsql)?\s*([\s\S]*?)```/i)
+  const match = text.match(/```(?:sql|mysql|postgresql|sqlite|oracle|mssql|tsql|clickhouse)?\s*([\s\S]*?)```/i)
   const sql = normalizeDatabaseAiProviderText(match?.[1])
   if (!match || !sql) return { sql: '', reasoning: normalizeDatabaseAiProviderText(text) }
   const reasoning = normalizeDatabaseAiProviderText(text.slice(0, match.index)) || normalizeDatabaseAiProviderText(text.replace(match[0], ''))
@@ -4847,6 +5226,27 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
   }
 
   if (!shouldUseDatabaseSeedData()) {
+    if (input.dbType === 'clickhouse') {
+      try {
+        const result = await clickHouseQueryJson<{ version?: string }>(input, 'SELECT version() AS version', trim(input.database))
+        const version = trim(rowValue(result.rows[0] ?? {}, 'version', 'VERSION'))
+        return {
+          ok: true,
+          data: {
+            dbType: 'clickhouse',
+            serverVersion: version ? `ClickHouse ${version}` : 'ClickHouse',
+            endpoint: clickHouseEndpointFor(input),
+            durationMs: Math.max(1, Date.now() - startedAt)
+          }
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_CONNECTION_FAILED'),
+          errorMessage: clickHouseErrorMessage(error, 'ClickHouse connection failed.')
+        }
+      }
+    }
     return testRelationalDatabaseConnection(input, startedAt)
   }
 
@@ -4949,11 +5349,11 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
-  if (!isMysqlCompatibleDbType(connection.dbType) && !isPostgresCompatibleDbType(connection.dbType) && connection.dbType !== 'sqlserver') {
+  if (!isMysqlCompatibleDbType(connection.dbType) && !isPostgresCompatibleDbType(connection.dbType) && connection.dbType !== 'sqlserver' && connection.dbType !== 'clickhouse') {
     return {
       ok: false,
       errorCode: 'DB_CREATE_DATABASE_UNSUPPORTED',
-      errorMessage: 'Create Database is only available for MySQL-compatible, PostgreSQL-compatible, and SQL Server connections.'
+      errorMessage: 'Create Database is only available for MySQL-compatible, PostgreSQL-compatible, SQL Server, and ClickHouse connections.'
     }
   }
 
@@ -4978,23 +5378,28 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
         await withPostgresClient(connection, async (client) => {
           await postgresExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, connection.dbType as RelationalDatabaseType)}`)
         })
-      } else {
+      } else if (connection.dbType === 'sqlserver') {
         await withSqlServerPool(connection, async (client) => {
           await sqlServerExec(client, input.sql || `CREATE DATABASE ${relationalIdentifier(name, 'sqlserver')}`)
         })
+      } else {
+        await clickHouseQueryText(clickHouseConnectionInput(connection), input.sql || `CREATE DATABASE ${clickHouseIdentifier(name)}`)
       }
     } catch (error) {
       return {
         ok: false,
-        errorCode: relationalErrorCode(
-          error,
-          isMysqlCompatibleDbType(connection.dbType)
-            ? 'DB_MYSQL_CREATE_DATABASE_FAILED'
-            : connection.dbType === 'sqlserver'
-              ? 'DB_SQLSERVER_CREATE_DATABASE_FAILED'
-              : relationalFallbackCode(connection.dbType as RelationalDatabaseType, 'CREATE_DATABASE_FAILED')
-        ),
-        errorMessage: relationalErrorMessage(error, 'Create database failed.')
+        errorCode:
+          connection.dbType === 'clickhouse'
+            ? clickHouseErrorCode(error, 'DB_CLICKHOUSE_CREATE_DATABASE_FAILED')
+            : relationalErrorCode(
+                error,
+                isMysqlCompatibleDbType(connection.dbType)
+                  ? 'DB_MYSQL_CREATE_DATABASE_FAILED'
+                  : connection.dbType === 'sqlserver'
+                    ? 'DB_SQLSERVER_CREATE_DATABASE_FAILED'
+                    : relationalFallbackCode(connection.dbType as RelationalDatabaseType, 'CREATE_DATABASE_FAILED')
+              ),
+        errorMessage: connection.dbType === 'clickhouse' ? clickHouseErrorMessage(error, 'Create database failed.') : relationalErrorMessage(error, 'Create database failed.')
       }
     }
   }
@@ -5041,6 +5446,7 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   if (!shouldUseDatabaseSeedData()) {
+    if (isClickHouseConnection(connection)) return clickHouseExecute(connection, rawSql, startedAt)
     if (isRelationalConnection(connection)) return relationalExecute(connection, rawSql, startedAt)
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine execution is not wired in this aiopsterm backend yet.' }
   }
@@ -5086,6 +5492,7 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   if (!shouldUseDatabaseSeedData()) {
+    if (isClickHouseConnection(connection)) return clickHouseTableDdl(connection, input)
     if (isRelationalConnection(connection)) return relationalTableDdl(connection, input)
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine DDL lookup is not wired in this aiopsterm backend yet.' }
   }
@@ -5125,6 +5532,7 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   if (!shouldUseDatabaseSeedData()) {
+    if (isClickHouseConnection(connection)) return clickHouseQueryTable(connection, input, startedAt)
     if (isRelationalConnection(connection)) return relationalQueryTable(connection, input, startedAt)
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table query is not wired in this aiopsterm backend yet.' }
   }
@@ -5199,6 +5607,7 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
   }
 
   if (!shouldUseDatabaseSeedData()) {
+    if (isClickHouseConnection(connection)) return clickHouseMutationUnsupported()
     if (isRelationalConnection(connection)) {
       try {
         const columns = await relationalColumnsForTable(connection, input)
@@ -5245,6 +5654,7 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   if (!shouldUseDatabaseSeedData()) {
+    if (isClickHouseConnection(connection)) return clickHouseMutationUnsupported()
     if (isRelationalConnection(connection)) return relationalMutateTable(connection, input, startedAt)
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table mutations are not wired in this aiopsterm backend yet.' }
   }

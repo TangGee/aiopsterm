@@ -1988,7 +1988,16 @@ export type AiChatCancelResult = AiopsMutationResult<{
   contextUsage?: AiChatContextUsageSnapshot
 }>
 
-export type DatabaseEngineCode = 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlite' | 'oracle' | 'sqlserver'
+export type DatabaseEngineCode =
+  | 'mysql'
+  | 'mariadb'
+  | 'oceanbase'
+  | 'postgresql'
+  | 'kingbase'
+  | 'sqlite'
+  | 'oracle'
+  | 'sqlserver'
+  | 'clickhouse'
 
 export type DatabaseEngineOptionCode =
   | DatabaseEngineCode
