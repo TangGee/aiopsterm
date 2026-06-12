@@ -7508,7 +7508,10 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('Database')
     expect(wrapper.text()).toContain('Default Group')
     expect(wrapper.text()).toContain('orders-postgres')
+    expect(wrapper.findAll('.db-workspace-tab')).toHaveLength(1)
     expect(wrapper.find('.db-workspace-tab').text()).toContain('Overview')
+    expect(wrapper.text()).not.toContain('SQL Console')
+    expect(wrapper.text()).not.toContain('select id, service, status, owner')
     expect(wrapper.text()).toContain('New Connection')
     expect(wrapper.find('.db-overview-hero').text()).toContain('Create connection')
     expect(wrapper.find('.db-overview-hero').text()).toContain('Explore schemas')
@@ -9041,6 +9044,8 @@ describe('AppShell', () => {
     expect(malformedCatalogWrapper.text()).toContain('Database catalog backend returned malformed result data.')
     expect(malformedCatalogWrapper.text()).not.toContain('Default Group')
     expect(malformedCatalogWrapper.text()).not.toContain('orders-postgres')
+    expect(malformedCatalogWrapper.text()).not.toContain('SQL Console')
+    expect(malformedCatalogWrapper.text()).not.toContain('select id, service, status, owner')
     malformedCatalogWrapper.unmount()
 
     const wrapper = mount(DatabaseWorkspace, {

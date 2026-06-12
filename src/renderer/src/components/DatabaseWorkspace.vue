@@ -3198,24 +3198,7 @@ const noticeTimer = ref<number | null>(null)
 const editingGroupId = ref<string | null>(null)
 const editingGroupName = ref('')
 
-const tabs = ref<WorkspaceTab[]>([
-  { id: 'tab-overview', kind: 'overview', title: 'Overview' },
-  {
-    id: 'tab-sql-1',
-    kind: 'sql',
-    title: 'SQL Console',
-    connectionId: 'conn-prod-pg',
-    catalogName: 'orders',
-    schemaName: 'public',
-    sql: 'select id, service, status, owner, updated_at\nfrom public.orders\nwhere status <> \'closed\'\norder by updated_at desc\nlimit 20;',
-    savedSql: 'select id, service, status, owner, updated_at\nfrom public.orders\nwhere status <> \'closed\'\norder by updated_at desc\nlimit 20;',
-    saving: false,
-    saveError: null,
-    resultTabs: [],
-    activeResultTabId: 'overview',
-    history: []
-  }
-])
+const tabs = ref<WorkspaceTab[]>([{ id: 'tab-overview', kind: 'overview', title: 'Overview' }])
 const activeTabId = ref('tab-overview')
 const resultSeq = ref(1)
 const sqlEditorRef = ref<DatabaseSqlEditorApi | null>(null)
