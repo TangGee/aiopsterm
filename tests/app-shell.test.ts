@@ -4029,6 +4029,21 @@ describe('AppShell', () => {
       await wrapper.vm.$nextTick()
       expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('导出失败：AI 服务返回数据无效')
 
+      vi.mocked(window.aiops.exportChat).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          exported: 1,
+          fileName: 'ai-chat.md',
+          filePath: '/tmp/ai-chat.md',
+          markdown: '# malformed export'
+        }
+      } as any)
+      await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('导出失败：AI 服务返回数据无效')
+      expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).not.toContain('聊天已导出')
+
       vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/malformed-image.png'] })
       vi.mocked(window.aiops.prepareChatImageAttachmentFromFile).mockResolvedValueOnce({
         ok: true,

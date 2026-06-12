@@ -103,6 +103,24 @@ describe('zmodem backend boundary', () => {
     await expect(stat(output)).resolves.toMatchObject({ size: 5 })
   })
 
+  it('rejects ZMODEM stream close when the saved file size does not match transferred bytes', async () => {
+    const output = join(tempRoot, 'truncated.bin')
+    const opened = await backend.openZmodemStream(output)
+    expect(opened.ok).toBe(true)
+    const streamId = opened.data!.streamId
+
+    await expect(backend.writeZmodemChunk(streamId, [0, 1, 2, 3])).resolves.toMatchObject({
+      ok: true,
+      data: { totalBytes: 4 }
+    })
+    await writeFile(output, Buffer.from([9]))
+
+    await expect(backend.closeZmodemStream(streamId)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'ZMODEM_STREAM_SIZE_MISMATCH'
+    })
+  })
+
   it('fails closed for missing streams and empty chunks', async () => {
     await expect(backend.writeZmodemChunk('missing-stream', [1])).resolves.toMatchObject({
       ok: false,

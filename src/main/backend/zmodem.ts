@@ -181,6 +181,10 @@ export const closeZmodemStream = async (streamId: string): Promise<ZmodemStreamC
       active.stream.once('error', reject)
       active.stream.end(resolve)
     })
+    const metadata = await stat(active.filePath)
+    if (metadata.size !== active.bytes) {
+      return errorResult('ZMODEM_STREAM_SIZE_MISMATCH', 'ZMODEM saved file size does not match the transferred byte count.')
+    }
     return { ok: true, data: { streamId: id, filePath: active.filePath, bytes: active.bytes } }
   } catch (error) {
     return errorResult('ZMODEM_STREAM_CLOSE_FAILED', error instanceof Error ? error.message : 'Failed to close ZMODEM stream.')

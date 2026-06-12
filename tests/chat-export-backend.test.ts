@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { sanitizeChatExportFileName } from '../src/shared/chatExport'
@@ -10,7 +10,17 @@ type ChatExportBackend = {
     input: AiChatExportInput,
     runtime: {
       showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
-      writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
+      writeFile?: (
+        filePath: string,
+        content: string,
+        encoding: 'utf-8'
+      ) => Promise<
+        | void
+        | {
+            filePath?: string
+            bytes?: number
+          }
+      >
       now?: () => Date
     }
   ) => Promise<AiChatExportResult>
@@ -151,7 +161,9 @@ describe('AI chat export backend boundary', () => {
       data: {
         exported: input.messages.length,
         fileName: sanitizeChatExportFileName(input.title),
-        filePath: outputFile
+        filePath: outputFile,
+        bytes: expect.any(Number),
+        markdown: expect.any(String)
       }
     })
     expect(showSaveDialog).toHaveBeenCalledWith({
@@ -160,6 +172,9 @@ describe('AI chat export backend boundary', () => {
     })
 
     const markdown = await readFile(outputFile, 'utf-8')
+    expect(result.data?.markdown).toBe(markdown)
+    expect(result.data?.bytes).toBe(Buffer.byteLength(markdown, 'utf8'))
+    await expect(stat(outputFile)).resolves.toMatchObject({ size: result.data?.bytes })
     expect(markdown).toContain('# 生产/巡检:*?"<>|回滚执行')
     expect(markdown).toContain('from aiopsterm')
     expect(markdown).toContain('**System:**')
@@ -229,6 +244,77 @@ describe('AI chat export backend boundary', () => {
       ok: false,
       errorCode: 'AI_CHAT_EXPORT_FAILED',
       errorMessage: 'disk full'
+    })
+  })
+
+  it('rejects chat export save paths that cannot be written as absolute files', async () => {
+    const { exportChat } = await loadBackend()
+    const writeFileMock = vi.fn(async () => undefined)
+
+    await expect(
+      exportChat(exportInput(), {
+        showSaveDialog: async () => ({ canceled: false, filePath: '   ' }),
+        writeFile: writeFileMock
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'AI_CHAT_EXPORT_SAVE_PATH_INVALID'
+    })
+
+    await expect(
+      exportChat(exportInput(), {
+        showSaveDialog: async () => ({ canceled: false, filePath: 'relative/export.md' }),
+        writeFile: writeFileMock
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'AI_CHAT_EXPORT_SAVE_PATH_INVALID'
+    })
+
+    expect(writeFileMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects chat export writers that cannot confirm the written file', async () => {
+    const { exportChat } = await loadBackend()
+    const outputFile = await createTempOutput()
+    const otherOutputFile = await createTempOutput()
+
+    await expect(
+      exportChat(exportInput(), {
+        showSaveDialog: async () => ({ canceled: false, filePath: outputFile }),
+        writeFile: async (filePath, content) => {
+          await writeFile(filePath, content, 'utf-8')
+          return { filePath: otherOutputFile, bytes: Buffer.byteLength(content, 'utf8') }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'AI_CHAT_EXPORT_WRITE_CONFIRMATION_INVALID'
+    })
+
+    await expect(
+      exportChat(exportInput(), {
+        showSaveDialog: async () => ({ canceled: false, filePath: outputFile }),
+        writeFile: async (filePath, content) => {
+          await writeFile(filePath, content, 'utf-8')
+          return { filePath, bytes: 1 }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'AI_CHAT_EXPORT_WRITE_CONFIRMATION_INVALID'
+    })
+
+    await expect(
+      exportChat(exportInput(), {
+        showSaveDialog: async () => ({ canceled: false, filePath: outputFile }),
+        writeFile: async (filePath) => {
+          await writeFile(filePath, 'not the generated markdown', 'utf-8')
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'AI_CHAT_EXPORT_WRITE_CONFIRMATION_INVALID'
     })
   })
 })

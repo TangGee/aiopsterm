@@ -36,6 +36,8 @@ const isNonNegativeFiniteNumber = (value: unknown): value is number => typeof va
 
 const isNonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && isNonNegativeFiniteNumber(value)
 
+const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength
+
 export const isAiContextOptionData = (value: unknown): value is AiContextOption => {
   if (!isRecord(value)) return false
   if (!isNonEmptyString(value.id) || !aiContextKinds.has(value.kind as AiContextKind) || !isNonEmptyString(value.label)) return false
@@ -99,7 +101,13 @@ export const isAiChatExportData = (value: unknown): value is AiChatExportData =>
   if (!isRecord(value)) return false
   if (!isNonNegativeInteger(value.exported) || !isNonEmptyString(value.fileName)) return false
   if (!isOptionalString(value.filePath) || !isOptionalString(value.markdown) || !isOptionalBoolean(value.canceled)) return false
-  return true
+  if (value.canceled === true) return value.exported === 0 && value.filePath === undefined && value.bytes === undefined && value.markdown === undefined
+  return (
+    value.exported > 0 &&
+    isNonEmptyString(value.filePath) &&
+    isNonNegativeInteger(value.bytes) &&
+    (typeof value.markdown !== 'string' || value.bytes === utf8ByteLength(value.markdown))
+  )
 }
 
 export const isChatAttachmentStageData = (value: unknown): value is ChatAttachmentStageResult =>

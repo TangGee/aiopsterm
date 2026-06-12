@@ -6116,15 +6116,19 @@ Object.defineProperty(window, 'aiops', {
     getPathForFile: vi.fn((file: File & { path?: string }) => String(file?.path || '')),
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/tmp/imported-note.md'] })),
     showSaveDialog: vi.fn(async (options?: { defaultPath?: string }) => ({ canceled: false, filePath: `/tmp/${options?.defaultPath || 'downloaded-file'}` })),
-    exportChat: vi.fn(async (input: AiChatExportInput) => ({
-      ok: true,
-      data: {
-        exported: input.messages.length,
-        fileName: sanitizeChatExportFileName(input.title),
-        filePath: '/tmp/ai-chat-export.md',
-        markdown: buildChatExportMarkdown(input, new Date('2026-06-04T12:00:00+08:00'))
+    exportChat: vi.fn(async (input: AiChatExportInput) => {
+      const markdown = buildChatExportMarkdown(input, new Date('2026-06-04T12:00:00+08:00'))
+      return {
+        ok: true,
+        data: {
+          exported: input.messages.length,
+          fileName: sanitizeChatExportFileName(input.title),
+          filePath: '/tmp/ai-chat-export.md',
+          bytes: Buffer.byteLength(markdown, 'utf8'),
+          markdown
+        }
       }
-    })),
+    }),
     exportDatabaseRows: vi.fn(async (input: DatabaseExportInput) => {
       const csv = buildDatabaseExportCsv(input)
       return {

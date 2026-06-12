@@ -711,6 +711,7 @@ export type AiChatExportResult = AiopsMutationResult<{
   exported: number
   fileName: string
   filePath?: string
+  bytes?: number
   canceled?: boolean
   markdown?: string
 }>
