@@ -11413,6 +11413,24 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.userLoginLoading).toBe(false)
     assertUserSnapshotUnchanged()
 
+    vi.mocked(window.aiops.loginUserAccount).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        profile: {
+          ...store.userProfile,
+          username: 'complete_but_unacknowledged',
+          skippedLogin: false,
+          localDatabaseReady: true,
+          lastLoginMethod: 'account'
+        },
+        trustedDevices: store.trustedDevices.map((device) => ({ ...device }))
+      }
+    } as any)
+    await expect(store.loginWithAccount('ops_login', 'secret')).resolves.toBe(false)
+    expect(store.userNotice).toBe('用户后端返回了无效结果')
+    expect(store.userLoginLoading).toBe(false)
+    assertUserSnapshotUnchanged()
+
     vi.mocked(window.aiops.logoutUserAccount).mockResolvedValueOnce({
       ok: true,
       data: {

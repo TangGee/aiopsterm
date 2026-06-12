@@ -7164,25 +7164,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const applyUserMutationResult = (result: AiopsUserMutationResult | undefined) => {
-    if (result?.data && !isUserAccountSnapshot(result.data)) {
-      setUserNotice('用户后端返回了无效结果')
+    if (!result) {
+      setUserNotice('用户操作失败')
       userLoginLoading.value = false
       return false
     }
-    if (result?.data) applyUserAccountSnapshot(result.data)
-    if (!result?.ok) {
-      setUserNotice(result?.errorMessage || '用户操作失败')
+    if (result.ok) {
+      if (!isUserMutationData(result.data)) {
+        setUserNotice('用户后端返回了无效结果')
+        userLoginLoading.value = false
+        return false
+      }
+      applyUserAccountSnapshot(result.data)
+      setUserNotice(result.data.message || '用户操作已完成')
       userLoginLoading.value = false
-      return false
+      return true
     }
-    if (!isUserMutationData(result.data)) {
-      setUserNotice('用户后端返回了无效结果')
-      userLoginLoading.value = false
-      return false
+    if (result.data !== undefined) {
+      if (!isUserAccountSnapshot(result.data)) {
+        setUserNotice('用户后端返回了无效结果')
+        userLoginLoading.value = false
+        return false
+      }
+      if (result.errorCode === 'USER_DEVICE_VERIFICATION_REQUIRED') {
+        applyUserAccountSnapshot(result.data)
+      }
     }
-    setUserNotice(result.data.message || '用户操作已完成')
+    setUserNotice(result.errorMessage || '用户操作失败')
     userLoginLoading.value = false
-    return true
+    return false
   }
 
   const refreshUserAccount = async () => {
