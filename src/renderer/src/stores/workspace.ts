@@ -5651,6 +5651,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
+  const applyMcpMutationSnapshotForRequest = (
+    result: McpConfigMutationResult,
+    previousSnapshot: ReturnType<typeof getMcpSnapshot>,
+    errorPrefix: string,
+    mismatchMessage: string,
+    matches: () => boolean
+  ) => {
+    if (!applyMcpConfigMutationResult(result, errorPrefix)) {
+      restoreMcpServersSnapshot(previousSnapshot)
+      return false
+    }
+    if (!matches()) {
+      mcpConfigEditorError.value = `${errorPrefix}: ${mismatchMessage}`
+      return failMcpMutationRefresh(previousSnapshot, mismatchMessage)
+    }
+    return true
+  }
+
   const refreshMcpServersFromBridge = async () => {
     const { servers, toolStates } = getMcpSnapshot()
     const snapshot = await readMcpServersSnapshotFromBridge(servers, toolStates)
@@ -7866,7 +7884,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const nextDisabled = !server.disabled
     const previousSnapshot = getMcpSnapshot()
     try {
-      await window.aiops.toggleMcpServer(name, nextDisabled)
+      const result = await window.aiops.toggleMcpServer(name, nextDisabled)
+      if (
+        !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'MCP 状态更新失败', `MCP ${name} 状态更新结果不匹配`, () =>
+          mcpServerDisabledMatches(name, nextDisabled)
+        )
+      ) {
+        return false
+      }
       const refreshed = await refreshMcpServersFromBridge()
       if (!refreshed) {
         return failMcpMutationRefresh(previousSnapshot, `MCP ${name} 状态更新后刷新失败`)
@@ -7890,7 +7915,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const previousSnapshot = getMcpSnapshot()
     try {
-      await window.aiops.deleteMcpServer(name)
+      const result = await window.aiops.deleteMcpServer(name)
+      if (
+        !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'MCP 删除失败', `${name} 删除结果不匹配`, () => mcpServerDeletedMatches(name))
+      ) {
+        return false
+      }
       const refreshed = await refreshMcpServersFromBridge()
       if (!refreshed) {
         return failMcpMutationRefresh(previousSnapshot, `${name} 删除后刷新失败`)
@@ -7917,7 +7947,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const nextEnabled = !tool.enabled
     const previousSnapshot = getMcpSnapshot()
     try {
-      await window.aiops.setMcpToolState(serverName, toolName, nextEnabled)
+      const result = await window.aiops.setMcpToolState(serverName, toolName, nextEnabled)
+      if (
+        !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'MCP Tool 状态更新失败', `${toolName} 状态更新结果不匹配`, () =>
+          mcpToolEnabledMatches(serverName, toolName, nextEnabled)
+        )
+      ) {
+        return false
+      }
       const refreshed = await refreshMcpServersFromBridge()
       if (!refreshed) {
         return failMcpMutationRefresh(previousSnapshot, `${toolName} 状态更新后刷新失败`)
@@ -7945,7 +7982,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const previousSnapshot = getMcpSnapshot()
     try {
       const result = await window.aiops.setMcpToolAutoApprove(serverName, toolName, nextAutoApprove)
-      if (!applyMcpConfigMutationResult(result, 'Auto Approve failed')) return false
+      if (
+        !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'Auto Approve failed', 'MCP Auto Approve 更新结果不匹配', () =>
+          mcpToolAutoApproveMatches(serverName, toolName, nextAutoApprove)
+        )
+      ) {
+        return false
+      }
+      const refreshed = await refreshMcpServersFromBridge()
+      if (!refreshed) {
+        return failMcpMutationRefresh(previousSnapshot, 'MCP Auto Approve 更新后刷新失败')
+      }
       if (!mcpToolAutoApproveMatches(serverName, toolName, nextAutoApprove)) {
         mcpConfigEditorError.value = 'Auto Approve failed: MCP Auto Approve 更新后刷新结果不匹配'
         return failMcpMutationRefresh(previousSnapshot, 'MCP Auto Approve 更新后刷新结果不匹配')

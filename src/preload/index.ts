@@ -112,9 +112,11 @@ const api: AiopsPreloadApi = {
   getMcpServers: () => ipcRenderer.invoke('mcp:get-servers'),
   readMcpConfig: () => ipcRenderer.invoke('mcp-config:read') as Promise<string>,
   writeMcpConfig: (content: string) => ipcRenderer.invoke('mcp-config:write', content) as Promise<McpConfigWriteResult>,
-  toggleMcpServer: (serverName: string, disabled: boolean) => ipcRenderer.invoke('mcp-config:toggle-server', serverName, disabled),
-  deleteMcpServer: (serverName: string) => ipcRenderer.invoke('mcp-config:delete-server', serverName),
-  setMcpToolState: (serverName: string, toolName: string, enabled: boolean) => ipcRenderer.invoke('mcp:set-tool-state', serverName, toolName, enabled),
+  toggleMcpServer: (serverName: string, disabled: boolean) =>
+    ipcRenderer.invoke('mcp-config:toggle-server', serverName, disabled) as Promise<McpConfigWriteResult>,
+  deleteMcpServer: (serverName: string) => ipcRenderer.invoke('mcp-config:delete-server', serverName) as Promise<McpConfigWriteResult>,
+  setMcpToolState: (serverName: string, toolName: string, enabled: boolean) =>
+    ipcRenderer.invoke('mcp:set-tool-state', serverName, toolName, enabled) as Promise<McpConfigWriteResult>,
   setMcpToolAutoApprove: (serverName: string, toolName: string, autoApprove: boolean) =>
     ipcRenderer.invoke('mcp:set-tool-auto-approve', serverName, toolName, autoApprove) as Promise<McpConfigWriteResult>,
   callMcpTool: (serverName: string, toolName: string, args?: Record<string, unknown>) =>

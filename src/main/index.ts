@@ -2095,6 +2095,14 @@ const applyMcpConfigFileSnapshot = async (parsed: McpConfigFile) => {
   }
 }
 
+const mcpConfigWriteSuccess = (data: Awaited<ReturnType<typeof applyMcpConfigFileSnapshot>>) => ({ ok: true, data })
+
+const mcpConfigWriteError = (error: unknown, fallbackCode: string, fallbackMessage: string) => ({
+  ok: false,
+  errorCode: fallbackCode,
+  errorMessage: error instanceof Error ? error.message : fallbackMessage
+})
+
 const syncMcpConfigFromContent = async (content: string) => {
   if (!content.trim()) return
   return applyMcpConfigFileSnapshot(normalizeMcpConfigFile(JSON.parse(content)))
@@ -2105,7 +2113,7 @@ const loadCurrentMcpConfigFile = async () => {
   return normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
 }
 
-const setMcpToolState = (serverName: string, toolName: string, enabled: boolean) => {
+const setMcpToolState = async (serverName: string, toolName: string, enabled: boolean) => {
   const normalizedServerName = serverName.trim()
   const normalizedToolName = toolName.trim()
   if (!normalizedServerName || !normalizedToolName) {
@@ -2132,6 +2140,10 @@ const setMcpToolState = (serverName: string, toolName: string, enabled: boolean)
       }
     })
   )
+  const configPath = await ensureMcpConfigFile()
+  const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
+  const snapshot = await applyMcpConfigFileSnapshot(parsed)
+  return mcpConfigWriteSuccess(snapshot)
 }
 
 const setMcpToolAutoApprove = async (serverName: string, toolName: string, autoApprove: boolean) => {
@@ -2173,7 +2185,7 @@ const setMcpToolAutoApprove = async (serverName: string, toolName: string, autoA
   await writeFile(configPath, nextContent, 'utf-8')
   const snapshot = await applyMcpConfigFileSnapshot(parsed)
   broadcastMcpConfigChanged(nextContent)
-  return { ok: true, data: snapshot }
+  return mcpConfigWriteSuccess(snapshot)
 }
 
 const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined => {
@@ -2679,31 +2691,48 @@ const registerIpc = () => {
     await writeFile(configPath, nextContent, 'utf-8')
     const snapshot = await applyMcpConfigFileSnapshot(normalized)
     broadcastMcpConfigChanged(nextContent)
-    return { ok: true, data: snapshot }
+    return mcpConfigWriteSuccess(snapshot)
   })
   ipcMain.handle('mcp-config:toggle-server', async (_event, serverName: string, disabled: boolean) => {
-    const configPath = await ensureMcpConfigFile()
-    const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-    if (!parsed.mcpServers[serverName]) {
-      parsed.mcpServers[serverName] = { type: 'stdio' }
+    try {
+      const normalizedServerName = String(serverName || '').trim()
+      if (!normalizedServerName) throw new Error('MCP server name is required')
+      const configPath = await ensureMcpConfigFile()
+      const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
+      if (!parsed.mcpServers[normalizedServerName]) throw new Error(`MCP server not found: ${normalizedServerName}`)
+      parsed.mcpServers[normalizedServerName].disabled = disabled
+      const nextContent = JSON.stringify(parsed, null, 2)
+      await writeFile(configPath, nextContent, 'utf-8')
+      const snapshot = await applyMcpConfigFileSnapshot(parsed)
+      broadcastMcpConfigChanged(nextContent)
+      return mcpConfigWriteSuccess(snapshot)
+    } catch (error) {
+      return mcpConfigWriteError(error, 'MCP_SERVER_TOGGLE_FAILED', 'MCP server toggle failed.')
     }
-    parsed.mcpServers[serverName].disabled = disabled
-    const nextContent = JSON.stringify(parsed, null, 2)
-    await writeFile(configPath, nextContent, 'utf-8')
-    await syncMcpConfigFromContent(nextContent)
-    broadcastMcpConfigChanged(nextContent)
   })
   ipcMain.handle('mcp-config:delete-server', async (_event, serverName: string) => {
-    const configPath = await ensureMcpConfigFile()
-    const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-    delete parsed.mcpServers[serverName]
-    const nextContent = JSON.stringify(parsed, null, 2)
-    await writeFile(configPath, nextContent, 'utf-8')
-    await syncMcpConfigFromContent(nextContent)
-    broadcastMcpConfigChanged(nextContent)
+    try {
+      const normalizedServerName = String(serverName || '').trim()
+      if (!normalizedServerName) throw new Error('MCP server name is required')
+      const configPath = await ensureMcpConfigFile()
+      const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
+      if (!parsed.mcpServers[normalizedServerName]) throw new Error(`MCP server not found: ${normalizedServerName}`)
+      delete parsed.mcpServers[normalizedServerName]
+      const nextContent = JSON.stringify(parsed, null, 2)
+      await writeFile(configPath, nextContent, 'utf-8')
+      const snapshot = await applyMcpConfigFileSnapshot(parsed)
+      broadcastMcpConfigChanged(nextContent)
+      return mcpConfigWriteSuccess(snapshot)
+    } catch (error) {
+      return mcpConfigWriteError(error, 'MCP_SERVER_DELETE_FAILED', 'MCP server delete failed.')
+    }
   })
   ipcMain.handle('mcp:set-tool-state', async (_event, serverName: string, toolName: string, enabled: boolean) => {
-    setMcpToolState(serverName, toolName, Boolean(enabled))
+    try {
+      return await setMcpToolState(serverName, toolName, Boolean(enabled))
+    } catch (error) {
+      return mcpConfigWriteError(error, 'MCP_TOOL_STATE_FAILED', 'MCP tool state update failed.')
+    }
   })
   ipcMain.handle('mcp:set-tool-auto-approve', async (_event, serverName: string, toolName: string, autoApprove: boolean) => {
     try {

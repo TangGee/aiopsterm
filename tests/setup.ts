@@ -5215,6 +5215,12 @@ const applyMcpConfigContentMock = (content: string) => {
   }
 }
 
+const currentMcpConfigMutationDataMock = () => ({
+  mcpConfig: (JSON.parse(mcpConfigContentMock) as { mcpServers?: Record<string, unknown> }) || { mcpServers: {} },
+  mcpServers: mcpServersMock.map(cloneMcpServerMock),
+  mcpToolStates: getMcpToolStatesMock(mcpServersMock)
+})
+
 const callMcpToolMock = async (serverName: string, toolName: string, args?: Record<string, unknown>) => {
   const server = mcpServersMock.find((item) => item.name === serverName)
   if (!server) return { ok: false, errorCode: 'MCP_TOOL_SERVER_NOT_FOUND', errorMessage: `MCP server not found: ${serverName}` }
@@ -6007,22 +6013,34 @@ Object.defineProperty(window, 'aiops', {
     }),
     toggleMcpServer: vi.fn(async (serverName: string, disabled: boolean) => {
       const server = mcpServersMock.find((item) => item.name === serverName)
-      if (!server) throw new Error(`MCP server not found: ${serverName}`)
+      if (!server) return { ok: false, errorCode: 'MCP_SERVER_TOGGLE_FAILED', errorMessage: `MCP server not found: ${serverName}` }
       server.disabled = disabled
       server.status = disabled ? 'disabled' : server.error ? 'error' : 'connected'
+      const parsed = JSON.parse(mcpConfigContentMock) as { mcpServers?: Record<string, { disabled?: boolean }> }
+      const serverConfig = parsed.mcpServers?.[serverName]
+      if (serverConfig) {
+        serverConfig.disabled = disabled
+        mcpConfigContentMock = JSON.stringify(parsed, null, 2)
+      }
+      return { ok: true, data: currentMcpConfigMutationDataMock() }
     }),
     deleteMcpServer: vi.fn(async (serverName: string) => {
+      if (!mcpServersMock.some((server) => server.name === serverName)) {
+        return { ok: false, errorCode: 'MCP_SERVER_DELETE_FAILED', errorMessage: `MCP server not found: ${serverName}` }
+      }
       mcpServersMock = mcpServersMock.filter((server) => server.name !== serverName)
       const parsed = JSON.parse(mcpConfigContentMock) as { mcpServers?: Record<string, unknown> }
       if (parsed.mcpServers) {
         delete parsed.mcpServers[serverName]
         mcpConfigContentMock = JSON.stringify(parsed, null, 2)
       }
+      return { ok: true, data: currentMcpConfigMutationDataMock() }
     }),
     setMcpToolState: vi.fn(async (serverName: string, toolName: string, enabled: boolean) => {
       const tool = mcpServersMock.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
-      if (!tool) throw new Error(`MCP tool not found: ${serverName}:${toolName}`)
+      if (!tool) return { ok: false, errorCode: 'MCP_TOOL_STATE_FAILED', errorMessage: `MCP tool not found: ${serverName}:${toolName}` }
       tool.enabled = enabled
+      return { ok: true, data: currentMcpConfigMutationDataMock() }
     }),
     setMcpToolAutoApprove: vi.fn(async (serverName: string, toolName: string, autoApprove: boolean) => {
       const tool = mcpServersMock.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
