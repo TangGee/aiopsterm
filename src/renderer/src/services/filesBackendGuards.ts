@@ -148,6 +148,17 @@ export const isFileEntryMutationData = (value: unknown, mutationKind: FileEntryM
   return mutationKind === 'rename' || isFileTransferTaskData(value.task)
 }
 
+export const isFileEntryMutationDataForRequest = (value: unknown, mutation: FileEntryMutation): value is FileEntryMutationData => {
+  if (!isFileEntryMutationData(value, mutation.kind)) return false
+  const path = value.path
+  const task = isRecord(value) && isFileTransferTaskData(value.task) ? value.task : undefined
+  if (mutation.kind === 'rename') return path === mutation.newPath
+  if (!task || task.status !== 'success') return false
+  if (mutation.kind === 'delete') return path === mutation.path && task.source === mutation.path
+  if (mutation.kind === 'chmod') return path === mutation.path && value.mode === mutation.mode && task.source === mutation.path
+  return path === mutation.targetPath && task.source === mutation.srcPath && task.target === mutation.targetPath
+}
+
 export const isFileTransferOperationData = (value: unknown): value is FileTransferOperationData =>
   isRecord(value) &&
   (value.status === 'success' || value.status === 'cancelled' || value.status === 'skipped') &&

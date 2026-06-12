@@ -463,6 +463,7 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   isFileEntryMutationData,
+  isFileEntryMutationDataForRequest,
   isFileListEntryData,
   isFileTransferOperationData,
   isFileTransferTaskData,
@@ -662,7 +663,7 @@ const listDirectoryEntries = async (path: string) => {
 const applyMutationResult = (result: FileEntryMutationResult, mutation: FileEntryMutation, fallbackError: string) => {
   if (!result?.ok) throw new Error(result?.errorMessage || fallbackError)
   const data = result.data
-  if (!isFileEntryMutationData(data, mutation.kind) || typeof data.path !== 'string' || !data.path.trim()) throw new Error(malformedFilesBackendResultMessage)
+  if (!isFileEntryMutationDataForRequest(data, mutation) || typeof data.path !== 'string' || !data.path.trim()) throw new Error(malformedFilesBackendResultMessage)
   if (mutation.kind !== 'rename') pushBackendTransferTask(data.task, fallbackError)
   return data
 }

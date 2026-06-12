@@ -6145,6 +6145,160 @@ describe('AppShell', () => {
     expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(renameListCallsBefore)
     renameBrowser.unmount()
 
+    const mismatchedRenameBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const mismatchedRenameRow = mismatchedRenameBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await mismatchedRenameRow.find('.file-row-actions button[title="重命名"]').trigger('click')
+    await mismatchedRenameRow.find('.file-rename-row input').setValue('release-note-v2.md')
+    const mismatchedRenameListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        affected: 1,
+        path: '/tmp/local-picked/other-file.md',
+        mtimeMs: Date.now()
+      }
+    } as any)
+    await mismatchedRenameRow.find('.file-rename-row button[title="确认"]').trigger('click')
+    await flushPromises()
+    expect(mismatchedRenameBrowser.text()).toContain('文件服务返回数据无效')
+    expect(mismatchedRenameBrowser.text()).not.toContain('重命名成功')
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(mismatchedRenameListCallsBefore)
+    mismatchedRenameBrowser.unmount()
+
+    const chmodBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const chmodRow = chmodBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await chmodRow.find('.file-row-actions button[title="权限"]').trigger('click')
+    await chmodBrowser.findAll('.permission-check input').find((input) => (input.element as HTMLInputElement).value === '执行')!.setValue(true)
+    const chmodListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        affected: 1,
+        path: '/release-note.md',
+        mode: '744',
+        mtimeMs: Date.now(),
+        task: {
+          id: 'malformed-chmod-task',
+          type: 'r2r',
+          name: 'chmod release-note.md',
+          source: '/release-note.md',
+          target: 'permissions',
+          progress: 100,
+          speed: 'failed',
+          status: 'failed'
+        }
+      }
+    } as any)
+    await chmodBrowser.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(chmodBrowser.text()).toContain('文件服务返回数据无效')
+    expect(chmodBrowser.text()).not.toContain('权限已更新为 744')
+    expect(store.fileTransferTasks.some((task) => task.id === 'malformed-chmod-task')).toBe(false)
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(chmodListCallsBefore)
+    chmodBrowser.unmount()
+
+    const copyBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const copyRow = copyBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await copyRow.find('.file-row-actions button[title="更多"]').trigger('click')
+    await copyBrowser.find('.file-more-menu').findAll('button').find((button) => button.text().includes('复制'))!.trigger('click')
+    await copyBrowser.find('.move-path-edit-trigger').trigger('click')
+    await copyBrowser.find('.move-target-input').setValue('/tmp/local-picked/new-target')
+    await copyBrowser.find('.move-target-input').trigger('keydown', { key: 'Enter' })
+    vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        affected: 1,
+        path: '/tmp/local-picked/new-target/release-note.md',
+        mtimeMs: Date.now(),
+        task: {
+          id: 'malformed-copy-task',
+          type: 'r2r',
+          name: 'release-note.md',
+          source: '/other/source.md',
+          target: '/tmp/local-picked/new-target/release-note.md',
+          progress: 100,
+          speed: 'done',
+          status: 'success'
+        }
+      }
+    } as any)
+    await copyBrowser.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(copyBrowser.text()).toContain('冲突提示')
+    const copyListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    await copyBrowser.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('覆盖'))!.trigger('click')
+    await flushPromises()
+    expect(copyBrowser.text()).toContain('文件服务返回数据无效')
+    expect(copyBrowser.text()).not.toContain('复制成功')
+    expect(store.fileTransferTasks.some((task) => task.id === 'malformed-copy-task')).toBe(false)
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(copyListCallsBefore)
+    copyBrowser.unmount()
+
+    const moveBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const moveRow = moveBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await moveRow.find('.file-row-actions button[title="更多"]').trigger('click')
+    await moveBrowser.find('.file-more-menu').findAll('button').find((button) => button.text().includes('移动'))!.trigger('click')
+    await moveBrowser.find('.move-path-edit-trigger').trigger('click')
+    await moveBrowser.find('.move-target-input').setValue('/tmp/local-picked/new-target')
+    await moveBrowser.find('.move-target-input').trigger('keydown', { key: 'Enter' })
+    vi.mocked(window.aiops.mutateFileEntry).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        affected: 1,
+        path: '/tmp/local-picked/new-target/other-target.md',
+        mtimeMs: Date.now(),
+        task: {
+          id: 'malformed-move-task',
+          type: 'r2r',
+          name: 'release-note.md',
+          source: '/tmp/local-picked/release-note.md',
+          target: '/tmp/local-picked/new-target/other-target.md',
+          progress: 100,
+          speed: 'done',
+          status: 'success'
+        }
+      }
+    } as any)
+    await moveBrowser.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(moveBrowser.text()).toContain('冲突提示')
+    const moveListCallsBefore = vi.mocked(window.aiops.listFiles).mock.calls.length
+    await moveBrowser.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('覆盖'))!.trigger('click')
+    await flushPromises()
+    expect(moveBrowser.text()).toContain('文件服务返回数据无效')
+    expect(moveBrowser.text()).not.toContain('移动成功')
+    expect(store.fileTransferTasks.some((task) => task.id === 'malformed-move-task')).toBe(false)
+    expect(vi.mocked(window.aiops.listFiles).mock.calls.length).toBe(moveListCallsBefore)
+    moveBrowser.unmount()
+
     const deleteBrowser = mount(FileBrowser, {
       props: {
         session: localSession,
