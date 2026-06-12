@@ -1088,6 +1088,14 @@ const applyWorkspaceAssetSnapshot = (snapshot: unknown) => {
   return true
 }
 
+const applyWorkspaceAssetState = (snapshot: unknown, groups: AiopsAssetGroupRecord[]) => {
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  if (!isAiopsAssetGroupListData(groups)) throw new Error(malformedAssetBackendResultMessage)
+  applyWorkspaceAssetSnapshot(snapshot)
+  directGroupOptions.value = groups
+  return snapshot
+}
+
 const loadDirectGroupOptions = async () => {
   const listAssetGroups = window.aiops?.listAssetGroups
   if (typeof listAssetGroups !== 'function') throw new Error('资产分组服务不可用')
@@ -1098,19 +1106,22 @@ const loadDirectGroupOptions = async () => {
   return groups.map((group) => ({ ...group }))
 }
 
-const refreshDirectGroupOptions = async () => {
-  directGroupOptions.value = await loadDirectGroupOptions()
-}
-
 const refreshAssets = async () => {
   const listAssets = window.aiops?.listAssets
   if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用')
   const snapshot = await listAssets()
   if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
   const groups = await loadDirectGroupOptions()
-  applyWorkspaceAssetSnapshot(snapshot)
-  directGroupOptions.value = groups
-  return snapshot
+  return applyWorkspaceAssetState(snapshot, groups)
+}
+
+const loadWorkspaceAssetRefresh = async () => {
+  const listAssets = window.aiops?.listAssets
+  if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用')
+  const snapshot = await listAssets()
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  const groups = await loadDirectGroupOptions()
+  return { snapshot, groups }
 }
 
 const resetHostConnectionTest = () => {
@@ -1128,8 +1139,9 @@ const saveAssetRecord = async (input: AiopsAssetInput) => {
   if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
   const saved = result.data
   if (!isAiopsSavedAssetRecord(saved, input)) throw new Error(malformedAssetBackendResultMessage)
-  const snapshot = await refreshAssets()
+  const { snapshot, groups } = await loadWorkspaceAssetRefresh()
   if (!snapshot.assets.some((asset) => asset.id === saved.id)) throw new Error(malformedAssetBackendResultMessage)
+  applyWorkspaceAssetState(snapshot, groups)
   return saved
 }
 
@@ -1139,8 +1151,9 @@ const deleteAssetRecord = async (assetId: string) => {
   const result = await deleteAsset(assetId)
   if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
   if (!isAiopsDeletedAssetData(result.data, assetId)) throw new Error(malformedAssetBackendResultMessage)
-  const snapshot = await refreshAssets()
+  const { snapshot, groups } = await loadWorkspaceAssetRefresh()
   if (snapshot.assets.some((asset) => asset.id === assetId)) throw new Error(malformedAssetBackendResultMessage)
+  applyWorkspaceAssetState(snapshot, groups)
 }
 
 const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
@@ -1150,8 +1163,9 @@ const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
   if (!result?.ok) throw new Error(result?.errorMessage || '文件夹保存失败')
   const saved = result.data
   if (!isAiopsSavedCustomFolderRecord(saved, folder)) throw new Error(malformedAssetBackendResultMessage)
-  const snapshot = await refreshAssets()
+  const { snapshot, groups } = await loadWorkspaceAssetRefresh()
   if (!snapshot.folders.some((item) => item.uuid === saved.uuid)) throw new Error(malformedAssetBackendResultMessage)
+  applyWorkspaceAssetState(snapshot, groups)
   return saved
 }
 
@@ -1161,9 +1175,10 @@ const deleteFolderRecord = async (folderUuid: string) => {
   const result = await deleteAssetFolder(folderUuid)
   if (!result?.ok) throw new Error(result?.errorMessage || '文件夹删除失败')
   if (!isAiopsDeletedCustomFolderData(result.data, folderUuid)) throw new Error(malformedAssetBackendResultMessage)
-  const snapshot = await refreshAssets()
+  const { snapshot, groups } = await loadWorkspaceAssetRefresh()
   if (snapshot.folders.some((folder) => folder.uuid === folderUuid)) throw new Error(malformedAssetBackendResultMessage)
   if (snapshot.assets.some((asset) => asset.folderUuid === folderUuid)) throw new Error(malformedAssetBackendResultMessage)
+  applyWorkspaceAssetState(snapshot, groups)
 }
 
 const isGroupExpanded = (key: string) => !!searchValue.value.trim() || expandedGroups.value.includes(key)
@@ -1406,8 +1421,8 @@ const saveFolderForm = async () => {
     const result = await renameAssetGroup(input)
     if (!result?.ok) throw new Error(result?.errorMessage || '分组保存失败')
     if (!isAiopsAssetGroupRenameSnapshot(result.data, input)) throw new Error(malformedAssetBackendResultMessage)
-    applyWorkspaceAssetSnapshot(result.data)
-    await refreshDirectGroupOptions()
+    const groups = await loadDirectGroupOptions()
+    applyWorkspaceAssetState(result.data, groups)
     await replaceExpandedGroup(oldKey, newKey)
     notice.value = `已更新分组 ${name}`
     closeFolderModal()
@@ -1702,8 +1717,8 @@ const refreshGroup = async (groupKey: string) => {
     const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
     if (!isAiopsOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
-    applyWorkspaceAssetSnapshot(result.data)
-    await refreshDirectGroupOptions()
+    const groups = await loadDirectGroupOptions()
+    applyWorkspaceAssetState(result.data, groups)
     if (organization) await expandGroup(organization.uuid)
     notice.value = organization ? `${organization.name} 资源已刷新` : '堡垒机资源已刷新'
   } catch (error) {
@@ -1790,8 +1805,8 @@ const confirmDeleteGroup = () => {
       .then(async (result) => {
         if (!result?.ok) throw new Error(result?.errorMessage || '删除分组失败')
         if (!isAiopsAssetGroupDeleteSnapshot(result.data, input)) throw new Error(malformedAssetBackendResultMessage)
-        applyWorkspaceAssetSnapshot(result.data)
-        await refreshDirectGroupOptions()
+        const groups = await loadDirectGroupOptions()
+        applyWorkspaceAssetState(result.data, groups)
         await removeExpandedGroup(group.key)
         notice.value = `已删除分组 ${group.title}`
         closeDeleteGroupModal()

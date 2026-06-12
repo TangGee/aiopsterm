@@ -1153,6 +1153,14 @@ const applyAssetSnapshot = (snapshot: unknown) => {
   return true
 }
 
+const applyHostManagementState = (snapshot: unknown, groups: AiopsAssetGroupRecord[]) => {
+  if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
+  if (!isAiopsAssetGroupListData(groups)) throw new Error(malformedAssetBackendResultMessage)
+  applyAssetSnapshot(snapshot)
+  applyAssetGroups(groups)
+  return snapshot
+}
+
 const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?: boolean } = {}) => {
   const deleteAsset = window.aiops?.deleteAsset
   if (typeof deleteAsset !== 'function') throw new Error('资产删除服务不可用。')
@@ -1834,8 +1842,8 @@ const confirmImportAssets = async (overwrite: boolean) => {
       importNotice.value = malformedAssetBackendResultMessage
       return
     }
-    applyAssetSnapshot(result.data)
-    await refreshAssetGroupOptions()
+    const groups = await loadAssetGroupOptions()
+    applyHostManagementState(result.data, groups)
     importNotice.value = result.data.skipped
       ? `已导入 ${result.data.imported} 个主机，跳过 ${result.data.skipped} 个重复主机。`
       : `已导入 ${result.data.imported} 个主机。`

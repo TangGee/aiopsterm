@@ -1525,6 +1525,7 @@ describe('AppShell', () => {
   })
 
   it('does not fabricate Assets import preview or confirmation when import bridges fail', async () => {
+    const malformedMessage = '资产服务返回数据无效'
     const pinia = createPinia()
     setActivePinia(pinia)
     const assets = mount(AssetsPanel, {
@@ -1539,6 +1540,7 @@ describe('AppShell', () => {
       readLocalFile: window.aiops.readLocalFile,
       previewAssetImport: window.aiops.previewAssetImport,
       confirmAssetImport: window.aiops.confirmAssetImport,
+      listAssetGroups: window.aiops.listAssetGroups,
       saveAsset: window.aiops.saveAsset
     }
 
@@ -1606,6 +1608,17 @@ describe('AppShell', () => {
       expect(assets.text()).toContain('asset confirm denied')
       expect(assets.find('.import-assets-modal').exists()).toBe(true)
       expect(window.aiops.saveAsset).not.toHaveBeenCalled()
+
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/MobaXterm.mxtsessions'] })
+      await importButton().trigger('click')
+      await flushPromises()
+      expect(assets.find('.import-assets-modal').exists()).toBe(true)
+      vi.mocked(window.aiops.listAssetGroups).mockResolvedValueOnce([{ key: 'broken-group', name: '生产' }] as any)
+      await assets.findAll('.import-assets-modal footer button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+      await flushPromises()
+      expect(assets.text()).toContain(malformedMessage)
+      expect(assets.find('.import-assets-modal').exists()).toBe(true)
+      expect(assets.findAll('.host-card').some((card) => card.text().includes('moba-prod'))).toBe(false)
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
@@ -2070,6 +2083,8 @@ describe('AppShell', () => {
       deleteAsset: window.aiops.deleteAsset,
       saveAssetFolder: window.aiops.saveAssetFolder,
       deleteAssetFolder: window.aiops.deleteAssetFolder,
+      renameAssetGroup: window.aiops.renameAssetGroup,
+      refreshOrganizationAssets: window.aiops.refreshOrganizationAssets,
       deleteAssetGroup: window.aiops.deleteAssetGroup
     }
     const mountWorkspace = async () => {
@@ -2190,6 +2205,43 @@ describe('AppShell', () => {
       expect(staleGroupDelete.text()).toContain(malformedMessage)
       expect(staleGroupDelete.findAll('.workspace-folder-row').some((row) => row.text().includes('生产'))).toBe(true)
       staleGroupDelete.unmount()
+
+      const renameGroupRefreshFailure = await mountWorkspace()
+      await groupRow(renameGroupRefreshFailure, '生产').trigger('contextmenu')
+      await menuButton(renameGroupRefreshFailure, '编辑文件夹').trigger('click')
+      await renameGroupRefreshFailure.find('.workspace-folder-modal .files-folder-form input').setValue('生产归档')
+      vi.mocked(window.aiops.listAssetGroups).mockResolvedValueOnce([{ key: 'broken-group', name: '生产归档' }] as any)
+      await renameGroupRefreshFailure.find('.workspace-folder-modal .files-folder-form').trigger('submit')
+      await flushPromises()
+      expect(renameGroupRefreshFailure.text()).toContain(malformedMessage)
+      expect(renameGroupRefreshFailure.find('.workspace-folder-modal').exists()).toBe(true)
+      expect(renameGroupRefreshFailure.findAll('.workspace-folder-row').some((row) => row.text().includes('生产归档'))).toBe(false)
+      expect(renameGroupRefreshFailure.findAll('.workspace-folder-row').some((row) => row.text().includes('生产'))).toBe(true)
+      renameGroupRefreshFailure.unmount()
+
+      const deleteGroupRefreshFailure = await mountWorkspace()
+      await groupRow(deleteGroupRefreshFailure, '预发').trigger('contextmenu')
+      await menuButton(deleteGroupRefreshFailure, '删除文件夹').trigger('click')
+      vi.mocked(window.aiops.listAssetGroups).mockResolvedValueOnce([{ key: 'broken-group', name: '未分组' }] as any)
+      await deleteGroupRefreshFailure.find('.files-folder-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(deleteGroupRefreshFailure.text()).toContain(malformedMessage)
+      expect(deleteGroupRefreshFailure.find('.files-folder-confirm').exists()).toBe(true)
+      expect(deleteGroupRefreshFailure.findAll('.workspace-folder-row').some((row) => row.text().includes('预发'))).toBe(true)
+      expect(deleteGroupRefreshFailure.findAll('.workspace-folder-row').some((row) => row.text().includes('未分组'))).toBe(false)
+      deleteGroupRefreshFailure.unmount()
+
+      const refreshGroupOptionsFailure = await mountWorkspace()
+      await refreshGroupOptionsFailure.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+      expect(refreshGroupOptionsFailure.text()).not.toContain('jumpserver-org-synced-asset')
+      await groupRow(refreshGroupOptionsFailure, 'jumpserver-org').trigger('contextmenu')
+      vi.mocked(window.aiops.listAssetGroups).mockResolvedValueOnce([{ key: 'broken-group', name: '企业' }] as any)
+      await menuButton(refreshGroupOptionsFailure, '刷新').trigger('click')
+      await flushPromises()
+      expect(refreshGroupOptionsFailure.text()).toContain(malformedMessage)
+      expect(refreshGroupOptionsFailure.text()).toContain('jumpserver-org')
+      expect(refreshGroupOptionsFailure.text()).not.toContain('jumpserver-org-synced-asset')
+      refreshGroupOptionsFailure.unmount()
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
