@@ -5431,6 +5431,42 @@ describe('AppShell', () => {
     expect(store.activePanel.output).not.toContain('[connection reconnected]')
     expect(store.topNotice).toBe('终端已重新连接')
 
+    const terminalAfterReconnect = mockXtermInstances.at(-1)!
+    terminalAfterReconnect.selectedText = 'copied terminal text'
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('复制'))!.trigger('click')
+    await flushPromises()
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('copied terminal text')
+    expect(store.topNotice).toBe('终端内容已复制')
+    expect(wrapper.find('.terminal-context-menu').exists()).toBe(false)
+
+    terminalAfterReconnect.selectedText = 'copy should fail'
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard write denied'))
+    const originalExecCommand = document.execCommand
+    const failedExecCommandSpy = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: failedExecCommandSpy
+    })
+    try {
+      await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('复制'))!.trigger('click')
+      await flushPromises()
+      expect(failedExecCommandSpy).toHaveBeenCalledWith('copy')
+      expect(store.topNotice).toBe('终端复制失败')
+      expect(wrapper.find('.terminal-context-menu').exists()).toBe(false)
+    } finally {
+      if (originalExecCommand) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          value: originalExecCommand
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
+    }
+
     vi.mocked(window.aiops.writeTerminal).mockClear()
     await wrapper.find('.command-line input').setValue('whoami')
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
@@ -5526,6 +5562,24 @@ describe('AppShell', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'clipboard-command')
     expect(store.activePanel.output).not.toContain('clipboard-command')
     expect(wrapper.find('.terminal-context-menu').exists()).toBe(false)
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(navigator.clipboard.readText).mockRejectedValueOnce(new Error('clipboard read denied'))
+    await wrapper.find('.xterm-host').trigger('contextmenu')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.topNotice).toBe('clipboard read denied')
+    expect(wrapper.find('.terminal-context-menu').exists()).toBe(false)
+
+    const originalReadText = navigator.clipboard.readText
+    ;(navigator.clipboard as any).readText = undefined
+    try {
+      await wrapper.find('.xterm-host').trigger('contextmenu')
+      await flushPromises()
+      expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+      expect(store.topNotice).toBe('终端剪贴板读取服务不可用')
+    } finally {
+      ;(navigator.clipboard as any).readText = originalReadText
+    }
 
     await expect(store.updateTerminalSettings({ middleMouseEvent: 'contextMenu' })).resolves.toBe(true)
     await wrapper.find('.xterm-host').trigger('mousedown', { button: 1 })

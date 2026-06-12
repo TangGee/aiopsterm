@@ -443,6 +443,7 @@ import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBott
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
 
@@ -919,18 +920,37 @@ const handleTabDragStart = (event: DragEvent, panel: TerminalPanel) => {
 
 const copySelection = async (panelId = workspace.activePanelId) => {
   const selectedText = terminalViews.get(panelId)?.terminal.getSelection()
-  if (selectedText && navigator.clipboard) {
-    await navigator.clipboard.writeText(selectedText)
+  if (selectedText) {
+    const copied = await copyTextToClipboard(selectedText)
+    workspace.setTopNotice(copied ? '终端内容已复制' : '终端复制失败')
   }
   menu.visible = false
+  termMenu.visible = false
 }
 
 const pasteClipboard = async (panelId = workspace.activePanelId) => {
-  if (!navigator.clipboard) return
-  const text = await navigator.clipboard.readText()
-  if (!text) return
+  if (!navigator.clipboard?.readText) {
+    workspace.setTopNotice('终端剪贴板读取服务不可用')
+    termMenu.visible = false
+    return
+  }
+  let text = ''
+  try {
+    text = await navigator.clipboard.readText()
+  } catch (error) {
+    workspace.setTopNotice(error instanceof Error && error.message ? error.message : '终端剪贴板读取失败')
+    termMenu.visible = false
+    return
+  }
+  if (!text) {
+    termMenu.visible = false
+    return
+  }
   const panel = panelById(panelId)
-  if (!panel || panel.kind === 'knowledge') return
+  if (!panel || panel.kind === 'knowledge') {
+    termMenu.visible = false
+    return
+  }
   const result = await workspace.runTerminalCommand(panel.id, text, {
     inputText: text,
     shellText: text,
@@ -939,6 +959,7 @@ const pasteClipboard = async (panelId = workspace.activePanelId) => {
   })
   if (result?.status === 'allow') syncTerminalView(panel)
   menu.visible = false
+  termMenu.visible = false
 }
 
 const clearTerminal = (panelId = workspace.activePanelId) => {
