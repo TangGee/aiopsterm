@@ -9832,10 +9832,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return []
     }
     if (!window.aiops?.kbSearch) {
-      kbContentSearchResults.value = []
       kbSearchLoading.value = false
       kbSearchError.value = '知识库搜索服务不可用'
-      return []
+      return kbContentSearchResults.value
     }
     kbSearchLoading.value = true
     kbSearchError.value = ''
@@ -9843,19 +9842,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const results = await window.aiops.kbSearch(normalizedQuery, { maxResults: 12, minScore: 0.15 })
       if (request !== kbSearchRequest) return kbContentSearchResults.value
       if (!isKnowledgeSearchResultListData(results)) {
-        kbContentSearchResults.value = []
         kbSearchError.value = malformedKnowledgeBackendResultMessage
         setTopNotice(malformedKnowledgeBackendResultMessage)
-        return []
+        return kbContentSearchResults.value
       }
       kbContentSearchResults.value = results
       await refreshKnowledgeSearchStatus()
       return results
     } catch (searchError) {
       if (request !== kbSearchRequest) return kbContentSearchResults.value
-      kbContentSearchResults.value = []
       kbSearchError.value = searchError instanceof Error ? searchError.message : String(searchError)
-      return []
+      return kbContentSearchResults.value
     } finally {
       if (request === kbSearchRequest) kbSearchLoading.value = false
     }

@@ -5814,6 +5814,11 @@ describe('workspace store', () => {
     await expect(store.refreshKnowledgeSearchStatus()).resolves.toBe(false)
     expect(store.kbSearchStatus).toEqual(backendStatus)
 
+    await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual([
+      expect.objectContaining({ path: 'commands/diagnose.md', matchCount: 2 })
+    ])
+    const backendSearchResults = JSON.parse(JSON.stringify(store.kbContentSearchResults))
+
     const originalAiops = {
       kbSearch: window.aiops.kbSearch,
       kbSearchStatus: window.aiops.kbSearchStatus,
@@ -5825,9 +5830,14 @@ describe('workspace store', () => {
       await expect(store.refreshKnowledgeSearchStatus()).resolves.toBe(false)
       expect(store.kbSearchStatus).toEqual(backendStatus)
 
+      vi.mocked(window.aiops.kbSearch).mockRejectedValueOnce(new Error('search service offline'))
+      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual(backendSearchResults)
+      expect(store.kbContentSearchResults).toEqual(backendSearchResults)
+      expect(store.kbSearchError).toBe('search service offline')
+
       ;(window.aiops as any).kbSearch = undefined
-      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual([])
-      expect(store.kbContentSearchResults).toEqual([])
+      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual(backendSearchResults)
+      expect(store.kbContentSearchResults).toEqual(backendSearchResults)
       expect(store.kbSearchError).toBe('知识库搜索服务不可用')
 
       ;(window.aiops as any).kbReindex = undefined
@@ -6516,6 +6526,10 @@ describe('workspace store', () => {
     await store.refreshKnowledgeTree({ persist: false })
     store.openKnowledgeFile('Markdown语法指南.md')
     store.copyKnowledgeNodes(['commands/Summary to Doc.md'], 'copy')
+    await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual([
+      expect.objectContaining({ path: 'commands/diagnose.md', matchCount: 2 })
+    ])
+    const originalSearchResults = JSON.parse(JSON.stringify(store.kbContentSearchResults))
     store.chatMessages.push({
       id: 'assistant-malformed-kb',
       role: 'assistant',
@@ -6560,8 +6574,8 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
 
       vi.mocked(window.aiops.kbSearch).mockResolvedValueOnce([{ path: '', startLine: 0, endLine: 0, score: 1, snippet: 'bad', matchCount: 1 }] as any)
-      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual([])
-      expect(store.kbContentSearchResults).toEqual([])
+      await expect(store.searchKnowledgeContent('deploy')).resolves.toEqual(originalSearchResults)
+      expect(store.kbContentSearchResults).toEqual(originalSearchResults)
       expect(store.kbSearchError).toBe(malformedKnowledgeBackendResultMessage)
       expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
 
