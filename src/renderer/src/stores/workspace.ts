@@ -815,7 +815,8 @@ const defaultConfig: UserConfig = {
 
 const ONBOARDING_VERSION = 2
 const onboardingModuleIds: OnboardingModuleId[] = ['interfaceGuide', 'systemSettings', 'addAndConnectHost', 'aiChat']
-const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
+type RendererLocalIdPrefix = 'panel' | 'terminal-security'
+const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
 const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
 const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
 const MACRO_MAX_COMMAND_COUNT = 50
@@ -12022,7 +12023,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createPanel = (split?: PanelDirection) => {
-    const panel = createEmptyTerminalPanel(createId('panel'), split ? `split ${panels.value.length}` : `shell ${panels.value.length}`, split)
+    const panel = createEmptyTerminalPanel(createRendererLocalId('panel'), split ? `split ${panels.value.length}` : `shell ${panels.value.length}`, split)
     panels.value.push(panel)
     activePanelId.value = panel.id
   }
@@ -12121,7 +12122,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       forkFromConnectionId: sourceSession.connectionId
     }
     const forkPanel: TerminalPanel = {
-      id: createId('panel'),
+      id: createRendererLocalId('panel'),
       title: `${source.title} fork`,
       cwd: source.cwd,
       kind: 'terminal',
@@ -12398,7 +12399,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (result.requiresApproval) {
         const promptExecution = { ...execution, command: securityCommand }
         const prompt = {
-          id: createId('terminal-security'),
+          id: createRendererLocalId('terminal-security'),
           command: securityCommand,
           panelIds: execution.panelIds,
           source: execution.source,

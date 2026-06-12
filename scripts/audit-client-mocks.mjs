@@ -83,16 +83,31 @@ const rendererContentRules = [
 const rendererBusinessIdLiteralPattern =
   /`(?:asset|folder|key|conv|aichat|dbai-pane|dbai-drawer|sql-exec|transfer|files-folder|snippet|snippet-group|alias|rule|k8s-run|k8s-session|k8s-tab|terminal-command)-\$\{/i
 
+const rendererGenericIdHelperPatterns = [
+  /\b(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*=\s*\(\s*(?:prefix|kind|type)\s*:\s*string\b/,
+  /\b(?:const|let|var)\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*=\s*function\s*\(\s*(?:prefix|kind|type)\s*:\s*string\b/,
+  /\bfunction\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*\(\s*(?:prefix|kind|type)\s*:\s*string\b/
+]
+
 const rendererBusinessIdFailures = (filePath, content) => {
   const failures = []
   content.split(/\r?\n/).forEach((line, index) => {
-    if (!rendererBusinessIdLiteralPattern.test(line)) return
-    failures.push({
-      filePath,
-      rule: 'renderer-business-id-generation',
-      message: 'Renderer code must not generate backend-owned business ids; use preload/main/backend creation results and keep renderer ids limited to local UI/request state.',
-      lineNumber: index + 1
-    })
+    if (rendererBusinessIdLiteralPattern.test(line)) {
+      failures.push({
+        filePath,
+        rule: 'renderer-business-id-generation',
+        message: 'Renderer code must not generate backend-owned business ids; use preload/main/backend creation results and keep renderer ids limited to local UI/request state.',
+        lineNumber: index + 1
+      })
+    }
+    if (rendererGenericIdHelperPatterns.some((pattern) => pattern.test(line))) {
+      failures.push({
+        filePath,
+        rule: 'renderer-generic-id-helper',
+        message: 'Renderer id helpers must use explicit UI-only prefix unions instead of accepting arbitrary string prefixes.',
+        lineNumber: index + 1
+      })
+    }
   })
   return failures
 }

@@ -139,4 +139,29 @@ describe('client mock audit', () => {
     expect(result.output).toContain('renderer-business-id-generation')
     expect(result.output).toContain('BusinessIds.vue')
   })
+
+  it('rejects generic renderer id helpers that can mint backend business identities by prefix', async () => {
+    const rejectedRoot = await createAuditRepo()
+    await writeFile(
+      join(rejectedRoot, 'src', 'renderer', 'src', 'components', 'GenericIdHelper.vue'),
+      [
+        '<script setup lang="ts">',
+        "const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2)}`",
+        "function generateRecordId(kind: string) { return `${kind}-${Date.now()}` }",
+        "const makeRecordId = function(type: string) { return `${type}-${Date.now()}` }",
+        "const createLocalId = (prefix: 'panel' | 'tmp') => `${prefix}-${Math.random().toString(36).slice(2)}`",
+        "const panelId = createLocalId('panel')",
+        'void createId',
+        'void generateRecordId',
+        'void makeRecordId',
+        'void panelId',
+        '</script>'
+      ].join('\n')
+    )
+
+    const result = await runAudit(rejectedRoot)
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('renderer-generic-id-helper')
+    expect(result.output).toContain('GenericIdHelper.vue')
+  })
 })
