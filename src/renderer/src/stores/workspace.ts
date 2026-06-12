@@ -10927,11 +10927,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const executeK8sTerminalAiCommand = async (command: string, tabId?: string) => {
     const target = tabId ? k8sTerminalTabs.value.find((tab) => tab.id === tabId || tab.sessionId === tabId) : k8sActiveTerminal.value
     if (!target || target.status === 'ended') return false
+    const text = command.trim()
+    if (!text) {
+      target.collectingAiOutput = false
+      target.aiCommandTabId = null
+      setK8sNotice('当前没有可采集到 AI 的 kubectl 命令')
+      return false
+    }
     activateK8sTerminal(target.id)
     target.collectingAiOutput = true
     target.aiCommandTabId = tabId || target.id
-    const terminalOutput = await sendK8sTerminalCommand(command)
-    return Boolean(terminalOutput)
+    const terminalOutput = await sendK8sTerminalCommand(text)
+    return Boolean(terminalOutput.trim())
   }
 
   const endK8sTerminalSession = async (id: string, exitCode = 0) => {

@@ -652,7 +652,7 @@ const syncActiveTerminalSize = () => {
 const sendAiCommand = () => {
   const terminal = workspace.k8sActiveTerminal
   if (!terminal) return
-  const text = command.value.trim() || terminal.lastCommand || 'kubectl get pods -A'
+  const text = command.value.trim() || terminal.lastCommand
   void workspace.executeK8sTerminalAiCommand(text, terminal.id)
   command.value = ''
 }
