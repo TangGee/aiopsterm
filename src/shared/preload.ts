@@ -2500,6 +2500,7 @@ export type DatabaseAiDrawerResponseResult = AiopsMutationResult<{
 }>
 
 export type DatabaseSqlErrorDiagnosisInput = {
+  requestId?: string
   sourceSql: string
   targetDialect?: DatabaseAiTargetDialect
   context: DatabaseAiDrawerResponseInput['context']

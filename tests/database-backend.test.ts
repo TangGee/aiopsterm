@@ -2854,6 +2854,7 @@ WHERE status = ''open'';
   it('diagnoses SQL errors through a dedicated backend lifecycle boundary', async () => {
     configureDatabaseAiRuntime({ localBackendDouble: true })
     const result = await diagnoseDatabaseSqlError({
+      requestId: 'dbai-diagnose-unit-1',
       sourceSql: 'select * from public.orders_missing',
       targetDialect: 'postgresql',
       context: {
@@ -2868,7 +2869,7 @@ WHERE status = ''open'';
 
     expect(result.ok).toBe(true)
     expect(result.data?.request).toMatchObject({
-      id: expect.stringMatching(/^dbai-drawer-request-/),
+      id: 'dbai-diagnose-unit-1',
       action: 'diagnose',
       label: 'Diagnose SQL',
       status: 'done',
@@ -2885,6 +2886,45 @@ WHERE status = ''open'';
     expect(result.data?.sql).toBe('SELECT *\nFROM "public"."orders"\nLIMIT 100;')
     expect(result.data?.reasoning).toContain('Diagnosis input error')
     expect(result.data?.text).toContain('```sql')
+  })
+
+  it('rejects duplicate DB AI request identities instead of overwriting existing diagnosis records', async () => {
+    configureDatabaseAiRuntime({ localBackendDouble: true })
+    const first = await diagnoseDatabaseSqlError({
+      requestId: 'dbai-diagnose-duplicate-unit',
+      sourceSql: 'select * from public.orders_missing',
+      targetDialect: 'postgresql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      },
+      errorMessage: 'relation does not exist'
+    })
+
+    expect(first.ok).toBe(true)
+
+    const second = await diagnoseDatabaseSqlError({
+      requestId: 'dbai-diagnose-duplicate-unit',
+      sourceSql: 'select * from public.ops_missing',
+      targetDialect: 'postgresql',
+      context: {
+        connectionId: 'conn-prod-pg',
+        dbType: 'postgresql',
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      },
+      errorMessage: 'different failure'
+    })
+
+    expect(second).toMatchObject({
+      ok: false,
+      errorCode: 'DB_AI_REQUEST_DUPLICATE',
+      errorMessage: 'DB AI drawer request id already exists.'
+    })
   })
 
   it('preserves DDL permission errors from the backend boundary', async () => {

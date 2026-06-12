@@ -3314,9 +3314,11 @@ const sqlDiagnose = reactive({
   running: false,
   error: '',
   success: false,
-  resultId: ''
+  resultId: '',
+  requestId: ''
 })
 let sqlDiagnoseSuccessTimer: number | null = null
+let sqlDiagnoseRequestSequence = 1
 let sqlPaneResizeElement: HTMLElement | null = null
 const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }> = [
   { value: 'postgresql', label: 'PostgreSQL' },
@@ -8168,6 +8170,11 @@ function clearSqlDiagnoseTimers() {
   }
 }
 
+function nextSqlDiagnoseRequestId(result: SqlResult) {
+  sqlDiagnoseRequestSequence += 1
+  return `dbai-diagnose-${result.id}-${Date.now().toString(36)}-${sqlDiagnoseRequestSequence}`
+}
+
 async function diagnoseSqlError(result: SqlResult) {
   const tab = activeSqlTab.value
   if (!tab || result.status !== 'error') return
@@ -8175,14 +8182,17 @@ async function diagnoseSqlError(result: SqlResult) {
     sqlDiagnose.running = false
     sqlDiagnose.success = false
     sqlDiagnose.resultId = result.id
+    sqlDiagnose.requestId = ''
     sqlDiagnose.error = 'Database context is required before diagnosis.'
     return
   }
   clearSqlDiagnoseTimers()
+  const requestId = nextSqlDiagnoseRequestId(result)
   sqlDiagnose.running = true
   sqlDiagnose.success = false
   sqlDiagnose.error = ''
   sqlDiagnose.resultId = result.id
+  sqlDiagnose.requestId = requestId
 
   try {
     const connection = findConnection(tab.connectionId)
@@ -8191,9 +8201,11 @@ async function diagnoseSqlError(result: SqlResult) {
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.error = 'DB AI diagnosis service unavailable'
+      sqlDiagnose.requestId = ''
       return
     }
     const response = await diagnoseBridge({
+      requestId,
       sourceSql: result.sql,
       targetDialect: connection?.dbType ?? 'postgresql',
       context: dbAiBackendContextForIpc(
@@ -8208,14 +8220,14 @@ async function diagnoseSqlError(result: SqlResult) {
       ),
       errorMessage: result.error ?? ''
     })
-    if (sqlDiagnose.resultId !== result.id) return
+    if (sqlDiagnose.resultId !== result.id || sqlDiagnose.requestId !== requestId) return
     if (!response.ok) {
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.error = response.errorMessage || 'DB AI diagnosis failed.'
       return
     }
-    if (!isDbAiDrawerResponseData(response.data, response.data?.request?.id ?? '') || !response.data.sql.trim()) {
+    if (!isDbAiDrawerResponseData(response.data, requestId) || response.data.request.action !== 'diagnose' || !response.data.sql.trim()) {
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.error = 'DB AI diagnosis backend returned malformed result data.'
@@ -8228,11 +8240,11 @@ async function diagnoseSqlError(result: SqlResult) {
     sqlDiagnose.error = ''
     showNotice('SQL diagnosis applied to editor')
     sqlDiagnoseSuccessTimer = window.setTimeout(() => {
-      if (sqlDiagnose.resultId === result.id) sqlDiagnose.success = false
+      if (sqlDiagnose.resultId === result.id && sqlDiagnose.requestId === requestId) sqlDiagnose.success = false
       sqlDiagnoseSuccessTimer = null
     }, 3000)
   } catch (error) {
-    if (sqlDiagnose.resultId !== result.id) return
+    if (sqlDiagnose.resultId !== result.id || sqlDiagnose.requestId !== requestId) return
     sqlDiagnose.running = false
     sqlDiagnose.success = false
     sqlDiagnose.error = bridgeErrorMessage(error, 'DB AI diagnosis failed.')

@@ -6786,8 +6786,14 @@ export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerReque
     return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
   }
 
+  const requestId = trim(input.requestId) || `dbai-drawer-request-${randomUUID()}`
+  const existing = findDatabaseAiDrawerRequest({ requestId })
+  if (existing) {
+    return { ok: false, errorCode: 'DB_AI_REQUEST_DUPLICATE', errorMessage: 'DB AI drawer request id already exists.' }
+  }
+
   const request: DatabaseAiDrawerRequestRecord = {
-    id: `dbai-drawer-request-${randomUUID()}`,
+    id: requestId,
     action,
     label: databaseAiDrawerActionName(action),
     status: 'queued',
@@ -6916,12 +6922,14 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
 
 export async function diagnoseDatabaseSqlError(input: DatabaseSqlErrorDiagnosisInput): Promise<DatabaseSqlErrorDiagnosisResult> {
   ensureDatabaseStateLoaded()
+  const requestId = trim(input.requestId) || `dbai-diagnose-request-${randomUUID()}`
   const sourceSql = trim(input.sourceSql)
   const errorMessage = trim(input.errorMessage)
   if (!sourceSql) return { ok: false, errorCode: 'DB_AI_SQL_REQUIRED', errorMessage: 'SQL is required.' }
   if (!errorMessage) return { ok: false, errorCode: 'DB_AI_ERROR_REQUIRED', errorMessage: 'SQL error message is required.' }
 
   const created = await createDatabaseAiDrawerRequest({
+    requestId,
     action: 'diagnose',
     sourceSql,
     targetDialect: input.targetDialect,
@@ -6938,7 +6946,7 @@ export async function diagnoseDatabaseSqlError(input: DatabaseSqlErrorDiagnosisI
   }
 
   return generateDatabaseAiDrawerResponse({
-    requestId: created.data.id,
+    requestId,
     action: 'diagnose',
     sourceSql: created.data.sourceSql,
     targetDialect: created.data.targetDialect,

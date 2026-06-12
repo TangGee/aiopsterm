@@ -7783,6 +7783,7 @@ Object.defineProperty(window, 'aiops', {
     ),
     createDatabaseAiDrawerRequest: vi.fn(
       async (input: {
+        requestId?: string
         action: TestDatabaseAiDrawerAction
         sourceSql: string
         targetDialect?: TestDatabaseAiTargetDialect
@@ -7790,7 +7791,7 @@ Object.defineProperty(window, 'aiops', {
       }) => {
         if (!input.context.connectionId) return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
         const now = Date.now()
-        const id = `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`
+        const id = input.requestId || `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`
         const backendDbType = input.context.dbType && input.context.dbType !== 'mssql' ? input.context.dbType : ''
         const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
         const request: DatabaseAiDrawerRequestRecord = {
@@ -7911,6 +7912,7 @@ Object.defineProperty(window, 'aiops', {
     ),
     diagnoseDatabaseSqlError: vi.fn(
       (input: {
+        requestId?: string
         sourceSql: string
         targetDialect?: TestDatabaseAiTargetDialect
         context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
@@ -7921,6 +7923,7 @@ Object.defineProperty(window, 'aiops', {
             const sourceSql = databaseTrimMock(input.sourceSql)
             const errorMessage = databaseTrimMock(input.errorMessage)
             const drawerInput = {
+              requestId: input.requestId,
               action: 'diagnose' as const,
               sourceSql,
               targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql'),
@@ -7943,7 +7946,7 @@ Object.defineProperty(window, 'aiops', {
             const backendDbType = input.context.dbType && input.context.dbType !== 'mssql' ? input.context.dbType : ''
             const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
             const request = storeDatabaseAiDrawerRequestMock({
-              id: `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`,
+              id: input.requestId || `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`,
               action: 'diagnose',
               label: databaseAiDrawerActionNameMock('diagnose'),
               status: 'streaming',

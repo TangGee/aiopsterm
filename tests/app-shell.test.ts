@@ -9638,6 +9638,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-result-error button').trigger('click')
     expect(window.aiops.diagnoseDatabaseSqlError).toHaveBeenCalledWith(
       expect.objectContaining({
+        requestId: expect.stringMatching(/^dbai-diagnose-/),
         sourceSql: 'syntax_error',
         targetDialect: 'postgresql',
         context: expect.objectContaining({
@@ -10781,6 +10782,122 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis backend returned malformed result data.')
     expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
+
+    vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        request: {
+          id: `${input.requestId}-forged`,
+          action: 'diagnose',
+          label: 'Diagnose SQL',
+          status: 'done',
+          contextSummary: '',
+          sourceSql: input.sourceSql,
+          text: 'Reasoning\n\n```sql\nSELECT forged;\n```',
+          targetDialect: input.targetDialect,
+          backendContext: input.context,
+          createdAt: 1,
+          updatedAt: 2
+        },
+        text: 'Reasoning\n\n```sql\nSELECT forged;\n```',
+        reasoning: 'Reasoning',
+        sql: 'SELECT forged;',
+        provider: 'aiopsterm-local',
+        durationMs: 1
+      }
+    }))
+    await wrapper.find('.db-result-error button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis backend returned malformed result data.')
+    expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
+
+    wrapper.unmount()
+  })
+
+  it('ignores stale SQL diagnosis completions after a newer request starts', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    const editor = wrapper.find('.db-sql-editor')
+    await editor.setValue('syntax_error')
+    await wrapper.find('button[title="Run all"]').trigger('click')
+    await waitForDatabaseSqlResult()
+
+    let resolveFirstDiagnosis: (value: any) => void = () => undefined
+    const firstDiagnosis = new Promise<any>((resolve) => {
+      resolveFirstDiagnosis = resolve
+    })
+    vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockImplementationOnce((input: any) =>
+      firstDiagnosis.then(() => ({
+        ok: true,
+        data: {
+          request: {
+            id: input.requestId,
+            action: 'diagnose',
+            label: 'Diagnose SQL',
+            status: 'done',
+            contextSummary: '',
+            sourceSql: input.sourceSql,
+            text: 'Reasoning\n\n```sql\nSELECT stale;\n```',
+            targetDialect: input.targetDialect,
+            backendContext: input.context,
+            createdAt: 1,
+            updatedAt: 2
+          },
+          text: 'Reasoning\n\n```sql\nSELECT stale;\n```',
+          reasoning: 'Reasoning',
+          sql: 'SELECT stale;',
+          provider: 'aiopsterm-local',
+          durationMs: 1
+        }
+      }))
+    )
+    await wrapper.find('.db-result-error button').trigger('click')
+    await flushPromises()
+    const firstRequestId = vi.mocked(window.aiops.diagnoseDatabaseSqlError).mock.calls.at(-1)?.[0]?.requestId
+    expect(firstRequestId).toMatch(/^dbai-diagnose-/)
+
+    await wrapper.find('button[title="Run all"]').trigger('click')
+    await waitForDatabaseSqlResult()
+
+    vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        request: {
+          id: input.requestId,
+          action: 'diagnose',
+          label: 'Diagnose SQL',
+          status: 'done',
+          contextSummary: '',
+          sourceSql: input.sourceSql,
+          text: 'Reasoning\n\n```sql\nSELECT fresh;\n```',
+          targetDialect: input.targetDialect,
+          backendContext: input.context,
+          createdAt: 3,
+          updatedAt: 4
+        },
+        text: 'Reasoning\n\n```sql\nSELECT fresh;\n```',
+        reasoning: 'Reasoning',
+        sql: 'SELECT fresh;',
+        provider: 'aiopsterm-local',
+        durationMs: 1
+      }
+    }))
+    await wrapper.find('.db-result-error button').trigger('click')
+    await flushPromises()
+    const secondRequestId = vi.mocked(window.aiops.diagnoseDatabaseSqlError).mock.calls.at(-1)?.[0]?.requestId
+    expect(secondRequestId).toMatch(/^dbai-diagnose-/)
+    expect(secondRequestId).not.toBe(firstRequestId)
+    expect((editor.element as HTMLTextAreaElement).value).toBe('SELECT fresh;')
+
+    resolveFirstDiagnosis(null)
+    await flushPromises()
+    expect((editor.element as HTMLTextAreaElement).value).toBe('SELECT fresh;')
+    expect(wrapper.find('.db-result-diagnose-success').text()).toContain('Diagnosed and replaced editor SQL')
 
     wrapper.unmount()
   })
