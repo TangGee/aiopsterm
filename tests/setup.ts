@@ -5609,6 +5609,8 @@ Object.defineProperty(window, 'aiops', {
     consumeDeepLinks: vi.fn(async () => []),
     onDeepLink: vi.fn(() => () => undefined),
     openExternalUrl: vi.fn(async () => undefined),
+    openSettingsDocumentation: vi.fn(async () => ({ path: '/tmp/aiopsterm/docs/index.md' })),
+    submitSettingsFeedbackReport: vi.fn(async () => ({ path: '/tmp/aiopsterm/feedback/aiopsterm-feedback.md' })),
     openLogDir: vi.fn(async () => ({ path: '/tmp/aiopsterm/logs' })),
     minimizeWindow: vi.fn(async () => undefined),
     maximizeWindow: vi.fn(async () => undefined),

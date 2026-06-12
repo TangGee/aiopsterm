@@ -3548,9 +3548,8 @@ const defaultAboutSettings: AboutSettings = {
   progress: 0
 }
 
-const settingsDocumentationUrl = 'https://aiopsterm.local/docs'
-const settingsFeedbackUrl = 'https://aiopsterm.local/feedback'
 const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<string, unknown> | undefined)?.[name] === 'function'
+const isOpenPathResult = (result: unknown): result is { path: string } => isRecord(result) && typeof result.path === 'string' && Boolean(result.path.trim())
 
 const appUpdateChannels: AppUpdateCheckResult['channel'][] = ['local', 'manual', 'auto']
 const appUpdateStatusMessage = '更新后端返回了无效结果'
@@ -5645,12 +5644,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const openSettingsDocumentation = async () => {
     closeSettingsInlineEditors()
     activeSettingsSection.value = 'general'
-    if (!hasAiopsBridgeMethod('openExternalUrl')) {
+    if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
       setSettingsNotice('文档入口服务不可用')
       return false
     }
     try {
-      await window.aiops.openExternalUrl(settingsDocumentationUrl)
+      const result = await window.aiops.openSettingsDocumentation()
+      if (!isOpenPathResult(result)) {
+        setSettingsNotice('文档入口打开失败')
+        return false
+      }
       setSettingsNotice('已打开文档')
       return true
     } catch {
@@ -7626,7 +7629,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           return false
         }
         const result = await window.aiops.openLogDir()
-        if (!result || typeof result.path !== 'string' || !result.path.trim()) {
+        if (!isOpenPathResult(result)) {
           setSettingsNotice('日志目录打开失败')
           return false
         }
@@ -7634,12 +7637,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return true
       }
       if (label === '反馈页面') {
-        if (!hasAiopsBridgeMethod('openExternalUrl')) {
-          setSettingsNotice('反馈页面服务不可用')
+        if (!hasAiopsBridgeMethod('submitSettingsFeedbackReport')) {
+          setSettingsNotice('反馈报告服务不可用')
           return false
         }
-        await window.aiops.openExternalUrl(settingsFeedbackUrl)
-        setSettingsNotice('反馈页面已打开')
+        const result = await window.aiops.submitSettingsFeedbackReport()
+        if (!isOpenPathResult(result)) {
+          setSettingsNotice('反馈报告生成失败')
+          return false
+        }
+        setSettingsNotice('反馈报告已打开')
         return true
       }
       if (label === '账户中心') {

@@ -60,6 +60,7 @@ import {
 } from './backend/chatImageAttachment'
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
+import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import { shouldRunMcpDiscovery, shouldUseE2eDialogFixtures } from '@shared/runtimeSwitches'
 import {
@@ -1230,6 +1231,17 @@ const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiop
 const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
+const settingsExternalActionRuntime = () => ({
+  userDataPath: app.getPath('userData'),
+  appPath: app.getAppPath(),
+  cwd: process.cwd(),
+  moduleDir: __dirname,
+  version: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  openPath: (targetPath: string) => shell.openPath(targetPath),
+  skipOpen: shouldUseE2eDialogFixtures()
+})
 
 const blockedKnowledgeImportExtensions = new Set([
   '.exe',
@@ -2549,6 +2561,8 @@ const registerIpc = () => {
     }
     await shell.openExternal(parsed.toString())
   })
+  ipcMain.handle('settings:open-documentation', async () => openSettingsDocumentation(settingsExternalActionRuntime()))
+  ipcMain.handle('settings:submit-feedback-report', async () => submitSettingsFeedbackReport(settingsExternalActionRuntime()))
   ipcMain.handle('app:open-log-dir', async () => {
     const logDir = getLogDirPath()
     await mkdir(logDir, { recursive: true })

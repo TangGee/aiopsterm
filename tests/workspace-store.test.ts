@@ -10359,19 +10359,19 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     await latestCheck
     expect(store.aboutSettings.updateStatus).toBe('latest')
     expect(window.aiops.checkUpdate).toHaveBeenCalled()
-    expect(window.aiops.openExternalUrl).not.toHaveBeenCalledWith('https://aiopsterm.local/docs')
+    expect(window.aiops.openSettingsDocumentation).not.toHaveBeenCalled()
 
     store.setActiveSettingsSection('docs')
     await Promise.resolve()
     expect(store.activeSettingsSection).toBe('general')
-    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/docs')
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalled()
 
     await store.openSettingsExternalAction('日志目录')
     expect(window.aiops.openLogDir).toHaveBeenCalled()
     expect(store.settingsNotice).toBe('日志目录已打开')
     await store.openSettingsExternalAction('反馈页面')
-    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/feedback')
-    expect(store.settingsNotice).toBe('反馈页面已打开')
+    expect(window.aiops.submitSettingsFeedbackReport).toHaveBeenCalled()
+    expect(store.settingsNotice).toBe('反馈报告已打开')
     await expect(store.openSettingsExternalAction('账户中心')).resolves.toBe(true)
     expect(window.aiops.getUserAccount).toHaveBeenCalled()
     expect(store.activeModule).toBe('user')
@@ -10421,27 +10421,41 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     const store = useWorkspaceStore()
     store.setActiveModule('settings')
     const originalAiops = {
-      openExternalUrl: window.aiops.openExternalUrl,
+      openSettingsDocumentation: window.aiops.openSettingsDocumentation,
+      submitSettingsFeedbackReport: window.aiops.submitSettingsFeedbackReport,
       openLogDir: window.aiops.openLogDir,
       getUserAccount: window.aiops.getUserAccount
     }
 
     try {
-      ;(window.aiops as any).openExternalUrl = undefined
+      ;(window.aiops as any).openSettingsDocumentation = undefined
       store.setActiveSettingsSection('docs')
       expect(store.activeSettingsSection).toBe('general')
       expect(store.settingsNotice).toBe('文档入口服务不可用')
+      ;(window.aiops as any).submitSettingsFeedbackReport = undefined
       await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
-      expect(store.settingsNotice).toBe('反馈页面服务不可用')
+      expect(store.settingsNotice).toBe('反馈报告服务不可用')
 
-      ;(window.aiops as any).openExternalUrl = originalAiops.openExternalUrl
-      vi.mocked(window.aiops.openExternalUrl).mockRejectedValueOnce(new Error('external offline'))
+      ;(window.aiops as any).openSettingsDocumentation = originalAiops.openSettingsDocumentation
+      vi.mocked(window.aiops.openSettingsDocumentation).mockRejectedValueOnce(new Error('docs offline'))
       store.setActiveSettingsSection('docs')
       await Promise.resolve()
       expect(store.settingsNotice).toBe('文档入口打开失败')
-      vi.mocked(window.aiops.openExternalUrl).mockRejectedValueOnce(new Error('feedback offline'))
+      vi.mocked(window.aiops.openSettingsDocumentation).mockResolvedValueOnce({ path: '   ' })
+      store.setActiveSettingsSection('docs')
+      await Promise.resolve()
+      expect(store.settingsNotice).toBe('文档入口打开失败')
+
+      ;(window.aiops as any).submitSettingsFeedbackReport = originalAiops.submitSettingsFeedbackReport
+      vi.mocked(window.aiops.submitSettingsFeedbackReport).mockRejectedValueOnce(new Error('feedback offline'))
       await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('反馈页面 打开失败')
+      vi.mocked(window.aiops.submitSettingsFeedbackReport).mockResolvedValueOnce(undefined as any)
+      await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('反馈报告生成失败')
+      vi.mocked(window.aiops.submitSettingsFeedbackReport).mockResolvedValueOnce({ path: '   ' })
+      await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('反馈报告生成失败')
 
       ;(window.aiops as any).openLogDir = undefined
       await expect(store.openSettingsExternalAction('日志目录')).resolves.toBe(false)

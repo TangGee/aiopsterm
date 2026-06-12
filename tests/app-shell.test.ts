@@ -9815,7 +9815,7 @@ describe('AppShell', () => {
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('文档'))!.trigger('click')
     await flushPromises()
     expect(store.activeSettingsSection).toBe('general')
-    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/docs')
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalled()
 
     const workspace = mount(SettingsWorkspace, {
       global: { plugins: [pinia] }
@@ -10855,7 +10855,7 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Install Requested')
     await workspace.findAll('.diagnostics-card .settings-button').find((button) => button.text().includes('Open Log Dir'))!.trigger('click')
     expect(window.aiops.openLogDir).toHaveBeenCalled()
-    await workspace.findAll('.diagnostics-card .settings-button').find((button) => button.text().includes('Submit Feedback'))!.trigger('click')
-    expect(window.aiops.openExternalUrl).toHaveBeenCalledWith('https://aiopsterm.local/feedback')
+    await workspace.findAll('.diagnostics-card .settings-button').find((button) => button.text().includes('Open Feedback Report'))!.trigger('click')
+    expect(window.aiops.submitSettingsFeedbackReport).toHaveBeenCalled()
   })
 })

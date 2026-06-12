@@ -2801,6 +2801,8 @@ export type AiopsPreloadApi = {
   consumeDeepLinks: () => Promise<AiopstermDeepLinkPayload[]>
   onDeepLink: (listener: (payload: AiopstermDeepLinkPayload) => void) => () => void
   openExternalUrl: (url: string) => Promise<void>
+  openSettingsDocumentation: () => Promise<OpenPathResult>
+  submitSettingsFeedbackReport: () => Promise<OpenPathResult>
   openLogDir: () => Promise<OpenPathResult>
   minimizeWindow: () => Promise<void>
   maximizeWindow: () => Promise<void>

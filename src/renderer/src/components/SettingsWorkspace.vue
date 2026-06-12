@@ -1596,8 +1596,8 @@ const AboutSettingsPage = defineComponent({
         ]),
         h('div', { class: 'settings-section-card diagnostics-card' }, [
           h('div', { class: 'diagnostics-card-header' }, [h(MessageSquare, { class: 'diagnostics-icon' }), h('strong', 'Feedback')]),
-          h('small', 'Submit feedback through the product issue channel.'),
-          h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('反馈页面') }, [h(ExternalLink), 'Submit Feedback'])
+          h('small', 'Prepare a local diagnostics report for feedback.'),
+          h('button', { class: 'settings-button', onClick: () => workspace.openSettingsExternalAction('反馈页面') }, [h(ExternalLink), 'Open Feedback Report'])
         ])
       ])
   }

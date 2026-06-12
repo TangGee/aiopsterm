@@ -65,6 +65,8 @@ const api: AiopsPreloadApi = {
     return () => ipcRenderer.off('app:deep-link', wrapped)
   },
   openExternalUrl: (url: string) => ipcRenderer.invoke('app:open-external-url', url),
+  openSettingsDocumentation: () => ipcRenderer.invoke('settings:open-documentation'),
+  submitSettingsFeedbackReport: () => ipcRenderer.invoke('settings:submit-feedback-report'),
   openLogDir: () => ipcRenderer.invoke('app:open-log-dir'),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
