@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer } from 'http'
-import { chmod, mkdir, rm, writeFile } from 'fs/promises'
+import { chmod, mkdir, readFile, rm, writeFile } from 'fs/promises'
 import type { AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
@@ -766,7 +766,30 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.db-tree-row.connection').filter({ hasText: 'e2e-postgres' })).toBeVisible()
     await page.locator('.db-workspace-add-tab').click()
     await expect(page.locator('.db-workspace-tab').filter({ hasText: 'Query 1' })).toBeVisible()
-    await expect(page.getByTitle('Save As')).toBeDisabled()
+    const sqlSaveButton = page.locator('.db-sql-toolbar-save')
+    const sqlSaveAsButton = page.locator('.db-sql-toolbar-save-as')
+    await expect(sqlSaveButton).toBeEnabled()
+    await expect(sqlSaveAsButton).toBeEnabled()
+    await page.locator('.db-sql-editor').fill("select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from ops.ops_incidents;")
+    const e2eSqlSavePath = path.join(os.homedir(), 'Downloads', 'Query-1-orders-postgres-orders-public.sql')
+    await rm(e2eSqlSavePath, { force: true })
+    await sqlSaveAsButton.click()
+    await expect(page.locator('.db-sql-save-state')).toContainText('Saved:')
+    await expect
+      .poll(async () => {
+        try {
+          return await readFile(e2eSqlSavePath, 'utf-8')
+        } catch {
+          return ''
+        }
+      })
+      .toContain("select id, service from public.orders where status = 'open'")
+    await page.locator('.db-sql-editor').fill("select id from public.orders where status = 'open';")
+    await expect(page.locator('.db-sql-save-state')).toContainText('Unsaved changes')
+    await sqlSaveButton.click()
+    await expect(page.locator('.db-sql-save-state')).toContainText('Saved:')
+    await expect.poll(async () => readFile(e2eSqlSavePath, 'utf-8')).toContain("select id from public.orders where status = 'open';")
+    await rm(e2eSqlSavePath, { force: true })
     await page.locator('.db-sql-editor').fill("select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from ops.ops_incidents;")
     await page.getByTitle('Format').click()
     await expect(page.locator('.db-sql-editor')).toHaveValue(/SELECT\n  id/)

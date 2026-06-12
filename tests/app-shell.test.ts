@@ -7987,10 +7987,40 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-sql-editor-shell').exists()).toBe(true)
     expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('1')
     expect(wrapper.find('.db-sql-editor-footer').text()).toContain('Ln 1, Col 1')
+    expect(wrapper.find('.db-sql-save-state').text()).toContain('Not saved')
+    expect(wrapper.find('button[title="Save"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('button[title="Save As"]').exists()).toBe(true)
-    expect(wrapper.find('button[title="Save As"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[title="Save As"]').attributes('disabled')).toBeUndefined()
     await workbenchEditor.setValue('select id, service from public.orders where status = \'open\' order by updated_at desc limit 5; select * from public.orders where service = \'billing\';')
+    expect(wrapper.find('.db-sql-save-state').text()).toContain('Not saved')
+    vi.mocked(window.aiops.showSaveDialog).mockClear()
+    vi.mocked(window.aiops.writeLocalFile).mockClear()
+    vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/aiopsterm-sql/query-one.sql' })
+    await wrapper.find('button[title="Save As"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({
+      defaultPath: expect.stringMatching(/Query-.*orders.*public\.sql$/),
+      filters: [{ name: 'SQL Files', extensions: ['sql'] }]
+    })
+    expect(window.aiops.writeLocalFile).toHaveBeenCalledWith(
+      '/tmp/aiopsterm-sql/query-one.sql',
+      "select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from public.orders where service = 'billing';"
+    )
+    expect(wrapper.find('.db-sql-save-state').text()).toContain('Saved: query-one.sql')
+    await workbenchEditor.setValue('select id, service from public.orders where status = \'open\' order by updated_at desc limit 10;')
+    expect(wrapper.find('.db-sql-save-state').text()).toContain('Unsaved changes')
+    vi.mocked(window.aiops.showSaveDialog).mockClear()
+    vi.mocked(window.aiops.writeLocalFile).mockClear()
+    await wrapper.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.showSaveDialog).not.toHaveBeenCalled()
+    expect(window.aiops.writeLocalFile).toHaveBeenCalledWith(
+      '/tmp/aiopsterm-sql/query-one.sql',
+      "select id, service from public.orders where status = 'open' order by updated_at desc limit 10;"
+    )
+    expect(wrapper.find('.db-sql-save-state').text()).toContain('Saved: query-one.sql')
     expect(wrapper.find('.db-sql-editor-gutter').text()).toContain('1')
+    await workbenchEditor.setValue('select id, service from public.orders where status = \'open\' order by updated_at desc limit 5; select * from public.orders where service = \'billing\';')
     await wrapper.find('button[title="Format"]').trigger('click')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('SELECT\n  id')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('\nFROM\n  public.orders')
@@ -8844,6 +8874,55 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-data-workspace .db-result-error').text()).toContain('Backend table query returned malformed result data.')
     expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('Backend table query returned malformed result data.')
     expect(wrapper.find('.db-data-workspace .db-status-bar').text()).not.toContain('Execution OK')
+
+    wrapper.unmount()
+  })
+
+  it('keeps Database SQL save state unchanged when file save bridges cancel or fail', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
+
+    vi.mocked(window.aiops.showSaveDialog).mockClear()
+    vi.mocked(window.aiops.writeLocalFile).mockClear()
+    vi.mocked(window.aiops.showSaveDialog).mockResolvedValueOnce({ canceled: true })
+    await wrapper.find('button[title="Save As"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.showSaveDialog).toHaveBeenCalled()
+    expect(window.aiops.writeLocalFile).not.toHaveBeenCalled()
+    expect(wrapper.find('.db-sql-save-state').text()).toContain('Not saved')
+    expect(wrapper.text()).toContain('SQL save cancelled')
+
+    const originalAiops = {
+      showSaveDialog: window.aiops.showSaveDialog,
+      writeLocalFile: window.aiops.writeLocalFile
+    }
+    try {
+      ;(window.aiops as any).showSaveDialog = undefined
+      await wrapper.find('button[title="Save As"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-sql-save-state').text()).toContain('SQL save dialog service unavailable')
+
+      ;(window.aiops as any).showSaveDialog = originalAiops.showSaveDialog
+      vi.mocked(window.aiops.showSaveDialog!).mockResolvedValueOnce({ canceled: false, filePath: '/tmp/aiopsterm-sql/failing.sql' })
+      vi.mocked(window.aiops.writeLocalFile).mockRejectedValueOnce(new Error('disk denied'))
+      await wrapper.find('button[title="Save As"]').trigger('click')
+      await flushPromises()
+      expect(window.aiops.writeLocalFile).toHaveBeenCalledWith('/tmp/aiopsterm-sql/failing.sql', 'select * from public.orders;')
+      expect(wrapper.find('.db-sql-save-state').text()).toContain('disk denied')
+
+      ;(window.aiops as any).writeLocalFile = undefined
+      await wrapper.find('button[title="Save"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-sql-save-state').text()).toContain('SQL file writer service unavailable')
+    } finally {
+      ;(window.aiops as any).showSaveDialog = originalAiops.showSaveDialog
+      ;(window.aiops as any).writeLocalFile = originalAiops.writeLocalFile
+    }
 
     wrapper.unmount()
   })

@@ -3001,6 +3001,7 @@ const registerIpc = () => {
   })
   ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => {
     if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
+    if (!isAbsolute(filePath)) throw new Error('filePath must be absolute')
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, typeof content === 'string' ? content : String(content), 'utf-8')
   })

@@ -12572,6 +12572,25 @@ th {
   white-space: nowrap;
 }
 
+.db-sql-editor-footer .db-sql-save-state {
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.db-sql-editor-footer .db-sql-save-state.dirty {
+  color: #b7791f;
+}
+
+.db-sql-editor-footer .db-sql-save-state.saving {
+  color: var(--accent);
+}
+
+.db-sql-editor-footer .db-sql-save-state.error {
+  color: #dc2626;
+}
+
 .db-sql-results {
   min-height: 0;
   display: flex;

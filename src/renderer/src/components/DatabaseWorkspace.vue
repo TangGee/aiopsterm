@@ -529,17 +529,19 @@
           <span class="db-toolbar-divider" />
           <button
             type="button"
-            class="db-sql-toolbar-btn"
-            disabled
-            title="Save"
+            class="db-sql-toolbar-btn db-sql-toolbar-save"
+            :disabled="!activeSqlTab || activeSqlSaving"
+            :title="activeSqlSaveTitle"
+            @click="saveActiveSql(false)"
           >
             <Save />
           </button>
           <button
             type="button"
-            class="db-sql-toolbar-btn"
-            disabled
+            class="db-sql-toolbar-btn db-sql-toolbar-save-as"
+            :disabled="!activeSqlTab || activeSqlSaving"
             title="Save As"
+            @click="saveActiveSql(true)"
           >
             <SaveAll />
           </button>
@@ -780,6 +782,14 @@
               </div>
             </div>
             <footer class="db-sql-editor-footer">
+              <span
+                v-if="activeSqlTab"
+                class="db-sql-save-state"
+                :class="{ dirty: activeSqlIsDirty, saving: activeSqlSaving, error: Boolean(activeSqlTab.saveError) }"
+                :title="activeSqlTab.filePath || activeSqlTab.saveError || undefined"
+              >
+                {{ activeSqlSaveStateText }}
+              </span>
               <span>{{ activeSqlEditorLineCount }} lines</span>
               <span>Ln {{ sqlEditorActiveLine }}, Col {{ sqlEditorActiveColumn }}</span>
               <span v-if="sqlEditorSelectionSize">{{ sqlEditorSelectionSize }} selected</span>
@@ -2439,6 +2449,10 @@ type WorkspaceTab =
       tableName?: string
       readOnly?: boolean
       sql: string
+      filePath?: string
+      savedSql: string
+      saving: boolean
+      saveError: string | null
       resultTabs: SqlResult[]
       activeResultTabId: string
       history: SqlHistory[]
@@ -3039,6 +3053,9 @@ const tabs = ref<WorkspaceTab[]>([
     catalogName: 'orders',
     schemaName: 'public',
     sql: 'select id, service, status, owner, updated_at\nfrom public.orders\nwhere status <> \'closed\'\norder by updated_at desc\nlimit 20;',
+    savedSql: 'select id, service, status, owner, updated_at\nfrom public.orders\nwhere status <> \'closed\'\norder by updated_at desc\nlimit 20;',
+    saving: false,
+    saveError: null,
     resultTabs: [],
     activeResultTabId: 'overview',
     history: []
@@ -3251,6 +3268,25 @@ const activeSqlResultViewState = computed(() => {
 })
 
 const activeSqlHasText = computed(() => Boolean(activeSqlTab.value?.sql.trim()))
+const activeSqlSaving = computed(() => Boolean(activeSqlTab.value?.saving))
+const activeSqlIsDirty = computed(() => {
+  const tab = activeSqlTab.value
+  return !!tab && tab.sql !== tab.savedSql
+})
+const activeSqlSaveTitle = computed(() => {
+  const tab = activeSqlTab.value
+  if (!tab) return 'Save'
+  if (tab.saving) return 'Saving'
+  return 'Save'
+})
+const activeSqlSaveStateText = computed(() => {
+  const tab = activeSqlTab.value
+  if (!tab) return ''
+  if (tab.saving) return 'Saving...'
+  if (tab.saveError) return tab.saveError
+  if (activeSqlIsDirty.value) return tab.filePath ? 'Unsaved changes' : 'Not saved'
+  return tab.filePath ? `Saved: ${fileNameFromPath(tab.filePath)}` : 'Not saved'
+})
 const canToggleDbAiPane = computed(() => connections.value.length > 0)
 const sqlEditorLineHeight = computed(() => editorLineHeightPx(workspaceStore.editorSettings))
 const databaseWorkspaceStyle = computed(() => ({
@@ -4914,6 +4950,9 @@ function openSqlConsole(connectionId?: string) {
     catalogName: catalog?.name ?? context.catalogName,
     schemaName: context.schemaName,
     sql: '',
+    savedSql: '',
+    saving: false,
+    saveError: null,
     resultTabs: [],
     activeResultTabId: 'overview',
     history: []
@@ -5079,6 +5118,80 @@ function bridgeErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) return error.message
   if (typeof error === 'string' && error.trim()) return error.trim()
   return fallback
+}
+
+function defaultSqlFileName(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
+  const connection = findConnection(tab.connectionId)
+  const parts = [tab.title, connection?.name, tab.catalogName, tab.schemaName].filter(Boolean)
+  const base = parts.join('-') || 'query'
+  const safe = base
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  return `${safe || 'query'}.sql`
+}
+
+function fileNameFromPath(filePath: string) {
+  return String(filePath || '').split(/[\\/]/).filter(Boolean).pop() || filePath
+}
+
+async function pickSqlSavePath(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
+  const showSaveDialog = window.aiops?.showSaveDialog
+  if (typeof showSaveDialog !== 'function') {
+    return { ok: false as const, error: 'SQL save dialog service unavailable' }
+  }
+  try {
+    const result = await showSaveDialog({
+      defaultPath: tab.filePath || defaultSqlFileName(tab),
+      filters: [{ name: 'SQL Files', extensions: ['sql'] }]
+    })
+    if (!result || result.canceled || !result.filePath) return { ok: true as const, canceled: true as const }
+    return { ok: true as const, canceled: false as const, filePath: result.filePath }
+  } catch (error) {
+    return { ok: false as const, error: bridgeErrorMessage(error, 'SQL save dialog failed') }
+  }
+}
+
+async function saveActiveSql(forceSaveAs: boolean) {
+  const tab = activeSqlTab.value
+  if (!tab || tab.saving) return
+  const writeLocalFile = window.aiops?.writeLocalFile
+  if (typeof writeLocalFile !== 'function') {
+    tab.saveError = 'SQL file writer service unavailable'
+    showNotice(tab.saveError)
+    return
+  }
+
+  tab.saving = true
+  tab.saveError = null
+  try {
+    let targetPath = forceSaveAs ? '' : tab.filePath || ''
+    if (!targetPath) {
+      const picked = await pickSqlSavePath(tab)
+      if (!picked.ok) {
+        tab.saveError = picked.error
+        showNotice(tab.saveError)
+        return
+      }
+      if (picked.canceled) {
+        showNotice('SQL save cancelled')
+        return
+      }
+      targetPath = picked.filePath
+    }
+    await writeLocalFile(targetPath, tab.sql)
+    tab.filePath = targetPath
+    tab.savedSql = tab.sql
+    tab.saveError = null
+    showNotice(`SQL saved to ${fileNameFromPath(targetPath)}`)
+  } catch (error) {
+    tab.saveError = bridgeErrorMessage(error, 'SQL file save failed')
+    showNotice(tab.saveError)
+  } finally {
+    tab.saving = false
+  }
 }
 
 function firstStatement(sql: string) {
