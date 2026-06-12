@@ -443,7 +443,7 @@ import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBott
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
-import { copyTextToClipboard, mirrorTextToClipboardQuietly } from '@/services/clipboardRuntime'
+import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
 
@@ -927,19 +927,17 @@ const copySelection = async (panelId = workspace.activePanelId) => {
 }
 
 const pasteClipboard = async (panelId = workspace.activePanelId) => {
-  if (!navigator.clipboard?.readText) {
-    workspace.setTopNotice('终端剪贴板读取服务不可用')
+  const clipboardRead = await readTextFromClipboard()
+  if (!clipboardRead.ok) {
+    if (clipboardRead.error === 'unavailable') {
+      workspace.setTopNotice('终端剪贴板读取服务不可用')
+    } else {
+      workspace.setTopNotice(clipboardRead.message || '终端剪贴板读取失败')
+    }
     termMenu.visible = false
     return
   }
-  let text = ''
-  try {
-    text = await navigator.clipboard.readText()
-  } catch (error) {
-    workspace.setTopNotice(error instanceof Error && error.message ? error.message : '终端剪贴板读取失败')
-    termMenu.visible = false
-    return
-  }
+  const text = clipboardRead.text
   if (!text) {
     termMenu.visible = false
     return

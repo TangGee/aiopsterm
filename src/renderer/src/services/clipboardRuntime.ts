@@ -38,3 +38,22 @@ export const mirrorTextToClipboardQuietly = async (text: string): Promise<boolea
     return false
   }
 }
+
+export type ClipboardTextReadResult =
+  | { ok: true; text: string }
+  | { ok: false; error: 'unavailable' | 'rejected'; message: string }
+
+export const readTextFromClipboard = async (): Promise<ClipboardTextReadResult> => {
+  if (!navigator.clipboard?.readText) {
+    return { ok: false, error: 'unavailable', message: 'Clipboard read service unavailable.' }
+  }
+  try {
+    return { ok: true, text: await navigator.clipboard.readText() }
+  } catch (error) {
+    return {
+      ok: false,
+      error: 'rejected',
+      message: error instanceof Error && error.message ? error.message : 'Clipboard read failed.'
+    }
+  }
+}
