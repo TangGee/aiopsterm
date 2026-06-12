@@ -26,6 +26,7 @@ let downloadAppUpdate: (
 ) => Promise<any>
 let installAppUpdate: (input?: { version?: string }, options?: AppUpdateInstallTestOptions) => Promise<any>
 let resetAppUpdateStateForTests: () => void
+let configureAppUpdateRuntime: (config?: AppUpdateInstallTestOptions) => void
 
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex')
 
@@ -133,6 +134,7 @@ beforeAll(async () => {
   const modulePath = '../src/main/backend/appUpdate'
   const backend = await import(modulePath)
   checkAppUpdate = backend.checkAppUpdate as typeof checkAppUpdate
+  configureAppUpdateRuntime = backend.configureAppUpdateRuntime as typeof configureAppUpdateRuntime
   downloadAppUpdate = backend.downloadAppUpdate as typeof downloadAppUpdate
   installAppUpdate = backend.installAppUpdate as typeof installAppUpdate
   resetAppUpdateStateForTests = backend.resetAppUpdateStateForTests as typeof resetAppUpdateStateForTests
@@ -272,7 +274,7 @@ describe('app update backend boundary', () => {
     }
   })
 
-  it('requires a downloaded cache package and configured installer before install handoff', async () => {
+  it('requires a downloaded cache package and uses the configured runtime installer for install handoff', async () => {
     const fixture = await createUpdateFixture({ version: '0.1.5', packageContent: 'package-v015' })
 
     try {
@@ -292,17 +294,18 @@ describe('app update backend boundary', () => {
         errorMessage: 'Update installer handoff is not configured.'
       })
 
-      const installer = vi.fn(async () => ({
+      const runtimeInstaller = vi.fn(async () => ({
         handoff: {
           kind: 'os-open' as const,
           accepted: true as const
         },
-        message: 'test installer accepted update package'
+        message: 'runtime installer accepted update package'
       }))
-      const result = await installAppUpdate({ version: '0.1.5' }, { installer })
+      configureAppUpdateRuntime({ installer: runtimeInstaller })
+      const result = await installAppUpdate({ version: '0.1.5' })
 
       expect(result.ok).toBe(true)
-      expect(installer).toHaveBeenCalledWith({
+      expect(runtimeInstaller).toHaveBeenCalledWith({
         version: '0.1.5',
         filePath: downloaded.data.filePath,
         size: Buffer.byteLength(fixture.packageContent),
@@ -318,9 +321,55 @@ describe('app update backend boundary', () => {
           kind: 'os-open',
           accepted: true
         },
-        message: 'test installer accepted update package'
+        message: 'runtime installer accepted update package'
       })
       expect(result.data.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('allows a per-call installer to override the configured runtime installer', async () => {
+    const fixture = await createUpdateFixture({ version: '0.1.8', packageContent: 'package-v018' })
+
+    try {
+      await expect(
+        downloadAppUpdate({ version: '0.1.8' }, undefined, {
+          manifestPath: fixture.manifestPath,
+          cacheDir: fixture.cacheDir
+        })
+      ).resolves.toMatchObject({ ok: true })
+
+      const runtimeInstaller = vi.fn(async () => ({
+        handoff: {
+          kind: 'os-open' as const,
+          accepted: true as const
+        },
+        message: 'runtime installer should not run'
+      }))
+      const overrideInstaller = vi.fn(async () => ({
+        handoff: {
+          kind: 'os-open' as const,
+          accepted: true as const
+        },
+        message: 'per-call installer accepted update package'
+      }))
+      configureAppUpdateRuntime({ installer: runtimeInstaller })
+
+      await expect(installAppUpdate({ version: '0.1.8' }, { installer: overrideInstaller })).resolves.toMatchObject({
+        ok: true,
+        data: {
+          version: '0.1.8',
+          status: 'install-requested',
+          handoff: {
+            kind: 'os-open',
+            accepted: true
+          },
+          message: 'per-call installer accepted update package'
+        }
+      })
+      expect(runtimeInstaller).not.toHaveBeenCalled()
+      expect(overrideInstaller).toHaveBeenCalledTimes(1)
     } finally {
       await rm(fixture.root, { recursive: true, force: true })
     }

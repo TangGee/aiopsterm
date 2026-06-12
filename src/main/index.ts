@@ -40,7 +40,7 @@ import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiT
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
 import { configureAliasBackendRuntime, deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
-import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
+import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
   createChatConversation,
@@ -1221,6 +1221,19 @@ configureQuickCommandBackendRuntime({
 configureAliasBackendRuntime({
   databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
   useSeedData: process.env.AIOPSTERM_ALIASES_ENABLE_SEED === '1'
+})
+configureAppUpdateRuntime({
+  installer: async (update) => {
+    const errorMessage = await shell.openPath(update.filePath)
+    if (errorMessage) throw new Error(errorMessage)
+    return {
+      handoff: {
+        kind: 'os-open',
+        accepted: true
+      },
+      message: `Update ${update.version} handed off to the operating system installer.`
+    }
+  }
 })
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
@@ -2492,24 +2505,7 @@ const registerIpc = () => {
     const emit = (progress: AppUpdateProgressEvent) => event.sender.send('app:update-progress', progress)
     return downloadAppUpdate({ version }, emit, { cacheDir: join(app.getPath('userData'), 'updates') })
   })
-  ipcMain.handle('app:install-update', (_event, version?: string) =>
-    installAppUpdate(
-      { version },
-      {
-        installer: async (update) => {
-          const errorMessage = await shell.openPath(update.filePath)
-          if (errorMessage) throw new Error(errorMessage)
-          return {
-            handoff: {
-              kind: 'os-open',
-              accepted: true
-            },
-            message: `Update ${update.version} handed off to the operating system installer.`
-          }
-        }
-      }
-    )
-  )
+  ipcMain.handle('app:install-update', (_event, version?: string) => installAppUpdate({ version }))
   ipcMain.handle('chat-history:list', () => listChatConversations())
   ipcMain.handle('chat-history:create', () => createChatConversation())
   ipcMain.handle('chat-history:update', (_event, input: AiChatConversationUpdateInput) => updateChatConversation(input))

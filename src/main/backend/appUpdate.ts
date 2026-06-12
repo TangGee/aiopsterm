@@ -75,7 +75,12 @@ type AppUpdateInstallOptions = {
   installer?: (input: AppUpdateInstallerInput) => Promise<AppUpdateInstallerResult> | AppUpdateInstallerResult
 }
 
+type AppUpdateRuntimeConfig = {
+  installer?: AppUpdateInstallOptions['installer']
+}
+
 let downloadedUpdate: DownloadedUpdate | null = null
+let runtimeConfig: AppUpdateRuntimeConfig = {}
 
 const normalizeVersion = (value: unknown) => String(value || '').trim().replace(/^v/i, '')
 
@@ -390,6 +395,13 @@ const validateCachedUpdate = async (update: DownloadedUpdate) => {
 
 export const resetAppUpdateStateForTests = () => {
   downloadedUpdate = null
+  runtimeConfig = {}
+}
+
+export const configureAppUpdateRuntime = (config: AppUpdateRuntimeConfig = {}) => {
+  runtimeConfig = {
+    installer: config.installer
+  }
 }
 
 export const checkAppUpdate = (currentVersion: string, options: AppUpdateOptions = {}): AppUpdateCheckResult => {
@@ -488,7 +500,8 @@ export const installAppUpdate = async (input: { version?: string } = {}, options
   if (version !== downloadedUpdate.version) {
     return mutationError('APP_UPDATE_VERSION_MISMATCH', 'Downloaded update version does not match.')
   }
-  if (typeof options.installer !== 'function') {
+  const installer = options.installer || runtimeConfig.installer
+  if (typeof installer !== 'function') {
     return mutationError('APP_UPDATE_INSTALLER_UNAVAILABLE', 'Update installer handoff is not configured.')
   }
 
@@ -501,7 +514,7 @@ export const installAppUpdate = async (input: { version?: string } = {}, options
 
   let installResult: AppUpdateInstallerResult
   try {
-    installResult = await options.installer({
+    installResult = await installer({
       version,
       filePath: downloadedUpdate.filePath,
       size: downloadedUpdate.size,
