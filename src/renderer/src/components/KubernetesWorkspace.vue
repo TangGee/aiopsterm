@@ -709,11 +709,12 @@ const K8sAddClusterModal = defineComponent({
     const testing = ref(false)
     const saving = ref(false)
     const formError = ref('')
+    const firstImportContext = store.k8sImportContexts[0]
     const form = reactive({
       kubeconfigPath: '~/.kube/config',
-      contextName: store.k8sImportContexts[0]?.name || 'new/context',
-      name: store.k8sImportContexts[0]?.cluster || 'new-cluster',
-      serverUrl: store.k8sImportContexts[0]?.server || 'https://new.k8s.local:6443',
+      contextName: firstImportContext?.name || '',
+      name: firstImportContext?.cluster || '',
+      serverUrl: firstImportContext?.server || '',
       defaultNamespace: 'default',
       kubeconfigContent: ''
     })
@@ -765,11 +766,22 @@ const K8sAddClusterModal = defineComponent({
         if (context) applyContext(context.name)
         return
       }
-      form.contextName = 'new/context'
-      form.name = 'new-cluster'
-      form.serverUrl = 'https://new.k8s.local:6443'
+      form.contextName = ''
+      form.name = ''
+      form.serverUrl = ''
       form.defaultNamespace = 'default'
       form.kubeconfigContent = ''
+    }
+
+    const hydrateManualKubeconfig = async () => {
+      if (store.k8sAddMode !== 'manual' || !form.kubeconfigContent.trim()) return true
+      const parsed = await store.importK8sKubeconfigContent(form.kubeconfigContent)
+      if (!parsed.success) {
+        formError.value = parsed.error || 'Kubeconfig 导入失败'
+        return false
+      }
+      applyImportedContexts(parsed.contexts)
+      return true
     }
 
     const validateForm = () => {
@@ -778,12 +790,18 @@ const K8sAddClusterModal = defineComponent({
         if (!form.name.trim() || !form.serverUrl.trim()) return '请补全集群名称和 Server URL'
         return ''
       }
+      if (!form.kubeconfigContent.trim()) return '请输入 kubeconfig 内容，或通过导入模式选择 kubeconfig 文件'
       if (!form.name.trim() || !form.contextName.trim() || !form.serverUrl.trim()) return '请补全集群名称、Context Name 和 Server URL'
       return ''
     }
 
     const testConnection = async () => {
       formError.value = ''
+      if (!(await hydrateManualKubeconfig())) {
+        store.k8sTestResult = false
+        store.k8sClusterNotice = formError.value
+        return
+      }
       const error = validateForm()
       if (error) {
         formError.value = error
@@ -793,12 +811,6 @@ const K8sAddClusterModal = defineComponent({
       }
       testing.value = true
       try {
-        if (store.k8sAddMode === 'manual' && form.kubeconfigContent.trim()) {
-          const parsed = await store.importK8sKubeconfigContent(form.kubeconfigContent)
-          if (parsed.success && parsed.contexts.some((context) => context.name === form.contextName)) {
-            applyImportedContexts(parsed.contexts)
-          }
-        }
         await store.testK8sClusterConnection({
           contextName: form.contextName,
           serverUrl: form.serverUrl,
@@ -811,6 +823,10 @@ const K8sAddClusterModal = defineComponent({
     }
 
     const submit = async () => {
+      if (!(await hydrateManualKubeconfig())) {
+        store.k8sClusterNotice = formError.value
+        return
+      }
       formError.value = validateForm()
       if (formError.value) {
         store.k8sClusterNotice = formError.value

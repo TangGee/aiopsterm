@@ -7378,7 +7378,8 @@ describe('workspace store', () => {
       name: 'qa-cluster',
       contextName: 'qa/dev',
       serverUrl: 'https://qa.k8s.local:6443',
-      defaultNamespace: 'qa'
+      defaultNamespace: 'qa',
+      kubeconfigContent: qaKubeconfigContent
     })
     expect(added?.id).toMatch(/^k8s-/)
     expect(store.k8sSelectedClusterId).toBe(added?.id)
@@ -8048,7 +8049,21 @@ describe('workspace store', () => {
       store.addK8sCluster({
         name: 'bad-cluster',
         contextName: 'bad/context',
-        serverUrl: 'https://bad.k8s.local:6443'
+        serverUrl: 'https://bad.k8s.local:6443',
+        kubeconfigContent: [
+          'apiVersion: v1',
+          'kind: Config',
+          'current-context: bad/context',
+          'clusters:',
+          '- name: bad-cluster',
+          '  cluster:',
+          '    server: https://bad.k8s.local:6443',
+          'contexts:',
+          '- name: bad/context',
+          '  context:',
+          '    cluster: bad-cluster',
+          '    namespace: bad'
+        ].join('\n')
       })
     ).resolves.toBeNull()
     expect(store.k8sClusterNotice).toBe('Kubernetes cluster backend returned malformed result data.')

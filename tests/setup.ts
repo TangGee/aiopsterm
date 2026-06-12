@@ -6646,21 +6646,29 @@ Object.defineProperty(window, 'aiops', {
       const contextName = trimMock(input.contextName)
       const serverUrl = trimMock(input.serverUrl)
       if (!name || !contextName || !serverUrl) return { ok: false, errorCode: 'K8S_CLUSTER_REQUIRED', errorMessage: 'Cluster name, context and server URL are required.' }
+      if (name === 'new-cluster' || contextName === 'new/context' || serverUrl === 'https://new.k8s.local:6443') {
+        return { ok: false, errorCode: 'K8S_PLACEHOLDER_CLUSTER_REJECTED', errorMessage: 'Replace the placeholder Kubernetes cluster values before saving.' }
+      }
+      const sourceType = input.sourceType || 'local'
+      const authType = sourceType === 'jumpserver' ? 'jumpserver' : 'kubeconfig'
+      if (sourceType === 'local' && authType === 'kubeconfig' && !trimMock(input.kubeconfigPath) && !trimMock(input.kubeconfigContent)) {
+        return { ok: false, errorCode: 'K8S_KUBECONFIG_REQUIRED', errorMessage: 'Kubeconfig path or content is required before saving a Kubernetes cluster.' }
+      }
       const cluster: TestKubernetesCluster = {
         id: `k8s-test-${kubernetesCatalogMock.clusters.length + 1}`,
         name,
-        kubeconfig_path: input.kubeconfigPath || null,
-        kubeconfig_content: input.kubeconfigContent || null,
+        kubeconfig_path: trimMock(input.kubeconfigPath) || null,
+        kubeconfig_content: trimMock(input.kubeconfigContent) || null,
         context_name: contextName,
         server_url: serverUrl,
-        auth_type: input.sourceType === 'jumpserver' ? 'jumpserver' : 'kubeconfig',
+        auth_type: authType,
         is_active: 0,
         connection_status: 'disconnected',
         auto_connect: 0,
         default_namespace: input.defaultNamespace?.trim() || 'default',
         created_at: '刚刚',
         updated_at: '刚刚',
-        source_type: input.sourceType || 'local',
+        source_type: sourceType,
         bastion_uuid: input.bastionUuid || null,
         bastion_asset_address: null,
         bastion_asset_name: null,

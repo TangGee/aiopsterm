@@ -723,22 +723,22 @@ test('aiopsterm primary desktop flows', async () => {
       [
         'apiVersion: v1',
         'kind: Config',
-        'current-context: new/context',
+        'current-context: manual/admin',
         'clusters:',
-        '- name: new-cluster',
+        '- name: manual-cluster',
         '  cluster:',
-        '    server: https://new.k8s.local:6443',
+        '    server: https://manual.k8s.test:6443',
         'contexts:',
-        '- name: new/context',
+        '- name: manual/admin',
         '  context:',
-        '    cluster: new-cluster',
+        '    cluster: manual-cluster',
         '    namespace: default'
       ].join('\n')
     )
     await page.locator('.k8s-test-connection button').click()
     await expect(page.getByText('连接成功')).toBeVisible()
     await page.locator('.k8s-add-cluster-modal footer button').filter({ hasText: '保存' }).click()
-    await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'new-cluster' })).toBeVisible()
+    await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'manual-cluster' })).toBeVisible()
 
     await page.getByTitle('数据库').click()
     await expect(page.locator('.db-sidebar-header').filter({ hasText: 'Database' })).toBeVisible()

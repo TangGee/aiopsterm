@@ -1335,11 +1335,20 @@ export const addKubernetesCluster = async (input: KubernetesClusterInput): Promi
     if (!name || !contextName || !serverUrl) {
       throw Object.assign(new Error('Cluster name, context and server URL are required.'), { code: 'K8S_CLUSTER_REQUIRED' })
     }
+    requireRunnableKubernetesClusterInput({
+      name,
+      contextName,
+      serverUrl,
+      sourceType: input.sourceType,
+      authType: input.authType,
+      kubeconfigPath: input.kubeconfigPath,
+      kubeconfigContent: input.kubeconfigContent
+    })
     const cluster: KubernetesClusterRecord = {
       id: `k8s-${randomUUID()}`,
       name,
-      kubeconfig_path: input.kubeconfigPath || null,
-      kubeconfig_content: input.kubeconfigContent || null,
+      kubeconfig_path: input.kubeconfigPath?.trim() || null,
+      kubeconfig_content: input.kubeconfigContent?.trim() || null,
       context_name: contextName,
       server_url: serverUrl,
       auth_type: input.authType || (input.sourceType === 'jumpserver' ? 'jumpserver' : 'kubeconfig'),
@@ -1813,6 +1822,28 @@ const canRunLocalKubectl = (cluster: KubernetesClusterRecord) =>
   cluster.source_type === 'local' &&
   cluster.auth_type === 'kubeconfig' &&
   Boolean(cluster.kubeconfig_content?.trim() || cluster.kubeconfig_path?.trim())
+
+const isLegacyPlaceholderClusterInput = (input: { name: string; contextName: string; serverUrl: string }) =>
+  input.name.trim() === 'new-cluster' || input.contextName.trim() === 'new/context' || input.serverUrl.trim() === 'https://new.k8s.local:6443'
+
+const requireRunnableKubernetesClusterInput = (input: {
+  name: string
+  contextName: string
+  serverUrl: string
+  sourceType?: KubernetesClusterRecord['source_type']
+  authType?: string
+  kubeconfigPath?: string | null
+  kubeconfigContent?: string | null
+}) => {
+  if (isLegacyPlaceholderClusterInput(input)) {
+    throw Object.assign(new Error('Replace the placeholder Kubernetes cluster values before saving.'), { code: 'K8S_PLACEHOLDER_CLUSTER_REJECTED' })
+  }
+  const sourceType = input.sourceType || 'local'
+  const authType = input.authType || (sourceType === 'jumpserver' ? 'jumpserver' : 'kubeconfig')
+  if (sourceType === 'local' && authType === 'kubeconfig' && !input.kubeconfigPath?.trim() && !input.kubeconfigContent?.trim()) {
+    throw Object.assign(new Error('Kubeconfig path or content is required before saving a Kubernetes cluster.'), { code: 'K8S_KUBECONFIG_REQUIRED' })
+  }
+}
 
 const nonRunnableKubernetesReason = (cluster: KubernetesClusterRecord): KubernetesNonRunnableReason | null => {
   if (cluster.source_type === 'jumpserver' || cluster.auth_type === 'jumpserver') {

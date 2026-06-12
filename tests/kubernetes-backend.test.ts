@@ -725,6 +725,43 @@ describe('kubernetes backend boundary', () => {
     expect(result.data?.output).toContain('dial tcp')
   })
 
+  it('rejects placeholder and non-runnable local cluster saves before catalog mutation', async () => {
+    const before = await listKubernetesCatalog()
+    const beforeClusterIds = before.data?.clusters.map((cluster) => cluster.id) || []
+
+    await expect(
+      addKubernetesCluster({
+        name: 'new-cluster',
+        contextName: 'new/context',
+        serverUrl: 'https://new.k8s.local:6443',
+        defaultNamespace: 'default',
+        kubeconfigContent: qaKubeconfigContent,
+        authType: 'kubeconfig',
+        sourceType: 'local'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_PLACEHOLDER_CLUSTER_REJECTED'
+    })
+
+    await expect(
+      addKubernetesCluster({
+        name: 'qa-cluster',
+        contextName: 'qa/dev',
+        serverUrl: 'https://qa.k8s.local:6443',
+        defaultNamespace: 'qa',
+        authType: 'kubeconfig',
+        sourceType: 'local'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_REQUIRED'
+    })
+
+    const after = await listKubernetesCatalog()
+    expect(after.data?.clusters.map((cluster) => cluster.id)).toEqual(beforeClusterIds)
+  })
+
   it('imports kubeconfig contexts behind the backend boundary', async () => {
     const kubeconfigContent = [
       'apiVersion: v1',
