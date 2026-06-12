@@ -23,7 +23,8 @@
     "test:e2e": "npm run build && playwright test",
     "generate:icons": "node scripts/generate-app-icons.mjs",
     "smoke:packaged": "xvfb-run -a node scripts/smoke-packaged-app.mjs",
-    "audit:linux-package": "node scripts/audit-linux-package.mjs"
+    "audit:linux-package": "node scripts/audit-linux-package.mjs",
+    "audit:client-mocks": "node scripts/audit-client-mocks.mjs"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",

@@ -19,7 +19,10 @@ Run checks:
 ```bash
 npm run typecheck
 npm test
+npm run audit:client-mocks
 ```
+
+`audit:client-mocks` fails if renderer source reintroduces page-level business mock files, imports from `src/renderer/src/data`, backend seed/double switches, shared seed modules, or imports from the reference-only `external-reference/` tree. UI placeholders and backend/test-only seeds remain allowed behind their existing boundaries.
 
 Run the opt-in live SSH/SFTP backend verification against a real host:
 
