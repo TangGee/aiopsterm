@@ -2081,58 +2081,12 @@ describe('workspace store', () => {
 
     await store.hydrateConfig()
 
-    expect(store.mcpServers).toEqual([
-      {
-        name: 'release-tools',
-        status: 'connecting',
-        disabled: false,
-        tools: [
-          {
-            name: 'deploy',
-            description: 'Deploy release',
-            enabled: true,
-            parameters: [{ name: 'version', description: 'Version tag', required: true }]
-          }
-        ],
-        resources: [{ name: 'file:///release', description: 'release docs', uri: 'file:///release' }]
-      },
-      {
-        name: 'partial-runtime',
-        status: 'disconnected',
-        disabled: false,
-        tools: [{ name: 'inspect', description: 'Inspect release', enabled: true, parameters: [] }],
-        resources: []
-      }
-    ])
+    expect(store.mcpServers).toEqual(defaultMcpServers)
+    expect(window.aiops.getMcpServers).toHaveBeenCalled()
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        mcpServers: [
-          {
-            name: 'release-tools',
-            status: 'connecting',
-            disabled: false,
-            tools: [
-              {
-                name: 'deploy',
-                description: 'Deploy release',
-                enabled: true,
-                parameters: [{ name: 'version', description: 'Version tag', required: true }]
-              }
-            ],
-            resources: [{ name: 'file:///release', description: 'release docs', uri: 'file:///release' }]
-          },
-          {
-            name: 'partial-runtime',
-            status: 'disconnected',
-            disabled: false,
-            tools: [{ name: 'inspect', description: 'Inspect release', enabled: true, parameters: [] }],
-            resources: []
-          }
-        ],
-        mcpToolStates: {
-          'release-tools:deploy': true,
-          'partial-runtime:inspect': true
-        }
+        mcpServers: defaultMcpServers,
+        mcpToolStates: defaultMcpToolStates
       })
     )
   })
@@ -10533,8 +10487,16 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
         }
       }
     }
+    vi.mocked(window.aiops.getMcpServers).mockResolvedValueOnce(
+      defaultMcpServers.map((server) => ({
+        ...server,
+        tools: server.tools.map((tool) => ({ ...tool, parameters: tool.parameters.map((parameter) => ({ ...parameter })) })),
+        resources: server.resources.map((resource) => ({ ...resource })),
+        ...(server.name === 'filesystem' ? { disabled: false, status: 'connected' as const } : {})
+      }))
+    )
     mcpConfigFileListeners[0](JSON.stringify(externalMcpConfig, null, 2))
-    expect(store.mcpServers.find((server) => server.name === 'filesystem')?.disabled).toBe(false)
+    await vi.waitFor(() => expect(store.mcpServers.find((server) => server.name === 'filesystem')?.disabled).toBe(false))
     store.closeMcpConfigEditor()
     expect(removeMcpConfigFileListener).toHaveBeenCalled()
 
@@ -12254,6 +12216,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(originalFilesystem).toBeTruthy()
 
     const originalAiops = {
+      getMcpServers: window.aiops.getMcpServers,
       writeMcpConfig: window.aiops.writeMcpConfig,
       toggleMcpServer: window.aiops.toggleMcpServer,
       setMcpToolState: window.aiops.setMcpToolState,
@@ -12262,6 +12225,38 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
 
     try {
+      ;(window.aiops as any).getMcpServers = undefined
+      vi.mocked(window.aiops.readMcpConfig).mockResolvedValueOnce(
+        JSON.stringify(
+          {
+            mcpServers: {
+              filesystem: {
+                type: 'stdio',
+                disabled: true,
+                command: 'npx',
+                args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+                timeout: 60
+              },
+              rendererOnly: {
+                type: 'stdio',
+                command: 'node',
+                args: ['fake-mcp.js'],
+                timeout: 60
+              }
+            }
+          },
+          null,
+          2
+        )
+      )
+      await store.openMcpConfigEditor()
+      expect(store.settingsNotice).toBe('MCP 列表加载服务不可用')
+      expect(store.mcpServers.find((server) => server.name === 'filesystem')?.disabled).toBe(originalFilesystem?.disabled)
+      expect(store.mcpServers.some((server) => server.name === 'rendererOnly')).toBe(false)
+      expect(JSON.stringify(store.mcpServers)).toBe(originalServers)
+      store.closeMcpConfigEditor()
+      ;(window.aiops as any).getMcpServers = originalAiops.getMcpServers
+
       ;(window.aiops as any).writeMcpConfig = undefined
       await store.openMcpConfigEditor()
       store.updateMcpConfigEditorContent(

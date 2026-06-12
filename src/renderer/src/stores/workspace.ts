@@ -1663,30 +1663,6 @@ const normalizeMcpConfigFile = (source?: unknown): McpConfigFile => {
 const mcpConfigFilesMatch = (left: McpConfigFile, right: McpConfigFile) =>
   JSON.stringify(normalizeMcpConfigFile(left)) === JSON.stringify(normalizeMcpConfigFile(right))
 
-const mcpConfigFileToServers = (file: McpConfigFile, existingServers: SettingsMcpServer[]): SettingsMcpServer[] => {
-  const existingByName = new Map(existingServers.map((server) => [server.name, server]))
-  return Object.entries(file.mcpServers).map(([name, serverConfig]) => {
-    const existing = existingByName.get(name)
-    const approved = new Set((serverConfig.autoApprove || []).filter(Boolean))
-    return {
-      name,
-      status: serverConfig.disabled ? 'disabled' : existing?.status && existing.status !== 'disabled' ? existing.status : 'disconnected',
-      disabled: Boolean(serverConfig.disabled),
-      ...(existing?.error && !serverConfig.disabled ? { error: existing.error } : {}),
-      tools:
-        existing?.tools.map((tool) => {
-          const { autoApprove: _autoApprove, ...toolWithoutAutoApprove } = tool
-          return {
-            ...toolWithoutAutoApprove,
-            ...(approved.has(tool.name) ? { autoApprove: true } : {}),
-            parameters: tool.parameters.map((parameter) => ({ ...parameter }))
-          }
-        }) || [],
-      resources: existing?.resources.map((resource) => ({ ...resource })) || []
-    }
-  })
-}
-
 const normalizeStringArray = (source: unknown, fallback: string[]) => {
   if (!Array.isArray(source)) return { normalized: [...fallback], changed: true }
   const normalized = source.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
@@ -4873,11 +4849,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const skillsChanged = bridgeSkills ? savedSkillsSnapshot.changed : rawSkillsChanged
     settingsSkills.value = normalizedSkills.map((skill) => ({ ...skill }))
     const savedMcpSnapshot = normalizeMcpServersConfig(savedConfig.mcpServers, savedConfig.mcpToolStates)
-    applyMcpServersSnapshot({
-      normalized: savedMcpSnapshot.normalized,
-      toolStates: savedMcpSnapshot.toolStates,
-      changed: savedMcpSnapshot.changed
-    })
+    const bridgeMcpSnapshot = await readMcpServersSnapshotFromBridge()
+    const normalizedMcpSnapshot = bridgeMcpSnapshot || savedMcpSnapshot
+    if (bridgeMcpSnapshot) {
+      applyMcpServersSnapshot(bridgeMcpSnapshot)
+    }
     const { normalized, changed } = normalizeOnboardingConfig(config.value.onboarding)
     onboardingCompleted.value = normalized.completedModules
     config.value = mergeUserConfig(config.value, {
@@ -4899,8 +4875,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       rules: normalizedRules,
       skills: normalizedSkills,
       customInstructions: '',
-      mcpServers: savedMcpSnapshot.normalized,
-      mcpToolStates: savedMcpSnapshot.toolStates,
+      mcpServers: normalizedMcpSnapshot.normalized,
+      mcpToolStates: normalizedMcpSnapshot.toolStates,
       onboarding: normalized
     })
     if (
@@ -4950,8 +4926,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           modelSettings: normalizedModelSettings,
           skills: normalizedSkills,
           customInstructions: '',
-          mcpServers: savedMcpSnapshot.normalized,
-          mcpToolStates: savedMcpSnapshot.toolStates,
+          mcpServers: normalizedMcpSnapshot.normalized,
+          mcpToolStates: normalizedMcpSnapshot.toolStates,
           onboarding: normalized
         })
       )
@@ -5638,21 +5614,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false
   }
 
-  const readMcpServersSnapshotFromBridge = async (currentServers: McpServerUserConfig[], currentToolStates: McpToolStatesUserConfig) => {
-    if (window.aiops?.getMcpServers) {
-      try {
-        return normalizeMcpServersConfig(await window.aiops.getMcpServers())
-      } catch {
-        setSettingsNotice('MCP 配置加载失败')
+  const readMcpServersSnapshotFromBridge = async () => {
+    if (!window.aiops?.getMcpServers) {
+      setSettingsNotice('MCP 列表加载服务不可用')
+      return null
+    }
+    try {
+      const servers = await window.aiops.getMcpServers()
+      if (!Array.isArray(servers)) {
+        setSettingsNotice('MCP 配置服务返回数据无效')
         return null
       }
-    }
-    if (!window.aiops?.readMcpConfig) return null
-    try {
-      const content = await window.aiops.readMcpConfig()
-      const editorContent = content.trim() ? content : JSON.stringify({ mcpServers: {} }, null, 2)
-      const parsed = normalizeMcpConfigFile(parseMcpEditorContent(editorContent))
-      return normalizeMcpServersConfig(mcpConfigFileToServers(parsed, currentServers), currentToolStates)
+      return normalizeMcpServersConfig(servers)
     } catch {
       setSettingsNotice('MCP 配置加载失败')
       return null
@@ -5732,24 +5705,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshMcpServersFromBridge = async () => {
-    const { servers, toolStates } = getMcpSnapshot()
-    const snapshot = await readMcpServersSnapshotFromBridge(servers, toolStates)
+    const snapshot = await readMcpServersSnapshotFromBridge()
     if (!snapshot) return false
     applyMcpServersSnapshot(snapshot)
     return true
   }
 
-  const applyMcpConfigFileContent = (content: string, markSaved = true) => {
+  const applyMcpConfigFileContent = (content: string, markSaved = true, snapshot?: ReturnType<typeof normalizeMcpServersConfig> | null) => {
     const editorContent = content.trim() ? content : JSON.stringify({ mcpServers: {} }, null, 2)
     mcpConfigEditorContent.value = editorContent
     try {
-      const parsed = normalizeMcpConfigFile(parseMcpEditorContent(editorContent))
-      mcpServers.value = mcpConfigFileToServers(parsed, mcpServers.value)
-      expandedMcpServerNames.value = expandedMcpServerNames.value.filter((name) => mcpServers.value.some((server) => server.name === name))
-      const { toolStates } = getMcpSnapshot()
+      normalizeMcpConfigFile(parseMcpEditorContent(editorContent))
+      if (snapshot) applyMcpServersSnapshot(snapshot)
       mcpConfigEditorError.value = ''
       mcpConfigEditorLastSaved.value = markSaved
-      config.value = mergeUserConfig(config.value, { mcpServers: cloneMcpServerConfig(mcpServers.value), mcpToolStates: toolStates })
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -5762,7 +5731,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const installMcpConfigFileListener = () => {
     if (removeMcpConfigFileListener || !window.aiops?.onMcpConfigFileChanged) return
     removeMcpConfigFileListener = window.aiops.onMcpConfigFileChanged((content) => {
-      applyMcpConfigFileContent(content, true)
+      void (async () => {
+        const snapshot = await readMcpServersSnapshotFromBridge()
+        if (!snapshot) {
+          mcpConfigEditorContent.value = content.trim() ? content : JSON.stringify({ mcpServers: {} }, null, 2)
+          mcpConfigEditorLastSaved.value = false
+          return
+        }
+        applyMcpConfigFileContent(content, true, snapshot)
+      })()
     })
   }
 
@@ -7857,21 +7834,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const requestId = ++mcpConfigLoadRequest
     mcpConfigEditorOpen.value = true
-    mcpConfigEditorContent.value = JSON.stringify(defaultMcpConfigFile(), null, 2)
+    mcpConfigEditorContent.value = ''
     mcpConfigEditorError.value = ''
     mcpConfigEditorLastSaved.value = false
     installMcpConfigFileListener()
     if (!window.aiops) return
+    if (!window.aiops.getMcpConfigPath || !window.aiops.readMcpConfig) {
+      mcpConfigEditorError.value = 'Failed to read MCP config: MCP 配置读取服务不可用'
+      setSettingsNotice('MCP 配置读取服务不可用')
+      return
+    }
     try {
-      const { servers, toolStates } = getMcpSnapshot()
-      const bridgeSnapshot = await readMcpServersSnapshotFromBridge(servers, toolStates)
-      if (bridgeSnapshot) {
-        applyMcpServersSnapshot(bridgeSnapshot)
-      }
-      const [path, content] = await Promise.all([window.aiops.getMcpConfigPath(), window.aiops.readMcpConfig()])
+      const [bridgeSnapshot, path, content] = await Promise.all([readMcpServersSnapshotFromBridge(), window.aiops.getMcpConfigPath(), window.aiops.readMcpConfig()])
       if (requestId !== mcpConfigLoadRequest) return
       mcpConfigPath.value = path
-      applyMcpConfigFileContent(content, false)
+      applyMcpConfigFileContent(content, false, bridgeSnapshot)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       mcpConfigEditorError.value = `Failed to read MCP config: ${message}`
