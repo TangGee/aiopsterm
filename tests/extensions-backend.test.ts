@@ -402,6 +402,36 @@ describe('extension plugin backend boundary', () => {
     })
   })
 
+  it('rejects unsafe remote store catalog package and subscription URLs during discovery', async () => {
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      storeCatalogUrl: 'https://extensions.aiopsterm.test/catalog.json',
+      fetch: async () =>
+        fetchResponse(
+          JSON.stringify({
+            plugins: [
+              {
+                id: 'unsafe-plugin',
+                displayName: 'Unsafe Plugin',
+                version: '1.0.0',
+                description: 'Unsafe remote catalog package.',
+                iconKey: 'private',
+                packageUrl: 'javascript:alert(1)',
+                subscriptionUrl: 'https://user:pass@extensions.aiopsterm.test/private',
+                private: true,
+                installable: false
+              }
+            ]
+          })
+        ) as any
+    })
+
+    const catalog = await listExtensionPlugins()
+    const unsafePlugin = catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'unsafe-plugin')
+
+    expect(unsafePlugin).toBeUndefined()
+  })
+
   it('installs a store plugin from a configured real package', async () => {
     const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     const progress: ExtensionProgress[] = []
@@ -1101,6 +1131,32 @@ describe('extension plugin backend boundary', () => {
       errorCode: 'EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE',
       errorMessage: 'Plugin subscription URL is not available.'
     })
+  })
+
+  it('rejects private subscription entries with unsafe subscription URLs before opening the system browser', async () => {
+    const openedUrls: string[] = []
+    const result = await openExtensionSubscription(
+      {
+        plugin: basePlugin({
+          pluginId: 'private-automation-pack',
+          name: 'Private Automation Pack',
+          iconKey: 'private',
+          installable: false,
+          isPrivate: true,
+          subscriptionUrl: 'javascript:alert(document.cookie)'
+        })
+      },
+      (url) => {
+        openedUrls.push(url)
+      }
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE',
+      errorMessage: 'Plugin subscription URL is not available.'
+    })
+    expect(openedUrls).toEqual([])
   })
 
   it('rejects subscription entry requests for plugins that do not require subscription', async () => {

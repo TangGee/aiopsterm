@@ -62,6 +62,7 @@ import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseI
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import { shouldRunMcpDiscovery, shouldUseE2eDialogFixtures } from '@shared/runtimeSwitches'
+import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -992,7 +993,8 @@ const createWindow = () => {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    const normalized = normalizeExternalHttpUrl(url)
+    if (normalized.valid) void shell.openExternal(normalized.url)
     return { action: 'deny' }
   })
 
@@ -2517,11 +2519,11 @@ const registerIpc = () => {
     return queue
   })
   ipcMain.handle('app:open-external-url', async (_event, rawUrl: string) => {
-    const parsed = new URL(rawUrl)
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
+    const normalized = normalizeExternalHttpUrl(rawUrl)
+    if (!normalized.valid) {
       throw new Error('Only http and https URLs can be opened')
     }
-    await shell.openExternal(parsed.toString())
+    await shell.openExternal(normalized.url)
   })
   ipcMain.handle('settings:open-documentation', async () => openSettingsDocumentation(settingsExternalActionRuntime()))
   ipcMain.handle('settings:submit-feedback-report', async () => submitSettingsFeedbackReport(settingsExternalActionRuntime()))

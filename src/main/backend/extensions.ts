@@ -18,6 +18,7 @@ import type {
   ExtensionPackageDownloadResult,
   ExtensionPluginUrlInstallInput
 } from '@shared/preload'
+import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 
 export const EXTENSION_INSTALL_STEP_DELAY_MS = 120
 
@@ -356,15 +357,8 @@ const readLocalExtensionRegistry = (): ExtensionPluginRuntimeConfig[] => {
 }
 
 const normalizeAbsoluteHttpUrl = (value: unknown, baseUrl?: string) => {
-  const text = trimText(value)
-  if (!text) return ''
-  try {
-    const url = baseUrl ? new URL(text, baseUrl) : new URL(text)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
-    return url.toString()
-  } catch {
-    return ''
-  }
+  const result = normalizeExternalHttpUrl(value, baseUrl)
+  return result.valid ? result.url : ''
 }
 
 const normalizeSha256 = (value: unknown) => {
@@ -681,13 +675,13 @@ export const openExtensionSubscription = async (
   if (plugin.installable !== false && !plugin.isPrivate) {
     return subscriptionErrorResult('EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE', 'Plugin does not require a subscription.')
   }
-  const subscriptionUrl = trimText(plugin.subscriptionUrl)
-  if (!subscriptionUrl) {
+  const subscriptionUrl = normalizeExternalHttpUrl(plugin.subscriptionUrl)
+  if (!subscriptionUrl.valid) {
     return subscriptionErrorResult('EXTENSION_PLUGIN_SUBSCRIPTION_UNAVAILABLE', 'Plugin subscription URL is not available.')
   }
 
   try {
-    await openExternal?.(subscriptionUrl)
+    await openExternal?.(subscriptionUrl.url)
   } catch (error) {
     return subscriptionErrorResult(
       'EXTENSION_SUBSCRIPTION_OPEN_FAILED',
@@ -699,7 +693,7 @@ export const openExtensionSubscription = async (
     ok: true,
     data: {
       pluginId: plugin.pluginId,
-      url: subscriptionUrl,
+      url: subscriptionUrl.url,
       message: `${plugin.name} subscription entry opened by aiopsterm backend.`
     }
   }
