@@ -249,6 +249,27 @@ const expectNoBusinessDataConfigWrites = (keys: readonly string[] = businessData
   }
 }
 
+const withMockExecCommand = async <T>(handler: () => boolean, callback: (execCommandSpy: ReturnType<typeof vi.fn>) => Promise<T>) => {
+  const originalExecCommand = document.execCommand
+  const execCommandSpy = vi.fn(handler)
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    value: execCommandSpy
+  })
+  try {
+    return await callback(execCommandSpy)
+  } finally {
+    if (originalExecCommand) {
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: originalExecCommand
+      })
+    } else {
+      Reflect.deleteProperty(document, 'execCommand')
+    }
+  }
+}
+
 describe('workspace store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -8446,16 +8467,56 @@ describe('workspace store', () => {
       }
     } as any)
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied'))
-    await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
-    expect(store.k8sClusterNotice).toBe('clipboard denied')
-    expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+    await withMockExecCommand(
+      () => true,
+      async (execCommandSpy) => {
+        await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe(
+          'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops'
+        )
+        expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      }
+    )
+    expect(store.k8sClusterNotice).toBe('kubectl 命令已复制')
+    expect(store.k8sCopiedCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+
+    vi.mocked(window.aiops.planKubernetesResourceAction).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        resourceId: 'k8s-pod-worker-1',
+        resourceName: 'billing-worker-7f9d6f9dd9-rx8mm',
+        resourceKind: 'pods',
+        action: 'describe',
+        title: 'Describe billing-worker-7f9d6f9dd9-rx8mm',
+        command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops',
+        clusterId: 'k8s-1',
+        clusterName: 'prod-cluster',
+        contextName: 'prod/admin',
+        namespace: 'ops'
+      }
+    } as any)
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied again'))
+    await withMockExecCommand(
+      () => false,
+      async (execCommandSpy) => {
+        await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
+        expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      }
+    )
+    expect(store.k8sClusterNotice).toBe('Kubernetes kubectl command copy failed.')
+    expect(store.k8sCopiedCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
 
     store.k8sResourceOutputTitle = 'Stable resource output'
     store.k8sResourceOutput = 'stable backend output'
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard output denied'))
-    await expect(store.copyK8sResourceOutput()).resolves.toBe('')
-    expect(store.k8sClusterNotice).toBe('clipboard output denied')
-    expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+    await withMockExecCommand(
+      () => false,
+      async (execCommandSpy) => {
+        await expect(store.copyK8sResourceOutput()).resolves.toBe('')
+        expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      }
+    )
+    expect(store.k8sClusterNotice).toBe('Kubernetes output copy failed.')
+    expect(store.k8sCopiedCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     expect(store.k8sResourceOutput).toBe('stable backend output')
 
     store.k8sResourceOutputTitle = 'Stable resource output'

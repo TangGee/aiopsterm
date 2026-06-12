@@ -64,6 +64,7 @@ import {
   isSettingsRuleDeleteData,
   malformedSettingsBackendResultMessage
 } from '@/services/settingsBackendGuards'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import {
   isSkillContentResultData,
   isSkillExportResultData,
@@ -11230,18 +11231,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const writeK8sClipboardText = async (text: string, fallbackError: string) => {
-    const writeText = navigator.clipboard?.writeText
-    if (typeof writeText !== 'function') {
-      setK8sNotice('Clipboard write service unavailable.')
-      return false
-    }
-    try {
-      await writeText.call(navigator.clipboard, text)
-      return true
-    } catch (error) {
-      setK8sNotice(error instanceof Error && error.message ? error.message : fallbackError)
-      return false
-    }
+    const copied = await copyTextToClipboard(text)
+    if (!copied) setK8sNotice(fallbackError)
+    return copied
   }
 
   const copyK8sResourceCommand = async (resourceId: string, action: K8sResourceAction = 'get') => {
