@@ -327,6 +327,27 @@ const waitForMockCall = async (mock: { mock: { calls: unknown[] } }, label: stri
   throw new Error(`${label} was not called`)
 }
 
+const withMockExecCommand = async <T>(handler: () => boolean, callback: (execCommandSpy: ReturnType<typeof vi.fn>) => Promise<T>) => {
+  const originalExecCommand = document.execCommand
+  const execCommandSpy = vi.fn(handler)
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    value: execCommandSpy
+  })
+  try {
+    return await callback(execCommandSpy)
+  } finally {
+    if (originalExecCommand) {
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: originalExecCommand
+      })
+    } else {
+      Reflect.deleteProperty(document, 'execCommand')
+    }
+  }
+}
+
 const dispatchShortcut = (key: string, init: Partial<KeyboardEventInit> = {}) => {
   const event = new KeyboardEvent('keydown', {
     key,
@@ -3323,6 +3344,17 @@ describe('AppShell', () => {
     await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('rollback 计划：先确认连接，再生成只读 SQL。')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('消息已复制')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied'))
+    await withMockExecCommand(
+      () => false,
+      async (execCommandSpy) => {
+        await assistantMessage!.find('[data-testid="ai-message-copy"]').trigger('click')
+        await flushPromises()
+        expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      }
+    )
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('复制失败')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).not.toContain('消息已复制')
 
     await assistantMessage!.find('button[title="收藏"]').trigger('click')
     await flushPromises()

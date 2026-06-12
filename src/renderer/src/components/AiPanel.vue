@@ -1222,6 +1222,7 @@ import {
   Zap
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import {
   isAiChatExportData,
   isChatAttachmentStageData,
@@ -1509,34 +1510,13 @@ const showChatExportNotice = (message: string) => {
   }, 2400)
 }
 
-const copyTextWithFallback = async (text: string) => {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      // Fall through to textarea fallback for restricted clipboard environments.
-    }
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand?.('copy') ?? false
-  textarea.remove()
-  return copied
-}
-
 const copyMessageToClipboard = async (message: { text: string; contentParts?: AiContentPart[] }) => {
   const text = messagePlainText(message).trim()
   if (!text) {
     showChatExportNotice('消息为空，无法复制。')
     return
   }
-  const copied = await copyTextWithFallback(text)
+  const copied = await copyTextToClipboard(text)
   showChatExportNotice(copied ? '消息已复制。' : '复制失败。')
 }
 

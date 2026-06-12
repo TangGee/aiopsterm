@@ -2353,6 +2353,7 @@ import {
   X,
   Zap
 } from 'lucide-vue-next'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { editorLineHeightPx } from '@/services/editorRuntime'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -8185,34 +8186,9 @@ function showNotice(text: string) {
 
 async function copyText(value: string) {
   const text = String(value ?? '')
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // Fall through to the textarea fallback used for older Electron contexts.
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  try {
-    if (typeof document.execCommand !== 'function') {
-      showNotice('Copy failed')
-      return false
-    }
-    const copied = document.execCommand('copy')
-    if (!copied) showNotice('Copy failed')
-    return copied
-  } catch {
-    showNotice('Copy failed')
-    return false
-  } finally {
-    document.body.removeChild(textarea)
-  }
+  const copied = await copyTextToClipboard(text)
+  if (!copied) showNotice('Copy failed')
+  return copied
 }
 
 function handleWindowClick() {
