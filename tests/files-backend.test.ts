@@ -15,23 +15,25 @@ const ssh2Mock = vi.hoisted(() => {
   const nodes = new Map<string, MockNode>()
   const connectConfigs: Array<Record<string, unknown>> = []
   const calls: Array<Record<string, unknown>> = []
+  const handles = new Map<number, { path: string; flags: string; closed: boolean; writes: Map<number, Buffer> }>()
+  let nextHandle = 1
   const readFileDelays = new Map<
     string,
-    {
+    Array<{
       released: Promise<void>
       release: () => void
       reached: Promise<void>
       markReached: () => void
-    }
+    }>
   >()
   const writeFileDelays = new Map<
     string,
-    {
+    Array<{
       released: Promise<void>
       release: () => void
       reached: Promise<void>
       markReached: () => void
-    }
+    }>
   >()
 
   const normalize = (path: string) => {
@@ -70,6 +72,24 @@ const ssh2Mock = vi.hoisted(() => {
     isFile: () => node.type === 'file',
     isSymbolicLink: () => node.type === 'link'
   })
+
+  const takeDelay = (
+    delays: Map<
+      string,
+      Array<{
+        released: Promise<void>
+        release: () => void
+        reached: Promise<void>
+        markReached: () => void
+      }>
+    >,
+    path: string
+  ) => {
+    const queue = delays.get(path)
+    const delay = queue?.shift()
+    if (queue && queue.length === 0) delays.delete(path)
+    return delay
+  }
 
   const sftp = {
     readdir(path: string, callback: (error: Error | null, entries?: Array<Record<string, unknown>>) => void) {
@@ -117,14 +137,13 @@ const ssh2Mock = vi.hoisted(() => {
         }
         callback(null, Buffer.from(node.content || Buffer.alloc(0)))
       }
-      const delay = readFileDelays.get(normalized)
+      const delay = takeDelay(readFileDelays, normalized)
       if (!delay) {
         complete()
         return
       }
       delay.markReached()
       delay.released.then(() => {
-        readFileDelays.delete(normalized)
         complete()
       })
     },
@@ -139,16 +158,115 @@ const ssh2Mock = vi.hoisted(() => {
         nodes.set(normalized, { type: 'file', content: Buffer.from(content), mode: 0o100644, mtime: 1_717_200_200 })
         callback(null)
       }
-      const delay = writeFileDelays.get(normalized)
+      const delay = takeDelay(writeFileDelays, normalized)
       if (!delay) {
         complete()
         return
       }
       delay.markReached()
       delay.released.then(() => {
-        writeFileDelays.delete(normalized)
         complete()
       })
+    },
+    open(path: string, flags: string, callback: (error: Error | null, handle?: number) => void) {
+      const normalized = normalize(path)
+      calls.push({ method: 'open', path: normalized, flags })
+      if (flags.includes('r')) {
+        const node = nodes.get(normalized)
+        if (!node) {
+          callback(missingError(normalized))
+          return
+        }
+        if (node.type !== 'file') {
+          callback(Object.assign(new Error(`${normalized} is not a file`), { code: 'EISDIR' }))
+          return
+        }
+      }
+      if (flags.includes('w') && !nodes.has(dirname(normalized))) {
+        callback(missingError(dirname(normalized)))
+        return
+      }
+      const handle = nextHandle++
+      handles.set(handle, { path: normalized, flags, closed: false, writes: new Map() })
+      callback(null, handle)
+    },
+    read(handle: number, buffer: Buffer, offset: number, length: number, position: number, callback: (error: Error | null, bytesRead?: number) => void) {
+      const entry = handles.get(handle)
+      const normalized = entry?.path || ''
+      calls.push({ method: 'read', path: normalized, offset, length, position })
+      const complete = () => {
+        if (!entry || entry.closed) {
+          callback(Object.assign(new Error('SFTP handle closed'), { code: 'HANDLE_CLOSED' }))
+          return
+        }
+        const node = nodes.get(normalized)
+        if (!node) {
+          callback(missingError(normalized))
+          return
+        }
+        if (node.type !== 'file') {
+          callback(Object.assign(new Error(`${normalized} is not a file`), { code: 'EISDIR' }))
+          return
+        }
+        const content = node.content || Buffer.alloc(0)
+        const chunk = content.subarray(position, Math.min(content.length, position + length))
+        chunk.copy(buffer, offset)
+        callback(null, chunk.length)
+      }
+      const delay = takeDelay(readFileDelays, normalized)
+      if (!delay) {
+        complete()
+        return
+      }
+      delay.markReached()
+      delay.released.then(() => {
+        complete()
+      })
+    },
+    write(handle: number, buffer: Buffer, offset: number, length: number, position: number, callback: (error?: Error | null) => void) {
+      const entry = handles.get(handle)
+      const normalized = entry?.path || ''
+      const content = Buffer.from(buffer.subarray(offset, offset + length))
+      calls.push({ method: 'write', path: normalized, offset, length, position, content: content.toString('utf-8') })
+      const complete = () => {
+        if (!entry || entry.closed) {
+          callback(Object.assign(new Error('SFTP handle closed'), { code: 'HANDLE_CLOSED' }))
+          return
+        }
+        if (!nodes.has(dirname(normalized))) {
+          callback(missingError(dirname(normalized)))
+          return
+        }
+        entry.writes.set(position, content)
+        callback(null)
+      }
+      const delay = takeDelay(writeFileDelays, normalized)
+      if (!delay) {
+        complete()
+        return
+      }
+      delay.markReached()
+      delay.released.then(() => {
+        complete()
+      })
+    },
+    close(handle: number, callback: (error?: Error | null) => void) {
+      const entry = handles.get(handle)
+      calls.push({ method: 'close', path: entry?.path || '' })
+      if (!entry) {
+        callback(null)
+        return
+      }
+      if (!entry.closed && entry.flags.includes('w')) {
+        const orderedWrites = [...entry.writes.entries()].sort(([left], [right]) => left - right)
+        const totalBytes = orderedWrites.reduce((max, [position, chunk]) => Math.max(max, position + chunk.length), 0)
+        const content = Buffer.alloc(totalBytes)
+        orderedWrites.forEach(([position, chunk]) => chunk.copy(content, position))
+        nodes.set(entry.path, { type: 'file', content, mode: 0o100644, mtime: 1_717_200_200 })
+      }
+      entry.closed = true
+      handles.delete(handle)
+      callback(null)
     },
     rename(oldPath: string, newPath: string, callback: (error?: Error | null) => void) {
       const normalizedOld = normalize(oldPath)
@@ -256,11 +374,13 @@ const ssh2Mock = vi.hoisted(() => {
 
   const reset = () => {
     nodes.clear()
+    handles.clear()
+    nextHandle = 1
     connectConfigs.length = 0
     calls.length = 0
-    readFileDelays.forEach((delay) => delay.release())
+    readFileDelays.forEach((delays) => delays.forEach((delay) => delay.release()))
     readFileDelays.clear()
-    writeFileDelays.forEach((delay) => delay.release())
+    writeFileDelays.forEach((delays) => delays.forEach((delay) => delay.release()))
     writeFileDelays.clear()
     ensureDirectory('/')
     ensureDirectory('/srv')
@@ -285,7 +405,7 @@ const ssh2Mock = vi.hoisted(() => {
       const reached = new Promise<void>((resolve) => {
         markReached = resolve
       })
-      readFileDelays.set(normalized, { released, release, reached, markReached })
+      readFileDelays.set(normalized, [...(readFileDelays.get(normalized) || []), { released, release, reached, markReached }])
       return { release, reached }
     },
     pauseWriteFile(path: string) {
@@ -298,7 +418,7 @@ const ssh2Mock = vi.hoisted(() => {
       const reached = new Promise<void>((resolve) => {
         markReached = resolve
       })
-      writeFileDelays.set(normalized, { released, release, reached, markReached })
+      writeFileDelays.set(normalized, [...(writeFileDelays.get(normalized) || []), { released, release, reached, markReached }])
       return { release, reached }
     },
     connectConfigs,
@@ -1339,11 +1459,113 @@ describe('files backend content boundary', () => {
       expect(await readFile(localDownload)).toEqual(downloadBytes)
       expect(ssh2Mock.calls).toEqual(
         expect.arrayContaining([
-          { method: 'writeFile', path: '/srv/archive/binary.bin', content: uploadBytes.toString('utf-8') },
-          { method: 'readFile', path: '/srv/archive/remote.bin' }
+          expect.objectContaining({ method: 'open', path: '/srv/archive/binary.bin', flags: 'w' }),
+          expect.objectContaining({ method: 'write', path: '/srv/archive/binary.bin', content: uploadBytes.toString('utf-8') }),
+          expect.objectContaining({ method: 'open', path: '/srv/archive/remote.bin', flags: 'r' }),
+          expect.objectContaining({ method: 'read', path: '/srv/archive/remote.bin' })
         ])
       )
     } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes byte-level running progress for asset-backed single-file downloads', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-file-download-progress-'))
+    const localDownload = join(dir, 'large.bin')
+    const downloadBytes = Buffer.alloc(128 * 1024, 7)
+    const firstPausedRead = ssh2Mock.pauseReadFile('/srv/archive/large.bin')
+    const secondPausedRead = ssh2Mock.pauseReadFile('/srv/archive/large.bin')
+    try {
+      ssh2Mock.nodes.set('/srv/archive/large.bin', { type: 'file', content: downloadBytes, mode: 0o100600, mtime: 1_717_200_400 })
+
+      const transferPromise = transferFileEntry(
+        { kind: 'download-file', remotePath: '/srv/archive/large.bin', localPath: localDownload },
+        { kind: 'remote', sessionId, fromHost: 'sftp.example.test', toHost: '127.0.0.1' }
+      )
+
+      await firstPausedRead.reached
+      let activeTasks = await listFileTransferTasks()
+      expect(activeTasks[0]).toEqual(
+        expect.objectContaining({
+          type: 'download',
+          progress: 0,
+          speed: 'pending',
+          status: 'running'
+        })
+      )
+
+      firstPausedRead.release()
+      await secondPausedRead.reached
+      activeTasks = await listFileTransferTasks()
+      expect(activeTasks[0]).toEqual(
+        expect.objectContaining({
+          type: 'download',
+          progress: 50,
+          speed: '下载中 64 KB / 128 KB',
+          status: 'running'
+        })
+      )
+
+      secondPausedRead.release()
+      const downloaded = await transferPromise
+      expect(downloaded.ok).toBe(true)
+      expect(downloaded.data).toEqual(expect.objectContaining({ status: 'success', bytes: downloadBytes.length }))
+      expect(await readFile(localDownload)).toEqual(downloadBytes)
+    } finally {
+      firstPausedRead.release()
+      secondPausedRead.release()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes byte-level running progress for asset-backed single-file uploads', async () => {
+    const sessionId = saveSftpAsset()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-sftp-file-upload-progress-'))
+    const localUpload = join(dir, 'large-upload.bin')
+    const uploadBytes = Buffer.alloc(128 * 1024, 9)
+    const firstPausedWrite = ssh2Mock.pauseWriteFile('/srv/archive/large-upload.bin')
+    const secondPausedWrite = ssh2Mock.pauseWriteFile('/srv/archive/large-upload.bin')
+    try {
+      await writeFile(localUpload, uploadBytes)
+
+      const transferPromise = transferFileEntry(
+        { kind: 'upload-file', localPath: localUpload, remoteDirectory: '/srv/archive' },
+        { kind: 'remote', sessionId, fromHost: '127.0.0.1', toHost: 'sftp.example.test' }
+      )
+
+      await firstPausedWrite.reached
+      let activeTasks = await listFileTransferTasks()
+      expect(activeTasks[0]).toEqual(
+        expect.objectContaining({
+          type: 'upload',
+          progress: 50,
+          speed: '上传中 64 KB / 128 KB',
+          status: 'running'
+        })
+      )
+
+      firstPausedWrite.release()
+      await secondPausedWrite.reached
+      activeTasks = await listFileTransferTasks()
+      expect(activeTasks[0]).toEqual(
+        expect.objectContaining({
+          type: 'upload',
+          progress: 99,
+          speed: '上传中 128 KB / 128 KB',
+          status: 'running'
+        })
+      )
+
+      secondPausedWrite.release()
+      const uploaded = await transferPromise
+      expect(uploaded.ok).toBe(true)
+      expect(uploaded.data).toEqual(expect.objectContaining({ status: 'success', bytes: uploadBytes.length }))
+      expect(ssh2Mock.nodes.get('/srv/archive/large-upload.bin')?.content).toEqual(uploadBytes)
+    } finally {
+      firstPausedWrite.release()
+      secondPausedWrite.release()
       await rm(dir, { recursive: true, force: true })
     }
   })
@@ -1442,8 +1664,8 @@ describe('files backend content boundary', () => {
           target: '/srv/archive/binary.bin',
           fromHost: '127.0.0.1',
           toHost: 'sftp.example.test',
-          progress: 50,
-          speed: '上传中',
+          progress: 99,
+          speed: '上传中 7 B / 7 B',
           status: 'running',
           stage: 'pending'
         })
@@ -1479,6 +1701,7 @@ describe('files backend content boundary', () => {
           })
         })
       )
+      expect(ssh2Mock.nodes.get('/srv/archive/binary.bin')?.content).not.toEqual(uploadBytes)
     } finally {
       pausedWrite.release()
       await rm(dir, { recursive: true, force: true })

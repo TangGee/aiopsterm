@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'crypto'
 import { app } from 'electron'
 import Store from 'electron-store'
 import { basename as getLocalBasename, dirname as getLocalDirname, isAbsolute, join, resolve } from 'path'
-import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
+import { chmod, cp, mkdir, open as openFile, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'fs/promises'
 import type {
   FileSessionCatalog,
   FileSessionCatalogResult,
@@ -69,6 +69,14 @@ type RemoteSftpPooledConnection = {
   closing: boolean
   lastUsedAt: number
   closeTimer: ReturnType<typeof setTimeout> | null
+}
+
+type SftpFileHandle = unknown
+type SftpLowLevelWrapper = SFTPWrapper & {
+  open(path: string, flags: string, callback: (error: Error | null, handle?: SftpFileHandle) => void): void
+  read(handle: SftpFileHandle, buffer: Buffer, offset: number, length: number, position: number, callback: (error: Error | null, bytesRead?: number) => void): void
+  write(handle: SftpFileHandle, buffer: Buffer, offset: number, length: number, position: number, callback: (error?: Error | null) => void): void
+  close(handle: SftpFileHandle, callback: (error?: Error | null) => void): void
 }
 
 type FilesBackendRuntimeConfig = {
@@ -432,6 +440,74 @@ const sftpReadFile = (sftp: SFTPWrapper, path: string) =>
 const sftpWriteFile = (sftp: SFTPWrapper, path: string, content: Buffer) =>
   new Promise<void>((resolve, reject) => {
     sftp.writeFile(path, content, (error) => (error ? reject(error) : resolve()))
+  })
+
+const isSftpLowLevelWrapper = (sftp: SFTPWrapper): sftp is SftpLowLevelWrapper => {
+  const candidate = sftp as Partial<SftpLowLevelWrapper>
+  return (
+    typeof candidate.open === 'function' &&
+    typeof candidate.read === 'function' &&
+    typeof candidate.write === 'function' &&
+    typeof candidate.close === 'function'
+  )
+}
+
+const sftpCloseHandle = (sftp: SftpLowLevelWrapper, handle: SftpFileHandle) =>
+  new Promise<void>((resolve, reject) => {
+    sftp.close(handle, (error) => (error ? reject(error) : resolve()))
+  })
+
+const cancellableTransferPromise = <T>(control: FileTransferAbortControl, executor: (settle: (error: Error | null, value?: T) => void) => void) =>
+  new Promise<T>((resolve, reject) => {
+    let settled = false
+    const cleanup = control.onCancel(() => {
+      if (settled) return
+      settled = true
+      reject(transferCancelledError())
+    })
+    try {
+      executor((error, value) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        if (error) reject(error)
+        else resolve(value as T)
+      })
+    } catch (error) {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+  })
+
+const sftpOpenCancellable = (sftp: SftpLowLevelWrapper, path: string, flags: string, control: FileTransferAbortControl) =>
+  cancellableTransferPromise<SftpFileHandle>(control, (settle) => {
+    sftp.open(path, flags, (error, handle) => settle(error || (!handle ? new Error('SFTP file handle is unavailable') : null), handle))
+  })
+
+const sftpReadChunkCancellable = (
+  sftp: SftpLowLevelWrapper,
+  handle: SftpFileHandle,
+  buffer: Buffer,
+  length: number,
+  position: number,
+  control: FileTransferAbortControl
+) =>
+  cancellableTransferPromise<number>(control, (settle) => {
+    sftp.read(handle, buffer, 0, length, position, (error, bytesRead) => settle(error, bytesRead || 0))
+  })
+
+const sftpWriteChunkCancellable = (
+  sftp: SftpLowLevelWrapper,
+  handle: SftpFileHandle,
+  buffer: Buffer,
+  length: number,
+  position: number,
+  control: FileTransferAbortControl
+) =>
+  cancellableTransferPromise<void>(control, (settle) => {
+    sftp.write(handle, buffer, 0, length, position, (error) => settle(error || null))
   })
 
 const sftpRename = (sftp: SFTPWrapper, oldPath: string, newPath: string) =>
@@ -842,6 +918,7 @@ const activeFileTransferTasks = new Map<string, FileTransferTask>()
 
 type FileTransferAbortControl = {
   cancelled: boolean
+  onCancel: (handler: () => void) => () => void
   cancel: () => void
   assertActive: () => void
 }
@@ -855,10 +932,28 @@ const isFileTransferCancelledError = (error: unknown) =>
   (error as { __cancelled?: unknown } | undefined)?.__cancelled === true
 
 const createFileTransferAbortControl = (): FileTransferAbortControl => {
+  const cancelHandlers = new Set<() => void>()
   const control: FileTransferAbortControl = {
     cancelled: false,
+    onCancel: (handler) => {
+      if (control.cancelled) {
+        handler()
+        return () => {}
+      }
+      cancelHandlers.add(handler)
+      return () => {
+        cancelHandlers.delete(handler)
+      }
+    },
     cancel: () => {
+      if (control.cancelled) return
       control.cancelled = true
+      cancelHandlers.forEach((handler) => {
+        try {
+          handler()
+        } catch {}
+      })
+      cancelHandlers.clear()
     },
     assertActive: () => {
       if (control.cancelled) throw transferCancelledError()
@@ -1031,6 +1126,31 @@ const createRunningFileTransferTask = (input: BackendFileTransferTaskPayload) =>
     ...input
   })
 
+const FILE_TRANSFER_CHUNK_SIZE = 64 * 1024
+
+const transferByteCount = (value: unknown) => {
+  const bytes = Number(value)
+  return Number.isFinite(bytes) && bytes > 0 ? Math.floor(bytes) : 0
+}
+
+const formatTransferBytes = (bytes: number) => {
+  if (bytes < 1024) return `${Math.max(0, bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
+}
+
+const updateSingleFileTransferProgress = (
+  task: FileTransferTask,
+  control: FileTransferAbortControl,
+  transferredBytes: number,
+  totalBytes: number,
+  stageText: string
+) => {
+  task.progress = totalBytes > 0 ? Math.max(1, Math.min(99, Math.round((transferredBytes / totalBytes) * 100))) : 0
+  task.speed = totalBytes > 0 ? `${stageText} ${formatTransferBytes(transferredBytes)} / ${formatTransferBytes(totalBytes)}` : `${stageText} ${formatTransferBytes(transferredBytes)}`
+  updateActiveFileTransferTask(task, control)
+}
+
 const fileTransferTaskHosts = (options: FileListOptions) => ({
   ...(transferFromHost(options) ? { fromHost: transferFromHost(options) } : {}),
   ...(transferToHost(options) ? { toHost: transferToHost(options) } : {})
@@ -1119,6 +1239,134 @@ const mutationTask = (mutation: FileEntryMutation, resultPath: string, options: 
     target: resultPath,
     ...fileTransferTaskHosts(options)
   })
+}
+
+const downloadRemoteFileStreamViaSftp = async (
+  sftp: SftpLowLevelWrapper,
+  remotePath: string,
+  localPath: string,
+  totalBytes: number,
+  task: FileTransferTask,
+  control: FileTransferAbortControl
+) => {
+  await mkdir(getLocalDirname(localPath), { recursive: true })
+  control.assertActive()
+
+  let remoteHandle: SftpFileHandle | null = null
+  const localFile = await openFile(localPath, 'w')
+  let transferredBytes = 0
+  let remoteClosed = false
+  let localClosed = false
+  const closeRemote = () => {
+    if (!remoteHandle || remoteClosed) return
+    remoteClosed = true
+    sftp.close(remoteHandle, () => {})
+  }
+  const closeLocal = () => {
+    if (localClosed) return
+    localClosed = true
+    void localFile.close().catch(() => {})
+  }
+  const cleanupCancel = control.onCancel(() => {
+    closeRemote()
+    closeLocal()
+  })
+
+  try {
+    remoteHandle = await sftpOpenCancellable(sftp, remotePath, 'r', control)
+    const buffer = Buffer.alloc(FILE_TRANSFER_CHUNK_SIZE)
+    for (;;) {
+      control.assertActive()
+      const bytesRead = await sftpReadChunkCancellable(sftp, remoteHandle, buffer, FILE_TRANSFER_CHUNK_SIZE, transferredBytes, control)
+      if (bytesRead <= 0) break
+      control.assertActive()
+      await localFile.write(buffer, 0, bytesRead, transferredBytes)
+      transferredBytes += bytesRead
+      updateSingleFileTransferProgress(task, control, transferredBytes, totalBytes, '下载中')
+    }
+    control.assertActive()
+    return transferredBytes
+  } finally {
+    const cancelled = control.cancelled
+    cleanupCancel()
+    if (!localClosed) {
+      localClosed = true
+      try {
+        await localFile.close()
+      } catch {}
+    }
+    if (remoteHandle && !remoteClosed) {
+      remoteClosed = true
+      try {
+        await sftpCloseHandle(sftp, remoteHandle)
+      } catch {}
+    }
+    if (cancelled) {
+      try {
+        await unlink(localPath)
+      } catch {}
+    }
+  }
+}
+
+const uploadRemoteFileStreamViaSftp = async (
+  sftp: SftpLowLevelWrapper,
+  localPath: string,
+  remotePath: string,
+  totalBytes: number,
+  task: FileTransferTask,
+  control: FileTransferAbortControl
+) => {
+  let remoteHandle: SftpFileHandle | null = null
+  const localFile = await openFile(localPath, 'r')
+  let transferredBytes = 0
+  let remoteClosed = false
+  let localClosed = false
+  const closeRemote = () => {
+    if (!remoteHandle || remoteClosed) return
+    remoteClosed = true
+    sftp.close(remoteHandle, () => {})
+  }
+  const closeLocal = () => {
+    if (localClosed) return
+    localClosed = true
+    void localFile.close().catch(() => {})
+  }
+  const cleanupCancel = control.onCancel(() => {
+    closeRemote()
+    closeLocal()
+  })
+
+  try {
+    remoteHandle = await sftpOpenCancellable(sftp, remotePath, 'w', control)
+    const buffer = Buffer.alloc(FILE_TRANSFER_CHUNK_SIZE)
+    for (;;) {
+      control.assertActive()
+      const { bytesRead } = await localFile.read(buffer, 0, FILE_TRANSFER_CHUNK_SIZE, transferredBytes)
+      if (bytesRead <= 0) break
+      control.assertActive()
+      updateSingleFileTransferProgress(task, control, transferredBytes + bytesRead, totalBytes, '上传中')
+      await sftpWriteChunkCancellable(sftp, remoteHandle, buffer, bytesRead, transferredBytes, control)
+      transferredBytes += bytesRead
+      updateSingleFileTransferProgress(task, control, transferredBytes, totalBytes, '上传中')
+    }
+    control.assertActive()
+    return transferredBytes
+  } finally {
+    cleanupCancel()
+    if (!localClosed) {
+      localClosed = true
+      try {
+        await localFile.close()
+      } catch {}
+    }
+    if (remoteHandle && !remoteClosed) {
+      remoteClosed = true
+      try {
+        await sftpCloseHandle(sftp, remoteHandle)
+      } catch {}
+    }
+  }
 }
 
 const findActiveFileTransferTaskIds = (id: string) => {
@@ -1710,18 +1958,25 @@ const downloadRemoteFileViaSftp = async (remotePath: string, localPath: string, 
       })
       registerActiveFileTransferTask(task, control)
       control.assertActive()
-      const content = await sftpReadFile(sftp, source)
-      control.assertActive()
-      task.progress = 90
-      task.speed = '写入中'
-      updateActiveFileTransferTask(task, control)
-      await mkdir(getLocalDirname(destination), { recursive: true })
-      control.assertActive()
-      await writeFile(destination, content)
+      const totalBytes = transferByteCount((stats as { size?: unknown }).size)
+      let bytes = 0
+      if (isSftpLowLevelWrapper(sftp)) {
+        bytes = await downloadRemoteFileStreamViaSftp(sftp, source, destination, totalBytes, task, control)
+      } else {
+        const content = await sftpReadFile(sftp, source)
+        control.assertActive()
+        task.progress = 90
+        task.speed = '写入中'
+        updateActiveFileTransferTask(task, control)
+        await mkdir(getLocalDirname(destination), { recursive: true })
+        control.assertActive()
+        await writeFile(destination, content)
+        bytes = content.length
+      }
       control.assertActive()
       return {
         ok: true,
-        data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task: completeRunningFileTransferTask(task, 1) }
+        data: { status: 'success', source, target: destination, bytes, files: 1, mtimeMs, itemKind: 'file', task: completeRunningFileTransferTask(task, 1) }
       }
     })
   } catch (error) {
@@ -1910,18 +2165,27 @@ const uploadRemoteFileViaSftp = async (
       })
       registerActiveFileTransferTask(task, control)
       control.assertActive()
-      const content = await readFile(source)
+      const localStats = await stat(source)
+      if (!localStats.isFile()) return { ok: false, errorCode: 'not_file', errorMessage: 'Source must be a file' }
       control.assertActive()
       await ensureRemoteParentDirs(sftp, dirname(destination))
       control.assertActive()
-      task.progress = 50
-      task.speed = '上传中'
-      updateActiveFileTransferTask(task, control)
-      await sftpWriteFile(sftp, destination, content)
+      let bytes = 0
+      if (isSftpLowLevelWrapper(sftp)) {
+        bytes = await uploadRemoteFileStreamViaSftp(sftp, source, destination, transferByteCount(localStats.size), task, control)
+      } else {
+        const content = await readFile(source)
+        control.assertActive()
+        task.progress = 50
+        task.speed = '上传中'
+        updateActiveFileTransferTask(task, control)
+        await sftpWriteFile(sftp, destination, content)
+        bytes = content.length
+      }
       control.assertActive()
       return {
         ok: true,
-        data: { status: 'success', source, target: destination, bytes: content.length, files: 1, mtimeMs, itemKind: 'file', task: completeRunningFileTransferTask(task, 1) }
+        data: { status: 'success', source, target: destination, bytes, files: 1, mtimeMs, itemKind: 'file', task: completeRunningFileTransferTask(task, 1) }
       }
     })
   } catch (error) {
