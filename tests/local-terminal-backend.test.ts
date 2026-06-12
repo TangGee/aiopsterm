@@ -22,6 +22,7 @@ type LocalTerminalBackend = {
     getDefaultShell?: () => string
     getDefaultCwd?: () => string
     getEnv?: () => NodeJS.ProcessEnv
+    getPlatform?: () => NodeJS.Platform
     loadPty?: () => { spawn: (shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }) => MockPtyProcess } | null
     processRuntime?: {
       spawn: (shell: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; shell: false }) => MockChildProcess
@@ -141,12 +142,17 @@ describe('local terminal backend runtime', () => {
     const backend = await loadBackend()
     const events = createRecorder()
     const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
     backend.configureLocalTerminalBackendRuntime({
       getDefaultShell: () => '/bin/bash',
       getDefaultCwd: () => '/home/ops',
       getEnv: () => ({ PATH: '/usr/bin' }),
+      getPlatform: () => 'linux',
       loadPty: () => ({
-        spawn: (_shell, _args, _options) => pty
+        spawn: (shell, args, options) => {
+          spawnCalls.push({ shell, args, options })
+          return pty
+        }
       })
     })
 
@@ -163,6 +169,13 @@ describe('local terminal backend runtime', () => {
         runtimeKind: 'pty'
       })
     )
+    expect(spawnCalls).toEqual([
+      expect.objectContaining({
+        shell: '/bin/bash',
+        args: ['--login'],
+        options: expect.objectContaining({ cwd: '/home/ops', cols: 120, rows: 40 })
+      })
+    ])
     expect(pty.writes).toEqual(['uptime\n'])
     expect(pty.resizes).toEqual([{ cols: 132, rows: 44 }])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['starting', 'shell-ready', 'closed'])
@@ -182,6 +195,7 @@ describe('local terminal backend runtime', () => {
       getDefaultShell: () => '/bin/sh',
       getDefaultCwd: () => '/tmp',
       getEnv: () => ({ PATH: '/bin' }),
+      getPlatform: () => 'linux',
       loadPty: () => null,
       processRuntime: {
         spawn: (shell, args, options) => {
@@ -202,7 +216,7 @@ describe('local terminal backend runtime', () => {
     expect(spawnCalls).toEqual([
       expect.objectContaining({
         shell: '/bin/sh',
-        args: [],
+        args: ['--login'],
         options: expect.objectContaining({ cwd: '/tmp', shell: false })
       })
     ])
@@ -221,6 +235,7 @@ describe('local terminal backend runtime', () => {
     backend.configureLocalTerminalBackendRuntime({
       getDefaultShell: () => '/missing/shell',
       getDefaultCwd: () => '/tmp',
+      getPlatform: () => 'linux',
       loadPty: () => null,
       processRuntime: {
         spawn: () => child as never
@@ -243,5 +258,36 @@ describe('local terminal backend runtime', () => {
     expect(events.data).toEqual([])
     expect(events.exit).toEqual([expect.objectContaining({ code: 1 })])
     expect(events.closed).toEqual(['local-error-1'])
+  })
+
+  it('does not add login-shell arguments for Windows local shells', async () => {
+    const backend = await loadBackend()
+    const events = createRecorder()
+    const child = new MockChildProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    backend.configureLocalTerminalBackendRuntime({
+      getDefaultShell: () => 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      getDefaultCwd: () => 'C:\\Users\\ops',
+      getEnv: () => ({ PATH: 'C:\\Windows\\System32' }),
+      getPlatform: () => 'win32',
+      loadPty: () => null,
+      processRuntime: {
+        spawn: (shell, args, options) => {
+          spawnCalls.push({ shell, args, options })
+          return child as never
+        }
+      }
+    })
+
+    const result = backend.createLocalTerminalSession('local-win-1', { kind: 'local' }, createSink(events))
+
+    expect(result.runtimeKind).toBe('process')
+    expect(spawnCalls).toEqual([
+      expect.objectContaining({
+        shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+        args: [],
+        options: expect.objectContaining({ cwd: 'C:\\Users\\ops', shell: false })
+      })
+    ])
   })
 })

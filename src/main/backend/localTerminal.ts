@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { basename } from 'path'
 import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/preload'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
 
@@ -27,6 +28,7 @@ type LocalTerminalRuntimeConfig = {
   getDefaultShell?: () => string
   getDefaultCwd?: () => string
   getEnv?: () => NodeJS.ProcessEnv
+  getPlatform?: () => NodeJS.Platform
   loadPty?: () => LocalPtyRuntime | null
   processRuntime?: LocalProcessRuntime
 }
@@ -67,6 +69,7 @@ export const configureLocalTerminalBackendRuntime = (config: LocalTerminalRuntim
   runtimeConfig.getDefaultShell = config.getDefaultShell
   runtimeConfig.getDefaultCwd = config.getDefaultCwd
   runtimeConfig.getEnv = config.getEnv
+  runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
 }
@@ -77,9 +80,19 @@ const getCwd = (options: TerminalCreateOptions) => options.cwd || runtimeConfig.
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
 
+const getPlatform = () => runtimeConfig.getPlatform?.() || process.platform
+
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
+
+const loginShellNames = new Set(['zsh', 'bash', 'fish', 'sh'])
+
+const localShellArgs = (shell: string) => {
+  if (getPlatform() === 'win32') return []
+  const shellName = basename(shell).toLowerCase()
+  return loginShellNames.has(shellName) ? ['--login'] : []
+}
 
 const sendLifecycle = (id: string, sink: LocalTerminalEventSink, event: Omit<TerminalLifecycleEvent, 'id' | 'at'> & { at?: number }) => {
   const payload = createTerminalLifecycleEvent(id, event)
@@ -100,6 +113,7 @@ const sendErrorLifecycle = (
 
 export const createLocalTerminalSession = (id: string, options: TerminalCreateOptions, sink: LocalTerminalEventSink): LocalTerminalCreateResult => {
   const terminalShell = getShell(options)
+  const terminalArgs = localShellArgs(terminalShell)
   const cwd = getCwd(options)
   const lifecycleBase = {
     kind: 'local' as const,
@@ -142,7 +156,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
 
   const ptyRuntime = getPtyRuntime()
   if (ptyRuntime) {
-    const ptyProcess = ptyRuntime.spawn(terminalShell, [], {
+    const ptyProcess = ptyRuntime.spawn(terminalShell, terminalArgs, {
       name: 'xterm-256color',
       cols: options.cols || 100,
       rows: options.rows || 30,
@@ -179,7 +193,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     return { shell: terminalShell, cwd, session, lifecycle, runtimeKind: 'pty' }
   }
 
-  const child = getProcessRuntime().spawn(terminalShell, [], {
+  const child = getProcessRuntime().spawn(terminalShell, terminalArgs, {
     cwd,
     env: getEnv(),
     shell: false
