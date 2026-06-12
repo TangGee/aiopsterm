@@ -81,6 +81,7 @@ import {
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
+import { isLegacyLocalModelName, isLegacyLocalModelProvider } from '@shared/modelConfigBoundary'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
@@ -936,8 +937,6 @@ const middleMouseEventActions: TerminalMouseEventAction[] = ['none', 'paste', 'c
 const rightMouseEventActions: TerminalSettings['rightMouseEvent'][] = ['none', 'paste', 'contextMenu']
 const modelApiFormats: NonNullable<ModelProviderSettings['apiFormat']>[] = ['chat-completions', 'responses']
 const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standard', 'custom']
-const legacyRendererModelProviders = new Set(['mock'])
-const legacyRendererModelNames = new Set(['mock-ops-agent', 'ops-local-agent'])
 const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -1182,7 +1181,7 @@ const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUse
       return
     }
     const name = typeof item.name === 'string' ? item.name.trim() : ''
-    if (!name || legacyRendererModelNames.has(name) || seenNames.has(name)) {
+    if (!name || isLegacyLocalModelName(name) || seenNames.has(name)) {
       changed = true
       return
     }
@@ -1220,8 +1219,8 @@ const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
   if (!isRecord(source)) return null
   const id = typeof source.id === 'string' ? source.id.trim() : ''
   const label = typeof source.label === 'string' && source.label.trim() ? source.label.trim() : id
-  if (!id || !label || legacyRendererModelNames.has(id)) return null
-  if (typeof source.apiProvider === 'string' && legacyRendererModelProviders.has(source.apiProvider.trim())) return null
+  if (!id || !label || isLegacyLocalModelName(id)) return null
+  if (typeof source.apiProvider === 'string' && isLegacyLocalModelProvider(source.apiProvider)) return null
   const locked = Boolean(source.locked)
   return {
     id,
