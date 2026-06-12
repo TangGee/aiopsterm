@@ -581,7 +581,6 @@ type McpOperationRecord = {
   status: McpOperationStatus
   output: string
   error: string
-  updatedAt: number
   durationMs?: number
   isError?: boolean
 }
@@ -7899,14 +7898,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const setMcpOperationResult = (key: string, record: Omit<McpOperationRecord, 'updatedAt'>) => {
+  const setMcpOperationResult = (key: string, record: McpOperationRecord) => {
     mcpOperationResults.value = {
       ...mcpOperationResults.value,
-      [key]: {
-        ...record,
-        updatedAt: Date.now()
-      }
+      [key]: record
     }
+  }
+
+  const restoreMcpOperationResult = (key: string, record: McpOperationRecord | undefined) => {
+    const next = { ...mcpOperationResults.value }
+    if (record) next[key] = record
+    else delete next[key]
+    mcpOperationResults.value = next
   }
 
   const parseMcpToolArguments = (serverName: string, toolName: string) => {
@@ -7933,39 +7936,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!server || !tool) return false
     if (server.disabled || server.status !== 'connected') {
       const message = server.disabled ? `MCP ${serverName} 已禁用` : `MCP ${serverName} 未连接`
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
       setSettingsNotice(message)
       return false
     }
     if (!tool.enabled) {
       const message = `MCP Tool ${toolName} 已禁用`
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
       setSettingsNotice(message)
       return false
     }
     if (!window.aiops?.callMcpTool) {
       const message = 'MCP Tool 调用服务不可用'
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
       setSettingsNotice(message)
       return false
     }
     const parsed = parseMcpToolArguments(serverName, toolName)
     if (!parsed.ok) {
-      setMcpOperationResult(key, { status: 'error', output: '', error: parsed.message })
       setSettingsNotice(parsed.message)
       return false
     }
+    const previousRecord = mcpOperationResults.value[key] ? { ...mcpOperationResults.value[key] } : undefined
     setMcpOperationResult(key, { status: 'running', output: '', error: '' })
     try {
       const result = await window.aiops.callMcpTool(serverName, toolName, parsed.arguments)
       if (!result?.ok) {
         const message = result?.errorMessage || `${toolName} 调用失败`
-        setMcpOperationResult(key, { status: 'error', output: '', error: message })
+        restoreMcpOperationResult(key, previousRecord)
         setSettingsNotice(message)
         return false
       }
       if (!isMcpToolCallResultData(result.data, serverName, toolName)) {
-        setMcpOperationResult(key, { status: 'error', output: '', error: malformedMcpToolResultMessage })
+        restoreMcpOperationResult(key, previousRecord)
         setSettingsNotice(malformedMcpToolResultMessage)
         return false
       }
@@ -7980,7 +7980,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return !result.data.isError
     } catch (error) {
       const message = error instanceof Error ? error.message : `${toolName} 调用失败`
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      restoreMcpOperationResult(key, previousRecord)
       setSettingsNotice(message)
       return false
     }
@@ -7993,27 +7993,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!server || !resource) return false
     if (server.disabled || server.status !== 'connected') {
       const message = server.disabled ? `MCP ${serverName} 已禁用` : `MCP ${serverName} 未连接`
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
       setSettingsNotice(message)
       return false
     }
     if (!window.aiops?.readMcpResource) {
       const message = 'MCP Resource 读取服务不可用'
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
       setSettingsNotice(message)
       return false
     }
+    const previousRecord = mcpOperationResults.value[key] ? { ...mcpOperationResults.value[key] } : undefined
     setMcpOperationResult(key, { status: 'running', output: '', error: '' })
     try {
       const result = await window.aiops.readMcpResource(serverName, uri)
       if (!result?.ok) {
         const message = result?.errorMessage || `${resource.name} 读取失败`
-        setMcpOperationResult(key, { status: 'error', output: '', error: message })
+        restoreMcpOperationResult(key, previousRecord)
         setSettingsNotice(message)
         return false
       }
       if (!isMcpResourceReadResultData(result.data, serverName, uri)) {
-        setMcpOperationResult(key, { status: 'error', output: '', error: malformedMcpResourceResultMessage })
+        restoreMcpOperationResult(key, previousRecord)
         setSettingsNotice(malformedMcpResourceResultMessage)
         return false
       }
@@ -8027,7 +8026,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : `${resource.name} 读取失败`
-      setMcpOperationResult(key, { status: 'error', output: '', error: message })
+      restoreMcpOperationResult(key, previousRecord)
       setSettingsNotice(message)
       return false
     }

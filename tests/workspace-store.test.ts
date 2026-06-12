@@ -11928,27 +11928,39 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     }
 
     try {
+      store.updateMcpToolArgumentDraft('filesystem', 'read_file', '{"path":"/tmp/readme.md"}')
+      await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(true)
+      const backendToolRecord = { ...store.mcpOperationResults[toolKey] }
+      expect(backendToolRecord).toMatchObject({
+        status: 'success',
+        error: '',
+        isError: false
+      })
+      await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(true)
+      const backendResourceRecord = { ...store.mcpOperationResults[resourceKey] }
+      expect(backendResourceRecord).toMatchObject({
+        status: 'success',
+        error: ''
+      })
+
       store.updateMcpToolArgumentDraft('filesystem', 'read_file', '{invalid')
       vi.mocked(window.aiops.callMcpTool).mockClear()
       await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
       expect(window.aiops.callMcpTool).not.toHaveBeenCalled()
-      expect(store.mcpOperationResults[toolKey].status).toBe('error')
-      expect(store.mcpOperationResults[toolKey].error).toContain('MCP Tool 参数 JSON 无效')
+      expect(store.settingsNotice).toContain('MCP Tool 参数 JSON 无效')
+      expect(store.mcpOperationResults[toolKey]).toEqual(backendToolRecord)
 
       store.updateMcpToolArgumentDraft('filesystem', 'read_file', '["not-object"]')
       await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
       expect(window.aiops.callMcpTool).not.toHaveBeenCalled()
-      expect(store.mcpOperationResults[toolKey].error).toBe('MCP Tool 参数必须是 JSON object')
+      expect(store.settingsNotice).toBe('MCP Tool 参数必须是 JSON object')
+      expect(store.mcpOperationResults[toolKey]).toEqual(backendToolRecord)
 
       store.updateMcpToolArgumentDraft('filesystem', 'read_file', '{}')
       ;(window.aiops as any).callMcpTool = undefined
       await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('MCP Tool 调用服务不可用')
-      expect(store.mcpOperationResults[toolKey]).toMatchObject({
-        status: 'error',
-        output: '',
-        error: 'MCP Tool 调用服务不可用'
-      })
+      expect(store.mcpOperationResults[toolKey]).toEqual(backendToolRecord)
 
       ;(window.aiops as any).callMcpTool = originalAiops.callMcpTool
       vi.mocked(window.aiops.callMcpTool!).mockResolvedValueOnce({
@@ -11957,11 +11969,8 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
         errorMessage: 'backend tool failure'
       })
       await expect(store.runMcpTool('filesystem', 'read_file')).resolves.toBe(false)
-      expect(store.mcpOperationResults[toolKey]).toMatchObject({
-        status: 'error',
-        output: '',
-        error: 'backend tool failure'
-      })
+      expect(store.settingsNotice).toBe('backend tool failure')
+      expect(store.mcpOperationResults[toolKey]).toEqual(backendToolRecord)
 
       vi.mocked(window.aiops.callMcpTool!).mockResolvedValueOnce({
         ok: true,
@@ -11995,18 +12004,15 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       expect(store.settingsNotice).toBe('MCP Tool 服务返回数据无效')
       expect(store.mcpOperationResults[toolKey]).toMatchObject({
         status: 'error',
-        output: '',
-        error: 'MCP Tool 服务返回数据无效'
+        output: 'permission denied',
+        error: 'permission denied',
+        isError: true
       })
 
       ;(window.aiops as any).readMcpResource = undefined
       await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('MCP Resource 读取服务不可用')
-      expect(store.mcpOperationResults[resourceKey]).toMatchObject({
-        status: 'error',
-        output: '',
-        error: 'MCP Resource 读取服务不可用'
-      })
+      expect(store.mcpOperationResults[resourceKey]).toEqual(backendResourceRecord)
 
       ;(window.aiops as any).readMcpResource = originalAiops.readMcpResource
       vi.mocked(window.aiops.readMcpResource!).mockResolvedValueOnce({
@@ -12015,11 +12021,8 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
         errorMessage: 'backend resource failure'
       })
       await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(false)
-      expect(store.mcpOperationResults[resourceKey]).toMatchObject({
-        status: 'error',
-        output: '',
-        error: 'backend resource failure'
-      })
+      expect(store.settingsNotice).toBe('backend resource failure')
+      expect(store.mcpOperationResults[resourceKey]).toEqual(backendResourceRecord)
 
       vi.mocked(window.aiops.readMcpResource!).mockResolvedValueOnce({
         ok: true,
@@ -12032,11 +12035,7 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       } as any)
       await expect(store.readMcpResource('filesystem', 'file:///workspace')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('MCP Resource 服务返回数据无效')
-      expect(store.mcpOperationResults[resourceKey]).toMatchObject({
-        status: 'error',
-        output: '',
-        error: 'MCP Resource 服务返回数据无效'
-      })
+      expect(store.mcpOperationResults[resourceKey]).toEqual(backendResourceRecord)
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
