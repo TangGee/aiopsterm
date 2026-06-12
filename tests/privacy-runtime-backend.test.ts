@@ -75,7 +75,11 @@ describe('privacy runtime backend boundary', () => {
     expect(disabled.ok).toBe(true)
     expect(disabled.data).toMatchObject({
       dataSync: 'disabled',
-      dataSyncRuntime: 'disabled'
+      dataSyncRuntime: 'disabled',
+      syncStatus: 'disabled',
+      syncRunId: '',
+      syncedScopes: [],
+      lastSyncAt: enabled.data.lastSyncAt
     })
   })
 
@@ -94,7 +98,11 @@ describe('privacy runtime backend boundary', () => {
       telemetry: 'disabled',
       dataSync: 'enabled',
       dataSyncRuntime: 'local-file',
+      syncStatus: 'synced',
+      syncRunId: expect.stringMatching(/^sync-/),
+      syncedScopes: ['config'],
       stateFilePath,
+      lastSyncAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       message: '隐私运行时设置已应用，数据同步已启用'
     })
     const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as Record<string, unknown>
@@ -102,6 +110,9 @@ describe('privacy runtime backend boundary', () => {
       version: 1,
       enabled: true,
       runtime: 'local-file',
+      syncStatus: 'synced',
+      syncRunId: result.data.syncRunId,
+      syncedScopes: ['config'],
       telemetry: 'disabled',
       dataSync: 'enabled'
     })
@@ -111,6 +122,9 @@ describe('privacy runtime backend boundary', () => {
       telemetry: 'disabled',
       dataSync: 'enabled',
       dataSyncRuntime: 'local-file',
+      syncStatus: 'synced',
+      syncRunId: result.data.syncRunId,
+      syncedScopes: ['config'],
       stateFilePath
     })
   })
@@ -130,7 +144,9 @@ describe('privacy runtime backend boundary', () => {
     expect(result.data).toMatchObject({
       telemetry: 'enabled',
       dataSync: 'enabled',
-      dataSyncRuntime: 'backend-double'
+      dataSyncRuntime: 'backend-double',
+      syncStatus: 'synced',
+      syncedScopes: ['config']
     })
   })
 

@@ -3520,6 +3520,13 @@ describe('workspace store', () => {
       telemetry: 'disabled',
       secretRedaction: 'enabled',
       dataSync: 'disabled',
+      dataSyncRuntime: 'disabled',
+      dataSyncStatus: 'disabled',
+      dataSyncRunId: '',
+      dataSyncStateFilePath: '',
+      dataSyncLastSyncAt: '',
+      dataSyncSyncedScopes: [],
+      dataSyncErrorMessage: '',
       deactivateModalOpen: false,
       deactivateConfirmationInput: '',
       deactivateLoading: false
@@ -9250,9 +9257,24 @@ describe('workspace store', () => {
       })
       expect(store.settingsNotice).toBe('隐私设置已保存')
       expect(store.privacySettings.dataSync).toBe('enabled')
+      expect(store.privacySettings).toMatchObject({
+        dataSyncRuntime: 'local-file',
+        dataSyncStatus: 'synced',
+        dataSyncRunId: 'sync-test-runtime',
+        dataSyncStateFilePath: '/tmp/aiopsterm/data-sync-runtime.json',
+        dataSyncLastSyncAt: '2026-06-10T00:00:00.000Z',
+        dataSyncSyncedScopes: ['config'],
+        dataSyncErrorMessage: ''
+      })
       expect(store.config.privacy).toMatchObject({ dataSync: 'enabled' })
       await expect(store.updatePrivacySettings({ dataSync: 'disabled' })).resolves.toBe(true)
       expect(store.privacySettings.dataSync).toBe('disabled')
+      expect(store.privacySettings).toMatchObject({
+        dataSyncRuntime: 'disabled',
+        dataSyncStatus: 'disabled',
+        dataSyncRunId: '',
+        dataSyncSyncedScopes: []
+      })
       expect(store.config.privacy).toMatchObject({ dataSync: 'disabled' })
 
       vi.mocked(window.aiops.applyPrivacyRuntimeSettings!).mockResolvedValueOnce({

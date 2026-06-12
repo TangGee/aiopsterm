@@ -1483,6 +1483,16 @@ const PrivacySettingsPage = defineComponent({
             { label: '启用', checked: workspace.privacySettings.dataSync === 'enabled', onChange: () => workspace.updatePrivacySettings({ dataSync: 'enabled' }) },
             { label: '禁用', checked: workspace.privacySettings.dataSync === 'disabled', onChange: () => workspace.updatePrivacySettings({ dataSync: 'disabled' }) }
           ]),
+          h('div', { class: 'privacy-runtime-status' }, [
+            h('span', ['Runtime: ', h('strong', workspace.privacySettings.dataSyncRuntime)]),
+            h('span', ['Status: ', h('strong', workspace.privacySettings.dataSyncStatus)]),
+            workspace.privacySettings.dataSyncLastSyncAt ? h('span', ['Last Sync: ', h('strong', workspace.privacySettings.dataSyncLastSyncAt)]) : null,
+            workspace.privacySettings.dataSyncSyncedScopes.length
+              ? h('span', ['Scopes: ', h('strong', workspace.privacySettings.dataSyncSyncedScopes.join(', '))])
+              : null,
+            workspace.privacySettings.dataSyncStateFilePath ? h('small', workspace.privacySettings.dataSyncStateFilePath) : null,
+            workspace.privacySettings.dataSyncErrorMessage ? h('small', { class: 'danger-text' }, workspace.privacySettings.dataSyncErrorMessage) : null
+          ]),
           h('div', { class: 'account-management-section' }, [
             h('div', [h('strong', 'Account Management'), h('small', '停用账户会关闭同步和登录状态。')]),
             h(

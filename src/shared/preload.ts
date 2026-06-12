@@ -1077,8 +1077,12 @@ export type PrivacyRuntimeSnapshot = {
   dataSync: PrivacyUserConfig['dataSync']
   appliedAt: string
   dataSyncRuntime: 'disabled' | 'service' | 'backend-double' | 'local-file'
+  syncStatus?: 'disabled' | 'idle' | 'syncing' | 'synced' | 'error'
+  syncRunId?: string
+  syncedScopes?: Array<'config' | 'knowledge' | 'chat' | 'assets' | 'skills'>
   stateFilePath?: string
   lastSyncAt?: string
+  errorMessage?: string
   message: string
 }
 

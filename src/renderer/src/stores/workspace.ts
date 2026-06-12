@@ -617,6 +617,13 @@ const cloneMcpServerConfig = (servers: SettingsMcpServer[]): McpServerUserConfig
 export type ExtensionSettings = ExtensionUserConfig
 
 export type PrivacySettings = PrivacyUserConfig & {
+  dataSyncRuntime: PrivacyRuntimeSnapshot['dataSyncRuntime']
+  dataSyncStatus: NonNullable<PrivacyRuntimeSnapshot['syncStatus']>
+  dataSyncRunId: string
+  dataSyncStateFilePath: string
+  dataSyncLastSyncAt: string
+  dataSyncSyncedScopes: NonNullable<PrivacyRuntimeSnapshot['syncedScopes']>
+  dataSyncErrorMessage: string
   deactivateModalOpen: boolean
   deactivateConfirmationInput: string
   deactivateLoading: boolean
@@ -1779,6 +1786,8 @@ const normalizePrivacyConfig = (source?: Partial<PrivacyUserConfig>) => {
 }
 
 const privacyRuntimeValues = ['disabled', 'service', 'backend-double', 'local-file'] as const
+const privacySyncStatusValues = ['disabled', 'idle', 'syncing', 'synced', 'error'] as const
+const privacySyncedScopeValues = ['config', 'knowledge', 'chat', 'assets', 'skills'] as const
 
 const isPrivacyRuntimeSnapshotForRequest = (source: unknown, expectedPrivacy: PrivacyUserConfig): source is PrivacyRuntimeApplyData =>
   isRecord(source) &&
@@ -1788,8 +1797,26 @@ const isPrivacyRuntimeSnapshotForRequest = (source: unknown, expectedPrivacy: Pr
   source.appliedAt.trim() !== '' &&
   privacyRuntimeValues.includes(source.dataSyncRuntime as (typeof privacyRuntimeValues)[number]) &&
   (expectedPrivacy.dataSync === 'enabled' || source.dataSyncRuntime === 'disabled') &&
+  (source.syncStatus === undefined || privacySyncStatusValues.includes(source.syncStatus as (typeof privacySyncStatusValues)[number])) &&
+  (expectedPrivacy.dataSync === 'enabled' || source.syncStatus === undefined || source.syncStatus === 'disabled') &&
+  (source.syncRunId === undefined || typeof source.syncRunId === 'string') &&
+  (source.stateFilePath === undefined || typeof source.stateFilePath === 'string') &&
+  (source.lastSyncAt === undefined || typeof source.lastSyncAt === 'string') &&
+  (source.errorMessage === undefined || typeof source.errorMessage === 'string') &&
+  (source.syncedScopes === undefined ||
+    (Array.isArray(source.syncedScopes) && source.syncedScopes.every((scope) => privacySyncedScopeValues.includes(scope as (typeof privacySyncedScopeValues)[number])))) &&
   typeof source.message === 'string' &&
   source.message.trim() !== ''
+
+const privacyRuntimeSettingsFromSnapshot = (snapshot?: PrivacyRuntimeApplyData | null) => ({
+  dataSyncRuntime: snapshot?.dataSyncRuntime || 'disabled',
+  dataSyncStatus: snapshot?.syncStatus || (snapshot?.dataSync === 'enabled' ? 'idle' : 'disabled'),
+  dataSyncRunId: snapshot?.syncRunId || '',
+  dataSyncStateFilePath: snapshot?.stateFilePath || '',
+  dataSyncLastSyncAt: snapshot?.lastSyncAt || '',
+  dataSyncSyncedScopes: snapshot?.syncedScopes ? [...snapshot.syncedScopes] : [],
+  dataSyncErrorMessage: snapshot?.errorMessage || ''
+})
 
 const reasoningEffortValues = ['low', 'medium', 'high'] as const
 const proxyTypeValues: AiPreferenceSettings['proxy']['type'][] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
@@ -3530,6 +3557,13 @@ const defaultSecuritySettings: SecuritySettings = {
 
 const defaultPrivacySettings: PrivacySettings = {
   ...defaultConfig.privacy!,
+  dataSyncRuntime: 'disabled',
+  dataSyncStatus: 'disabled',
+  dataSyncRunId: '',
+  dataSyncStateFilePath: '',
+  dataSyncLastSyncAt: '',
+  dataSyncSyncedScopes: [],
+  dataSyncErrorMessage: '',
   deactivateModalOpen: false,
   deactivateConfirmationInput: '',
   deactivateLoading: false
@@ -4656,6 +4690,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const { normalized: normalizedPrivacy, changed: privacyChanged } = normalizePrivacyConfig(savedConfig.privacy)
     privacySettings.value = {
       ...normalizedPrivacy,
+      ...privacyRuntimeSettingsFromSnapshot(),
       deactivateModalOpen: false,
       deactivateConfirmationInput: '',
       deactivateLoading: false
@@ -5118,6 +5153,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
 
       const runtimeChanged = previousPrivacy.telemetry !== nextPrivacy.telemetry || previousPrivacy.dataSync !== nextPrivacy.dataSync
+      let runtimeSnapshot: PrivacyRuntimeApplyData | null = null
       if (runtimeChanged) {
         const runtimeBridge = window.aiops?.applyPrivacyRuntimeSettings
         if (typeof runtimeBridge !== 'function') {
@@ -5135,6 +5171,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
                 : '隐私运行时服务返回数据无效'
             return failPrivacyRuntime(saveConfigBridge, previousPrivacy, message)
           }
+          runtimeSnapshot = runtimeResult.data
         } catch (error) {
           return failPrivacyRuntime(saveConfigBridge, previousPrivacy, error instanceof Error ? error.message : '隐私运行时设置应用失败')
         }
@@ -5145,7 +5182,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
       privacySettings.value = {
         ...privacySettings.value,
-        ...saved.savedPrivacy
+        ...saved.savedPrivacy,
+        ...(runtimeSnapshot ? privacyRuntimeSettingsFromSnapshot(runtimeSnapshot) : {})
       }
       return true
     } catch (error) {

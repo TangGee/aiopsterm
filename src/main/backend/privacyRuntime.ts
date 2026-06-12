@@ -12,10 +12,14 @@ type DataSyncRuntimeState = {
   version: 1
   enabled: boolean
   runtime: PrivacyRuntimeSnapshot['dataSyncRuntime']
+  syncStatus: NonNullable<PrivacyRuntimeSnapshot['syncStatus']>
+  syncRunId: string
+  syncedScopes: NonNullable<PrivacyRuntimeSnapshot['syncedScopes']>
   telemetry: PrivacyUserConfig['telemetry']
   dataSync: PrivacyUserConfig['dataSync']
   updatedAt: string
   lastSyncAt: string
+  errorMessage: string
 }
 
 const privacyStatusValues = new Set(['enabled', 'disabled'])
@@ -35,7 +39,11 @@ let runtimeSnapshot: PrivacyRuntimeSnapshot = {
   telemetry: 'enabled',
   dataSync: 'disabled',
   dataSyncRuntime: 'disabled',
+  syncStatus: 'disabled',
+  syncRunId: '',
+  syncedScopes: [],
   appliedAt: new Date(0).toISOString(),
+  lastSyncAt: '',
   message: 'Privacy runtime has not been changed in this process.'
 }
 let runtimeStateLoaded = false
@@ -48,7 +56,10 @@ const isPrivacyStatus = (value: unknown): value is PrivacyUserConfig['telemetry'
 const isPrivacyConfig = (value: unknown): value is PrivacyUserConfig =>
   isRecord(value) && isPrivacyStatus(value.telemetry) && isPrivacyStatus(value.secretRedaction) && isPrivacyStatus(value.dataSync)
 
-const cloneSnapshot = (): PrivacyRuntimeSnapshot => ({ ...runtimeSnapshot })
+const cloneSnapshot = (): PrivacyRuntimeSnapshot => ({
+  ...runtimeSnapshot,
+  syncedScopes: runtimeSnapshot.syncedScopes ? [...runtimeSnapshot.syncedScopes] : []
+})
 
 const errorResult = (errorCode: string, errorMessage: string): PrivacyRuntimeApplyResult => ({
   ok: false,
@@ -83,6 +94,20 @@ const resolveDataSyncRuntime = (): PrivacyRuntimeSnapshot['dataSyncRuntime'] => 
 
 const dataSyncStateFilePath = () => runtimeConfig.dataSyncStateFilePath || defaultDataSyncStateFilePath()
 
+const syncStatusFromState = (value: unknown, dataSync: PrivacyUserConfig['dataSync']): NonNullable<PrivacyRuntimeSnapshot['syncStatus']> => {
+  if (dataSync === 'disabled') return 'disabled'
+  return value === 'idle' || value === 'syncing' || value === 'synced' || value === 'error' ? value : 'idle'
+}
+
+const syncedScopesFromState = (value: unknown): NonNullable<PrivacyRuntimeSnapshot['syncedScopes']> => {
+  const allowed = new Set(['config', 'knowledge', 'chat', 'assets', 'skills'])
+  if (!Array.isArray(value)) return ['config']
+  const scopes = value.filter((scope): scope is NonNullable<PrivacyRuntimeSnapshot['syncedScopes']>[number] => typeof scope === 'string' && allowed.has(scope))
+  return scopes.length ? [...new Set(scopes)] : ['config']
+}
+
+const createSyncRunId = () => `sync-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
 const normalizeRuntimeState = (value: unknown): DataSyncRuntimeState | null => {
   if (!isRecord(value)) return null
   const telemetry = isPrivacyStatus(value.telemetry) ? value.telemetry : 'enabled'
@@ -93,14 +118,19 @@ const normalizeRuntimeState = (value: unknown): DataSyncRuntimeState | null => {
       : dataSync === 'enabled'
         ? resolveDataSyncRuntime()
         : 'disabled'
+  const syncStatus = syncStatusFromState(value.syncStatus || value.status, dataSync)
   return {
     version: 1,
     enabled: Boolean(value.enabled) && dataSync === 'enabled',
     runtime: dataSync === 'enabled' ? runtime : 'disabled',
+    syncStatus,
+    syncRunId: dataSync === 'enabled' && typeof value.syncRunId === 'string' ? value.syncRunId.trim() : '',
+    syncedScopes: dataSync === 'enabled' ? syncedScopesFromState(value.syncedScopes) : [],
     telemetry,
     dataSync,
     updatedAt: typeof value.updatedAt === 'string' && value.updatedAt.trim() ? value.updatedAt : new Date(0).toISOString(),
-    lastSyncAt: typeof value.lastSyncAt === 'string' && value.lastSyncAt.trim() ? value.lastSyncAt : ''
+    lastSyncAt: dataSync === 'enabled' && typeof value.lastSyncAt === 'string' && value.lastSyncAt.trim() ? value.lastSyncAt : '',
+    errorMessage: syncStatus === 'error' && typeof value.errorMessage === 'string' ? value.errorMessage.trim() : ''
   }
 }
 
@@ -109,9 +139,13 @@ const applyRuntimeStateSnapshot = (state: DataSyncRuntimeState, message = 'Priva
     telemetry: state.telemetry,
     dataSync: state.dataSync,
     dataSyncRuntime: state.dataSync === 'enabled' ? state.runtime : 'disabled',
+    syncStatus: state.dataSync === 'enabled' ? state.syncStatus : 'disabled',
+    syncRunId: state.dataSync === 'enabled' ? state.syncRunId : '',
+    syncedScopes: state.dataSync === 'enabled' ? [...state.syncedScopes] : [],
     appliedAt: state.updatedAt,
     stateFilePath: dataSyncStateFilePath(),
     lastSyncAt: state.lastSyncAt,
+    ...(state.errorMessage ? { errorMessage: state.errorMessage } : {}),
     message
   }
 }
@@ -125,7 +159,10 @@ const ensureRuntimeStateLoaded = () => {
     runtimeSnapshot = {
       ...runtimeSnapshot,
       stateFilePath,
-      dataSyncRuntime: runtimeSnapshot.dataSync === 'enabled' ? resolveDataSyncRuntime() : 'disabled'
+      dataSyncRuntime: runtimeSnapshot.dataSync === 'enabled' ? resolveDataSyncRuntime() : 'disabled',
+      syncStatus: runtimeSnapshot.dataSync === 'enabled' ? runtimeSnapshot.syncStatus || 'idle' : 'disabled',
+      syncRunId: runtimeSnapshot.dataSync === 'enabled' ? runtimeSnapshot.syncRunId || '' : '',
+      syncedScopes: runtimeSnapshot.dataSync === 'enabled' ? runtimeSnapshot.syncedScopes || ['config'] : []
     }
     return
   }
@@ -137,6 +174,9 @@ const ensureRuntimeStateLoaded = () => {
       ...runtimeSnapshot,
       stateFilePath,
       dataSyncRuntime: 'disabled',
+      syncStatus: 'error',
+      syncRunId: '',
+      syncedScopes: [],
       message: 'Privacy runtime state file is corrupt; keeping current in-process defaults.'
     }
   }
@@ -145,14 +185,19 @@ const ensureRuntimeStateLoaded = () => {
 const persistRuntimeState = (nextPrivacy: PrivacyUserConfig, dataSyncRuntime: PrivacyRuntimeSnapshot['dataSyncRuntime']) => {
   const now = new Date().toISOString()
   const stateFilePath = dataSyncStateFilePath()
+  const enabled = nextPrivacy.dataSync === 'enabled'
   const state: DataSyncRuntimeState = {
     version: 1,
-    enabled: nextPrivacy.dataSync === 'enabled',
-    runtime: nextPrivacy.dataSync === 'enabled' ? dataSyncRuntime : 'disabled',
+    enabled,
+    runtime: enabled ? dataSyncRuntime : 'disabled',
+    syncStatus: enabled ? 'synced' : 'disabled',
+    syncRunId: enabled ? runtimeSnapshot.syncRunId || createSyncRunId() : '',
+    syncedScopes: enabled ? ['config'] : [],
     telemetry: nextPrivacy.telemetry,
     dataSync: nextPrivacy.dataSync,
     updatedAt: now,
-    lastSyncAt: nextPrivacy.dataSync === 'enabled' ? now : runtimeSnapshot.lastSyncAt || ''
+    lastSyncAt: enabled ? now : runtimeSnapshot.lastSyncAt || '',
+    errorMessage: ''
   }
   mkdirSync(dirname(stateFilePath), { recursive: true })
   const tempPath = `${stateFilePath}.${process.pid}.${Date.now()}.tmp`
@@ -185,6 +230,9 @@ export const resetPrivacyRuntimeForTests = () => {
     telemetry: 'enabled',
     dataSync: 'disabled',
     dataSyncRuntime: 'disabled',
+    syncStatus: 'disabled',
+    syncRunId: '',
+    syncedScopes: [],
     appliedAt: new Date(0).toISOString(),
     stateFilePath: dataSyncStateFilePath(),
     lastSyncAt: '',
@@ -215,8 +263,12 @@ export const applyPrivacyRuntimeSettings = (input: PrivacyRuntimeApplyInput): Pr
       telemetry: previousPrivacy.telemetry,
       dataSync: previousPrivacy.dataSync,
       dataSyncRuntime: previousPrivacy.dataSync === 'enabled' ? resolveDataSyncRuntime() : 'disabled',
+      syncStatus: previousPrivacy.dataSync === 'enabled' ? 'error' : 'disabled',
+      syncRunId: runtimeSnapshot.syncRunId || '',
+      syncedScopes: previousPrivacy.dataSync === 'enabled' ? runtimeSnapshot.syncedScopes || ['config'] : [],
       appliedAt: new Date().toISOString(),
       stateFilePath: dataSyncStateFilePath(),
+      errorMessage: 'Data sync enable failed because no backend service is configured.',
       message: 'Data sync enable failed because no backend service is configured.'
     }
     return errorResult('DATA_SYNC_UNAVAILABLE', '数据同步服务未配置，无法启用')

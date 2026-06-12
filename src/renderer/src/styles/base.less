@@ -2876,6 +2876,38 @@ em {
   margin: 0;
 }
 
+.privacy-runtime-status {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.privacy-runtime-status span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.privacy-runtime-status strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.privacy-runtime-status small {
+  overflow-wrap: anywhere;
+}
+
+.privacy-runtime-status .danger-text {
+  color: var(--danger);
+}
+
 .mcp-parameters p {
   display: flex;
   gap: 4px;

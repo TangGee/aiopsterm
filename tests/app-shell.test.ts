@@ -258,6 +258,30 @@ const waitForSelector = async (wrapper: WrapperSelectorLike, selector: string) =
   throw new Error(`Selector did not appear: ${selector}`)
 }
 
+const placeCaretAfterTrailingSlash = (editable: Element) => {
+  const textNodes: Text[] = []
+  const collectTextNodes = (node: Node) => {
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        textNodes.push(child as Text)
+        return
+      }
+      collectTextNodes(child)
+    })
+  }
+  collectTextNodes(editable)
+  const slashNode = textNodes.reverse().find((node) => node.data.endsWith('/'))
+  if (!slashNode) throw new Error('Trailing slash token not found')
+  const range = document.createRange()
+  range.setStart(slashNode, slashNode.data.length)
+  range.collapse(true)
+  ;(editable as HTMLElement).focus()
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  return range
+}
+
 const waitForText = async (wrapper: TextWrapperLike, text: string) => {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     await flushPromises()
@@ -4424,21 +4448,15 @@ describe('AppShell', () => {
     await mainInput.trigger('input')
     vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
 
-    const slashTextNode = document.createTextNode('/')
-    mainInput.element.appendChild(slashTextNode)
-    const mainSlashRange = document.createRange()
-    mainSlashRange.setStart(slashTextNode, 1)
-    mainSlashRange.collapse(true)
-    ;(mainInput.element as HTMLElement).focus()
-    mainSelection?.removeAllRanges()
-    mainSelection?.addRange(mainSlashRange)
+    mainInput.element.appendChild(document.createTextNode('/'))
+    placeCaretAfterTrailingSlash(mainInput.element)
     await mainInput.trigger('input')
-    mainSelection?.removeAllRanges()
-    mainSelection?.addRange(mainSlashRange)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    placeCaretAfterTrailingSlash(mainInput.element)
     await mainInput.trigger('keyup')
     await mainInput.trigger('keydown', { key: '/' })
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
+    await waitForSelector(wrapper, '.command-select-popup header input')
     expect(window.aiops.listAiCommandCatalog).toHaveBeenCalled()
     expect(wrapper.find('.command-select-popup').exists()).toBe(true)
     await wrapper.find('.command-select-popup header input').setValue('summary')
@@ -4571,16 +4589,12 @@ describe('AppShell', () => {
     expect(window.aiops.prepareChatImageAttachmentFromFile).toHaveBeenCalledWith({ filePath: '/tmp/input.png' })
     expect(wrapper.find('.chat-editable .image-preview-wrapper').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-context-usage-ring"]').exists()).toBe(false)
-    const sendSlashTextNode = document.createTextNode('/')
-    mainInput.element.appendChild(sendSlashTextNode)
-    const sendSlashRange = document.createRange()
-    sendSlashRange.setStart(sendSlashTextNode, 1)
-    sendSlashRange.collapse(true)
-    mainSelection?.removeAllRanges()
-    mainSelection?.addRange(sendSlashRange)
+    mainInput.element.appendChild(document.createTextNode(' /'))
+    placeCaretAfterTrailingSlash(mainInput.element)
     await mainInput.trigger('input')
-    mainSelection?.removeAllRanges()
-    mainSelection?.addRange(sendSlashRange)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    placeCaretAfterTrailingSlash(mainInput.element)
     await mainInput.trigger('keydown', { key: '/' })
     await waitForSelector(wrapper, '.command-select-popup header input')
     await wrapper.find('.command-select-popup header input').setValue('rollback')
@@ -4667,16 +4681,12 @@ describe('AppShell', () => {
     editSelection?.removeAllRanges()
     editSelection?.addRange(editResetRange)
     await editInput.trigger('input')
-    const editSlashTextNode = document.createTextNode('/')
-    editInput.element.appendChild(editSlashTextNode)
-    const slashRange = document.createRange()
-    slashRange.setStart(editSlashTextNode, 1)
-    slashRange.collapse(true)
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(slashRange)
+    editInput.element.appendChild(document.createTextNode(' /'))
+    placeCaretAfterTrailingSlash(editInput.element)
     await editInput.trigger('input')
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(slashRange)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    placeCaretAfterTrailingSlash(editInput.element)
     await editInput.trigger('keyup')
     await editInput.trigger('keydown', { key: '/' })
     await waitForSelector(wrapper, '.command-select-popup header input')
@@ -10871,6 +10881,17 @@ describe('AppShell', () => {
     await secretRadios[0].setValue(true)
     await flushPromises()
     expect(store.privacySettings.secretRedaction).toBe('enabled')
+    const dataSyncRadios = workspace.findAll('input[name="dataSync"]')
+    await dataSyncRadios[0].setValue(true)
+    await flushPromises()
+    expect(store.privacySettings.dataSyncStatus).toBe('synced')
+    expect(workspace.text()).toContain('Runtime:')
+    expect(workspace.text()).toContain('local-file')
+    expect(workspace.text()).toContain('Status:')
+    expect(workspace.text()).toContain('synced')
+    expect(workspace.text()).toContain('Scopes:')
+    expect(workspace.text()).toContain('config')
+    expect(workspace.text()).toContain('/tmp/aiopsterm/data-sync-runtime.json')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         privacy: expect.objectContaining({
