@@ -461,6 +461,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import {
   isFileEntryMutationData,
   isFileEntryMutationDataForRequest,
@@ -1256,23 +1257,11 @@ const confirmDeleteEntry = async () => {
 }
 
 const copyPath = async (entry: FileBrowserEntry) => {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(entry.path)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = entry.path
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.focus()
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
+  const copied = await copyTextToClipboard(entry.path)
+  if (copied) {
     fileNotice.value = '绝对路径已复制'
-  } catch (copyError) {
-    fileNotice.value = copyError instanceof Error ? copyError.message : '复制绝对路径失败'
+  } else {
+    fileNotice.value = '复制绝对路径失败'
   }
   moreForPath.value = ''
 }

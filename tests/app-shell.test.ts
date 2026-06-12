@@ -5995,6 +5995,30 @@ describe('AppShell', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/tmp/local-picked/release-note-v2.md')
     expect(wrapper.text()).toContain('绝对路径已复制')
     await renamedRow.find('.file-row-actions button[title="更多"]').trigger('click')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable'))
+    const originalExecCommand = document.execCommand
+    const failedExecCommandSpy = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: failedExecCommandSpy
+    })
+    try {
+      await wrapper.find('.file-more-menu').findAll('button').find((button) => button.text().includes('复制绝对路径'))!.trigger('click')
+      await flushPromises()
+      expect(failedExecCommandSpy).toHaveBeenCalledWith('copy')
+      expect(wrapper.text()).toContain('复制绝对路径失败')
+      expect(wrapper.text()).not.toContain('绝对路径已复制')
+    } finally {
+      if (originalExecCommand) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          value: originalExecCommand
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
+    }
+    await renamedRow.find('.file-row-actions button[title="更多"]').trigger('click')
     await wrapper.find('.file-more-menu').findAll('button').find((button) => button.text().includes('复制'))!.trigger('click')
     expect(wrapper.text()).toContain('复制到')
     expect(wrapper.find('.move-breadcrumb-row').exists()).toBe(true)
@@ -6537,6 +6561,52 @@ describe('AppShell', () => {
     await wrapper.find('.script-help .help-header').trigger('click')
     await wrapper.find('.copy-example').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('sleep==2000'))
+    expect(wrapper.find('.copy-example').text()).toBe('已复制')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable'))
+    const originalExecCommand = document.execCommand
+    const execCommandSpy = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommandSpy
+    })
+    try {
+      await wrapper.find('.copy-example').trigger('click')
+      await flushPromises()
+      expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      expect(wrapper.find('.copy-example').text()).toBe('已复制')
+    } finally {
+      if (originalExecCommand) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          value: originalExecCommand
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
+    }
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable again'))
+    const originalExecCommandForFailure = document.execCommand
+    const failedExecCommandSpy = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: failedExecCommandSpy
+    })
+    try {
+      await wrapper.find('.copy-example').trigger('click')
+      await flushPromises()
+      expect(failedExecCommandSpy).toHaveBeenCalledWith('copy')
+      expect(wrapper.find('.copy-example').text()).toBe('复制')
+      expect(store.topNotice).toBe('示例脚本复制失败')
+    } finally {
+      if (originalExecCommandForFailure) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          value: originalExecCommandForFailure
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
+    }
     await wrapper.find('.snippet-edit-panel input').setValue('新片段')
     await wrapper.find('.script-editor-container textarea').setValue('pwd\nsleep==1000\nctrl+c')
     await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
@@ -6752,7 +6822,35 @@ describe('AppShell', () => {
     const markdownNode = wrapper.findAll('.kb-tree-node').find((node) => node.text().includes('Markdown语法指南.md'))!
     await markdownNode.trigger('contextmenu')
     expect(wrapper.find('.kb-context-menu').exists()).toBe(true)
+    vi.mocked(navigator.clipboard.writeText).mockClear()
     await wrapper.find('.kb-context-menu').findAll('button').find((button) => button.text().includes('复制路径'))!.trigger('click')
+    await flushPromises()
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Markdown语法指南.md')
+    expect(store.topNotice).toBe('知识库路径已复制')
+
+    await markdownNode.trigger('contextmenu')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable'))
+    const originalExecCommand = document.execCommand
+    const failedExecCommandSpy = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: failedExecCommandSpy
+    })
+    try {
+      await wrapper.find('.kb-context-menu').findAll('button').find((button) => button.text().includes('复制路径'))!.trigger('click')
+      await flushPromises()
+      expect(failedExecCommandSpy).toHaveBeenCalledWith('copy')
+      expect(store.topNotice).toBe('知识库路径复制失败')
+    } finally {
+      if (originalExecCommand) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          value: originalExecCommand
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
+    }
 
     await wrapper.find('.kb-capacity-detail-link').trigger('click')
     expect(wrapper.text()).toContain('容量来源明细')

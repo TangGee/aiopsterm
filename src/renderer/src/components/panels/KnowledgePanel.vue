@@ -238,6 +238,7 @@
 import { computed, defineComponent, h, nextTick, onMounted, reactive, ref, watch, type VNode } from 'vue'
 import { ChevronDown, ChevronRight, Cloud, File, FilePlus, Folder, FolderPlus, Plus, RefreshCw, Search, UploadCloud, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { isKnowledgePathCheckResultData, malformedKnowledgeBackendResultMessage } from '@/services/knowledgeBackendGuards'
 import type { KnowledgeBaseSearchResult, KnowledgeNode } from '@shared/preload'
 
@@ -455,7 +456,8 @@ const pasteInto = async (relPath: string) => {
 }
 
 const copyPath = async () => {
-  if (navigator.clipboard) await navigator.clipboard.writeText(workspace.kbSelectedKeys.join('\n') || nodeMenu.relPath)
+  const copied = await copyTextToClipboard(workspace.kbSelectedKeys.join('\n') || nodeMenu.relPath)
+  workspace.setTopNotice(copied ? '知识库路径已复制' : '知识库路径复制失败')
   nodeMenu.visible = false
 }
 

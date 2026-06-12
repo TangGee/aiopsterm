@@ -351,6 +351,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 
 const workspace = useWorkspaceStore()
 const editingCommand = ref(false)
@@ -412,14 +413,14 @@ const syncLineNumberScroll = () => {
 }
 
 const copyExampleScript = async () => {
-  try {
-    await navigator.clipboard.writeText(exampleScript)
-    copyExampleSuccess.value = true
+  const copied = await copyTextToClipboard(exampleScript)
+  copyExampleSuccess.value = copied
+  if (copied) {
     window.setTimeout(() => {
       copyExampleSuccess.value = false
     }, 2000)
-  } catch {
-    copyExampleSuccess.value = false
+  } else {
+    workspace.setTopNotice('示例脚本复制失败')
   }
 }
 
