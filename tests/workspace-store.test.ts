@@ -2708,6 +2708,127 @@ describe('workspace store', () => {
     expectNoBusinessDataConfigWrites(['quickCommands'])
   })
 
+  it('drops legacy business rows that do not carry backend-owned ids during hydration', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      language: 'zh-CN',
+      theme: 'dark',
+      defaultMode: 'terminal',
+      leftPanelOpen: true,
+      rightPanelOpen: true,
+      agentsLeftOpen: true,
+      modelProvider: 'local',
+      modelEndpoint: '',
+      modelName: 'aiopsterm-local-agent',
+      watermark: 'open',
+      background: {
+        mode: 'none',
+        image: '',
+        opacity: 0.15,
+        brightness: 0.45
+      },
+      terminal: defaultTerminalSettings,
+      workspacePreferences: {
+        expandedGroups: ['recent_connections'],
+        showIpMode: false
+      },
+      editorSettings: defaultEditorSettings,
+      sshProxyConfigs: defaultSshProxyConfigs,
+      sshAgentKeys: defaultSshAgentKeys,
+      extensionSettings: {
+        autoCompleteStatus: true,
+        quickVimStatus: true,
+        aliasStatus: true,
+        highlightStatus: true
+      },
+      keywordHighlight: defaultKeywordHighlight,
+      securityConfig: defaultSecurityConfig,
+      privacy: {
+        telemetry: 'enabled',
+        secretRedaction: 'disabled',
+        dataSync: 'disabled'
+      },
+      aiPreferences: defaultAiPreferences,
+      modelSettings: defaultModelSettings,
+      shortcuts: defaultShortcuts,
+      rules: [
+        { content: 'legacy rule without id', enabled: true },
+        { id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false }
+      ],
+      skills: defaultSkills,
+      mcpServers: defaultMcpServers,
+      mcpToolStates: defaultMcpToolStates,
+      quickCommands: {
+        groups: [
+          { id: 301, group_name: 'legacy group without uuid' },
+          { id: 302, uuid: 'group-backend-owned', group_name: 'Backend Group' }
+        ],
+        snippets: [
+          { id: 401, snippet_name: 'legacy snippet without uuid', snippet_content: 'echo legacy', group_uuid: 'group-backend-owned' },
+          {
+            id: 402,
+            uuid: 'snippet-backend-owned',
+            snippet_name: 'Backend Snippet',
+            snippet_content: 'echo backend',
+            group_uuid: 'group-backend-owned'
+          }
+        ]
+      },
+      knowledgeBase: {
+        tree: [],
+        usedBytes: 0,
+        totalBytes: 1073741824
+      },
+      aliasCommands: [
+        { alias: 'legacy-no-id', command: 'echo legacy', createdAt: 1780487300000 },
+        { id: 'alias-backend-owned', alias: 'backend', command: 'echo backend', createdAt: 1780487400000 }
+      ],
+      onboarding: {
+        version: 2,
+        guideTabAutoOpened: false,
+        completedModules: {
+          interfaceGuide: false,
+          systemSettings: false,
+          addAndConnectHost: false,
+          aiChat: false
+        }
+      }
+    } as any)
+    vi.mocked(window.aiops.getQuickCommands).mockResolvedValueOnce({ groups: [], snippets: [] })
+    vi.mocked(window.aiops.listAliasCommands).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        { alias: 'legacy-no-id', command: 'echo legacy', createdAt: 1780487300000 },
+        { id: 'alias-backend-owned', alias: 'backend', command: 'echo backend', createdAt: 1780487400000 }
+      ]
+    } as any)
+    vi.mocked(window.aiops.getSettingsPreferences).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        shortcuts: defaultShortcuts,
+        rules: [
+          { content: 'legacy rule without id', enabled: true },
+          { id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false }
+        ]
+      }
+    } as any)
+
+    await store.hydrateConfig()
+
+    expect(store.snippetGroups).toEqual([])
+    expect(store.quickCommands).toEqual([])
+    expect(store.config.quickCommands).toEqual({ groups: [], snippets: [] })
+    expect(store.aliasCommands).toEqual([])
+    expect(store.aliasCommands.some((alias) => alias.alias === 'legacy-no-id')).toBe(false)
+    expect(store.config.aliasCommands).toEqual([{ id: 'alias-backend-owned', alias: 'backend', command: 'echo backend', createdAt: 1780487400000 }])
+    expect(store.settingsRules).toEqual([{ id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false, isEditing: false }])
+    expect(store.config.rules).toEqual([{ id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false }])
+    expect(store.topNotice).toBe('')
+    expect(store.extensionNotice).toBe('Alias 服务返回数据无效')
+    expect(store.settingsNotice).toBe('设置服务返回数据无效')
+    expectNoBusinessDataConfigWrites(['quickCommands', 'aliasCommands'])
+  })
+
   it('hydrates file transfer task snapshots from the backend boundary', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([

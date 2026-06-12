@@ -97,4 +97,46 @@ describe('client mock audit', () => {
     expect(result.output).toContain('src/main/extension-copy.ts')
     expect(result.output).not.toContain('electron-builder.yml')
   })
+
+  it('rejects renderer-generated backend business identities while allowing local UI and request ids', async () => {
+    const allowedRoot = await createAuditRepo()
+    await writeFile(
+      join(allowedRoot, 'src', 'renderer', 'src', 'components', 'AllowedUiIds.vue'),
+      [
+        '<script setup lang="ts">',
+        'const panelId = `panel-${Math.random().toString(36).slice(2)}`',
+        'const sqlTabId = `tab-sql-${Date.now()}`',
+        'const dataTabId = `tab-data-${table.id}-${Date.now()}`',
+        'const rowDraftId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`',
+        'const resultId = `result-${seq}`',
+        'const diagnosisRequestId = `dbai-diagnose-${result.id}-${Date.now().toString(36)}`',
+        'void panelId',
+        'void sqlTabId',
+        'void dataTabId',
+        'void rowDraftId',
+        'void resultId',
+        'void diagnosisRequestId',
+        '</script>'
+      ].join('\n')
+    )
+    await expect(runAudit(allowedRoot)).resolves.toMatchObject({ ok: true, output: expect.stringContaining('client-mock-audit-ok') })
+
+    const rejectedRoot = await createAuditRepo()
+    await writeFile(
+      join(rejectedRoot, 'src', 'renderer', 'src', 'components', 'BusinessIds.vue'),
+      [
+        '<script setup lang="ts">',
+        'const assetId = `asset-${Date.now()}`',
+        'const historyId = `conv-${Math.random().toString(36).slice(2)}`',
+        'void assetId',
+        'void historyId',
+        '</script>'
+      ].join('\n')
+    )
+
+    const result = await runAudit(rejectedRoot)
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('renderer-business-id-generation')
+    expect(result.output).toContain('BusinessIds.vue')
+  })
 })

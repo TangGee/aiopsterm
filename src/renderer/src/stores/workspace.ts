@@ -2066,7 +2066,8 @@ const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>)
       if (!isRecord(item)) return null
       const groupName = typeof item.group_name === 'string' ? item.group_name.trim() : ''
       if (!groupName) return null
-      const uuid = typeof item.uuid === 'string' && item.uuid.trim() ? item.uuid.trim() : `snippet-group-${index + 1}`
+      const uuid = typeof item.uuid === 'string' ? item.uuid.trim() : ''
+      if (!uuid) return null
       if (groupUuids.has(uuid)) return null
       groupUuids.add(uuid)
       return {
@@ -2088,7 +2089,8 @@ const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>)
     while (snippetIds.has(id)) id += 1
     snippetIds.add(id)
 
-    const uuid = typeof item.uuid === 'string' && item.uuid.trim() ? item.uuid.trim() : `snippet-${id}`
+    const uuid = typeof item.uuid === 'string' ? item.uuid.trim() : ''
+    if (!uuid) return
     if (snippetUuids.has(uuid)) return
     snippetUuids.add(uuid)
 
@@ -2880,7 +2882,8 @@ const normalizeAliasCommandsConfig = (source?: AliasCommandConfig[]) => {
     const alias = typeof item.alias === 'string' ? item.alias.trim() : ''
     const command = typeof item.command === 'string' ? item.command.trim() : ''
     if (!alias || !command || seenAliases.has(alias)) return
-    let id = typeof item.id === 'string' && item.id.trim() && item.id !== 'new' ? item.id.trim() : `alias-${index + 1}`
+    let id = typeof item.id === 'string' && item.id.trim() && item.id !== 'new' ? item.id.trim() : ''
+    if (!id) return
     while (seenIds.has(id)) id = `${id}-${index + 1}`
     seenAliases.add(alias)
     seenIds.add(id)
@@ -2983,7 +2986,11 @@ const normalizeRulesConfig = (source?: unknown, customInstructions?: unknown) =>
       changed = true
       return
     }
-    let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `rule-${index + 1}`
+    let id = typeof item.id === 'string' ? item.id.trim() : ''
+    if (!id) {
+      changed = true
+      return
+    }
     while (seenIds.has(id)) id = `${id}-${index + 1}`
     seenIds.add(id)
     const rule = {
@@ -4874,8 +4881,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const snapshot = normalizeAliasCommandsConfig(bridgeAliasCommands)
       normalizedAliasCommands = snapshot.normalized
       aliasCommandsLoadedFromBridge = true
-    } catch {
-      setExtensionNotice(hasAliasListBridge() ? 'Alias 加载失败' : 'Alias 服务不可用')
+    } catch (error) {
+      setExtensionNotice(error instanceof Error ? error.message : hasAliasListBridge() ? 'Alias 加载失败' : 'Alias 服务不可用')
     }
     aliasCommands.value = normalizedAliasCommands.map((alias) => ({ ...alias, edit: false }))
     let bridgeSettingsPreferences: SettingsPreferencesSnapshot = {

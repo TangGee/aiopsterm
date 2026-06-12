@@ -80,6 +80,23 @@ const rendererContentRules = [
   }
 ]
 
+const rendererBusinessIdLiteralPattern =
+  /`(?:asset|folder|key|conv|aichat|dbai-pane|dbai-drawer|sql-exec|transfer|files-folder|snippet|snippet-group|alias|rule|k8s-run|k8s-session|k8s-tab|terminal-command)-\$\{/i
+
+const rendererBusinessIdFailures = (filePath, content) => {
+  const failures = []
+  content.split(/\r?\n/).forEach((line, index) => {
+    if (!rendererBusinessIdLiteralPattern.test(line)) return
+    failures.push({
+      filePath,
+      rule: 'renderer-business-id-generation',
+      message: 'Renderer code must not generate backend-owned business ids; use preload/main/backend creation results and keep renderer ids limited to local UI/request state.',
+      lineNumber: index + 1
+    })
+  })
+  return failures
+}
+
 const external-referenceImportPattern = /(?:from|require|import)\s*\(?\s*['"][^'"]*(?:^|\/|\.\.)external-reference(?:\/|['"])/
 
 const external-referenceTreePathPattern = /(^|[^.\w-])(?:\.{1,2}\/)?external-reference[\\/]/i
@@ -139,6 +156,7 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
         failures.push({ filePath, rule: rule.id, message: rule.message })
       }
     })
+    failures.push(...rendererBusinessIdFailures(filePath, content))
     if (rel.includes('/__fixtures__/') || rel.includes('/fixtures/')) {
       failures.push({
         filePath,
