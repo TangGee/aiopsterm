@@ -201,6 +201,19 @@ const getKnowledgeName = (relPath: string) => relPath.split('/').filter(Boolean)
 
 const createKnowledgeRelPath = (parentRelDir: string, name: string) => [parentRelDir, name].filter(Boolean).join('/')
 
+const uniqueKnowledgeNameMock = (parentRelDir: string, name: string) => {
+  const dotIndex = name.lastIndexOf('.')
+  const base = dotIndex >= 0 ? name.slice(0, dotIndex) : name
+  const ext = dotIndex >= 0 ? name.slice(dotIndex) : ''
+  let candidate = name
+  let index = 1
+  while (findKnowledgeNodeMock(createKnowledgeRelPath(parentRelDir, candidate))) {
+    candidate = `${base} (${index})${ext}`
+    index += 1
+  }
+  return candidate
+}
+
 const findKnowledgeNodeMock = (relPath: string, nodes: TestKnowledgeNode[] = knowledgeTreeMock): TestKnowledgeNode | null => {
   for (const node of nodes) {
     if (node.relPath === relPath) return node
@@ -257,12 +270,13 @@ const listKnowledgeDirMock = (relDir: string) => {
 }
 
 const createKnowledgeNodeMock = (kind: 'file' | 'dir', parentRelDir: string, name: string): TestKnowledgeNode => {
-  const relPath = createKnowledgeRelPath(parentRelDir, name)
+  const finalName = uniqueKnowledgeNameMock(parentRelDir, name)
+  const relPath = createKnowledgeRelPath(parentRelDir, finalName)
   const node: TestKnowledgeNode = {
     id: `kb-${relPath.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
     key: relPath,
     relPath,
-    title: name,
+    title: finalName,
     type: kind,
     ...(kind === 'file' ? { size: 1024 } : { children: [] })
   }
@@ -272,7 +286,7 @@ const createKnowledgeNodeMock = (kind: 'file' | 'dir', parentRelDir: string, nam
 
 const cloneKnowledgeNodeWithPaths = (node: TestKnowledgeNode, dstRelDir: string): TestKnowledgeNode => {
   const cloned = cloneKnowledgeTree([node])[0]
-  const nextRelPath = createKnowledgeRelPath(dstRelDir, cloned.title)
+  const nextRelPath = createKnowledgeRelPath(dstRelDir, uniqueKnowledgeNameMock(dstRelDir, cloned.title))
   updateKnowledgeNodePathsMock(cloned, cloned.relPath, nextRelPath)
   return cloned
 }
@@ -6283,7 +6297,10 @@ Object.defineProperty(window, 'aiops', {
         ...(encoding === 'base64' ? { mimeType: isDefaultImage ? DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME : 'application/octet-stream', isImage: relPath.endsWith('.png') } : {})
       }
     }),
-    kbWriteFile: vi.fn(async () => ({ mtimeMs: 1717200000000 })),
+    kbWriteFile: vi.fn(async (relPath: string, content: string, encoding?: 'utf-8' | 'base64') => {
+      const bytes = encoding === 'base64' ? Buffer.from(String(content || ''), 'base64').byteLength : new TextEncoder().encode(String(content ?? '')).byteLength
+      return { relPath, type: 'file' as const, size: bytes, bytes, mtimeMs: 1717200000000 }
+    }),
     kbPasteImageFromClipboard: vi.fn(async (relDir?: string, name?: string) => {
       const fileName = name || 'pasted-image-2026-06-09T12-34-56.png'
       const node = createKnowledgeNodeMock('file', relDir || '', fileName)
@@ -6298,46 +6315,48 @@ Object.defineProperty(window, 'aiops', {
     }),
     kbMkdir: vi.fn(async (relDir: string, name: string) => {
       const node = createKnowledgeNodeMock('dir', relDir, name)
-      return { success: true, relPath: node.relPath }
+      return { relPath: node.relPath, type: 'dir' as const, mtimeMs: 1717200000000 }
     }),
-    kbCreateFile: vi.fn(async (relDir: string, name: string) => {
+    kbCreateFile: vi.fn(async (relDir: string, name: string, content = '') => {
       const node = createKnowledgeNodeMock('file', relDir, name)
-      return { relPath: node.relPath }
+      const size = new TextEncoder().encode(String(content ?? '')).byteLength
+      return { relPath: node.relPath, type: 'file' as const, size, mtimeMs: 1717200000000 }
     }),
     kbRename: vi.fn(async (relPath: string, newName: string) => {
       const node = findKnowledgeNodeMock(relPath)
       if (!node) throw new Error(`Missing node: ${relPath}`)
       const nextRelPath = createKnowledgeRelPath(getKnowledgeParent(relPath), newName)
       updateKnowledgeNodePathsMock(node, relPath, nextRelPath)
-      return { relPath: nextRelPath }
+      return { relPath: nextRelPath, type: node.type, size: node.type === 'file' ? node.size || 0 : undefined, mtimeMs: 1717200000000 }
     }),
     kbDelete: vi.fn(async (relPath: string) => {
-      removeKnowledgeNodeMock(relPath)
-      return { success: true }
+      const node = removeKnowledgeNodeMock(relPath)
+      if (!node) throw new Error(`Missing node: ${relPath}`)
+      return { success: true, relPath, type: node.type, deleted: true as const }
     }),
     kbMove: vi.fn(async (srcRelPath: string, dstRelDir: string) => {
       const node = removeKnowledgeNodeMock(srcRelPath)
       if (!node) throw new Error(`Missing node: ${srcRelPath}`)
       updateKnowledgeNodePathsMock(node, srcRelPath, createKnowledgeRelPath(dstRelDir, node.title))
       insertKnowledgeNodeMock(dstRelDir, node)
-      return { relPath: node.relPath }
+      return { relPath: node.relPath, type: node.type, size: node.type === 'file' ? node.size || 0 : undefined, mtimeMs: 1717200000000 }
     }),
     kbCopy: vi.fn(async (srcRelPath: string, dstRelDir: string) => {
       const node = findKnowledgeNodeMock(srcRelPath)
       if (!node) throw new Error(`Missing node: ${srcRelPath}`)
       const cloned = cloneKnowledgeNodeWithPaths(node, dstRelDir)
       insertKnowledgeNodeMock(dstRelDir, cloned)
-      return { relPath: cloned.relPath }
+      return { relPath: cloned.relPath, type: cloned.type, size: cloned.type === 'file' ? cloned.size || 0 : undefined, mtimeMs: 1717200000000 }
     }),
     kbImportFile: vi.fn(async (srcAbsPath: string, dstRelDir: string) => {
       const name = getKnowledgeName(srcAbsPath)
       const node = createKnowledgeNodeMock('file', dstRelDir, name)
-      return { jobId: 'kb-import-file', relPath: node.relPath }
+      return { jobId: 'kb-import-file', relPath: node.relPath, type: 'file' as const, size: node.size || 0, mtimeMs: 1717200000000 }
     }),
     kbImportFolder: vi.fn(async (srcAbsPath: string, dstRelDir: string) => {
       const name = getKnowledgeName(srcAbsPath)
       const node = createKnowledgeNodeMock('dir', dstRelDir, name)
-      return { jobId: 'kb-import-folder', relPath: node.relPath }
+      return { jobId: 'kb-import-folder', relPath: node.relPath, type: 'dir' as const, mtimeMs: 1717200000000 }
     }),
     kbSearch: vi.fn(async (query: string) =>
       query.trim()

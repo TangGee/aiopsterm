@@ -1445,6 +1445,32 @@ export type KnowledgeBaseReadResult = {
   isImage?: boolean
 }
 
+export type KnowledgeBaseMutationEntry = {
+  relPath: string
+  type: 'file' | 'dir'
+  size?: number
+  mtimeMs: number
+}
+
+export type KnowledgeBaseWriteResult = KnowledgeBaseMutationEntry & {
+  type: 'file'
+  size: number
+  bytes: number
+}
+
+export type KnowledgeBaseCreateResult = KnowledgeBaseMutationEntry
+
+export type KnowledgeBaseDeleteResult = {
+  success: boolean
+  relPath: string
+  type: 'file' | 'dir'
+  deleted: true
+}
+
+export type KnowledgeBaseImportResult = KnowledgeBaseMutationEntry & {
+  jobId: string
+}
+
 export type KnowledgeBasePastedImageInput = {
   relDir?: string
   name?: string
@@ -2932,16 +2958,16 @@ export type AiopsPreloadApi = {
   kbGetRoot: () => Promise<{ root: string }>
   kbListDir: (relDir: string) => Promise<KnowledgeBaseEntry[]>
   kbReadFile: (relPath: string, encoding?: 'utf-8' | 'base64') => Promise<KnowledgeBaseReadResult>
-  kbWriteFile: (relPath: string, content: string, encoding?: 'utf-8' | 'base64') => Promise<{ mtimeMs: number }>
+  kbWriteFile: (relPath: string, content: string, encoding?: 'utf-8' | 'base64') => Promise<KnowledgeBaseWriteResult>
   kbPasteImageFromClipboard: (relDir?: string, name?: string) => Promise<KnowledgeBasePastedImageResult>
-  kbMkdir: (relDir: string, name: string) => Promise<{ success: boolean; relPath: string }>
-  kbCreateFile: (relDir: string, name: string, content?: string) => Promise<{ relPath: string }>
-  kbRename: (relPath: string, newName: string) => Promise<{ relPath: string }>
-  kbDelete: (relPath: string, recursive?: boolean) => Promise<{ success: boolean }>
-  kbMove: (srcRelPath: string, dstRelDir: string) => Promise<{ relPath: string }>
-  kbCopy: (srcRelPath: string, dstRelDir: string) => Promise<{ relPath: string }>
-  kbImportFile: (srcAbsPath: string, dstRelDir: string) => Promise<{ jobId: string; relPath: string }>
-  kbImportFolder: (srcAbsPath: string, dstRelDir: string) => Promise<{ jobId: string; relPath: string }>
+  kbMkdir: (relDir: string, name: string) => Promise<KnowledgeBaseCreateResult>
+  kbCreateFile: (relDir: string, name: string, content?: string) => Promise<KnowledgeBaseCreateResult>
+  kbRename: (relPath: string, newName: string) => Promise<KnowledgeBaseCreateResult>
+  kbDelete: (relPath: string, recursive?: boolean) => Promise<KnowledgeBaseDeleteResult>
+  kbMove: (srcRelPath: string, dstRelDir: string) => Promise<KnowledgeBaseCreateResult>
+  kbCopy: (srcRelPath: string, dstRelDir: string) => Promise<KnowledgeBaseCreateResult>
+  kbImportFile: (srcAbsPath: string, dstRelDir: string) => Promise<KnowledgeBaseImportResult>
+  kbImportFolder: (srcAbsPath: string, dstRelDir: string) => Promise<KnowledgeBaseImportResult>
   kbSearch: (query: string, options?: { maxResults?: number; minScore?: number }) => Promise<KnowledgeBaseSearchResult[]>
   kbSearchStatus: () => Promise<KnowledgeBaseSearchStatus>
   kbReindex: () => Promise<{ files: number; chunks: number }>

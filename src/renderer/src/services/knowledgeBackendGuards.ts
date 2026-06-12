@@ -1,10 +1,14 @@
 import type {
   KnowledgeBaseEntry,
+  KnowledgeBaseCreateResult,
+  KnowledgeBaseDeleteResult,
+  KnowledgeBaseImportResult,
   KnowledgeBasePastedImageResult,
   KnowledgeBaseReadResult,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
-  KnowledgeBaseTransferProgress
+  KnowledgeBaseTransferProgress,
+  KnowledgeBaseWriteResult
 } from '@shared/preload'
 
 export const malformedKnowledgeBackendResultMessage = '知识库服务返回数据无效'
@@ -21,12 +25,28 @@ const isNonNegativeNumber = (value: unknown): value is number => isFiniteNumber(
 
 export const isKnowledgeRelPathResultData = (value: unknown): value is { relPath: string } => isRecord(value) && isNonEmptyString(value.relPath)
 
-export const isKnowledgeDeleteResultData = (value: unknown): value is { success: boolean } => isRecord(value) && value.success === true
+export const isKnowledgeMutationEntryData = (value: unknown): value is KnowledgeBaseCreateResult =>
+  isRecord(value) &&
+  isNonEmptyString(value.relPath) &&
+  (value.type === 'file' || value.type === 'dir') &&
+  (value.type === 'dir' || isNonNegativeNumber(value.size)) &&
+  isFiniteNumber(value.mtimeMs) &&
+  value.mtimeMs > 0
 
-export const isKnowledgeWriteResultData = (value: unknown): value is { mtimeMs: number } => isRecord(value) && isFiniteNumber(value.mtimeMs)
+export const isKnowledgeDeleteResultData = (value: unknown): value is KnowledgeBaseDeleteResult =>
+  isRecord(value) && value.success === true && value.deleted === true && isNonEmptyString(value.relPath) && (value.type === 'file' || value.type === 'dir')
 
-export const isKnowledgeImportResultData = (value: unknown): value is { jobId: string; relPath: string } =>
-  isRecord(value) && isNonEmptyString(value.jobId) && isNonEmptyString(value.relPath)
+export const isKnowledgeWriteResultData = (value: unknown): value is KnowledgeBaseWriteResult => {
+  if (!isRecord(value) || !isKnowledgeMutationEntryData(value) || value.type !== 'file') return false
+  const source = value as Record<string, unknown>
+  return isNonNegativeNumber(source.size) && isNonNegativeNumber(source.bytes) && source.bytes === source.size
+}
+
+export const isKnowledgeImportResultData = (value: unknown): value is KnowledgeBaseImportResult => {
+  if (!isRecord(value) || !isKnowledgeMutationEntryData(value)) return false
+  const source = value as Record<string, unknown>
+  return isNonEmptyString(source.jobId)
+}
 
 export type KnowledgePathCheckResultData = { exists: boolean; isDirectory: boolean; isFile: boolean }
 
@@ -37,14 +57,14 @@ export const isKnowledgeImportResultForRequest = (
   value: unknown,
   expectedParentRelDir: string,
   expectedSourceType: 'file' | 'folder'
-): value is { jobId: string; relPath: string } => {
+): value is KnowledgeBaseImportResult => {
   if (!isKnowledgeImportResultData(value)) return false
   const parent = expectedParentRelDir.trim().replace(/^\/+|\/+$/g, '')
   const relPath = value.relPath.trim().replace(/^\/+|\/+$/g, '')
   if (!relPath || !relPath.split('/').filter(Boolean).at(-1)) return false
   const resultParent = relPath.split('/').slice(0, -1).join('/')
   if (resultParent !== parent) return false
-  if (expectedSourceType === 'file' && relPath.endsWith('/')) return false
+  if (value.type !== (expectedSourceType === 'folder' ? 'dir' : 'file')) return false
   return true
 }
 
@@ -127,3 +147,19 @@ export const isKnowledgeTransferProgressData = (value: unknown): value is Knowle
   isRecord(value) && isNonEmptyString(value.jobId) && isNonEmptyString(value.destRelPath) && isNonNegativeNumber(value.transferred) && isNonNegativeNumber(value.total)
 
 export const expectedKnowledgeRelPath = (relDir: string, name: string) => [relDir.trim().replace(/^\/+|\/+$/g, ''), name.trim()].filter(Boolean).join('/')
+
+export const isKnowledgeRelPathInParentWithRequestedName = (relPath: string, relDir: string, requestedName: string) => {
+  const parent = relDir.trim().replace(/^\/+|\/+$/g, '')
+  const normalizedRelPath = relPath.trim().replace(/^\/+|\/+$/g, '')
+  const normalizedName = requestedName.trim()
+  if (!normalizedRelPath || !normalizedName) return false
+  const parts = normalizedRelPath.split('/').filter(Boolean)
+  const resultName = parts.at(-1) || ''
+  if (parts.slice(0, -1).join('/') !== parent) return false
+  if (resultName === normalizedName) return true
+  const dotIndex = normalizedName.lastIndexOf('.')
+  const base = dotIndex >= 0 ? normalizedName.slice(0, dotIndex) : normalizedName
+  const ext = dotIndex > 0 ? normalizedName.slice(dotIndex).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : ''
+  const searchableBase = dotIndex > 0 ? base : normalizedName
+  return new RegExp(`^${searchableBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(\\d+\\)${ext}$`).test(resultName)
+}

@@ -6317,6 +6317,10 @@ describe('workspace store', () => {
     expect(store.kbUsedBytes).toBeGreaterThan(knowledgeBytesAfterFolder)
     expect(window.aiops.kbCreateFile).toHaveBeenCalledWith('Runbooks', 'Deploy.md', '')
 
+    const duplicateFile = await store.createKnowledgeNode('file', 'Runbooks', 'Deploy.md')
+    expect(duplicateFile?.relPath).toBe('Runbooks/Deploy (1).md')
+    expect(store.findKnowledgeNode('Runbooks/Deploy (1).md')).toBeTruthy()
+
     await store.renameKnowledgeNode(file.relPath, 'Deploy-v2.md')
     expect(store.findKnowledgeNode('Runbooks/Deploy.md')).toBeNull()
     expect(store.findKnowledgeNode('Runbooks/Deploy-v2.md')).toBeTruthy()
@@ -6327,6 +6331,10 @@ describe('workspace store', () => {
     await store.pasteKnowledgeNodes('commands')
     expect(store.findKnowledgeNode('commands/Deploy-v2.md')).toBeTruthy()
     expect(window.aiops.kbCopy).toHaveBeenCalledWith('Runbooks/Deploy-v2.md', 'commands')
+
+    store.copyKnowledgeNodes(['Runbooks/Deploy-v2.md'], 'copy')
+    await store.pasteKnowledgeNodes('commands')
+    expect(store.findKnowledgeNode('commands/Deploy-v2 (1).md')).toBeTruthy()
 
     store.copyKnowledgeNodes(['commands/Deploy-v2.md'], 'cut')
     await store.pasteKnowledgeNodes('')
@@ -6468,13 +6476,13 @@ describe('workspace store', () => {
       vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({} as Awaited<ReturnType<typeof window.aiops.kbCreateFile>>)
       const created = await store.createKnowledgeNode('file', '', 'NoRelPath.md')
       expect(created).toBeNull()
-      expect(store.topNotice).toBe('知识库写入服务不可用')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
       expect(store.kbSelectedKeys).toEqual(originalSelectedKeys)
       expect(store.findKnowledgeNode('NoRelPath.md')).toBeNull()
 
       vi.mocked(window.aiops.kbRename).mockResolvedValueOnce({} as Awaited<ReturnType<typeof window.aiops.kbRename>>)
       await store.renameKnowledgeNode('Markdown语法指南.md', 'Markdown-no-relpath.md')
-      expect(store.topNotice).toBe('知识库重命名服务不可用')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
       expect(store.kbSelectedKeys).toEqual(originalSelectedKeys)
       expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
       expect(store.findKnowledgeNode('Markdown-no-relpath.md')).toBeNull()
@@ -6502,7 +6510,7 @@ describe('workspace store', () => {
       const result = await store.summarizeMessageToKnowledge('assistant-empty-kb-relpath')
 
       expect(result).toBeNull()
-      expect(store.topNotice).toBe('知识库写入服务不可用')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
       expect(window.aiops.kbWriteFile).not.toHaveBeenCalled()
       expect(store.findKnowledgeNode('summary/ai-message-assistant-empty-kb-relpath.md')).toBeNull()
       expect(store.activePanel.kind).not.toBe('knowledge')
@@ -6628,7 +6636,7 @@ describe('workspace store', () => {
       expect(store.findKnowledgeNode('summary')).toBeNull()
 
       vi.mocked(window.aiops.kbMkdir).mockResolvedValueOnce({ success: true, relPath: 'summary' } as any)
-      vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({ relPath: 'summary/ai-message-assistant-malformed-kb.md' })
+      vi.mocked(window.aiops.kbCreateFile).mockResolvedValueOnce({ relPath: 'summary/ai-message-assistant-malformed-kb.md' } as any)
       vi.mocked(window.aiops.kbWriteFile).mockResolvedValueOnce({ mtimeMs: Number.NaN } as any)
       await expect(store.summarizeMessageToKnowledge('assistant-malformed-kb')).resolves.toBeNull()
       expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
@@ -6654,7 +6662,7 @@ describe('workspace store', () => {
       expect(kbDeleteImplementation).toBeTruthy()
       vi.mocked(window.aiops.kbDelete)
         .mockImplementationOnce(kbDeleteImplementation!)
-        .mockResolvedValueOnce({ success: false } as Awaited<ReturnType<typeof window.aiops.kbDelete>>)
+        .mockResolvedValueOnce({ success: false } as any)
 
       await store.deleteKnowledgeNodes(['commands/diagnose.md', 'Markdown语法指南.md'])
 
@@ -6685,7 +6693,7 @@ describe('workspace store', () => {
       expect(kbMoveImplementation).toBeTruthy()
       vi.mocked(window.aiops.kbMove)
         .mockImplementationOnce(kbMoveImplementation!)
-        .mockResolvedValueOnce({ relPath: 'wrong/diagnose.md' } as Awaited<ReturnType<typeof window.aiops.kbMove>>)
+        .mockResolvedValueOnce({ relPath: 'wrong/diagnose.md' } as any)
 
       await store.pasteKnowledgeNodes('')
 
@@ -6715,7 +6723,7 @@ describe('workspace store', () => {
       expect(kbCopyImplementation).toBeTruthy()
       vi.mocked(window.aiops.kbCopy)
         .mockImplementationOnce(kbCopyImplementation!)
-        .mockResolvedValueOnce({ relPath: 'wrong/diagnose.md' } as Awaited<ReturnType<typeof window.aiops.kbCopy>>)
+        .mockResolvedValueOnce({ relPath: 'wrong/diagnose.md' } as any)
 
       await store.pasteKnowledgeNodes('')
 

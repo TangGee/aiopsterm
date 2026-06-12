@@ -364,7 +364,7 @@ const saveNow = async () => {
       throw new Error('Knowledge bridge unavailable')
     }
     const result = await window.aiops.kbWriteFile(relPath.value, content.value)
-    if (!isKnowledgeWriteResultData(result)) throw new Error(malformedKnowledgeBackendResultMessage)
+    if (!isKnowledgeWriteResultData(result) || result.relPath.trim() !== relPath.value) throw new Error(malformedKnowledgeBackendResultMessage)
     dirty.value = false
   } catch (saveError) {
     error.value = saveError instanceof Error ? saveError.message : String(saveError)

@@ -303,9 +303,13 @@ import type {
   FileTransferTaskCancelInput,
   FileTransferOperation,
   KeywordHighlightUserConfig,
+  KnowledgeBaseCreateResult,
+  KnowledgeBaseDeleteResult,
+  KnowledgeBaseImportResult,
   KnowledgeBaseNodeConfig,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
+  KnowledgeBaseWriteResult,
   KubernetesAgentProxyConfigInput,
   KubernetesClusterInput,
   KubernetesKubeconfigImportInput,
@@ -1361,6 +1365,47 @@ const ensureUniqueKnowledgeName = async (dirAbs: string, desiredName: string) =>
     index += 1
   }
   return candidate
+}
+
+const knowledgeMutationEntry = async (relPath: string, absPath: string): Promise<KnowledgeBaseCreateResult> => {
+  const metadata = await stat(absPath)
+  if (metadata.isDirectory()) {
+    return {
+      relPath,
+      type: 'dir',
+      mtimeMs: metadata.mtimeMs
+    }
+  }
+  if (!metadata.isFile()) throw new Error('Knowledge target is not a file or directory')
+  return {
+    relPath,
+    type: 'file',
+    size: metadata.size,
+    mtimeMs: metadata.mtimeMs
+  }
+}
+
+const knowledgeWriteResult = async (relPath: string, absPath: string, expectedBytes: number): Promise<KnowledgeBaseWriteResult> => {
+  const entry = await knowledgeMutationEntry(relPath, absPath)
+  if (entry.type !== 'file') throw new Error('Knowledge write target is not a file')
+  if (entry.size !== expectedBytes) throw new Error('Knowledge write size does not match content byte count')
+  return {
+    relPath: entry.relPath,
+    type: 'file',
+    size: entry.size,
+    bytes: expectedBytes,
+    mtimeMs: entry.mtimeMs
+  }
+}
+
+const knowledgeDeletedResult = async (relPath: string, type: 'file' | 'dir', absPath: string): Promise<KnowledgeBaseDeleteResult> => {
+  if (await pathExists(absPath)) throw new Error('Knowledge delete target still exists')
+  return {
+    success: true,
+    relPath,
+    type,
+    deleted: true
+  }
 }
 
 const getKnowledgeMimeType = (relPath: string) => {
@@ -3034,13 +3079,17 @@ const registerIpc = () => {
     const { absPath } = resolveKnowledgePath(relPath)
     await mkdir(dirname(absPath), { recursive: true })
     if (encoding === 'base64') {
-      await writeFile(absPath, Buffer.from(content, 'base64'))
+      const bytes = Buffer.from(content, 'base64')
+      await writeFile(absPath, bytes)
+      const result = await knowledgeWriteResult(relPath, absPath, bytes.byteLength)
+      await syncKnowledgeBaseConfigFromDisk()
+      return result
     } else {
       await writeFile(absPath, content, 'utf-8')
+      const result = await knowledgeWriteResult(relPath, absPath, Buffer.byteLength(content, 'utf-8'))
+      await syncKnowledgeBaseConfigFromDisk()
+      return result
     }
-    const metadata = await stat(absPath)
-    await syncKnowledgeBaseConfigFromDisk()
-    return { mtimeMs: metadata.mtimeMs }
   })
   ipcMain.handle('kb:paste-image-from-clipboard', async (_event, payload?: KnowledgeBasePastedImageInput) =>
     writeKnowledgePastedImageFromClipboard(payload || {}, {
@@ -3058,8 +3107,9 @@ const registerIpc = () => {
     const targetAbs = join(dirAbs, name)
     await mkdir(targetAbs, { recursive: false })
     const relPath = posix.join(normalizedRelDir, name)
+    const result = await knowledgeMutationEntry(relPath, targetAbs)
     await syncKnowledgeBaseConfigFromDisk()
-    return { success: true, relPath }
+    return result
   })
   ipcMain.handle('kb:create-file', async (_event, payload: { relDir: string; name: string; content?: string }) => {
     const relDir = payload?.relDir || ''
@@ -3068,10 +3118,13 @@ const registerIpc = () => {
     const { absPath: dirAbs, relPath: normalizedRelDir } = resolveKnowledgePath(relDir)
     await mkdir(dirAbs, { recursive: true })
     const finalName = await ensureUniqueKnowledgeName(dirAbs, name)
-    await writeFile(join(dirAbs, finalName), typeof payload?.content === 'string' ? payload.content : '', 'utf-8')
+    const content = typeof payload?.content === 'string' ? payload.content : ''
+    const targetAbs = join(dirAbs, finalName)
+    await writeFile(targetAbs, content, 'utf-8')
     const relPath = posix.join(normalizedRelDir, finalName)
+    const result = await knowledgeMutationEntry(relPath, targetAbs)
     await syncKnowledgeBaseConfigFromDisk()
-    return { relPath }
+    return result
   })
   ipcMain.handle('kb:rename', async (_event, payload: { relPath: string; newName: string }) => {
     const relPath = payload?.relPath || ''
@@ -3082,23 +3135,26 @@ const registerIpc = () => {
     const destAbs = join(parentAbs, newName)
     const parentRel = posix.dirname(normalizedRelPath)
     const nextRelPath = parentRel === '.' ? newName : posix.join(parentRel, newName)
-    if (srcAbs === destAbs) return { relPath: nextRelPath }
+    if (srcAbs === destAbs) return knowledgeMutationEntry(nextRelPath, destAbs)
     if (await pathExists(destAbs)) throw new Error('Target already exists')
     await rename(srcAbs, destAbs)
+    const result = await knowledgeMutationEntry(nextRelPath, destAbs)
     await syncKnowledgeBaseConfigFromDisk()
-    return { relPath: nextRelPath }
+    return result
   })
   ipcMain.handle('kb:delete', async (_event, payload: { relPath: string; recursive?: boolean }) => {
     const relPath = payload?.relPath || ''
-    const { absPath } = resolveKnowledgePath(relPath)
+    const { absPath, relPath: normalizedRelPath } = resolveKnowledgePath(relPath)
     const metadata = await stat(absPath)
+    const type = metadata.isDirectory() ? 'dir' : 'file'
     if (metadata.isDirectory()) {
       await rm(absPath, { recursive: Boolean(payload?.recursive), force: true })
     } else {
       await unlink(absPath)
     }
+    const result = await knowledgeDeletedResult(normalizedRelPath, type, absPath)
     await syncKnowledgeBaseConfigFromDisk()
-    return { success: true }
+    return result
   })
   ipcMain.handle('kb:move', async (_event, payload: { srcRelPath: string; dstRelDir: string }) => {
     const srcRelPath = payload?.srcRelPath || ''
@@ -3122,8 +3178,9 @@ const registerIpc = () => {
       }
     }
     const relPath = posix.join(normalizedDstRelDir, finalName)
+    const result = await knowledgeMutationEntry(relPath, destAbs)
     await syncKnowledgeBaseConfigFromDisk()
-    return { relPath }
+    return result
   })
   ipcMain.handle('kb:copy', async (_event, payload: { srcRelPath: string; dstRelDir: string }) => {
     const srcRelPath = payload?.srcRelPath || ''
@@ -3135,10 +3192,12 @@ const registerIpc = () => {
     }
     await mkdir(dstDirAbs, { recursive: true })
     const finalName = await ensureUniqueKnowledgeName(dstDirAbs, basename(srcAbs))
-    await cp(srcAbs, join(dstDirAbs, finalName), { recursive: true })
+    const destAbs = join(dstDirAbs, finalName)
+    await cp(srcAbs, destAbs, { recursive: true })
     const relPath = posix.join(normalizedDstRelDir, finalName)
+    const result = await knowledgeMutationEntry(relPath, destAbs)
     await syncKnowledgeBaseConfigFromDisk()
-    return { relPath }
+    return result
   })
   ipcMain.handle('kb:import-file', async (event, payload: { srcAbsPath: string; dstRelDir: string }) => {
     const srcAbsPath = payload?.srcAbsPath || ''
@@ -3159,8 +3218,9 @@ const registerIpc = () => {
     sendKnowledgeProgress(owner, { jobId, transferred: 0, total: sourceMetadata.size || 1, destRelPath })
     await cp(srcAbsPath, destAbs)
     sendKnowledgeProgress(owner, { jobId, transferred: sourceMetadata.size || 1, total: sourceMetadata.size || 1, destRelPath })
+    const result = (await knowledgeMutationEntry(destRelPath, destAbs)) as KnowledgeBaseImportResult
     await syncKnowledgeBaseConfigFromDisk()
-    return { jobId, relPath: destRelPath }
+    return { ...result, jobId }
   })
   ipcMain.handle('kb:import-folder', async (event, payload: { srcAbsPath: string; dstRelDir: string }) => {
     const srcAbsPath = payload?.srcAbsPath || ''
@@ -3182,8 +3242,9 @@ const registerIpc = () => {
       await cp(tasks[index].srcPath, tasks[index].destPath)
       sendKnowledgeProgress(owner, { jobId, transferred: index + 1, total: tasks.length, destRelPath: destFolderRel })
     }
+    const result = (await knowledgeMutationEntry(destFolderRel, destFolderAbs)) as KnowledgeBaseImportResult
     await syncKnowledgeBaseConfigFromDisk()
-    return { jobId, relPath: destFolderRel }
+    return { ...result, jobId }
   })
   ipcMain.handle('kb:search', async (_event, query: string, options?: { maxResults?: number; minScore?: number }) => searchKnowledgeIndex(query, options))
   ipcMain.handle('kb:search-status', async () => {
