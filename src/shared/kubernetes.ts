@@ -1044,6 +1044,19 @@ const failKubernetesClusterTerminalSessions = (clusterId: string, error: string)
   })
 }
 
+const markKubernetesClusterRuntimeError = (cluster: KubernetesClusterRecord, errorMessage: string) => {
+  const failed: KubernetesClusterRecord = {
+    ...cluster,
+    is_active: 0,
+    connection_status: 'error',
+    updated_at: nowLabel()
+  }
+  clusters = clusters.map((item) => (item.id === cluster.id ? failed : item))
+  contexts = contexts.map((context) => (context.name === cluster.context_name ? { ...context, isActive: false } : context))
+  failKubernetesClusterTerminalSessions(cluster.id, errorMessage)
+  return failed
+}
+
 const stripYamlScalar = (value: string) => {
   const trimmed = value.trim()
   if (!trimmed) return ''
@@ -1583,19 +1596,25 @@ export const deleteKubernetesCluster = async (id: string): Promise<KubernetesClu
 export async function connectKubernetesCluster(id: string): Promise<KubernetesClusterMutationResult> {
   try {
     const current = requireCluster(id)
+    const nonRunnableReason = canRunLocalKubectl(current) ? null : nonRunnableKubernetesReason(current)
+    if (nonRunnableReason) {
+      const failed = markKubernetesClusterRuntimeError(current, nonRunnableReason.message)
+      persistKubernetesCatalogState()
+      return {
+        ok: false,
+        data: {
+          ...cloneCatalog(),
+          cluster: { ...failed }
+        },
+        errorCode: nonRunnableReason.code,
+        errorMessage: nonRunnableReason.message
+      }
+    }
     if (!(shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(current.id))) {
       const probe = await probeKubernetesClusterConnection(current)
       if (!probe.success) {
         const errorMessage = probe.error || probe.message || 'Kubernetes connection probe failed.'
-        const failed: KubernetesClusterRecord = {
-          ...current,
-          is_active: 0,
-          connection_status: 'error',
-          updated_at: nowLabel()
-        }
-        clusters = clusters.map((cluster) => (cluster.id === id ? failed : cluster))
-        contexts = contexts.map((context) => (context.name === current.context_name ? { ...context, isActive: false } : context))
-        failKubernetesClusterTerminalSessions(id, errorMessage)
+        const failed = markKubernetesClusterRuntimeError(current, errorMessage)
         persistKubernetesCatalogState()
         return {
           ok: false,
@@ -1728,6 +1747,12 @@ export const syncKubernetesBastion = async (bastionUuid: string): Promise<Kubern
 export const createKubernetesTerminal = async (input: KubernetesTerminalCreateInput): Promise<KubernetesTerminalCreateResult> =>
   asResult(() => {
     const cluster = requireCluster(input.clusterId)
+    const nonRunnableReason = canRunLocalKubectl(cluster) ? null : nonRunnableKubernetesReason(cluster)
+    if (nonRunnableReason) {
+      markKubernetesClusterRuntimeError(cluster, nonRunnableReason.message)
+      persistKubernetesCatalogState()
+      throw Object.assign(new Error(nonRunnableReason.message), { code: nonRunnableReason.code })
+    }
     const namespace = input.namespace?.trim() || cluster.default_namespace || 'default'
     const activeClusterSessions = terminalSessions.filter((session) => session.clusterId === cluster.id && session.status !== 'ended')
     const sessionIndex = activeClusterSessions.length + 1

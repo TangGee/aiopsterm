@@ -535,25 +535,27 @@ describe('kubernetes backend boundary', () => {
   })
 
   it('rejects terminal and resource operations for non-runnable Kubernetes clusters', async () => {
+    const events: unknown[] = []
+    setKubernetesTerminalEventSink((event) => events.push(event))
+
     await expect(connectKubernetesCluster('k8s-3')).resolves.toMatchObject({
-      ok: true,
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.',
       data: {
         cluster: expect.objectContaining({
           id: 'k8s-3',
-          connection_status: 'connected'
+          connection_status: 'error',
+          is_active: 0
         })
       }
     })
     const terminal = await createKubernetesTerminal({ clusterId: 'k8s-3', namespace: 'ops' })
-    expect(terminal).toMatchObject({
-      ok: true,
-      data: expect.objectContaining({
-        clusterId: 'k8s-3',
-        status: 'connected'
-      })
+    expect(terminal).toEqual({
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
     })
-    const events: unknown[] = []
-    setKubernetesTerminalEventSink((event) => events.push(event))
 
     const command = await executeKubernetesCommand({
       command: 'kubectl get pods -n ops',
@@ -567,13 +569,18 @@ describe('kubernetes backend boundary', () => {
       errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
     })
 
-    const write = await writeKubernetesTerminal(terminal.data!.sessionId, 'kubectl get pods -n ops\n')
+    const write = await writeKubernetesTerminal('missing-jumpserver-session', 'kubectl get pods -n ops\n')
     expect(write).toEqual({
       ok: false,
-      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
-      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+      errorCode: 'K8S_TERMINAL_NOT_FOUND',
+      errorMessage: 'Kubernetes terminal session not found.'
     })
     expect(events).toEqual([])
+    const catalog = await listKubernetesCatalog()
+    expect(catalog.data?.clusters.find((cluster) => cluster.id === 'k8s-3')).toMatchObject({
+      connection_status: 'error',
+      is_active: 0
+    })
 
     const action = await executeKubernetesResourceAction({
       resourceId: 'k8s-pod-jump-ops',
@@ -1154,6 +1161,24 @@ describe('kubernetes backend boundary', () => {
       namespace: 'default'
     })
     expect(command).toEqual({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_REQUIRED',
+      errorMessage: 'Kubeconfig path or content is required before executing kubectl.'
+    })
+
+    await expect(connectKubernetesCluster('k8s-1')).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_REQUIRED',
+      errorMessage: 'Kubeconfig path or content is required before executing kubectl.',
+      data: {
+        cluster: expect.objectContaining({
+          id: 'k8s-1',
+          connection_status: 'error',
+          is_active: 0
+        })
+      }
+    })
+    await expect(createKubernetesTerminal({ clusterId: 'k8s-1', namespace: 'ops' })).resolves.toEqual({
       ok: false,
       errorCode: 'K8S_KUBECONFIG_REQUIRED',
       errorMessage: 'Kubeconfig path or content is required before executing kubectl.'
