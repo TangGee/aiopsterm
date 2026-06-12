@@ -53,7 +53,9 @@ const fieldsForRows = (rows: Array<Record<string, unknown>>) => Object.keys(rows
 const createClickHouseFetchDouble = () => {
   const state = {
     requests: [] as Array<{ url: string; sql: string; authorization?: string }>,
-    createdDatabases: [] as string[]
+    createdDatabases: [] as string[],
+    eventsDropped: false,
+    rows: [{ event_id: 42, service: 'clickhouse-api', status: 'open', created_at: '2026-06-09 12:00:00' }] as Array<Record<string, unknown>>
   }
   const response = (payload: Record<string, unknown>) =>
     new Response(JSON.stringify(payload), {
@@ -66,19 +68,68 @@ const createClickHouseFetchDouble = () => {
       data: rows,
       rows: rows.length
     })
+  const unquoteSqlString = (value: string) => value.replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+  const matchSqlString = (sql: string, pattern: RegExp) => unquoteSqlString(sql.match(pattern)?.[1] || '')
+  const sqlValueForColumn = (sql: string, column: string) => {
+    const escaped = column.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const quoted = sql.match(new RegExp(`\`${escaped}\`\\s*=\\s*'((?:\\\\'|[^'])*)'`, 'i'))?.[1]
+    if (quoted !== undefined) return unquoteSqlString(quoted)
+    const numeric = sql.match(new RegExp(`\`${escaped}\`\\s*=\\s*(-?\\d+(?:\\.\\d+)?)`, 'i'))?.[1]
+    if (numeric !== undefined) return Number(numeric)
+    return undefined
+  }
+  const splitClickHouseValues = (values: string) => {
+    const result: string[] = []
+    let current = ''
+    let quoted = false
+    for (let index = 0; index < values.length; index += 1) {
+      const char = values[index]
+      const previous = values[index - 1]
+      if (char === "'" && previous !== '\\') quoted = !quoted
+      if (char === ',' && !quoted) {
+        result.push(current.trim())
+        current = ''
+        continue
+      }
+      current += char
+    }
+    if (current.trim()) result.push(current.trim())
+    return result
+  }
+  const parseClickHouseValue = (value: string) => {
+    if (/^null$/i.test(value)) return null
+    if (value.startsWith("'") && value.endsWith("'")) return unquoteSqlString(value.slice(1, -1))
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric : value
+  }
+  const insertRowFromSql = (sql: string) => {
+    const match = sql.match(/\(([^)]+)\)\s+values\s*\((.*)\)\s*;?$/i)
+    if (!match) return {}
+    const columns = match[1].split(',').map((column) => column.trim().replace(/^`|`$/g, ''))
+    const values = splitClickHouseValues(match[2])
+    return Object.fromEntries(columns.map((column, index) => [column, parseClickHouseValue(values[index] ?? 'NULL')]))
+  }
+  const eventIdFromWhere = (sql: string) => Number(sqlValueForColumn(sql, 'event_id'))
   const fetchDouble: typeof fetch = async (url, init = {}) => {
     const sql = String(init.body ?? '')
     const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers as HeadersInit)
     state.requests.push({ url: String(url), sql, authorization: headers.get('Authorization') || undefined })
     const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
     if (normalized.startsWith('select version()')) return rowsFor([{ version: '24.8.1.1' }], [{ name: 'version', type: 'String' }])
-    if (normalized.includes('from system.databases')) return rowsFor([{ name: 'ops' }], [{ name: 'name', type: 'String' }])
+    if (normalized.includes('from system.databases')) {
+      return rowsFor([{ name: 'ops' }, ...state.createdDatabases.map((name) => ({ name }))], [{ name: 'name', type: 'String' }])
+    }
     if (normalized.includes('from system.tables')) {
+      const database = matchSqlString(sql, /where\s+database\s*=\s*'((?:\\'|[^'])*)'/i)
+      const rows =
+        database === 'ops'
+          ? [
+              ...(state.eventsDropped ? [] : [{ name: 'events', engine: 'MergeTree' }]),
+              { name: 'events_mv', engine: 'MaterializedView' }
+            ]
+          : []
       return rowsFor(
-        [
-          { name: 'events', engine: 'MergeTree' },
-          { name: 'events_mv', engine: 'MaterializedView' }
-        ],
+        rows,
         [
           { name: 'name', type: 'String' },
           { name: 'engine', type: 'String' }
@@ -86,13 +137,18 @@ const createClickHouseFetchDouble = () => {
       )
     }
     if (normalized.includes('from system.columns')) {
+      const table = matchSqlString(sql, /table\s*=\s*'((?:\\'|[^'])*)'/i)
+      const rows =
+        state.eventsDropped && table === 'events'
+          ? []
+          : [
+              { name: 'event_id', type: 'UInt64', is_in_primary_key: 1 },
+              { name: 'service', type: 'String', is_in_primary_key: 0 },
+              { name: 'status', type: 'LowCardinality(String)', is_in_primary_key: 0 },
+              { name: 'created_at', type: 'DateTime', is_in_primary_key: 0 }
+            ]
       return rowsFor(
-        [
-          { name: 'event_id', type: 'UInt64', is_in_primary_key: 1 },
-          { name: 'service', type: 'String', is_in_primary_key: 0 },
-          { name: 'status', type: 'LowCardinality(String)', is_in_primary_key: 0 },
-          { name: 'created_at', type: 'DateTime', is_in_primary_key: 0 }
-        ],
+        rows,
         [
           { name: 'name', type: 'String' },
           { name: 'type', type: 'String' },
@@ -105,10 +161,10 @@ const createClickHouseFetchDouble = () => {
         { name: 'statement', type: 'String' }
       ])
     }
-    if (normalized.startsWith('select count()')) return rowsFor([{ total: 1 }], [{ name: 'total', type: 'UInt64' }])
+    if (normalized.startsWith('select count()')) return rowsFor([{ total: state.eventsDropped ? 0 : state.rows.length }], [{ name: 'total', type: 'UInt64' }])
     if (normalized.startsWith('select * from')) {
       return rowsFor(
-        [{ event_id: 42, service: 'clickhouse-api', status: 'open', created_at: '2026-06-09 12:00:00' }],
+        state.eventsDropped ? [] : state.rows.map((row) => ({ ...row })),
         [
           { name: 'event_id', type: 'UInt64' },
           { name: 'service', type: 'String' },
@@ -118,13 +174,42 @@ const createClickHouseFetchDouble = () => {
       )
     }
     if (normalized.startsWith('select event_id')) {
-      return rowsFor([{ event_id: 42, service: 'clickhouse-api' }], [
+      return rowsFor(state.eventsDropped ? [] : state.rows.map((row) => ({ event_id: row.event_id, service: row.service })), [
         { name: 'event_id', type: 'UInt64' },
         { name: 'service', type: 'String' }
       ])
     }
     if (normalized.startsWith('create database')) {
       state.createdDatabases.push(sql.match(/`([^`]+)`/)?.[1] || 'unknown')
+      return new Response('', { status: 200 })
+    }
+    if (normalized.startsWith('insert into')) {
+      state.rows.push(insertRowFromSql(sql))
+      return new Response('', { status: 200 })
+    }
+    if (normalized.startsWith('alter table') && normalized.includes(' update ')) {
+      const eventId = eventIdFromWhere(sql)
+      const row = state.rows.find((item) => Number(item.event_id) === eventId)
+      if (row) {
+        ;(['service', 'status', 'created_at'] as const).forEach((column) => {
+          const value = sqlValueForColumn(sql, column)
+          if (value !== undefined) row[column] = value
+        })
+      }
+      return new Response('', { status: 200 })
+    }
+    if (normalized.startsWith('alter table') && normalized.includes(' delete where ')) {
+      const eventId = eventIdFromWhere(sql)
+      state.rows = state.rows.filter((row) => Number(row.event_id) !== eventId)
+      return new Response('', { status: 200 })
+    }
+    if (normalized.startsWith('truncate table')) {
+      state.rows = []
+      return new Response('', { status: 200 })
+    }
+    if (normalized.startsWith('drop table')) {
+      state.eventsDropped = true
+      state.rows = []
       return new Response('', { status: 200 })
     }
     return new Response(`unexpected clickhouse query: ${sql}`, { status: 500 })
@@ -3276,20 +3361,115 @@ WHERE status = ''open'';
       dbType: 'clickhouse',
       databaseName: 'ops',
       tableName: 'events',
-      knownColumns: ['event_id', 'service'],
-      mutations: [{ kind: 'insert', values: { event_id: 43, service: 'new-event' } }]
+      knownColumns: ['event_id', 'service', 'status', 'created_at'],
+      mutations: [
+        {
+          kind: 'update',
+          rowKey: JSON.stringify([42]),
+          primaryKey: ['event_id'],
+          patch: { service: 'clickhouse-api-edited', status: 'triaged' },
+          originalRow: { event_id: 42, service: 'clickhouse-api', status: 'open', created_at: '2026-06-09 12:00:00' }
+        },
+        { kind: 'insert', values: { event_id: 43, service: 'new-event', status: 'open', created_at: '2026-06-09 12:05:00' } },
+        {
+          kind: 'delete',
+          rowKey: JSON.stringify([42]),
+          primaryKey: ['event_id'],
+          originalRow: { event_id: 42, service: 'clickhouse-api-edited', status: 'triaged', created_at: '2026-06-09 12:00:00' }
+        }
+      ]
     })
-    expect(plan.ok).toBe(false)
-    expect(plan.errorCode).toBe('DB_CLICKHOUSE_MUTATION_UNSUPPORTED')
+    expect(plan.ok).toBe(true)
+    expect(plan.data).toMatchObject({ statementCount: 3, warning: '' })
+    expect(plan.data?.preview).toContain('ALTER TABLE `ops`.`events` UPDATE `service` = \'clickhouse-api-edited\', `status` = \'triaged\' WHERE `event_id` = 42;')
+    expect(plan.data?.preview).toContain("INSERT INTO `ops`.`events` (`event_id`, `service`, `status`, `created_at`) VALUES (43, 'new-event', 'open', '2026-06-09 12:05:00');")
+    expect(plan.data?.preview).toContain('ALTER TABLE `ops`.`events` DELETE WHERE `event_id` = 42;')
 
     const mutation = await mutateDatabaseTable({
       connectionId: 'conn-live-clickhouse',
       databaseName: 'ops',
       tableName: 'events',
+      mutations: [
+        {
+          kind: 'update',
+          rowKey: JSON.stringify([42]),
+          primaryKey: ['event_id'],
+          patch: { service: 'clickhouse-api-edited', status: 'triaged' },
+          originalRow: { event_id: 42, service: 'clickhouse-api', status: 'open', created_at: '2026-06-09 12:00:00' }
+        },
+        { kind: 'insert', values: { event_id: 43, service: 'new-event', status: 'open', created_at: '2026-06-09 12:05:00' } },
+        {
+          kind: 'delete',
+          rowKey: JSON.stringify([42]),
+          primaryKey: ['event_id'],
+          originalRow: { event_id: 42, service: 'clickhouse-api-edited', status: 'triaged', created_at: '2026-06-09 12:00:00' }
+        }
+      ]
+    })
+    expect(mutation.ok).toBe(true)
+    expect(mutation.data?.affected).toBe(3)
+    expect(clickhouse.state.requests.some((request) => request.sql.includes('ALTER TABLE `ops`.`events` UPDATE'))).toBe(true)
+    expect(clickhouse.state.requests.some((request) => request.sql.includes('INSERT INTO `ops`.`events`'))).toBe(true)
+    expect(clickhouse.state.requests.some((request) => request.sql.includes('ALTER TABLE `ops`.`events` DELETE'))).toBe(true)
+
+    const mutatedRows = await queryDatabaseTable({
+      connectionId: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
+      filters: [],
+      sort: { column: 'event_id', direction: 'asc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(mutatedRows.ok).toBe(true)
+    expect(mutatedRows.data).toMatchObject({
+      rows: [expect.objectContaining({ event_id: 43, service: 'new-event' })],
+      total: 1
+    })
+
+    const truncate = await mutateDatabaseTable({
+      connectionId: 'conn-live-clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
       mutations: [{ kind: 'truncate' }]
     })
-    expect(mutation.ok).toBe(false)
-    expect(mutation.errorCode).toBe('DB_CLICKHOUSE_MUTATION_UNSUPPORTED')
+    expect(truncate.ok).toBe(true)
+    expect(truncate.data?.affected).toBe(1)
+    expect(clickhouse.state.requests.some((request) => request.sql.includes('TRUNCATE TABLE `ops`.`events`'))).toBe(true)
+
+    const truncatedRows = await queryDatabaseTable({
+      connectionId: 'conn-live-clickhouse',
+      dbType: 'clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
+      filters: [],
+      sort: null,
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(truncatedRows.ok).toBe(true)
+    expect(truncatedRows.data?.rows).toEqual([])
+    expect(truncatedRows.data?.total).toBe(0)
+
+    const drop = await mutateDatabaseTable({
+      connectionId: 'conn-live-clickhouse',
+      databaseName: 'ops',
+      tableName: 'events',
+      mutations: [{ kind: 'drop' }]
+    })
+    expect(drop.ok).toBe(true)
+    expect(drop.data?.affected).toBe(1)
+    expect(drop.data?.catalog?.connections.find((connection) => connection.id === 'conn-live-clickhouse')?.catalogs[0]?.tables?.map((table) => table.name)).not.toContain(
+      'events'
+    )
+    expect(clickhouse.state.requests.some((request) => request.sql.includes('DROP TABLE `ops`.`events`'))).toBe(true)
   })
 
   it('uses the Presto HTTP backend in non-seed runtime instead of a coming-soon placeholder', async () => {

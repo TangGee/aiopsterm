@@ -1093,6 +1093,11 @@ const addDatabaseMutationPreview = (statement: DatabaseMutationStatement): Datab
   preview: formatDatabaseMutationStatementPreview(statement)
 })
 
+const addClickHouseMutationPreview = (statement: DatabaseMutationStatement): DatabaseTableMutationPlanStatement => ({
+  ...statement,
+  preview: `${statement.sql};`
+})
+
 const sqliteApplyMutation = (db: SqliteDatabase, tableRef: string, knownColumns: string[], mutation: DatabaseTableMutationInput['mutations'][number]) => {
   if (mutation.kind === 'drop') {
     db.prepare(`DROP TABLE ${tableRef}`).run()
@@ -1306,6 +1311,107 @@ const clickHouseIdentifier = (value: string) => `\`${String(value || '').replace
 
 const clickHouseTableReference = (input: Pick<DatabaseTableQueryInput, 'databaseName' | 'tableName'>) =>
   `${clickHouseIdentifier(trim(input.databaseName))}.${clickHouseIdentifier(trim(input.tableName))}`
+
+const clickHouseMutationLiteral = (value: unknown) => {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : clickHouseLiteral(String(value))
+  if (typeof value === 'bigint') return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (value instanceof Date) return clickHouseLiteral(value.toISOString().replace('T', ' ').replace(/Z$/, ''))
+  return clickHouseLiteral(String(value))
+}
+
+const clickHouseMutationComparison = (column: string, value: unknown) => {
+  const quoted = clickHouseIdentifier(column)
+  return value === null || value === undefined ? `${quoted} IS NULL` : `${quoted} = ${clickHouseMutationLiteral(value)}`
+}
+
+const clickHouseMutationWhereForRow = (
+  knownColumns: string[],
+  mutation: DatabaseRowMutation
+) => {
+  const primaryKey = mutation.primaryKey.map(trim).filter(Boolean)
+  const values = decodeDatabaseMutationPrimaryKeyRowKey(mutation.rowKey, primaryKey)
+  if (primaryKey.length && values) {
+    return {
+      sql: primaryKey.map((column, index) => clickHouseMutationComparison(column, values[index])).join(' AND '),
+      usesPrimaryKey: true
+    }
+  }
+
+  if (!mutation.originalRow) {
+    throw Object.assign(new Error('Original row snapshot is required for ClickHouse table mutations without a primary key.'), {
+      code: 'DB_ROW_SNAPSHOT_REQUIRED'
+    })
+  }
+
+  const originalRow = mutation.originalRow
+  const clauses = knownColumns.flatMap((column) =>
+    Object.prototype.hasOwnProperty.call(originalRow, column)
+      ? [clickHouseMutationComparison(column, originalRow[column])]
+      : []
+  )
+  if (!clauses.length) {
+    throw Object.assign(new Error('Original row snapshot does not contain known ClickHouse table columns.'), { code: 'DB_ROW_SNAPSHOT_REQUIRED' })
+  }
+  return { sql: clauses.join(' AND '), usesPrimaryKey: false }
+}
+
+const buildClickHouseMutationStatement = (
+  tableRef: string,
+  knownColumns: string[],
+  mutation: DatabaseTableMutationInput['mutations'][number]
+): DatabaseMutationStatement | null => {
+  const knownColumnSet = new Set(knownColumns.map((column) => column.toLowerCase()))
+  if (mutation.kind === 'drop') return { kind: mutation.kind, sql: `DROP TABLE ${tableRef}`, params: [] }
+  if (mutation.kind === 'truncate') return { kind: mutation.kind, sql: `TRUNCATE TABLE ${tableRef}`, params: [] }
+  if (mutation.kind === 'insert') {
+    const columns = Object.keys(mutation.values).filter((column) => knownColumnSet.has(column.toLowerCase()) && mutation.values[column] !== null && mutation.values[column] !== undefined)
+    if (!columns.length) return null
+    return {
+      kind: mutation.kind,
+      sql: `INSERT INTO ${tableRef} (${columns.map(clickHouseIdentifier).join(', ')}) VALUES (${columns.map((column) => clickHouseMutationLiteral(mutation.values[column])).join(', ')})`,
+      params: []
+    }
+  }
+  if (mutation.kind === 'delete') {
+    const where = clickHouseMutationWhereForRow(knownColumns, mutation)
+    return { kind: mutation.kind, sql: `ALTER TABLE ${tableRef} DELETE WHERE ${where.sql}`, params: [] }
+  }
+
+  const columns = Object.keys(mutation.patch).filter((column) => knownColumnSet.has(column.toLowerCase()))
+  if (!columns.length) return null
+  const assignments = columns.map((column) => `${clickHouseIdentifier(column)} = ${clickHouseMutationLiteral(mutation.patch[column])}`).join(', ')
+  const where = clickHouseMutationWhereForRow(knownColumns, mutation)
+  return { kind: mutation.kind, sql: `ALTER TABLE ${tableRef} UPDATE ${assignments} WHERE ${where.sql}`, params: [] }
+}
+
+const clickHouseMutationWarning = (input: Pick<DatabaseTableMutationInput, 'mutations'>) => {
+  const hasNoPrimaryKeyRowMutation = input.mutations.some((mutation) => {
+    if (mutation.kind !== 'delete' && mutation.kind !== 'update') return false
+    return mutation.primaryKey.map(trim).filter(Boolean).length === 0
+  })
+  return hasNoPrimaryKeyRowMutation
+    ? 'No primary key detected. ClickHouse UPDATE and DELETE previews use the original row snapshot as the mutation guard.'
+    : ''
+}
+
+const clickHouseMutationPlanData = (
+  input: DatabaseTableMutationPlanInput,
+  knownColumns: string[]
+): DatabaseTableMutationPlanResult['data'] => {
+  const tableRef = clickHouseTableReference(input)
+  const statements = input.mutations
+    .map((mutation) => buildClickHouseMutationStatement(tableRef, knownColumns, mutation))
+    .filter((statement): statement is DatabaseMutationStatement => !!statement)
+    .map(addClickHouseMutationPreview)
+  return {
+    statements,
+    statementCount: statements.length,
+    preview: statements.map((statement) => statement.preview).join('\n'),
+    warning: clickHouseMutationWarning(input)
+  }
+}
 
 const clickHouseErrorCode = (error: unknown, fallback: string) => {
   const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
@@ -1581,11 +1687,53 @@ const clickHouseTableDdl = async (connection: DatabaseConnectionInfo, input: Dat
   }
 }
 
-const clickHouseMutationUnsupported = () => ({
-  ok: false as const,
-  errorCode: 'DB_CLICKHOUSE_MUTATION_UNSUPPORTED',
-  errorMessage: 'ClickHouse table editing is not supported by this aiopsterm backend yet.'
-})
+const clickHouseMutateTable = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableMutationInput,
+  startedAt: number
+): Promise<DatabaseTableMutationResult> => {
+  if (connection.readonly) {
+    return { ok: false, errorCode: 'DB_CLICKHOUSE_READONLY', errorMessage: 'ClickHouse connection is read-only.' }
+  }
+
+  try {
+    const columns = await clickHouseColumnsForTable(connection, input)
+    if (!columns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const knownColumns = columns.map((column) => column.name)
+    const tableRef = clickHouseTableReference(input)
+    const statements = input.mutations
+      .map((mutation) => buildClickHouseMutationStatement(tableRef, knownColumns, mutation))
+      .filter((statement): statement is DatabaseMutationStatement => !!statement)
+
+    for (const statement of statements) {
+      await clickHouseQueryText(clickHouseConnectionInput(connection), statement.sql, trim(input.databaseName))
+    }
+
+    const index = databaseConnections.findIndex((item) => item.id === connection.id)
+    if (index >= 0) {
+      const catalogs = await clickHouseCatalogsForConnection({ ...databaseConnections[index] }).catch(() => databaseConnections[index].catalogs)
+      databaseConnections[index] = { ...databaseConnections[index], catalogs }
+      persistDatabaseState()
+    }
+
+    return {
+      ok: true,
+      data: {
+        affected: statements.length,
+        durationMs: Math.max(1, Date.now() - startedAt),
+        catalog: databaseWorkspaceCatalogFor(input.connectionId)
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_MUTATION_FAILED'),
+      errorMessage: clickHouseErrorMessage(error, 'ClickHouse table mutation failed.')
+    }
+  }
+}
 
 const loadPrestoFetch = loadDatabaseFetch
 
@@ -3697,9 +3845,7 @@ const databaseMutationPlanData = (
   knownColumns: string[]
 ): DatabaseTableMutationPlanResult['data'] => {
   if (connection.dbType === 'clickhouse') {
-    throw Object.assign(new Error('ClickHouse table editing is not supported by this aiopsterm backend yet.'), {
-      code: 'DB_CLICKHOUSE_MUTATION_UNSUPPORTED'
-    })
+    return clickHouseMutationPlanData(input, knownColumns)
   }
   if (connection.dbType === 'presto') {
     throw Object.assign(new Error('Presto table editing is not supported by this aiopsterm backend.'), {
@@ -6261,7 +6407,22 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
   }
 
   if (!shouldUseDatabaseSeedData()) {
-    if (isClickHouseConnection(connection)) return clickHouseMutationUnsupported()
+    if (isClickHouseConnection(connection)) {
+      try {
+        const columns = await clickHouseColumnsForTable(connection, input)
+        if (!columns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
+          return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+        }
+        const knownColumns = columns.map((column) => column.name)
+        return { ok: true, data: clickHouseMutationPlanData(input, knownColumns.length ? knownColumns : inputKnownColumns(input)) }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_MUTATION_PLAN_FAILED'),
+          errorMessage: clickHouseErrorMessage(error, 'ClickHouse table mutation planning failed.')
+        }
+      }
+    }
     if (isPrestoConnection(connection)) return prestoMutationUnsupported()
     if (isRelationalConnection(connection)) {
       try {
@@ -6309,7 +6470,7 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
   if (!shouldUseDatabaseSeedData()) {
-    if (isClickHouseConnection(connection)) return clickHouseMutationUnsupported()
+    if (isClickHouseConnection(connection)) return clickHouseMutateTable(connection, input, startedAt)
     if (isPrestoConnection(connection)) return prestoMutationUnsupported()
     if (isRelationalConnection(connection)) return relationalMutateTable(connection, input, startedAt)
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table mutations are not wired in this aiopsterm backend yet.' }
