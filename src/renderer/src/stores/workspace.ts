@@ -295,6 +295,7 @@ type K8sClusterTestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['testKu
 type K8sProxyConfigData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveKubernetesAgentProxyConfig']>>['data']>
 type K8sTerminalCloseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['closeKubernetesTerminal']>>['data']>
 type K8sTerminalWriteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['writeKubernetesTerminal']>>['data']>
+type ModelProviderCheckData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['checkModelProvider']>>['data']>
 type AiChatHistorySnapshotData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['listChatConversations']>>['data']>
 type AiChatConversationMutationData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createChatConversation']>>['data']>
 type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['deleteChatConversation']>>['data']>
@@ -932,6 +933,7 @@ const legacyRendererModelNames = new Set(['mock-ops-agent', 'ops-local-agent'])
 const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const malformedModelProviderResultMessage = '模型 Provider 检查服务返回数据无效'
 const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
 const malformedMcpToolResultMessage = 'MCP Tool 服务返回数据无效'
 const malformedMcpResourceResultMessage = 'MCP Resource 服务返回数据无效'
@@ -1218,6 +1220,21 @@ const normalizeAiModelCatalog = (source?: Partial<AiModelCatalog> | null): AiMod
   ).normalized
   return { chatModels, lockedChatModels, settingsModels }
 }
+
+const isModelProviderCheckDataForRequest = (source: unknown, provider: ModelProviderKey, expectedConfig: ModelProviderSettings): source is ModelProviderCheckData =>
+  isRecord(source) &&
+  source.provider === provider &&
+  typeof source.label === 'string' &&
+  source.label.trim() !== '' &&
+  typeof source.modelId === 'string' &&
+  source.modelId.trim() === expectedConfig.modelId.trim() &&
+  typeof source.endpoint === 'string' &&
+  source.endpoint.trim() !== '' &&
+  typeof source.message === 'string' &&
+  source.message.trim() !== '' &&
+  typeof source.durationMs === 'number' &&
+  Number.isFinite(source.durationMs) &&
+  source.durationMs >= 0
 
 const createMacroSnippetName = () => {
   const now = new Date()
@@ -6470,12 +6487,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     modelCheckRequestSeq.value = { ...modelCheckRequestSeq.value, [provider]: requestSeq }
     modelCheckState.value = { ...modelCheckState.value, [provider]: 'checking' }
     const config = { ...modelProviders.value[provider] }
+    const checkProviderBridge = window.aiops?.checkModelProvider
+    if (typeof checkProviderBridge !== 'function') {
+      if (modelCheckRequestSeq.value[provider] !== requestSeq) return
+      modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
+      setSettingsNotice('模型 Provider 检查服务不可用')
+      return
+    }
     try {
-      const result = await window.aiops.checkModelProvider({ provider, config })
+      const result = await checkProviderBridge({ provider, config })
       if (modelCheckRequestSeq.value[provider] !== requestSeq) return
       if (result.ok) {
+        if (!isModelProviderCheckDataForRequest(result.data, provider, config)) {
+          modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
+          setSettingsNotice(malformedModelProviderResultMessage)
+          return
+        }
         modelCheckState.value = { ...modelCheckState.value, [provider]: 'success' }
-        setSettingsNotice(result.data?.message || `${provider} Check 成功`)
+        setSettingsNotice(result.data.message)
       } else {
         modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
         setSettingsNotice(result.errorMessage || `${provider} Check 失败`)

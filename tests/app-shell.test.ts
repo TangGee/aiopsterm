@@ -10510,6 +10510,23 @@ describe('AppShell', () => {
     })
     expect(store.modelCheckState.openai).toBe('success')
     expect(workspace.text()).toContain('OpenAI Compatible configuration validated by test backend.')
+    vi.mocked(window.aiops.checkModelProvider).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        provider: 'openai',
+        label: 'OpenAI Compatible',
+        modelId: 'other-model',
+        endpoint: 'https://api.openai.com/v1/responses',
+        message: 'This malformed check must not be shown.',
+        durationMs: 1
+      }
+    } as any)
+    await openAiCard.findAll('button').find((button) => button.text() === 'Check')!.trigger('click')
+    await flushPromises()
+    expect(store.modelCheckState.openai).toBe('error')
+    expect(store.settingsNotice).toBe('模型 Provider 检查服务返回数据无效')
+    expect(workspace.text()).toContain('模型 Provider 检查服务返回数据无效')
+    expect(workspace.text()).not.toContain('This malformed check must not be shown.')
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('AI 偏好设置'))!.trigger('click')
     await workspace.vm.$nextTick()

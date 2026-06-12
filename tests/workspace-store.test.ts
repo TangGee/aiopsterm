@@ -9051,10 +9051,11 @@ describe('workspace store', () => {
       })
     )
 
-    store.checkModelProvider('litellm')
+    const modelProviderCheck = store.checkModelProvider('litellm')
     expect(store.modelCheckState.litellm).toBe('checking')
-    await vi.runOnlyPendingTimersAsync()
+    await modelProviderCheck
     expect(store.modelCheckState.litellm).toBe('success')
+    expect(store.settingsNotice).toBe('LiteLLM configuration validated by test backend.')
 
     vi.mocked(window.aiops.saveConfig).mockClear()
     await expect(store.updateAiPreferences({ needProxy: true, proxy: { host: '10.0.0.2', port: 8080 } })).resolves.toBe(true)
@@ -9166,6 +9167,73 @@ describe('workspace store', () => {
       expect(proxyConfigSnapshot()).toBe(savedSnapshot)
     } finally {
       window.aiops.saveConfig = originalSaveConfig
+    }
+  })
+
+  it('does not fabricate model provider Check success when the bridge is unavailable or malformed', async () => {
+    const store = useWorkspaceStore()
+    const originalCheckModelProvider = window.aiops.checkModelProvider
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
+
+    try {
+      ;(window.aiops as any).checkModelProvider = undefined
+      await store.checkModelProvider('openai')
+      expect(store.modelCheckState.openai).toBe('error')
+      expect(store.settingsNotice).toBe('模型 Provider 检查服务不可用')
+
+      ;(window.aiops as any).checkModelProvider = originalCheckModelProvider
+      vi.mocked(window.aiops.checkModelProvider!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          provider: 'openai',
+          label: 'OpenAI Compatible',
+          modelId: 'ops-model',
+          endpoint: 'https://gateway.local/v1'
+        }
+      } as any)
+      await store.checkModelProvider('openai')
+      expect(store.modelCheckState.openai).toBe('error')
+      expect(store.settingsNotice).toBe('模型 Provider 检查服务返回数据无效')
+
+      vi.mocked(window.aiops.checkModelProvider!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          provider: 'litellm',
+          label: 'LiteLLM',
+          modelId: 'ops-model',
+          endpoint: 'https://gateway.local/v1',
+          message: 'Wrong provider should not become a success notice.',
+          durationMs: 1
+        }
+      } as any)
+      await store.checkModelProvider('openai')
+      expect(store.modelCheckState.openai).toBe('error')
+      expect(store.settingsNotice).toBe('模型 Provider 检查服务返回数据无效')
+
+      vi.mocked(window.aiops.checkModelProvider!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          provider: 'openai',
+          label: 'OpenAI Compatible',
+          modelId: 'different-model',
+          endpoint: 'https://gateway.local/v1',
+          message: 'Wrong model should not become a success notice.',
+          durationMs: 1
+        }
+      } as any)
+      await store.checkModelProvider('openai')
+      expect(store.modelCheckState.openai).toBe('error')
+      expect(store.settingsNotice).toBe('模型 Provider 检查服务返回数据无效')
+
+      await store.checkModelProvider('openai')
+      expect(window.aiops.checkModelProvider).toHaveBeenLastCalledWith({
+        provider: 'openai',
+        config: expect.objectContaining({ baseUrl: 'https://gateway.local', modelId: 'ops-model' })
+      })
+      expect(store.modelCheckState.openai).toBe('success')
+      expect(store.settingsNotice).toBe('OpenAI Compatible configuration validated by test backend.')
+    } finally {
+      ;(window.aiops as any).checkModelProvider = originalCheckModelProvider
     }
   })
 
