@@ -6496,7 +6496,25 @@ Object.defineProperty(window, 'aiops', {
         data: {
           exported: exportable.length,
           fileName: 'external-reference-assets-2024-06-01.json',
-          filePath: '/tmp/assets-export.json'
+          filePath: '/tmp/assets-export.json',
+          bytes: Buffer.byteLength(JSON.stringify(
+            exportable.map((asset) => ({
+              username: asset.username,
+              password: '',
+              ip: asset.host || asset.ip,
+              label: asset.title || asset.name || asset.host,
+              group_name: asset.group_name || asset.group || '',
+              auth_type: asset.auth_type || 'password',
+              ...(asset.keychainId ? { keyChain: asset.keychainId } : {}),
+              port: asset.port || 22,
+              asset_type: asset.asset_type || 'person',
+              needProxy: Boolean(asset.needProxy),
+              proxyName: asset.proxyName || '',
+              ...(asset.comment ? { comment: asset.comment } : {})
+            })),
+            null,
+            2
+          ), 'utf8')
         }
       }
     }),

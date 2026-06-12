@@ -351,6 +351,7 @@ export type AiopsAssetExportResult = AiopsMutationResult<{
   exported: number
   fileName: string
   filePath?: string
+  bytes?: number
   canceled?: boolean
 }>
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -592,10 +592,14 @@ describe('assets backend boundary', () => {
         data: {
           exported: 1,
           fileName: 'external-reference-assets-2026-06-10.json',
-          filePath
+          filePath,
+          bytes: expect.any(Number)
         }
       })
-      const exported = JSON.parse(await readFile(filePath, 'utf-8'))
+      const content = await readFile(filePath, 'utf-8')
+      expect(result.data?.bytes).toBe(Buffer.byteLength(content, 'utf8'))
+      await expect(stat(filePath)).resolves.toMatchObject({ size: result.data?.bytes })
+      const exported = JSON.parse(content)
       expect(exported).toEqual([
         {
           username: 'ops',
@@ -648,6 +652,98 @@ describe('assets backend boundary', () => {
     )
     expect(empty.ok).toBe(false)
     expect(empty.errorCode).toBe('ASSET_EXPORT_EMPTY')
+  })
+
+  it('rejects asset export save paths that cannot be written as absolute files', async () => {
+    const backend = await loadBackend()
+    const writeFileMock = vi.fn(async () => undefined)
+
+    await expect(
+      backend.exportAssets(
+        { assetIds: ['asset-1'] },
+        {
+          now: () => new Date('2026-06-10T00:00:00.000Z'),
+          showSaveDialog: async () => ({ canceled: false, filePath: '   ' }),
+          writeFile: writeFileMock
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'ASSET_EXPORT_SAVE_PATH_INVALID'
+    })
+
+    await expect(
+      backend.exportAssets(
+        { assetIds: ['asset-1'] },
+        {
+          now: () => new Date('2026-06-10T00:00:00.000Z'),
+          showSaveDialog: async () => ({ canceled: false, filePath: 'relative/assets.json' }),
+          writeFile: writeFileMock
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'ASSET_EXPORT_SAVE_PATH_INVALID'
+    })
+
+    expect(writeFileMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects asset export writers that cannot confirm the written file', async () => {
+    const backend = await loadBackend()
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-assets-export-confirm-'))
+    const filePath = join(dir, 'selected-assets.json')
+    const otherFilePath = join(dir, 'other-assets.json')
+    try {
+      await expect(
+        backend.exportAssets(
+          { assetIds: ['asset-1'] },
+          {
+            showSaveDialog: async () => ({ canceled: false, filePath }),
+            writeFile: async (targetPath: string, content: string) => {
+              await writeFile(targetPath, content, 'utf-8')
+              return { filePath: otherFilePath, bytes: Buffer.byteLength(content, 'utf8') }
+            }
+          }
+        )
+      ).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'ASSET_EXPORT_WRITE_CONFIRMATION_INVALID'
+      })
+
+      await expect(
+        backend.exportAssets(
+          { assetIds: ['asset-1'] },
+          {
+            showSaveDialog: async () => ({ canceled: false, filePath }),
+            writeFile: async (targetPath: string, content: string) => {
+              await writeFile(targetPath, content, 'utf-8')
+              return { filePath: targetPath, bytes: 1 }
+            }
+          }
+        )
+      ).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'ASSET_EXPORT_WRITE_CONFIRMATION_INVALID'
+      })
+
+      await expect(
+        backend.exportAssets(
+          { assetIds: ['asset-1'] },
+          {
+            showSaveDialog: async () => ({ canceled: false, filePath }),
+            writeFile: async (targetPath: string) => {
+              await writeFile(targetPath, '{"not":"the generated asset export"}', 'utf-8')
+            }
+          }
+        )
+      ).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'ASSET_EXPORT_WRITE_CONFIRMATION_INVALID'
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('confirms asset imports by re-reading the file and skipping duplicates in the backend', async () => {

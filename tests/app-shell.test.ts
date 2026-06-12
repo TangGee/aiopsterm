@@ -1785,6 +1785,20 @@ describe('AppShell', () => {
     expect(assets.find('.export-assets-modal').exists()).toBe(true)
     expect(assets.text()).not.toContain('已导出')
 
+    vi.mocked(window.aiops.exportAssets).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        exported: 1,
+        fileName: 'external-reference-assets-2024-06-01.json',
+        filePath: '/tmp/assets-export.json'
+      }
+    } as any)
+    await assets.find('.export-assets-modal footer button:last-child').trigger('click')
+    await flushPromises()
+    expect(assets.text()).toContain(malformedMessage)
+    expect(assets.find('.export-assets-modal').exists()).toBe(true)
+    expect(assets.text()).not.toContain('已导出 1 个主机')
+
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/external-reference-assets.json'] })
     vi.mocked(window.aiops.previewAssetImport).mockResolvedValueOnce({
       ok: true,

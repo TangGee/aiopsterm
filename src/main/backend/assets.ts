@@ -4,7 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { createRequire } from 'module'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, stat, writeFile } from 'fs/promises'
 import type { Client, ConnectConfig } from 'ssh2'
 import type {
   AiopsAssetConnectionTestInfo,
@@ -86,7 +86,17 @@ type AssetBackendRuntimeConfig = AssetConnectionRuntimeConfig & {
 
 type AssetExportRuntime = {
   showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
-  writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
+  writeFile?: (
+    filePath: string,
+    content: string,
+    encoding: 'utf-8'
+  ) => Promise<
+    | void
+    | {
+        filePath?: string
+        bytes?: number
+      }
+  >
   now?: () => Date
 }
 
@@ -1376,6 +1386,11 @@ const assetExportErrorResult = (error: unknown): AiopsAssetExportResult => ({
   errorMessage: error instanceof Error ? error.message : String(error || '导出文件失败。')
 })
 
+type AssetExportWriteResult = Awaited<ReturnType<NonNullable<AssetExportRuntime['writeFile']>>>
+
+const isAssetExportWriteMetadata = (value: AssetExportWriteResult): value is Exclude<AssetExportWriteResult, void> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
 const assetExportFileName = (now = new Date()) => `external-reference-assets-${now.toISOString().slice(0, 10)}.json`
 
 const assetExportPayload = (asset: AiopsAssetRecord): AiopsAssetExportPayload => ({
@@ -1659,7 +1674,7 @@ export const exportAssets = async (input: AiopsAssetExportInput, runtime: AssetE
       defaultPath: fileName,
       filters: [{ name: 'JSON Files', extensions: ['json'] }]
     })
-    if (saveResult?.canceled || !saveResult?.filePath) {
+    if (saveResult?.canceled) {
       return {
         ok: true,
         data: {
@@ -1669,13 +1684,29 @@ export const exportAssets = async (input: AiopsAssetExportInput, runtime: AssetE
         }
       }
     }
-    await (runtime.writeFile || writeFile)(saveResult.filePath, JSON.stringify(payload, null, 2), 'utf-8')
+    const filePath = typeof saveResult.filePath === 'string' ? saveResult.filePath : ''
+    if (!filePath.trim() || !isAbsolute(filePath)) throw new AssetExportError('ASSET_EXPORT_SAVE_PATH_INVALID', '资产导出保存路径必须是绝对路径。')
+    const content = JSON.stringify(payload, null, 2)
+    const expectedBytes = Buffer.byteLength(content, 'utf8')
+    const writeResult = await (runtime.writeFile || writeFile)(filePath, content, 'utf-8')
+    if (isAssetExportWriteMetadata(writeResult)) {
+      if (writeResult.filePath !== filePath) throw new AssetExportError('ASSET_EXPORT_WRITE_CONFIRMATION_INVALID', '资产导出写入路径确认失败。')
+      if (writeResult.bytes !== expectedBytes) throw new AssetExportError('ASSET_EXPORT_WRITE_CONFIRMATION_INVALID', '资产导出写入字节数确认失败。')
+    }
+    let writtenSize = -1
+    try {
+      writtenSize = (await stat(filePath)).size
+    } catch {
+      throw new AssetExportError('ASSET_EXPORT_WRITE_CONFIRMATION_INVALID', '资产导出文件写入后无法确认。')
+    }
+    if (writtenSize !== expectedBytes) throw new AssetExportError('ASSET_EXPORT_WRITE_CONFIRMATION_INVALID', '资产导出文件大小与生成内容不一致。')
     return {
       ok: true,
       data: {
         exported: payload.length,
         fileName,
-        filePath: saveResult.filePath
+        filePath,
+        bytes: expectedBytes
       }
     }
   } catch (error) {

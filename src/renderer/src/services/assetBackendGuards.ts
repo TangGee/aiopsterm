@@ -328,9 +328,10 @@ export const isAiopsAssetImportConfirmData = (value: unknown): value is AiopsAss
 
 export const isAiopsAssetExportData = (value: unknown): value is AiopsAssetExportData => {
   if (!isRecord(value)) return false
-  if (!isNonNegativeInteger(value.exported) || !isNonEmptyString(value.fileName)) return false
+  if (!isNonNegativeInteger(value.exported) || !isNonEmptyString(value.fileName) || !String(value.fileName).endsWith('.json')) return false
   if (!isOptionalString(value.filePath) || !isOptionalBoolean(value.canceled)) return false
-  return value.canceled === true || value.exported > 0
+  if (value.canceled === true) return value.exported === 0 && value.filePath === undefined && value.bytes === undefined
+  return isNonEmptyString(value.filePath) && isNonNegativeInteger(value.bytes) && value.exported > 0
 }
 
 const isAiopsSshTunnelRecord = (value: unknown): value is AiopsSshTunnelRecord => {
