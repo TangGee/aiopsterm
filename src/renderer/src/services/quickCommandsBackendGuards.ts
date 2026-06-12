@@ -116,13 +116,14 @@ export const isQuickCommandGroupDeleteData = (value: unknown, uuid: string): val
 
 export const isQuickCommandSnippetSaveData = (
   value: unknown,
-  expected: { id?: number; snippetName: string; snippetContent: string }
+  expected: { id?: number; snippetName: string; snippetContent: string; groupUuid?: string | null }
 ): value is QuickCommandSnippetMutationData => {
   if (!isRecord(value) || !isQuickCommandsSnapshotData(value)) return false
   const record = value as QuickCommandsUserConfig & Record<string, unknown>
   if (!isQuickCommandSnippetData(record.snippet)) return false
   const snippet = record.snippet
   if (expected.id !== undefined && snippet.id !== expected.id) return false
+  if (expected.groupUuid !== undefined && quickCommandSnippetGroupUuid(snippet) !== expected.groupUuid) return false
   return snippet.snippet_name === expected.snippetName && snippet.snippet_content === expected.snippetContent && snapshotContainsQuickCommandSnippet(record, snippet)
 }
 

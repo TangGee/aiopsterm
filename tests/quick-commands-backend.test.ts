@@ -310,8 +310,23 @@ describe('quick commands backend boundary', () => {
       group_uuid: 'missing-group'
     })
 
-    expect(updated.ok).toBe(true)
-    expect(updated.data?.snippet).toEqual(
+    expect(updated).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command group not found'
+      })
+    )
+    expect(backend.getQuickCommands().snippets).toEqual([expect.objectContaining({ id: created.id, snippet_name: '临时命令' })])
+
+    const updatedWithoutGroup = backend.saveQuickCommandSnippet({
+      id: created.id,
+      snippet_name: '临时命令更新',
+      snippet_content: 'whoami',
+      group_uuid: null
+    })
+    expect(updatedWithoutGroup.ok).toBe(true)
+    expect(updatedWithoutGroup.data?.snippet).toEqual(
       expect.objectContaining({
         id: created.id,
         uuid: created.uuid,
@@ -377,6 +392,19 @@ describe('quick commands backend boundary', () => {
       })
     )
     expect(backend.deleteQuickCommandGroup('missing-group')).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'QUICK_COMMAND_BACKEND_ERROR',
+        errorMessage: 'Quick command group not found'
+      })
+    )
+    expect(
+      backend.saveQuickCommandSnippet({
+        snippet_name: '假分组命令',
+        snippet_content: 'echo fake group',
+        group_uuid: 'missing-group'
+      })
+    ).toEqual(
       expect.objectContaining({
         ok: false,
         errorCode: 'QUICK_COMMAND_BACKEND_ERROR',

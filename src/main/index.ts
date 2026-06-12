@@ -161,8 +161,7 @@ import {
   reorderQuickCommands,
   saveQuickCommandGroup,
   saveQuickCommandMacro,
-  saveQuickCommandSnippet,
-  saveQuickCommands
+  saveQuickCommandSnippet
 } from './backend/quickCommands'
 import {
   configureSettingsPreferencesBackendRuntime,
@@ -328,7 +327,6 @@ import type {
   QuickCommandReorderInput,
   QuickCommandScriptPlanInput,
   QuickCommandSnippetSaveInput,
-  QuickCommandsUserConfig,
   SecurityUserConfig,
   SettingsRuleSaveInput,
   SettingsShortcutSaveInput,
@@ -2864,7 +2862,6 @@ const registerIpc = () => {
   ipcMain.handle('assets:keychains:save', (_event, keychain: AiopsKeychainInput) => saveKeychain(keychain))
   ipcMain.handle('assets:keychains:delete', (_event, id: string) => deleteKeychain(id))
   ipcMain.handle('quick-commands:get', () => getQuickCommands())
-  ipcMain.handle('quick-commands:save', (_event, config: QuickCommandsUserConfig) => saveQuickCommands(config))
   ipcMain.handle('quick-commands:group:save', (_event, input: QuickCommandGroupSaveInput) => saveQuickCommandGroup(input))
   ipcMain.handle('quick-commands:group:delete', (_event, uuid: string) => deleteQuickCommandGroup(uuid))
   ipcMain.handle('quick-commands:snippet:save', (_event, input: QuickCommandSnippetSaveInput) => saveQuickCommandSnippet(input))

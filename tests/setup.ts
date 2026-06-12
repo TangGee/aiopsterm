@@ -6301,19 +6301,6 @@ Object.defineProperty(window, 'aiops', {
       groups: quickCommandStoreMock.groups.map((group) => ({ ...group })),
       snippets: quickCommandStoreMock.snippets.map((snippet) => ({ ...snippet }))
     })),
-    saveQuickCommands: vi.fn(async (config: typeof defaultQuickCommands) => {
-      quickCommandStoreMock = {
-        groups: (config.groups || []).map((group) => ({ ...group })),
-        snippets: (config.snippets || []).map((snippet) => ({ ...snippet }))
-      }
-      return {
-        ok: true,
-        data: {
-          groups: quickCommandStoreMock.groups.map((group) => ({ ...group })),
-          snippets: quickCommandStoreMock.snippets.map((snippet) => ({ ...snippet }))
-        }
-      }
-    }),
     saveQuickCommandGroup: vi.fn(async (input: { uuid?: string; group_name: string }) => {
       const groupName = String(input.group_name || '').trim()
       if (!groupName) return { ok: false, errorCode: 'QUICK_COMMAND_GROUP_REQUIRED', errorMessage: 'Group name is required' }
@@ -6349,7 +6336,10 @@ Object.defineProperty(window, 'aiops', {
         if (!input.snippet_content) return { ok: false, errorCode: 'QUICK_COMMAND_SNIPPET_REQUIRED', errorMessage: 'Snippet content is required' }
         const existing = input.id ? quickCommandStoreMock.snippets.find((snippet) => snippet.id === input.id) : undefined
         if (input.id && !existing) return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command snippet not found' }
-        const groupUuid = input.group_uuid && quickCommandStoreMock.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
+        if (input.group_uuid && !quickCommandStoreMock.groups.some((group) => group.uuid === input.group_uuid)) {
+          return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command group not found' }
+        }
+        const groupUuid = input.group_uuid || null
         const snippet = existing
           ? {
               ...existing,
@@ -6387,7 +6377,10 @@ Object.defineProperty(window, 'aiops', {
         try {
           const snippetContent = buildQuickCommandMacroContentMock(input)
           const snippetName = String(input.snippet_name || '').trim() || `macro-test-${quickCommandSnippetSequenceMock++}`
-          const groupUuid = input.group_uuid && quickCommandStoreMock.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
+          if (input.group_uuid && !quickCommandStoreMock.groups.some((group) => group.uuid === input.group_uuid)) {
+            return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command group not found' }
+          }
+          const groupUuid = input.group_uuid || null
           const snippet = {
             id: nextQuickCommandSnippetIdMock(),
             uuid: `quick-snippet-test-${quickCommandSnippetSequenceMock++}`,

@@ -2900,7 +2900,6 @@ export type AiopsPreloadApi = {
   saveKeychain: (keychain: AiopsKeychainInput) => Promise<AiopsMutationResult<AiopsKeychainRecord>>
   deleteKeychain: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
   getQuickCommands: () => Promise<QuickCommandsUserConfig>
-  saveQuickCommands: (config: QuickCommandsUserConfig) => Promise<AiopsMutationResult<QuickCommandsUserConfig>>
   saveQuickCommandGroup: (input: QuickCommandGroupSaveInput) => Promise<QuickCommandGroupMutationResult>
   deleteQuickCommandGroup: (uuid: string) => Promise<QuickCommandGroupDeleteResult>
   saveQuickCommandSnippet: (input: QuickCommandSnippetSaveInput) => Promise<QuickCommandSnippetMutationResult>

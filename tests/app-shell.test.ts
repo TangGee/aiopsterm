@@ -6372,6 +6372,7 @@ describe('AppShell', () => {
     await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
     await flushPromises()
     expect(store.quickCommands.some((command) => command.snippet_name === '新片段')).toBe(true)
+    expect((window.aiops as any).saveQuickCommands).toBeUndefined()
 
     const commandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('磁盘巡检'))!
     store.panels[0].sessionId = 'snippet-panel-main'

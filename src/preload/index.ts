@@ -195,7 +195,6 @@ const api: AiopsPreloadApi = {
   saveKeychain: (keychain) => ipcRenderer.invoke('assets:keychains:save', keychain),
   deleteKeychain: (id: string) => ipcRenderer.invoke('assets:keychains:delete', id),
   getQuickCommands: () => ipcRenderer.invoke('quick-commands:get'),
-  saveQuickCommands: (config) => ipcRenderer.invoke('quick-commands:save', config),
   saveQuickCommandGroup: (input) => ipcRenderer.invoke('quick-commands:group:save', input),
   deleteQuickCommandGroup: (uuid: string) => ipcRenderer.invoke('quick-commands:group:delete', uuid),
   saveQuickCommandSnippet: (input) => ipcRenderer.invoke('quick-commands:snippet:save', input),

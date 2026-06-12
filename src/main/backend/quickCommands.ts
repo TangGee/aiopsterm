@@ -423,7 +423,9 @@ const saveQuickCommandSnippetSnapshot = (
   if (!input.snippet_content) throw new Error('Snippet content is required')
   const existing = input.id ? current.snippets.find((snippet) => snippet.id === input.id) : undefined
   if (input.id && !existing) throw new Error('Quick command snippet not found')
-  const groupUuid = input.group_uuid && current.groups.some((group) => group.uuid === input.group_uuid) ? input.group_uuid : null
+  const requestedGroupUuid = typeof input.group_uuid === 'string' && input.group_uuid.trim() ? input.group_uuid.trim() : null
+  if (requestedGroupUuid && !current.groups.some((group) => group.uuid === requestedGroupUuid)) throw new Error('Quick command group not found')
+  const groupUuid = requestedGroupUuid
   const snippet: QuickCommandSnippetConfig = existing
     ? { ...existing, snippet_name: name, snippet_content: input.snippet_content, group_uuid: groupUuid, update_at: nowText() }
     : {

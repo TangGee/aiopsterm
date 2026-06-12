@@ -5359,9 +5359,13 @@ describe('workspace store', () => {
     const malformedMacro = await store.stopMacroRecording()
     expect(malformedMacro).toBeNull()
     expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
-    expect(store.isMacroRecording).toBe(false)
+    expect(store.isMacroRecording).toBe(true)
+    expect(store.recordedCommands).toEqual(['hostname'])
     expect(store.quickCommands).toHaveLength(countBeforeMalformedMacro)
     expect(store.quickCommands.some((command) => command.snippet_content === 'hostname')).toBe(false)
+    const retriedMacro = await store.stopMacroRecording()
+    expect(retriedMacro?.snippet_content).toBe('hostname')
+    expect(store.isMacroRecording).toBe(false)
 
     const originalSaveQuickCommandMacro = window.aiops.saveQuickCommandMacro
     ;(window.aiops as any).saveQuickCommandMacro = undefined
@@ -5371,8 +5375,12 @@ describe('workspace store', () => {
     const missingMacroBridge = await store.stopMacroRecording()
     expect(missingMacroBridge).toBeNull()
     expect(store.topNotice).toBe('宏录制保存服务不可用')
+    expect(store.isMacroRecording).toBe(true)
+    expect(store.recordedCommands).toEqual(['whoami'])
     expect(store.quickCommands).toHaveLength(countBeforeMissingMacroBridge)
     ;(window.aiops as any).saveQuickCommandMacro = originalSaveQuickCommandMacro
+    store.cancelMacroRecording()
+    expect(store.isMacroRecording).toBe(false)
 
     const countBeforeEmptyMacro = store.quickCommands.length
     store.startMacroRecording()
@@ -5409,6 +5417,7 @@ describe('workspace store', () => {
       saveQuickCommandGroup: window.aiops.saveQuickCommandGroup,
       deleteQuickCommandGroup: window.aiops.deleteQuickCommandGroup,
       saveQuickCommandSnippet: window.aiops.saveQuickCommandSnippet,
+      saveQuickCommandMacro: window.aiops.saveQuickCommandMacro,
       deleteQuickCommandSnippet: window.aiops.deleteQuickCommandSnippet,
       reorderQuickCommands: window.aiops.reorderQuickCommands
     }
@@ -5542,6 +5551,33 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
 
+      vi.mocked(window.aiops.saveQuickCommandSnippet!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          groups: store.snippetGroups.map((item) => ({ ...item })),
+          snippets: [
+            ...store.quickCommands.map((item) => ({ ...item })),
+            {
+              id: 1000,
+              uuid: 'wrong-group-snippet',
+              snippet_name: 'Wrong Group Command',
+              snippet_content: 'echo wrong-group',
+              group_uuid: null
+            }
+          ],
+          snippet: {
+            id: 1000,
+            uuid: 'wrong-group-snippet',
+            snippet_name: 'Wrong Group Command',
+            snippet_content: 'echo wrong-group',
+            group_uuid: null
+          }
+        }
+      } as any)
+      await expect(store.createQuickCommand({ snippet_name: 'Wrong Group Command', snippet_content: 'echo wrong-group', group_uuid: group!.uuid })).resolves.toBeNull()
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+      expect(quickCommandsSnapshot()).toBe(afterGroupSnapshot)
+
       const command = await store.createQuickCommand({ snippet_name: 'Bridge Command', snippet_content: 'echo bridge', group_uuid: group!.uuid })
       expect(command).toBeTruthy()
       const afterCommandSnapshot = quickCommandsSnapshot()
@@ -5564,10 +5600,59 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
       expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
 
+      vi.mocked(window.aiops.saveQuickCommandSnippet!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          groups: store.snippetGroups.map((item) => ({ ...item })),
+          snippets: store.quickCommands.map((item) =>
+            item.id === command!.id ? { ...item, snippet_name: 'Fake Wrong Group', snippet_content: 'echo fake', group_uuid: null } : { ...item }
+          ),
+          snippet: { ...command!, snippet_name: 'Fake Wrong Group', snippet_content: 'echo fake', group_uuid: null }
+        }
+      } as any)
+      await expect(store.updateQuickCommand(command!.id, { snippet_name: 'Fake Wrong Group', snippet_content: 'echo fake', group_uuid: group!.uuid })).resolves.toBe(false)
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+      expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
       vi.mocked(window.aiops.saveQuickCommandSnippet!).mockRejectedValueOnce(new Error('snippet write failed'))
       await expect(store.updateQuickCommand(command!.id, { snippet_name: 'Fake Update', snippet_content: 'echo fake', group_uuid: null })).resolves.toBe(false)
       expect(store.topNotice).toBe('快捷命令写入失败')
       expect(quickCommandsSnapshot()).toBe(afterCommandSnapshot)
+
+      const macroSnapshot = quickCommandsSnapshot()
+      vi.mocked(window.aiops.saveQuickCommandMacro!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          groups: store.snippetGroups.map((item) => ({ ...item })),
+          snippets: [
+            ...store.quickCommands.map((item) => ({ ...item })),
+            {
+              id: 1001,
+              uuid: 'wrong-group-macro',
+              snippet_name: 'Backend Macro',
+              snippet_content: 'hostname',
+              group_uuid: null
+            }
+          ],
+          snippet: {
+            id: 1001,
+            uuid: 'wrong-group-macro',
+            snippet_name: 'Backend Macro',
+            snippet_content: 'hostname',
+            group_uuid: null
+          }
+        }
+      } as any)
+      store.selectedSnippetGroupUuid = group!.uuid
+      store.startMacroRecording()
+      store.recordMacroCommand('hostname')
+      const wrongGroupMacro = await store.stopMacroRecording()
+      expect(wrongGroupMacro).toBeNull()
+      expect(store.topNotice).toBe(malformedQuickCommandsBackendResultMessage)
+      expect(store.isMacroRecording).toBe(true)
+      expect(store.recordedCommands).toEqual(['hostname'])
+      expect(quickCommandsSnapshot()).toBe(macroSnapshot)
+      store.cancelMacroRecording()
 
       ;(window.aiops as any).deleteQuickCommandSnippet = undefined
       await expect(store.deleteQuickCommand(command!.id)).resolves.toBe(false)

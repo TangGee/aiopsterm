@@ -9201,7 +9201,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令写入失败')
       return null
     }
-    if (!isQuickCommandSnippetSaveData(result.data, { snippetName, snippetContent: payload.snippet_content })) {
+    if (!isQuickCommandSnippetSaveData(result.data, { snippetName, snippetContent: payload.snippet_content, groupUuid: payload.group_uuid ?? null })) {
       setTopNotice(malformedQuickCommandsBackendResultMessage)
       return null
     }
@@ -9232,7 +9232,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '快捷命令写入失败')
       return false
     }
-    if (!isQuickCommandSnippetSaveData(result.data, { id, snippetName, snippetContent: payload.snippet_content })) {
+    if (!isQuickCommandSnippetSaveData(result.data, { id, snippetName, snippetContent: payload.snippet_content, groupUuid: payload.group_uuid ?? null })) {
       setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
@@ -9530,8 +9530,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const snippetName = macroDefaultName.value || createMacroSnippetName()
     const groupUuid = macroTargetGroupUuid.value
     const sleepThresholdMs = macroSleepThresholdMs.value
+    if (!entries.length) {
+      resetMacroRecordingState()
+      return null
+    }
     const saved = await saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
-    resetMacroRecordingState()
+    if (saved) resetMacroRecordingState()
     return saved
   }
 
