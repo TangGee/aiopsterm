@@ -6784,6 +6784,10 @@ async function toggleConnectionStatus(id: string) {
 
 async function refreshConnected() {
   const connected = connections.value.filter((connection) => connection.status === 'connected')
+  if (!connected.length) {
+    showNotice('No connected database schemas to refresh')
+    return
+  }
   for (const connection of connected) {
     const result = await refreshDatabaseConnectionViaBackend(connection.id)
     const wasExpanded = expandedConnections.value.includes(connection.id)

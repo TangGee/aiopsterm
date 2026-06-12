@@ -9585,6 +9585,41 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('does not fabricate Database refresh success when no connections are connected', async () => {
+    const listDatabaseCatalogImplementation = vi.mocked(window.aiops.listDatabaseCatalog).getMockImplementation()
+    expect(listDatabaseCatalogImplementation).toBeDefined()
+    vi.mocked(window.aiops.listDatabaseCatalog).mockImplementationOnce(async () => {
+      const result = await listDatabaseCatalogImplementation!()
+      if (!result.ok || !result.data) return result
+      return {
+        ...result,
+        data: {
+          ...result.data,
+          connections: result.data.connections.map((connection) => ({ ...connection, status: 'idle' as const })),
+          defaults: {
+            ...result.data.defaults,
+            expandedConnectionIds: []
+          }
+        }
+      }
+    })
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    vi.mocked(window.aiops.refreshDatabaseConnection).mockClear()
+    await wrapper.find('button[title="Refresh connected"]').trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.refreshDatabaseConnection).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('No connected database schemas to refresh')
+    expect(wrapper.text()).not.toContain('Connected database schemas refreshed')
+
+    wrapper.unmount()
+  })
+
   it('supports Monaco-like SQL editor indentation, run shortcut, and find/replace controls', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
