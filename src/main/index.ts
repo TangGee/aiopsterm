@@ -1,7 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { watch } from 'fs'
 import type { FSWatcher } from 'fs'
@@ -155,6 +154,7 @@ import {
 } from './backend/kubernetes'
 import { checkModelProvider, listAiModels } from './backend/modelProviders'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
+import { configureLocalTerminalBackendRuntime, createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
 import {
   configureQuickCommandBackendRuntime,
   deleteQuickCommandGroup,
@@ -188,9 +188,7 @@ import {
   createSshTerminalConnectionInfo,
   createTerminalBinaryWriteResult,
   createTerminalDataEvent,
-  createTerminalErrorLifecycleEvent,
   createTerminalKillResult,
-  createTerminalLifecycleEvent,
   createTerminalWriteResult
 } from './backend/terminal'
 import {
@@ -343,7 +341,6 @@ import type {
   TerminalCommandGenerationInput,
   TerminalCommandSuggestionContext,
   TerminalCreateOptions,
-  TerminalDisconnectReason,
   TerminalLifecycleEvent,
   ChatImageAttachmentPrepareInput,
   ChatImageAttachmentClipboardInput,
@@ -362,27 +359,14 @@ import type {
   AiopsSshTunnelStopInput
 } from '@shared/preload'
 
-type PtyProcess = {
-  write(data: string): void
-  resize(cols: number, rows: number): void
-  kill(): void
-  onData(callback: (data: string) => void): void
-  onExit(callback: (event: { exitCode: number }) => void): void
-}
-
-type PtyModule = {
-  spawn(shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }): PtyProcess
-}
-
 type TerminalSession = {
   id: string
-  process: ChildProcessWithoutNullStreams | PtyProcess | SshTerminalSession
+  process: LocalTerminalSession | SshTerminalSession
   shell: string
   cwd: string
   window: BrowserWindow
-  kind: 'pty' | 'process' | 'ssh'
+  kind: 'local' | 'ssh'
   host?: string
-  manualCloseRequested?: boolean
 }
 
 type SkillImportResult = {
@@ -565,28 +549,6 @@ let mcpConfigWatcher: FSWatcher | null = null
 let skillsWatchers: FSWatcher[] = []
 let skillsWatcherDebounce: NodeJS.Timeout | null = null
 
-const sendTerminalLifecycle = (
-  owner: BrowserWindow,
-  id: string,
-  event: Omit<TerminalLifecycleEvent, 'id' | 'at'> & { at?: number }
-): TerminalLifecycleEvent => {
-  const payload = createTerminalLifecycleEvent(id, event)
-  owner.webContents.send('terminal:lifecycle', payload)
-  return payload
-}
-
-const sendTerminalErrorLifecycle = (
-  owner: BrowserWindow,
-  id: string,
-  kind: TerminalLifecycleEvent['kind'],
-  error: unknown,
-  event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>> = {}
-): TerminalLifecycleEvent => {
-  const payload = createTerminalErrorLifecycleEvent(id, kind, error, event)
-  owner.webContents.send('terminal:lifecycle', payload)
-  return payload
-}
-
 const sendTerminalExit = (owner: BrowserWindow, lifecycle: TerminalLifecycleEvent, code = lifecycle.code ?? null) => {
   owner.webContents.send('terminal:exit', {
     id: lifecycle.id,
@@ -612,14 +574,6 @@ const terminalBinaryPayload = (payload: unknown): Buffer => {
   if (ArrayBuffer.isView(payload)) return Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength)
   if (Array.isArray(payload)) return Buffer.from(payload)
   return Buffer.alloc(0)
-}
-
-const writeTerminalBuffer = (session: TerminalSession, buffer: Buffer) => {
-  if (session.kind === 'ssh') {
-    ;(session.process as SshTerminalSession).write(buffer)
-  } else {
-    ;(session.process as ChildProcessWithoutNullStreams).stdin.write(buffer)
-  }
 }
 
 const cloneKnowledgeBaseNodes = (nodes: KnowledgeBaseNodeConfig[] = []): KnowledgeBaseNodeConfig[] =>
@@ -1177,6 +1131,11 @@ configurePrivacyRuntime({
   useDataSyncBackendDouble: process.env.AIOPSTERM_DATA_SYNC_BACKEND_DOUBLE === '1'
 })
 configureSshTunnelBackendRuntime({ getConfig })
+configureLocalTerminalBackendRuntime({
+  getDefaultShell,
+  getDefaultCwd: () => app.getPath('home'),
+  getEnv: () => process.env
+})
 configureSshTerminalBackendRuntime({
   getConfig,
   getAsset,
@@ -2492,14 +2451,6 @@ const startMcpConfigWatcher = async () => {
   })
 }
 
-const loadPty = (): PtyModule | null => {
-  try {
-    return require('node-pty') as PtyModule
-  } catch {
-    return null
-  }
-}
-
 const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
   return createSshTerminalSession(id, options, {
     lifecycle: (event) => owner.webContents.send('terminal:lifecycle', event),
@@ -3303,122 +3254,32 @@ const registerIpc = () => {
       }
     }
 
-    const terminalShell = options.shell || getDefaultShell()
-    const cwd = options.cwd || app.getPath('home')
-    const localLifecycleBase = {
-      kind: 'local' as const,
-      shell: terminalShell,
-      cwd
-    }
-    let lifecycle = sendTerminalLifecycle(owner, id, {
-      ...localLifecycleBase,
-      stage: 'starting',
-      message: `Starting local shell ${terminalShell}`
+    const result = createLocalTerminalSession(id, options, {
+      lifecycle: (event) => owner.webContents.send('terminal:lifecycle', event),
+      exit: (event, code) => sendTerminalExit(owner, event, code ?? event.code ?? null),
+      data: (chunk) => sendTerminalData(owner, id, chunk),
+      closed: () => sessions.delete(id)
     })
-    let localClosed = false
-    const finishLocal = (code: number | null, reason: TerminalDisconnectReason, message: string) => {
-      if (localClosed) return
-      localClosed = true
-      const terminalSession = sessions.get(id)
-      sessions.delete(id)
-      lifecycle = sendTerminalLifecycle(owner, id, {
-        ...localLifecycleBase,
-        stage: 'closed',
-        code,
-        reason: terminalSession?.manualCloseRequested ? 'manual' : reason,
-        isNetworkDisconnect: false,
-        message: terminalSession?.manualCloseRequested ? 'Terminal closed by user.' : message
-      })
-      sendTerminalExit(owner, lifecycle, code)
-    }
-    const failLocal = (error: unknown, message: string, code = 1) => {
-      if (localClosed) return
-      localClosed = true
-      sessions.delete(id)
-      lifecycle = sendTerminalErrorLifecycle(owner, id, 'local', error, {
-        ...localLifecycleBase,
-        code,
-        message
-      })
-      sendTerminalExit(owner, lifecycle, code)
-    }
-    const ptyModule = loadPty()
-    if (ptyModule) {
-      const ptyProcess = ptyModule.spawn(terminalShell, [], {
-        name: 'xterm-256color',
-        cols: options.cols || 100,
-        rows: options.rows || 30,
-        cwd,
-        env: process.env
-      })
-      sessions.set(id, {
-        id,
-        process: ptyProcess,
-        shell: terminalShell,
-        cwd,
-        window: owner,
-        kind: 'pty',
-        host: 'local'
-      })
-      lifecycle = sendTerminalLifecycle(owner, id, {
-        ...localLifecycleBase,
-        stage: 'shell-ready',
-        message: `Local shell ready ${terminalShell}`
-      })
-      ptyProcess.onData((data) => sendTerminalData(owner, id, data))
-      ptyProcess.onExit((event) => {
-        finishLocal(event.exitCode, 'process', 'Local shell exited.')
-      })
-    } else {
-      const child = spawn(terminalShell, [], {
-        cwd,
-        env: process.env,
-        shell: false
-      })
+    sessions.set(id, {
+      id,
+      process: result.session,
+      shell: result.shell,
+      cwd: result.cwd,
+      window: owner,
+      kind: 'local',
+      host: 'local'
+    })
 
-      sessions.set(id, {
-        id,
-        process: child,
-        shell: terminalShell,
-        cwd,
-        window: owner,
-        kind: 'process',
-        host: 'local'
-      })
-      lifecycle = sendTerminalLifecycle(owner, id, {
-        ...localLifecycleBase,
-        stage: 'shell-ready',
-        message: `Local shell ready ${terminalShell}`
-      })
-
-      child.stdout.on('data', (chunk: Buffer) => {
-        sendTerminalData(owner, id, chunk)
-      })
-      child.stderr.on('data', (chunk: Buffer) => {
-        sendTerminalData(owner, id, chunk)
-      })
-      child.on('exit', (code) => {
-        finishLocal(code, 'process', 'Local shell exited.')
-      })
-      child.on('error', (childError) => {
-        sendTerminalData(owner, id, `\n[aiopsterm] failed to start shell: ${childError.message}\n`)
-        failLocal(childError, 'Local shell failed to start.')
-      })
-      sendTerminalData(owner, id, '\n[aiopsterm] pty unavailable, using subprocess fallback.\n')
-    }
-
-    return { id, shell: terminalShell, cwd, kind: 'local' as const, lifecycle }
+    return { id, shell: result.shell, cwd: result.cwd, kind: 'local' as const, lifecycle: result.lifecycle }
   })
 
   ipcMain.handle('terminal:write', (_event, id: string, data: string) => {
     const session = sessions.get(id)
     if (!session) return createTerminalWriteResult(id, data, false)
-    if (session.kind === 'pty') {
-      ;(session.process as PtyProcess).write(data)
-    } else if (session.kind === 'ssh') {
+    if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).write(data)
     } else {
-      ;(session.process as ChildProcessWithoutNullStreams).stdin.write(data)
+      ;(session.process as LocalTerminalSession).write(data)
     }
     terminalHistoryLinesFromWrite(data).forEach((command) => recordTerminalCommandHistory(command, { host: session.host }))
     return createTerminalWriteResult(id, data, true)
@@ -3428,13 +3289,6 @@ const registerIpc = () => {
     const session = sessions.get(id)
     const buffer = terminalBinaryPayload(payload)
     if (!session) return createTerminalBinaryWriteResult(id, buffer.byteLength, false)
-    if (session.kind === 'pty') {
-      return {
-        ok: false,
-        errorCode: 'TERMINAL_BINARY_UNSUPPORTED',
-        errorMessage: 'This terminal runtime does not support binary writes.'
-      }
-    }
     if (!buffer.byteLength) {
       return {
         ok: false,
@@ -3442,28 +3296,36 @@ const registerIpc = () => {
         errorMessage: 'Terminal binary payload is empty.'
       }
     }
-    writeTerminalBuffer(session, buffer)
+    if (session.kind === 'local' && !(session.process as LocalTerminalSession).writeBinary(buffer)) {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_BINARY_UNSUPPORTED',
+        errorMessage: 'This terminal runtime does not support binary writes.'
+      }
+    }
+    if (session.kind === 'ssh') {
+      ;(session.process as SshTerminalSession).write(buffer)
+    }
     return createTerminalBinaryWriteResult(id, buffer.byteLength, true)
   })
 
   ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) => {
     const session = sessions.get(id)
     if (!session) return
-    if (session.kind === 'pty') {
-      ;(session.process as PtyProcess).resize(cols, rows)
-    } else if (session.kind === 'ssh') {
+    if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).resize(cols, rows)
+    } else {
+      ;(session.process as LocalTerminalSession).resize(cols, rows)
     }
   })
 
   ipcMain.handle('terminal:kill', (_event, id: string) => {
     const session = sessions.get(id)
     if (!session) return createTerminalKillResult(id, false)
-    session.manualCloseRequested = true
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).kill('manual')
     } else {
-      session.process.kill()
+      ;(session.process as LocalTerminalSession).kill('manual')
     }
     return createTerminalKillResult(id, true)
   })
@@ -3632,7 +3494,7 @@ app.on('window-all-closed', () => {
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).kill()
     } else {
-      session.process.kill()
+      ;(session.process as LocalTerminalSession).kill()
     }
   })
   sessions.clear()
