@@ -2485,8 +2485,8 @@ const DB_AI_PANE_DEFAULT_WIDTH = 360
 const DB_AI_PANE_MIN_WIDTH = 280
 const DB_AI_PANE_MAX_WIDTH = 720
 const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
-const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql', 'clickhouse']
-const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse']
+const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql', 'clickhouse', 'presto']
+const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto']
 const DB_ENGINE_OPTION_CODES = [
   'mysql',
   'h2',
@@ -2514,7 +2514,7 @@ const connectionSchemeForDbType = (dbType: DatabaseEngineCode) =>
       ? 'jdbc:kingbase8'
       : dbType === 'sqlserver'
         ? 'jdbc:sqlserver'
-        : dbType === 'clickhouse'
+        : dbType === 'clickhouse' || dbType === 'presto'
           ? 'http'
           : dbType === 'mariadb'
             ? 'jdbc:mariadb'
@@ -3332,7 +3332,8 @@ const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }> = [
   { value: 'sqlite', label: 'SQLite' },
   { value: 'oracle', label: 'Oracle' },
   { value: 'mssql', label: 'SQL Server' },
-  { value: 'clickhouse', label: 'ClickHouse' }
+  { value: 'clickhouse', label: 'ClickHouse' },
+  { value: 'presto', label: 'Presto' }
 ]
 const dangerConfirm = reactive({
   open: false,
@@ -3519,7 +3520,7 @@ const dbAiContextSummary = computed(() => activeDbAiRequest.value?.contextSummar
 const dbAiSql = computed(() => (dbAiStatus.value === 'done' ? extractSql(dbAiText.value) : ''))
 const dbAiIsConvertAction = computed(() => dbAiAction.value === 'convert')
 const dbAiReasoningText = computed(() => {
-  const fenceIndex = dbAiText.value.search(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql)?\s*\n/i)
+  const fenceIndex = dbAiText.value.search(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse|presto)?\s*\n/i)
   const text = fenceIndex >= 0 ? dbAiText.value.slice(0, fenceIndex).trim() : dbAiText.value.trim()
   return text.replace(/^Reasoning\s*\n?/i, '').trim()
 })
@@ -3626,7 +3627,7 @@ function buildConnectionUrl() {
   const database = connectionDraft.database ? `/${connectionDraft.database}` : ''
   if (connectionDraft.dbType === 'oracle') return `${host}${port}${database}`
   const scheme = connectionSchemeForDbType(connectionDraft.dbType)
-  if (connectionDraft.dbType === 'clickhouse') return `${scheme}://${host}${port}`
+  if (connectionDraft.dbType === 'clickhouse' || connectionDraft.dbType === 'presto') return `${scheme}://${host}${port}`
   return `${scheme}://${host}${port}${database}`
 }
 
@@ -3641,7 +3642,7 @@ function clearConnectionFeedback() {
 }
 
 function sqlConnectionRequiresSchema(connection: DatabaseConnectionInfo) {
-  return isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'oracle' || connection.dbType === 'sqlserver'
+  return isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'oracle' || connection.dbType === 'sqlserver' || connection.dbType === 'presto'
 }
 
 function defaultSchemaForSqlConnection(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined) {
@@ -5169,6 +5170,9 @@ function renderDefaultSql(connection: DatabaseConnectionInfo | undefined, catalo
 
 function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
   const quotedTable = quoteSqlIdentifierForDialect(tableName, dbType)
+  if (dbType === 'presto' && catalogName && schemaName) {
+    return `${quoteSqlIdentifierForDialect(catalogName, dbType)}.${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
+  }
   if (dbType === 'clickhouse' && catalogName) {
     return `${quoteSqlIdentifierForDialect(catalogName, dbType)}.${quotedTable}`
   }
@@ -7347,9 +7351,11 @@ function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[
               ? 1433
               : dbType === 'clickhouse'
                 ? 8123
-                : dbType === 'sqlite'
-                  ? null
-                  : 3306
+                : dbType === 'presto'
+                  ? 8080
+                  : dbType === 'sqlite'
+                    ? null
+                    : 3306
   Object.assign(connectionDraft, {
     id: '',
     dbType,
@@ -7359,7 +7365,7 @@ function openConnectionModal(dbType: DatabaseEngineCode, groupId = groups.value[
     host: '127.0.0.1',
     port: defaultPort,
     authentication: 'UserAndPassword',
-    user: dbType === 'sqlite' ? '' : dbType === 'sqlserver' ? 'sa' : dbType === 'clickhouse' ? 'default' : 'root',
+    user: dbType === 'sqlite' ? '' : dbType === 'sqlserver' ? 'sa' : dbType === 'clickhouse' ? 'default' : dbType === 'presto' ? 'presto' : 'root',
     password: '',
     database: '',
     filePath: '',
@@ -8136,7 +8142,7 @@ function setEditorSql(nextSql: string, selectionStart: number, selectionEnd = se
 }
 
 function extractSql(text: string) {
-  const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse)?\s*\n([\s\S]*?)```/i)
+  const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse|presto)?\s*\n([\s\S]*?)```/i)
   return match?.[1].trim() ?? text
 }
 

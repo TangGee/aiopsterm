@@ -1998,6 +1998,7 @@ export type DatabaseEngineCode =
   | 'oracle'
   | 'sqlserver'
   | 'clickhouse'
+  | 'presto'
 
 export type DatabaseEngineOptionCode =
   | DatabaseEngineCode

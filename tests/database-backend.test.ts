@@ -132,6 +132,104 @@ const createClickHouseFetchDouble = () => {
   return { fetch: fetchDouble, state }
 }
 
+const createPrestoFetchDouble = () => {
+  const state = {
+    requests: [] as Array<{ url: string; method: string; sql: string; user?: string; catalog?: string; schema?: string; authorization?: string }>
+  }
+  const response = (payload: Record<string, unknown>) =>
+    new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  const rowsFor = (columns: Array<{ name: string; type?: string }>, data: unknown[][]) =>
+    response({
+      id: `query-${state.requests.length + 1}`,
+      columns,
+      data
+    })
+  const fetchDouble: typeof fetch = async (url, init = {}) => {
+    const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers as HeadersInit)
+    const sql = String(init.body ?? '')
+    state.requests.push({
+      url: String(url),
+      method: String(init.method || 'GET'),
+      sql,
+      user: headers.get('X-Presto-User') || undefined,
+      catalog: headers.get('X-Presto-Catalog') || undefined,
+      schema: headers.get('X-Presto-Schema') || undefined,
+      authorization: headers.get('Authorization') || undefined
+    })
+    const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
+    if (normalized.startsWith('select node_version')) return rowsFor([{ name: 'version', type: 'varchar' }], [['0.286']])
+    if (normalized.includes('from information_schema.catalogs')) return rowsFor([{ name: 'catalog_name', type: 'varchar' }], [['hive']])
+    if (normalized.includes('information_schema.schemata')) return rowsFor([{ name: 'schema_name', type: 'varchar' }], [['ops'], ['analytics']])
+    if (normalized.includes('information_schema.tables')) {
+      return rowsFor(
+        [
+          { name: 'table_schema', type: 'varchar' },
+          { name: 'table_name', type: 'varchar' },
+          { name: 'table_type', type: 'varchar' }
+        ],
+        [
+          ['ops', 'events', 'BASE TABLE'],
+          ['ops', 'events_view', 'VIEW']
+        ]
+      )
+    }
+    if (normalized.includes('information_schema.columns')) {
+      const data = [
+        ['ops', 'events', 'event_id', 'bigint', 'NO'],
+        ['ops', 'events', 'service', 'varchar', 'NO'],
+        ['ops', 'events', 'status', 'varchar', 'YES'],
+        ['ops', 'events', 'created_at', 'timestamp', 'NO'],
+        ['ops', 'events_view', 'event_id', 'bigint', 'NO'],
+        ['ops', 'events_view', 'service', 'varchar', 'NO']
+      ]
+      return rowsFor(
+        [
+          { name: 'table_schema', type: 'varchar' },
+          { name: 'table_name', type: 'varchar' },
+          { name: 'column_name', type: 'varchar' },
+          { name: 'data_type', type: 'varchar' },
+          { name: 'is_nullable', type: 'varchar' }
+        ],
+        normalized.includes("table_name = 'events'") ? data.filter((row) => row[1] === 'events') : data
+      )
+    }
+    if (normalized.startsWith('show create table')) {
+      return rowsFor([{ name: 'Create Table', type: 'varchar' }], [
+        ['CREATE TABLE hive.ops.events (\n  event_id bigint,\n  service varchar,\n  status varchar,\n  created_at timestamp\n)']
+      ])
+    }
+    if (normalized.startsWith('select count(*)')) return rowsFor([{ name: 'total', type: 'bigint' }], [[1]])
+    if (normalized.startsWith('select * from')) {
+      return rowsFor(
+        [
+          { name: 'event_id', type: 'bigint' },
+          { name: 'service', type: 'varchar' },
+          { name: 'status', type: 'varchar' },
+          { name: 'created_at', type: 'timestamp' }
+        ],
+        [[77, 'presto-api', 'open', '2026-06-10 08:30:00']]
+      )
+    }
+    if (normalized.startsWith('select event_id')) {
+      return rowsFor(
+        [
+          { name: 'event_id', type: 'bigint' },
+          { name: 'service', type: 'varchar' }
+        ],
+        [[77, 'presto-api']]
+      )
+    }
+    return new Response(JSON.stringify({ error: { message: `unexpected presto query: ${sql}`, errorName: 'UNEXPECTED_QUERY' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+  return { fetch: fetchDouble, state }
+}
+
 const createPostgresDriverDouble = () => {
   const state = {
     connected: 0,
@@ -1114,6 +1212,7 @@ describe('database backend boundary', () => {
       'SQLite',
       'MariaDB',
       'ClickHouse',
+      'Presto',
       'OceanBase',
       'KingBase'
     ])
@@ -3191,6 +3290,157 @@ WHERE status = ''open'';
     })
     expect(mutation.ok).toBe(false)
     expect(mutation.errorCode).toBe('DB_CLICKHOUSE_MUTATION_UNSUPPORTED')
+  })
+
+  it('uses the Presto HTTP backend in non-seed runtime instead of a coming-soon placeholder', async () => {
+    const presto = createPrestoFetchDouble()
+    configureDatabaseRuntime({ useSeedData: false, fetch: presto.fetch })
+
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data?.engines.find((engine) => engine.code === 'presto')).toMatchObject({
+      connectionCode: 'presto',
+      enabled: true
+    })
+
+    const probe = await testDatabaseConnection({
+      dbType: 'presto',
+      name: 'live-presto',
+      host: '127.0.0.1',
+      port: 8080,
+      user: 'presto',
+      password: 'secret',
+      database: 'hive'
+    })
+    expect(probe.ok).toBe(true)
+    expect(probe.data).toMatchObject({
+      dbType: 'presto',
+      serverVersion: 'Presto 0.286',
+      endpoint: 'http://127.0.0.1:8080'
+    })
+    expect(presto.state.requests.at(-1)).toMatchObject({
+      user: 'presto',
+      catalog: 'hive',
+      authorization: expect.stringMatching(/^Basic /)
+    })
+
+    const saved = await saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'presto',
+        name: 'live-presto',
+        host: '127.0.0.1',
+        port: 8080,
+        user: 'presto',
+        password: 'secret',
+        database: 'hive',
+        env: 'Production',
+        groupId: 'group-prod',
+        authentication: 'UserAndPassword'
+      }
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.data?.connection).toMatchObject({
+      id: 'conn-live-presto',
+      dbType: 'presto',
+      status: 'idle',
+      url: 'http://127.0.0.1:8080',
+      catalogs: [{ name: 'hive', schemas: [] }]
+    })
+
+    const connected = await connectDatabaseConnection('conn-live-presto')
+    expect(connected.ok).toBe(true)
+    expect(connected.data?.connection.status).toBe('connected')
+    const opsSchema = connected.data?.connection.catalogs[0]?.schemas?.find((schema) => schema.name === 'ops')
+    expect(opsSchema?.tables[0]).toMatchObject({
+      name: 'events',
+      primaryKey: [],
+      columns: expect.arrayContaining([expect.objectContaining({ name: 'service', type: 'varchar' })])
+    })
+    expect(opsSchema?.views?.[0]).toMatchObject({
+      name: 'events_view'
+    })
+
+    const refreshed = await refreshDatabaseConnection('conn-live-presto')
+    expect(refreshed.ok).toBe(true)
+    expect(refreshed.data?.connection.catalogs[0]?.schemas?.find((schema) => schema.name === 'ops')?.tables[0]?.name).toBe('events')
+
+    const sql = await executeDatabaseSql({
+      connectionId: 'conn-live-presto',
+      dbType: 'presto',
+      databaseName: 'hive',
+      schemaName: 'ops',
+      sql: 'SELECT event_id, service FROM "hive"."ops"."events"'
+    })
+    expect(sql.ok).toBe(true)
+    expect(sql.data).toMatchObject({
+      columns: ['event_id', 'service'],
+      rows: [{ event_id: 77, service: 'presto-api' }]
+    })
+    expect(sql.data?.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ service: 'payment-api' })]))
+
+    const tablePage = await queryDatabaseTable({
+      connectionId: 'conn-live-presto',
+      dbType: 'presto',
+      databaseName: 'hive',
+      schemaName: 'ops',
+      tableName: 'events',
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }],
+      sort: { column: 'event_id', direction: 'desc' },
+      whereRaw: null,
+      orderByRaw: null,
+      page: 1,
+      pageSize: 20,
+      withTotal: true
+    })
+    expect(tablePage.ok).toBe(true)
+    expect(tablePage.data).toMatchObject({
+      knownColumns: ['event_id', 'service', 'status', 'created_at'],
+      rows: [expect.objectContaining({ event_id: 77, service: 'presto-api' })],
+      total: 1
+    })
+    expect(presto.state.requests.some((request) => request.sql.includes('ORDER BY "event_id" DESC'))).toBe(true)
+    expect(presto.state.requests.some((request) => request.catalog === 'hive' && request.schema === 'ops')).toBe(true)
+
+    const ddl = await getDatabaseTableDdl({
+      connectionId: 'conn-live-presto',
+      dbType: 'presto',
+      databaseName: 'hive',
+      schemaName: 'ops',
+      tableName: 'events'
+    })
+    expect(ddl.ok).toBe(true)
+    expect(ddl.data?.ddl).toContain('CREATE TABLE hive.ops.events')
+
+    const createdDatabase = await createDatabaseCatalog({
+      connectionId: 'conn-live-presto',
+      requestedName: 'ops_archive',
+      sql: 'CREATE DATABASE "ops_archive";'
+    })
+    expect(createdDatabase.ok).toBe(false)
+    expect(createdDatabase.errorCode).toBe('DB_CREATE_DATABASE_UNSUPPORTED')
+
+    const plan = await planDatabaseTableMutation({
+      connectionId: 'conn-live-presto',
+      dbType: 'presto',
+      databaseName: 'hive',
+      schemaName: 'ops',
+      tableName: 'events',
+      knownColumns: ['event_id', 'service'],
+      mutations: [{ kind: 'insert', values: { event_id: 78, service: 'new-event' } }]
+    })
+    expect(plan.ok).toBe(false)
+    expect(plan.errorCode).toBe('DB_PRESTO_MUTATION_UNSUPPORTED')
+
+    const mutation = await mutateDatabaseTable({
+      connectionId: 'conn-live-presto',
+      databaseName: 'hive',
+      schemaName: 'ops',
+      tableName: 'events',
+      mutations: [{ kind: 'truncate' }]
+    })
+    expect(mutation.ok).toBe(false)
+    expect(mutation.errorCode).toBe('DB_PRESTO_MUTATION_UNSUPPORTED')
   })
 
   it('uses the injected PostgreSQL-compatible driver for KingBase instead of a coming-soon placeholder', async () => {

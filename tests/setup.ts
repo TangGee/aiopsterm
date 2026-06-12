@@ -1014,7 +1014,7 @@ const databaseEngineOptionsMock: DatabaseEngineInfo[] = [
   { code: 'mariadb', connectionCode: 'mariadb', name: 'MariaDB', enabled: true, accent: '#c0765c' },
   { code: 'clickhouse', connectionCode: 'clickhouse', name: 'ClickHouse', enabled: true, accent: '#fdd835' },
   { code: 'dm', name: 'DM', enabled: false, accent: '#d946ef' },
-  { code: 'presto', name: 'Presto', enabled: false, accent: '#7c2d12' },
+  { code: 'presto', connectionCode: 'presto', name: 'Presto', enabled: true, accent: '#7c2d12' },
   { code: 'db2', name: 'DB2', enabled: false, accent: '#2563eb' },
   { code: 'oceanbase', connectionCode: 'oceanbase', name: 'OceanBase', enabled: true, accent: '#0ea5e9' },
   { code: 'hive', name: 'Hive', enabled: false, accent: '#f59e0b' },
@@ -1484,12 +1484,12 @@ const isPostgresCompatibleDatabaseMock = (dialect: DatabaseEngineCode | TestData
 const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
   open: state.open === true,
   width: Math.min(720, Math.max(280, Math.round(Number(state.width) || 360))),
-  context: {
-    connectionId: databaseTrimMock(state.context?.connectionId),
-    catalogName: databaseTrimMock(state.context?.catalogName),
-    schemaName: databaseTrimMock(state.context?.schemaName),
-    dbType: ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
-  },
+    context: {
+      connectionId: databaseTrimMock(state.context?.connectionId),
+      catalogName: databaseTrimMock(state.context?.catalogName),
+      schemaName: databaseTrimMock(state.context?.schemaName),
+      dbType: ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
+    },
   draft: typeof state.draft === 'string' ? state.draft : '',
   messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
     ...cloneDatabaseAiPaneMessageMock(message),
@@ -1760,7 +1760,9 @@ const testDatabaseConnectionMock = async (input: DatabaseConnectionTestInput) =>
                     ? 'SQL Server local backend validation'
                     : input.dbType === 'clickhouse'
                       ? 'ClickHouse local backend validation'
-                      : 'SQLite local backend validation'
+                      : input.dbType === 'presto'
+                        ? 'Presto local backend validation'
+                        : 'SQLite local backend validation'
   return { ok: true, data: { dbType: input.dbType, serverVersion, endpoint: 'test-backend', durationMs: 1 } }
 }
 
@@ -1827,8 +1829,8 @@ const buildSavedDatabaseConnectionUrlMock = (
   const rawUrl = databaseTrimMock(input.url)
   if (rawUrl) return rawUrl
   if (normalized.dbType === 'sqlite') return `sqlite://${normalized.filePath || ''}`
-  if (normalized.dbType === 'clickhouse') {
-    const port = normalized.port || 8123
+  if (normalized.dbType === 'clickhouse' || normalized.dbType === 'presto') {
+    const port = normalized.port || (normalized.dbType === 'presto' ? 8080 : 8123)
     return `http://${normalized.host}${port ? `:${port}` : ''}`
   }
   const port = normalized.port ? `:${normalized.port}` : ''
@@ -1859,6 +1861,9 @@ const defaultCatalogsForSavedConnectionMock = (connection: Omit<DatabaseConnecti
   }
   if (connection.dbType === 'sqlserver') {
     return [{ name: connection.database, schemas: [{ name: 'dbo', tables: [], views: [], functions: [], procedures: [] }] }]
+  }
+  if (connection.dbType === 'presto') {
+    return [{ name: connection.database, schemas: [] }]
   }
   return [{ name: connection.database, tables: [] }]
 }
@@ -2292,6 +2297,7 @@ type TestDatabaseAiTargetDialect =
   | 'mssql'
   | 'sqlserver'
   | 'clickhouse'
+  | 'presto'
 
 const stripDatabaseAiSqlTerminatorMock = (sql: string) => sql.trim().replace(/;+$/, '').trim()
 const ensureDatabaseAiSqlTerminatedMock = (sql: string) => {
@@ -2352,6 +2358,9 @@ const databaseAiTableRefMock = (
   }
   if (dialect === 'sqlite' && input.context.databaseName) {
     return `${quoteDatabaseAiIdentifierMock(input.context.databaseName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
+  }
+  if (dialect === 'presto' && input.context.databaseName && schemaName) {
+    return `${quoteDatabaseAiIdentifierMock(input.context.databaseName, dialect)}.${quoteDatabaseAiIdentifierMock(schemaName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
   }
   if (dialect === 'clickhouse' && input.context.databaseName) {
     return `${quoteDatabaseAiIdentifierMock(input.context.databaseName, dialect)}.${quoteDatabaseAiIdentifierMock(tableName, dialect)}`
