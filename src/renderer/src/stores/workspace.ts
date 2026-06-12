@@ -1486,6 +1486,12 @@ const normalizeSshAgentKeys = (source?: unknown) => {
   }
 }
 
+const sshProxyConfigSnapshotsMatch = (left: SshProxyConfig[], right: SshProxyConfig[]) =>
+  JSON.stringify(normalizeSshProxyConfigs(left).normalized) === JSON.stringify(normalizeSshProxyConfigs(right).normalized)
+
+const sshAgentKeySnapshotsMatch = (left: SshAgentKeyConfig[], right: SshAgentKeyConfig[]) =>
+  JSON.stringify(normalizeSshAgentKeys(left).normalized) === JSON.stringify(normalizeSshAgentKeys(right).normalized)
+
 const normalizeSshAgentKeychainOptions = (source?: unknown): SshAgentKeychainOption[] => {
   const rawOptions = Array.isArray(source) ? source : []
   const seenKeys = new Set<string>()
@@ -6305,6 +6311,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       const savedProxyConfigs = normalizeSshProxyConfigs(savedConfig.sshProxyConfigs).normalized
+      if (!sshProxyConfigSnapshotsMatch(savedProxyConfigs, normalizedConfigs)) {
+        setSettingsNotice(failureNotice)
+        return false
+      }
       config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         sshProxyConfigs: savedProxyConfigs
       })
@@ -6365,6 +6375,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       const savedKeys = normalizeSshAgentKeys(savedConfig.sshAgentKeys).normalized
+      if (!sshAgentKeySnapshotsMatch(savedKeys, normalizedKeys)) {
+        setSettingsNotice(failureNotice)
+        return false
+      }
       config.value = mergeGenericSavedConfig(config.value, savedConfig, {
         sshAgentKeys: savedKeys
       })

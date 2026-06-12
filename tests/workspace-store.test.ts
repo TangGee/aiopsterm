@@ -1808,6 +1808,15 @@ describe('workspace store', () => {
       expect(store.sshAgentSelectedKey).toBe('key-1')
       expect(agentKeySnapshot()).toBe(initialSnapshot)
 
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        sshAgentKeys: []
+      })
+      await expect(store.addSshAgentKey()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH Agent 密钥保存失败')
+      expect(store.sshAgentSelectedKey).toBe('key-1')
+      expect(agentKeySnapshot()).toBe(initialSnapshot)
+
       vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ssh agent save offline'))
       await expect(store.addSshAgentKey()).resolves.toBe(false)
       expect(store.settingsNotice).toBe('ssh agent save offline')
@@ -1834,6 +1843,14 @@ describe('workspace store', () => {
 
       ;(window.aiops as any).saveConfig = originalSaveConfig
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.removeSshAgentKey('key-1')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH Agent 密钥移除失败')
+      expect(agentKeySnapshot()).toBe(savedSnapshot)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        sshAgentKeys: [...store.sshAgentKeys]
+      })
       await expect(store.removeSshAgentKey('key-1')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('SSH Agent 密钥移除失败')
       expect(agentKeySnapshot()).toBe(savedSnapshot)
@@ -9200,6 +9217,15 @@ describe('workspace store', () => {
       expect(store.sshProxyAddModalOpen).toBe(true)
       expect(proxyConfigSnapshot()).toBe(initialSnapshot)
 
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        sshProxyConfigs: []
+      })
+      await expect(store.saveSshProxyForm()).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH 代理配置保存失败')
+      expect(store.sshProxyAddModalOpen).toBe(true)
+      expect(proxyConfigSnapshot()).toBe(initialSnapshot)
+
       vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ssh proxy save offline'))
       await expect(store.saveSshProxyForm()).resolves.toBe(false)
       expect(store.settingsNotice).toBe('ssh proxy save offline')
@@ -9218,6 +9244,14 @@ describe('workspace store', () => {
 
       ;(window.aiops as any).saveConfig = originalSaveConfig
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
+      await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('SSH 代理配置删除失败')
+      expect(proxyConfigSnapshot()).toBe(savedSnapshot)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        sshProxyConfigs: [draftProxy]
+      })
       await expect(store.removeSshProxyConfig('release-proxy')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('SSH 代理配置删除失败')
       expect(proxyConfigSnapshot()).toBe(savedSnapshot)
