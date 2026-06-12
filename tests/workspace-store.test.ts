@@ -1122,6 +1122,31 @@ describe('workspace store', () => {
     expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'modelName'))).toBe(true)
   })
 
+  it('keeps renderer startup defaults seedless until backend config hydrates', async () => {
+    const store = useWorkspaceStore()
+
+    expect(store.config.workspacePreferences?.expandedGroups).toEqual(['recent_connections', 'local_connections'])
+    expect(store.config.modelSettings?.options.map((option) => option.name)).toEqual(['aiopsterm-local-agent'])
+    expect(store.config.modelSettings?.options.some((option) => option.name === 'custom-maintenance')).toBe(false)
+
+    await store.hydrateConfig()
+
+    expect(store.config.workspacePreferences?.expandedGroups).toEqual([
+      'recent_connections',
+      'group-生产',
+      'group-预发',
+      'local_connections',
+      'org-1',
+      'custom-folder-a'
+    ])
+    expect(store.config.modelSettings?.options.map((option) => option.name)).toEqual([
+      'gpt-5',
+      'gpt-5-Thinking',
+      'aiopsterm-local-agent',
+      'custom-maintenance'
+    ])
+  })
+
   it('hydrates and migrates persisted External reference-style onboarding completion state', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
@@ -5766,7 +5791,7 @@ describe('workspace store', () => {
         providers: expect.objectContaining({
           openai: expect.objectContaining({ modelId: expect.any(String) })
         }),
-        options: expect.any(Array)
+        options: [expect.objectContaining({ name: 'aiopsterm-local-agent' })]
       })
     })
     expect(store.aiModelOptions).toEqual(
@@ -5784,7 +5809,7 @@ describe('workspace store', () => {
         expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true })
       ])
     )
-    expect(store.settingModelOptions.some((model) => model.name === 'custom-maintenance')).toBe(true)
+    expect(store.settingModelOptions.some((model) => model.name === 'custom-maintenance')).toBe(false)
     expect(process.env.AIOPSTERM_MODEL_SETTINGS_ENABLE_SEED).toBe('1')
     expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
     expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')

@@ -216,8 +216,8 @@ export type {
   AiSupportedImageType,
   AiTextContentPart
 } from '@shared/preload'
-import { defaultModelSettingsConfig as createDefaultModelSettingsConfig } from '@shared/modelSettingsSeed'
-import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
+import { defaultModelSettingsData } from '@shared/modelSettingsDefaults'
+import { defaultWorkspacePreferencesData } from '@shared/workspacePreferencesDefaults'
 
 type PanelDirection = 'right' | 'below'
 type CloseMode = 'current' | 'others' | 'all'
@@ -671,8 +671,8 @@ const createEmptyUserProfile = (): AiopsUserProfile => ({
   avatarUpdatedAt: ''
 })
 
-const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesConfig()
-const defaultModelSettingsUserConfig: ModelSettingsUserConfig = createDefaultModelSettingsConfig()
+const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesData()
+const defaultModelSettingsUserConfig: ModelSettingsUserConfig = defaultModelSettingsData()
 
 const defaultConfig: UserConfig = {
   language: 'zh-CN',

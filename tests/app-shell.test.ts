@@ -1779,6 +1779,8 @@ describe('AppShell', () => {
   it('does not fabricate Workspace host favorite, comment, or tunnel state before asset writes succeed', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
     const wrapper = mount(WorkspacePanel, {
       global: { plugins: [pinia] }
     })
@@ -2052,6 +2054,8 @@ describe('AppShell', () => {
     const mountWorkspace = async () => {
       const pinia = createPinia()
       setActivePinia(pinia)
+      const store = useWorkspaceStore()
+      await store.hydrateConfig()
       const wrapper = mount(WorkspacePanel, {
         global: { plugins: [pinia] }
       })
@@ -2242,11 +2246,12 @@ describe('AppShell', () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
     const wrapper = mount(WorkspacePanel, {
       global: { plugins: [pinia] }
     })
     await flushPromises()
-    const store = useWorkspaceStore()
 
     try {
       expect(window.aiops.listAssetGroups).toHaveBeenCalledWith({ assetTypes: ['person', 'switch'] })

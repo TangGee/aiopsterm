@@ -1,6 +1,4 @@
-import type { WorkspaceUserConfig } from './preload'
-
-const defaultExpandedGroups = ['recent_connections', 'local_connections']
+import { defaultWorkspacePreferencesData } from './workspacePreferencesDefaults'
 
 const developmentSeedExpandedGroups = [
   'recent_connections',
@@ -11,7 +9,7 @@ const developmentSeedExpandedGroups = [
   'custom-folder-a'
 ]
 
-const cloneWorkspacePreferences = (expandedGroups: string[]): WorkspaceUserConfig => ({
+const cloneWorkspacePreferences = (expandedGroups: string[]) => ({
   expandedGroups: [...expandedGroups],
   showIpMode: false
 })
@@ -26,7 +24,7 @@ const isExplicitWorkspacePreferencesSeedEnabled = () => {
 
 export const shouldUseWorkspacePreferencesSeedData = () => isExplicitWorkspacePreferencesSeedEnabled()
 
-export const defaultWorkspacePreferencesData = () => cloneWorkspacePreferences(defaultExpandedGroups)
+export { defaultWorkspacePreferencesData } from './workspacePreferencesDefaults'
 
 export const defaultWorkspacePreferencesSeedData = () => cloneWorkspacePreferences(developmentSeedExpandedGroups)
 
