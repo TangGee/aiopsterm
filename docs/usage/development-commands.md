@@ -22,7 +22,7 @@ npm test
 npm run audit:client-mocks
 ```
 
-`audit:client-mocks` fails if renderer source reintroduces page-level business mock files, imports from `src/renderer/src/data`, backend seed/double switches, shared seed modules, or imports from the reference-only `external-reference/` tree. It also scans source, scripts, package scripts, and build/package config for `external-reference/` reference-tree paths so the reference implementation cannot be copied, built from, or packaged by aiopsterm; explicit package exclusions such as `!external-reference/**` remain allowed. UI placeholders, `.external-reference` plugin package names, and backend/test-only seeds remain allowed behind their existing boundaries.
+`audit:client-mocks` fails if renderer source reintroduces page-level business mock files, imports from `src/renderer/src/data`, backend seed/double switches, shared seed modules, imports from the reference-only `external-reference/` tree, renderer-generated backend business id prefixes, or generic string-prefix renderer id helpers. It also scans source, scripts, package scripts, and build/package config for `external-reference/` reference-tree paths so the reference implementation cannot be copied, built from, or packaged by aiopsterm; explicit package exclusions such as `!external-reference/**` remain allowed. UI placeholders, UI-only id helpers with explicit prefix unions, `.external-reference` plugin package names, and backend/test-only seeds remain allowed behind their existing boundaries.
 
 Run the opt-in live SSH/SFTP backend verification against a real host:
 

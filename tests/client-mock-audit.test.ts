@@ -164,4 +164,28 @@ describe('client mock audit', () => {
     expect(result.output).toContain('renderer-generic-id-helper')
     expect(result.output).toContain('GenericIdHelper.vue')
   })
+
+  it('rejects untyped renderer id helpers that can bypass TypeScript prefix unions', async () => {
+    const rejectedRoot = await createAuditRepo()
+    await writeFile(
+      join(rejectedRoot, 'src', 'renderer', 'src', 'components', 'UntypedIdHelper.vue'),
+      [
+        '<script setup>',
+        "const createId = (prefix) => `${prefix}-${Math.random().toString(36).slice(2)}`",
+        "function generateRuntimeId(kind) { return `${kind}-${Date.now()}` }",
+        "const buildRuntimeId = function(type) { return `${type}-${Date.now()}` }",
+        "const createLocalId = (prefix) => prefix === 'panel' ? `panel-${Date.now()}` : ''",
+        'void createId',
+        'void generateRuntimeId',
+        'void buildRuntimeId',
+        'void createLocalId',
+        '</script>'
+      ].join('\n')
+    )
+
+    const result = await runAudit(rejectedRoot)
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('renderer-generic-id-helper')
+    expect(result.output).toContain('UntypedIdHelper.vue')
+  })
 })

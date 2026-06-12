@@ -84,9 +84,9 @@ const rendererBusinessIdLiteralPattern =
   /`(?:asset|folder|key|conv|aichat|dbai-pane|dbai-drawer|sql-exec|transfer|files-folder|snippet|snippet-group|alias|rule|k8s-run|k8s-session|k8s-tab|terminal-command)-\$\{/i
 
 const rendererGenericIdHelperPatterns = [
-  /\b(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*=\s*\(\s*(?:prefix|kind|type)\s*:\s*string\b/,
-  /\b(?:const|let|var)\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*=\s*function\s*\(\s*(?:prefix|kind|type)\s*:\s*string\b/,
-  /\bfunction\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*\(\s*(?:prefix|kind|type)\s*:\s*string\b/
+  /\b(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*=\s*\(\s*(?:prefix|kind|type)\s*(?=\)|,|=|:\s*string\b)/,
+  /\b(?:const|let|var)\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*=\s*function\s*\(\s*(?:prefix|kind|type)\s*(?=\)|,|=|:\s*string\b)/,
+  /\bfunction\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*\(\s*(?:prefix|kind|type)\s*(?=\)|,|=|:\s*string\b)/
 ]
 
 const rendererBusinessIdFailures = (filePath, content) => {
