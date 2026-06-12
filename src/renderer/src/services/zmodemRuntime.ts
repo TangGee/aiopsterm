@@ -33,8 +33,15 @@ type TerminalZmodemSessionState = {
   transferAbort?: () => void
 }
 
+type ZmodemUploadTransfer = {
+  send: (chunk: Uint8Array) => unknown | Promise<unknown>
+  end: (chunk: Uint8Array) => unknown | Promise<unknown>
+}
+
 const zmodemMagicBytes = [0x2a, 0x2a, 0x18, 0x42]
 const abortBytes = new Uint8Array([...Array(10).fill(0x18), ...Array(10).fill(0x08)])
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object'
 
 const bytesFrom = (value: unknown): Uint8Array => {
   if (value instanceof Uint8Array) return value
@@ -78,6 +85,9 @@ const isZmodemUploadFile = (value: unknown): value is ZmodemUploadFile => {
   const bytes = bytesFrom(file.data)
   return bytes.byteLength === file.size
 }
+
+const isZmodemUploadTransfer = (value: unknown): value is ZmodemUploadTransfer =>
+  isRecord(value) && typeof value.send === 'function' && typeof value.end === 'function'
 
 const validUploadPickData = (data: ZmodemUploadPickResult['data'] | undefined): data is NonNullable<ZmodemUploadPickResult['data']> =>
   !!data &&
@@ -167,16 +177,18 @@ export const createTerminalZmodemRuntime = (options: TerminalZmodemRuntimeOption
         mtime: new Date(file.lastModified || Date.now()),
         mode: 0o100644
       })
-      if (!transfer) continue
+      if (!isZmodemUploadTransfer(transfer)) {
+        throw new Error('ZMODEM upload offer was not accepted by the remote session.')
+      }
       const chunkSize = 128 * 1024
       for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
         const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + chunkSize))
-        transfer.send?.(chunk)
+        await transfer.send(chunk)
         transferred += chunk.byteLength
         update(sessionId, progress('upload', name, transferred, total, 'running', 'Uploading'))
         await new Promise((resolve) => window.setTimeout(resolve, 0))
       }
-      await transfer.end?.(new Uint8Array())
+      await transfer.end(new Uint8Array())
     }
     update(sessionId, progress('upload', files.at(-1)?.name || 'zmodem-upload', total, total, 'success', 'Upload complete'))
   }

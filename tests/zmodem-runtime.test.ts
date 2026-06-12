@@ -184,6 +184,37 @@ describe('terminal zmodem runtime boundary', () => {
     })
   })
 
+  it('fails upload when the remote session does not accept the offered file', async () => {
+    const sendSession = createSendSession({
+      send_offer: vi.fn(async () => undefined)
+    })
+    const { notices, progressEvents, runtime } = createRuntimeHarness({
+      pickZmodemUploadFiles: vi.fn(async () => ({
+        ok: true,
+        data: {
+          files: [{ name: 'upload.bin', size: 3, lastModified: 1717200000000, data: [1, 2, 3] }]
+        }
+      }))
+    })
+
+    await detectSession(runtime, sendSession)
+
+    expect(sendSession.send_offer).toHaveBeenCalledWith({
+      name: 'upload.bin',
+      size: 3,
+      mtime: new Date(1717200000000),
+      mode: 0o100644
+    })
+    expect(sendSession.close).toHaveBeenCalledTimes(1)
+    expect(notices).toContain('ZMODEM upload offer was not accepted by the remote session.')
+    expect(progressEvents.at(-1)?.progress).toMatchObject({
+      type: 'upload',
+      status: 'error',
+      message: 'ZMODEM upload offer was not accepted by the remote session.'
+    })
+    expect(progressEvents.some(({ progress }) => progress.status === 'success')).toBe(false)
+  })
+
   it('rejects malformed successful upload picker results before offering files', async () => {
     const sendSession = createSendSession()
     const { notices, progressEvents, runtime } = createRuntimeHarness({
