@@ -1511,6 +1511,12 @@ const normalizeSshAgentKeychainOptions = (source?: unknown): SshAgentKeychainOpt
   return normalized
 }
 
+const readSshAgentKeychainOptionsSnapshot = (source: unknown): SshAgentKeychainOption[] | null => {
+  if (!Array.isArray(source)) return null
+  const normalized = normalizeSshAgentKeychainOptions(source)
+  return normalized.length === source.length ? normalized : null
+}
+
 const booleanFromExtensionStatus = (value: unknown, fallback: boolean) => {
   if (typeof value === 'boolean') return value
   if (value === 1) return true
@@ -4692,16 +4698,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const onboardingActiveStep = computed(() => onboardingActiveSteps.value[onboardingActiveStepIndex.value] || null)
 
   const refreshSshAgentKeychainOptions = async () => {
-    if (!window.aiops?.listSshAgentKeychainOptions) {
-      sshAgentKeyChainOptions.value = []
+    const listSshAgentKeychainOptionsBridge = window.aiops?.listSshAgentKeychainOptions
+    if (typeof listSshAgentKeychainOptionsBridge !== 'function') {
+      setSettingsNotice('SSH Agent 密钥列表服务不可用')
       return false
     }
     try {
-      const options = await window.aiops.listSshAgentKeychainOptions()
-      sshAgentKeyChainOptions.value = normalizeSshAgentKeychainOptions(options)
+      const options = readSshAgentKeychainOptionsSnapshot(await listSshAgentKeychainOptionsBridge())
+      if (!options) {
+        setSettingsNotice('SSH Agent 密钥列表返回数据无效')
+        return false
+      }
+      sshAgentKeyChainOptions.value = options
       return true
     } catch {
-      sshAgentKeyChainOptions.value = []
       setSettingsNotice('SSH Agent 密钥列表加载失败')
       return false
     }

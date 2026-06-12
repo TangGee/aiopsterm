@@ -1774,14 +1774,50 @@ describe('workspace store', () => {
 
   it('does not fall back to renderer SSH Agent keychain fixtures when the bridge is unavailable', async () => {
     const store = useWorkspaceStore()
+    await store.refreshSshAgentKeychainOptions()
+    const confirmedOptions = store.sshAgentKeyChainOptions.map((option) => ({ ...option }))
     const originalListSshAgentKeychainOptions = window.aiops.listSshAgentKeychainOptions
     try {
       ;(window.aiops as any).listSshAgentKeychainOptions = undefined
       expect(await store.refreshSshAgentKeychainOptions()).toBe(false)
-      expect(store.sshAgentKeyChainOptions).toEqual([])
+      expect(store.settingsNotice).toBe('SSH Agent 密钥列表服务不可用')
+      expect(store.sshAgentKeyChainOptions).toEqual(confirmedOptions)
     } finally {
       ;(window.aiops as any).listSshAgentKeychainOptions = originalListSshAgentKeychainOptions
     }
+  })
+
+  it('preserves confirmed SSH Agent keychain options when backend refresh fails closed', async () => {
+    const store = useWorkspaceStore()
+    await expect(store.refreshSshAgentKeychainOptions()).resolves.toBe(true)
+    const confirmedOptions = store.sshAgentKeyChainOptions.map((option) => ({ ...option }))
+
+    vi.mocked(window.aiops.listSshAgentKeychainOptions).mockRejectedValueOnce(new Error('keychain backend offline'))
+    await expect(store.refreshSshAgentKeychainOptions()).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('SSH Agent 密钥列表加载失败')
+    expect(store.sshAgentKeyChainOptions).toEqual(confirmedOptions)
+
+    vi.mocked(window.aiops.listSshAgentKeychainOptions).mockResolvedValueOnce({ options: confirmedOptions } as any)
+    await expect(store.refreshSshAgentKeychainOptions()).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('SSH Agent 密钥列表返回数据无效')
+    expect(store.sshAgentKeyChainOptions).toEqual(confirmedOptions)
+
+    vi.mocked(window.aiops.listSshAgentKeychainOptions).mockResolvedValueOnce([
+      confirmedOptions[0],
+      {
+        key: 'broken-key',
+        label: 'broken-key',
+        fingerprint: '',
+        keyType: 'RSA'
+      }
+    ] as any)
+    await expect(store.refreshSshAgentKeychainOptions()).resolves.toBe(false)
+    expect(store.settingsNotice).toBe('SSH Agent 密钥列表返回数据无效')
+    expect(store.sshAgentKeyChainOptions).toEqual(confirmedOptions)
+
+    vi.mocked(window.aiops.listSshAgentKeychainOptions).mockResolvedValueOnce([])
+    await expect(store.refreshSshAgentKeychainOptions()).resolves.toBe(true)
+    expect(store.sshAgentKeyChainOptions).toEqual([])
   })
 
   it('does not fabricate SSH Agent key writes when the config bridge is unavailable or fails', async () => {
