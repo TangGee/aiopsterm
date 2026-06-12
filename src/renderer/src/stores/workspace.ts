@@ -4327,9 +4327,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const currentChatHistoryMessages = () => chatMessages.value.map(chatMessageToHistoryMessage).filter(Boolean) as AiChatHistoryMessage[]
 
   const restoreChatMessagesFromBackend = async (id: string) => {
-    if (!window.aiops?.restoreChatConversation) return false
-    const result = await window.aiops.restoreChatConversation(id)
-    if (!result?.ok || !isAiChatConversationRestoreData(result.data)) return false
+    if (!window.aiops?.restoreChatConversation) {
+      setTopNotice('会话历史加载服务不可用')
+      return false
+    }
+    let result
+    try {
+      result = await window.aiops.restoreChatConversation(id)
+    } catch {
+      setTopNotice('会话历史加载失败')
+      return false
+    }
+    if (!result?.ok) {
+      setTopNotice(result?.errorMessage || '会话历史加载失败')
+      return false
+    }
+    if (!isAiChatConversationRestoreData(result.data)) {
+      setTopNotice(malformedAiBackendResultMessage)
+      return false
+    }
     const data = result.data
     const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
     const nextConversation = cloneConversationRecord(data.conversation)
@@ -4343,9 +4359,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean } = {}) => {
-    if (!window.aiops?.listChatConversations) return false
-    const result = await window.aiops.listChatConversations()
-    if (!result?.ok || !isAiChatHistorySnapshotData(result.data)) return false
+    if (!window.aiops?.listChatConversations) {
+      setTopNotice('会话历史加载服务不可用')
+      return false
+    }
+    let result
+    try {
+      result = await window.aiops.listChatConversations()
+    } catch {
+      setTopNotice('会话历史加载失败')
+      return false
+    }
+    if (!result?.ok) {
+      setTopNotice(result?.errorMessage || '会话历史加载失败')
+      return false
+    }
+    if (!isAiChatHistorySnapshotData(result.data)) {
+      setTopNotice(malformedAiBackendResultMessage)
+      return false
+    }
     applyChatHistorySnapshot(result.data)
     if (options.restoreIfEmpty !== false && chatMessages.value.length === 0 && selectedConversationId.value) {
       await restoreChatMessagesFromBackend(selectedConversationId.value)
@@ -4354,9 +4386,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = {}) => {
-    if (!window.aiops?.listAiContextCatalog) return false
-    const result = await window.aiops.listAiContextCatalog()
-    if (!result?.ok) return false
+    if (!window.aiops?.listAiContextCatalog) {
+      setTopNotice('AI 上下文加载服务不可用')
+      return false
+    }
+    let result
+    try {
+      result = await window.aiops.listAiContextCatalog()
+    } catch {
+      setTopNotice('AI 上下文加载失败')
+      return false
+    }
+    if (!result?.ok) {
+      setTopNotice(result?.errorMessage || 'AI 上下文加载失败')
+      return false
+    }
     if (!isAiContextCatalogData(result.data)) {
       setTopNotice(malformedAiBackendResultMessage)
       return false
@@ -4377,12 +4421,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const refreshAiCommandCatalog = async () => {
     if (!window.aiops?.listAiCommandCatalog) {
-      aiCommandOptions.value = []
+      setTopNotice('AI 命令加载服务不可用')
       return false
     }
-    const result = await window.aiops.listAiCommandCatalog()
+    let result
+    try {
+      result = await window.aiops.listAiCommandCatalog()
+    } catch {
+      setTopNotice('AI 命令加载失败')
+      return false
+    }
     if (!result?.ok) {
-      aiCommandOptions.value = []
+      setTopNotice(result?.errorMessage || 'AI 命令加载失败')
       return false
     }
     if (!isAiCommandCatalogData(result.data)) {
@@ -4399,12 +4449,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const refreshAiTodoSnapshot = async () => {
     if (!window.aiops?.listAiTodoSnapshot) {
-      todoItems.value = []
+      setTopNotice('AI Todo 加载服务不可用')
       return false
     }
-    const result = await window.aiops.listAiTodoSnapshot()
+    let result
+    try {
+      result = await window.aiops.listAiTodoSnapshot()
+    } catch {
+      setTopNotice('AI Todo 加载失败')
+      return false
+    }
     if (!result?.ok) {
-      todoItems.value = []
+      setTopNotice(result?.errorMessage || 'AI Todo 加载失败')
       return false
     }
     if (!isAiTodoSnapshotData(result.data)) {

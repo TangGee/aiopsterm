@@ -4839,6 +4839,7 @@ describe('workspace store', () => {
     await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(false)
     expect(JSON.stringify(store.conversations)).toBe(conversationsBeforeList)
     expect(store.selectedConversationId).toBe(selectedBeforeList)
+    expect(store.topNotice).toBe('AI 服务返回数据无效')
 
     vi.mocked(window.aiops.restoreChatConversation).mockResolvedValueOnce({
       ok: true,
@@ -4857,6 +4858,7 @@ describe('workspace store', () => {
     await expect(store.restoreConversation('conv-2')).resolves.toBe(false)
     expect(JSON.stringify(store.conversations)).toBe(conversationsBeforeList)
     expect(store.chatMessages).toEqual([])
+    expect(store.topNotice).toBe('AI 服务返回数据无效')
 
     vi.mocked(window.aiops.createChatConversation).mockResolvedValueOnce({
       ok: true,
@@ -6056,6 +6058,9 @@ describe('workspace store', () => {
     const originalListAiCommandCatalog = window.aiops.listAiCommandCatalog
 
     try {
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(true)
+      const loadedSnapshot = JSON.stringify(store.aiCommandOptions)
+
       store.aiCommandOptions = [
         {
           id: 'commands/existing.md',
@@ -6068,24 +6073,36 @@ describe('workspace store', () => {
 
       ;(window.aiops as any).listAiCommandCatalog = undefined
       await expect(store.refreshAiCommandCatalog()).resolves.toBe(false)
-      expect(store.aiCommandOptions).toEqual([])
-
-      store.aiCommandOptions = [
+      expect(store.topNotice).toBe('AI 命令加载服务不可用')
+      expect(store.aiCommandOptions).toEqual([
         {
-          id: 'commands/stale.md',
-          label: '/stale',
-          name: 'stale',
-          path: 'commands/stale.md',
-          command: '/stale'
+          id: 'commands/existing.md',
+          label: '/existing',
+          name: 'existing',
+          path: 'commands/existing.md',
+          command: '/existing'
         }
-      ]
+      ])
+
+      ;(window.aiops as any).listAiCommandCatalog = originalListAiCommandCatalog
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(true)
+      expect(JSON.stringify(store.aiCommandOptions)).toBe(loadedSnapshot)
+
       ;(window.aiops as any).listAiCommandCatalog = vi.fn(async () => ({
         ok: false,
         errorCode: 'AI_COMMAND_CATALOG_ERROR',
         errorMessage: 'Command backend unavailable.'
       }))
       await expect(store.refreshAiCommandCatalog()).resolves.toBe(false)
-      expect(store.aiCommandOptions).toEqual([])
+      expect(store.topNotice).toBe('Command backend unavailable.')
+      expect(JSON.stringify(store.aiCommandOptions)).toBe(loadedSnapshot)
+
+      ;(window.aiops as any).listAiCommandCatalog = vi.fn(async () => {
+        throw new Error('command backend rejected')
+      })
+      await expect(store.refreshAiCommandCatalog()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 命令加载失败')
+      expect(JSON.stringify(store.aiCommandOptions)).toBe(loadedSnapshot)
     } finally {
       ;(window.aiops as any).listAiCommandCatalog = originalListAiCommandCatalog
     }
@@ -6114,10 +6131,15 @@ describe('workspace store', () => {
     const originalListAiTodoSnapshot = window.aiops.listAiTodoSnapshot
 
     try {
+      await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
+      const loadedSnapshot = JSON.stringify(store.todoItems)
+      const loadedProgress = { ...store.todoProgress }
+
       ;(window.aiops as any).listAiTodoSnapshot = undefined
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
-      expect(store.todoItems).toEqual([])
-      expect(store.todoProgress).toEqual({ total: 0, completed: 0, inProgress: 0, pending: 0, percent: 0 })
+      expect(store.topNotice).toBe('AI Todo 加载服务不可用')
+      expect(JSON.stringify(store.todoItems)).toBe(loadedSnapshot)
+      expect(store.todoProgress).toEqual(loadedProgress)
 
       ;(window.aiops as any).listAiTodoSnapshot = vi.fn(async () => ({
         ok: false,
@@ -6125,8 +6147,17 @@ describe('workspace store', () => {
         errorMessage: 'Todo backend unavailable.'
       }))
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
-      expect(store.todoItems).toEqual([])
-      expect(store.todoProgress).toEqual({ total: 0, completed: 0, inProgress: 0, pending: 0, percent: 0 })
+      expect(store.topNotice).toBe('Todo backend unavailable.')
+      expect(JSON.stringify(store.todoItems)).toBe(loadedSnapshot)
+      expect(store.todoProgress).toEqual(loadedProgress)
+
+      ;(window.aiops as any).listAiTodoSnapshot = vi.fn(async () => {
+        throw new Error('todo backend rejected')
+      })
+      await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI Todo 加载失败')
+      expect(JSON.stringify(store.todoItems)).toBe(loadedSnapshot)
+      expect(store.todoProgress).toEqual(loadedProgress)
     } finally {
       ;(window.aiops as any).listAiTodoSnapshot = originalListAiTodoSnapshot
     }
@@ -6135,20 +6166,100 @@ describe('workspace store', () => {
   it('fails closed on malformed successful AI catalog and todo backend results', async () => {
     const store = useWorkspaceStore()
     const originalAiops = {
+      listChatConversations: window.aiops.listChatConversations,
+      restoreChatConversation: window.aiops.restoreChatConversation,
       listAiContextCatalog: window.aiops.listAiContextCatalog,
       listAiCommandCatalog: window.aiops.listAiCommandCatalog,
       listAiTodoSnapshot: window.aiops.listAiTodoSnapshot
     }
 
     try {
+      await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(true)
       await expect(store.refreshAiContextCatalog()).resolves.toBe(true)
       await expect(store.refreshAiCommandCatalog()).resolves.toBe(true)
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
+      const conversationsBefore = JSON.stringify(store.conversations)
+      const selectedConversationBefore = store.selectedConversationId
       const contextBefore = JSON.stringify(store.aiContextCatalog)
       const selectedContextsBefore = JSON.stringify(store.selectedContexts)
       const commandsBefore = JSON.stringify(store.aiCommandOptions)
       const todosBefore = JSON.stringify(store.todoItems)
 
+      ;(window.aiops as any).listChatConversations = undefined
+      await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(false)
+      expect(store.topNotice).toBe('会话历史加载服务不可用')
+      expect(JSON.stringify(store.conversations)).toBe(conversationsBefore)
+      expect(store.selectedConversationId).toBe(selectedConversationBefore)
+
+      ;(window.aiops as any).listChatConversations = vi.fn(async () => ({
+        ok: false,
+        errorCode: 'CHAT_HISTORY_LIST_FAILED',
+        errorMessage: 'history list offline'
+      }))
+      await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(false)
+      expect(store.topNotice).toBe('history list offline')
+      expect(JSON.stringify(store.conversations)).toBe(conversationsBefore)
+      expect(store.selectedConversationId).toBe(selectedConversationBefore)
+
+      ;(window.aiops as any).listChatConversations = vi.fn(async () => {
+        throw new Error('history list rejected')
+      })
+      await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(false)
+      expect(store.topNotice).toBe('会话历史加载失败')
+      expect(JSON.stringify(store.conversations)).toBe(conversationsBefore)
+      expect(store.selectedConversationId).toBe(selectedConversationBefore)
+
+      ;(window.aiops as any).listChatConversations = originalAiops.listChatConversations
+      ;(window.aiops as any).restoreChatConversation = undefined
+      await expect(store.restoreConversation('conv-2')).resolves.toBe(false)
+      expect(store.topNotice).toBe('会话历史加载服务不可用')
+      expect(JSON.stringify(store.conversations)).toBe(conversationsBefore)
+      expect(store.selectedConversationId).toBe(selectedConversationBefore)
+
+      ;(window.aiops as any).restoreChatConversation = vi.fn(async () => ({
+        ok: false,
+        errorCode: 'CHAT_HISTORY_RESTORE_FAILED',
+        errorMessage: 'history restore offline'
+      }))
+      await expect(store.restoreConversation('conv-2')).resolves.toBe(false)
+      expect(store.topNotice).toBe('history restore offline')
+      expect(JSON.stringify(store.conversations)).toBe(conversationsBefore)
+      expect(store.selectedConversationId).toBe(selectedConversationBefore)
+
+      ;(window.aiops as any).restoreChatConversation = vi.fn(async () => {
+        throw new Error('history restore rejected')
+      })
+      await expect(store.restoreConversation('conv-2')).resolves.toBe(false)
+      expect(store.topNotice).toBe('会话历史加载失败')
+      expect(JSON.stringify(store.conversations)).toBe(conversationsBefore)
+      expect(store.selectedConversationId).toBe(selectedConversationBefore)
+
+      ;(window.aiops as any).restoreChatConversation = originalAiops.restoreChatConversation
+      ;(window.aiops as any).listAiContextCatalog = undefined
+      await expect(store.refreshAiContextCatalog()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 上下文加载服务不可用')
+      expect(JSON.stringify(store.aiContextCatalog)).toBe(contextBefore)
+      expect(JSON.stringify(store.selectedContexts)).toBe(selectedContextsBefore)
+
+      ;(window.aiops as any).listAiContextCatalog = vi.fn(async () => ({
+        ok: false,
+        errorCode: 'AI_CONTEXT_CATALOG_FAILED',
+        errorMessage: 'context catalog offline'
+      }))
+      await expect(store.refreshAiContextCatalog()).resolves.toBe(false)
+      expect(store.topNotice).toBe('context catalog offline')
+      expect(JSON.stringify(store.aiContextCatalog)).toBe(contextBefore)
+      expect(JSON.stringify(store.selectedContexts)).toBe(selectedContextsBefore)
+
+      ;(window.aiops as any).listAiContextCatalog = vi.fn(async () => {
+        throw new Error('context catalog rejected')
+      })
+      await expect(store.refreshAiContextCatalog()).resolves.toBe(false)
+      expect(store.topNotice).toBe('AI 上下文加载失败')
+      expect(JSON.stringify(store.aiContextCatalog)).toBe(contextBefore)
+      expect(JSON.stringify(store.selectedContexts)).toBe(selectedContextsBefore)
+
+      ;(window.aiops as any).listAiContextCatalog = originalAiops.listAiContextCatalog
       vi.mocked(window.aiops.listAiContextCatalog!).mockResolvedValueOnce({
         ok: true,
         data: {
