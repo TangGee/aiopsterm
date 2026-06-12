@@ -89,6 +89,12 @@ const rendererGenericIdHelperPatterns = [
   /\bfunction\s+(?:create|make|build|generate)[A-Za-z0-9_]*Id\s*\(\s*(?:prefix|kind|type)\s*(?=\)|,|=|:\s*string\b)/
 ]
 
+const rendererConfigBusinessFieldPattern =
+  /\b(?:asset_type|group_uuid|snippet_content|host|hostname|ip|username|password|privateKey|passphrase|credential|secret|connectionId|conversationId|dbType|databaseName|catalogName|schemaName|kubeconfig(?:Path|Content)?|contextName|serverUrl)\s*:/
+
+const rendererConfigFixtureExportPattern =
+  /\bexport\s+(?:const|let|var)\s+(?=[A-Za-z0-9_]*(?:default|mock|fixture|fake|dummy|seed|sample|demo))(?=[A-Za-z0-9_]*(?:Asset|Assets|Host|Hosts|Connection|Connections|Conversation|Conversations|Chat|Chats|Command|Commands|Snippet|Snippets|Alias|Aliases|Rule|Rules|Skill|Skills|Mcp|Database|Kubernetes|Knowledge|File|Files|User|Credential|Secret))[A-Za-z0-9_]*\s*=/i
+
 const rendererBusinessIdFailures = (filePath, content) => {
   const failures = []
   content.split(/\r?\n/).forEach((line, index) => {
@@ -105,6 +111,29 @@ const rendererBusinessIdFailures = (filePath, content) => {
         filePath,
         rule: 'renderer-generic-id-helper',
         message: 'Renderer id helpers must use explicit UI-only prefix unions instead of accepting arbitrary string prefixes.',
+        lineNumber: index + 1
+      })
+    }
+  })
+  return failures
+}
+
+const rendererConfigStaticMetadataFailures = (filePath, content) => {
+  const failures = []
+  content.split(/\r?\n/).forEach((line, index) => {
+    if (rendererConfigBusinessFieldPattern.test(line)) {
+      failures.push({
+        filePath,
+        rule: 'renderer-config-business-field',
+        message: 'Renderer config modules must stay limited to static UI metadata and must not define business fixture fields.',
+        lineNumber: index + 1
+      })
+    }
+    if (rendererConfigFixtureExportPattern.test(line)) {
+      failures.push({
+        filePath,
+        rule: 'renderer-config-fixture-export',
+        message: 'Renderer config modules must not export business fixture collections; expose runtime data through preload/main/backend boundaries.',
         lineNumber: index + 1
       })
     }
@@ -145,6 +174,7 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
   const repoRoot = resolve(root)
   const rendererRoot = join(repoRoot, 'src', 'renderer', 'src')
   const rendererDataRoot = join(rendererRoot, 'data')
+  const rendererConfigRoot = join(rendererRoot, 'config')
   const sourceRoots = [join(repoRoot, 'src'), join(repoRoot, 'scripts')]
   const failures = []
 
@@ -172,6 +202,9 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
       }
     })
     failures.push(...rendererBusinessIdFailures(filePath, content))
+    if (isUnder(filePath, rendererConfigRoot)) {
+      failures.push(...rendererConfigStaticMetadataFailures(filePath, content))
+    }
     if (rel.includes('/__fixtures__/') || rel.includes('/fixtures/')) {
       failures.push({
         filePath,

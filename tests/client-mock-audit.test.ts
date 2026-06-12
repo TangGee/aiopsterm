@@ -20,6 +20,7 @@ const runAudit = async (root: string) => {
 const createAuditRepo = async () => {
   const root = await mkdtemp(join(tmpdir(), 'aiopsterm-client-mock-audit-'))
   await mkdir(join(root, 'src', 'renderer', 'src', 'components'), { recursive: true })
+  await mkdir(join(root, 'src', 'renderer', 'src', 'config'), { recursive: true })
   await mkdir(join(root, 'src', 'renderer', 'src', 'data'), { recursive: true })
   await mkdir(join(root, 'src', 'main'), { recursive: true })
   await mkdir(join(root, 'scripts'), { recursive: true })
@@ -187,5 +188,44 @@ describe('client mock audit', () => {
     expect(result.ok).toBe(false)
     expect(result.output).toContain('renderer-generic-id-helper')
     expect(result.output).toContain('UntypedIdHelper.vue')
+  })
+
+  it('keeps renderer config limited to static UI metadata instead of hidden business fixtures', async () => {
+    const allowedRoot = await createAuditRepo()
+    await writeFile(
+      join(allowedRoot, 'src', 'renderer', 'src', 'config', 'navigation.ts'),
+      [
+        "export const menuItems = [",
+        "  { key: 'workspace', label: '工作区', icon: Server, position: 'main' },",
+        "  { id: 'terminal-tab', targetId: 'settings-terminal-tab', title: '终端设置', description: '打开终端设置。' }",
+        "]"
+      ].join('\n')
+    )
+    await expect(runAudit(allowedRoot)).resolves.toMatchObject({ ok: true, output: expect.stringContaining('client-mock-audit-ok') })
+
+    const rejectedRoot = await createAuditRepo()
+    await writeFile(
+      join(rejectedRoot, 'src', 'renderer', 'src', 'config', 'assets.ts'),
+      [
+        'export const defaultAssetHosts = [',
+        "  { host: '10.0.0.8', ip: '10.0.0.8', username: 'root', password: 'secret', asset_type: 'person' }",
+        ']'
+      ].join('\n')
+    )
+    await writeFile(
+      join(rejectedRoot, 'src', 'renderer', 'src', 'config', 'settings.ts'),
+      [
+        'export const sampleDatabaseConnections = [',
+        "  { connectionId: 'conn-1', dbType: 'mysql', databaseName: 'ops' }",
+        ']'
+      ].join('\n')
+    )
+
+    const result = await runAudit(rejectedRoot)
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('renderer-config-business-field')
+    expect(result.output).toContain('renderer-config-fixture-export')
+    expect(result.output).toContain('src/renderer/src/config/assets.ts')
+    expect(result.output).toContain('src/renderer/src/config/settings.ts')
   })
 })
