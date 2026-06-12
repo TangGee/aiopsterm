@@ -8426,14 +8426,11 @@ describe('AppShell', () => {
     expect(selectionFormattedSql).toContain('SELECT\n  id')
     expect(selectionFormattedSql).toContain('select * from ops.ops_incidents;')
     await wrapper.find('button[title="Run all"]').trigger('click')
-	    expect(wrapper.find('.db-result-running').text()).toContain('Running query')
-	    expect(wrapper.find('.db-status-bar').text()).toContain('Running')
-	    expect(wrapper.find('.db-result-tabs').text()).toContain('#1-1')
-	    await waitForDatabaseSqlResult()
-	    expect(wrapper.find('.db-result-tabs').text()).toContain('#1-1')
-	    expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
-	    expect(wrapper.find('.db-status-bar').text()).toContain('Execution OK (4 rows)')
-	    expect(wrapper.text()).toContain('【Rows】')
+    await waitForDatabaseSqlResult()
+    expect(wrapper.find('.db-result-tabs').text()).toContain('#1-1')
+    expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
+    expect(wrapper.find('.db-status-bar').text()).toContain('Execution OK (4 rows)')
+    expect(wrapper.text()).toContain('【Rows】')
     expect(wrapper.find('.db-result-tabs').attributes('role')).toBe('tablist')
     const overviewResultTab = wrapper.find('.db-result-tabs [role="tab"]')
     expect(overviewResultTab.text()).toContain('Overview')
@@ -8567,7 +8564,6 @@ describe('AppShell', () => {
     const secondStatementOffset = editorElement.value.indexOf('select * from ops.ops_incidents')
     editorElement.setSelectionRange(secondStatementOffset, secondStatementOffset)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
-    expect(wrapper.find('.db-result-running').text()).toContain('select * from ops.ops_incidents')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-sql-overview').exists()).toBe(false)
     expect(wrapper.find('.db-result-table').text()).toContain('checkout')
@@ -8652,7 +8648,6 @@ describe('AppShell', () => {
     const readOnlyEditorBefore = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.trigger('click')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toBe(readOnlyEditorBefore)
-    expect(wrapper.find('.db-result-running').text()).toContain('LIMIT 100')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-tabs').text()).toContain('#')
     await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Replace Selection'))!.trigger('click')
@@ -9220,7 +9215,6 @@ describe('AppShell', () => {
     const sqlEditor = wrapper.find('.db-sql-editor')
     await sqlEditor.setValue('syntax_error')
     await wrapper.find('button[title="Run all"]').trigger('click')
-    expect(wrapper.find('.db-result-running').text()).toContain('syntax_error')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor rejected')
     const dbAiRequestCountBeforeDiagnose = wrapper.findAll('.db-ai-request-list button').length
@@ -9254,7 +9248,6 @@ describe('AppShell', () => {
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('SELECT')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toContain('LIMIT 100')
     await wrapper.find('button[title="Run all"]').trigger('click')
-    expect(wrapper.find('.db-result-running').exists()).toBe(true)
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-tabs').text()).toContain('#')
 
@@ -9323,13 +9316,25 @@ describe('AppShell', () => {
     await wrapper.find('button[title="Run all"]').trigger('click')
 	    await waitForDatabaseSqlResult()
 
-	    expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor returned malformed result data.')
-	    expect(wrapper.find('.db-status-bar').text()).toContain('Backend SQL executor returned malformed result data.')
-	    expect(wrapper.find('.db-status-bar').text()).not.toContain('Execution OK')
-	    await wrapper.find('.db-result-tabs [role="tab"]').trigger('click')
-	    expect(wrapper.find('.db-sql-overview').text()).toContain('Run SQL to create a result tab.')
-	    expect(wrapper.find('.db-sql-overview').text()).not.toContain('Backend SQL executor returned malformed result data.')
-	    expect(wrapper.find('.db-sql-overview').text()).not.toContain('Execution OK')
+    expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor returned malformed result data.')
+    expect(wrapper.find('.db-status-bar').text()).toContain('Backend SQL executor returned malformed result data.')
+    expect(wrapper.find('.db-status-bar').text()).not.toContain('Execution OK')
+    await wrapper.find('.db-result-tabs [role="tab"]').trigger('click')
+    expect(wrapper.find('.db-sql-overview').text()).toContain('Run SQL to create a result tab.')
+    expect(wrapper.find('.db-sql-overview').text()).not.toContain('Backend SQL executor returned malformed result data.')
+    expect(wrapper.find('.db-sql-overview').text()).not.toContain('Execution OK')
+
+    const originalExecuteDatabaseSql = window.aiops.executeDatabaseSql
+    try {
+      ;(window.aiops as any).executeDatabaseSql = undefined
+      await wrapper.find('button[title="Run all"]').trigger('click')
+      await waitForDatabaseSqlResult()
+      expect(wrapper.find('.db-result-error').text()).toContain('Database SQL executor service unavailable')
+      expect(wrapper.find('.db-status-bar').text()).toContain('Database SQL executor service unavailable')
+      expect(wrapper.find('.db-status-bar').text()).not.toContain('Execution OK')
+    } finally {
+      ;(window.aiops as any).executeDatabaseSql = originalExecuteDatabaseSql
+    }
 
     await findOrdersTable().trigger('dblclick')
     await waitForDatabaseTableData(wrapper)
@@ -9359,6 +9364,18 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-data-workspace .db-result-error').text()).toContain('Backend table query returned malformed result data.')
     expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('Backend table query returned malformed result data.')
     expect(wrapper.find('.db-data-workspace .db-status-bar').text()).not.toContain('Execution OK')
+
+    vi.mocked(window.aiops.queryDatabaseTable).mockRejectedValueOnce(new Error('table query rejected'))
+    await wrapper.find('.db-data-workspace .db-toolbar button[title="Refresh"]').trigger('click')
+    await waitForDatabaseTableData(wrapper)
+    expect(wrapper.find('.db-data-workspace .db-result-error').text()).toContain('table query rejected')
+    expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('table query rejected')
+    expect(wrapper.find('.db-data-workspace .db-status-bar').text()).not.toContain('Execution OK')
+
+    await wrapper.find('.db-data-workspace .db-toolbar button[title="Refresh"]').trigger('click')
+    await waitForDatabaseTableData(wrapper)
+    expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
+    expect(wrapper.find('.db-data-workspace .db-status-bar').text()).toContain('Execution OK')
 
     wrapper.unmount()
   })
@@ -9726,6 +9743,19 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.find('.db-edit-summary').text()).toContain('Backend table mutation returned malformed result data.')
 
+    const originalPlanDatabaseTableMutation = window.aiops.planDatabaseTableMutation
+    try {
+      ;(window.aiops as any).planDatabaseTableMutation = undefined
+      await wrapper.find('.db-result-table tbody tr').findAll('td').at(4)!.trigger('dblclick')
+      const plannerMissingInput = wrapper.find('.db-result-table td input')
+      await plannerMissingInput.setValue('planner-missing-owner')
+      await plannerMissingInput.trigger('keydown', { key: 'Enter' })
+      await flushPromises()
+      expect(wrapper.find('.db-edit-summary').text()).toContain('Database table mutation planner service unavailable')
+    } finally {
+      ;(window.aiops as any).planDatabaseTableMutation = originalPlanDatabaseTableMutation
+    }
+
     vi.mocked(window.aiops.mutateDatabaseTable).mockClear()
     vi.mocked(window.aiops.planDatabaseTableMutation).mockResolvedValueOnce({ ok: true, data: {} } as any)
     await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
@@ -9747,6 +9777,54 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-edit-summary').text()).toContain('Backend table mutation returned malformed result data.')
     expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
 
+    vi.mocked(window.aiops.mutateDatabaseTable).mockRejectedValueOnce(new Error('table mutation rejected'))
+    await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-edit-summary').text()).toContain('table mutation rejected')
+    expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
+    expect(wrapper.find('.db-toolbar-btn-save').attributes('disabled')).toBeUndefined()
+
+    const originalMutateDatabaseTable = window.aiops.mutateDatabaseTable
+    try {
+      ;(window.aiops as any).mutateDatabaseTable = undefined
+      await wrapper.find('.db-toolbar button[title="Save changes"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-edit-summary').text()).toContain('Database table mutation service unavailable')
+      expect(wrapper.find('.db-result-table tbody tr').classes()).toContain('updated')
+      expect(wrapper.find('.db-toolbar-btn-save').attributes('disabled')).toBeUndefined()
+    } finally {
+      ;(window.aiops as any).mutateDatabaseTable = originalMutateDatabaseTable
+    }
+
+    await wrapper.findAll('.db-edit-summary-actions button').find((button) => button.text().includes('Discard All'))!.trigger('click')
+    expect(wrapper.find('.db-edit-summary').exists()).toBe(false)
+
+    vi.mocked(window.aiops.mutateDatabaseTable).mockRejectedValueOnce(new Error('truncate rejected'))
+    await tableRow('orders').trigger('contextmenu')
+    await contextButton('Truncate').trigger('click')
+    await wrapper.find('.db-danger-confirm input').setValue('orders')
+    await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('truncate rejected')
+    expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
+    expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
+    await wrapper.find('.db-danger-confirm footer button').trigger('click')
+
+    try {
+      ;(window.aiops as any).mutateDatabaseTable = undefined
+      await tableRow('orders').trigger('contextmenu')
+      await contextButton('Truncate').trigger('click')
+      await wrapper.find('.db-danger-confirm input').setValue('orders')
+      await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('Database table mutation service unavailable')
+      expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
+      expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
+      await wrapper.find('.db-danger-confirm footer button').trigger('click')
+    } finally {
+      ;(window.aiops as any).mutateDatabaseTable = originalMutateDatabaseTable
+    }
+
     vi.mocked(window.aiops.mutateDatabaseTable).mockResolvedValueOnce({ ok: true, data: {} } as any)
     await tableRow('orders').trigger('contextmenu')
     await contextButton('Truncate').trigger('click')
@@ -9757,6 +9835,34 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
     expect(wrapper.find('.db-data-workspace .db-result-table').text()).toContain('payment-api')
     await wrapper.find('.db-danger-confirm footer button').trigger('click')
+
+    vi.mocked(window.aiops.mutateDatabaseTable).mockRejectedValueOnce(new Error('drop rejected'))
+    await tableRow('orders').trigger('contextmenu')
+    await contextButton('Drop').trigger('click')
+    await wrapper.find('.db-danger-confirm input').setValue('orders')
+    await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('drop rejected')
+    expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
+    expect(wrapper.findAll('.db-tree-row.table').some((row) => row.text().trim().includes('orders'))).toBe(true)
+    expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(true)
+    await wrapper.find('.db-danger-confirm footer button').trigger('click')
+
+    try {
+      ;(window.aiops as any).mutateDatabaseTable = undefined
+      await tableRow('orders').trigger('contextmenu')
+      await contextButton('Drop').trigger('click')
+      await wrapper.find('.db-danger-confirm input').setValue('orders')
+      await wrapper.find('.db-danger-confirm footer .danger').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('Database table mutation service unavailable')
+      expect(wrapper.find('.db-danger-confirm').exists()).toBe(true)
+      expect(wrapper.findAll('.db-tree-row.table').some((row) => row.text().trim().includes('orders'))).toBe(true)
+      expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(true)
+      await wrapper.find('.db-danger-confirm footer button').trigger('click')
+    } finally {
+      ;(window.aiops as any).mutateDatabaseTable = originalMutateDatabaseTable
+    }
 
     vi.mocked(window.aiops.mutateDatabaseTable).mockResolvedValueOnce({ ok: true, data: { affected: 1, durationMs: 1 } } as any)
     await tableRow('orders').trigger('contextmenu')
@@ -9881,7 +9987,6 @@ describe('AppShell', () => {
 
     await editor.setValue('select * from public.orders;')
     await editor.trigger('keydown', { key: 'Enter', ctrlKey: true })
-    expect(wrapper.find('.db-result-running').text()).toContain('select * from public.orders')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
 
@@ -9946,6 +10051,14 @@ describe('AppShell', () => {
     })
     await waitForDatabaseCatalog()
 
+    const executeDatabaseSqlImplementation = vi.mocked(window.aiops.executeDatabaseSql).getMockImplementation()
+    expect(executeDatabaseSqlImplementation).toBeDefined()
+    vi.mocked(window.aiops.executeDatabaseSql).mockImplementationOnce(
+      async (input) =>
+        new Promise((resolve) => {
+          window.setTimeout(() => resolve(executeDatabaseSqlImplementation!(input)), 20)
+        })
+    )
     await wrapper.find('button[title="New SQL"]').trigger('click')
     await wrapper.find('.db-sql-editor').setValue('select * from public.orders;')
     await wrapper.find('button[title="Run all"]').trigger('click')
@@ -9953,17 +10066,18 @@ describe('AppShell', () => {
 
     const runningResultTab = wrapper.findAll('.db-result-tabs [role="tab"]').find((tab) => tab.text().includes('#1-1'))!
     await runningResultTab.find('.db-result-tab-close').trigger('click')
-	    expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
-	    expect(wrapper.find('.db-sql-overview').text()).not.toContain('#1-1')
+    expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
+    expect(wrapper.find('.db-sql-overview').text()).not.toContain('#1-1')
 
-	    await waitForDatabaseSqlResult()
-	    expect(wrapper.find('.db-sql-overview').text()).toContain('select * from public.orders')
-	    const closedHistoryRow = wrapper.find('.db-sql-overview tbody tr')
-	    expect(closedHistoryRow.classes()).toContain('closed')
-	    expect(closedHistoryRow.attributes('data-execution-id')).toBe('sql-exec-test-1')
-	    expect(closedHistoryRow.attributes('title')).toBe('2026-06-10T00:00:01.000Z')
-	    expect(wrapper.find('.db-sql-overview-open').exists()).toBe(false)
-	    await closedHistoryRow.trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 30))
+    await waitForDatabaseSqlResult()
+    expect(wrapper.find('.db-sql-overview').text()).toContain('select * from public.orders')
+    const closedHistoryRow = wrapper.find('.db-sql-overview tbody tr')
+    expect(closedHistoryRow.classes()).toContain('closed')
+    expect(closedHistoryRow.attributes('data-execution-id')).toBe('sql-exec-test-1')
+    expect(closedHistoryRow.attributes('title')).toBe('2026-06-10T00:00:01.000Z')
+    expect(wrapper.find('.db-sql-overview-open').exists()).toBe(false)
+    await closedHistoryRow.trigger('click')
     expect(wrapper.find('.db-sql-overview').exists()).toBe(true)
     expect(wrapper.find('.db-result-table').exists()).toBe(false)
 

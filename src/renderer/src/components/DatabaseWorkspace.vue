@@ -2527,6 +2527,10 @@ const DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE = 'Database connection back
 const DATABASE_CREATE_DATABASE_MALFORMED_MESSAGE = 'Create database backend returned malformed result data.'
 const DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE = 'Backend table mutation returned malformed result data.'
 const SQL_FILE_WRITE_MALFORMED_MESSAGE = 'SQL file writer returned malformed result data.'
+const DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE = 'Database SQL executor service unavailable'
+const DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE = 'Database table query service unavailable'
+const DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE = 'Database table mutation planner service unavailable'
+const DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE = 'Database table mutation service unavailable'
 const workspaceStore = useWorkspaceStore()
 
 type SqlResult = {
@@ -5303,13 +5307,8 @@ async function appendSqlExecution(tab: Extract<WorkspaceTab, { kind: 'sql' }>, s
   tab.resultTabs.push(result)
   tab.activeResultTabId = result.id
 
-  let outcome: SqlExecutionOutcome
-  try {
-    const response = await executeSqlThroughBackend(tab, sql)
-    outcome = sqlOutcomeFromBackendResult(response)
-  } catch (error) {
-    outcome = { payload: createSqlErrorPayload(errorToMessage(error)), execution: null }
-  }
+  const response = await executeSqlThroughBackend(tab, sql)
+  const outcome = sqlOutcomeFromBackendResult(response)
 
   patchSqlResult(tab, result.id, outcome.payload)
   if (outcome.execution) {
@@ -5359,14 +5358,22 @@ function createRunningSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql
 }
 
 async function executeSqlThroughBackend(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string): Promise<DatabaseSqlExecuteResult> {
+  const executeDatabaseSql = window.aiops?.executeDatabaseSql
+  if (typeof executeDatabaseSql !== 'function') {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE }
+  }
   const connection = findConnection(tab.connectionId)
-  return window.aiops.executeDatabaseSql({
-    connectionId: tab.connectionId,
-    dbType: connection?.dbType,
-    sql,
-    databaseName: tab.catalogName,
-    schemaName: tab.schemaName
-  })
+  try {
+    return await executeDatabaseSql({
+      connectionId: tab.connectionId,
+      dbType: connection?.dbType,
+      sql,
+      databaseName: tab.catalogName,
+      schemaName: tab.schemaName
+    })
+  } catch (error) {
+    return { ok: false, errorCode: 'DB_SQL_EXECUTOR_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend SQL executor failed.') }
+  }
 }
 
 function sqlOutcomeFromBackendResult(result: DatabaseSqlExecuteResult | undefined): SqlExecutionOutcome {
@@ -5979,8 +5986,16 @@ async function refreshDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data'
   const key = JSON.stringify(input)
   if (!force && tab.mutationPlan.key === key && !tab.mutationPlan.loading) return tab.mutationPlan
   tab.mutationPlan = makeDataMutationPlanState({ key, loading: true })
+  const planDatabaseTableMutation = window.aiops?.planDatabaseTableMutation
+  if (typeof planDatabaseTableMutation !== 'function') {
+    tab.mutationPlan = makeDataMutationPlanState({
+      key,
+      error: DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE
+    })
+    return tab.mutationPlan
+  }
   try {
-    const result = await window.aiops.planDatabaseTableMutation(input)
+    const result = await planDatabaseTableMutation(input)
     if (tab.mutationPlan.key !== key) return tab.mutationPlan
     if (!result.ok) {
       tab.mutationPlan = makeDataMutationPlanState({
@@ -6156,32 +6171,45 @@ async function saveDataChanges() {
   tab.saving = true
   tab.saveError = null
   await nextTick()
-  const backendResult = await mutateDataTabThroughBackend(tab)
-  if (!backendResult.ok) {
-    tab.saveError = backendResult.errorMessage || 'Backend table mutation failed.'
+  try {
+    const backendResult = await mutateDataTabThroughBackend(tab)
+    if (!backendResult.ok) {
+      tab.saveError = backendResult.errorMessage || 'Backend table mutation failed.'
+      showNotice(tab.saveError)
+      return
+    }
+    if (!isDatabaseTableMutationData(backendResult.data)) {
+      tab.saveError = DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
+      showNotice(tab.saveError)
+      return
+    }
+    await reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false })
+    showNotice(`Changes saved through backend table store (${plan.statementCount} statement${plan.statementCount > 1 ? 's' : ''})`)
+  } finally {
     tab.saving = false
-    showNotice(tab.saveError)
-    return
   }
-  if (!isDatabaseTableMutationData(backendResult.data)) {
-    tab.saveError = DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
-    tab.saving = false
-    showNotice(tab.saveError)
-    return
-  }
-  await reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false })
-  tab.saving = false
-  showNotice(`Changes saved through backend table store (${plan.statementCount} statement${plan.statementCount > 1 ? 's' : ''})`)
 }
 
-function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  return window.aiops.mutateDatabaseTable({
+async function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>): Promise<DatabaseTableMutationResult> {
+  return mutateDatabaseTableThroughBackend({
     connectionId: tab.connectionId,
     databaseName: tab.catalogName,
     schemaName: tab.schemaName,
     tableName: tab.tableName,
     mutations: buildDataMutationPayload(tab)
   })
+}
+
+async function mutateDatabaseTableThroughBackend(input: Parameters<typeof window.aiops.mutateDatabaseTable>[0]): Promise<DatabaseTableMutationResult> {
+  const mutateDatabaseTable = window.aiops?.mutateDatabaseTable
+  if (typeof mutateDatabaseTable !== 'function') {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE }
+  }
+  try {
+    return await mutateDatabaseTable(input)
+  } catch (error) {
+    return { ok: false, errorCode: 'DB_TABLE_MUTATION_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend table mutation failed.') }
+  }
 }
 
 async function exportDatabaseRowsThroughBackend(input: Parameters<typeof window.aiops.exportDatabaseRows>[0]) {
@@ -6566,22 +6594,30 @@ async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, optio
   }
 }
 
-function queryDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>, withTotal: boolean): Promise<DatabaseTableQueryResult> {
+async function queryDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>, withTotal: boolean): Promise<DatabaseTableQueryResult> {
+  const queryDatabaseTable = window.aiops?.queryDatabaseTable
+  if (typeof queryDatabaseTable !== 'function') {
+    return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE }
+  }
   const connection = findConnection(tab.connectionId)
-  return window.aiops.queryDatabaseTable({
-    connectionId: tab.connectionId,
-    dbType: connection?.dbType,
-    databaseName: tab.catalogName,
-    schemaName: tab.schemaName,
-    tableName: tab.tableName,
-    filters: tab.filters.map((filter) => ({ ...filter })),
-    sort: tab.sort ? { ...tab.sort } : null,
-    whereRaw: tab.whereRaw || null,
-    orderByRaw: tab.orderByRaw || null,
-    page: tab.page,
-    pageSize: tab.pageSize,
-    withTotal
-  })
+  try {
+    return await queryDatabaseTable({
+      connectionId: tab.connectionId,
+      dbType: connection?.dbType,
+      databaseName: tab.catalogName,
+      schemaName: tab.schemaName,
+      tableName: tab.tableName,
+      filters: tab.filters.map((filter) => ({ ...filter })),
+      sort: tab.sort ? { ...tab.sort } : null,
+      whereRaw: tab.whereRaw || null,
+      orderByRaw: tab.orderByRaw || null,
+      page: tab.page,
+      pageSize: tab.pageSize,
+      withTotal
+    })
+  } catch (error) {
+    return { ok: false, errorCode: 'DB_TABLE_QUERY_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend table query failed.') }
+  }
 }
 
 function parseWhereRaw(whereRaw: string): DbFilter[] {
@@ -7396,7 +7432,7 @@ async function confirmDangerousTableAction() {
 async function applyBackendTableTruncate() {
   const table = findTable(dangerConfirm.connectionId, dangerConfirm.catalogName, dangerConfirm.tableId, dangerConfirm.schemaName || undefined)
   if (!table) return false
-  const result = await window.aiops.mutateDatabaseTable({
+  const result = await mutateDatabaseTableThroughBackend({
     connectionId: dangerConfirm.connectionId,
     databaseName: dangerConfirm.catalogName,
     schemaName: dangerConfirm.schemaName || undefined,
@@ -7450,7 +7486,7 @@ async function applyBackendTableDrop() {
     ddlModal.catalogName === droppedContext.catalogName &&
     (ddlModal.schemaName || '') === (droppedContext.schemaName || '') &&
     (ddlModal.tableId === droppedContext.tableId || ddlModal.tableName === droppedContext.tableName)
-  const result = await window.aiops.mutateDatabaseTable({
+  const result = await mutateDatabaseTableThroughBackend({
     connectionId: dangerConfirm.connectionId,
     databaseName: dangerConfirm.catalogName,
     schemaName: dangerConfirm.schemaName || undefined,
