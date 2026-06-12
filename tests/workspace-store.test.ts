@@ -1104,37 +1104,22 @@ describe('workspace store', () => {
     }
   })
 
-  it('normalizes legacy mock AI model configuration to the local backend provider', async () => {
+  it('does not migrate legacy mock AI model configuration in the renderer', async () => {
     const store = useWorkspaceStore()
+    const backendConfig = await window.aiops.getConfig()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
-      language: 'zh-CN',
-      theme: 'dark',
-      defaultMode: 'terminal',
-      leftPanelOpen: true,
-      rightPanelOpen: true,
-      agentsLeftOpen: true,
+      ...backendConfig,
       modelProvider: 'mock',
-      modelEndpoint: '',
-      modelName: 'mock-ops-agent',
-      watermark: 'open',
-      background: {
-        mode: 'none',
-        image: '',
-        opacity: 0.15,
-        brightness: 0.45
-      }
+      modelName: 'mock-ops-agent'
     } as any)
 
     await store.hydrateConfig()
 
     expect(store.config.modelProvider).toBe('local')
     expect(store.config.modelName).toBe('aiopsterm-local-agent')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelProvider: 'local',
-        modelName: 'aiopsterm-local-agent'
-      })
-    )
+    const saveConfigPatches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch as Record<string, unknown>)
+    expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'modelProvider'))).toBe(true)
+    expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'modelName'))).toBe(true)
   })
 
   it('hydrates and migrates persisted External reference-style onboarding completion state', async () => {
@@ -5828,6 +5813,27 @@ describe('workspace store', () => {
     } finally {
       ;(window.aiops as any).listAiModels = originalListAiModels
     }
+  })
+
+  it('rejects legacy mock AI model rows returned by the backend catalog bridge', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.listAiModels!).mockResolvedValueOnce({
+      chatModels: [
+        { id: 'mock-ops-agent', label: 'mock-ops-agent', apiProvider: 'mock' },
+        { id: 'qwen2.5-coder', label: 'qwen2.5-coder', apiProvider: 'ollama' }
+      ],
+      lockedChatModels: [{ id: 'ops-local-agent', label: 'ops-local-agent', locked: true, apiProvider: 'mock' }],
+      settingsModels: [
+        { name: 'mock-ops-agent', locked: false, checked: true, type: 'standard', apiProvider: 'mock' },
+        { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom', apiProvider: 'ollama' }
+      ]
+    } as any)
+
+    await expect(store.refreshAiModelCatalog({ replaceSettingsOptions: true })).resolves.toBeTruthy()
+
+    expect(store.aiModelOptions).toEqual([expect.objectContaining({ id: 'qwen2.5-coder', apiProvider: 'ollama' })])
+    expect(store.lockedAiModelOptions).toEqual([])
+    expect(store.settingModelOptions).toEqual([expect.objectContaining({ name: 'qwen2.5-coder', apiProvider: 'ollama' })])
   })
 
   it('does not fabricate AI model selection when config persistence is unavailable or malformed', async () => {

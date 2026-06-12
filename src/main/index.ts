@@ -153,6 +153,7 @@ import {
   writeKubernetesTerminal
 } from './backend/kubernetes'
 import { checkModelProvider, listAiModels } from './backend/modelProviders'
+import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
 import {
   configureQuickCommandBackendRuntime,
   deleteQuickCommandGroup,
@@ -1068,16 +1069,11 @@ const terminalHistoryLinesFromWrite = (data: string) => {
 }
 
 const normalizeModelProvider = (value: unknown): UserConfig['modelProvider'] => {
-  const provider = String(value || '').trim()
-  if (!provider || provider === 'mock' || provider === 'local') return 'local'
-  if (provider === 'litellm' || provider === 'openai-compatible' || provider === 'ollama' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic') return provider
-  return defaultConfig.modelProvider
+  return normalizeConfigModelProvider(value, defaultConfig)
 }
 
 const normalizeModelName = (value: unknown) => {
-  const modelName = String(value || '').trim()
-  if (!modelName || modelName === 'mock-ops-agent' || modelName === 'ops-local-agent' || modelName === 'aiopsterm-local-agent') return defaultConfig.modelName
-  return modelName
+  return normalizeConfigModelName(value, defaultConfig)
 }
 
 const normalizeLayoutWidth = (value: unknown, fallback: number) =>

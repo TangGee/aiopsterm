@@ -921,6 +921,8 @@ const middleMouseEventActions: TerminalMouseEventAction[] = ['none', 'paste', 'c
 const rightMouseEventActions: TerminalSettings['rightMouseEvent'][] = ['none', 'paste', 'contextMenu']
 const modelApiFormats: NonNullable<ModelProviderSettings['apiFormat']>[] = ['chat-completions', 'responses']
 const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standard', 'custom']
+const legacyRendererModelProviders = new Set(['mock'])
+const legacyRendererModelNames = new Set(['mock-ops-agent', 'ops-local-agent'])
 const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -1142,7 +1144,7 @@ const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUse
       return
     }
     const name = typeof item.name === 'string' ? item.name.trim() : ''
-    if (!name || seenNames.has(name)) {
+    if (!name || legacyRendererModelNames.has(name) || seenNames.has(name)) {
       changed = true
       return
     }
@@ -1180,7 +1182,8 @@ const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
   if (!isRecord(source)) return null
   const id = typeof source.id === 'string' ? source.id.trim() : ''
   const label = typeof source.label === 'string' && source.label.trim() ? source.label.trim() : id
-  if (!id || !label) return null
+  if (!id || !label || legacyRendererModelNames.has(id)) return null
+  if (typeof source.apiProvider === 'string' && legacyRendererModelProviders.has(source.apiProvider.trim())) return null
   const locked = Boolean(source.locked)
   return {
     id,
@@ -3156,14 +3159,14 @@ const normalizeMcpServersConfig = (source?: unknown, toolStatesSource?: unknown)
 
 const normalizeUserModelProvider = (value: unknown): UserConfig['modelProvider'] => {
   const provider = String(value || '').trim()
-  if (!provider || provider === 'mock' || provider === 'local') return 'local'
+  if (!provider || provider === 'local') return 'local'
   if (provider === 'litellm' || provider === 'openai-compatible' || provider === 'ollama' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic') return provider
   return defaultConfig.modelProvider
 }
 
 const normalizeUserModelName = (value: unknown) => {
   const modelName = String(value || '').trim()
-  if (!modelName || modelName === 'mock-ops-agent' || modelName === 'ops-local-agent' || modelName === 'aiopsterm-local-agent') return defaultConfig.modelName
+  if (!modelName) return defaultConfig.modelName
   return modelName
 }
 
@@ -4628,8 +4631,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const savedModelSettings: Record<string, unknown> = isRecord(savedConfig.modelSettings) ? savedConfig.modelSettings : {}
     const missingModelSettings = !isRecord(savedConfig.modelSettings)
     const missingModelOptions = !Array.isArray(savedModelSettings.options)
-    const modelProviderChanged = normalizeUserModelProvider(savedConfig.modelProvider) !== savedConfig.modelProvider
-    const modelNameChanged = normalizeUserModelName(savedConfig.modelName) !== savedConfig.modelName
     const missingSkills = !Array.isArray(savedConfig.skills)
     const missingMcpServers = !Array.isArray(savedConfig.mcpServers)
     config.value = mergeUserConfig(defaultConfig, savedConfig)
@@ -4807,8 +4808,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       aiPreferencesChanged ||
       missingAiPreferences ||
       missingAgentsLeftOpen ||
-      modelProviderChanged ||
-      modelNameChanged ||
       modelSettingsChanged ||
       missingModelSettings ||
       skillsChanged ||
@@ -4820,8 +4819,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         config.value,
         await window.aiops.saveConfig({
           agentsLeftOpen: config.value.agentsLeftOpen,
-          modelProvider: config.value.modelProvider,
-          modelName: config.value.modelName,
           terminal: normalizedTerminal,
           workspacePreferences: normalizedWorkspacePreferences,
           editorSettings: normalizedEditorSettings,
