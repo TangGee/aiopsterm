@@ -4903,19 +4903,10 @@ async function sendDbAiPaneMessage(promptOverride = '') {
   scrollDbAiPaneMessagesToBottom()
 }
 
-function markDbAiPaneAssistantError(messageId: string, errorMessage: string) {
-  dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
-    if (message.id !== messageId || message.role !== 'assistant' || message.status === 'cancelled' || message.status === 'done') return message
-    return { ...message, status: 'error', content: errorMessage, updatedAt: Date.now() }
-  })
-  scrollDbAiPaneMessagesToBottom()
-}
-
 async function requestDbAiPaneResponse(messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) {
   const startBridge = window.aiops?.startDatabaseAiPaneResponse
   if (typeof startBridge !== 'function') {
     const message = 'DB AI pane start service unavailable'
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
     return
   }
@@ -4924,19 +4915,16 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
     started = await startBridge({ requestId, assistantMessageId: messageId })
   } catch (error) {
     const message = bridgeErrorMessage(error, 'DB AI pane request failed to start')
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
     return
   }
   if (!started.ok) {
     const message = started.errorMessage || 'DB AI pane request failed to start'
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
     return
   }
   if (!isDbAiPaneLifecycleData(started.data, { requestId, assistantMessageId: messageId })) {
     const message = 'DB AI pane backend returned malformed lifecycle data.'
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
     return
   }
@@ -4944,7 +4932,6 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
   const generateBridge = window.aiops?.generateDatabaseAiPaneResponse
   if (typeof generateBridge !== 'function') {
     const message = 'DB AI pane response service unavailable'
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
     return
   }
@@ -4966,7 +4953,6 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
     finishDbAiPaneMessage(messageId, result, requestId)
   } catch (error) {
     const message = bridgeErrorMessage(error, 'DB AI pane response failed')
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
   }
 }
@@ -4984,14 +4970,13 @@ function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponse
   const responseData = hasValidResponseData ? result.data : null
   if (result.ok && !hasValidResponseData) {
     const message = 'DB AI pane backend returned malformed response data.'
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
     return
   }
   if (!result.ok && !hasValidResponseData) {
     const message = result.errorMessage || 'DB AI pane response failed'
-    markDbAiPaneAssistantError(messageId, message)
     showNotice(message)
+    return
   }
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled') return message
@@ -7859,16 +7844,6 @@ function patchDbAiRequest(reqId: string, patch: Partial<DbAiRequest>) {
   }
 }
 
-function markDbAiDrawerRequestError(reqId: string, errorMessage: string) {
-  const request = dbAiRequests.value[reqId]
-  if (!request || request.status === 'cancelled' || request.status === 'done') return
-  patchDbAiRequest(reqId, {
-    status: 'error',
-    text: errorMessage,
-    updatedAt: Date.now()
-  })
-}
-
 async function requestDbAiDrawerResponse(reqId: string) {
   const request = dbAiRequests.value[reqId]
   if (!request) return
@@ -7876,7 +7851,6 @@ async function requestDbAiDrawerResponse(reqId: string) {
   const startBridge = window.aiops?.startDatabaseAiDrawerResponse
   if (typeof startBridge !== 'function') {
     const message = 'DB AI drawer start service unavailable'
-    markDbAiDrawerRequestError(reqId, message)
     showNotice(message)
     return
   }
@@ -7885,19 +7859,16 @@ async function requestDbAiDrawerResponse(reqId: string) {
     started = await startBridge({ requestId: reqId })
   } catch (error) {
     const message = bridgeErrorMessage(error, 'DB AI drawer request failed to start')
-    markDbAiDrawerRequestError(reqId, message)
     showNotice(message)
     return
   }
   if (!started.ok) {
     const message = started.errorMessage || 'DB AI drawer request failed to start'
-    markDbAiDrawerRequestError(reqId, message)
     showNotice(message)
     return
   }
   if (!isDbAiDrawerRequestRecord(started.data, reqId)) {
     const message = 'DB AI drawer backend returned malformed lifecycle data.'
-    markDbAiDrawerRequestError(reqId, message)
     showNotice(message)
     return
   }
@@ -7905,7 +7876,6 @@ async function requestDbAiDrawerResponse(reqId: string) {
   const generateBridge = window.aiops?.generateDatabaseAiDrawerResponse
   if (typeof generateBridge !== 'function') {
     const message = 'DB AI drawer response service unavailable'
-    markDbAiDrawerRequestError(reqId, message)
     showNotice(message)
     return
   }
@@ -7919,15 +7889,7 @@ async function requestDbAiDrawerResponse(reqId: string) {
     })
     finishDbAiRequest(reqId, result, expectedDialect)
   } catch (error) {
-    finishDbAiRequest(
-      reqId,
-      {
-        ok: false,
-        errorCode: 'DB_AI_DRAWER_BACKEND_ERROR',
-        errorMessage: errorToMessage(error)
-      },
-      expectedDialect
-    )
+    showNotice(bridgeErrorMessage(error, 'DB AI drawer response failed'))
   }
 }
 
@@ -7939,7 +7901,6 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
   const responseData = hasValidResponseData ? result.data : null
   if (result.ok && !hasValidResponseData) {
     const message = 'DB AI drawer backend returned malformed response data.'
-    markDbAiDrawerRequestError(reqId, message)
     showNotice(message)
     return
   }
@@ -7951,7 +7912,6 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
     return
   }
   const message = result.errorMessage || 'DB AI drawer backend failed.'
-  markDbAiDrawerRequestError(reqId, message)
   showNotice(message)
 }
 

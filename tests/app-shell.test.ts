@@ -9550,7 +9550,8 @@ describe('AppShell', () => {
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
-    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
@@ -9563,7 +9564,8 @@ describe('AppShell', () => {
     } as any)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed response data.')
     expect(wrapper.find('.db-ai-sql-actions').exists()).toBe(false)
     await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
@@ -9599,7 +9601,8 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
     expect(wrapper.text()).toContain('DB AI pane backend returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
@@ -9617,7 +9620,8 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await waitForDatabaseDbAiDone()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('missing assistant message')
     expect(wrapper.text()).toContain('DB AI pane backend returned malformed response data.')
 
@@ -9679,7 +9683,8 @@ describe('AppShell', () => {
       await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
       await flushPromises()
       expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
-      expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+      expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+      expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
       expect(wrapper.text()).toContain('DB AI drawer start service unavailable')
       expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     } finally {
@@ -9691,7 +9696,8 @@ describe('AppShell', () => {
       ;(window.aiops as any).generateDatabaseAiDrawerResponse = undefined
       await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
       await flushPromises()
-      expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+      expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+      expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
       expect(wrapper.text()).toContain('DB AI drawer response service unavailable')
     } finally {
       ;(window.aiops as any).generateDatabaseAiDrawerResponse = originalGenerateDrawer
@@ -9701,7 +9707,8 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockRejectedValueOnce(new Error('drawer response rejected'))
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
     expect(wrapper.text()).toContain('drawer response rejected')
     await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
 
@@ -9751,7 +9758,8 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
       expect(wrapper.text()).toContain('DB AI pane start service unavailable')
       expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     } finally {
@@ -9764,7 +9772,8 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer textarea').setValue('Generate pane missing')
       await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
       await flushPromises()
-      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
       expect(wrapper.text()).toContain('DB AI pane response service unavailable')
     } finally {
       ;(window.aiops as any).generateDatabaseAiPaneResponse = originalGeneratePane
@@ -9775,8 +9784,10 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer textarea').setValue('Generate pane rejected')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('pane response rejected')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('pane response rejected')
+    expect(wrapper.text()).toContain('pane response rejected')
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
     vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
