@@ -13127,4 +13127,31 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
     expect(store.mode).toBe('agents')
     expect(store.agentsLeftOpen).toBe(true)
   })
+
+  it('rejects malformed aiopsterm protocol payloads before mutating shell state', () => {
+    const store = useWorkspaceStore()
+
+    store.handleDeepLink({
+      url: 'aiopsterm://open/files',
+      action: 'open',
+      target: 'files',
+      module: 'files',
+      acceptedAt: 1780490000000
+    })
+    expect(store.activeModule).toBe('files')
+
+    const result = store.handleDeepLink({
+      url: 'aiopsterm://open/database',
+      action: 'open',
+      target: 'settings',
+      module: 'settings',
+      settingsSection: 'general',
+      acceptedAt: 1780490000100
+    })
+
+    expect(result).toBe(false)
+    expect(store.activeModule).toBe('files')
+    expect(store.activeSettingsSection).toBe('general')
+    expect(store.topNotice).toContain('deep link')
+  })
 })

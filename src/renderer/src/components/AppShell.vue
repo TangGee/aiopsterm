@@ -98,6 +98,7 @@ import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
+import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 
 const workspace = useWorkspaceStore()
 type ResizeSide = 'left' | 'right' | 'agents-left'
@@ -146,6 +147,29 @@ const persistResize = async (side: ResizeSide, width: number) => {
 const quickClose = async (side: ResizeSide) => {
   if (side === 'right') return workspace.quickCloseRightPanel()
   return workspace.quickCloseLeftPanel()
+}
+
+const applyDeepLinkPayload = (payload: unknown) => {
+  if (!isAiopstermDeepLinkPayload(payload)) {
+    workspace.handleDeepLink(payload)
+    return false
+  }
+  return workspace.handleDeepLink(payload)
+}
+
+const consumePendingDeepLinks = async () => {
+  const consumeDeepLinks = window.aiops?.consumeDeepLinks
+  if (typeof consumeDeepLinks !== 'function') return
+  try {
+    const payloads = await consumeDeepLinks()
+    if (!Array.isArray(payloads)) {
+      applyDeepLinkPayload(payloads)
+      return
+    }
+    payloads.forEach((payload) => applyDeepLinkPayload(payload))
+  } catch {
+    applyDeepLinkPayload(null)
+  }
 }
 
 const endResize = async () => {
@@ -208,11 +232,9 @@ onMounted(() => {
   workspace.installShortcutRuntime()
   workspace.hydrateConfig()
   stopDeepLink = window.aiops?.onDeepLink?.((payload) => {
-    workspace.handleDeepLink(payload)
+    applyDeepLinkPayload(payload)
   })
-  void window.aiops?.consumeDeepLinks?.().then((payloads) => {
-    payloads.forEach((payload) => workspace.handleDeepLink(payload))
-  })
+  void consumePendingDeepLinks()
 })
 
 onUnmounted(() => {

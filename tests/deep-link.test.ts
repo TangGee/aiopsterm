@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aiopstermProtocolPrefix, parseAiopstermDeepLink } from '@shared/deepLink'
+import { aiopstermProtocolPrefix, isAiopstermDeepLinkPayload, parseAiopstermDeepLink } from '@shared/deepLink'
 
 describe('aiopsterm deep links', () => {
   it('accepts self-owned module links', () => {
@@ -56,5 +56,82 @@ describe('aiopsterm deep links', () => {
       valid: false,
       reason: 'unsupported-settings-section'
     })
+  })
+
+  it('validates runtime payloads against their parsed URL identity', () => {
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'aiopsterm://open/settings?section=shortcuts',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'shortcuts',
+        source: 'tray',
+        acceptedAt: 1780490000000
+      })
+    ).toBe(false)
+
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'aiopsterm://open/settings?section=shortcuts&source=tray',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'shortcuts',
+        source: 'tray',
+        acceptedAt: 1780490000000
+      })
+    ).toBe(true)
+  })
+
+  it('rejects malformed runtime payload shapes', () => {
+    expect(isAiopstermDeepLinkPayload(null)).toBe(false)
+    expect(isAiopstermDeepLinkPayload([{ url: 'aiopsterm://open/files' }])).toBe(false)
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'external-term://open/files',
+        action: 'open',
+        target: 'files',
+        module: 'files',
+        acceptedAt: 1780490000000
+      })
+    ).toBe(false)
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'aiopsterm://open/files',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'general',
+        acceptedAt: 1780490000000
+      })
+    ).toBe(false)
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'aiopsterm://open/settings?section=mcp',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        acceptedAt: 1780490000000
+      })
+    ).toBe(false)
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'aiopsterm://open?target=agents',
+        action: 'open',
+        target: 'agents',
+        module: 'workspace',
+        acceptedAt: 1780490000000
+      })
+    ).toBe(false)
+    expect(
+      isAiopstermDeepLinkPayload({
+        url: 'aiopsterm://open/files',
+        action: 'open',
+        target: 'files',
+        module: 'files',
+        acceptedAt: Number.NaN
+      })
+    ).toBe(false)
   })
 })

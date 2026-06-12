@@ -76,7 +76,7 @@ import {
 } from '@/services/skillsBackendGuards'
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
-import type { AiopstermDeepLinkPayload } from '@shared/deepLink'
+import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
@@ -8799,7 +8799,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setTopNotice(organizationId ? '已打开组织资产管理' : '已打开资产管理')
   }
 
-  const handleDeepLink = (payload: AiopstermDeepLinkPayload) => {
+  const handleDeepLink = (payload: unknown) => {
+    if (!isAiopstermDeepLinkPayload(payload)) {
+      setTopNotice('aiopsterm deep link 后端返回数据异常')
+      return false
+    }
+
     if (payload.target === 'agents') {
       mode.value = 'agents'
       agentsLeftOpen.value = true

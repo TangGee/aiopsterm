@@ -64,6 +64,12 @@ const settingsTargets = new Set<AiopstermDeepLinkSettingsSection>([
 ])
 const internalHosts = new Set(['chat-attachment'])
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isModuleTarget = (value: unknown): value is AiopstermDeepLinkModule => typeof value === 'string' && moduleTargets.has(value as AiopstermDeepLinkModule)
+const isDeepLinkTarget = (value: unknown): value is AiopstermDeepLinkTarget => value === 'agents' || isModuleTarget(value)
+const isSettingsSection = (value: unknown): value is AiopstermDeepLinkSettingsSection => typeof value === 'string' && settingsTargets.has(value as AiopstermDeepLinkSettingsSection)
+
 const normalizeModuleTarget = (value: string | null | undefined): AiopstermDeepLinkTarget | null => {
   const normalized = (value || '').trim()
   if (normalized === 'agents') return 'agents'
@@ -125,4 +131,33 @@ export const parseAiopstermDeepLink = (rawUrl: string): AiopstermDeepLinkParseRe
       source: parsed.searchParams.get('source') || undefined
     }
   }
+}
+
+export const isAiopstermDeepLinkPayload = (value: unknown): value is AiopstermDeepLinkPayload => {
+  if (!isRecord(value)) return false
+  if (typeof value.url !== 'string' || !value.url.startsWith(aiopstermProtocolPrefix)) return false
+  if (value.action !== 'open') return false
+  if (!isDeepLinkTarget(value.target)) return false
+  if (typeof value.acceptedAt !== 'number' || !Number.isFinite(value.acceptedAt) || value.acceptedAt < 0) return false
+  if (value.source !== undefined && typeof value.source !== 'string') return false
+
+  const parsed = parseAiopstermDeepLink(value.url)
+  if (!parsed.valid) return false
+  if (parsed.payload.url !== value.url) return false
+  if (parsed.payload.action !== value.action) return false
+  if (parsed.payload.target !== value.target) return false
+  if ((parsed.payload.source ?? undefined) !== (value.source ?? undefined)) return false
+
+  if (value.target === 'agents') {
+    return value.module === undefined && value.settingsSection === undefined
+  }
+
+  if (value.module !== undefined && value.module !== value.target) return false
+  if (parsed.payload.module !== value.target) return false
+
+  if (value.target === 'settings') {
+    return value.settingsSection !== undefined && isSettingsSection(value.settingsSection) && value.settingsSection === parsed.payload.settingsSection
+  }
+
+  return value.settingsSection === undefined
 }

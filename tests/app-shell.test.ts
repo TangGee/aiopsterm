@@ -527,6 +527,108 @@ describe('AppShell', () => {
     expect(stopDeepLink).toHaveBeenCalled()
   })
 
+  it('fails closed for malformed pending aiopsterm protocol links', async () => {
+    vi.mocked(window.aiops.consumeDeepLinks).mockResolvedValueOnce({ target: 'settings' } as any)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    expect(store.activeModule).toBe('workspace')
+    expect(store.activeSettingsSection).toBe('general')
+    expect(store.topNotice).toContain('deep link')
+  })
+
+  it('applies only valid aiopsterm protocol links from pending batches and runtime events', async () => {
+    const stopDeepLink = vi.fn()
+    vi.mocked(window.aiops.consumeDeepLinks).mockResolvedValueOnce([
+      {
+        url: 'aiopsterm://open/settings?section=mcp',
+        action: 'open',
+        target: 'database',
+        module: 'database',
+        acceptedAt: 1780490000000
+      } as any,
+      {
+        url: 'aiopsterm://open/files',
+        action: 'open',
+        target: 'files',
+        module: 'files',
+        acceptedAt: 1780490000100
+      }
+    ])
+    vi.mocked(window.aiops.onDeepLink).mockReturnValueOnce(stopDeepLink)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    expect(store.activeModule).toBe('files')
+    expect(store.topNotice).toContain('aiopsterm://')
+
+    const listener = vi.mocked(window.aiops.onDeepLink).mock.calls.at(-1)?.[0]
+    listener?.({
+      url: 'aiopsterm://open/database',
+      action: 'open',
+      target: 'settings',
+      module: 'settings',
+      settingsSection: 'general',
+      acceptedAt: 1780490000200
+    } as any)
+    expect(store.activeModule).toBe('files')
+    expect(store.topNotice).toContain('deep link')
+
+    listener?.({
+      url: 'aiopsterm://open/database',
+      action: 'open',
+      target: 'database',
+      module: 'database',
+      acceptedAt: 1780490000300
+    })
+    expect(store.activeModule).toBe('database')
+
+    wrapper.unmount()
+    expect(stopDeepLink).toHaveBeenCalled()
+  })
+
+  it('fails closed when pending aiopsterm protocol consumption rejects', async () => {
+    vi.mocked(window.aiops.consumeDeepLinks).mockRejectedValueOnce(new Error('ipc failed'))
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    expect(store.activeModule).toBe('workspace')
+    expect(store.topNotice).toContain('deep link')
+  })
+
   it('binds External reference-style configured shortcuts at runtime', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
