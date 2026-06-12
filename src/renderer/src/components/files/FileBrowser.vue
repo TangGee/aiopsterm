@@ -1006,8 +1006,8 @@ const confirmRename = async (entry: FileBrowserEntry) => {
   loading.value = true
   try {
     await mutateEntry({ kind: 'rename', oldPath: entry.path, newPath }, '重命名失败')
-    cancelRename()
     await requireEntriesReload()
+    cancelRename()
     fileNotice.value = '重命名成功'
   } catch (renameError) {
     fileNotice.value = renameError instanceof Error ? renameError.message : '重命名失败'
@@ -1140,7 +1140,12 @@ const loadTargetSubDirs = async (index: number) => {
 const toggleTargetMenu = async (index: number) => {
   moveDialog.activeMenuIndex = moveDialog.activeMenuIndex === index ? null : index
   if (moveDialog.activeMenuIndex === index) {
-    await loadTargetSubDirs(index)
+    try {
+      await loadTargetSubDirs(index)
+    } catch (targetError) {
+      moveDialog.activeMenuIndex = null
+      fileNotice.value = targetError instanceof Error ? targetError.message : '文件列表加载失败'
+    }
   }
 }
 
@@ -1184,10 +1189,15 @@ const confirmMove = async () => {
   moveDialog.editingPath = false
   moveDialog.activeMenuIndex = null
   const targetName = moveDialog.entry.name
-  const exists = await targetFileExists(moveDialog.targetPath, targetName)
-  if (exists) {
-    conflictDialog.newName = await buildConflictName(moveDialog.targetPath, targetName)
-    conflictDialog.visible = true
+  try {
+    const exists = await targetFileExists(moveDialog.targetPath, targetName)
+    if (exists) {
+      conflictDialog.newName = await buildConflictName(moveDialog.targetPath, targetName)
+      conflictDialog.visible = true
+      return
+    }
+  } catch (targetError) {
+    fileNotice.value = targetError instanceof Error ? targetError.message : '文件列表加载失败'
     return
   }
   queueMoveTarget(targetName)

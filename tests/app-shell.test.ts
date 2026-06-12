@@ -6593,10 +6593,106 @@ describe('AppShell', () => {
     )
     expect(browser.text()).toContain('post-rename list failed')
     expect(browser.text()).not.toContain('重命名成功')
-    expect(browser.text()).toContain('release-note.md')
+    expect(browser.find('.file-rename-row input').exists()).toBe(true)
+    expect((browser.find('.file-rename-row input').element as HTMLInputElement).value).toBe('release-note-v2.md')
     expect(pathInput().value).toBe('/')
 
     browser.unmount()
+
+    ;(globalThis as any).__resetAssetStoreMock?.()
+    ;(globalThis as any).__resetAssetStoreMock?.()
+    ;(globalThis as any).__resetFileSessionCatalogMock?.()
+    const chmodBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const chmodRow = chmodBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await chmodRow.find('.file-row-actions button[title="权限"]').trigger('click')
+    await chmodBrowser.findAll('.permission-check input').find((input) => (input.element as HTMLInputElement).value === '执行')!.setValue(true)
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('post-chmod list failed'))
+    await chmodBrowser.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(chmodBrowser.text()).toContain('post-chmod list failed')
+    expect(chmodBrowser.text()).not.toContain('权限已更新为 744')
+    expect(chmodBrowser.find('.file-modal-card.small').text()).toContain('权限设置 - release-note.md')
+    expect(chmodBrowser.text()).toContain('release-note.md')
+    chmodBrowser.unmount()
+
+    ;(globalThis as any).__resetAssetStoreMock?.()
+    ;(globalThis as any).__resetFileSessionCatalogMock?.()
+    const moveBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const moveRow = moveBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await moveRow.find('.file-row-actions button[title="更多"]').trigger('click')
+    await moveBrowser.find('.file-more-menu').findAll('button').find((button) => button.text().includes('移动'))!.trigger('click')
+    await moveBrowser.find('.move-path-edit-trigger').trigger('click')
+    await moveBrowser.find('.move-target-input').setValue('/tmp/move-target')
+    await moveBrowser.find('.move-target-input').trigger('keydown', { key: 'Enter' })
+    const moveMutationCallsBeforeTargetFailure = vi.mocked(window.aiops.mutateFileEntry).mock.calls.length
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('move target list failed'))
+    await moveBrowser.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(moveBrowser.text()).toContain('move target list failed')
+    expect(moveBrowser.text()).not.toContain('移动成功')
+    expect(moveBrowser.find('.file-modal-card').text()).toContain('移动到')
+    expect(vi.mocked(window.aiops.mutateFileEntry).mock.calls.length).toBe(moveMutationCallsBeforeTargetFailure)
+    await moveBrowser.find('.move-path-edit-trigger').trigger('click')
+    await moveBrowser.find('.move-target-input').setValue('/')
+    await moveBrowser.find('.move-target-input').trigger('keydown', { key: 'Enter' })
+    await moveBrowser.find('.file-modal-card footer .primary').trigger('click')
+    await flushPromises()
+    expect(moveBrowser.text()).toContain('冲突提示')
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('post-move list failed'))
+    await moveBrowser.findAll('.file-modal-card.small footer button').find((button) => button.text().includes('覆盖'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'move', srcPath: '/release-note.md', targetPath: '/release-note.md', overwrite: true },
+      expect.objectContaining({ kind: 'local', sessionId: 'local' })
+    )
+    expect(moveBrowser.text()).toContain('post-move list failed')
+    expect(moveBrowser.text()).not.toContain('移动成功')
+    expect(moveBrowser.find('.file-modal-card').text()).toContain('移动到')
+    expect(moveBrowser.text()).toContain('release-note.md')
+    moveBrowser.unmount()
+
+    ;(globalThis as any).__resetFileSessionCatalogMock?.()
+    const deleteBrowser = mount(FileBrowser, {
+      props: {
+        session: localSession,
+        uiMode: 'default'
+      },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const deleteRow = deleteBrowser.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
+    await deleteRow.find('.file-row-actions button[title="更多"]').trigger('click')
+    await deleteBrowser.find('.file-more-menu').findAll('button').find((button) => button.text().includes('删除'))!.trigger('click')
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      {
+        name: 'bad-refresh-entry-without-path',
+        type: 'file',
+        size: 1,
+        modifiedAt: Date.now()
+      }
+    ] as any)
+    await deleteBrowser.find('.file-delete-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(deleteBrowser.text()).toContain('文件服务返回数据无效')
+    expect(deleteBrowser.text()).not.toContain('删除成功')
+    expect(deleteBrowser.find('.file-delete-confirm').text()).toContain('/release-note.md')
+    expect(deleteBrowser.text()).toContain('release-note.md')
+    expect(deleteBrowser.text()).not.toContain('bad-refresh-entry-without-path')
+    deleteBrowser.unmount()
   })
 
   it('keeps Files editor dirty when save succeeds without a backend-owned task', async () => {
