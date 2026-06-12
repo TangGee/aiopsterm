@@ -6963,8 +6963,9 @@ Object.defineProperty(window, 'aiops', {
       upsertKubernetesContextMock(updated)
       return k8sCatalogResultMock({ cluster: { ...updated } })
     }),
-    importKubernetesKubeconfig: vi.fn(async (input: { kubeconfigPath?: string | null; kubeconfigContent?: string | null }) => {
+    importKubernetesKubeconfig: vi.fn(async (input: { requestId?: string | null; kubeconfigPath?: string | null; kubeconfigContent?: string | null }) => {
       const kubeconfigPath = trimMock(input.kubeconfigPath)
+      const requestId = trimMock(input.requestId)
       const kubeconfigContent =
         input.kubeconfigContent ||
         [
@@ -6997,6 +6998,7 @@ Object.defineProperty(window, 'aiops', {
       return {
         ok: true,
         data: {
+          requestId,
           contexts: parsed.contexts.map((context) => ({ ...context })),
           kubeconfigPath,
           kubeconfigContent,

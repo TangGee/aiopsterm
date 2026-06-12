@@ -1459,6 +1459,7 @@ export async function testKubernetesClusterConnection(input: KubernetesClusterTe
 export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImportInput): Promise<KubernetesKubeconfigImportResult> {
   try {
     ensureKubernetesCatalogStateLoaded()
+    const requestId = input.requestId?.trim() || ''
     const kubeconfigPath = input.kubeconfigPath?.trim() || ''
     const providedContent = input.kubeconfigContent ?? ''
     if (!kubeconfigPath && !providedContent.trim()) {
@@ -1485,6 +1486,7 @@ export async function importKubernetesKubeconfig(input: KubernetesKubeconfigImpo
     return {
       ok: true,
       data: {
+        requestId,
         contexts: parsed.contexts.map((context) => ({ ...context })),
         kubeconfigPath,
         kubeconfigContent,

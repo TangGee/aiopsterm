@@ -488,7 +488,7 @@ type K8sKubeconfigImportResult = {
 }
 
 type K8sKubeconfigImportRequest = {
-  requestId: number
+  requestId: string
   kubeconfigPath?: string
   kubeconfigContent?: string
 }
@@ -2320,6 +2320,7 @@ const isK8sBastionSyncData = (source: unknown): source is KubernetesCatalog & { 
 
 const isK8sKubeconfigImportData = (source: unknown): source is K8sKubeconfigImportData =>
   isRecord(source) &&
+  typeof source.requestId === 'string' &&
   Array.isArray(source.contexts) &&
   source.contexts.every(isK8sImportContextInfo) &&
   typeof source.kubeconfigPath === 'string' &&
@@ -2328,6 +2329,7 @@ const isK8sKubeconfigImportData = (source: unknown): source is K8sKubeconfigImpo
 
 const isK8sKubeconfigImportDataForRequest = (source: unknown, expected: K8sKubeconfigImportRequest): source is K8sKubeconfigImportData => {
   if (!isK8sKubeconfigImportData(source)) return false
+  if (source.requestId !== expected.requestId) return false
   if (!source.contexts.length) return false
   if (expected.kubeconfigPath !== undefined && source.kubeconfigPath !== expected.kubeconfigPath) return false
   if (expected.kubeconfigContent !== undefined && source.kubeconfigContent !== expected.kubeconfigContent) return false
@@ -4185,7 +4187,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let removeMcpConfigFileListener: (() => void) | null = null
   let mcpConfigLoadRequest = 0
   let kbSearchRequest = 0
-  let k8sKubeconfigImportRequest = 0
+  let k8sKubeconfigImportRequestSequence = 0
+  let k8sKubeconfigImportRequestId = ''
+  const nextK8sKubeconfigImportRequestId = () => `k8s-kubeconfig-import-${(k8sKubeconfigImportRequestSequence += 1)}`
   let k8sAgentCleanupRequest = 0
   let removeSkillsUpdateListener: (() => void) | null = null
   let removeKnowledgeProgressListener: (() => void) | null = null
@@ -11300,7 +11304,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     result: Awaited<ReturnType<AiopsPreloadApi['importKubernetesKubeconfig']>>,
     expected: K8sKubeconfigImportRequest
   ): K8sKubeconfigImportResult => {
-    if (expected.requestId !== k8sKubeconfigImportRequest) {
+    if (expected.requestId !== k8sKubeconfigImportRequestId) {
       return {
         success: false,
         contexts: [],
@@ -11354,8 +11358,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('Kubeconfig 导入服务不可用')
       return failed
     }
-    const request: K8sKubeconfigImportRequest = { requestId: ++k8sKubeconfigImportRequest, kubeconfigContent: content }
-    const result = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigContent: content }), request)
+    const request: K8sKubeconfigImportRequest = { requestId: nextK8sKubeconfigImportRequestId(), kubeconfigContent: content }
+    k8sKubeconfigImportRequestId = request.requestId
+    const result = normalizeK8sKubeconfigImportResult(await importKubeconfig(request), request)
     if (result.success) {
       k8sImportContexts.value = result.contexts
       setK8sNotice(`已发现 ${result.contexts.length} 个 kubeconfig Context`)
@@ -11395,8 +11400,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice('Kubeconfig 导入服务不可用')
         return failed
       }
-      const request: K8sKubeconfigImportRequest = { requestId: ++k8sKubeconfigImportRequest, kubeconfigPath }
-      const imported = normalizeK8sKubeconfigImportResult(await importKubeconfig({ kubeconfigPath }), request)
+      const request: K8sKubeconfigImportRequest = { requestId: nextK8sKubeconfigImportRequestId(), kubeconfigPath }
+      k8sKubeconfigImportRequestId = request.requestId
+      const imported = normalizeK8sKubeconfigImportResult(await importKubeconfig(request), request)
       if (imported.success) {
         k8sImportContexts.value = imported.contexts
         setK8sNotice(`已选择 kubeconfig 文件，发现 ${imported.contexts.length} 个 Context`)

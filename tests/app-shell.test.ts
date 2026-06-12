@@ -7486,7 +7486,10 @@ describe('AppShell', () => {
         { name: 'YAML Files', extensions: ['yaml', 'yml'] }
       ]
     })
-    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenCalledWith({ kubeconfigPath: '/tmp/prod-kubeconfig.yaml' })
+    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenCalledWith({
+      requestId: expect.stringMatching(/^k8s-kubeconfig-import-/),
+      kubeconfigPath: '/tmp/prod-kubeconfig.yaml'
+    })
     expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
     expect(store.k8sClusterNotice).toContain('发现 2 个 Context')
     expect(store.k8sImportContexts).toHaveLength(2)

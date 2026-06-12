@@ -777,10 +777,11 @@ describe('kubernetes backend boundary', () => {
       '    cluster: qa-cluster',
       '    namespace: qa'
     ].join('\n')
-    const fromContent = await importKubernetesKubeconfig({ kubeconfigContent })
+    const fromContent = await importKubernetesKubeconfig({ requestId: 'kubeconfig-import-content-test', kubeconfigContent })
     expect(fromContent).toMatchObject({
       ok: true,
       data: {
+        requestId: 'kubeconfig-import-content-test',
         currentContext: 'qa/dev',
         kubeconfigContent,
         contexts: [{ name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }]
@@ -795,9 +796,10 @@ describe('kubernetes backend boundary', () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-kubeconfig-'))
     const filePath = join(dir, 'config.yaml')
     await writeFile(filePath, kubeconfigContent, 'utf-8')
-    await expect(importKubernetesKubeconfig({ kubeconfigPath: filePath })).resolves.toMatchObject({
+    await expect(importKubernetesKubeconfig({ requestId: 'kubeconfig-import-file-test', kubeconfigPath: filePath })).resolves.toMatchObject({
       ok: true,
       data: {
+        requestId: 'kubeconfig-import-file-test',
         kubeconfigPath: filePath,
         contexts: [{ name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }]
       }

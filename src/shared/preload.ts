@@ -2580,11 +2580,13 @@ export type KubernetesImportContextInfo = {
 }
 
 export type KubernetesKubeconfigImportInput = {
+  requestId?: string | null
   kubeconfigPath?: string | null
   kubeconfigContent?: string | null
 }
 
 export type KubernetesKubeconfigImportResult = AiopsMutationResult<{
+  requestId: string
   contexts: KubernetesImportContextInfo[]
   kubeconfigPath: string
   kubeconfigContent: string

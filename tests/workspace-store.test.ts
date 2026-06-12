@@ -7413,7 +7413,10 @@ describe('workspace store', () => {
     ].join('\n')
     const importResult = await store.importK8sKubeconfigContent(qaKubeconfigContent)
     expect(importResult.success).toBe(true)
-    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenLastCalledWith({ kubeconfigContent: qaKubeconfigContent })
+    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenLastCalledWith({
+      requestId: expect.stringMatching(/^k8s-kubeconfig-import-/),
+      kubeconfigContent: qaKubeconfigContent
+    })
     expect(importResult.currentContext).toBe('qa/dev')
     expect(store.k8sImportContexts).toEqual([
       { name: 'qa/dev', cluster: 'qa-cluster', server: 'https://qa.k8s.local:6443', namespace: 'qa' }
@@ -7426,19 +7429,23 @@ describe('workspace store', () => {
       kubeconfigContent: qaKubeconfigContent
     })
     expect(await store.testK8sClusterConnection({ contextName: 'missing/dev', kubeconfigContent: qaKubeconfigContent })).toBe(false)
-    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockImplementationOnce(async (input) => ({
       ok: true,
       data: {
+        requestId: input.requestId || '',
         contexts: [{ name: 'imported/admin', cluster: 'imported-cluster', server: 'https://imported.k8s.local:6443', namespace: 'imported' }],
         kubeconfigPath: '/tmp/imported-kubeconfig.yaml',
         kubeconfigContent: 'backend imported kubeconfig',
         currentContext: 'imported/admin'
       }
-    })
+    }))
     vi.mocked(window.aiops.readLocalFile).mockClear()
     const fileImport = await store.importK8sKubeconfigFile('/tmp/imported-kubeconfig.yaml')
     expect(fileImport.success).toBe(true)
-    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenLastCalledWith({ kubeconfigPath: '/tmp/imported-kubeconfig.yaml' })
+    expect(window.aiops.importKubernetesKubeconfig).toHaveBeenLastCalledWith({
+      requestId: expect.stringMatching(/^k8s-kubeconfig-import-/),
+      kubeconfigPath: '/tmp/imported-kubeconfig.yaml'
+    })
     expect(window.aiops.readLocalFile).not.toHaveBeenCalled()
     expect(store.k8sImportContexts[0]).toMatchObject({ name: 'imported/admin', server: 'https://imported.k8s.local:6443' })
 
@@ -7753,12 +7760,33 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
       ok: true,
       data: {
+        requestId: 'wrong-k8s-kubeconfig-import',
+        contexts: [{ name: 'shadow/admin', cluster: 'shadow-cluster', server: 'https://shadow.k8s.local:6443', namespace: 'shadow' }],
+        kubeconfigPath: '',
+        kubeconfigContent: 'requested kubeconfig content',
+        currentContext: 'shadow/admin'
+      }
+    })
+    const mismatchedRequestImport = await store.importK8sKubeconfigContent('requested kubeconfig content')
+    expect(mismatchedRequestImport).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: 'Kubeconfig backend returned malformed result data.'
+      })
+    )
+    expect(store.k8sClusterNotice).toBe('Kubeconfig backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sImportContexts)).toBe(originalImportContexts)
+
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockImplementationOnce(async (input) => ({
+      ok: true,
+      data: {
+        requestId: input.requestId || '',
         contexts: [{ name: 'shadow/admin', cluster: 'shadow-cluster', server: 'https://shadow.k8s.local:6443', namespace: 'shadow' }],
         kubeconfigPath: '',
         kubeconfigContent: 'different kubeconfig content',
         currentContext: 'shadow/admin'
       }
-    })
+    }))
     const mismatchedContentImport = await store.importK8sKubeconfigContent('requested kubeconfig content')
     expect(mismatchedContentImport).toEqual(
       expect.objectContaining({
@@ -7769,19 +7797,35 @@ describe('workspace store', () => {
     expect(store.k8sClusterNotice).toBe('Kubeconfig backend returned malformed result data.')
     expect(JSON.stringify(store.k8sImportContexts)).toBe(originalImportContexts)
 
-    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockImplementationOnce(async (input) => ({
       ok: true,
       data: {
+        requestId: input.requestId || '',
         contexts: [{ name: 'shadow/admin', cluster: 'shadow-cluster', server: 'https://shadow.k8s.local:6443', namespace: 'shadow' }],
         kubeconfigPath: '/tmp/shadow-kubeconfig.yaml',
         kubeconfigContent: 'shadow kubeconfig',
         currentContext: 'shadow/admin'
       }
-    })
+    }))
     const mismatchedFileImport = await store.importK8sKubeconfigFile('/tmp/requested-kubeconfig.yaml')
     expect(mismatchedFileImport.success).toBe(false)
     expect(mismatchedFileImport.error).toBe('Kubeconfig backend returned malformed result data.')
     expect(store.k8sClusterNotice).toBe('Kubeconfig 导入失败：Kubeconfig backend returned malformed result data.')
+    expect(JSON.stringify(store.k8sImportContexts)).toBe(originalImportContexts)
+
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        contexts: [{ name: 'missing-id/admin', cluster: 'missing-id-cluster', server: 'https://missing-id.k8s.local:6443', namespace: 'missing-id' }],
+        kubeconfigPath: '',
+        kubeconfigContent: 'missing request id kubeconfig',
+        currentContext: 'missing-id/admin'
+      }
+    } as any)
+    const missingRequestIdImport = await store.importK8sKubeconfigContent('missing request id kubeconfig')
+    expect(missingRequestIdImport.success).toBe(false)
+    expect(missingRequestIdImport.error).toBe('Kubeconfig backend returned malformed result data.')
+    expect(store.k8sClusterNotice).toBe('Kubeconfig backend returned malformed result data.')
     expect(JSON.stringify(store.k8sImportContexts)).toBe(originalImportContexts)
 
     let resolveSlowImport: ((value: Awaited<ReturnType<typeof window.aiops.importKubernetesKubeconfig>>) => void) | undefined
@@ -7792,21 +7836,23 @@ describe('workspace store', () => {
         }) as ReturnType<typeof window.aiops.importKubernetesKubeconfig>
     )
     const stalePromise = store.importK8sKubeconfigContent('slow kubeconfig content')
-    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockImplementationOnce(async (input) => ({
       ok: true,
       data: {
+        requestId: input.requestId || '',
         contexts: [{ name: 'fast/admin', cluster: 'fast-cluster', server: 'https://fast.k8s.local:6443', namespace: 'fast' }],
         kubeconfigPath: '',
         kubeconfigContent: 'fast kubeconfig content',
         currentContext: 'fast/admin'
       }
-    })
+    }))
     const fastImport = await store.importK8sKubeconfigContent('fast kubeconfig content')
     expect(fastImport.success).toBe(true)
     expect(store.k8sImportContexts).toEqual([{ name: 'fast/admin', cluster: 'fast-cluster', server: 'https://fast.k8s.local:6443', namespace: 'fast' }])
     resolveSlowImport?.({
       ok: true,
       data: {
+        requestId: 'k8s-kubeconfig-import-older',
         contexts: [{ name: 'slow/admin', cluster: 'slow-cluster', server: 'https://slow.k8s.local:6443', namespace: 'slow' }],
         kubeconfigPath: '',
         kubeconfigContent: 'slow kubeconfig content',
@@ -8073,15 +8119,16 @@ describe('workspace store', () => {
     expect(store.k8sProxyConfig.host).not.toBe('malformed.proxy')
 
     const importContextsBefore = JSON.stringify(store.k8sImportContexts)
-    vi.mocked(window.aiops.importKubernetesKubeconfig).mockResolvedValueOnce({
+    vi.mocked(window.aiops.importKubernetesKubeconfig).mockImplementationOnce(async (input) => ({
       ok: true,
       data: {
+        requestId: input.requestId || '',
         contexts: [{ name: 'broken/import' }],
         kubeconfigPath: '/tmp/broken-kubeconfig.yaml',
         kubeconfigContent: 'broken kubeconfig',
         currentContext: 'broken/import'
       }
-    } as any)
+    }) as any)
     const malformedImport = await store.importK8sKubeconfigContent('broken kubeconfig')
     expect(malformedImport).toEqual(
       expect.objectContaining({
