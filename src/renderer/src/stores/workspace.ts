@@ -2667,6 +2667,12 @@ const isAiChatResponseData = (source: unknown): source is AiChatResponseData =>
 const aiChatRequestIdFromAssistantMessageId = (assistantMessageId: string) =>
   assistantMessageId.endsWith('-assistant') ? assistantMessageId.slice(0, -'-assistant'.length) : ''
 
+const aiBridgeErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (typeof error === 'string' && error.trim()) return error.trim()
+  return fallback
+}
+
 const isAiChatExchangeRequestDataForRequest = (source: unknown): source is AiChatExchangeRequestData => {
   if (!isAiChatExchangeRequestData(source)) return false
   const requestId = source.requestId.trim()
@@ -12161,7 +12167,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       .join('')
 
   const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
-    const result = await window.aiops.generateAiChatResponse(input)
+    const responseBridge = window.aiops?.generateAiChatResponse
+    const failGeneration = (messageText: string) => {
+      const message = chatMessages.value.find((item) => item.id === assistantId)
+      if (message && message.state === 'streaming') {
+        message.state = 'error'
+        message.text = messageText
+        void updateCurrentConversationSnapshot()
+      }
+      void refreshAiTodoSnapshot()
+    }
+    if (typeof responseBridge !== 'function') {
+      failGeneration('AI 响应生成服务不可用')
+      return
+    }
+    let result: Awaited<ReturnType<AiopsPreloadApi['generateAiChatResponse']>> | undefined
+    try {
+      result = await responseBridge(input)
+    } catch (error) {
+      failGeneration(aiBridgeErrorMessage(error, 'AI 响应生成失败'))
+      return
+    }
     const message = chatMessages.value.find((item) => item.id === assistantId)
     if (!message || message.state !== 'streaming') {
       void refreshAiTodoSnapshot()
@@ -12169,10 +12195,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const requestId = input.requestId?.trim() || aiChatRequestIdFromAssistantMessageId(assistantId)
     const assistantMessageId = input.assistantMessageId?.trim() || assistantId
-    const data = result.data
-    if (!result.ok) {
+    const data = result?.data
+    if (!result?.ok) {
       message.state = 'error'
-      message.text = result.errorMessage || 'AI 响应生成失败'
+      message.text = result?.errorMessage || 'AI 响应生成失败'
     } else if (!requestId || !isAiChatResponseDataForRequest(data, requestId, assistantMessageId)) {
       message.state = 'error'
       message.text = 'AI 响应生成结果无效'
@@ -12208,7 +12234,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const result = await cancelBridge({
       assistantMessageId: message.id,
       requestId
+    }).catch((error) => {
+      setTopNotice(aiBridgeErrorMessage(error, 'AI 生成取消失败'))
+      return null
     })
+    if (!result) return false
     if (!result?.ok || !isAiChatCancelDataForRequest(result.data, requestId, message.id)) {
       setTopNotice(result?.errorMessage || 'AI 生成取消失败')
       return false
@@ -12243,33 +12273,44 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
     const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
     const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
-    const request = await window.aiops.createAiChatExchangeRequest({
-      text: prompt,
-      hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts'],
-      messages: historyForBackend,
-      contexts: messageContexts.map((item) => ({
-        id: item.id,
-        kind: item.kind,
-        label: item.label,
-        detail: item.detail,
-        relPath: item.relPath,
-        mediaType: item.mediaType
-      })),
-      command: selectedCommandRef.value
-        ? {
-            id: selectedCommandId.value || undefined,
-            label: selectedCommandRef.value.label,
-            command: selectedCommandRef.value.command,
-            path: selectedCommandRef.value.path
-          }
-        : commandDisplay
-          ? { id: selectedCommandId.value || undefined, label: commandDisplay }
-          : null,
-      model: config.value.modelName,
-      mode: mode.value === 'agents' ? 'agent' : 'command'
-    })
-    if (!request.ok || !isAiChatExchangeRequestDataForRequest(request.data)) {
-      setTopNotice(request.errorMessage || 'AI 请求创建失败')
+    const exchangeBridge = window.aiops?.createAiChatExchangeRequest
+    if (typeof exchangeBridge !== 'function') {
+      setTopNotice('AI 请求创建服务不可用')
+      return false
+    }
+    let request: Awaited<ReturnType<AiopsPreloadApi['createAiChatExchangeRequest']>> | undefined
+    try {
+      request = await exchangeBridge({
+        text: prompt,
+        hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts'],
+        messages: historyForBackend,
+        contexts: messageContexts.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          label: item.label,
+          detail: item.detail,
+          relPath: item.relPath,
+          mediaType: item.mediaType
+        })),
+        command: selectedCommandRef.value
+          ? {
+              id: selectedCommandId.value || undefined,
+              label: selectedCommandRef.value.label,
+              command: selectedCommandRef.value.command,
+              path: selectedCommandRef.value.path
+            }
+          : commandDisplay
+            ? { id: selectedCommandId.value || undefined, label: commandDisplay }
+            : null,
+        model: config.value.modelName,
+        mode: mode.value === 'agents' ? 'agent' : 'command'
+      })
+    } catch (error) {
+      setTopNotice(aiBridgeErrorMessage(error, 'AI 请求创建失败'))
+      return false
+    }
+    if (!request?.ok || !isAiChatExchangeRequestDataForRequest(request.data)) {
+      setTopNotice(request?.errorMessage || 'AI 请求创建失败')
       return false
     }
     if (isAiContextUsageForRequest(request.data.contextUsage, request.data.requestId, request.data.assistantMessage.id)) {

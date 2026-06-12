@@ -3782,6 +3782,44 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('renders rejected AI response bridges as backend errors and re-enables input actions', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockRejectedValueOnce(new Error('provider bridge rejected'))
+
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('检查 rejected AI 响应'))
+    const range = document.createRange()
+    range.selectNodeContents(input.element)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await flushPromises()
+    await waitForMockCall(vi.mocked(window.aiops.generateAiChatResponse), 'generateAiChatResponse')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const assistantMessage = wrapper.findAll('.message.assistant').at(-1)
+    expect(assistantMessage).toBeTruthy()
+    expect(store.chatMessages.at(-1)?.state).toBe('error')
+    expect(assistantMessage!.text()).toContain('provider bridge rejected')
+    expect(store.chatMessages.some((message) => message.state === 'streaming')).toBe(false)
+    expect(wrapper.find('[data-testid="ai-file-upload-button"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('disabled')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
   it('renders and approves AI MCP tool calls through the backend bridge', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

@@ -575,6 +575,73 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('AI 生成取消失败')
   })
 
+  it('fails closed when AI exchange and response bridges are unavailable or reject', async () => {
+    const store = useWorkspaceStore()
+    const originalCreateExchange = window.aiops.createAiChatExchangeRequest
+    const originalGenerateResponse = window.aiops.generateAiChatResponse
+
+    try {
+      ;(window.aiops as any).createAiChatExchangeRequest = undefined
+      await expect(store.sendChat('创建 bridge 缺失不能插入本地消息')).resolves.toBe(false)
+      expect(store.chatMessages).toEqual([])
+      expect(store.aiContextUsage).toBeNull()
+      expect(store.topNotice).toBe('AI 请求创建服务不可用')
+    } finally {
+      ;(window.aiops as any).createAiChatExchangeRequest = originalCreateExchange
+    }
+
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockRejectedValueOnce(new Error('AI exchange bridge down'))
+    await expect(store.sendChat('创建 bridge reject 不能插入本地消息')).resolves.toBe(false)
+    expect(store.chatMessages).toEqual([])
+    expect(store.aiContextUsage).toBeNull()
+    expect(store.topNotice).toBe('AI exchange bridge down')
+
+    try {
+      ;(window.aiops as any).generateAiChatResponse = undefined
+      await expect(store.sendChat('生成 bridge 缺失不能一直 streaming')).resolves.toBe(true)
+      expect(store.chatMessages.at(-1)).toMatchObject({
+        id: 'aichat-request-test-1-assistant',
+        role: 'assistant',
+        state: 'error',
+        text: 'AI 响应生成服务不可用'
+      })
+      expect(store.chatMessages.some((message) => message.state === 'streaming')).toBe(false)
+    } finally {
+      ;(window.aiops as any).generateAiChatResponse = originalGenerateResponse
+    }
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockRejectedValueOnce(new Error('AI provider bridge rejected'))
+    await expect(store.sendChat('生成 bridge reject 不能一直 streaming')).resolves.toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.chatMessages.at(-1)).toMatchObject({
+      id: 'aichat-request-test-2-assistant',
+      role: 'assistant',
+      state: 'error',
+      text: 'AI provider bridge rejected'
+    })
+    expect(store.chatMessages.some((message) => message.state === 'streaming')).toBe(false)
+  })
+
+  it('keeps streaming AI responses when cancellation bridge rejects instead of fabricating cancellation', async () => {
+    const store = useWorkspaceStore()
+
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
+    await expect(store.sendChat('取消 bridge reject 不能本地伪造已停止')).resolves.toBe(true)
+    const streamingAssistant = store.chatMessages.at(-1)
+    expect(streamingAssistant).toMatchObject({
+      id: 'aichat-request-test-1-assistant',
+      role: 'assistant',
+      state: 'streaming'
+    })
+
+    vi.mocked(window.aiops.cancelAiChatResponse).mockRejectedValueOnce(new Error('cancel bridge rejected'))
+    await expect(store.cancelStreamingAiChatResponse()).resolves.toBe(false)
+    expect(streamingAssistant?.state).toBe('streaming')
+    expect(streamingAssistant?.text).toContain('正在请求 aiopsterm AI 后端')
+    expect(store.topNotice).toBe('cancel bridge rejected')
+  })
+
   it('binds AI exchange, generation, and cancellation results to the active request identity', async () => {
     const store = useWorkspaceStore()
 
