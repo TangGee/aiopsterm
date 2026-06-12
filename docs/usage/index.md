@@ -6,3 +6,4 @@
 - [Kubernetes](kubernetes.md)
 - [MCP Servers](mcp-servers.md)
 - [Package Verification](package-verification.md)
+- [User Account](user-account.md)

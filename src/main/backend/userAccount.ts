@@ -16,7 +16,7 @@ import type {
   AiopsUserProfile,
   AiopsUserProfileUpdateInput
 } from '@shared/preload'
-import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto'
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
 import { copyFile, readFile, stat } from 'fs/promises'
 import { hostname, networkInterfaces, userInfo } from 'os'
@@ -77,6 +77,21 @@ type UserAccountPersistedState = {
   version: 1
   profile: AiopsUserProfile
   trustedDevices: AiopsTrustedDevice[]
+  credentials: UserAccountCredential[]
+}
+
+type UserAccountCredential = {
+  username: string
+  passwordHash: string
+  salt: string
+  updatedAt: string
+  requiresDeviceVerification?: boolean
+}
+
+type SeedUserAccountCredential = {
+  username: string
+  password: string
+  requiresDeviceVerification?: boolean
 }
 
 const defaultUserAccountStateFilePath = () => {
@@ -174,8 +189,52 @@ const createInitialUserProfile = () => (runtimeConfig.useSeedData ? { ...default
 const createInitialTrustedDevices = () =>
   runtimeConfig.useSeedData ? defaultTrustedDevices.map((device) => ({ ...device })) : createLocalTrustedDevices()
 
+const seedUserAccountCredentials: SeedUserAccountCredential[] = [
+  { username: 'ops_login', password: 'secret' },
+  { username: 'ops_return', password: 'secret' },
+  { username: 'privacy_ops', password: 'secret' },
+  { username: 'verify-device', password: 'secret', requiresDeviceVerification: true }
+]
+
+const credentialText = (value: unknown) => String(value || '').trim()
+
+const userCredentialKey = (username: string) => credentialText(username).toLowerCase()
+
+const isUsableCredentialUsername = (username: string) => {
+  const value = credentialText(username)
+  return value.length > 0 && value.length <= 64
+}
+
+const userPasswordHash = (password: string, salt: string) => scryptSync(password, `aiopsterm-user-account-v1\0${salt}`, 32).toString('hex')
+
+const createUserCredential = (
+  username: string,
+  password: string,
+  options: { salt?: string; updatedAt?: string; requiresDeviceVerification?: boolean } = {}
+): UserAccountCredential => {
+  const salt = options.salt || randomBytes(16).toString('hex')
+  return {
+    username: credentialText(username),
+    salt,
+    passwordHash: userPasswordHash(password, salt),
+    updatedAt: options.updatedAt || defaultUserProfile.passwordUpdatedAt,
+    ...(options.requiresDeviceVerification ? { requiresDeviceVerification: true } : {})
+  }
+}
+
+const createSeedUserCredentials = () =>
+  seedUserAccountCredentials.map((credential) =>
+    createUserCredential(credential.username, credential.password, {
+      updatedAt: defaultUserProfile.passwordUpdatedAt,
+      requiresDeviceVerification: credential.requiresDeviceVerification
+    })
+  )
+
+const createInitialCredentials = () => (runtimeConfig.useSeedData ? createSeedUserCredentials() : [])
+
 let profileStore: AiopsUserProfile = createInitialUserProfile()
 let trustedDeviceStore: AiopsTrustedDevice[] = createInitialTrustedDevices()
+let credentialStore: UserAccountCredential[] = createInitialCredentials()
 let userAccountStateLoaded = false
 let userAccountLoadedStateFilePath = ''
 
@@ -317,6 +376,54 @@ const normalizePersistedTrustedDevices = (value: unknown): AiopsTrustedDevice[] 
 }
 
 const seedTrustedDevicesById = new Map(defaultTrustedDevices.map((device) => [device.id, device]))
+const seedUserAccountCredentialsByKey = new Map(seedUserAccountCredentials.map((credential) => [userCredentialKey(credential.username), credential]))
+
+const normalizePersistedCredential = (value: unknown): UserAccountCredential | null => {
+  if (!isRecord(value)) return null
+  const username = persistedString(value.username)
+  const salt = persistedString(value.salt)
+  const passwordHash = persistedString(value.passwordHash)
+  if (!isUsableCredentialUsername(username)) return null
+  if (!/^[a-f0-9]{32,128}$/i.test(salt)) return null
+  if (!/^[a-f0-9]{64}$/i.test(passwordHash)) return null
+  return {
+    username,
+    salt: salt.toLowerCase(),
+    passwordHash: passwordHash.toLowerCase(),
+    updatedAt: persistedString(value.updatedAt, defaultUserProfile.passwordUpdatedAt),
+    ...(persistedBoolean(value.requiresDeviceVerification, false) ? { requiresDeviceVerification: true } : {})
+  }
+}
+
+const normalizePersistedCredentials = (value: unknown) => {
+  if (!Array.isArray(value)) return []
+  const credentialsByKey = new Map<string, UserAccountCredential>()
+  value.forEach((item) => {
+    const credential = normalizePersistedCredential(item)
+    if (credential) credentialsByKey.set(userCredentialKey(credential.username), credential)
+  })
+  return [...credentialsByKey.values()]
+}
+
+const mergeSeedUserCredentials = (credentials: UserAccountCredential[]) => {
+  const credentialsByKey = new Map<string, UserAccountCredential>()
+  createSeedUserCredentials().forEach((credential) => {
+    credentialsByKey.set(userCredentialKey(credential.username), credential)
+  })
+  credentials.forEach((credential) => {
+    credentialsByKey.set(userCredentialKey(credential.username), { ...credential })
+  })
+  return [...credentialsByKey.values()]
+}
+
+const isUnchangedSeedUserCredential = (credential: UserAccountCredential) => {
+  const seed = seedUserAccountCredentialsByKey.get(userCredentialKey(credential.username))
+  return (
+    Boolean(seed) &&
+    Boolean(credential.requiresDeviceVerification) === Boolean(seed?.requiresDeviceVerification) &&
+    verifyUserCredentialPassword(credential, seed!.password)
+  )
+}
 
 const stripLegacySeedUserAccountState = (state: UserAccountPersistedState): UserAccountPersistedState => {
   if (runtimeConfig.useSeedData) return state
@@ -328,16 +435,19 @@ const stripLegacySeedUserAccountState = (state: UserAccountPersistedState): User
   return {
     version: 1,
     profile,
-    trustedDevices: withSingleCurrentTrustedDevice(trustedDevices, createLocalTrustedDevices())
+    trustedDevices: withSingleCurrentTrustedDevice(trustedDevices, createLocalTrustedDevices()),
+    credentials: state.credentials.filter((credential) => !isUnchangedSeedUserCredential(credential))
   }
 }
 
 const normalizePersistedUserAccountState = (value: unknown): UserAccountPersistedState | null => {
   if (!isRecord(value)) return null
+  const credentials = normalizePersistedCredentials(value.credentials)
   const state: UserAccountPersistedState = {
     version: 1,
     profile: normalizePersistedProfile(value.profile),
-    trustedDevices: normalizePersistedTrustedDevices(value.trustedDevices)
+    trustedDevices: normalizePersistedTrustedDevices(value.trustedDevices),
+    credentials: runtimeConfig.useSeedData ? mergeSeedUserCredentials(credentials) : credentials
   }
   return runtimeConfig.useSeedData ? state : stripLegacySeedUserAccountState(state)
 }
@@ -345,16 +455,19 @@ const normalizePersistedUserAccountState = (value: unknown): UserAccountPersiste
 const applyInitialUserAccountState = () => {
   profileStore = createInitialUserProfile()
   trustedDeviceStore = createInitialTrustedDevices()
+  credentialStore = createInitialCredentials()
 }
 
 const applyDeactivatedUserAccountState = () => {
   profileStore = createLocalUserProfile()
   trustedDeviceStore = createLocalTrustedDevices()
+  credentialStore = createInitialCredentials()
 }
 
 const applyPersistedUserAccountState = (state: UserAccountPersistedState) => {
   profileStore = { ...state.profile }
   trustedDeviceStore = state.trustedDevices.map((device) => ({ ...device }))
+  credentialStore = state.credentials.map((credential) => ({ ...credential }))
 }
 
 const ensureUserAccountStateLoaded = () => {
@@ -380,7 +493,8 @@ const persistUserAccountState = () => {
   const state: UserAccountPersistedState = {
     version: 1,
     profile: { ...profileStore },
-    trustedDevices: trustedDeviceStore.map((device) => ({ ...device }))
+    trustedDevices: trustedDeviceStore.map((device) => ({ ...device })),
+    credentials: credentialStore.map((credential) => ({ ...credential }))
   }
   try {
     mkdirSync(dirname(runtimeConfig.stateFilePath), { recursive: true })
@@ -454,6 +568,44 @@ const secureHashEqual = (left: string, right: string) => {
   const leftBuffer = Buffer.from(left, 'hex')
   const rightBuffer = Buffer.from(right, 'hex')
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+const verifyUserCredentialPassword = (credential: UserAccountCredential, password: string) =>
+  secureHashEqual(credential.passwordHash, userPasswordHash(password, credential.salt))
+
+const findUserCredential = (username: string) => {
+  const key = userCredentialKey(username)
+  return credentialStore.find((credential) => userCredentialKey(credential.username) === key) || null
+}
+
+const upsertUserCredential = (
+  username: string,
+  password: string,
+  options: { updatedAt?: string; requiresDeviceVerification?: boolean } = {}
+) => {
+  const normalizedUsername = credentialText(username)
+  if (!isUsableCredentialUsername(normalizedUsername)) return null
+  const key = userCredentialKey(normalizedUsername)
+  const existing = credentialStore.find((credential) => userCredentialKey(credential.username) === key)
+  const credential = createUserCredential(normalizedUsername, password, {
+    updatedAt: options.updatedAt || timestamp(),
+    requiresDeviceVerification: options.requiresDeviceVerification ?? existing?.requiresDeviceVerification
+  })
+  credentialStore = existing
+    ? credentialStore.map((item) => (userCredentialKey(item.username) === key ? credential : item))
+    : [...credentialStore, credential]
+  return credential
+}
+
+const renameCurrentUserCredential = (previousUsername: string, nextUsername: string) => {
+  const previousKey = userCredentialKey(previousUsername)
+  const nextKey = userCredentialKey(nextUsername)
+  if (!previousKey || !nextKey || previousKey === nextKey) return
+  const existing = credentialStore.find((credential) => userCredentialKey(credential.username) === previousKey)
+  if (!existing) return
+  credentialStore = credentialStore
+    .filter((credential) => userCredentialKey(credential.username) !== nextKey)
+    .map((credential) => (userCredentialKey(credential.username) === previousKey ? { ...credential, username: credentialText(nextUsername) } : credential))
 }
 
 const clearUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) => {
@@ -668,8 +820,13 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
   if (input.method === 'account') {
     const username = trimText(input.username)
     if (!username || !input.password) return errorResult('USER_LOGIN_REQUIRED', '请输入用户名和密码')
-    if (username.toLowerCase().includes('verify')) {
+    const credential = findUserCredential(username)
+    if (!credential || !verifyUserCredentialPassword(credential, input.password)) {
+      return errorResult('USER_LOGIN_INVALID', '用户名或密码不正确')
+    }
+    if (credential.requiresDeviceVerification) {
       applyProfile({
+        username: credential.username,
         needDeviceVerification: true,
         localDatabaseReady: false
       })
@@ -685,8 +842,8 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
       }
     }
     loginProfile({
-      username,
-      name: profileStore.name || username,
+      username: credential.username,
+      name: profileStore.name || credential.username,
       authProvider: 'local',
       registrationCode: 9,
       lastLoginMethod: 'account'
@@ -820,13 +977,16 @@ export const updateUserProfile = (input: AiopsUserProfileUpdateInput): AiopsUser
   if (validation) return errorResult('USER_PROFILE_INVALID', validation)
   const nextAvatarInitials = trimText(input.avatarInitials).toUpperCase().slice(0, 3)
   const avatarChanged = input.avatarImageUrl !== undefined || input.avatarInitials !== undefined
+  const previousUsername = profileStore.username
+  const nextUsername = input.username !== undefined ? trimText(input.username) : profileStore.username
   const nextAvatarImageUrl = input.avatarImageUrl !== undefined ? trimText(input.avatarImageUrl) : profileStore.avatarImageUrl
   if (input.avatarImageUrl !== undefined && nextAvatarImageUrl && !avatarAssetExists(nextAvatarImageUrl)) {
     return errorResult('USER_AVATAR_ASSET_INVALID', '头像图片必须来自后端头像上传结果')
   }
+  if (!profileStore.skippedLogin) renameCurrentUserCredential(previousUsername, nextUsername)
   applyProfile({
     name: input.name !== undefined ? trimText(input.name) : profileStore.name,
-    username: input.username !== undefined ? trimText(input.username) : profileStore.username,
+    username: nextUsername,
     avatarInitials: nextAvatarInitials || profileStore.avatarInitials,
     avatarImageUrl: nextAvatarImageUrl,
     avatarUpdatedAt: avatarChanged ? timestamp() : profileStore.avatarUpdatedAt
@@ -875,7 +1035,15 @@ export const resetUserPassword = (input: AiopsUserPasswordInput): AiopsUserMutat
   if (!canResetPassword()) return errorResult('USER_PASSWORD_RESET_FORBIDDEN', 'SSO 用户不能修改密码')
   if (input.password.length < 6) return errorResult('USER_PASSWORD_TOO_SHORT', '密码长度不能小于6位')
   if (passwordScore(input.password) < 1) return errorResult('USER_PASSWORD_WEAK', '请具有弱以上的密码强度')
-  applyProfile({ passwordUpdatedAt: timestamp() })
+  const updatedAt = timestamp()
+  if (!profileStore.skippedLogin && isUsableCredentialUsername(profileStore.username)) {
+    const existing = findUserCredential(profileStore.username)
+    upsertUserCredential(profileStore.username, input.password, {
+      updatedAt,
+      requiresDeviceVerification: existing?.requiresDeviceVerification
+    })
+  }
+  applyProfile({ passwordUpdatedAt: updatedAt })
   return successMutation('密码重置成功')
 }
 

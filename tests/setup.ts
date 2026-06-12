@@ -37,7 +37,7 @@ import {
 } from '@shared/knowledgeBaseSeed'
 import { defaultModelSettingsSeedData } from '@shared/modelSettingsSeed'
 import { defaultWorkspacePreferencesSeedData } from '@shared/workspacePreferencesSeed'
-import { createHash } from 'crypto'
+import { createHash, scryptSync } from 'crypto'
 import { vi } from 'vitest'
 
 process.env.AIOPSTERM_WORKSPACE_PREFERENCES_ENABLE_SEED = '1'
@@ -383,12 +383,49 @@ type TestUserAccountSnapshot = {
   trustedDevices: TestTrustedDevice[]
 }
 
+type TestUserAccountCredential = {
+  username: string
+  passwordHash: string
+  salt: string
+  updatedAt: string
+  requiresDeviceVerification?: boolean
+}
+
 const cloneUserProfileMock = (profile: TestUserProfile): TestUserProfile => ({ ...profile })
 
 const cloneTrustedDeviceMock = (device: TestTrustedDevice): TestTrustedDevice => ({ ...device })
 
+const trimUserTextMock = (value: unknown) => String(value || '').trim()
+
+const userCredentialKeyMock = (username: string) => trimUserTextMock(username).toLowerCase()
+
+const userCredentialHashMock = (password: string, salt: string) => scryptSync(password, `tests/setup\0${salt}`, 32).toString('hex')
+
+const createUserCredentialMock = (
+  username: string,
+  password: string,
+  options: { salt?: string; updatedAt?: string; requiresDeviceVerification?: boolean } = {}
+): TestUserAccountCredential => {
+  const salt = options.salt || createHash('sha256').update(['tests/setup', userCredentialKeyMock(username)].join('\0')).digest('hex').slice(0, 32)
+  return {
+    username: trimUserTextMock(username),
+    salt,
+    passwordHash: userCredentialHashMock(password, salt),
+    updatedAt: options.updatedAt || defaultUserProfile.passwordUpdatedAt,
+    ...(options.requiresDeviceVerification ? { requiresDeviceVerification: true } : {})
+  }
+}
+
+const defaultUserCredentialsMock = () => [
+  createUserCredentialMock('ops_login', 'secret'),
+  createUserCredentialMock('ops_return', 'secret'),
+  createUserCredentialMock('privacy_ops', 'secret'),
+  createUserCredentialMock('verify-device', 'secret', { requiresDeviceVerification: true })
+]
+
 let userProfileStoreMock = cloneUserProfileMock(defaultUserProfile)
 let trustedDeviceStoreMock = defaultTrustedDevices.map(cloneTrustedDeviceMock)
+let userCredentialStoreMock = defaultUserCredentialsMock()
 
 type UserCodeCooldownScopeMock = 'login' | 'contact'
 type UserCodeKindMock = 'email' | 'mobile'
@@ -399,8 +436,6 @@ const userTimestampMock = (value = new Date()) => {
   const pad = (input: number) => input.toString().padStart(2, '0')
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`
 }
-
-const trimUserTextMock = (value: unknown) => String(value || '').trim()
 
 const isValidUserEmailMock = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
@@ -494,6 +529,36 @@ const userPasswordScoreMock = (password: string) => {
   return score
 }
 
+const findUserCredentialMock = (username: string) =>
+  userCredentialStoreMock.find((credential) => userCredentialKeyMock(credential.username) === userCredentialKeyMock(username)) || null
+
+const verifyUserCredentialPasswordMock = (credential: TestUserAccountCredential, password: string) =>
+  credential.passwordHash === userCredentialHashMock(password, credential.salt)
+
+const upsertUserCredentialMock = (username: string, password: string, options: { updatedAt?: string; requiresDeviceVerification?: boolean } = {}) => {
+  const normalizedUsername = trimUserTextMock(username)
+  if (!normalizedUsername) return
+  const existing = findUserCredentialMock(normalizedUsername)
+  const credential = createUserCredentialMock(normalizedUsername, password, {
+    updatedAt: options.updatedAt || userTimestampMock(),
+    requiresDeviceVerification: options.requiresDeviceVerification ?? existing?.requiresDeviceVerification
+  })
+  userCredentialStoreMock = existing
+    ? userCredentialStoreMock.map((item) => (userCredentialKeyMock(item.username) === userCredentialKeyMock(normalizedUsername) ? credential : item))
+    : [...userCredentialStoreMock, credential]
+}
+
+const renameCurrentUserCredentialMock = (previousUsername: string, nextUsername: string) => {
+  const previousKey = userCredentialKeyMock(previousUsername)
+  const nextKey = userCredentialKeyMock(nextUsername)
+  if (!previousKey || !nextKey || previousKey === nextKey) return
+  const existing = findUserCredentialMock(previousUsername)
+  if (!existing) return
+  userCredentialStoreMock = userCredentialStoreMock
+    .filter((credential) => userCredentialKeyMock(credential.username) !== nextKey)
+    .map((credential) => (userCredentialKeyMock(credential.username) === previousKey ? { ...credential, username: trimUserTextMock(nextUsername) } : credential))
+}
+
 const userAccountSnapshotMock = (): TestUserAccountSnapshot => ({
   profile: cloneUserProfileMock(userProfileStoreMock),
   trustedDevices: trustedDeviceStoreMock.map(cloneTrustedDeviceMock)
@@ -533,6 +598,7 @@ const loginUserProfileMock = (patch: Partial<TestUserProfile>) => {
 const resetUserAccountStoreMock = () => {
   userProfileStoreMock = cloneUserProfileMock(defaultUserProfile)
   trustedDeviceStoreMock = defaultTrustedDevices.map(cloneTrustedDeviceMock)
+  userCredentialStoreMock = defaultUserCredentialsMock()
   userCodeCooldownStoreMock.clear()
 }
 
@@ -553,6 +619,7 @@ const deactivateUserAccountStoreMock = () => {
     lastLoginAt: ''
   }
   trustedDeviceStoreMock = [cloneTrustedDeviceMock({ ...defaultTrustedDevices[0], id: 1, current: true })]
+  userCredentialStoreMock = defaultUserCredentialsMock()
   userCodeCooldownStoreMock.clear()
 }
 
@@ -5417,8 +5484,13 @@ Object.defineProperty(window, 'aiops', {
         if (input.method === 'account') {
           const username = trimUserTextMock(input.username)
           if (!username || !input.password) return userErrorMock('USER_LOGIN_REQUIRED', '请输入用户名和密码')
-          if (username.toLowerCase().includes('verify')) {
+          const credential = findUserCredentialMock(username)
+          if (!credential || !verifyUserCredentialPasswordMock(credential, input.password)) {
+            return userErrorMock('USER_LOGIN_INVALID', '用户名或密码不正确')
+          }
+          if (credential.requiresDeviceVerification) {
             applyUserProfileMock({
+              username: credential.username,
               needDeviceVerification: true,
               localDatabaseReady: false
             })
@@ -5430,8 +5502,8 @@ Object.defineProperty(window, 'aiops', {
             }
           }
           loginUserProfileMock({
-            username,
-            name: userProfileStoreMock.name || username,
+            username: credential.username,
+            name: userProfileStoreMock.name || credential.username,
             authProvider: 'local',
             registrationCode: 9,
             lastLoginMethod: 'account'
@@ -5529,13 +5601,16 @@ Object.defineProperty(window, 'aiops', {
         if (validation) return userErrorMock('USER_PROFILE_INVALID', validation)
         const nextAvatarInitials = trimUserTextMock(input.avatarInitials).toUpperCase().slice(0, 3)
         const avatarChanged = input.avatarImageUrl !== undefined || input.avatarInitials !== undefined
+        const previousUsername = userProfileStoreMock.username
+        const nextUsername = input.username !== undefined ? trimUserTextMock(input.username) : userProfileStoreMock.username
         const nextAvatarImageUrl = input.avatarImageUrl !== undefined ? trimUserTextMock(input.avatarImageUrl) : userProfileStoreMock.avatarImageUrl
         if (input.avatarImageUrl !== undefined && nextAvatarImageUrl && !userAvatarAssetUrlPatternMock.test(nextAvatarImageUrl)) {
           return userErrorMock('USER_AVATAR_ASSET_INVALID', '头像图片必须来自后端头像上传结果')
         }
+        if (!userProfileStoreMock.skippedLogin) renameCurrentUserCredentialMock(previousUsername, nextUsername)
         applyUserProfileMock({
           name: input.name !== undefined ? trimUserTextMock(input.name) : userProfileStoreMock.name,
-          username: input.username !== undefined ? trimUserTextMock(input.username) : userProfileStoreMock.username,
+          username: nextUsername,
           avatarInitials: nextAvatarInitials || userProfileStoreMock.avatarInitials,
           avatarImageUrl: nextAvatarImageUrl,
           avatarUpdatedAt: avatarChanged ? userTimestampMock() : userProfileStoreMock.avatarUpdatedAt
@@ -5547,7 +5622,11 @@ Object.defineProperty(window, 'aiops', {
       if (!canResetUserPasswordMock()) return userErrorMock('USER_PASSWORD_RESET_FORBIDDEN', 'SSO 用户不能修改密码')
       if (input.password.length < 6) return userErrorMock('USER_PASSWORD_TOO_SHORT', '密码长度不能小于6位')
       if (userPasswordScoreMock(input.password) < 1) return userErrorMock('USER_PASSWORD_WEAK', '请具有弱以上的密码强度')
-      applyUserProfileMock({ passwordUpdatedAt: userTimestampMock() })
+      const updatedAt = userTimestampMock()
+      if (!userProfileStoreMock.skippedLogin && userProfileStoreMock.username) {
+        upsertUserCredentialMock(userProfileStoreMock.username, input.password, { updatedAt })
+      }
+      applyUserProfileMock({ passwordUpdatedAt: updatedAt })
       return userSuccessMock('密码重置成功')
     }),
     sendUserContactCode: vi.fn(async (input: { kind: 'email' | 'mobile'; value: string }) => {

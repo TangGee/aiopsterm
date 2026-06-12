@@ -99,6 +99,16 @@ describe('user account backend boundary', () => {
       errorCode: 'USER_LOGIN_REQUIRED',
       errorMessage: '请输入用户名和密码'
     })
+    expect(backend.loginUserAccount({ method: 'account', username: 'unknown_ops', password: 'secret' })).toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_INVALID',
+      errorMessage: '用户名或密码不正确'
+    })
+    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'wrong-secret' })).toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_INVALID',
+      errorMessage: '用户名或密码不正确'
+    })
 
     const account = backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })
     expect(expectOkData(account).profile).toMatchObject({
@@ -389,6 +399,36 @@ describe('user account backend boundary', () => {
     expect(expectOkData(result).profile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   })
 
+  it('updates backend-owned account credentials after password reset', () => {
+    expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
+    expectOkData(backend.resetUserPassword({ password: 'Newpass1!' }))
+    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_INVALID',
+      errorMessage: '用户名或密码不正确'
+    })
+    expect(expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'Newpass1!' })).profile).toMatchObject({
+      username: 'ops_login',
+      lastLoginMethod: 'account'
+    })
+  })
+
+  it('keeps account credentials aligned with backend-owned username edits', () => {
+    expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
+    expectOkData(backend.updateUserProfile({ username: 'ops_renamed' }))
+    expectOkData(backend.resetUserPassword({ password: 'Renamed1!' }))
+
+    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_INVALID',
+      errorMessage: '用户名或密码不正确'
+    })
+    expect(expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_renamed', password: 'Renamed1!' })).profile).toMatchObject({
+      username: 'ops_renamed',
+      lastLoginMethod: 'account'
+    })
+  })
+
   it('rejects current trusted device revocation and removes non-current devices', () => {
     expect(backend.revokeTrustedDevice(1)).toEqual({
       ok: false,
@@ -663,6 +703,7 @@ describe('user account backend boundary', () => {
     const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
       profile: { name: string; username: string; email: string; passwordUpdatedAt: string; avatarInitials: string }
       trustedDevices: Array<{ id: number; deviceName: string }>
+      credentials: Array<{ username: string; salt: string; passwordHash: string }>
     }
     expect(persisted.profile).toMatchObject({
       name: 'Ops Lead',
@@ -672,6 +713,12 @@ describe('user account backend boundary', () => {
     })
     expect(persisted.profile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
     expect(persisted.trustedDevices.map((device) => device.id)).toEqual([1])
+    expect(persisted.credentials.find((credential) => credential.username === 'ops_lead')).toMatchObject({
+      username: 'ops_lead',
+      salt: expect.stringMatching(/^[a-f0-9]{32}$/),
+      passwordHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+    })
+    expect(JSON.stringify(persisted.credentials)).not.toContain('Aa123456!')
 
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
     const restored = expectOkData(backend.getUserAccount())
@@ -686,6 +733,27 @@ describe('user account backend boundary', () => {
     })
     expect(restored.profile.passwordUpdatedAt).toBe(persisted.profile.passwordUpdatedAt)
     expect(restored.trustedDevices.map((device: { id: number }) => device.id)).toEqual([1])
+    expect(restored).not.toHaveProperty('credentials')
+    expect(expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_lead', password: 'Aa123456!' })).profile.username).toBe('ops_lead')
+  })
+
+  it('starts non-seed runtime without development account credentials', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-non-seed-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'user-account.json')
+    backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: false })
+    backend.resetUserAccountForTests()
+
+    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_INVALID',
+      errorMessage: '用户名或密码不正确'
+    })
+    expect(backend.loginUserAccount({ method: 'account', username: 'verify-device', password: 'secret' })).toEqual({
+      ok: false,
+      errorCode: 'USER_LOGIN_INVALID',
+      errorMessage: '用户名或密码不正确'
+    })
   })
 
   it('normalizes malformed persisted account state instead of leaking invalid client data', async () => {
