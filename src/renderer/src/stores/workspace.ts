@@ -11200,24 +11200,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sResourceOutput.value = k8sCommandDisplayOutput(result)
   }
 
+  const writeK8sClipboardText = async (text: string, fallbackError: string) => {
+    const writeText = navigator.clipboard?.writeText
+    if (typeof writeText !== 'function') {
+      setK8sNotice('Clipboard write service unavailable.')
+      return false
+    }
+    try {
+      await writeText.call(navigator.clipboard, text)
+      return true
+    } catch (error) {
+      setK8sNotice(error instanceof Error && error.message ? error.message : fallbackError)
+      return false
+    }
+  }
+
   const copyK8sResourceCommand = async (resourceId: string, action: K8sResourceAction = 'get') => {
     const plan = await planK8sResourceAction(resourceId, action)
     if (!plan) return ''
     const command = plan.command
+    const copied = await writeK8sClipboardText(command, 'Kubernetes kubectl command copy failed.')
+    if (!copied) return ''
     k8sCopiedCommand.value = command
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(command).catch(() => undefined)
-    }
     setK8sNotice('kubectl 命令已复制')
     return command
   }
 
-  const copyK8sResourceOutput = () => {
+  const copyK8sResourceOutput = async () => {
     const output = k8sResourceOutput.value.trim()
     if (!output) return ''
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(output).catch(() => undefined)
-    }
+    const copied = await writeK8sClipboardText(output, 'Kubernetes output copy failed.')
+    if (!copied) return ''
     setK8sNotice('Kubernetes 输出已复制')
     return output
   }

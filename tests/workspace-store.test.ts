@@ -7325,7 +7325,7 @@ describe('workspace store', () => {
         source: 'resource'
       })
     )
-    expect(store.copyK8sResourceOutput()).toContain('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
+    await expect(store.copyK8sResourceOutput()).resolves.toContain('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     const sentOutputCommand = await store.sendK8sCurrentOutputToTerminal()
     expect(sentOutputCommand).toBe('kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
     expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops')
@@ -8429,6 +8429,34 @@ describe('workspace store', () => {
     await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
     expect(store.k8sClusterNotice).toBe('Kubernetes resource action backend returned malformed plan data.')
     expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+
+    vi.mocked(window.aiops.planKubernetesResourceAction).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        resourceId: 'k8s-pod-worker-1',
+        resourceName: 'billing-worker-7f9d6f9dd9-rx8mm',
+        resourceKind: 'pods',
+        action: 'describe',
+        title: 'Describe billing-worker-7f9d6f9dd9-rx8mm',
+        command: 'kubectl describe pod billing-worker-7f9d6f9dd9-rx8mm -n ops',
+        clusterId: 'k8s-1',
+        clusterName: 'prod-cluster',
+        contextName: 'prod/admin',
+        namespace: 'ops'
+      }
+    } as any)
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied'))
+    await expect(store.copyK8sResourceCommand('k8s-pod-worker-1', 'describe')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('clipboard denied')
+    expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+
+    store.k8sResourceOutputTitle = 'Stable resource output'
+    store.k8sResourceOutput = 'stable backend output'
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard output denied'))
+    await expect(store.copyK8sResourceOutput()).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('clipboard output denied')
+    expect(store.k8sCopiedCommand).toBe('kubectl get pods -n stable')
+    expect(store.k8sResourceOutput).toBe('stable backend output')
 
     store.k8sResourceOutputTitle = 'Stable resource output'
     store.k8sResourceOutput = 'stable backend output'

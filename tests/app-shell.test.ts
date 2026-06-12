@@ -7575,6 +7575,7 @@ describe('AppShell', () => {
     expect(window.aiops.executeKubernetesResourceAction).toHaveBeenCalledWith({ resourceId: 'k8s-pod-worker-1', action: 'logs' })
     expect(store.k8sResourceOutput).toContain('kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
     await workspace.find('.k8s-resource-output-actions button[title="复制输出"]').trigger('click')
+    await flushPromises()
     expect(store.k8sClusterNotice).toBe('Kubernetes 输出已复制')
     await workspace.find('.k8s-resource-output-actions button[title="发送输出命令到终端"]').trigger('click')
     await flushPromises()
