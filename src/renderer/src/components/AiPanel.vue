@@ -2305,7 +2305,7 @@ const createImageElement = (part: AiImageContentPart) => {
 }
 
 const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiImageContentPart, onInserted: () => void) => {
-  if (!editable) return
+  if (!editable) return false
   editable.focus()
 
   const appendImageAtEnd = () => {
@@ -2313,12 +2313,13 @@ const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiIma
     editable.appendChild(imageElement)
     editable.appendChild(document.createTextNode(' '))
     onInserted()
+    return true
   }
 
   const selection = window.getSelection()
   if (!selection) {
     appendImageAtEnd()
-    return
+    return true
   }
   let range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
   if (!range || !editable.contains(range.startContainer)) {
@@ -2331,7 +2332,7 @@ const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiIma
   }
   if (!range) {
     appendImageAtEnd()
-    return
+    return true
   }
 
   const imageElement = createImageElement(part)
@@ -2347,17 +2348,18 @@ const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiIma
   selection.addRange(nextRange)
 
   onInserted()
+  return true
 }
 
 const insertImageAtEditableCursor = (part: AiImageContentPart) => {
-  insertImageIntoEditableCursor(editableRef.value, part, () => {
+  return insertImageIntoEditableCursor(editableRef.value, part, () => {
     imageInputParts.value = [...imageInputParts.value, part]
     handleEditableInput()
   })
 }
 
 const insertImageAtEditCursor = (part: AiImageContentPart) => {
-  insertImageIntoEditableCursor(editEditableRef.value, part, () => {
+  return insertImageIntoEditableCursor(editEditableRef.value, part, () => {
     editImageInputParts.value = [...editImageInputParts.value, part]
     handleEditEditableInput()
   })
@@ -2366,21 +2368,19 @@ const insertImageAtEditCursor = (part: AiImageContentPart) => {
 const insertContextAtEditCursor = (context: AiContextOption) => {
   const imagePart = imagePartFromContext(context)
   if (imagePart) {
-    insertImageAtEditCursor(imagePart)
-    return true
+    return insertImageAtEditCursor(imagePart)
   }
 
   const chipPart = chipPartFromContext(context)
   if (!chipPart) return false
   restoreEditSelection()
   const editTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
-  insertChipIntoEditableCursor(editTarget, chipPart, handleEditEditableInput, '@')
-  return true
+  return insertChipIntoEditableCursor(editTarget, chipPart, handleEditEditableInput, '@')
 }
 
 const insertFileChipAtMainCursor = (part: AiDocChipContentPart) => {
   restoreEditableSelection()
-  insertChipIntoEditableCursor(editableRef.value, part, () => {
+  return insertChipIntoEditableCursor(editableRef.value, part, () => {
     fileInputParts.value = [...fileInputParts.value, part]
     handleEditableInput()
   }, '@')
@@ -2389,7 +2389,7 @@ const insertFileChipAtMainCursor = (part: AiDocChipContentPart) => {
 const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
   restoreEditSelection()
   const editTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
-  insertChipIntoEditableCursor(editTarget, part, handleEditEditableInput, '@')
+  return insertChipIntoEditableCursor(editTarget, part, handleEditEditableInput, '@')
 }
 
 const clipboardHasImage = (event: ClipboardEvent) => Array.from(event.clipboardData?.items || []).some((item) => item.type.startsWith('image/'))
@@ -2485,7 +2485,7 @@ const removeTokenFromEditableCursor = (
 }
 
 const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChipContentPart, onInserted: () => void, triggerToken = '/') => {
-  if (!editable) return
+  if (!editable) return false
   editable.focus()
 
   const insertAtEnd = () => {
@@ -2494,12 +2494,12 @@ const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChip
     editable.appendChild(chip)
     editable.appendChild(document.createTextNode(' '))
     onInserted()
+    return true
   }
 
   const selection = window.getSelection()
   if (!selection) {
-    insertAtEnd()
-    return
+    return insertAtEnd()
   }
   let range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
   if (!range || !editable.contains(range.startContainer)) {
@@ -2511,8 +2511,7 @@ const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChip
     range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
   }
   if (!range) {
-    insertAtEnd()
-    return
+    return insertAtEnd()
   }
 
   removeTokenBeforeRange(range, triggerToken)
@@ -2528,6 +2527,7 @@ const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChip
   selection.removeAllRanges()
   selection.addRange(nextRange)
   onInserted()
+  return true
 }
 
 const saveEditSelection = () => {
@@ -3272,10 +3272,9 @@ const handleFileUpload = async () => {
         type: 'file'
       }
     }
-    if (editingMessageId.value) {
-      insertFileChipAtEditCursor(part)
-    } else {
-      insertFileChipAtMainCursor(part)
+    const inserted = editingMessageId.value ? insertFileChipAtEditCursor(part) : insertFileChipAtMainCursor(part)
+    if (!inserted) {
+      throw new Error('文件输入框不可用')
     }
     showInputPlaceholderNotice(`已添加文件：${displayName}`)
   } catch (error) {
@@ -3340,9 +3339,14 @@ const handleVoiceTranscriptionComplete = async (text: string) => {
 }
 
 const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
+  const transcribeVoice = window.aiops?.transcribeVoiceInput
+  if (typeof transcribeVoice !== 'function') {
+    showInputPlaceholderNotice('语音识别失败：语音识别服务不可用')
+    return
+  }
   voiceTranscribing.value = true
   try {
-    const result = await window.aiops.transcribeVoiceInput(input)
+    const result = await transcribeVoice(input)
     if (!result?.ok) {
       showInputPlaceholderNotice(`语音识别失败：${result?.errorMessage || result?.errorCode || '识别结果为空'}`)
       return

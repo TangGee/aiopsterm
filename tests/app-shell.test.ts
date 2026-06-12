@@ -3999,6 +3999,153 @@ describe('AppShell', () => {
     }
   })
 
+  it('fails closed on edit-mode AI input and voice transcription backend boundaries', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.selectedConversationId = 'conv-edit-ai-boundary'
+    store.conversations = [
+      {
+        id: 'conv-edit-ai-boundary',
+        title: 'Edit AI boundary',
+        summary: '',
+        updatedAt: '刚刚',
+        ts: 1
+      }
+    ]
+    store.chatMessages = [
+      {
+        id: 'edit-ai-user',
+        role: 'user',
+        text: '原始故障描述',
+        contentParts: [{ type: 'text', text: '原始故障描述' }],
+        state: 'done'
+      }
+    ]
+
+    const originalPrepareClipboardImage = window.aiops.prepareChatImageAttachmentFromClipboard
+    const originalStageChatAttachment = window.aiops.stageChatAttachment
+    const originalTranscribeVoiceInput = window.aiops.transcribeVoiceInput
+    const originalVoiceBlobArrayBuffer = Blob.prototype.arrayBuffer
+
+    try {
+      await wrapper.vm.$nextTick()
+      await wrapper.find('[data-testid="ai-message-edit"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      const editInput = wrapper.find('.user-message-edit-container .message-editable')
+      editInput.element.replaceChildren(document.createTextNode('编辑态保留文本'))
+      const editRange = document.createRange()
+      editRange.selectNodeContents(editInput.element)
+      editRange.collapse(false)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(editRange)
+      await editInput.trigger('input')
+
+      const dispatchEditImagePaste = () => {
+        const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+        Object.defineProperty(pasteEvent, 'clipboardData', {
+          configurable: true,
+          value: {
+            getData: vi.fn(() => ''),
+            items: [{ type: 'image/png', getAsFile: () => null }]
+          }
+        })
+        editInput.element.dispatchEvent(pasteEvent)
+      }
+
+      ;(window.aiops as any).prepareChatImageAttachmentFromClipboard = undefined
+      dispatchEditImagePaste()
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：剪贴板图片服务不可用')
+      expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(false)
+      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
+
+      ;(window.aiops as any).prepareChatImageAttachmentFromClipboard = originalPrepareClipboardImage
+      vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          type: 'image',
+          mediaType: 'image/png',
+          data: '',
+          name: 'edit-malformed.png',
+          size: 16
+        }
+      } as any)
+      dispatchEditImagePaste()
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(window.aiops.prepareChatImageAttachmentFromClipboard).toHaveBeenCalledWith()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(false)
+      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
+
+      ;(window.aiops as any).stageChatAttachment = undefined
+      vi.mocked(window.aiops.showOpenDialog).mockClear()
+      await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：文件暂存服务不可用')
+      expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
+      expect(wrapper.find('.user-message-edit-container .mention-chip-doc').exists()).toBe(false)
+      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
+
+      ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
+      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/edit-wrong-task.log'] })
+      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
+        mode: 'local',
+        taskId: 'other-conversation',
+        srcAbsPath: '/tmp/edit-wrong-task.log',
+        refPath: 'aiopsterm://chat-attachment/other-conversation/edit-wrong-task.log',
+        name: 'edit-wrong-task.log',
+        size: 128,
+        stagedPath: '/tmp/aiopsterm/chat-attachments/other-conversation/edit-wrong-task.log'
+      })
+      await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(window.aiops.stageChatAttachment).toHaveBeenLastCalledWith({ taskId: 'conv-edit-ai-boundary', srcAbsPath: '/tmp/edit-wrong-task.log' })
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
+      expect(wrapper.find('.user-message-edit-container .mention-chip-doc').exists()).toBe(false)
+      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
+
+      ;(window.aiops as any).transcribeVoiceInput = undefined
+      Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+        configurable: true,
+        writable: true,
+        value: vi.fn(async function (this: Blob) {
+          return Uint8Array.from({ length: this.size }, (_value, index) => index % 255).buffer
+        })
+      })
+      const mainInput = wrapper.find('[data-testid="ai-message-input"]')
+      mainInput.element.replaceChildren(document.createTextNode('voice draft'))
+      await mainInput.trigger('input')
+      await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+      await wrapper.vm.$nextTick()
+      await new Promise((resolve) => window.setTimeout(resolve, 240))
+      await wrapper.find('[data-testid="ai-voice-button"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.input-placeholder-notice').text()).toContain('语音识别失败：语音识别服务不可用')
+      expect((mainInput.element as HTMLElement).textContent).toContain('voice draft')
+      expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
+    } finally {
+      ;(window.aiops as any).prepareChatImageAttachmentFromClipboard = originalPrepareClipboardImage
+      ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
+      ;(window.aiops as any).transcribeVoiceInput = originalTranscribeVoiceInput
+      Object.defineProperty(Blob.prototype, 'arrayBuffer', { configurable: true, writable: true, value: originalVoiceBlobArrayBuffer })
+      wrapper.unmount()
+    }
+  })
+
   it('does not transcribe voice input when browser recording is unavailable', async () => {
     restoreMockVoiceRecorder?.()
     restoreMockVoiceRecorder = undefined
