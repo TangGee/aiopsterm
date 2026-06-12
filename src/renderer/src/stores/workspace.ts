@@ -3674,6 +3674,8 @@ const getKbParent = (relPath: string) => {
 
 const createKbRelPath = (parentRelDir: string, name: string) => [parentRelDir, name].filter(Boolean).join('/')
 
+const knowledgePathContains = (relPath: string, candidate: string) => candidate === relPath || candidate.startsWith(`${relPath}/`)
+
 const imageFileExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 
 const getFileExtension = (relPath: string) => {
@@ -9874,6 +9876,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return result.relPath.trim()
   }
 
+  const pruneMissingKnowledgeUiState = (candidateRelPaths: string[]) => {
+    const missingRelPaths = [...new Set(candidateRelPaths.filter(Boolean))].filter((relPath) => !findKnowledgeNode(relPath))
+    if (!missingRelPaths.length) return
+    kbSelectedKeys.value = kbSelectedKeys.value.filter((key) => !missingRelPaths.some((relPath) => knowledgePathContains(relPath, key)))
+    kbExpandedKeys.value = kbExpandedKeys.value.filter((key) => !missingRelPaths.some((relPath) => knowledgePathContains(relPath, key)))
+    closeKnowledgePanelsForRemoved(missingRelPaths)
+  }
+
+  const refreshKnowledgeTreeAfterMutationFailure = async (notice: string, candidateRemovedRelPaths: string[] = []) => {
+    const refreshed = await refreshKnowledgeTree()
+    if (!refreshed) return false
+    pruneMissingKnowledgeUiState(candidateRemovedRelPaths)
+    setTopNotice(notice)
+    return true
+  }
+
   const createKnowledgeNode = async (kind: KnowledgeNodeType, parentRelDir: string, title: string) => {
     const name = title.trim()
     if (!name) return null
@@ -9936,24 +9954,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('知识库删除服务不可用')
       return
     }
+    const candidateRemovedRelPaths: string[] = []
     for (const relPath of relPaths) {
       const node = findKnowledgeNode(relPath)
       if (!node) continue
-      const result = await window.aiops.kbDelete(relPath, node.type === 'dir')
-      if (!isKnowledgeDeleteResultData(result)) {
-        setTopNotice(malformedKnowledgeBackendResultMessage)
+      let result: unknown
+      try {
+        result = await window.aiops.kbDelete(relPath, node.type === 'dir')
+      } catch {
+        await refreshKnowledgeTreeAfterMutationFailure('知识库删除服务不可用', [...candidateRemovedRelPaths, relPath])
         return
       }
+      if (!isKnowledgeDeleteResultData(result)) {
+        await refreshKnowledgeTreeAfterMutationFailure(malformedKnowledgeBackendResultMessage, [...candidateRemovedRelPaths, relPath])
+        return
+      }
+      candidateRemovedRelPaths.push(relPath)
     }
     const refreshed = await refreshKnowledgeTree()
     if (!refreshed) return
     if (relPaths.some((relPath) => findKnowledgeNode(relPath))) {
+      pruneMissingKnowledgeUiState(relPaths)
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return
     }
-    kbSelectedKeys.value = kbSelectedKeys.value.filter((key) => !relPaths.includes(key))
-    kbExpandedKeys.value = kbExpandedKeys.value.filter((key) => !relPaths.some((relPath) => key === relPath || key.startsWith(`${relPath}/`)))
-    closeKnowledgePanelsForRemoved(relPaths)
+    pruneMissingKnowledgeUiState(relPaths)
   }
 
   const copyKnowledgeNodes = (relPaths: string[], mode: 'copy' | 'cut') => {
@@ -9972,34 +9997,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const sources = [...kbClipboard.value.sources]
     const mode = kbClipboard.value.mode
     const resultRelPaths: string[] = []
+    const candidateRemovedSources: string[] = []
     for (const source of sources) {
       let result: unknown
-      if (mode === 'copy') {
-        result = await window.aiops.kbCopy(source, dstRelDir)
-      } else {
-        result = await window.aiops.kbMove(source, dstRelDir)
+      try {
+        if (mode === 'copy') {
+          result = await window.aiops.kbCopy(source, dstRelDir)
+        } else {
+          result = await window.aiops.kbMove(source, dstRelDir)
+        }
+      } catch {
+        await refreshKnowledgeTreeAfterMutationFailure('知识库复制移动服务不可用', mode === 'cut' ? [...candidateRemovedSources, source] : [])
+        return
       }
       const resultRelPath = backendRelPathOrNotice(result, '知识库复制移动服务不可用')
-      if (!resultRelPath) return
+      if (!resultRelPath) {
+        await refreshKnowledgeTreeAfterMutationFailure('知识库复制移动服务不可用', mode === 'cut' ? [...candidateRemovedSources, source] : [])
+        return
+      }
       const sourceName = source.split('/').pop() || source
       if (resultRelPath !== expectedKnowledgeRelPath(dstRelDir, sourceName)) {
-        setTopNotice(malformedKnowledgeBackendResultMessage)
+        await refreshKnowledgeTreeAfterMutationFailure(malformedKnowledgeBackendResultMessage, mode === 'cut' ? [...candidateRemovedSources, source] : [])
         return
       }
       resultRelPaths.push(resultRelPath)
+      if (mode === 'cut') candidateRemovedSources.push(source)
     }
     const refreshed = await refreshKnowledgeTree()
     if (!refreshed) return
     if (resultRelPaths.some((relPath) => !findKnowledgeNode(relPath))) {
+      if (mode === 'cut') pruneMissingKnowledgeUiState(sources)
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return
     }
     if (mode === 'cut' && sources.some((source) => findKnowledgeNode(source))) {
+      pruneMissingKnowledgeUiState(sources)
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return
     }
     if (mode === 'cut') kbClipboard.value = null
-    if (mode === 'cut') closeKnowledgePanelsForRemoved(sources)
+    if (mode === 'cut') pruneMissingKnowledgeUiState(sources)
   }
 
   const addKnowledgeImportJob = async (destRelPath: string, srcAbsPath?: string, sourceType: 'file' | 'folder' = 'file') => {

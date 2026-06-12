@@ -6641,6 +6641,98 @@ describe('workspace store', () => {
     }
   })
 
+  it('refreshes Knowledge tree after partial delete backend mutations fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.openKnowledgeFile('commands/diagnose.md')
+    store.openKnowledgeFile('Markdown语法指南.md')
+    store.kbSelectedKeys = ['commands/diagnose.md', 'Markdown语法指南.md']
+    store.kbExpandedKeys = ['commands']
+    const kbDeleteImplementation = vi.mocked(window.aiops.kbDelete).getMockImplementation()
+
+    try {
+      expect(kbDeleteImplementation).toBeTruthy()
+      vi.mocked(window.aiops.kbDelete)
+        .mockImplementationOnce(kbDeleteImplementation!)
+        .mockResolvedValueOnce({ success: false } as Awaited<ReturnType<typeof window.aiops.kbDelete>>)
+
+      await store.deleteKnowledgeNodes(['commands/diagnose.md', 'Markdown语法指南.md'])
+
+      expect(window.aiops.kbDelete).toHaveBeenNthCalledWith(1, 'commands/diagnose.md', false)
+      expect(window.aiops.kbDelete).toHaveBeenNthCalledWith(2, 'Markdown语法指南.md', false)
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('commands/diagnose.md')).toBeNull()
+      expect(store.findKnowledgeNode('Markdown语法指南.md')).toBeTruthy()
+      expect(store.kbSelectedKeys).toEqual(['Markdown语法指南.md'])
+      expect(store.kbExpandedKeys).toEqual(['commands'])
+      expect(store.panels.some((panel) => panel.knowledge?.relPath === 'commands/diagnose.md')).toBe(false)
+      expect(store.panels.some((panel) => panel.knowledge?.relPath === 'Markdown语法指南.md')).toBe(true)
+      expectNoBusinessDataConfigWrites(['knowledgeBase'])
+    } finally {
+      vi.mocked(window.aiops.kbDelete).mockImplementation(kbDeleteImplementation!)
+    }
+  })
+
+  it('refreshes Knowledge tree after partial cut backend mutations fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.openKnowledgeFile('commands/Summary to Doc.md')
+    store.openKnowledgeFile('commands/diagnose.md')
+    store.copyKnowledgeNodes(['commands/Summary to Doc.md', 'commands/diagnose.md'], 'cut')
+    const kbMoveImplementation = vi.mocked(window.aiops.kbMove).getMockImplementation()
+
+    try {
+      expect(kbMoveImplementation).toBeTruthy()
+      vi.mocked(window.aiops.kbMove)
+        .mockImplementationOnce(kbMoveImplementation!)
+        .mockResolvedValueOnce({ relPath: 'wrong/diagnose.md' } as Awaited<ReturnType<typeof window.aiops.kbMove>>)
+
+      await store.pasteKnowledgeNodes('')
+
+      expect(window.aiops.kbMove).toHaveBeenNthCalledWith(1, 'commands/Summary to Doc.md', '')
+      expect(window.aiops.kbMove).toHaveBeenNthCalledWith(2, 'commands/diagnose.md', '')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Summary to Doc.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('commands/Summary to Doc.md')).toBeNull()
+      expect(store.findKnowledgeNode('commands/diagnose.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('diagnose.md')).toBeNull()
+      expect(store.kbClipboard).toEqual({ mode: 'cut', sources: ['commands/Summary to Doc.md', 'commands/diagnose.md'] })
+      expect(store.panels.some((panel) => panel.knowledge?.relPath === 'commands/Summary to Doc.md')).toBe(false)
+      expect(store.panels.some((panel) => panel.knowledge?.relPath === 'commands/diagnose.md')).toBe(true)
+      expectNoBusinessDataConfigWrites(['knowledgeBase'])
+    } finally {
+      vi.mocked(window.aiops.kbMove).mockImplementation(kbMoveImplementation!)
+    }
+  })
+
+  it('refreshes Knowledge tree after partial copy backend mutations fail', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+    store.copyKnowledgeNodes(['commands/Summary to Doc.md', 'commands/diagnose.md'], 'copy')
+    const kbCopyImplementation = vi.mocked(window.aiops.kbCopy).getMockImplementation()
+
+    try {
+      expect(kbCopyImplementation).toBeTruthy()
+      vi.mocked(window.aiops.kbCopy)
+        .mockImplementationOnce(kbCopyImplementation!)
+        .mockResolvedValueOnce({ relPath: 'wrong/diagnose.md' } as Awaited<ReturnType<typeof window.aiops.kbCopy>>)
+
+      await store.pasteKnowledgeNodes('')
+
+      expect(window.aiops.kbCopy).toHaveBeenNthCalledWith(1, 'commands/Summary to Doc.md', '')
+      expect(window.aiops.kbCopy).toHaveBeenNthCalledWith(2, 'commands/diagnose.md', '')
+      expect(store.topNotice).toBe(malformedKnowledgeBackendResultMessage)
+      expect(store.findKnowledgeNode('Summary to Doc.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('commands/Summary to Doc.md')).toBeTruthy()
+      expect(store.findKnowledgeNode('diagnose.md')).toBeNull()
+      expect(store.findKnowledgeNode('commands/diagnose.md')).toBeTruthy()
+      expect(store.kbClipboard).toEqual({ mode: 'copy', sources: ['commands/Summary to Doc.md', 'commands/diagnose.md'] })
+      expectNoBusinessDataConfigWrites(['knowledgeBase'])
+    } finally {
+      vi.mocked(window.aiops.kbCopy).mockImplementation(kbCopyImplementation!)
+    }
+  })
+
   it('adds External reference-style knowledge docs and images to AI context and includes them in chat payloads', async () => {
     const store = useWorkspaceStore()
     await store.refreshKnowledgeTree({ persist: false })
