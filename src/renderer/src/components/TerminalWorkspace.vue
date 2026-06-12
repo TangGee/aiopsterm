@@ -497,6 +497,7 @@ type TerminalSuggestion = TerminalCommandSuggestion
 const terminalSuggestionSources = new Set<TerminalSuggestion['source']>(['base', 'history', 'ai'])
 const malformedTerminalSuggestionMessage = '终端命令建议服务返回数据无效'
 const failedTerminalSuggestionMessage = '终端命令建议加载失败'
+const unavailableTerminalSuggestionMessage = '终端命令建议服务不可用'
 const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
 const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
@@ -538,6 +539,12 @@ const normalizeTerminalSuggestions = (value: unknown): TerminalSuggestion[] | nu
     source: item.source,
     ...(item.explanation !== undefined ? { explanation: item.explanation } : {})
   }))
+}
+
+const bridgeErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (typeof error === 'string' && error.trim()) return error.trim()
+  return fallback
 }
 
 const formatZmodemBytes = (bytes: number) => {
@@ -1226,21 +1233,23 @@ const updateSuggestions = async (panelId: string) => {
     return
   }
   let base: TerminalSuggestion[] = []
-  let suggestionErrorMessage = failedTerminalSuggestionMessage
   let suggestionNotice = ''
   try {
-    const result = window.aiops?.getTerminalCommandSuggestions
-      ? await window.aiops.getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'base'))
-      : []
+    const suggestionBridge = window.aiops?.getTerminalCommandSuggestions
+    if (typeof suggestionBridge !== 'function') {
+      suggestionNotice = unavailableTerminalSuggestionMessage
+      throw new Error(unavailableTerminalSuggestionMessage)
+    }
+    const result = await suggestionBridge(rawQuery, getSuggestionContext(panelId, 'base'))
     const normalized = normalizeTerminalSuggestions(result)
     if (!normalized) {
-      suggestionErrorMessage = malformedTerminalSuggestionMessage
+      suggestionNotice = malformedTerminalSuggestionMessage
       throw new Error(malformedTerminalSuggestionMessage)
     }
     base = normalized
-  } catch {
+  } catch (error) {
     base = []
-    suggestionNotice = suggestionErrorMessage
+    suggestionNotice = suggestionNotice || bridgeErrorMessage(error, failedTerminalSuggestionMessage)
   }
   if (requestId !== suggestionRequestId || suggestionPanel.panelId !== panelId || command.value.trim().toLowerCase() !== query) return
   if (suggestionNotice) workspace.setTopNotice(suggestionNotice)
@@ -1285,11 +1294,14 @@ const triggerAiSuggestion = async () => {
   const requestId = ++suggestionRequestId
   aiSuggestLoading.value = true
   updateSuggestionsPosition()
-  let suggestionErrorMessage = failedTerminalSuggestionMessage
+  let suggestionErrorMessage = ''
   try {
-    const result = window.aiops?.getTerminalCommandSuggestions
-      ? await window.aiops.getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'ai'))
-      : []
+    const suggestionBridge = window.aiops?.getTerminalCommandSuggestions
+    if (typeof suggestionBridge !== 'function') {
+      suggestionErrorMessage = unavailableTerminalSuggestionMessage
+      throw new Error(unavailableTerminalSuggestionMessage)
+    }
+    const result = await suggestionBridge(rawQuery, getSuggestionContext(panelId, 'ai'))
     const aiSuggestions = normalizeTerminalSuggestions(result)
     if (!aiSuggestions) {
       suggestionErrorMessage = malformedTerminalSuggestionMessage
@@ -1297,10 +1309,10 @@ const triggerAiSuggestion = async () => {
     }
     if (requestId !== suggestionRequestId || command.value.trim().toLowerCase() !== query) return
     suggestionItems.value = [...aiSuggestions, ...suggestionItems.value].slice(0, 6)
-  } catch {
+  } catch (error) {
     if (requestId !== suggestionRequestId) return
     suggestionItems.value = suggestionItems.value.filter((item) => item.source !== 'ai')
-    workspace.setTopNotice(suggestionErrorMessage)
+    workspace.setTopNotice(suggestionErrorMessage || bridgeErrorMessage(error, failedTerminalSuggestionMessage))
   } finally {
     if (requestId !== suggestionRequestId) return
     aiSuggestLoading.value = false

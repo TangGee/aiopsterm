@@ -12128,15 +12128,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const prompt = instruction.trim()
     if (!panel || panel.kind === 'knowledge' || !prompt) return null
     const selectedModel = modelName || terminalCommandModelOptions.value[0] || config.value.modelName || 'aiopsterm-local-agent'
+    const generateBridge = window.aiops?.generateTerminalCommand
+    if (typeof generateBridge !== 'function') {
+      setTopNotice('终端命令生成服务不可用')
+      return null
+    }
 
-    const result = await window.aiops.generateTerminalCommand({
-      panelId: panel.id,
-      instruction: prompt,
-      modelName: selectedModel,
-      context: buildTerminalCommandContext(panel)
-    })
-    if (!result.ok || !isTerminalCommandGenerationRecord(result.data)) {
+    let result: Awaited<ReturnType<AiopsPreloadApi['generateTerminalCommand']>>
+    try {
+      result = await generateBridge({
+        panelId: panel.id,
+        instruction: prompt,
+        modelName: selectedModel,
+        context: buildTerminalCommandContext(panel)
+      })
+    } catch (error) {
+      setTopNotice(aiBridgeErrorMessage(error, '终端命令生成失败'))
+      return null
+    }
+    if (!result.ok) {
       setTopNotice(result.errorMessage || '终端命令生成失败')
+      return null
+    }
+    if (!isTerminalCommandGenerationRecord(result.data) || result.data.panelId !== panel.id || result.data.instruction !== prompt) {
+      setTopNotice('终端命令生成结果无效')
       return null
     }
     const record = result.data

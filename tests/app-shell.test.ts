@@ -5043,6 +5043,25 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-suggestions .ai-trigger').exists()).toBe(false)
     expect(wrapper.find('.terminal-suggestions .ai-trigger-loading').exists()).toBe(false)
 
+    const originalSuggestionBridge = window.aiops.getTerminalCommandSuggestions
+    try {
+      ;(window.aiops as any).getTerminalCommandSuggestions = undefined
+      await wrapper.find('.command-line input').setValue('svc')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(store.topNotice).toBe('终端命令建议服务不可用')
+      expect(wrapper.find('.terminal-suggestions').exists()).toBe(false)
+    } finally {
+      ;(window.aiops as any).getTerminalCommandSuggestions = originalSuggestionBridge
+    }
+
+    vi.mocked(window.aiops.getTerminalCommandSuggestions).mockRejectedValueOnce(new Error('suggestions backend rejected'))
+    await wrapper.find('.command-line input').setValue('svc')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(store.topNotice).toBe('suggestions backend rejected')
+    expect(wrapper.find('.terminal-suggestions').exists()).toBe(false)
+
     vi.mocked(window.aiops.getTerminalCommandSuggestions).mockResolvedValueOnce([
       { command: '', source: 'base', explanation: 'empty command from backend' } as any
     ])
@@ -5070,6 +5089,19 @@ describe('AppShell', () => {
     expect(store.topNotice).toBe('终端命令建议服务返回数据无效')
     expect(wrapper.find('.terminal-suggestions').text()).toContain('tail -f /var/log/syslog')
     expect(wrapper.find('.terminal-suggestions').text()).not.toContain('tail -n 100 /var/log/syslog')
+    expect(wrapper.find('.terminal-suggestions .ai-trigger-loading').exists()).toBe(false)
+
+    vi.mocked(window.aiops.getTerminalCommandSuggestions)
+      .mockImplementationOnce(async () => [{ command: 'journalctl -u nginx', source: 'history', explanation: 'history on this host' }])
+      .mockRejectedValueOnce(new Error('ai suggestion rejected'))
+    await wrapper.find('.command-line input').setValue('journal')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.terminal-suggestions .ai-trigger').trigger('mouseenter')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(store.topNotice).toBe('ai suggestion rejected')
+    expect(wrapper.find('.terminal-suggestions').text()).toContain('journalctl -u nginx')
     expect(wrapper.find('.terminal-suggestions .ai-trigger-loading').exists()).toBe(false)
 
     await wrapper.find('.command-line input').setValue('rm /tmp/file')
@@ -5206,6 +5238,32 @@ describe('AppShell', () => {
     expect(store.activePanel.outputSegments.at(-1)).toEqual({ text: 'df -h', scope: 'input' })
     expect(wrapper.find('.terminal-command-dialog').exists()).toBe(true)
     expect((wrapper.find('.terminal-command-dialog textarea').element as HTMLTextAreaElement).value).toBe('')
+
+    const originalGenerateTerminalCommand = window.aiops.generateTerminalCommand
+    try {
+      ;(window.aiops as any).generateTerminalCommand = undefined
+      await wrapper.find('.terminal-command-dialog textarea').setValue('检查内存')
+      await wrapper.find('.terminal-command-dialog textarea').trigger('keydown', { key: 'Enter' })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.terminal-command-dialog p').text()).toBe('命令生成失败')
+      expect(store.topNotice).toBe('终端命令生成服务不可用')
+      expect(store.terminalCommandGenerationRecords.some((record) => record.instruction === '检查内存')).toBe(false)
+      expect((wrapper.find('.terminal-command-dialog textarea').element as HTMLTextAreaElement).value).toBe('检查内存')
+    } finally {
+      ;(window.aiops as any).generateTerminalCommand = originalGenerateTerminalCommand
+    }
+
+    vi.mocked(window.aiops.generateTerminalCommand).mockRejectedValueOnce(new Error('terminal command backend rejected'))
+    await wrapper.find('.terminal-command-dialog textarea').setValue('检查 CPU')
+    await wrapper.find('.terminal-command-dialog textarea').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-command-dialog p').text()).toBe('命令生成失败')
+    expect(store.topNotice).toBe('terminal command backend rejected')
+    expect(store.terminalCommandGenerationRecords.some((record) => record.instruction === '检查 CPU')).toBe(false)
+    expect((wrapper.find('.terminal-command-dialog textarea').element as HTMLTextAreaElement).value).toBe('检查 CPU')
+
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-command-dialog').exists()).toBe(false)

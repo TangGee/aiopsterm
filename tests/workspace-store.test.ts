@@ -4840,17 +4840,42 @@ describe('workspace store', () => {
     await expect(store.toggleMessageFavorite(assistant!.id)).resolves.toBe(false)
     expect(assistant!.favorite).toBeUndefined()
 
+    const originalGenerateTerminalCommand = window.aiops.generateTerminalCommand
+    try {
+      ;(window.aiops as any).generateTerminalCommand = undefined
+      await expect(store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')).resolves.toBeNull()
+      expect(store.topNotice).toBe('终端命令生成服务不可用')
+      expect(store.terminalCommandGenerationRecords.some((record) => record.instruction === '检查磁盘空间')).toBe(false)
+    } finally {
+      ;(window.aiops as any).generateTerminalCommand = originalGenerateTerminalCommand
+    }
+
+    vi.mocked(window.aiops.generateTerminalCommand).mockRejectedValueOnce(new Error('terminal command offline'))
+    await expect(store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')).resolves.toBeNull()
+    expect(store.topNotice).toBe('terminal command offline')
+
+    vi.mocked(window.aiops.generateTerminalCommand).mockResolvedValueOnce({ ok: true, data: { id: 'client-fake-command', command: 'df -h' } } as any)
+    await expect(store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')).resolves.toBeNull()
+    expect(store.terminalCommandGenerationRecords.some((record) => record.id === 'client-fake-command')).toBe(false)
+    expect(store.topNotice).toBe('终端命令生成结果无效')
+
     vi.mocked(window.aiops.generateTerminalCommand).mockResolvedValueOnce({
       ok: true,
       data: {
-        id: 'client-fake-command',
-        command: 'df -h'
+        id: 'terminal-command-mismatch',
+        panelId: store.activePanelId,
+        instruction: '另一个请求',
+        command: 'df -h',
+        modelName: 'aiopsterm-local-agent',
+        context: { host: '127.0.0.1', username: 'local', cwd: '~', shell: 'bash', connectionType: 'local' },
+        status: 'done',
+        createdAt: 1780488000000,
+        provider: 'aiopsterm-local'
       }
     } as any)
-    const generated = await store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')
-    expect(generated).toBeNull()
-    expect(store.terminalCommandGenerationRecords.some((record) => record.id === 'client-fake-command')).toBe(false)
-    expect(store.topNotice).toBe('终端命令生成失败')
+    await expect(store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')).resolves.toBeNull()
+    expect(store.terminalCommandGenerationRecords.some((record) => record.id === 'terminal-command-mismatch')).toBe(false)
+    expect(store.topNotice).toBe('终端命令生成结果无效')
   })
 
   it('manages External reference-style context chips, command presets, message actions, and todos', async () => {
