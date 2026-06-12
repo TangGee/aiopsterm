@@ -524,24 +524,85 @@ describe('kubernetes backend boundary', () => {
       kind: 'pods'
     })
 
-    expect(result.ok).toBe(true)
-    expect(result.data).toEqual(
-      expect.objectContaining({
-        refreshedClusterId: 'k8s-3',
-        refreshedKind: 'pods',
-        clusterId: 'k8s-3',
-        contextName: 'jumpserver/prod',
-        namespace: 'ops',
-        command: 'kubectl get pods -n ops',
-        success: false,
-        refreshedResources: 0,
-        refreshedNamespaces: 0
-      })
-    )
-    expect(result.data?.error).toContain('JumpServer Kubernetes command streaming is not connected')
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    })
 
     const after = await listKubernetesCatalog()
     expect(after.data?.resources.filter((resource) => resource.clusterId === 'k8s-3')).toEqual(beforeJumpResources)
+  })
+
+  it('rejects terminal and resource operations for non-runnable Kubernetes clusters', async () => {
+    await expect(connectKubernetesCluster('k8s-3')).resolves.toMatchObject({
+      ok: true,
+      data: {
+        cluster: expect.objectContaining({
+          id: 'k8s-3',
+          connection_status: 'connected'
+        })
+      }
+    })
+    const terminal = await createKubernetesTerminal({ clusterId: 'k8s-3', namespace: 'ops' })
+    expect(terminal).toMatchObject({
+      ok: true,
+      data: expect.objectContaining({
+        clusterId: 'k8s-3',
+        status: 'connected'
+      })
+    })
+    const events: unknown[] = []
+    setKubernetesTerminalEventSink((event) => events.push(event))
+
+    const command = await executeKubernetesCommand({
+      command: 'kubectl get pods -n ops',
+      clusterId: 'k8s-3',
+      namespace: 'ops',
+      source: 'terminal'
+    })
+    expect(command).toEqual({
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    })
+
+    const write = await writeKubernetesTerminal(terminal.data!.sessionId, 'kubectl get pods -n ops\n')
+    expect(write).toEqual({
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    })
+    expect(events).toEqual([])
+
+    const action = await executeKubernetesResourceAction({
+      resourceId: 'k8s-pod-jump-ops',
+      action: 'describe'
+    })
+    expect(action).toEqual({
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    })
+
+    const agentRun = await executeKubernetesCommand({
+      command: 'kubectl get pods -n ops',
+      clusterId: 'k8s-3',
+      namespace: 'ops',
+      source: 'agent'
+    })
+    expect(agentRun).toMatchObject({
+      ok: true,
+      data: {
+        command: 'kubectl get pods -n ops',
+        success: false,
+        error: 'JumpServer Kubernetes command streaming is not connected in this backend yet.',
+        clusterId: 'k8s-3',
+        contextName: 'jumpserver/prod',
+        namespace: 'ops',
+        source: 'agent'
+      }
+    })
   })
 
   it('returns backend-owned failure metadata for nonzero kubectl exits', async () => {
@@ -1053,10 +1114,11 @@ describe('kubernetes backend boundary', () => {
       clusterId: 'k8s-1',
       namespace: 'default'
     })
-    expect(command.ok).toBe(true)
-    expect(command.data?.success).toBe(false)
-    expect(command.data?.error).toContain('Kubeconfig path or content is required')
-    expect(command.data?.output).not.toContain('api-gateway-6d8c9bb7f6-l6j2m')
+    expect(command).toEqual({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_REQUIRED',
+      errorMessage: 'Kubeconfig path or content is required before executing kubectl.'
+    })
   })
 
   it('fails closed for non-seed JumpServer Kubernetes sync without fabricating clusters', async () => {

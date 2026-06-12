@@ -378,6 +378,11 @@ const shouldUseKubernetesSeedData = () => runtimeConfig.useSeedData
 const jumpserverKubernetesSyncUnavailableError = () =>
   Object.assign(new Error('JumpServer Kubernetes asset sync requires the live JumpServer backend integration.'), { code: 'K8S_BASTION_SYNC_UNAVAILABLE' })
 
+type KubernetesNonRunnableReason = {
+  code: string
+  message: string
+}
+
 const initialKubernetesState = () =>
   shouldUseKubernetesSeedData()
     ? {
@@ -1809,15 +1814,21 @@ const canRunLocalKubectl = (cluster: KubernetesClusterRecord) =>
   cluster.auth_type === 'kubeconfig' &&
   Boolean(cluster.kubeconfig_content?.trim() || cluster.kubeconfig_path?.trim())
 
-const nonRunnableKubernetesReason = (cluster: KubernetesClusterRecord) => {
+const nonRunnableKubernetesReason = (cluster: KubernetesClusterRecord): KubernetesNonRunnableReason | null => {
   if (cluster.source_type === 'jumpserver' || cluster.auth_type === 'jumpserver') {
-    return 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    return {
+      code: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      message: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    }
   }
-  if (shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(cluster.id)) return ''
+  if (shouldUseKubernetesSeedData() && developmentSeedClusterIds.has(cluster.id)) return null
   if (!cluster.kubeconfig_content?.trim() && !cluster.kubeconfig_path?.trim()) {
-    return 'Kubeconfig path or content is required before executing kubectl.'
+    return {
+      code: 'K8S_KUBECONFIG_REQUIRED',
+      message: 'Kubeconfig path or content is required before executing kubectl.'
+    }
   }
-  return ''
+  return null
 }
 
 const createKubectlEnvironment = async (cluster: KubernetesClusterRecord) => {
@@ -1929,17 +1940,17 @@ const probeKubernetesClusterConnection = async (
   const startedAt = Date.now()
   const command = kubernetesConnectionProbeCommand
   const namespace = cluster.default_namespace || 'default'
-  const nonRunnableReason = canRunLocalKubectl(cluster) ? '' : nonRunnableKubernetesReason(cluster)
+  const nonRunnableReason = canRunLocalKubectl(cluster) ? null : nonRunnableKubernetesReason(cluster)
   if (nonRunnableReason) {
     return {
       success: false,
       isValid: false,
       contextName: cluster.context_name,
       serverUrl: cluster.server_url,
-      message: nonRunnableReason,
+      message: nonRunnableReason.message,
       command,
-      output: nonRunnableReason,
-      error: nonRunnableReason,
+      output: nonRunnableReason.message,
+      error: nonRunnableReason.message,
       durationMs: Math.max(1, Date.now() - startedAt)
     }
   }
@@ -2294,11 +2305,18 @@ export async function executeKubernetesCommand(input: KubernetesCommandInput): P
 
   const nonRunnableReason = nonRunnableKubernetesReason(cluster)
   if (nonRunnableReason) {
+    if (input.source !== 'agent') {
+      return {
+        ok: false,
+        errorCode: nonRunnableReason.code,
+        errorMessage: nonRunnableReason.message
+      }
+    }
     return {
       ok: true,
       data: {
-        ...createKubernetesCommandRun(input, command, nonRunnableReason, false, startedAt, nonRunnableReason),
-        terminalOutput: renderTerminalCommandOutput(command, nonRunnableReason, nonRunnableReason)
+        ...createKubernetesCommandRun(input, command, nonRunnableReason.message, false, startedAt, nonRunnableReason.message),
+        terminalOutput: renderTerminalCommandOutput(command, nonRunnableReason.message, nonRunnableReason.message)
       }
     }
   }
@@ -2480,11 +2498,11 @@ export async function refreshKubernetesResources(input: KubernetesResourceRefres
 
   const nonRunnableReason = nonRunnableKubernetesReason(cluster)
   if (nonRunnableReason) {
-    const command =
-      requestedKind === 'all'
-        ? ['kubectl get namespaces', ...allKubernetesResourceKinds.map((kind) => buildKubernetesGetCommand(kind, namespace))].join(' && ')
-        : buildKubernetesGetCommand(requestedKind, namespace)
-    return asRefreshResult(cluster, command, nonRunnableReason, false, nonRunnableReason, 0, 0, nonRunnableReason, requestedKind)
+    return {
+      ok: false,
+      errorCode: nonRunnableReason.code,
+      errorMessage: nonRunnableReason.message
+    }
   }
 
   const refreshedKinds = requestedKind === 'all' ? allKubernetesResourceKinds : [requestedKind]

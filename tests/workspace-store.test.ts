@@ -7439,6 +7439,45 @@ describe('workspace store', () => {
     expect(store.k8sClusterNotice).toBe('Kubernetes terminal is not connected.')
   })
 
+  it('does not apply rejected Kubernetes terminal or refresh responses to UI state', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKubernetesCatalog()
+    await store.openK8sTerminal('k8s-1')
+    const terminal = store.k8sActiveTerminal
+    if (!terminal) throw new Error('Expected Kubernetes terminal to open.')
+
+    const terminalOutputBefore = terminal.output
+    const terminalHistoryBefore = [...terminal.commandHistory]
+    const terminalLastOutputBefore = terminal.lastCommandOutput
+    terminal.collectingAiOutput = true
+    vi.mocked(window.aiops.writeKubernetesTerminal).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'K8S_KUBECONFIG_REQUIRED',
+      errorMessage: 'Kubeconfig path or content is required before executing kubectl.'
+    })
+    await expect(store.sendK8sTerminalCommand('kubectl get pods -A')).resolves.toBe('')
+    expect(store.k8sClusterNotice).toBe('Kubeconfig path or content is required before executing kubectl.')
+    expect(store.k8sActiveTerminal?.collectingAiOutput).toBe(false)
+    expect(store.k8sActiveTerminal?.output).toBe(terminalOutputBefore)
+    expect(store.k8sActiveTerminal?.commandHistory).toEqual(terminalHistoryBefore)
+    expect(store.k8sActiveTerminal?.lastCommandOutput).toBe(terminalLastOutputBefore)
+
+    const resourcesBeforeRefresh = JSON.stringify(store.k8sResources)
+    const agentRunsBeforeRefresh = store.k8sAgentRuns.map((run) => ({ ...run }))
+    const resourceOutputBeforeRefresh = store.k8sResourceOutput
+    vi.mocked(window.aiops.refreshKubernetesResources).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'K8S_JUMPSERVER_STREAM_UNAVAILABLE',
+      errorMessage: 'JumpServer Kubernetes command streaming is not connected in this backend yet.'
+    })
+    await expect(store.refreshK8sResources()).resolves.toBeNull()
+    expect(store.k8sResourceLoading).toBe(false)
+    expect(store.k8sClusterNotice).toBe('JumpServer Kubernetes command streaming is not connected in this backend yet.')
+    expect(JSON.stringify(store.k8sResources)).toBe(resourcesBeforeRefresh)
+    expect(store.k8sAgentRuns).toEqual(agentRunsBeforeRefresh)
+    expect(store.k8sResourceOutput).toBe(resourceOutputBeforeRefresh)
+  })
+
   it('does not fabricate Kubernetes Agent refresh or cleanup success when backend operations fail', async () => {
     const store = useWorkspaceStore()
     await store.refreshKubernetesCatalog()
