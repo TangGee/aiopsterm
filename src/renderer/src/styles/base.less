@@ -465,11 +465,11 @@ svg {
 }
 
 .mode-terminal.has-right-pane {
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: 48px minmax(0, 1fr) 6px auto;
 }
 
 .mode-terminal.has-left-pane.has-right-pane {
-  grid-template-columns: 48px auto 6px minmax(0, 1fr) auto;
+  grid-template-columns: 48px auto 6px minmax(0, 1fr) 6px auto;
 }
 
 .mode-agents {
@@ -611,6 +611,10 @@ svg {
   border-left: 1px solid var(--border);
 }
 
+.mode-terminal .layout-pane-right {
+  grid-column: -2;
+}
+
 .layout-resizer {
   position: relative;
   z-index: 2;
@@ -645,7 +649,7 @@ svg {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 0;
+  left: -6px;
 }
 
 .layout-resizer:hover,
@@ -6506,6 +6510,7 @@ code {
 .terminal-workspace {
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-rows: 36px 42px minmax(0, 1fr);
   background: var(--bg);
@@ -6622,12 +6627,29 @@ code {
 }
 
 .terminal-toolbar {
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.terminal-toolbar .toolbar-group {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-toolbar .toolbar-group::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-toolbar .toolbar-group button {
+  flex: 0 0 auto;
 }
 
 .terminal-toolbar button.active {
@@ -6636,9 +6658,20 @@ code {
 }
 
 .terminal-search {
-  width: 220px;
+  flex: 0 1 220px;
+  width: min(220px, 40%);
+  min-width: 132px;
   height: 30px;
   margin: 0;
+  gap: 6px;
+}
+
+.terminal-search button {
+  flex: 0 0 auto;
+  width: 28px;
+  min-width: 28px;
+  height: 26px;
+  padding: 0;
 }
 
 .terminal-global-command {

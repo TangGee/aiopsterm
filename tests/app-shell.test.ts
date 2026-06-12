@@ -9480,6 +9480,53 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-modal-feedback').text()).toContain('Database connection save backend returned malformed result data.')
     expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
     expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('malformed-pg'))).toBe(false)
+
+    vi.mocked(window.aiops.testDatabaseConnection).mockResolvedValueOnce({ ok: true, data: validConnectionTestData })
+    vi.mocked(window.aiops.saveDatabaseConnection).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        engines: [],
+        groups: [{ id: 'group-default', name: 'Default Group' }],
+        groupParents: { 'group-default': null },
+        connections: [
+          {
+            id: 'conn-wrong-save',
+            name: 'wrong-save',
+            dbType: 'postgresql',
+            env: 'Production',
+            groupId: 'group-default',
+            host: '127.0.0.2',
+            port: 5432,
+            authentication: 'UserAndPassword',
+            user: 'wrong',
+            database: 'wrong',
+            status: 'idle',
+            catalogs: []
+          }
+        ],
+        defaults: { selectedNodeId: 'conn-wrong-save', expandedGroupIds: ['group-default'], expandedConnectionIds: [], expandedCatalogIds: [], expandedSchemaIds: [], expandedSchemaObjectFolderIds: [] },
+        connection: {
+          id: 'conn-wrong-save',
+          name: 'wrong-save',
+          dbType: 'postgresql',
+          env: 'Production',
+          groupId: 'group-default',
+          host: '127.0.0.2',
+          port: 5432,
+          authentication: 'UserAndPassword',
+          user: 'wrong',
+          database: 'wrong',
+          status: 'idle',
+          catalogs: []
+        },
+        message: 'Connection saved'
+      }
+    } as any)
+    await wrapper.find('.db-connection-modal').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.db-modal-feedback').text()).toContain('Database connection save backend returned malformed result data.')
+    expect(wrapper.find('.db-connection-modal').exists()).toBe(true)
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('wrong-save'))).toBe(false)
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
 
     vi.mocked(window.aiops.createDatabaseGroup).mockResolvedValueOnce({ ok: true, data: {} } as any)
@@ -9505,8 +9552,75 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('Database connection backend returned malformed result data.')
     expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('orders-postgres'))).toBe(true)
 
+    vi.mocked(window.aiops.moveDatabaseConnection).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        engines: [],
+        groups: [{ id: 'group-default', name: 'Default Group' }],
+        groupParents: { 'group-default': null },
+        connections: [
+          {
+            id: 'conn-metrics-mysql',
+            name: 'metrics-mysql',
+            dbType: 'mysql',
+            env: 'Staging',
+            groupId: 'group-default',
+            host: '10.32.6.18',
+            port: 3306,
+            authentication: 'UserAndPassword',
+            user: 'ops',
+            database: 'metrics',
+            status: 'idle',
+            catalogs: []
+          }
+        ],
+        defaults: { selectedNodeId: 'conn-metrics-mysql', expandedGroupIds: ['group-default'], expandedConnectionIds: [], expandedCatalogIds: [], expandedSchemaIds: [], expandedSchemaObjectFolderIds: [] },
+        connection: {
+          id: 'conn-metrics-mysql',
+          name: 'metrics-mysql',
+          dbType: 'mysql',
+          env: 'Staging',
+          groupId: 'group-default',
+          host: '10.32.6.18',
+          port: 3306,
+          authentication: 'UserAndPassword',
+          user: 'ops',
+          database: 'metrics',
+          status: 'idle',
+          catalogs: []
+        },
+        message: 'Connection moved'
+      }
+    } as any)
+    await connectionRow('metrics-mysql').trigger('contextmenu')
+    await wrapper.findAll('.db-popup-submenu-wrap').find((item) => item.text().includes('Move To'))!.trigger('mouseenter')
+    await wrapper.find('.db-popup-submenu').findAll('button').find((button) => button.text().includes('Production'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database connection backend returned malformed result data.')
+    expect(wrapper.findAll('.db-tree > ul > li').find((group) => group.text().includes('Production'))!.text()).not.toContain('metrics-mysql')
+
     const tabCountBeforeRemove = wrapper.findAll('.db-workspace-tab').length
     vi.mocked(window.aiops.removeDatabaseConnection).mockResolvedValueOnce({ ok: true, data: {} } as any)
+    await connectionRow('orders-postgres').trigger('contextmenu')
+    await contextButton('Remove').trigger('click')
+    await wrapper.find('.db-operation-confirm footer .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Database connection backend returned malformed result data.')
+    expect(wrapper.findAll('.db-tree-row.connection').some((row) => row.text().includes('orders-postgres'))).toBe(true)
+    expect(wrapper.findAll('.db-workspace-tab')).toHaveLength(tabCountBeforeRemove)
+
+    vi.mocked(window.aiops.removeDatabaseConnection).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        engines: [],
+        groups: [{ id: 'group-default', name: 'Default Group' }],
+        groupParents: { 'group-default': null },
+        connections: [],
+        defaults: { selectedNodeId: 'group-default', expandedGroupIds: ['group-default'], expandedConnectionIds: [], expandedCatalogIds: [], expandedSchemaIds: [], expandedSchemaObjectFolderIds: [] },
+        connectionId: 'conn-other',
+        message: 'Connection removed'
+      }
+    } as any)
     await connectionRow('orders-postgres').trigger('contextmenu')
     await contextButton('Remove').trigger('click')
     await wrapper.find('.db-operation-confirm footer .danger').trigger('click')
@@ -9524,6 +9638,54 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-create-modal').exists()).toBe(true)
     expect(wrapper.find('.db-create-modal .db-modal-feedback').text()).toContain('Create database backend returned malformed result data.')
     expect(wrapper.findAll('.db-tree-row.database').some((row) => row.text().includes('malformed_catalog'))).toBe(false)
+
+    vi.mocked(window.aiops.createDatabaseCatalog).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        engines: [],
+        groups: [{ id: 'group-default', name: 'Default Group' }],
+        groupParents: { 'group-default': null },
+        connections: [
+          {
+            id: 'conn-prod-pg',
+            name: 'orders-postgres',
+            dbType: 'postgresql',
+            env: 'Production',
+            groupId: 'group-default',
+            host: '10.32.6.9',
+            port: 5432,
+            authentication: 'UserAndPassword',
+            user: 'readonly',
+            database: 'orders',
+            status: 'connected',
+            catalogs: [{ name: 'wrong_catalog', schemas: [] }]
+          }
+        ],
+        defaults: { selectedNodeId: 'conn-prod-pg:wrong_catalog', expandedGroupIds: ['group-default'], expandedConnectionIds: ['conn-prod-pg'], expandedCatalogIds: [], expandedSchemaIds: [], expandedSchemaObjectFolderIds: [] },
+        connection: {
+          id: 'conn-prod-pg',
+          name: 'orders-postgres',
+          dbType: 'postgresql',
+          env: 'Production',
+          groupId: 'group-default',
+          host: '10.32.6.9',
+          port: 5432,
+          authentication: 'UserAndPassword',
+          user: 'readonly',
+          database: 'orders',
+          status: 'connected',
+          catalogs: [{ name: 'wrong_catalog', schemas: [] }]
+        },
+        catalog: { name: 'wrong_catalog', schemas: [] },
+        message: 'Database created in workspace catalog'
+      }
+    } as any)
+    await wrapper.find('.db-create-modal input').setValue('malformed_catalog')
+    await wrapper.find('.db-create-modal').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.db-create-modal').exists()).toBe(true)
+    expect(wrapper.find('.db-create-modal .db-modal-feedback').text()).toContain('Create database backend returned malformed result data.')
+    expect(wrapper.findAll('.db-tree-row.database').some((row) => row.text().includes('wrong_catalog'))).toBe(false)
     await wrapper.find('.db-create-modal footer button[type="button"]').trigger('click')
 
     await tableRow('orders').trigger('dblclick')
