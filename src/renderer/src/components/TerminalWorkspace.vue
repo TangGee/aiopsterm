@@ -443,7 +443,7 @@ import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBott
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
-import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { copyTextToClipboard, mirrorTextToClipboardQuietly } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
 
@@ -615,9 +615,7 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
   syncTerminalView(panel)
   terminal.onSelectionChange(() => {
     const selectedText = terminal.getSelection()
-    if (selectedText.trim() && navigator.clipboard) {
-      navigator.clipboard.writeText(selectedText.trim()).catch(() => undefined)
-    }
+    if (selectedText.trim()) void mirrorTextToClipboardQuietly(selectedText.trim())
     updateSelectionButtonPosition(panel.id)
   })
   terminal.onResize(({ cols, rows }) => {

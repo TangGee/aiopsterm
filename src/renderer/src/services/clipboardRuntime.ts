@@ -28,3 +28,13 @@ export const copyTextToClipboard = async (text: string): Promise<boolean> => {
     document.body.removeChild(textarea)
   }
 }
+
+export const mirrorTextToClipboardQuietly = async (text: string): Promise<boolean> => {
+  if (!navigator.clipboard?.writeText) return false
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
