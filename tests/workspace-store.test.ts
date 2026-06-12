@@ -2004,6 +2004,13 @@ describe('workspace store', () => {
           ],
           extra: true
         } as any,
+        {
+          name: 'partial-runtime',
+          disabled: false,
+          tools: [{ name: 'inspect', description: 'Inspect release', enabled: true, parameters: [] }],
+          resources: [],
+          extra: true
+        } as any,
         { name: '', status: 'bad', disabled: false, tools: [], resources: [] } as any
       ],
       mcpToolStates: {
@@ -2050,6 +2057,13 @@ describe('workspace store', () => {
           }
         ],
         resources: [{ name: 'file:///release', description: 'release docs', uri: 'file:///release' }]
+      },
+      {
+        name: 'partial-runtime',
+        status: 'disconnected',
+        disabled: false,
+        tools: [{ name: 'inspect', description: 'Inspect release', enabled: true, parameters: [] }],
+        resources: []
       }
     ])
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
@@ -2068,10 +2082,18 @@ describe('workspace store', () => {
               }
             ],
             resources: [{ name: 'file:///release', description: 'release docs', uri: 'file:///release' }]
+          },
+          {
+            name: 'partial-runtime',
+            status: 'disconnected',
+            disabled: false,
+            tools: [{ name: 'inspect', description: 'Inspect release', enabled: true, parameters: [] }],
+            resources: []
           }
         ],
         mcpToolStates: {
-          'release-tools:deploy': true
+          'release-tools:deploy': true,
+          'partial-runtime:inspect': true
         }
       })
     )

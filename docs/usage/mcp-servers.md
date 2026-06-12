@@ -14,6 +14,8 @@ New profiles start with an empty MCP config unless the development seed switch `
 
 MCP servers are discovered by the main process. When the MCP settings page or editor refreshes the server list, aiopsterm opens the configured transport, sends MCP `initialize`, then requests `tools/list` and `resources/list`. The renderer only displays the backend-discovered tools and resources.
 
+If a server comes only from the JSON config or the backend returns a malformed/missing runtime status, the renderer keeps it `disconnected` rather than assuming it is connected. Run and Read actions stay blocked until the backend returns a valid `connected` status for that server.
+
 `stdio` example:
 
 ```json

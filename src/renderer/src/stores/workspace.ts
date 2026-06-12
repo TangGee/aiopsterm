@@ -1646,7 +1646,7 @@ const mcpConfigFileToServers = (file: McpConfigFile, existingServers: SettingsMc
     const approved = new Set((serverConfig.autoApprove || []).filter(Boolean))
     return {
       name,
-      status: serverConfig.disabled ? 'disabled' : existing?.status && existing.status !== 'disabled' ? existing.status : 'connected',
+      status: serverConfig.disabled ? 'disabled' : existing?.status && existing.status !== 'disabled' ? existing.status : 'disconnected',
       disabled: Boolean(serverConfig.disabled),
       ...(existing?.error && !serverConfig.disabled ? { error: existing.error } : {}),
       tools:
@@ -3069,7 +3069,7 @@ const normalizeMcpServersConfig = (source?: unknown, toolStatesSource?: unknown)
     }
     seenServers.add(name)
     const disabled = typeof item.disabled === 'boolean' ? item.disabled : false
-    const status = disabled ? 'disabled' : stringFromOptions(item.status, mcpStatusValues, 'connected')
+    const status = disabled ? 'disabled' : stringFromOptions(item.status, mcpStatusValues, 'disconnected')
     const seenTools = new Set<string>()
     const tools = (Array.isArray(item.tools) ? item.tools : [])
       .map((tool): McpServerUserConfig['tools'][number] | null => {
