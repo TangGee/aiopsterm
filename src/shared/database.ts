@@ -5197,7 +5197,7 @@ const qualifiedTableReference = (input: { dbType?: DatabaseConnectionTestInput['
   return table
 }
 
-const sampleSelectForContext = (input: DatabaseAiPaneResponseInput) => {
+const suggestedReadOnlySqlForContext = (input: DatabaseAiPaneResponseInput) => {
   const key = firstTableKeyForContext({
     connectionId: input.context.connectionId,
     databaseName: input.context.databaseName,
@@ -6684,7 +6684,7 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
   const promptLower = prompt.toLowerCase()
   const contextLine = databaseAiPaneContextSummary(input)
   const recentTurns = (input.messages || []).filter((message) => message.role === 'user').slice(-4).length
-  const selectSql = sampleSelectForContext(input)
+  const selectSql = suggestedReadOnlySqlForContext(input)
   const lines = [`Context: ${contextLine}`, '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。', `Recent user turns: ${recentTurns}`]
 
   if (promptLower.includes('explain') || promptLower.includes('解释')) {

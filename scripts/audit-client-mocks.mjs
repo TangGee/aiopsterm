@@ -15,6 +15,18 @@ const scriptPath = fileURLToPath(import.meta.url)
 
 const skippedDirs = new Set(['.git', 'node_modules', 'out', 'dist', 'test-results', 'playwright-report', 'coverage', 'external-reference'])
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.json'])
+const rootBoundaryFiles = [
+  'package.json',
+  'electron.vite.config.ts',
+  'vite.config.ts',
+  'vitest.config.ts',
+  'playwright.config.ts',
+  'electron-builder.yml',
+  'electron-builder.yaml',
+  'tsconfig.json',
+  'tsconfig.node.json',
+  'tsconfig.web.json'
+]
 
 const toPosix = (value) => value.split(sep).join('/')
 
@@ -70,6 +82,33 @@ const rendererContentRules = [
 
 const external-referenceImportPattern = /(?:from|require|import)\s*\(?\s*['"][^'"]*(?:^|\/|\.\.)external-reference(?:\/|['"])/
 
+const external-referenceTreePathPattern = /(^|[^.\w-])(?:\.{1,2}\/)?external-reference[\\/]/i
+
+const hasExternal referenceTreePathReference = (content) => external-referenceTreePathPattern.test(content.replace(/\\/g, '/'))
+
+const isAllowedExternal referenceTreeExclusion = (line) => {
+  const normalized = line.replace(/\\/g, '/').trim()
+  const token = normalized
+    .replace(/^[-\s,[{]+/, '')
+    .replace(/[,\]}]+$/, '')
+    .replace(/^['"]|['"]$/g, '')
+  return /^!\.?(?:\/)?external-reference\/\*\*$/.test(token)
+}
+
+const external-referenceTreeReferenceFailures = (filePath, content, message) => {
+  const failures = []
+  content.split(/\r?\n/).forEach((line, index) => {
+    if (!hasExternal referenceTreePathReference(line) || isAllowedExternal referenceTreeExclusion(line)) return
+    failures.push({
+      filePath,
+      rule: 'external-reference-tree-reference',
+      message,
+      lineNumber: index + 1
+    })
+  })
+  return failures
+}
+
 export const auditClientMocks = (root = repoRootFromArg()) => {
   const repoRoot = resolve(root)
   const rendererRoot = join(repoRoot, 'src', 'renderer', 'src')
@@ -120,12 +159,31 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
           message: 'external-reference/ is reference-only and must not be imported, required, or packaged by aiopsterm source.'
         })
       }
+      failures.push(
+        ...external-referenceTreeReferenceFailures(
+          filePath,
+          content,
+          'external-reference/ is reference-only and must not be copied, built from, packaged, or treated as an aiopsterm runtime source path.'
+        )
+      )
     }
+  }
+
+  for (const fileName of rootBoundaryFiles) {
+    const filePath = join(repoRoot, fileName)
+    if (!existsSync(filePath) || !statSync(filePath).isFile()) continue
+    failures.push(
+      ...external-referenceTreeReferenceFailures(
+        filePath,
+        readFileSync(filePath, 'utf8'),
+        'Build, package, and project configuration must not include external-reference/ reference-tree inputs; explicit !external-reference/** exclusions are allowed.'
+      )
+    )
   }
 
   return failures.map((failure) => ({
     ...failure,
-    relativePath: toPosix(relative(repoRoot, failure.filePath))
+    relativePath: `${toPosix(relative(repoRoot, failure.filePath))}${failure.lineNumber ? `:${failure.lineNumber}` : ''}`
   }))
 }
 
