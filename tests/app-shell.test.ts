@@ -9096,7 +9096,7 @@ describe('AppShell', () => {
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
-    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
@@ -9109,7 +9109,7 @@ describe('AppShell', () => {
     } as any)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed response data.')
     expect(wrapper.find('.db-ai-sql-actions').exists()).toBe(false)
     await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
@@ -9145,7 +9145,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
     expect(wrapper.text()).toContain('DB AI pane backend returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
@@ -9163,7 +9163,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await waitForDatabaseDbAiDone()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('missing assistant message')
     expect(wrapper.text()).toContain('DB AI pane backend returned malformed response data.')
 
@@ -9177,6 +9177,192 @@ describe('AppShell', () => {
     await wrapper.find('.db-result-error button').trigger('click')
     await flushPromises()
     expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis backend returned malformed result data.')
+    expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
+
+    wrapper.unmount()
+  })
+
+  it('fails closed when Database DB AI bridges are missing or rejected', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+    const editor = wrapper.find('.db-sql-editor')
+    await editor.setValue('select id from "public"."orders";')
+
+    const originalCreateDrawer = window.aiops.createDatabaseAiDrawerRequest
+    const originalStartDrawer = window.aiops.startDatabaseAiDrawerResponse
+    const originalGenerateDrawer = window.aiops.generateDatabaseAiDrawerResponse
+    const originalCancelDrawer = window.aiops.cancelDatabaseAiDrawerResponse
+    const originalCreatePane = window.aiops.createDatabaseAiPaneRequest
+    const originalStartPane = window.aiops.startDatabaseAiPaneResponse
+    const originalGeneratePane = window.aiops.generateDatabaseAiPaneResponse
+    const originalCancelPane = window.aiops.cancelDatabaseAiPaneResponse
+    const originalDiagnose = window.aiops.diagnoseDatabaseSqlError
+
+    try {
+      ;(window.aiops as any).createDatabaseAiDrawerRequest = undefined
+      await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('DB AI drawer request service unavailable')
+      expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    } finally {
+      ;(window.aiops as any).createDatabaseAiDrawerRequest = originalCreateDrawer
+    }
+
+    vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mockRejectedValueOnce(new Error('drawer create rejected'))
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('drawer create rejected')
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
+    try {
+      ;(window.aiops as any).startDatabaseAiDrawerResponse = undefined
+      await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
+      expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+      expect(wrapper.text()).toContain('DB AI drawer start service unavailable')
+      expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
+    } finally {
+      ;(window.aiops as any).startDatabaseAiDrawerResponse = originalStartDrawer
+    }
+    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+
+    try {
+      ;(window.aiops as any).generateDatabaseAiDrawerResponse = undefined
+      await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+      expect(wrapper.text()).toContain('DB AI drawer response service unavailable')
+    } finally {
+      ;(window.aiops as any).generateDatabaseAiDrawerResponse = originalGenerateDrawer
+    }
+    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockRejectedValueOnce(new Error('drawer response rejected'))
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await waitForDatabaseDbAiDone()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
+    expect(wrapper.text()).toContain('drawer response rejected')
+    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+
+    vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
+    await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    try {
+      ;(window.aiops as any).cancelDatabaseAiDrawerResponse = undefined
+      await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+      expect(wrapper.text()).toContain('DB AI drawer cancel service unavailable')
+    } finally {
+      ;(window.aiops as any).cancelDatabaseAiDrawerResponse = originalCancelDrawer
+    }
+    vi.mocked(window.aiops.cancelDatabaseAiDrawerResponse).mockRejectedValueOnce(new Error('drawer cancel rejected'))
+    await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.text()).toContain('drawer cancel rejected')
+    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+
+    await wrapper.find('button[title="Toggle DB AI Pane"]').trigger('click')
+    try {
+      ;(window.aiops as any).createDatabaseAiPaneRequest = undefined
+      await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
+      await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('DB AI pane request service unavailable')
+      expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
+    } finally {
+      ;(window.aiops as any).createDatabaseAiPaneRequest = originalCreatePane
+    }
+
+    vi.mocked(window.aiops.createDatabaseAiPaneRequest).mockRejectedValueOnce(new Error('pane create rejected'))
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('pane create rejected')
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
+
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockClear()
+    try {
+      ;(window.aiops as any).startDatabaseAiPaneResponse = undefined
+      await wrapper.find('.db-ai-pane-composer textarea').setValue('Start pane missing')
+      await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+      expect(wrapper.text()).toContain('DB AI pane start service unavailable')
+      expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
+    } finally {
+      ;(window.aiops as any).startDatabaseAiPaneResponse = originalStartPane
+    }
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
+
+    try {
+      ;(window.aiops as any).generateDatabaseAiPaneResponse = undefined
+      await wrapper.find('.db-ai-pane-composer textarea').setValue('Generate pane missing')
+      await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+      expect(wrapper.text()).toContain('DB AI pane response service unavailable')
+    } finally {
+      ;(window.aiops as any).generateDatabaseAiPaneResponse = originalGeneratePane
+    }
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
+
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockRejectedValueOnce(new Error('pane response rejected'))
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Generate pane rejected')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('pane response rejected')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
+
+    vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('Cancel pane rejected')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    try {
+      ;(window.aiops as any).cancelDatabaseAiPaneResponse = undefined
+      await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+      expect(wrapper.text()).toContain('DB AI pane cancel service unavailable')
+    } finally {
+      ;(window.aiops as any).cancelDatabaseAiPaneResponse = originalCancelPane
+    }
+    vi.mocked(window.aiops.cancelDatabaseAiPaneResponse).mockRejectedValueOnce(new Error('pane cancel rejected'))
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    expect(wrapper.text()).toContain('pane cancel rejected')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
+
+    await editor.setValue('syntax_error')
+    try {
+      ;(window.aiops as any).diagnoseDatabaseSqlError = undefined
+      await wrapper.find('button[title="Run all"]').trigger('click')
+      await waitForDatabaseSqlResult()
+      await wrapper.find('.db-result-error button').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis service unavailable')
+      expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
+    } finally {
+      ;(window.aiops as any).diagnoseDatabaseSqlError = originalDiagnose
+    }
+
+    vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockRejectedValueOnce(new Error('diagnosis rejected'))
+    await wrapper.find('.db-result-error button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('diagnosis rejected')
     expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
 
     wrapper.unmount()

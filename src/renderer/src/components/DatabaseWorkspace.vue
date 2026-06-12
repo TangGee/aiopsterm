@@ -2227,8 +2227,12 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import type {
   DatabaseAiDrawerResponseInput,
   DatabaseAiDrawerResponseResult,
+  DatabaseAiDrawerLifecycleResult,
+  DatabaseAiDrawerRequestResult,
   DatabaseAiDrawerRequestRecord,
+  DatabaseAiPaneLifecycleResult,
   DatabaseAiPaneMessageRecord,
+  DatabaseAiPaneRequestResult,
   DatabaseAiPaneResponseResult,
   DatabaseAiPaneStateSnapshot,
   DatabaseCatalogInfo,
@@ -4612,7 +4616,18 @@ async function sendDbAiPaneMessage(promptOverride = '') {
     activeSql: activeSqlTab.value?.sql ?? '',
     messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
   }
-  const created = await window.aiops.createDatabaseAiPaneRequest(requestInput)
+  const createBridge = window.aiops?.createDatabaseAiPaneRequest
+  if (typeof createBridge !== 'function') {
+    showNotice('DB AI pane request service unavailable')
+    return
+  }
+  let created: DatabaseAiPaneRequestResult
+  try {
+    created = await createBridge(requestInput)
+  } catch (error) {
+    showNotice(bridgeErrorMessage(error, 'DB AI pane request failed'))
+    return
+  }
   if (!created.ok) {
     showNotice(created.errorMessage || 'DB AI pane request failed')
     return
@@ -4628,19 +4643,53 @@ async function sendDbAiPaneMessage(promptOverride = '') {
   scrollDbAiPaneMessagesToBottom()
 }
 
+function markDbAiPaneAssistantError(messageId: string, errorMessage: string) {
+  dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
+    if (message.id !== messageId || message.role !== 'assistant' || message.status === 'cancelled' || message.status === 'done') return message
+    return { ...message, status: 'error', content: errorMessage, updatedAt: Date.now() }
+  })
+  scrollDbAiPaneMessagesToBottom()
+}
+
 async function requestDbAiPaneResponse(messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) {
-  const started = await window.aiops.startDatabaseAiPaneResponse({ requestId, assistantMessageId: messageId })
+  const startBridge = window.aiops?.startDatabaseAiPaneResponse
+  if (typeof startBridge !== 'function') {
+    const message = 'DB AI pane start service unavailable'
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
+    return
+  }
+  let started: DatabaseAiPaneLifecycleResult
+  try {
+    started = await startBridge({ requestId, assistantMessageId: messageId })
+  } catch (error) {
+    const message = bridgeErrorMessage(error, 'DB AI pane request failed to start')
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
+    return
+  }
   if (!started.ok) {
-    showNotice(started.errorMessage || 'DB AI pane request failed to start')
+    const message = started.errorMessage || 'DB AI pane request failed to start'
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
     return
   }
   if (!isDbAiPaneLifecycleData(started.data, { requestId, assistantMessageId: messageId })) {
-    showNotice('DB AI pane backend returned malformed lifecycle data.')
+    const message = 'DB AI pane backend returned malformed lifecycle data.'
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
     return
   }
   applyDbAiPaneAssistantMessage(started.data.assistantMessage)
+  const generateBridge = window.aiops?.generateDatabaseAiPaneResponse
+  if (typeof generateBridge !== 'function') {
+    const message = 'DB AI pane response service unavailable'
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
+    return
+  }
   try {
-    const result = await window.aiops.generateDatabaseAiPaneResponse({
+    const result = await generateBridge({
       requestId,
       assistantMessageId: messageId,
       prompt,
@@ -4656,7 +4705,9 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
     })
     finishDbAiPaneMessage(messageId, result, requestId)
   } catch (error) {
-    showNotice(errorToMessage(error))
+    const message = bridgeErrorMessage(error, 'DB AI pane response failed')
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
   }
 }
 
@@ -4672,10 +4723,16 @@ function finishDbAiPaneMessage(messageId: string, result: DatabaseAiPaneResponse
   const hasValidResponseData = isDbAiPaneResponseData(result.data, { requestId, assistantMessageId: messageId })
   const responseData = hasValidResponseData ? result.data : null
   if (result.ok && !hasValidResponseData) {
-    showNotice('DB AI pane backend returned malformed response data.')
+    const message = 'DB AI pane backend returned malformed response data.'
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
     return
   }
-  if (!result.ok && !hasValidResponseData) showNotice(result.errorMessage || 'DB AI pane response failed')
+  if (!result.ok && !hasValidResponseData) {
+    const message = result.errorMessage || 'DB AI pane response failed'
+    markDbAiPaneAssistantError(messageId, message)
+    showNotice(message)
+  }
   dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
     if (message.id !== messageId || message.status === 'cancelled') return message
     if (responseData) return responseData.assistantMessage
@@ -4689,7 +4746,18 @@ async function cancelDbAiPaneResponse() {
     .reverse()
     .find((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
   if (!activeAssistant) return
-  const result = await window.aiops.cancelDatabaseAiPaneResponse({ requestId: activeAssistant.requestId, assistantMessageId: activeAssistant.id })
+  const cancelBridge = window.aiops?.cancelDatabaseAiPaneResponse
+  if (typeof cancelBridge !== 'function') {
+    showNotice('DB AI pane cancel service unavailable')
+    return
+  }
+  let result: DatabaseAiPaneLifecycleResult
+  try {
+    result = await cancelBridge({ requestId: activeAssistant.requestId, assistantMessageId: activeAssistant.id })
+  } catch (error) {
+    showNotice(bridgeErrorMessage(error, 'DB AI pane cancel failed'))
+    return
+  }
   if (!result.ok) {
     showNotice(result.errorMessage || 'DB AI pane cancel failed')
     return
@@ -5005,6 +5073,12 @@ function errorToMessage(error: unknown) {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
   return 'Backend SQL executor failed.'
+}
+
+function bridgeErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (typeof error === 'string' && error.trim()) return error.trim()
+  return fallback
 }
 
 function firstStatement(sql: string) {
@@ -7165,12 +7239,23 @@ async function openDbAi(action: DbAiAction, sql: string, context = '', backendCo
           ? 'postgresql'
           : activeDialect || 'postgresql'
   const targetDialect: DbAiTargetDialect = action === 'convert' ? normalizedDialect : normalizedDialect
-  const result = await window.aiops.createDatabaseAiDrawerRequest({
-    action,
-    sourceSql: sql,
-    targetDialect,
-    context: dbAiBackendContextForIpc({ ...backendContext, contextSummary: backendContext.contextSummary || context })
-  })
+  const createBridge = window.aiops?.createDatabaseAiDrawerRequest
+  if (typeof createBridge !== 'function') {
+    showNotice('DB AI drawer request service unavailable')
+    return
+  }
+  let result: DatabaseAiDrawerRequestResult
+  try {
+    result = await createBridge({
+      action,
+      sourceSql: sql,
+      targetDialect,
+      context: dbAiBackendContextForIpc({ ...backendContext, contextSummary: backendContext.contextSummary || context })
+    })
+  } catch (error) {
+    showNotice(bridgeErrorMessage(error, 'DB AI request failed'))
+    return
+  }
   if (!result.ok) {
     showNotice(result.errorMessage || 'DB AI request failed')
     return
@@ -7196,22 +7281,58 @@ function patchDbAiRequest(reqId: string, patch: Partial<DbAiRequest>) {
   }
 }
 
+function markDbAiDrawerRequestError(reqId: string, errorMessage: string) {
+  const request = dbAiRequests.value[reqId]
+  if (!request || request.status === 'cancelled' || request.status === 'done') return
+  patchDbAiRequest(reqId, {
+    status: 'error',
+    text: errorMessage,
+    updatedAt: Date.now()
+  })
+}
+
 async function requestDbAiDrawerResponse(reqId: string) {
   const request = dbAiRequests.value[reqId]
   if (!request) return
   const expectedDialect = request.targetDialect
-  const started = await window.aiops.startDatabaseAiDrawerResponse({ requestId: reqId })
+  const startBridge = window.aiops?.startDatabaseAiDrawerResponse
+  if (typeof startBridge !== 'function') {
+    const message = 'DB AI drawer start service unavailable'
+    markDbAiDrawerRequestError(reqId, message)
+    showNotice(message)
+    return
+  }
+  let started: DatabaseAiDrawerLifecycleResult
+  try {
+    started = await startBridge({ requestId: reqId })
+  } catch (error) {
+    const message = bridgeErrorMessage(error, 'DB AI drawer request failed to start')
+    markDbAiDrawerRequestError(reqId, message)
+    showNotice(message)
+    return
+  }
   if (!started.ok) {
-    showNotice(started.errorMessage || 'DB AI drawer request failed to start')
+    const message = started.errorMessage || 'DB AI drawer request failed to start'
+    markDbAiDrawerRequestError(reqId, message)
+    showNotice(message)
     return
   }
   if (!isDbAiDrawerRequestRecord(started.data, reqId)) {
-    showNotice('DB AI drawer backend returned malformed lifecycle data.')
+    const message = 'DB AI drawer backend returned malformed lifecycle data.'
+    markDbAiDrawerRequestError(reqId, message)
+    showNotice(message)
     return
   }
   patchDbAiRequest(reqId, { status: started.data.status, text: started.data.text, updatedAt: started.data.updatedAt })
+  const generateBridge = window.aiops?.generateDatabaseAiDrawerResponse
+  if (typeof generateBridge !== 'function') {
+    const message = 'DB AI drawer response service unavailable'
+    markDbAiDrawerRequestError(reqId, message)
+    showNotice(message)
+    return
+  }
   try {
-    const result = await window.aiops.generateDatabaseAiDrawerResponse({
+    const result = await generateBridge({
       requestId: reqId,
       action: request.action,
       sourceSql: request.sourceSql,
@@ -7239,7 +7360,9 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
   const hasValidResponseData = isDbAiDrawerResponseData(result.data, reqId)
   const responseData = hasValidResponseData ? result.data : null
   if (result.ok && !hasValidResponseData) {
-    showNotice('DB AI drawer backend returned malformed response data.')
+    const message = 'DB AI drawer backend returned malformed response data.'
+    markDbAiDrawerRequestError(reqId, message)
+    showNotice(message)
     return
   }
   if (responseData) {
@@ -7249,7 +7372,9 @@ function finishDbAiRequest(reqId: string, result: DatabaseAiDrawerResponseResult
     }
     return
   }
-  showNotice(result.errorMessage || 'DB AI drawer backend failed.')
+  const message = result.errorMessage || 'DB AI drawer backend failed.'
+  markDbAiDrawerRequestError(reqId, message)
+  showNotice(message)
 }
 
 function setActiveDbAiRequest(reqId: string) {
@@ -7320,7 +7445,14 @@ async function diagnoseSqlError(result: SqlResult) {
 
   try {
     const connection = findConnection(tab.connectionId)
-    const response = await window.aiops.diagnoseDatabaseSqlError({
+    const diagnoseBridge = window.aiops?.diagnoseDatabaseSqlError
+    if (typeof diagnoseBridge !== 'function') {
+      sqlDiagnose.running = false
+      sqlDiagnose.success = false
+      sqlDiagnose.error = 'DB AI diagnosis service unavailable'
+      return
+    }
+    const response = await diagnoseBridge({
       sourceSql: result.sql,
       targetDialect: connection?.dbType ?? 'postgresql',
       context: dbAiBackendContextForIpc(
@@ -7362,7 +7494,7 @@ async function diagnoseSqlError(result: SqlResult) {
     if (sqlDiagnose.resultId !== result.id) return
     sqlDiagnose.running = false
     sqlDiagnose.success = false
-    sqlDiagnose.error = errorToMessage(error)
+    sqlDiagnose.error = bridgeErrorMessage(error, 'DB AI diagnosis failed.')
   }
 }
 
@@ -7370,7 +7502,18 @@ async function cancelDbAiRequest() {
   const request = activeDbAiRequest.value
   if (!request) return
   if (request.status === 'done' || request.status === 'error') return
-  const result = await window.aiops.cancelDatabaseAiDrawerResponse({ requestId: request.id })
+  const cancelBridge = window.aiops?.cancelDatabaseAiDrawerResponse
+  if (typeof cancelBridge !== 'function') {
+    showNotice('DB AI drawer cancel service unavailable')
+    return
+  }
+  let result: DatabaseAiDrawerLifecycleResult
+  try {
+    result = await cancelBridge({ requestId: request.id })
+  } catch (error) {
+    showNotice(bridgeErrorMessage(error, 'DB AI request cancel failed'))
+    return
+  }
   if (!result.ok) {
     showNotice(result.errorMessage || 'DB AI request cancel failed')
     return
