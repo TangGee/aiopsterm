@@ -10737,6 +10737,8 @@ ${JSON.stringify(externalSecurityConfig, null, 2)}`)
       ;(window.aiops as any).submitSettingsFeedbackReport = undefined
       await expect(store.openSettingsExternalAction('反馈页面')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('反馈报告服务不可用')
+      await expect(store.openSettingsExternalAction('插件市场')).resolves.toBe(false)
+      expect(store.settingsNotice).toBe('插件市场服务不可用')
 
       ;(window.aiops as any).openSettingsDocumentation = originalAiops.openSettingsDocumentation
       vi.mocked(window.aiops.openSettingsDocumentation).mockRejectedValueOnce(new Error('docs offline'))

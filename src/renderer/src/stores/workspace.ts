@@ -7720,8 +7720,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (label === '账户中心') {
         return openAccountCenter({ activateUserModule: true, notifySettings: true })
       }
-      setSettingsNotice(`已打开 ${label}`)
-      return true
+      setSettingsNotice(`${label}服务不可用`)
+      return false
     } catch {
       setSettingsNotice(`${label} 打开失败`)
       return false
