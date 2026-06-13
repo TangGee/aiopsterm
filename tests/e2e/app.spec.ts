@@ -1175,8 +1175,11 @@ test('terminal tab operations and visual baseline', async () => {
     await expect(page.locator('.tab-menu')).toBeVisible()
     await page.locator('.tab-menu button').filter({ hasText: '向右拆分' }).click()
     await expect(page.locator('.terminal-tab')).toHaveCount(3)
-    await expect(page.locator('.terminal-grid')).toHaveClass(/split/)
+    await expect(page.locator('.terminal-grid')).toHaveClass(/split-right/)
     await expect(page.locator('.terminal-pane')).toHaveCount(2)
+    const rightSplitBoxes = await page.locator('.terminal-pane').evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().toJSON()))
+    expect(Math.abs(rightSplitBoxes[0].y - rightSplitBoxes[1].y)).toBeLessThan(4)
+    expect(rightSplitBoxes[1].x).toBeGreaterThan(rightSplitBoxes[0].x)
 
     await page.locator('.terminal-pane').last().click({ button: 'right' })
     await expect(page.locator('.terminal-context-menu')).toBeVisible()

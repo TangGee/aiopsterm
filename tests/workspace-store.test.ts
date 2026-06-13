@@ -368,6 +368,91 @@ describe('workspace store', () => {
     expect(store.panels[0].outputSegments).toEqual([])
   })
 
+  it('prepares split panes from the selected live terminal metadata', () => {
+    const store = useWorkspaceStore()
+
+    store.activePanel.cwd = '/srv/app'
+    store.activePanel.sessionId = 'local-source-session'
+    store.activePanel.status = 'running'
+    const localSourceId = store.activePanelId
+    store.createPanel('right')
+    expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.splitSourceId).toBe(localSourceId)
+    expect(store.activePanel.cwd).toBe('/srv/app')
+    expect(store.activePanel.status).toBe('connecting')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.sshSession).toBeUndefined()
+
+    store.closePanels('all')
+    const sshSourceId = store.activePanelId
+    store.registerSshSession(sshSourceId, {
+      id: 'asset-split-copy',
+      name: 'split-copy-host',
+      host: '10.9.0.3',
+      port: 2203,
+      username: 'ops',
+      group_name: '生产',
+      asset_type: 'person',
+      auth_type: 'keyBased',
+      needProxy: true,
+      proxyName: 'proxy-a'
+    })
+    store.applySshTerminalSession(
+      sshSourceId,
+      {
+        id: 'ssh-source-session',
+        shell: 'ssh',
+        cwd: '/home/ops',
+        kind: 'ssh',
+        connection: {
+          connectionId: 'ssh-source-connection',
+          host: '10.9.0.3',
+          port: 2203,
+          username: 'ops',
+          assetId: 'asset-split-copy',
+          assetName: 'split-copy-host',
+          assetType: 'person',
+          organizationId: '生产',
+          authType: 'keyBased',
+          title: 'split-copy-host',
+          createdAt: 1717200001000
+        }
+      },
+      {
+        id: 'asset-split-copy',
+        name: 'split-copy-host',
+        host: '10.9.0.3',
+        port: 2203,
+        username: 'ops',
+        group_name: '生产',
+        asset_type: 'person',
+        auth_type: 'keyBased',
+        needProxy: true,
+        proxyName: 'proxy-a'
+      }
+    )
+
+    store.createPanel('below')
+    expect(store.activePanel.split).toBe('below')
+    expect(store.activePanel.splitSourceId).toBe(sshSourceId)
+    expect(store.activePanel.cwd).toBe('/home/ops')
+    expect(store.activePanel.status).toBe('connecting')
+    expect(store.activePanel.sessionId).toBeUndefined()
+    expect(store.activePanel.sshSession).toEqual(
+      expect.objectContaining({
+        sourcePanelId: sshSourceId,
+        host: '10.9.0.3',
+        port: 2203,
+        username: 'ops',
+        assetId: 'asset-split-copy',
+        assetName: 'split-copy-host',
+        needProxy: true,
+        proxyName: 'proxy-a'
+      })
+    )
+    expect(store.activePanel.sshSession?.connectionId).toBeUndefined()
+  })
+
   it('applies keyword highlight to terminal display without mutating raw output', () => {
     const store = useWorkspaceStore()
     store.keywordHighlightSettings = {

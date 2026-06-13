@@ -188,7 +188,7 @@
     <div
       ref="terminalGrid"
       class="terminal-grid"
-      :class="{ split: isSplitView }"
+      :class="terminalGridClasses"
     >
       <div
         v-if="showTerminalDashboard"
@@ -522,6 +522,16 @@ const visibleTerminalPanels = computed(() => {
   return splitPanels.length ? [active, ...splitPanels] : [active]
 })
 const isSplitView = computed(() => visibleTerminalPanels.value.length > 1)
+const terminalGridClasses = computed(() => {
+  if (!isSplitView.value) return {}
+  const splitDirections = visibleTerminalPanels.value.filter((panel) => panel.split).map((panel) => panel.split)
+  const lastDirection = splitDirections.at(-1)
+  return {
+    split: true,
+    'split-right': splitDirections.includes('right'),
+    'split-below': lastDirection === 'below' && !splitDirections.includes('right')
+  }
+})
 const showTerminalDashboard = computed(() => {
   const panel = visibleTerminalPanels.value[0]
   return (
@@ -938,18 +948,34 @@ const cloneSelected = () => {
   menu.visible = false
 }
 
-const splitSelected = (direction: 'right' | 'below') => {
-  workspace.activePanelId = menu.panelId
-  workspace.createPanel(direction)
-  menu.visible = false
-}
-
 const terminalViewSize = (panelId: string) => {
   const view = terminalViews.get(panelId)
   view?.fit.fit()
   return {
     cols: view?.terminal.cols || 80,
     rows: view?.terminal.rows || 24
+  }
+}
+
+const startLocalTerminalForPanel = async (panel: TerminalPanel) => {
+  if (!window.aiops?.createTerminal) {
+    workspace.setTopNotice('本地终端启动服务不可用')
+    return false
+  }
+  await nextTick()
+  const size = terminalViewSize(panel.id)
+  try {
+    const session = await window.aiops.createTerminal({
+      kind: 'local',
+      cols: size.cols,
+      rows: size.rows
+    })
+    const connected = Boolean(workspace.applyLocalTerminalSession(panel.id, session))
+    if (!connected) workspace.setTopNotice('本地终端启动失败')
+    return connected
+  } catch (error) {
+    workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+    return false
   }
 }
 
@@ -997,6 +1023,25 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
     workspace.setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')
     return false
   }
+}
+
+const connectSplitPanelFromSource = async (panel: TerminalPanel, sourcePanel?: TerminalPanel | null) => {
+  if (!sourcePanel?.sessionId || sourcePanel.status === 'closed' || sourcePanel.status === 'error') return false
+  return panel.sshSession ? startSshTerminalForPanel(panel) : startLocalTerminalForPanel(panel)
+}
+
+const createSplitPanel = async (direction: 'right' | 'below', sourcePanelId: string) => {
+  const sourcePanel = panelById(sourcePanelId)
+  workspace.activePanelId = sourcePanelId
+  const panel = workspace.createPanel(direction)
+  await nextTick()
+  void connectSplitPanelFromSource(panel, sourcePanel)
+  return panel
+}
+
+const splitSelected = (direction: 'right' | 'below') => {
+  void createSplitPanel(direction, menu.panelId)
+  menu.visible = false
 }
 
 const forkSelected = async () => {
@@ -1507,21 +1552,7 @@ const reconnectTerminalPanel = async (panel: TerminalPanel) => {
   if (panel.sshSession) {
     return startSshTerminalForPanel(panel)
   }
-  await nextTick()
-  const size = terminalViewSize(panel.id)
-  try {
-    const session = await window.aiops.createTerminal({
-      kind: 'local',
-      cols: size.cols,
-      rows: size.rows
-    })
-    const connected = Boolean(workspace.applyLocalTerminalSession(panel.id, session))
-    if (!connected) workspace.setTopNotice('本地终端启动失败')
-    return connected
-  } catch (error) {
-    workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
-    return false
-  }
+  return startLocalTerminalForPanel(panel)
 }
 
 const disconnectTerminalPanel = async (panel: TerminalPanel) => {
@@ -1577,8 +1608,7 @@ const closeTerminalFromMenu = () => {
 }
 
 const splitFromTermMenu = (direction: 'right' | 'below') => {
-  workspace.activePanelId = termMenu.panelId
-  workspace.createPanel(direction)
+  void createSplitPanel(direction, termMenu.panelId)
   termMenu.visible = false
 }
 
@@ -1619,31 +1649,21 @@ const chatSelectionToAi = (panelId: string) => {
 }
 
 const startRealShell = async () => {
-  if (!window.aiops?.createTerminal) {
-    workspace.setTopNotice('本地终端启动服务不可用')
-    return
-  }
   const panel = workspace.activePanel
   if (panel.kind === 'knowledge') return
-  const size = terminalViewSize(panel.id)
   try {
-    const session = await window.aiops.createTerminal({
-      kind: 'local',
-      cols: size.cols,
-      rows: size.rows
-    })
-    if (!workspace.applyLocalTerminalSession(panel.id, session)) {
+    const connected = await startLocalTerminalForPanel(panel)
+    if (!connected) {
       workspace.setTopNotice('本地终端启动失败')
       writeRuntimeLog('warn', 'renderer.local-terminal.apply-failed', {
-        panelId: panel.id,
-        sessionId: session?.id
+        panelId: panel.id
       })
     } else {
       writeRuntimeLog('info', 'renderer.local-terminal.ready', {
         panelId: panel.id,
-        sessionId: session.id,
-        shell: session.shell,
-        cwd: session.cwd
+        sessionId: panel.sessionId,
+        shell: panel.title,
+        cwd: panel.cwd
       })
     }
   } catch (error) {

@@ -5621,6 +5621,117 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('copies live local and SSH terminal connections when splitting panes', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    await wrapper.findAll('.terminal-toolbar button').find((button) => button.text().includes('打开本地 shell'))!.trigger('click')
+    await flushPromises()
+    const localSourcePanelId = store.activePanelId
+    expect(store.activePanel.sessionId).toBe('test-session-local')
+
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+      id: 'test-session-local-split',
+      shell: '/bin/bash',
+      cwd: '/',
+      kind: 'local',
+      lifecycle: {
+        id: 'test-session-local-split',
+        kind: 'local',
+        stage: 'shell-ready',
+        shell: '/bin/bash',
+        cwd: '/',
+        at: 1717200002000
+      }
+    })
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('向右拆分'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
+    expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.splitSourceId).toBe(localSourcePanelId)
+    expect(store.activePanel.sessionId).toBe('test-session-local-split')
+    expect(store.activePanel.status).toBe('running')
+    expect(store.activePanel.output).not.toContain('[aiopsterm]')
+    expect(wrapper.find('.terminal-grid').classes()).toContain('split-right')
+    expect(wrapper.find('.terminal-grid').classes()).not.toContain('split-below')
+
+    store.closePanels('all')
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-split-unit',
+      name: 'split-source',
+      host: '10.8.0.9',
+      port: 2229,
+      username: 'ops',
+      group_name: '生产',
+      asset_type: 'person',
+      auth_type: 'keyBased'
+    })
+    store.applySshTerminalSession(
+      store.activePanelId,
+      {
+        id: 'test-session-source-split-unit',
+        shell: 'ssh',
+        cwd: '/home/ops',
+        kind: 'ssh',
+        connection: {
+          connectionId: 'ssh-source-split-unit',
+          host: '10.8.0.9',
+          port: 2229,
+          username: 'ops',
+          assetId: 'asset-split-unit',
+          assetName: 'split-source',
+          assetType: 'person',
+          organizationId: '生产',
+          authType: 'keyBased',
+          title: 'split-source',
+          createdAt: 1717200002000
+        }
+      },
+      {
+        id: 'asset-split-unit',
+        name: 'split-source',
+        host: '10.8.0.9',
+        port: 2229,
+        username: 'ops',
+        group_name: '生产',
+        asset_type: 'person',
+        auth_type: 'keyBased'
+      }
+    )
+    await wrapper.vm.$nextTick()
+    const sshSourcePanelId = store.activePanelId
+
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('向下拆分'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'ssh',
+        assetId: 'asset-split-unit',
+        title: 'split-source',
+        ssh: expect.objectContaining({ host: '10.8.0.9', port: 2229, username: 'ops' })
+      })
+    )
+    expect(store.activePanel.split).toBe('below')
+    expect(store.activePanel.splitSourceId).toBe(sshSourcePanelId)
+    expect(store.activePanel.sessionId).toBe('test-session-asset-split-unit')
+    expect(store.activePanel.sshSession?.sourcePanelId).toBe(sshSourcePanelId)
+    expect(store.activePanel.sshSession?.connectionId).toBe('ssh-test-session-asset-split-unit')
+    expect(store.activePanel.output).not.toContain('aiopsterm ssh')
+    expect(wrapper.find('.terminal-grid').classes()).toContain('split-below')
+
+    wrapper.unmount()
+  })
+
   it('matches External reference-style terminal context menu, search overlay, suggestions, and global command bar', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

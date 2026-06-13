@@ -3788,16 +3788,26 @@ const createEmptyTerminalPanel = (
   title: string,
   split?: PanelDirection,
   splitSourceId?: string,
-  splitGroupId?: string
+  splitGroupId?: string,
+  sourcePanel?: TerminalPanel
 ): TerminalPanel => ({
   id,
   title,
-  cwd: '~',
+  cwd: sourcePanel?.cwd || '~',
   kind: 'terminal',
   output: '',
   outputSegments: [],
-  status: 'ready',
-  ...(split ? { split, splitSourceId, splitGroupId } : {})
+  status: sourcePanel?.sessionId ? 'connecting' : 'ready',
+  ...(split ? { split, splitSourceId, splitGroupId } : {}),
+  ...(split && sourcePanel?.sshSession
+    ? {
+        sshSession: {
+          ...sourcePanel.sshSession,
+          connectionId: undefined,
+          sourcePanelId: sourcePanel.id
+        }
+      }
+    : {})
 })
 
 const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedKind?: 'local' | 'ssh'): value is TerminalLifecycleEvent => {
@@ -12034,10 +12044,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const groupId = split ? sourcePanel?.splitGroupId || sourceId : undefined
     const panel = createEmptyTerminalPanel(
       createRendererLocalId('panel'),
-      split ? `split ${panels.value.length}` : `Terminal ${panels.value.length}`,
+      split && sourcePanel ? sourcePanel.title : `Terminal ${panels.value.length}`,
       split,
       sourceId,
-      groupId
+      groupId,
+      sourcePanel
     )
     if (split && sourcePanel && groupId) {
       sourcePanel.splitGroupId = groupId
