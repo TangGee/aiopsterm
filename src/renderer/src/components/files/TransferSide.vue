@@ -2,9 +2,9 @@
   <section
     class="files-transfer-side"
     :class="{ active: dropActive }"
-    @dragenter.prevent="dropActive = true"
-    @dragover.prevent
-    @dragleave.prevent="dropActive = false"
+    @dragenter.prevent="handleDragEnter"
+    @dragover.prevent="handleDragOver"
+    @dragleave.prevent="handleDragLeave"
     @drop.prevent="handlePanelDrop"
   >
     <article
@@ -28,13 +28,6 @@
             {{ option.label }}
           </option>
         </select>
-        <button
-          v-if="session.kind !== 'local'"
-          title="关闭连接"
-          @click.stop="closeCurrentRemote"
-        >
-          <X />
-        </button>
         <button
           title="添加"
           @click="$emit('add')"
@@ -62,9 +55,9 @@
       class="files-empty-drop"
       :class="{ active: dropActive }"
       @click="$emit('add')"
-      @dragenter.prevent="dropActive = true"
-      @dragover.prevent
-      @dragleave.prevent="dropActive = false"
+      @dragenter.prevent="handleDragEnter"
+      @dragover.prevent="handleDragOver"
+      @dragleave.prevent="handleDragLeave"
       @drop.prevent="handleEmptyDrop"
     >
       <Plus />
@@ -114,11 +107,6 @@ const closePanel = () => {
   store.closeFileSession(props.side)
 }
 
-const closeCurrentRemote = () => {
-  if (!props.session || props.session.kind === 'local') return
-  store.closeFileSession(props.side)
-}
-
 const readSftpDragPayload = (event: DragEvent) => {
   const raw = event.dataTransfer?.getData('application/x-asset-sftp')
   if (!raw) return null
@@ -154,6 +142,25 @@ const openDroppedSession = async (event: DragEvent) => {
   if (!sessionId) return
   const otherSelectedId = props.side === 'left' ? store.selectedRightFileSessionId : store.selectedLeftFileSessionId
   if (sessionId !== otherSelectedId) store.openFileSession(sessionId, props.side)
+}
+
+const containsRelatedTarget = (event: DragEvent) => {
+  const current = event.currentTarget as HTMLElement | null
+  const related = event.relatedTarget as Node | null
+  return Boolean(current && related && current.contains(related))
+}
+
+const handleDragEnter = () => {
+  dropActive.value = true
+}
+
+const handleDragOver = (event: DragEvent) => {
+  dropActive.value = true
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+const handleDragLeave = (event: DragEvent) => {
+  if (!containsRelatedTarget(event)) dropActive.value = false
 }
 
 const handleEmptyDrop = async (event: DragEvent) => {

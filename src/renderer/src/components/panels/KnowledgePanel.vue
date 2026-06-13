@@ -2,7 +2,7 @@
   <section
     class="kb-sidebar-root"
     @dragover.prevent
-    @drop.prevent="handleDropImport"
+    @drop.prevent="handleRootDrop"
   >
     <header class="kb-panel-header">
       <h2>知识库</h2>
@@ -53,8 +53,14 @@
       class="kb-tree-wrapper"
       @click="clearBlankSelection"
       @contextmenu.prevent="openBlankMenu"
+      @dragover.prevent="handleRootDragOver"
+      @dragleave="handleRootDragLeave"
+      @drop.prevent="handleRootDrop"
     >
-      <div class="kb-tree-scroll">
+      <div
+        class="kb-tree-scroll"
+        :class="{ 'drag-over-root': kbDragOverRoot }"
+      >
         <div
           v-if="workspace.kbContentSearchVisible"
           class="kb-search-results"
@@ -88,9 +94,15 @@
           :level="0"
           :editing-key="editingKey"
           :editing-name="editingName"
+          :drag-over-rel-path="kbDragOverRelPath"
           @select="selectNode"
           @toggle="toggleExpanded"
           @context="openNodeMenu"
+          @drag-start="handleKnowledgeDragStart"
+          @drag-over="handleKnowledgeNodeDragOver"
+          @drag-leave="handleKnowledgeNodeDragLeave"
+          @drag-end="clearKnowledgeDragState"
+          @drop-node="handleKnowledgeNodeDrop"
           @rename-input="editingName = $event"
           @confirm-rename="confirmRename"
           @cancel-rename="cancelRename"
@@ -248,6 +260,9 @@ const addMenuOpen = ref(false)
 const showCapacityDetail = ref(false)
 const editingKey = ref('')
 const editingName = ref('')
+const kbDragSource = ref('')
+const kbDragOverRelPath = ref('')
+const kbDragOverRoot = ref(false)
 const nodeMenu = reactive({ visible: false, x: 0, y: 0, relPath: '', type: 'file' as 'file' | 'dir' })
 const blankMenu = reactive({ visible: false, x: 0, y: 0 })
 
@@ -279,11 +294,13 @@ const KnowledgeTreeNode = defineComponent({
     node: { type: Object as () => KnowledgeNode, required: true },
     level: { type: Number, required: true },
     editingKey: { type: String, required: true },
-    editingName: { type: String, required: true }
+    editingName: { type: String, required: true },
+    dragOverRelPath: { type: String, required: true }
   },
-  emits: ['select', 'toggle', 'context', 'renameInput', 'confirmRename', 'cancelRename'],
+  emits: ['select', 'toggle', 'context', 'dragStart', 'dragOver', 'dragLeave', 'dragEnd', 'dropNode', 'renameInput', 'confirmRename', 'cancelRename'],
   setup(nodeProps, { emit }) {
     const store = useWorkspaceStore()
+    const getNodeParent = (relPath: string) => relPath.split('/').filter(Boolean).slice(0, -1).join('/')
     const nodeKindLabel = (node: KnowledgeNode) => {
       if (node.type === 'dir') return '文件夹'
       return /\.(md|markdown)$/i.test(node.relPath) ? '文档' : '文件'
@@ -292,12 +309,14 @@ const KnowledgeTreeNode = defineComponent({
       const expanded = store.kbExpandedKeys.includes(node.relPath)
       const selected = store.kbSelectedKeys.includes(node.relPath)
       const editing = nodeProps.editingKey === node.relPath
+      const dragOver = nodeProps.dragOverRelPath === node.relPath || (node.type === 'file' && nodeProps.dragOverRelPath === getNodeParent(node.relPath))
       return h('div', { class: 'kb-tree-node-wrap' }, [
         h(
           'div',
           {
-            class: ['kb-tree-node', { selected, editing }],
+            class: ['kb-tree-node', { selected, editing, 'drag-over': dragOver }],
             style: { paddingLeft: `${level * 16 + 6}px` },
+            draggable: !editing,
             onClick: (event: MouseEvent) => {
               event.stopPropagation()
               emit('select', node.relPath, event.ctrlKey || event.metaKey)
@@ -310,6 +329,21 @@ const KnowledgeTreeNode = defineComponent({
               event.preventDefault()
               event.stopPropagation()
               emit('context', event, node)
+            },
+            onDragstart: (event: DragEvent) => {
+              emit('dragStart', event, node)
+            },
+            onDragover: (event: DragEvent) => {
+              emit('dragOver', event, node)
+            },
+            onDragleave: () => {
+              emit('dragLeave', node)
+            },
+            onDragend: () => {
+              emit('dragEnd')
+            },
+            onDrop: (event: DragEvent) => {
+              emit('dropNode', event, node)
             }
           },
           [
@@ -460,6 +494,92 @@ const pasteInto = async (relPath: string) => {
   await workspace.pasteKnowledgeNodes(relPath)
   nodeMenu.visible = false
   blankMenu.visible = false
+}
+
+const isKnowledgeDragMime = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes('application/x-aiopsterm-kb-node')
+
+const isInvalidKnowledgeMove = (source: string, targetDir: string) => {
+  if (!source) return true
+  const sourceNode = workspace.findKnowledgeNode(source)
+  if (!sourceNode) return true
+  if (source === targetDir) return true
+  return sourceNode.type === 'dir' && Boolean(targetDir) && targetDir.startsWith(`${source}/`)
+}
+
+const moveKnowledgeNodeTo = async (source: string, targetDir: string) => {
+  const destination = workspace.findKnowledgeNode(targetDir)
+  const dstRelDir = destination?.type === 'file' ? getParent(destination.relPath) : targetDir
+  if (isInvalidKnowledgeMove(source, dstRelDir)) {
+    workspace.setTopNotice('不能移动到自身或子目录')
+    return
+  }
+  workspace.copyKnowledgeNodes([source], 'cut')
+  await workspace.pasteKnowledgeNodes(dstRelDir)
+}
+
+const clearKnowledgeDragState = () => {
+  kbDragSource.value = ''
+  kbDragOverRelPath.value = ''
+  kbDragOverRoot.value = false
+}
+
+const handleKnowledgeDragStart = (event: DragEvent, node: KnowledgeNode) => {
+  kbDragSource.value = node.relPath
+  workspace.selectKnowledgeNode(node.relPath, false)
+  if (!event.dataTransfer) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('application/x-aiopsterm-kb-node', node.relPath)
+  event.dataTransfer.setData('text/plain', node.relPath)
+}
+
+const handleKnowledgeNodeDragOver = (event: DragEvent, node: KnowledgeNode) => {
+  if (!isKnowledgeDragMime(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const targetDir = node.type === 'dir' ? node.relPath : getParent(node.relPath)
+  kbDragOverRelPath.value = targetDir
+  kbDragOverRoot.value = false
+  if (event.dataTransfer) event.dataTransfer.dropEffect = isInvalidKnowledgeMove(kbDragSource.value, targetDir) ? 'none' : 'move'
+}
+
+const handleKnowledgeNodeDragLeave = (node: KnowledgeNode) => {
+  if (kbDragOverRelPath.value === node.relPath || kbDragOverRelPath.value === getParent(node.relPath)) kbDragOverRelPath.value = ''
+}
+
+const handleKnowledgeNodeDrop = async (event: DragEvent, node: KnowledgeNode) => {
+  if (!isKnowledgeDragMime(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const source = event.dataTransfer?.getData('application/x-aiopsterm-kb-node') || kbDragSource.value
+  const targetDir = node.type === 'dir' ? node.relPath : getParent(node.relPath)
+  clearKnowledgeDragState()
+  await moveKnowledgeNodeTo(source, targetDir)
+}
+
+const handleRootDragOver = (event: DragEvent) => {
+  if (!isKnowledgeDragMime(event)) return
+  event.preventDefault()
+  kbDragOverRoot.value = true
+  kbDragOverRelPath.value = ''
+  if (event.dataTransfer) event.dataTransfer.dropEffect = isInvalidKnowledgeMove(kbDragSource.value, '') ? 'none' : 'move'
+}
+
+const handleRootDragLeave = (event: DragEvent) => {
+  const current = event.currentTarget as HTMLElement | null
+  const related = event.relatedTarget as Node | null
+  if (!current || !related || !current.contains(related)) kbDragOverRoot.value = false
+}
+
+const handleRootDrop = async (event: DragEvent) => {
+  event.stopPropagation()
+  if (!isKnowledgeDragMime(event)) {
+    await handleDropImport(event)
+    return
+  }
+  event.preventDefault()
+  const source = event.dataTransfer?.getData('application/x-aiopsterm-kb-node') || kbDragSource.value
+  clearKnowledgeDragState()
+  await moveKnowledgeNodeTo(source, '')
 }
 
 const copyPath = async () => {

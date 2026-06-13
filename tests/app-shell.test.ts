@@ -252,7 +252,10 @@ const createTestDataTransfer = () => {
     effectAllowed: '',
     dropEffect: '',
     setData: vi.fn((type: string, value: string) => data.set(type, value)),
-    getData: vi.fn((type: string) => data.get(type) || '')
+    getData: vi.fn((type: string) => data.get(type) || ''),
+    get types() {
+      return [...data.keys()]
+    }
   }
 }
 
@@ -953,7 +956,26 @@ describe('AppShell', () => {
     expect(assets.text()).toContain('密钥管理')
 
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
-    expect(assets.text()).toContain('mysql-primary')
+    await assets.find('.asset-search-input input').setValue('')
+    expect(assets.text()).toContain('prod-bastion')
+
+    await assets.find('.asset-host-tree').trigger('contextmenu', { clientX: 140, clientY: 180 })
+    expect(assets.find('.asset-context-menu').text()).toContain('新建目录')
+    await assets.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('新建目录'))!.trigger('click')
+    await assets.find('.asset-folder-modal input').setValue('资产目录')
+    await assets.find('.asset-folder-modal footer .primary').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAssetFolder).toHaveBeenCalledWith(expect.objectContaining({ name: '资产目录', scope: 'direct' }))
+    expect(assets.text()).toContain('资产目录')
+
+    await assets.findAll('.asset-tree-group-row').find((button) => button.text().includes('生产'))!.trigger('contextmenu', { clientX: 160, clientY: 190 })
+    expect(assets.find('.asset-context-menu').text()).toContain('新建子目录')
+    await assets.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('新建子目录'))!.trigger('click')
+    await assets.find('.asset-folder-modal input').setValue('资产子目录')
+    await assets.find('.asset-folder-modal footer .primary').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAssetFolder).toHaveBeenCalledWith(expect.objectContaining({ name: '资产子目录', scope: 'direct', parentUuid: expect.any(String) }))
+    expect(assets.text()).toContain('资产子目录')
 
     await assets.find('.asset-search-input input').setValue('mysql')
     expect(assets.text()).toContain('mysql-primary')
@@ -2299,6 +2321,39 @@ describe('AppShell', () => {
     expect(wrapper.find('.workspace-host-modal').exists()).toBe(true)
     expect((wrapper.findAll('.workspace-host-form input').at(2)!.element as HTMLInputElement).value).toBe('root')
     expect(wrapper.find('.workspace-host-form').text()).not.toContain('分组')
+    await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('jump-source-host')
+    await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.55.0.8')
+    await wrapper.findAll('.workspace-field-heading button').find((button) => button.text().includes('新建跳板机'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.workspace-jump-child-modal').exists()).toBe(true)
+    expect((wrapper.findAll('.workspace-jump-child-modal input').find((input) => input.element instanceof HTMLInputElement && (input.element as HTMLInputElement).value === '生产子组')?.element as HTMLInputElement | undefined)?.value).toBe('生产子组')
+    await wrapper.find('.workspace-jump-child-modal header button').trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('.workspace-host-form select').at(1)!.setValue('keyBased')
+    await flushPromises()
+    await wrapper.findAll('.workspace-field-heading button').find((button) => button.text().includes('新建密钥'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.workspace-key-child-modal .key-drop-area').exists()).toBe(true)
+    vi.mocked(window.aiops.readLocalFile).mockClear()
+    const droppedWorkspaceKey = new File(['key'], 'workspace.key') as File & { path?: string }
+    Object.defineProperty(droppedWorkspaceKey, 'path', { configurable: true, value: '/tmp/workspace.key' })
+    vi.mocked(window.aiops.readLocalFile).mockResolvedValueOnce({
+      content: '-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----',
+      mtimeMs: Date.now(),
+      size: 72
+    })
+    await wrapper.find('.workspace-key-child-modal .key-drop-area').trigger('drop', {
+      dataTransfer: {
+        files: [droppedWorkspaceKey]
+      }
+    })
+    await flushPromises()
+    expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/workspace.key')
+    expect((wrapper.find('.workspace-key-child-modal textarea').element as HTMLTextAreaElement).value).toContain('OPENSSH PRIVATE KEY')
+    await wrapper.find('.workspace-key-child-modal header button').trigger('click')
+    await flushPromises()
+
     await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('tree-linked-host')
     await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.55.0.9')
     await wrapper.find('.workspace-host-form select').setValue('person')
@@ -6613,6 +6668,7 @@ describe('AppShell', () => {
       expect(store.fileTransferTasks).toEqual([])
       expect(wrapper.find('.transfer-progress-panel').exists()).toBe(false)
       expect(store.selectedRightFileSessionId).toBe('local')
+      expect(wrapper.findAll('.files-session-header button[title="关闭连接"]').length).toBe(0)
 
       await wrapper.findAll('.files-session-header button[title="关闭"]').at(0)!.trigger('click')
       expect(store.selectedRightFileSessionId).toBeNull()
@@ -6627,11 +6683,18 @@ describe('AppShell', () => {
         username: 'ops',
         asset_type: 'person'
       }
+      await rightEmptyDrop.trigger('dragenter')
+      await rightEmptyDrop.trigger('dragover', { dataTransfer: { dropEffect: '' } })
+      expect(rightEmptyDrop.classes()).toContain('active')
+      await rightEmptyDrop.trigger('dragleave', { relatedTarget: null })
+      expect(rightEmptyDrop.classes()).not.toContain('active')
+      await rightEmptyDrop.trigger('dragenter')
       await rightEmptyDrop.trigger('drop', {
         dataTransfer: {
           getData: vi.fn((type: string) => (type === 'application/x-asset-sftp' ? JSON.stringify(sftpPayload) : ''))
         }
       })
+      expect(rightEmptyDrop.classes()).not.toContain('active')
       expect(window.aiops.saveFileSessionFromSftpPayload).toHaveBeenCalledWith(sftpPayload)
       expect(store.selectedRightFileSessionId).toBe('asset-dropped')
       expect(store.fileSessions.find((session) => session.id === 'asset-dropped')).toEqual(
@@ -6703,7 +6766,7 @@ describe('AppShell', () => {
           set dropEffect(value: string) {
             sameSideDropEffect.value = value
           },
-          getData: vi.fn((type: string) => dragPayload.get(type) || '')
+          getData: vi.fn((type: string) => dragPayload.get(type) || (type === 'text/plain' ? `synchro-fs-item:${dragPayload.get('application/x-synchro-fs-item') || ''}` : ''))
         }
       })
       expect(sameSideDropEffect.value).toBe('none')
@@ -7450,6 +7513,27 @@ describe('AppShell', () => {
     expect(browser.text()).not.toContain('bad-entry-without-path')
     expect(pathInput().value).toBe('/')
 
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      { name: 'linked-dir', path: '/linked-dir', type: 'link', size: 0, modifiedAt: Date.now(), mode: 'lrwxrwxrwx' },
+      { name: 'release-note.md', path: '/release-note.md', type: 'file', size: 2048, modifiedAt: Date.now(), mode: '-rw-r--r--' }
+    ])
+    await browser.findAll('.file-icon-button').find((button) => button.attributes('title') === '刷新')!.trigger('click')
+    await flushPromises()
+    const linkedDirRow = browser.findAll('tbody tr').find((row) => row.text().includes('linked-dir'))!
+    expect(linkedDirRow.attributes('draggable')).toBe('false')
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      { name: 'inside-link.md', path: '/linked-dir/inside-link.md', type: 'file', size: 12, modifiedAt: Date.now(), mode: '-rw-r--r--' }
+    ])
+    await linkedDirRow.find('td').trigger('click')
+    await flushPromises()
+    expect(window.aiops.listFiles).toHaveBeenCalledWith('/linked-dir', expect.objectContaining({ kind: 'local', sessionId: 'local' }))
+    expect(pathInput().value).toBe('/linked-dir')
+    expect(browser.text()).toContain('inside-link.md')
+    await browser.find('.file-path-input').setValue('/')
+    await browser.find('.file-path-input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(pathInput().value).toBe('/')
+
     await browser.find('.file-path-input').setValue('/tmp/local-picked')
     vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('manual path list failed'))
     await browser.find('.file-path-input').trigger('keydown', { key: 'Enter' })
@@ -8038,13 +8122,26 @@ describe('AppShell', () => {
     expect(store.findKnowledgeNode(selectedPath)).toBeNull()
     expect(store.findKnowledgeNode('Runbooks')).toBeTruthy()
 
+    vi.mocked(window.aiops.kbMove).mockClear()
+    const dragMarkdownTransfer = createTestDataTransfer()
+    const markdownDragNode = wrapper.findAll('.kb-tree-node').find((node) => node.text().includes('Markdown语法指南.md'))!
+    const commandsDropNode = wrapper.findAll('.kb-tree-node').find((node) => node.text().includes('commands'))!
+    await markdownDragNode.trigger('dragstart', { dataTransfer: dragMarkdownTransfer })
+    await commandsDropNode.trigger('dragover', { dataTransfer: dragMarkdownTransfer })
+    expect(commandsDropNode.classes()).toContain('drag-over')
+    await commandsDropNode.trigger('drop', { dataTransfer: dragMarkdownTransfer })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.kbMove).toHaveBeenCalledWith('Markdown语法指南.md', 'commands')
+    expect(store.findKnowledgeNode('commands/Markdown语法指南.md')).toBeTruthy()
+
     const markdownNode = wrapper.findAll('.kb-tree-node').find((node) => node.text().includes('Markdown语法指南.md'))!
     await markdownNode.trigger('contextmenu')
     expect(wrapper.find('.kb-context-menu').exists()).toBe(true)
     vi.mocked(navigator.clipboard.writeText).mockClear()
     await wrapper.find('.kb-context-menu').findAll('button').find((button) => button.text().includes('复制路径'))!.trigger('click')
     await flushPromises()
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Markdown语法指南.md')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('commands/Markdown语法指南.md')
     expect(store.topNotice).toBe('知识库路径已复制')
 
     await markdownNode.trigger('contextmenu')
@@ -8075,6 +8172,7 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('容量来源明细')
     await wrapper.find('.file-modal-card header button').trigger('click')
 
+    store.kbSelectedKeys = []
     await wrapper.find('.kb-add-button').trigger('click')
     await wrapper.find('.kb-add-menu').findAll('button').find((button) => button.text().includes('上传文件'))!.trigger('click')
     await flushPromises()

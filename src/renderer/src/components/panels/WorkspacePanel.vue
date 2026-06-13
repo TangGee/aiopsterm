@@ -667,7 +667,7 @@
       class="files-folder-modal-backdrop workspace-child-modal-backdrop"
       @click.self="closeHostChildModal"
     >
-      <section class="files-folder-modal workspace-child-modal workspace-proxy-child-modal">
+      <section class="files-folder-modal workspace-child-modal workspace-proxy-child-modal asset-proxy-form-modal">
         <header>
           <h3>新增代理</h3>
           <button
@@ -770,7 +770,7 @@
       class="files-folder-modal-backdrop workspace-child-modal-backdrop"
       @click.self="closeHostChildModal"
     >
-      <section class="files-folder-modal workspace-child-modal workspace-key-child-modal">
+      <section class="files-folder-modal workspace-child-modal workspace-key-child-modal key-form-panel">
         <header>
           <h3>新建密钥</h3>
           <button
@@ -811,6 +811,18 @@
               type="password"
             />
           </label>
+          <div
+            class="key-drop-area workspace-host-form-wide"
+            :class="{ 'drag-over': hostKeyDragOver }"
+            @dragover.prevent
+            @dragenter.prevent="hostKeyDragOver = true"
+            @dragleave.prevent="hostKeyDragOver = false"
+            @drop.prevent="handleHostKeyDrop"
+            @click="openHostKeyImportDialog"
+          >
+            <Upload />
+            <span>拖拽或点击导入密钥文件</span>
+          </div>
           <p
             v-if="hostChildFormError"
             class="files-folder-error workspace-host-form-wide"
@@ -840,7 +852,7 @@
       class="files-folder-modal-backdrop workspace-child-modal-backdrop"
       @click.self="closeHostChildModal"
     >
-      <section class="files-folder-modal workspace-child-modal workspace-jump-child-modal">
+      <section class="files-folder-modal workspace-host-modal workspace-jump-child-modal">
         <header>
           <h3>新建跳板机</h3>
           <button
@@ -906,6 +918,14 @@
           <label>
             <span>分组</span>
             <input v-model="hostJumpForm.group" />
+          </label>
+          <label class="workspace-host-form-wide">
+            <span>备注</span>
+            <textarea
+              v-model="hostJumpForm.comment"
+              rows="3"
+              placeholder="请输入备注"
+            />
           </label>
           <p
             v-if="hostChildFormError"
@@ -1151,6 +1171,7 @@ import {
   Search,
   Star,
   Trash2,
+  Upload,
   X
 } from 'lucide-vue-next'
 import type {
@@ -1276,6 +1297,7 @@ const hostKeyForm = reactive({
   publicKey: '',
   passphrase: ''
 })
+const hostKeyDragOver = ref(false)
 const hostJumpForm = reactive({
   title: 'jump-host',
   host: '',
@@ -1284,7 +1306,8 @@ const hostJumpForm = reactive({
   port: '22',
   authType: 'password' as AiopsAssetAuthType,
   password: '',
-  keychainId: ''
+  keychainId: '',
+  comment: '跳板机'
 })
 const deleteAssetModal = reactive({ visible: false, assetId: '' })
 const managementModal = reactive({ visible: false, organizationId: '', query: '' })
@@ -1655,6 +1678,75 @@ const detectHostKeyType = (privateKey = '', publicKey = ''): AiopsKeychainType =
   return 'rsa'
 }
 
+const localFileName = (filePath: string) => filePath.split(/[/\\]/).filter(Boolean).at(-1) || filePath
+
+const readLocalTextFile = async (filePath: string, unavailableMessage: string) => {
+  const readLocalFile = window.aiops?.readLocalFile
+  if (typeof readLocalFile !== 'function') throw new Error(unavailableMessage)
+  const result = await readLocalFile(filePath)
+  return result.content
+}
+
+const applyImportedHostKeyFile = (fileName: string, content: string) => {
+  const text = content.trim()
+  if (!text) {
+    hostChildFormError.value = '密钥文件为空'
+    return
+  }
+  hostKeyForm.privateKey = text
+  hostChildFormError.value = `已导入 ${fileName}，识别为 ${detectHostKeyType(hostKeyForm.privateKey, hostKeyForm.publicKey).toUpperCase()}`
+}
+
+const importHostKeyFileFromPath = async (filePath: string) => {
+  if (!filePath) {
+    hostChildFormError.value = '没有选择密钥文件'
+    return
+  }
+  try {
+    const content = await readLocalTextFile(filePath, '密钥文件读取服务不可用')
+    applyImportedHostKeyFile(localFileName(filePath), content)
+  } catch (error) {
+    hostChildFormError.value = error instanceof Error ? error.message : '密钥文件读取失败'
+  }
+}
+
+const openHostKeyImportDialog = async () => {
+  const showOpenDialog = window.aiops?.showOpenDialog
+  if (typeof showOpenDialog !== 'function') {
+    hostChildFormError.value = '密钥文件选择服务不可用'
+    return
+  }
+  try {
+    const result = await showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Key Files', extensions: ['pem', 'key', 'txt', 'pub', 'asc', 'crt', 'cer', 'der', 'p12', 'pfx', 'ssh', 'ppk', 'gpg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+    if (result?.canceled) return
+    await importHostKeyFileFromPath(result?.filePaths?.[0] || '')
+  } catch {
+    hostChildFormError.value = '密钥文件选择失败'
+  }
+}
+
+const handleHostKeyDrop = async (event: DragEvent) => {
+  hostKeyDragOver.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) {
+    hostChildFormError.value = '没有检测到可导入的密钥文件'
+    return
+  }
+  const getPathForFile = window.aiops?.getPathForFile
+  const filePath = (typeof getPathForFile === 'function' ? getPathForFile(file) : '') || String((file as File & { path?: string }).path || '').trim()
+  if (!filePath) {
+    hostChildFormError.value = '拖拽导入需要本地文件路径'
+    return
+  }
+  await importHostKeyFileFromPath(filePath)
+}
+
 const saveHostProxyForm = async () => {
   hostChildFormError.value = ''
   const proxyName = workspace.sshProxyForm.name.trim()
@@ -1744,7 +1836,7 @@ const saveHostJumpHostForm = async () => {
     auth_type: hostJumpForm.authType,
     group: hostJumpForm.group.trim() || '跳板机',
     group_name: hostJumpForm.group.trim() || '跳板机',
-    comment: '跳板机',
+    comment: hostJumpForm.comment.trim() || '跳板机',
     data_source: 'manual',
     status: 'online',
     tags: ['jump-host'],
@@ -2710,6 +2802,7 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
 const closeHostChildModal = () => {
   hostChildModal.value = ''
   hostChildFormError.value = ''
+  hostKeyDragOver.value = false
 }
 
 const openKeyManagementFromHostForm = () => {
@@ -2727,15 +2820,19 @@ const openProxyManagementFromHostForm = () => {
 const openJumpHostCreateFromHostForm = () => {
   hostChildModal.value = 'jumpHost'
   hostChildFormError.value = ''
+  const targetGroup = hostModal.targetGroupKey ? groupByKey(hostModal.targetGroupKey) : null
+  const currentGroup = String(hostForm.group || '').trim()
+  const defaultGroup = currentGroup || (targetGroup?.type === 'direct-group' ? targetGroup.title : targetGroup?.title) || (activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '跳板机')
   Object.assign(hostJumpForm, {
     title: 'jump-host',
     host: '',
     username: hostForm.username || 'root',
-    group: activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '跳板机',
+    group: defaultGroup,
     port: '22',
     authType: 'password',
     password: '',
-    keychainId: ''
+    keychainId: '',
+    comment: '跳板机'
   })
 }
 

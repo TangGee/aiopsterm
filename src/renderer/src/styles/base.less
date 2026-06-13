@@ -1152,17 +1152,17 @@ em {
 }
 
 .workspace-child-modal {
-  width: min(460px, calc(100vw - 44px));
-  max-height: min(620px, calc(100vh - 56px));
+  width: min(560px, calc(100vw - 44px));
+  max-height: min(720px, calc(100vh - 56px));
 }
 
-.workspace-key-child-modal,
-.workspace-jump-child-modal {
-  width: min(540px, calc(100vw - 44px));
+.workspace-key-child-modal {
+  width: min(560px, calc(100vw - 44px));
 }
 
 .workspace-proxy-form {
-  grid-template-columns: minmax(0, 1fr) 112px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
 }
 
 .workspace-port-field input {
@@ -1709,8 +1709,10 @@ em {
 }
 
 .asset-proxy-form-modal {
-  width: min(460px, calc(100vw - 40px));
-  grid-template-columns: minmax(0, 1fr) 112px;
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(640px, calc(100vh - 40px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
 }
 
 .asset-proxy-port-field input {
@@ -4298,7 +4300,9 @@ kbd {
 }
 
 .files-transfer-side.active {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -4px;
 }
 
 .files-session-card {
@@ -4314,7 +4318,7 @@ kbd {
 
 .files-session-header {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) repeat(3, 30px);
+  grid-template-columns: 30px minmax(0, 1fr) repeat(2, 30px);
   align-items: center;
   gap: 6px;
   border-bottom: 1px solid var(--border);
@@ -4379,6 +4383,7 @@ kbd {
   justify-items: center;
   gap: 12px;
   cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
 }
 
 .files-empty-drop > svg {
@@ -4394,7 +4399,9 @@ kbd {
 
 .files-empty-drop.active {
   border-color: #1677ff;
-  background: color-mix(in srgb, #1677ff 12%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, #1677ff 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #1677ff 42%, transparent);
 }
 
 .files-default-layout {
@@ -4537,23 +4544,26 @@ kbd {
 
 .file-table td:first-child {
   position: static;
+  cursor: default;
 }
 
 .file-name-action-wrap {
   position: static;
   min-width: 0;
+  width: 100%;
   display: block;
   align-items: center;
 }
 
 .file-name-cell {
   min-width: 0;
+  width: 100%;
   max-width: 100%;
   height: 24px;
   border: 0;
   background: transparent;
   color: var(--text);
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
   padding: 0;
@@ -4561,6 +4571,10 @@ kbd {
 }
 
 .file-table tr.directory .file-name-cell {
+  cursor: pointer;
+}
+
+.file-table tr.link .file-name-cell {
   cursor: pointer;
 }
 
@@ -6025,8 +6039,15 @@ code {
 
 .kb-tree-node:hover,
 .kb-tree-node.selected,
-.kb-tree-node.editing {
+.kb-tree-node.editing,
+.kb-tree-node.drag-over {
   background: var(--surface-3);
+}
+
+.kb-tree-node.drag-over,
+.kb-tree-scroll.drag-over-root {
+  outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: -1px;
 }
 
 .kb-expand-button,

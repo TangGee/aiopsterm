@@ -105,69 +105,23 @@
               class="asset-host-tree"
               @contextmenu.prevent="openAssetBlankContextMenu"
             >
-              <template
+              <AssetTreeGroupNode
                 v-for="group in filteredAssetGroups"
                 :key="group.key"
-              >
-                <button
-                  class="asset-tree-group-row"
-                  @click="toggleAssetGroup(group.key)"
-                  @contextmenu.prevent.stop="openAssetGroupContextMenu($event, group.key)"
-                >
-                  <ChevronDown v-if="isAssetGroupExpanded(group.key)" />
-                  <ChevronRight v-else />
-                  <span>{{ group.title }}</span>
-                  <small>{{ group.children.length }}</small>
-                </button>
-                <div
-                  v-if="isAssetGroupExpanded(group.key)"
-                  class="asset-tree-children"
-                >
-                  <div
-                    v-for="asset in group.children"
-                    :key="asset.id"
-                    class="host-card asset-tree-host-row"
-                    :class="{ selected: selectedAssetId === asset.id }"
-                    role="button"
-                    tabindex="0"
-                    :aria-label="`${asset.title} 主机${asset.username ? `, ${asset.username}` : ''}`"
-                    :data-onboarding-id="asset.id === flatFilteredAssets[0]?.id ? 'asset-card' : undefined"
-                    @click="selectedAssetId = asset.id"
-                    @dblclick.stop="connectAsset(asset.id)"
-                    @keydown.enter.prevent="connectAsset(asset.id)"
-                    @keydown.space.prevent="selectedAssetId = asset.id"
-                    @contextmenu.prevent="openAssetContextMenu($event, asset.id)"
-                  >
-                    <span class="host-card-icon">
-                      <Network v-if="asset.asset_type === 'switch'" />
-                      <Laptop v-else />
-                      <PlugZap
-                        v-if="asset.asset_type === 'organization'"
-                        class="enterprise-indicator"
-                      />
-                    </span>
-                    <span class="host-card-info">
-                      <strong>{{ asset.title }}</strong>
-                      <small>{{ asset.username }}@{{ asset.host }}:{{ asset.port }} · {{ asset.asset_type === 'organization' ? '堡垒机' : '主机' }}</small>
-                    </span>
-                    <span class="host-card-actions">
-                      <button
-                        title="编辑"
-                        @click.stop="editAsset(asset.id)"
-                      >
-                        <Pencil />
-                      </button>
-                      <button
-                        v-if="asset.asset_type !== 'organization'"
-                        title="删除"
-                        @click.stop="removeAsset(asset.id)"
-                      >
-                        <Trash2 />
-                      </button>
-                    </span>
-                  </div>
-                </div>
-              </template>
+                :group="group"
+                :level="0"
+                :expanded-keys="expandedAssetGroupKeys"
+                :force-expanded="Boolean(assetQuery.trim())"
+                :selected-asset-id="selectedAssetId || ''"
+                :first-asset-id="flatFilteredAssets[0]?.id || ''"
+                @toggle="toggleAssetGroup"
+                @select-asset="selectedAssetId = $event"
+                @connect-asset="connectAsset"
+                @edit-asset="editAsset"
+                @remove-asset="removeAsset"
+                @group-context="openAssetGroupContextMenu"
+                @asset-context="openAssetContextMenu"
+              />
             </div>
 
             <div
@@ -190,6 +144,10 @@
             class="asset-context-menu"
             :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
           >
+            <button @click="openCreateAssetFolderFromContext()">
+              <Folder />
+              新建目录
+            </button>
             <button @click="openNewPanelFromContext()">
               <Laptop />
               新建主机
@@ -201,6 +159,10 @@
             class="asset-context-menu"
             :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
           >
+            <button @click="openCreateAssetFolderFromContext(assetGroupContextMenuKey)">
+              <Folder />
+              新建子目录
+            </button>
             <button @click="openNewPanelFromContext(assetGroupContextMenuKey)">
               <Laptop />
               新建主机
@@ -251,6 +213,54 @@
           </div>
         </div>
 
+      </div>
+
+      <div
+        v-if="assetFolderModal.visible"
+        class="file-modal"
+        @click.self="closeAssetFolderModal"
+      >
+        <div class="file-modal-card asset-folder-modal">
+          <header>
+            <strong>{{ assetFolderModal.parentKey ? '新建子目录' : '新建目录' }}</strong>
+            <button
+              title="关闭"
+              @click="closeAssetFolderModal"
+            >
+              <X />
+            </button>
+          </header>
+          <label class="modal-field">
+            <span>目录名称 *</span>
+            <input
+              v-model="assetFolderForm.name"
+              placeholder="请输入目录名称"
+            />
+          </label>
+          <label class="modal-field">
+            <span>目录描述</span>
+            <textarea
+              v-model="assetFolderForm.description"
+              rows="3"
+              placeholder="请输入目录描述"
+            />
+          </label>
+          <small
+            v-if="assetFolderFormError"
+            class="asset-form-error"
+          >
+            {{ assetFolderFormError }}
+          </small>
+          <footer>
+            <button @click="closeAssetFolderModal">取消</button>
+            <button
+              class="primary"
+              @click="submitAssetFolderForm"
+            >
+              确定
+            </button>
+          </footer>
+        </div>
       </div>
 
       <div
@@ -540,6 +550,13 @@
             <span class="asset-management-context">
               {{ managedOrganizationTitle }}
             </span>
+            <button
+              class="asset-action-button"
+              @click="openCreateAssetFolder()"
+            >
+              <Folder />
+              新建目录
+            </button>
             <button
               class="asset-action-button"
               @click="openManagedAssetAdd"
@@ -1163,6 +1180,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { defineComponent, h, type VNode } from 'vue'
 import {
   ChevronDown,
   ChevronRight,
@@ -1170,6 +1188,7 @@ import {
   Copy,
   Database,
   Download,
+  Folder,
   Import,
   KeyRound,
   Laptop,
@@ -1190,6 +1209,8 @@ import type {
   AiopsAssetInput,
   AiopsAssetRecord,
   AiopsAssetType,
+  AiopsCustomFolderRecord,
+  AiopsCustomFolderSaveInput,
   AiopsKeychainInput,
   AiopsKeychainRecord,
   AiopsKeychainType
@@ -1208,6 +1229,7 @@ import {
   isAiopsKeychainRecord,
   isAiopsJumpserverOrganizationAssetRefreshData,
   isAiopsSavedAssetRecord,
+  isAiopsSavedCustomFolderRecord,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
 
@@ -1248,9 +1270,15 @@ type AssetGroup = {
   key: string
   title: string
   children: AssetRecord[]
+  childGroups: AssetGroup[]
+  type: 'direct-group' | 'custom-folder'
+  folderUuid?: string
+  parentKey?: string
+  groupName?: string
 }
 
 const assets = ref<AssetRecord[]>([])
+const customFolders = ref<AiopsCustomFolderRecord[]>([])
 const form = reactive({
   id: '',
   title: '',
@@ -1290,6 +1318,9 @@ const keyForm = reactive({
 })
 const expandedAssetGroupKeys = ref<string[]>([])
 const pendingHostDraftReturn = ref(false)
+const assetFolderModal = reactive({ visible: false, parentKey: '' })
+const assetFolderForm = reactive({ name: '', description: '' })
+const assetFolderFormError = ref('')
 
 const confirmInput = ref('')
 const confirmState = reactive<{
@@ -1444,6 +1475,7 @@ const saveAssetRecord = async (input: AiopsAssetInput, options: { requireGroups?
 const applyAssetSnapshot = (snapshot: unknown) => {
   if (!isAiopsAssetSnapshot(snapshot)) return false
   assets.value = snapshot.assets.filter((asset) => !asset.isLocalShell).map((asset) => ({ ...asset, tags: [...asset.tags] }))
+  customFolders.value = snapshot.folders.filter((folder) => folder.scope === 'direct').map((folder) => ({ ...folder }))
   return true
 }
 
@@ -1471,32 +1503,76 @@ const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?:
   if (refresh.groups) applyAssetGroups(refresh.groups)
 }
 
-const assetGroups = computed<AssetGroup[]>(() => {
-  if (!assetGroupOptionsReady.value) return []
-  const groupNames = Array.from(new Set(assets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
-  return groupNames.map((group) => ({
-    key: `group-${group}`,
-    title: group,
-    children: assets.value.filter((asset) => (asset.group || asset.group_name) === group)
-  }))
+const directGroupKey = (name: string) => `group-${name}`
+const flattenAssetGroups = (groups: AssetGroup[]): AssetGroup[] => groups.flatMap((group) => [group, ...flattenAssetGroups(group.childGroups)])
+const assetGroupByKey = (key: string) => flattenAssetGroups(assetGroups.value).find((group) => group.key === key) || null
+const assetFolderByGroup = (group: AssetGroup | null) => {
+  if (!group) return null
+  if (group.folderUuid) return customFolders.value.find((folder) => folder.uuid === group.folderUuid) || null
+  return customFolders.value.find((folder) => folder.name === group.groupName || folder.name === group.title) || null
+}
+
+const makeAssetGroup = (input: Omit<AssetGroup, 'childGroups' | 'children'> & Partial<Pick<AssetGroup, 'children' | 'childGroups'>>): AssetGroup => ({
+  ...input,
+  children: input.children || [],
+  childGroups: input.childGroups || []
 })
 
-const filterGroups = (groups: AssetGroup[], keyword: string) => {
+const assetGroupAssetCount = (group: AssetGroup): number => group.children.length + group.childGroups.reduce((sum, child) => sum + assetGroupAssetCount(child), 0)
+
+const assetGroups = computed<AssetGroup[]>(() => {
+  if (!assetGroupOptionsReady.value) return []
+  const folderByName = new Map(customFolders.value.map((folder) => [folder.name, folder]))
+  const groupNames = Array.from(new Set([...customFolders.value.map((folder) => folder.name), ...assetGroupOptions.value.map((group) => group.name), ...assets.value.map((asset) => asset.group || asset.group_name || 'Hosts')]))
+  const groupsByName = new Map<string, AssetGroup>()
+  groupNames.filter(Boolean).forEach((name) => {
+    const folder = folderByName.get(name)
+    const parentFolder = folder?.parentUuid ? customFolders.value.find((item) => item.uuid === folder.parentUuid) : null
+    const children = assets.value.filter((asset) => (asset.group || asset.group_name || 'Hosts') === name)
+    groupsByName.set(
+      name,
+      makeAssetGroup({
+        key: directGroupKey(name),
+        title: name,
+        children,
+        type: folder ? 'custom-folder' : 'direct-group',
+        groupName: name,
+        ...(folder ? { folderUuid: folder.uuid } : {}),
+        ...(parentFolder ? { parentKey: directGroupKey(parentFolder.name) } : {})
+      })
+    )
+  })
+  const roots: AssetGroup[] = []
+  groupsByName.forEach((group) => {
+    if (group.parentKey) {
+      const parent = [...groupsByName.values()].find((candidate) => candidate.key === group.parentKey)
+      if (parent && parent.key !== group.key) {
+        parent.childGroups.push(group)
+        return
+      }
+    }
+    roots.push(group)
+  })
+  return roots
+})
+
+const filterGroups = (groups: AssetGroup[], keyword: string): AssetGroup[] => {
   const normalized = keyword.trim().toLowerCase()
   if (!normalized) return groups
   return groups
     .map((group) => ({
       ...group,
+      childGroups: filterGroups(group.childGroups, normalized),
       children: group.children.filter((asset) =>
         `${asset.title} ${asset.host} ${asset.group_name} ${asset.username} ${asset.comment || ''} ${asset.tags.join(' ')}`.toLowerCase().includes(normalized)
       )
     }))
-    .filter((group) => group.children.length > 0)
+    .filter((group) => `${group.title} ${group.folderUuid || ''}`.toLowerCase().includes(normalized) || group.children.length > 0 || group.childGroups.length > 0)
 }
 
 const filteredAssetGroups = computed(() => filterGroups(assetGroups.value, assetQuery.value))
 const flatAssets = computed(() => assets.value)
-const flatFilteredAssets = computed(() => filteredAssetGroups.value.flatMap((group) => group.children))
+const flatFilteredAssets = computed(() => flattenAssetGroups(filteredAssetGroups.value).flatMap((group) => group.children))
 const contextAsset = computed(() => assets.value.find((asset) => asset.id === assetContextMenuId.value))
 const managedOrganization = computed(() => assets.value.find((asset) => asset.id === managedOrganizationId.value && asset.asset_type === 'organization'))
 const jumpHostOptions = computed(() => assets.value.filter((asset) => asset.asset_type === 'person' && asset.id !== form.id))
@@ -1514,7 +1590,10 @@ const exportAssetGroups = computed<AssetGroup[]>(() => {
   return groupNames.map((group) => ({
     key: `export-group-${group}`,
     title: group,
-    children: exportableAssets.value.filter((asset) => (asset.group || asset.group_name) === group)
+    children: exportableAssets.value.filter((asset) => (asset.group || asset.group_name) === group),
+    childGroups: [],
+    type: 'direct-group' as const,
+    groupName: group
   }))
 })
 const filteredExportGroups = computed(() => filterGroups(exportAssetGroups.value, exportQuery.value))
@@ -1530,7 +1609,10 @@ const managedFilteredGroups = computed<AssetGroup[]>(() => {
     groups.map((group) => ({
       key: `managed-${group}`,
       title: group,
-      children: managedSourceAssets.value.filter((asset) => (asset.group || asset.group_name) === group)
+      children: managedSourceAssets.value.filter((asset) => (asset.group || asset.group_name) === group),
+      childGroups: [],
+      type: 'direct-group' as const,
+      groupName: group
     })),
     assetManagementQuery.value
   )
@@ -1608,6 +1690,80 @@ const openNewPanel = (groupKey = '') => {
 
 const openNewPanelFromContext = (groupKey = '') => {
   openNewPanel(groupKey)
+}
+
+const saveAssetFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
+  const saveAssetFolder = window.aiops?.saveAssetFolder
+  if (typeof saveAssetFolder !== 'function') throw new Error('目录保存服务不可用。')
+  const result = await saveAssetFolder(folder)
+  if (!result?.ok) throw new Error(result?.errorMessage || '目录保存失败')
+  if (!isAiopsSavedCustomFolderRecord(result.data, folder)) throw new Error(malformedAssetBackendResultMessage)
+  const { snapshot, groups } = await loadHostManagementRefresh()
+  applyHostManagementState(snapshot, groups)
+  return result.data
+}
+
+const ensureAssetFolderForGroup = async (group: AssetGroup) => {
+  const existing = assetFolderByGroup(group)
+  if (existing) return existing
+  return saveAssetFolderRecord({ name: group.title, description: '', scope: 'direct' })
+}
+
+const openCreateAssetFolder = (parentGroup?: AssetGroup | null) => {
+  assetFolderModal.visible = true
+  assetFolderModal.parentKey = parentGroup?.key || ''
+  assetFolderForm.name = ''
+  assetFolderForm.description = ''
+  assetFolderFormError.value = ''
+  closeAssetContextMenus()
+}
+
+const openCreateAssetFolderFromContext = (groupKey = '') => {
+  openCreateAssetFolder(groupKey ? assetGroupByKey(groupKey) : null)
+}
+
+const closeAssetFolderModal = () => {
+  assetFolderModal.visible = false
+  assetFolderModal.parentKey = ''
+  assetFolderForm.name = ''
+  assetFolderForm.description = ''
+  assetFolderFormError.value = ''
+}
+
+const submitAssetFolderForm = async () => {
+  const name = assetFolderForm.name.trim()
+  if (!name) {
+    assetFolderFormError.value = '请输入目录名称'
+    return
+  }
+  const duplicate = flattenAssetGroups(assetGroups.value).some((group) => group.title === name)
+  if (duplicate) {
+    assetFolderFormError.value = '目录名称已存在'
+    return
+  }
+  let parentUuid = ''
+  const parentGroup = assetFolderModal.parentKey ? assetGroupByKey(assetFolderModal.parentKey) : null
+  if (parentGroup) {
+    try {
+      parentUuid = (await ensureAssetFolderForGroup(parentGroup)).uuid
+    } catch (error) {
+      assetFolderFormError.value = error instanceof Error ? error.message : '父目录保存失败'
+      return
+    }
+  }
+  try {
+    const saved = await saveAssetFolderRecord({
+      name,
+      description: assetFolderForm.description.trim(),
+      scope: 'direct',
+      ...(parentUuid ? { parentUuid } : {})
+    })
+    expandedAssetGroupKeys.value = Array.from(new Set([...expandedAssetGroupKeys.value, directGroupKey(saved.name), ...(parentGroup ? [parentGroup.key] : [])]))
+    importNotice.value = `已创建目录 ${saved.name}。`
+    closeAssetFolderModal()
+  } catch (error) {
+    assetFolderFormError.value = error instanceof Error ? error.message : '目录保存失败'
+  }
 }
 
 const openHostManagement = async () => {
@@ -1690,10 +1846,11 @@ const openJumpHostCreateFromHostForm = () => {
   pendingHostDraftReturn.value = true
   activeAssetView.value = 'assetConfig'
   editMode.value = false
-  resetForm()
+  const currentGroup = form.group.trim() || firstAssetGroupName.value || '跳板机'
+  resetForm(currentGroup)
   form.asset_type = 'person'
   form.auth_type = 'keyBased'
-  form.group = firstAssetGroupName.value || '跳板机'
+  form.group = currentGroup
   form.title = 'jump-host'
   editorOpen.value = true
 }
@@ -1921,12 +2078,123 @@ const buildAssetFormInput = (): { asset: AiopsAssetInput; title: string } | null
       comment: editMode.value ? '本地编辑' : '本地创建',
       data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
       keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
+      jumpHostId: form.jumpHostId || undefined,
       needProxy: Boolean(selectedProxy),
       proxyName: selectedProxy ? selectedProxyName : '',
       ...(form.password.trim() ? { password: form.password } : {})
     }
   }
 }
+
+const AssetTreeGroupNode = defineComponent({
+  name: 'AssetTreeGroupNode',
+  props: {
+    group: { type: Object as () => AssetGroup, required: true },
+    level: { type: Number, required: true },
+    expandedKeys: { type: Array as () => string[], required: true },
+    forceExpanded: { type: Boolean, default: false },
+    selectedAssetId: { type: String, default: '' },
+    firstAssetId: { type: String, default: '' }
+  },
+  emits: ['toggle', 'selectAsset', 'connectAsset', 'editAsset', 'removeAsset', 'groupContext', 'assetContext'],
+  setup(nodeProps, { emit }) {
+    const renderGroup = (group: AssetGroup, level: number): VNode => {
+      const expanded = nodeProps.forceExpanded || nodeProps.expandedKeys.includes(group.key)
+      return h('div', { class: 'asset-tree-group-node' }, [
+        h(
+          'button',
+          {
+            class: 'asset-tree-group-row',
+            style: { paddingLeft: `${8 + level * 14}px` },
+            onClick: () => emit('toggle', group.key),
+            onContextmenu: (event: MouseEvent) => {
+              event.preventDefault()
+              event.stopPropagation()
+              emit('groupContext', event, group.key)
+            }
+          },
+          [expanded ? h(ChevronDown) : h(ChevronRight), h('span', group.title), h('small', String(assetGroupAssetCount(group)))]
+        ),
+        expanded
+          ? h(
+              'div',
+              { class: 'asset-tree-children' },
+              [
+                ...group.childGroups.map((child) => renderGroup(child, level + 1)),
+                ...group.children.map((asset) =>
+                  h(
+                    'div',
+                    {
+                      key: asset.id,
+                      class: ['host-card asset-tree-host-row', { selected: nodeProps.selectedAssetId === asset.id }],
+                      role: 'button',
+                      tabindex: 0,
+                      'aria-label': `${asset.title} 主机${asset.username ? `, ${asset.username}` : ''}`,
+                      'data-onboarding-id': asset.id === nodeProps.firstAssetId ? 'asset-card' : undefined,
+                      style: { marginLeft: `${(level + 1) * 14}px` },
+                      onClick: () => emit('selectAsset', asset.id),
+                      onDblclick: (event: MouseEvent) => {
+                        event.stopPropagation()
+                        emit('connectAsset', asset.id)
+                      },
+                      onKeydown: (event: KeyboardEvent) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          emit('connectAsset', asset.id)
+                        }
+                        if (event.key === ' ') {
+                          event.preventDefault()
+                          emit('selectAsset', asset.id)
+                        }
+                      },
+                      onContextmenu: (event: MouseEvent) => {
+                        event.preventDefault()
+                        emit('assetContext', event, asset.id)
+                      }
+                    },
+                    [
+                      h('span', { class: 'host-card-icon' }, [asset.asset_type === 'switch' ? h(Network) : h(Laptop), asset.asset_type === 'organization' ? h(PlugZap, { class: 'enterprise-indicator' }) : null]),
+                      h('span', { class: 'host-card-info' }, [
+                        h('strong', asset.title),
+                        h('small', `${asset.username}@${asset.host}:${asset.port} · ${asset.asset_type === 'organization' ? '堡垒机' : '主机'}`)
+                      ]),
+                      h('span', { class: 'host-card-actions' }, [
+                        h(
+                          'button',
+                          {
+                            title: '编辑',
+                            onClick: (event: MouseEvent) => {
+                              event.stopPropagation()
+                              emit('editAsset', asset.id)
+                            }
+                          },
+                          [h(Pencil)]
+                        ),
+                        asset.asset_type !== 'organization'
+                          ? h(
+                              'button',
+                              {
+                                title: '删除',
+                                onClick: (event: MouseEvent) => {
+                                  event.stopPropagation()
+                                  emit('removeAsset', asset.id)
+                                }
+                              },
+                              [h(Trash2)]
+                            )
+                          : null
+                      ])
+                    ]
+                  )
+                )
+              ]
+            )
+          : null
+      ])
+    }
+    return () => renderGroup(nodeProps.group, nodeProps.level)
+  }
+})
 
 const testAssetFormConnection = async () => {
   const testAssetConnection = window.aiops?.testAssetConnection

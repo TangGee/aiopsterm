@@ -68,9 +68,9 @@
       class="file-drop-zone"
       :class="{ active: dragActive, forbidden: dropForbidden }"
       @dragenter.prevent="dragActive = true"
-      @dragover.prevent="handleDragOver"
+      @dragover.prevent.stop="handleDragOver"
       @dragleave.prevent="clearFileDropState"
-      @drop.prevent="handleDrop"
+      @drop.prevent.stop="handleDrop"
     >
       <table class="file-table">
         <thead>
@@ -89,6 +89,7 @@
             :data-path="entry.path"
             :class="{
               directory: entry.type === 'directory',
+              link: entry.type === 'link',
               editing: editingPath === entry.path,
               'file-row-drag-target': dropTargetPath === entry.path
             }"
@@ -99,12 +100,12 @@
             @drop.prevent.stop="handleEntryDrop($event, entry)"
             @dblclick="entry.type === 'file' && openFile(entry)"
           >
-            <td>
+            <td @click="editingPath !== entry.path && handleNameAreaClick(entry)">
               <div class="file-name-action-wrap">
                 <button
                   v-if="editingPath !== entry.path"
                   class="file-name-cell"
-                  @click="entry.type === 'directory' && openDirectory(entry)"
+                  @click.stop="handleNameAreaClick(entry)"
                 >
                   <FolderFilled v-if="entry.type === 'directory'" />
                   <Link v-else-if="entry.type === 'link'" />
@@ -775,8 +776,19 @@ const commitPath = async () => {
   if (!loaded) pathInput.value = currentPath.value
 }
 
+const canAttemptOpenDirectory = (entry: FileBrowserEntry) => entry.name !== '..' && (entry.type === 'directory' || entry.type === 'link')
+
 const openDirectory = async (entry: FileBrowserEntry) => {
-  await loadEntries(entry.path)
+  const loaded = await loadEntries(entry.path, { preserveOnFailure: true })
+  if (!loaded && entry.type === 'link') {
+    pathInput.value = currentPath.value
+    fileNotice.value = error.value || '软连接不是可展开目录'
+  }
+}
+
+const handleNameAreaClick = (entry: FileBrowserEntry) => {
+  if (!canAttemptOpenDirectory(entry)) return
+  void openDirectory(entry)
 }
 
 const goBack = async () => {
@@ -962,14 +974,15 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
 const handleDragOver = (event: DragEvent) => {
   const sourceSide = getGlobalDragSide()
   const payload = readFsDragPayload(event)
-  if (sourceSide && props.panelSide && sourceSide === props.panelSide) {
+  const dragSourceSide = payload?.fromSide || sourceSide || null
+  if (dragSourceSide && props.panelSide && dragSourceSide === props.panelSide) {
     dropForbidden.value = true
     dragActive.value = false
     dropTargetPath.value = ''
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
     return
   }
-  if (!payload || !sourceSide || !props.panelSide) {
+  if (!payload || !dragSourceSide || !props.panelSide) {
     dropForbidden.value = false
     dragActive.value = true
     if (event.dataTransfer && getDroppedLocalPath(event)) event.dataTransfer.dropEffect = 'copy'
