@@ -8,13 +8,17 @@
       @dragleave="handleTabBarDragLeave"
       @drop.prevent="handleTabBarDrop"
     >
-      <button
+      <div
         v-for="panel in workspace.panels"
         :key="panel.id"
         class="terminal-tab"
         :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id }"
+        role="button"
+        tabindex="0"
         :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
         @click="workspace.activePanelId = panel.id"
+        @keydown.enter.prevent="workspace.activePanelId = panel.id"
+        @keydown.space.prevent="workspace.activePanelId = panel.id"
         @contextmenu.prevent="openMenu($event, panel.id)"
         @dragstart="handleTabDragStart($event, panel)"
         @dragenter.prevent.stop="handleTabDragEnter($event, panel)"
@@ -25,6 +29,7 @@
       >
         <span
           v-if="renamingId !== panel.id"
+          class="terminal-tab-title"
           @dblclick.stop="startRename(panel.id, panel.title)"
         >{{ panel.title }}</span>
         <input
@@ -34,8 +39,27 @@
           @keydown.enter="finishRename"
           @keydown.esc="renamingId = ''"
         />
-        <i>{{ panel.kind === 'knowledge' ? 'editor' : panel.status }}</i>
-      </button>
+        <span
+          v-if="panel.kind === 'knowledge'"
+          class="terminal-tab-kind"
+        >editor</span>
+        <span
+          v-else-if="panel.status === 'connecting' || panel.status === 'error' || panel.status === 'closed'"
+          class="terminal-tab-state"
+          :class="panel.status"
+          :title="terminalStatusLabel(panel)"
+          aria-hidden="true"
+        ></span>
+        <button
+          class="terminal-tab-close"
+          title="关闭"
+          @click.stop="closeTab(panel.id)"
+          @mousedown.stop
+          @dragstart.stop.prevent
+        >
+          <X />
+        </button>
+      </div>
       <button
         class="new-tab-button"
         title="新建终端"
@@ -493,7 +517,9 @@ const closeTerminalMenusFromDocument = () => {
   menu.visible = false
   termMenu.visible = false
 }
-const fontSize = ref(12)
+const defaultTerminalFontSize = () => workspace.terminalSettings.fontSize || 12
+const paneFontSizes = reactive<Record<string, number>>({})
+const terminalFontSizeForPanel = (panelId: string) => paneFontSizes[panelId] || defaultTerminalFontSize()
 const terminalElements = new Map<string, HTMLElement>()
 type TerminalView = {
   terminal: XtermTerminal
@@ -538,6 +564,13 @@ const connectionActionLabel = (panel?: TerminalPanel | null) => {
   return '断开连接'
 }
 const connectionActionShortcut = (panel?: TerminalPanel | null) => (panel?.sessionId ? 'Ctrl+D' : 'Enter')
+const terminalStatusLabel = (panel: TerminalPanel) => {
+  if (panel.kind === 'knowledge') return '编辑器'
+  if (panel.status === 'connecting') return '连接中'
+  if (panel.status === 'error') return '异常'
+  if (panel.status === 'closed') return '已断开'
+  return '已连接'
+}
 const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
 const draggedTerminalPanelId = ref('')
 const tabDragOverPanelId = ref('')
@@ -814,7 +847,7 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
     convertEol: true,
     cursorStyle: workspace.terminalSettings.cursorStyle,
     fontFamily: workspace.terminalSettings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-    fontSize: workspace.terminalSettings.fontSize || 12,
+    fontSize: terminalFontSizeForPanel(panel.id),
     lineHeight: workspace.terminalSettings.lineHeight || 1,
     scrollback: workspace.terminalSettings.scrollBack,
     theme: {
@@ -1108,6 +1141,13 @@ const finishRename = () => {
 const closeSelected = () => {
   workspace.closePanel(menu.panelId)
   menu.visible = false
+}
+
+const closeTab = (panelId: string) => {
+  workspace.closePanel(panelId)
+  menu.visible = false
+  termMenu.visible = false
+  nextTick(() => scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3, forceGeometry: true }))
 }
 
 const closeOtherTabsFromMenu = () => {
@@ -1759,23 +1799,24 @@ const clearSearchFromButton = () => {
   clearSearch()
 }
 
-const updateFontSize = (nextSize: number) => {
-  fontSize.value = Math.min(20, Math.max(10, nextSize))
-  terminalViews.forEach((view) => {
-    view.terminal.options.fontSize = fontSize.value
-    window.requestAnimationFrame(() => view.fit.fit())
-  })
+const updateFontSize = (panelId: string, nextSize: number) => {
+  const view = terminalViews.get(panelId)
+  if (!view) return
+  const normalized = Math.min(24, Math.max(9, nextSize))
+  paneFontSizes[panelId] = normalized
+  view.terminal.options.fontSize = normalized
+  scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 4, forceGeometry: true })
 }
 
-const increaseFont = () => updateFontSize(fontSize.value + 1)
-const decreaseFont = () => updateFontSize(fontSize.value - 1)
+const increaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) + 1)
+const decreaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) - 1)
 const increaseFontFromMenu = () => {
-  increaseFont()
+  increaseFont(termMenu.panelId || workspace.activePanelId)
   termMenu.visible = false
   menu.visible = false
 }
 const decreaseFontFromMenu = () => {
-  decreaseFont()
+  decreaseFont(termMenu.panelId || workspace.activePanelId)
   termMenu.visible = false
   menu.visible = false
 }
@@ -2109,12 +2150,12 @@ const handleShortcut = async (event: KeyboardEvent) => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key === '=') {
     event.preventDefault()
-    increaseFont()
+    increaseFont(workspace.activePanelId)
     return
   }
   if ((event.ctrlKey || event.metaKey) && event.key === '-') {
     event.preventDefault()
-    decreaseFont()
+    decreaseFont(workspace.activePanelId)
     return
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'm') {
@@ -2150,8 +2191,20 @@ watch(
           terminalViews.get(panelId)?.resizeObserver?.disconnect()
           terminalViews.delete(panelId)
           terminalElements.delete(panelId)
+          delete paneFontSizes[panelId]
         }
       }
+    })
+  }
+)
+
+watch(
+  () => workspace.terminalSettings.fontSize,
+  (fontSize) => {
+    terminalViews.forEach((view, panelId) => {
+      if (paneFontSizes[panelId]) return
+      view.terminal.options.fontSize = fontSize || defaultTerminalFontSize()
+      scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 2 })
     })
   }
 )

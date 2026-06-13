@@ -2257,13 +2257,13 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.find('.workspace-host-modal').exists()).toBe(true)
     expect((wrapper.findAll('.workspace-host-form input').at(2)!.element as HTMLInputElement).value).toBe('root')
-    expect((wrapper.findAll('.workspace-host-form input').at(5)!.element as HTMLInputElement).value).toBe('22')
+    expect(wrapper.find('.workspace-host-form').text()).not.toContain('分组')
     await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('tree-linked-host')
     await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.55.0.9')
     await wrapper.find('.workspace-host-form select').setValue('person')
     await wrapper.findAll('.workspace-host-form select').at(1)!.setValue('keyBased')
     await flushPromises()
-    await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('22')
+    await wrapper.findAll('.workspace-host-form input').at(3)!.setValue('22')
     await wrapper.findAll('.workspace-host-form select').at(2)!.setValue('key-1')
     await wrapper.findAll('.workspace-host-form select').at(3)!.setValue('release-proxy')
     await wrapper.findAll('.workspace-host-form select').at(4)!.setValue('asset-2')
@@ -2340,8 +2340,7 @@ describe('AppShell', () => {
     await hostFormInputs().at(0)!.setValue('workspace-malformed-host')
     await hostFormInputs().at(1)!.setValue('10.66.0.8')
     await hostFormInputs().at(2)!.setValue('ops')
-    await hostFormInputs().at(4)!.setValue('Workspace')
-    await hostFormInputs().at(5)!.setValue('2208')
+    await hostFormInputs().at(4)!.setValue('2208')
     await wrapper.find('.workspace-host-form textarea').setValue('malformed host draft')
 
     vi.mocked(window.aiops.saveAsset).mockClear()
@@ -2487,8 +2486,7 @@ describe('AppShell', () => {
       await hostInputs().at(0)!.setValue('workspace-missing-refresh')
       await hostInputs().at(1)!.setValue('10.88.66.55')
       await hostInputs().at(2)!.setValue('ops')
-      await hostInputs().at(4)!.setValue('测试')
-      await hostInputs().at(5)!.setValue('2202')
+      await hostInputs().at(4)!.setValue('2202')
       vi.mocked(window.aiops.saveAsset).mockImplementationOnce(async (input: any) => {
         const savedResult = await originalAiops.saveAsset(input)
         const snapshot = await originalAiops.listAssets()
@@ -2581,7 +2579,6 @@ describe('AppShell', () => {
       expect(deleteGroupRefreshFailure.text()).toContain(malformedMessage)
       expect(deleteGroupRefreshFailure.find('.files-folder-confirm').exists()).toBe(true)
       expect(deleteGroupRefreshFailure.findAll('.workspace-folder-row').some((row) => row.text().includes('预发'))).toBe(true)
-      expect(deleteGroupRefreshFailure.findAll('.workspace-folder-row').some((row) => row.text().includes('未分组'))).toBe(false)
       deleteGroupRefreshFailure.unmount()
 
       const refreshGroupOptionsFailure = await mountWorkspace()
@@ -2785,8 +2782,7 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.44.0.9')
       await wrapper.findAll('.workspace-host-form input').at(2)!.setValue('ops')
       await wrapper.findAll('.workspace-host-form input').at(3)!.setValue('')
-      await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('Workspace')
-      await wrapper.findAll('.workspace-host-form input').at(5)!.setValue('2201')
+      await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('2201')
       await wrapper.find('.workspace-host-form textarea').setValue('工作区新增主机')
       vi.mocked(window.aiops.testAssetConnection).mockRejectedValueOnce(new Error('workspace probe refused'))
       vi.mocked(window.aiops.saveAsset).mockClear()
@@ -3088,7 +3084,6 @@ describe('AppShell', () => {
       expect(wrapper.find('.workspace-node-menu').text()).toContain('从文件夹移除')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
       await flushPromises()
-      expect(wrapper.text()).toContain('已从 核心业务 移除 prod-bastion')
       expect(wrapper.find('.workspace-node-menu').exists()).toBe(false)
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').text()).toContain('移动到文件夹')
@@ -3096,7 +3091,6 @@ describe('AppShell', () => {
       expect(wrapper.find('.workspace-folder-modal').text()).toContain('值班归档')
       await wrapper.findAll('.files-folder-option').find((button) => button.text().includes('值班归档'))!.trigger('click')
       await flushPromises()
-      expect(wrapper.text()).toContain('已移动 prod-bastion 到 值班归档')
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('值班归档'))!.trigger('contextmenu')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
       expect(wrapper.find('.files-folder-confirm').text()).toContain('其中 1 个主机将移出该文件夹')
@@ -5742,6 +5736,8 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('与AI对话')
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(0)
     expect(wrapper.find('.terminal-tab.active').text()).toContain('欢迎')
+    expect(wrapper.find('.terminal-tab.active').text()).not.toContain('ready')
+    expect(wrapper.find('.terminal-tab.active .terminal-tab-close').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('local shell')
 
     await wrapper.find('.new-tab-button').trigger('click')
@@ -5754,6 +5750,15 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
     expect(wrapper.find('.terminal-grid').classes()).not.toContain('split')
 
+    await wrapper.find('.terminal-tab.active .terminal-tab-close').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(store.panels).toHaveLength(1)
+    expect(store.activePanel.title).toBe('欢迎')
+
+    await wrapper.find('.new-tab-button').trigger('click')
+    store.appendTerminalOutput(store.activePanelId, 'new tab output\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
     await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
     await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('向右拆分'))!.trigger('click')
     store.appendTerminalOutput(store.activePanelId, 'split output\n')
@@ -5763,6 +5768,16 @@ describe('AppShell', () => {
     expect(store.activePanel.splitSourceId).toBe(store.panels[1].id)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(2)
     expect(wrapper.find('.terminal-grid').classes()).toContain('split')
+
+    const sourceTerminal = mockXtermInstances.at(-2)!
+    const splitTerminal = mockXtermInstances.at(-1)!
+    expect(sourceTerminal.options.fontSize).toBe(12)
+    expect(splitTerminal.options.fontSize).toBe(12)
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('字体放大'))!.trigger('click')
+    await waitForAnimationFrames(2)
+    expect(splitTerminal.options.fontSize).toBe(13)
+    expect(sourceTerminal.options.fontSize).toBe(12)
 
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('向下拆分'))!.trigger('click')
@@ -6551,6 +6566,9 @@ describe('AppShell', () => {
 
     try {
       expect(wrapper.text()).toContain('拖拽模式')
+      expect(wrapper.find('.files-workspace-tabs').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('主机管理')
+      expect(wrapper.text()).not.toContain('密钥管理')
       expect(wrapper.find('.files-transfer-layout').exists()).toBe(true)
       expect(wrapper.text()).toContain('新增连接 或 左侧拖拽至此')
       expect(store.fileTransferTasks).toEqual([])
@@ -6923,7 +6941,7 @@ describe('AppShell', () => {
 
     const renamedRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note-v2.md'))!
     await renamedRow.find('.file-row-actions button[title="权限"]').trigger('click')
-    expect(wrapper.find('.file-modal-card.small').text()).toContain('权限设置 - release-note-v2.md')
+    expect(wrapper.find('.file-modal-card.permission-modal').text()).toContain('权限设置 - release-note-v2.md')
     expect((wrapper.find('.permission-code input').element as HTMLInputElement).value).toBe('644')
     await wrapper.findAll('.permission-check input').find((input) => (input.element as HTMLInputElement).value === '执行')!.setValue(true)
     await wrapper.find('.permission-recursive input').setValue(true)
@@ -7438,7 +7456,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(chmodBrowser.text()).toContain('post-chmod list failed')
     expect(chmodBrowser.text()).not.toContain('权限已更新为 744')
-    expect(chmodBrowser.find('.file-modal-card.small').text()).toContain('权限设置 - release-note.md')
+    expect(chmodBrowser.find('.file-modal-card.permission-modal').text()).toContain('权限设置 - release-note.md')
     expect(chmodBrowser.text()).toContain('release-note.md')
     chmodBrowser.unmount()
 

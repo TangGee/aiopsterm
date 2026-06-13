@@ -97,70 +97,72 @@
             @dblclick="entry.type === 'file' && openFile(entry)"
           >
             <td>
-              <button
-                v-if="editingPath !== entry.path"
-                class="file-name-cell"
-                @click="entry.type === 'directory' && openDirectory(entry)"
-              >
-                <FolderFilled v-if="entry.type === 'directory'" />
-                <Link v-else-if="entry.type === 'link'" />
-                <File v-else />
-                <span>{{ entry.name }}</span>
-              </button>
-              <div
-                v-else
-                class="file-rename-row"
-              >
-                <FolderFilled v-if="entry.type === 'directory'" />
-                <File v-else />
-                <input
-                  v-model="renameValue"
-                  @keydown.enter="confirmRename(entry)"
-                  @keydown.esc="cancelRename"
-                />
+              <div class="file-name-action-wrap">
                 <button
-                  title="确认"
-                  @click="confirmRename(entry)"
+                  v-if="editingPath !== entry.path"
+                  class="file-name-cell"
+                  @click="entry.type === 'directory' && openDirectory(entry)"
                 >
-                  <Check />
+                  <FolderFilled v-if="entry.type === 'directory'" />
+                  <Link v-else-if="entry.type === 'link'" />
+                  <File v-else />
+                  <span>{{ entry.name }}</span>
                 </button>
-                <button
-                  title="取消"
-                  @click="cancelRename"
+                <div
+                  v-else
+                  class="file-rename-row"
                 >
-                  <X />
-                </button>
-              </div>
+                  <FolderFilled v-if="entry.type === 'directory'" />
+                  <File v-else />
+                  <input
+                    v-model="renameValue"
+                    @keydown.enter="confirmRename(entry)"
+                    @keydown.esc="cancelRename"
+                  />
+                  <button
+                    title="确认"
+                    @click="confirmRename(entry)"
+                  >
+                    <Check />
+                  </button>
+                  <button
+                    title="取消"
+                    @click="cancelRename"
+                  >
+                    <X />
+                  </button>
+                </div>
 
-              <div
-                v-if="editingPath !== entry.path && entry.name !== '..'"
-                class="file-row-actions"
-              >
-                <button
-                  v-if="entry.type === 'file'"
-                  title="下载"
-                  @click.stop="downloadEntry(entry)"
+                <div
+                  v-if="editingPath !== entry.path && entry.name !== '..'"
+                  class="file-row-actions"
                 >
-                  <Download />
-                </button>
-                <button
-                  title="重命名"
-                  @click.stop="startRename(entry)"
-                >
-                  <Pencil />
-                </button>
-                <button
-                  title="权限"
-                  @click.stop="openPermissions(entry)"
-                >
-                  <Lock />
-                </button>
-                <button
-                  title="更多"
-                  @click.stop="toggleMore(entry.path)"
-                >
-                  <MoreHorizontal />
-                </button>
+                  <button
+                    v-if="entry.type === 'file'"
+                    title="下载"
+                    @click.stop="downloadEntry(entry)"
+                  >
+                    <Download />
+                  </button>
+                  <button
+                    title="重命名"
+                    @click.stop="startRename(entry)"
+                  >
+                    <Pencil />
+                  </button>
+                  <button
+                    title="权限"
+                    @click.stop="openPermissions(entry)"
+                  >
+                    <Lock />
+                  </button>
+                  <button
+                    title="更多"
+                    @click.stop="toggleMore(entry.path)"
+                  >
+                    <MoreHorizontal />
+                  </button>
+                </div>
               </div>
 
               <div
@@ -209,7 +211,7 @@
       v-if="permissionsTarget"
       class="file-modal"
     >
-      <div class="file-modal-card small">
+      <div class="file-modal-card small permission-modal">
         <header>
           <strong>权限设置 - {{ permissionsTarget.name }}</strong>
           <button

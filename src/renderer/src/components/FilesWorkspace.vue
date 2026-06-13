@@ -1,14 +1,5 @@
 <template>
   <section class="files-workspace">
-    <header class="files-workspace-tabs">
-      <button>主机管理</button>
-      <button>密钥管理</button>
-      <button class="active">
-        文件管理
-        <X />
-      </button>
-    </header>
-
     <div class="files-mode-switch">
       <button
         :class="{ active: workspace.filesUiMode === 'transfer' }"

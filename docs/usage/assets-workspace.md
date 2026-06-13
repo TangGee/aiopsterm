@@ -12,6 +12,12 @@ The Workspace resource tree is the terminal-side resource launcher.
 
 - `直接连接` and `堡垒机资源` are tree tabs with nested groups.
 - Right-click blank tree space to create a top-level group or host.
-- Right-click a group to create a child group or host, edit/delete custom groups, refresh organization resources, or open organization management.
-- Drag hosts or custom groups onto another group to move them. Dragging to blank tree space restores them to top level or default grouping.
+- Right-click a group to create a child group or host, edit/delete custom groups, refresh organization resources, or open organization management. Host creation inherits the right-click target group instead of asking for a separate group in the creation form.
+- Drag hosts or custom groups onto another group to move them. Dragging to blank tree space restores them to top level or default grouping. Successful move actions update the tree without a persistent success toast; failures still surface an error.
 - Recently connected hosts are maintained from successful connections and capped at 10 entries.
+
+The Files workspace is a dedicated file-management workspace.
+
+- It opens directly into file-management modes instead of showing a duplicate top tab strip for Host/Key/File management.
+- File row hover actions are anchored in the row action area so they do not cover the file or directory name.
+- Permission editing uses the shared modal style with grouped owner/group/public permission controls and keeps backend mutation validation before reporting success.

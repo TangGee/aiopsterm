@@ -76,7 +76,7 @@
           v-else
           class="workspace-host-row"
           :class="{ selected: selectedAssetId === row.asset.id, 'drag-over': dragOverAssetId === row.asset.id }"
-          :style="{ paddingLeft: `${22 + row.depth * 14}px` }"
+          :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
           role="button"
           tabindex="0"
           :draggable="canDragAsset(row.asset)"
@@ -523,7 +523,7 @@
               </option>
             </select>
           </label>
-          <label>
+          <label v-if="hostModal.mode !== 'create'">
             <span>分组</span>
             <input
               v-model="hostForm.group"
@@ -1689,7 +1689,6 @@ const moveAssetToGroup = async (assetId: string, targetGroup: WorkspaceGroup | n
   try {
     const saved = await saveAssetRecord(toAssetInput(asset, groupTargetPatch(targetGroup, asset)))
     if (targetGroup) await expandGroup(targetGroup.key)
-    notice.value = targetGroup ? `已移动 ${saved.name} 到 ${targetGroup.title}` : `已移动 ${saved.name} 到顶级`
     return true
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '移动资产失败'
@@ -1726,7 +1725,6 @@ const moveGroupToParent = async (groupKey: string, parentGroup: WorkspaceGroup |
     })
     if (parentGroup) await expandGroup(parentGroup.key)
     await expandGroup(activeWorkspace.value === 'direct' ? directGroupKey(saved.name) : saved.uuid)
-    notice.value = parentGroup ? `已移动分组 ${group.title} 到 ${parentGroup.title}` : `已移动分组 ${group.title} 到顶级`
     return true
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '移动分组失败'
@@ -2093,7 +2091,6 @@ const moveAssetToFolder = async (folderUuid: string) => {
   try {
     await saveAssetRecord(toAssetInput(asset, targetGroup ? groupTargetPatch(targetGroup, asset) : { folderUuid, organizationId: asset.organizationId || organizationAssets.value[0]?.uuid }))
     await expandGroup(targetGroup?.key || folderUuid)
-    notice.value = `已移动 ${asset.name} 到 ${folderNameByUuid(folderUuid)}`
     closeMoveModal()
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '移动资产失败'
@@ -2107,7 +2104,6 @@ const removeAssetFromFolder = async (assetId: string) => {
   try {
     await saveAssetRecord(toAssetInput(asset, groupTargetPatch(null, asset)))
     if (asset.organizationId) await expandGroup(asset.organizationId)
-    notice.value = `已从 ${folderName} 移除 ${asset.name}`
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '移除资产失败'
   }
