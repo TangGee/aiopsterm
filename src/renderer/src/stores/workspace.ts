@@ -9602,6 +9602,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     applyQuickCommandsSnapshot(result.data)
+    setTopNotice('快捷命令已保存。')
     return result.data.snippet
   }
 
@@ -9633,6 +9634,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     applyQuickCommandsSnapshot(result.data)
+    setTopNotice('快捷命令已保存。')
     return true
   }
 
@@ -9805,6 +9807,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     applyQuickCommandsSnapshot(result.data)
+    setTopNotice('宏录制已保存为快捷命令。')
     return result.data.snippet
   }
 
@@ -9828,7 +9831,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const groupUuid = macroTargetGroupUuid.value
     const sleepThresholdMs = macroSleepThresholdMs.value
     resetMacroRecordingState()
-    return saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
+    const saved = await saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
+    if (saved) setTopNotice(reason === 'count' ? '宏录制达到命令上限，已保存为快捷命令。' : '宏录制达到时间上限，已保存为快捷命令。')
+    return saved
   }
 
   const startMacroRecording = (terminalId?: string | null) => {
@@ -9928,6 +9933,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const sleepThresholdMs = macroSleepThresholdMs.value
     if (!entries.length) {
       resetMacroRecordingState()
+      setTopNotice('没有录制到命令。')
       return null
     }
     const saved = await saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)

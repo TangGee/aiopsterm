@@ -59,7 +59,7 @@
           </button>
           <button
             class="icon-only"
-            title="新建片段"
+            title="新建快捷命令"
             @click="openAddCommand"
           >
             <FileTerminal />
@@ -102,7 +102,7 @@
         v-if="editingCommand"
         class="snippet-edit-panel"
       >
-        <h3>{{ isEditMode ? '编辑片段' : '新建片段' }}</h3>
+        <h3>{{ isEditMode ? '编辑快捷命令' : '新建快捷命令' }}</h3>
         <input
           v-model="commandForm.name"
           placeholder="脚本名称"
@@ -189,9 +189,26 @@
           </div>
         </div>
 
+        <p
+          v-if="commandFormError"
+          class="command-form-error"
+        >
+          {{ commandFormError }}
+        </p>
+
         <footer>
-          <button @click="cancelEditCommand">取消</button>
-          <button @click="saveCommand">确定</button>
+          <button
+            :disabled="commandSaving"
+            @click="cancelEditCommand"
+          >
+            取消
+          </button>
+          <button
+            :disabled="commandSaving"
+            @click="saveCommand"
+          >
+            {{ commandSaving ? '保存中' : '确定' }}
+          </button>
         </footer>
       </div>
 
@@ -371,6 +388,8 @@ const dragDirection = ref<'up' | 'down' | null>(null)
 const commandMenu = reactive({ visible: false, x: 0, y: 0, commandId: 0 })
 const groupMenu = reactive({ visible: false, x: 0, y: 0, groupUuid: '' })
 const commandForm = reactive({ name: '', content: '', groupUuid: '' })
+const commandFormError = ref('')
+const commandSaving = ref(false)
 const exampleScript = `# System monitoring
 ls -la
 sleep==2000
@@ -452,6 +471,7 @@ const openAddCommand = () => {
   editingCommand.value = true
   isEditMode.value = false
   editingCommandId.value = null
+  commandFormError.value = ''
   commandForm.name = ''
   commandForm.content = ''
   commandForm.groupUuid = workspace.selectedSnippetGroupUuid || ''
@@ -463,23 +483,38 @@ const openEditCommand = (id: number) => {
   editingCommand.value = true
   isEditMode.value = true
   editingCommandId.value = id
+  commandFormError.value = ''
   commandForm.name = command.snippet_name
   commandForm.content = command.snippet_content
   commandForm.groupUuid = command.group_uuid || ''
 }
 
 const saveCommand = async () => {
-  if (!commandForm.name.trim() || !commandForm.content.trim()) return
+  if (commandSaving.value) return
+  commandFormError.value = ''
+  if (!commandForm.name.trim()) {
+    commandFormError.value = '请输入快捷命令名称'
+    return
+  }
+  if (!commandForm.content.trim()) {
+    commandFormError.value = '请输入脚本内容'
+    return
+  }
   const payload = {
     snippet_name: commandForm.name.trim(),
     snippet_content: commandForm.content,
     group_uuid: commandForm.groupUuid || null
   }
-  const saved =
-    isEditMode.value && editingCommandId.value !== null
-      ? await workspace.updateQuickCommand(editingCommandId.value, payload)
-      : await workspace.createQuickCommand(payload)
-  if (saved) cancelEditCommand()
+  commandSaving.value = true
+  try {
+    const saved =
+      isEditMode.value && editingCommandId.value !== null
+        ? await workspace.updateQuickCommand(editingCommandId.value, payload)
+        : await workspace.createQuickCommand(payload)
+    if (saved) cancelEditCommand()
+  } finally {
+    commandSaving.value = false
+  }
 }
 
 const cancelEditCommand = () => {
@@ -489,6 +524,8 @@ const cancelEditCommand = () => {
   commandForm.name = ''
   commandForm.content = ''
   commandForm.groupUuid = ''
+  commandFormError.value = ''
+  commandSaving.value = false
 }
 
 const stopMacroRecording = async () => {

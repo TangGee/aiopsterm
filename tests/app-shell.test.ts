@@ -564,7 +564,7 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('直接连接')
     expect(wrapper.text()).toContain('堡垒机资源')
     expect(wrapper.text()).toContain('prod-bastion')
-    expect(wrapper.text()).toContain('智能助手')
+    expect(wrapper.find('.ai-header h2').text()).toBe('AI')
     expect(wrapper.text()).toContain('与AI对话')
     expect(wrapper.text()).toContain('切换布局')
     expect(wrapper.text()).not.toContain('local shell')
@@ -7965,9 +7965,11 @@ describe('AppShell', () => {
     await wrapper.find('.snippet-search input').setValue('')
     await wrapper.find('.snippet-search input').trigger('blur')
 
-    await wrapper.find('button[title="新建片段"]').trigger('click')
-    expect(wrapper.text()).toContain('新建片段')
+    await wrapper.find('button[title="新建快捷命令"]').trigger('click')
+    expect(wrapper.text()).toContain('新建快捷命令')
     expect(wrapper.text()).toContain('脚本语法说明')
+    await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
+    expect(wrapper.text()).toContain('请输入快捷命令名称')
     await wrapper.find('.script-help .help-header').trigger('click')
     await wrapper.find('.copy-example').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('sleep==2000'))
@@ -8022,6 +8024,7 @@ describe('AppShell', () => {
     await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
     await flushPromises()
     expect(store.quickCommands.some((command) => command.snippet_name === '新片段')).toBe(true)
+    expect(store.topNotice).toBe('快捷命令已保存。')
     expect((window.aiops as any).saveQuickCommands).toBeUndefined()
 
     const commandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('磁盘巡检'))!
@@ -8050,6 +8053,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.isMacroRecording).toBe(false)
     expect(store.quickCommands.some((command) => command.snippet_name.startsWith('macro-') && command.snippet_content.includes('uptime'))).toBe(true)
+    expect(store.topNotice).toBe('宏录制已保存为快捷命令。')
     expect(window.aiops.saveQuickCommandMacro).toHaveBeenCalledWith(
       expect.objectContaining({
         entries: [expect.objectContaining({ command: 'uptime' })]
@@ -8094,7 +8098,7 @@ describe('AppShell', () => {
       }
     } as any)
 
-    await wrapper.find('button[title="新建片段"]').trigger('click')
+    await wrapper.find('button[title="新建快捷命令"]').trigger('click')
     await wrapper.find('.snippet-edit-panel input').setValue('失败片段')
     await wrapper.find('.script-editor-container textarea').setValue('echo failed')
     await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')

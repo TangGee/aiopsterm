@@ -5768,6 +5768,16 @@ code {
   padding: 0 8px;
 }
 
+.command-form-error {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  color: #fecaca;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
 .script-editor-container {
   min-height: 168px;
   max-height: 260px;
@@ -5889,6 +5899,11 @@ code {
   height: 30px;
   border-color: var(--border);
   background: var(--surface-2);
+}
+
+.snippet-edit-panel footer button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .snippet-context-menu {
@@ -8208,7 +8223,7 @@ code {
   border-left: 0;
   border-right: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   padding: 14px;
   gap: 10px;
 }
@@ -8262,6 +8277,22 @@ code {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.ai-empty-chat {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-empty-chat svg {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
 }
 
 .ai-header-actions,

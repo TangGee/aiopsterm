@@ -58,7 +58,7 @@ export const onboardingTourSteps: Record<OnboardingModuleId, OnboardingStep[]> =
     { id: 'workspace', targetId: 'main-workspace-tabs', title: '主工作区', description: '终端标签、中央页面和主要操作结果显示在主工作区。' },
     { id: 'top-controls', targetId: 'top-layout-controls', title: '顶部布局控制', description: '这里切换 Terminal/Agents 模式、折叠侧栏、控制 AI 面板和窗口。' },
     { id: 'ai-toggle', targetId: 'right-ai-toggle', title: 'AI 面板开关', description: '点击可展开或收起右侧 AI 助手。', advanceOnTargetClick: true },
-    { id: 'ai-sidebar', targetId: 'right-ai-sidebar', title: 'AI 侧栏', description: 'AI 侧栏用于上下文、命令、任务进度和运维对话。' }
+    { id: 'ai-sidebar', targetId: 'right-ai-sidebar', title: 'AI 侧栏', description: 'AI 侧栏用于上下文、命令和运维对话；任务进度只在真实任务存在时出现。' }
   ],
   systemSettings: [
     { id: 'setting-entry', targetId: 'setting-entry', title: '设置入口', description: '底部设置入口会打开中央设置工作区。' },
@@ -88,7 +88,7 @@ export const onboardingTourSteps: Record<OnboardingModuleId, OnboardingStep[]> =
   ],
   aiChat: [
     { id: 'ai-sidebar-entry', targetId: 'right-ai-toggle', title: '打开 AI 侧栏', description: '从顶部右侧按钮打开 AI 助手。', highlightTargetIds: ['left-ai-toggle'], advanceOnTargetClick: true },
-    { id: 'ai-sidebar-overview', targetId: 'right-ai-sidebar', title: 'AI 侧栏概览', description: '侧栏包含消息、任务进度、模型信息和输入区。' },
+    { id: 'ai-sidebar-overview', targetId: 'right-ai-sidebar', title: 'AI 侧栏概览', description: '侧栏默认是干净的聊天界面，包含消息区、历史/新建/导出动作和输入区。' },
     { id: 'ai-input', targetId: 'ai-input', title: '输入区', description: '在这里描述运维目标，或通过 @ 添加上下文、通过 / 选择命令。' },
     {
       id: 'ai-mode-agent',

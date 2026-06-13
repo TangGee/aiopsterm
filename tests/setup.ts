@@ -4999,6 +4999,17 @@ const normalizeAssetFolderInputMock = (input: TestAssetFolderSaveInput, existing
   }
 }
 
+const assetFolderScopeMock = (folder: Pick<TestAssetFolder, 'scope'>) => (folder.scope === 'direct' ? 'direct' : 'bastion')
+
+const validateAssetFolderParentMock = (folder: TestAssetFolder) => {
+  if (!folder.parentUuid) return null
+  if (folder.parentUuid === folder.uuid) return 'Folder cannot be its own parent'
+  const parent = assetFolderStoreMock.find((item) => item.uuid === folder.parentUuid)
+  if (!parent) return 'Parent folder not found'
+  if (assetFolderScopeMock(parent) !== assetFolderScopeMock(folder)) return 'Folder parent scope mismatch'
+  return null
+}
+
 const assetSnapshotMock = () => ({
   assets: assetStoreMock.map(cloneAsset),
   folders: assetFolderStoreMock.map(cloneAssetFolder)
@@ -6762,6 +6773,8 @@ Object.defineProperty(window, 'aiops', {
       const existing = folder.uuid ? assetFolderStoreMock.find((item) => item.uuid === folder.uuid) : undefined
       const normalized: TestAssetFolder = normalizeAssetFolderInputMock({ ...folder, name }, existing)
       if (!existing && !folder.uuid) normalized.uuid = `folder-test-${assetFolderSequenceMock++}`
+      const parentError = validateAssetFolderParentMock(normalized)
+      if (parentError) return { ok: false, errorCode: 'ASSET_FOLDER_PARENT_INVALID', errorMessage: parentError }
       assetFolderStoreMock = assetFolderStoreMock.some((item) => item.uuid === normalized.uuid)
         ? assetFolderStoreMock.map((item) => (item.uuid === normalized.uuid ? normalized : item))
         : [...assetFolderStoreMock, normalized]

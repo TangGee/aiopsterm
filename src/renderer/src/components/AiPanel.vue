@@ -8,8 +8,7 @@
   >
     <header class="ai-header">
       <div>
-        <p class="eyebrow">AI Agent</p>
-        <h2>{{ agentMode ? 'Agents 工作台' : '智能助手' }}</h2>
+        <h2>{{ agentMode ? 'Agents' : 'AI' }}</h2>
       </div>
       <div class="ai-header-actions">
         <button
@@ -200,7 +199,6 @@
         >
           <Download />
         </button>
-        <span class="model-provider-badge">{{ workspace.config.modelProvider }}</span>
       </div>
     </header>
 
@@ -608,9 +606,17 @@
           </button>
         </div>
       </article>
+      <div
+        v-if="workspace.chatMessages.length === 0"
+        class="ai-empty-chat"
+      >
+        <Bot />
+        <span>{{ workspace.config.modelName }}</span>
+      </div>
     </div>
 
     <section
+      v-if="showTodoInlineDisplay"
       class="todo-inline-display"
       :class="{ 'has-focused': focusedTodo }"
     >
@@ -761,10 +767,6 @@
       </div>
     </section>
 
-    <div class="model-strip">
-      <span>{{ workspace.config.modelName }}</span>
-      <em>{{ workspace.config.modelEndpoint || '本地后端响应，未配置远端提供商' }}</em>
-    </div>
     <span
       v-if="chatExportNotice"
       class="ai-operation-notice"
@@ -1386,6 +1388,7 @@ const focusedTodo = computed(() => workspace.todoItems.find((todo) => todo.isFoc
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
 const focusedTodoId = computed(() => focusedTodo.value?.id || null)
 const visibleTodos = computed(() => workspace.todoItems.slice(0, todoMaxItems))
+const showTodoInlineDisplay = computed(() => Boolean(focusedTodo.value || workspace.todoProgress.total > 0))
 const filteredHistoryConversations = computed(() => {
   const keyword = historySearchTerm.value.trim().toLowerCase()
   return workspace.sortedConversations.filter((conversation) => {

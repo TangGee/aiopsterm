@@ -728,6 +728,24 @@ const normalizeFolderInput = (input: AiopsCustomFolderSaveInput, existing?: Aiop
   }
 }
 
+const folderScope = (folder: Pick<AiopsCustomFolderRecord, 'scope'>) => (folder.scope === 'direct' ? 'direct' : 'bastion')
+
+const assertFolderParent = (folders: AiopsCustomFolderRecord[], folder: AiopsCustomFolderRecord) => {
+  if (!folder.parentUuid) return
+  if (folder.parentUuid === folder.uuid) throw new Error('Folder cannot be its own parent')
+  const parent = folders.find((item) => item.uuid === folder.parentUuid)
+  if (!parent) throw new Error('Parent folder not found')
+  if (folderScope(parent) !== folderScope(folder)) throw new Error('Folder parent scope mismatch')
+
+  let cursor: AiopsCustomFolderRecord | undefined = parent
+  const seen = new Set<string>([folder.uuid])
+  while (cursor?.parentUuid) {
+    if (seen.has(cursor.parentUuid)) throw new Error('Folder parent cycle detected')
+    seen.add(cursor.uuid)
+    cursor = folders.find((item) => item.uuid === cursor?.parentUuid)
+  }
+}
+
 const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAssetRecord): AiopsAssetRecord => {
   const id = input.id || existing?.id || `asset-${randomUUID()}`
   const name = input.name.trim()
@@ -1005,6 +1023,7 @@ class FallbackAssetStore {
     const folders = this.store.get('folders') || []
     const existing = folder.uuid ? folders.find((item) => item.uuid === folder.uuid) : undefined
     const normalized = normalizeFolderInput(folder, existing)
+    assertFolderParent(folders, normalized)
     const nextFolders = folders.some((item) => item.uuid === normalized.uuid)
       ? folders.map((item) => (item.uuid === normalized.uuid ? normalized : item))
       : [...folders, normalized]
@@ -1255,6 +1274,9 @@ class SqliteAssetStore {
       : undefined
     const existing = existingRow ? (JSON.parse(existingRow.data) as AiopsCustomFolderRecord) : undefined
     const normalized = normalizeFolderInput(folder, existing)
+    const folderRows = this.db.prepare('SELECT data FROM asset_folders').all() as Array<{ data: string }>
+    const folders = folderRows.map((row) => JSON.parse(row.data) as AiopsCustomFolderRecord)
+    assertFolderParent(folders, normalized)
     this.db.prepare('INSERT INTO asset_folders (uuid, data) VALUES (?, ?) ON CONFLICT(uuid) DO UPDATE SET data = excluded.data').run(normalized.uuid, JSON.stringify(normalized))
     return cloneFolder(normalized)
   }

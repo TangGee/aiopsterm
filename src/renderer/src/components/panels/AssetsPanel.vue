@@ -1541,13 +1541,18 @@ const normalizeDirectAssetGroupName = (name?: string) => {
 }
 const directGroupKey = (name: string) => `group-${name}`
 const flattenAssetGroups = (groups: AssetGroup[]): AssetGroup[] => groups.flatMap((group) => [group, ...flattenAssetGroups(group.childGroups)])
-const assetGroupByKey = (key: string) => flattenAssetGroups(assetGroups.value).find((group) => group.key === key) || null
+const findAssetGroupByKey = (groups: AssetGroup[], key: string) => flattenAssetGroups(groups).find((group) => group.key === key) || null
+const assetGroupByKey = (key: string, scope: 'direct' | 'bastion' = 'direct') =>
+  scope === 'direct'
+    ? findAssetGroupByKey(assetGroups.value, key)
+    : findAssetGroupByKey(buildManagedGroups(managedSourceAssets.value), key) || findAssetGroupByKey(managedFilteredGroups.value, key)
 const directAssetFolders = computed(() => customFolders.value.filter((folder) => folder.scope === 'direct'))
 const bastionAssetFolders = computed(() => customFolders.value.filter((folder) => folder.scope !== 'direct'))
-const assetFolderByGroup = (group: AssetGroup | null) => {
+const assetFolderByGroup = (group: AssetGroup | null, scope: 'direct' | 'bastion' = 'direct') => {
   if (!group) return null
-  if (group.folderUuid) return directAssetFolders.value.find((folder) => folder.uuid === group.folderUuid) || null
-  return directAssetFolders.value.find((folder) => folder.name === group.groupName || folder.name === group.title) || null
+  const folders = scope === 'direct' ? directAssetFolders.value : bastionAssetFolders.value
+  if (group.folderUuid) return folders.find((folder) => folder.uuid === group.folderUuid) || null
+  return folders.find((folder) => folder.name === group.groupName || folder.name === group.title) || null
 }
 
 const makeAssetGroup = (input: Omit<AssetGroup, 'childGroups' | 'children'> & Partial<Pick<AssetGroup, 'children' | 'childGroups'>>): AssetGroup => ({
@@ -1838,10 +1843,10 @@ const saveAssetFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
   return result.data
 }
 
-const ensureAssetFolderForGroup = async (group: AssetGroup) => {
-  const existing = assetFolderByGroup(group)
+const ensureAssetFolderForGroup = async (group: AssetGroup, scope: 'direct' | 'bastion' = 'direct') => {
+  const existing = assetFolderByGroup(group, scope)
   if (existing) return existing
-  return saveAssetFolderRecord({ name: group.title, description: '', scope: 'direct' })
+  return saveAssetFolderRecord({ name: group.title, description: '', scope })
 }
 
 const openCreateAssetFolder = (parentGroup?: AssetGroup | null, scope: 'direct' | 'bastion' = 'direct') => {
@@ -1855,7 +1860,7 @@ const openCreateAssetFolder = (parentGroup?: AssetGroup | null, scope: 'direct' 
 }
 
 const openCreateAssetFolderFromContext = (groupKey = '') => {
-  openCreateAssetFolder(groupKey ? assetGroupByKey(groupKey) : null)
+  openCreateAssetFolder(groupKey ? assetGroupByKey(groupKey, 'direct') : null)
 }
 
 const closeAssetFolderModal = () => {
@@ -1882,10 +1887,10 @@ const submitAssetFolderForm = async () => {
     return
   }
   let parentUuid = ''
-  const parentGroup = assetFolderModal.parentKey ? assetGroupByKey(assetFolderModal.parentKey) : null
+  const parentGroup = assetFolderModal.parentKey ? assetGroupByKey(assetFolderModal.parentKey, assetFolderModal.scope) : null
   if (parentGroup) {
     try {
-      parentUuid = (await ensureAssetFolderForGroup(parentGroup)).uuid
+      parentUuid = (await ensureAssetFolderForGroup(parentGroup, assetFolderModal.scope)).uuid
     } catch (error) {
       assetFolderFormError.value = error instanceof Error ? error.message : '父目录保存失败'
       return

@@ -136,6 +136,30 @@ describe('assets sqlite backend seed boundary', () => {
     })
   })
 
+  it('keeps direct and bastion custom folder trees isolated in SQLite storage', async () => {
+    await withAssetDatabase(async (databasePath) => {
+      const backend = await loadBackend()
+      backend.configureAssetBackendRuntime({ databasePath, useSeedData: false, sqliteFactory: Database })
+
+      const directRoot = backend.saveAssetFolder({ name: '业务目录', description: 'direct root', scope: 'direct' })
+      const bastionRoot = backend.saveAssetFolder({ name: '业务目录', description: 'bastion root', scope: 'bastion' })
+
+      expect(directRoot.ok).toBe(true)
+      expect(bastionRoot.ok).toBe(true)
+      expect(directRoot.data?.uuid).not.toBe(bastionRoot.data?.uuid)
+      expect(backend.saveAssetFolder({ name: '直连子目录', scope: 'direct', parentUuid: directRoot.data!.uuid }).ok).toBe(true)
+      expect(backend.saveAssetFolder({ name: '堡垒机子目录', scope: 'bastion', parentUuid: bastionRoot.data!.uuid }).ok).toBe(true)
+
+      const bastionUnderDirect = backend.saveAssetFolder({ name: '错误堡垒机子目录', scope: 'bastion', parentUuid: directRoot.data!.uuid })
+      const directUnderBastion = backend.saveAssetFolder({ name: '错误直连子目录', scope: 'direct', parentUuid: bastionRoot.data!.uuid })
+
+      expect(bastionUnderDirect.ok).toBe(false)
+      expect(bastionUnderDirect.errorMessage).toContain('Folder parent scope mismatch')
+      expect(directUnderBastion.ok).toBe(false)
+      expect(directUnderBastion.errorMessage).toContain('Folder parent scope mismatch')
+    })
+  })
+
   it('migrates legacy plaintext SQLite secrets to encrypted storage on startup', async () => {
     await withAssetDatabase(async (databasePath) => {
       const credentialKeyPath = join(databasePath, '..', 'asset-credential.key')

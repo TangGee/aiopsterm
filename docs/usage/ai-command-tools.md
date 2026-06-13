@@ -15,6 +15,8 @@ The main process parses this block before the assistant response reaches the ren
 
 The AI panel renders that backend-owned message as a command card. Copy uses the structured command text. Run sends the command through the existing terminal command path and requires an active backend terminal session; without one, aiopsterm shows the normal terminal-unavailable notice and does not report a fake command result.
 
+The right AI sidebar starts as a real empty chat surface, not with client-fabricated assistant messages or sample workflow cards. The Todo/progress strip is hidden until a backend-owned task snapshot or focused task exists; model, context, history, export, and input controls remain functional from the initial empty state.
+
 Command execution still follows the terminal security policy from Settings -> AI Preferences -> Security Configuration. Commands blocked by policy stay blocked, commands requiring confirmation show the approval bar, and successful writes are accepted only after the terminal bridge confirms the exact backend session and byte count. Terminal output is rendered only from backend `terminal:data` events.
 
 Chat history and Markdown export preserve `commandExecution`, so restored or exported conversations keep the original command-tool metadata.

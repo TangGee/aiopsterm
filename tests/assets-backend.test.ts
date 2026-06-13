@@ -304,6 +304,26 @@ describe('assets backend boundary', () => {
     expect(ignoredClientUuid.data?.uuid).not.toBe('custom-folder-client-draft')
   })
 
+  it('keeps direct and bastion custom folder trees isolated behind the backend boundary', async () => {
+    const backend = await loadBackend()
+    const directRoot = backend.saveAssetFolder({ name: '业务目录', description: 'direct root', scope: 'direct' })
+    const bastionRoot = backend.saveAssetFolder({ name: '业务目录', description: 'bastion root', scope: 'bastion' })
+
+    expect(directRoot.ok).toBe(true)
+    expect(bastionRoot.ok).toBe(true)
+    expect(directRoot.data?.uuid).not.toBe(bastionRoot.data?.uuid)
+    expect(backend.saveAssetFolder({ name: '直连子目录', scope: 'direct', parentUuid: directRoot.data!.uuid }).ok).toBe(true)
+    expect(backend.saveAssetFolder({ name: '堡垒机子目录', scope: 'bastion', parentUuid: bastionRoot.data!.uuid }).ok).toBe(true)
+
+    const bastionUnderDirect = backend.saveAssetFolder({ name: '错误堡垒机子目录', scope: 'bastion', parentUuid: directRoot.data!.uuid })
+    const directUnderBastion = backend.saveAssetFolder({ name: '错误直连子目录', scope: 'direct', parentUuid: bastionRoot.data!.uuid })
+
+    expect(bastionUnderDirect.ok).toBe(false)
+    expect(bastionUnderDirect.errorMessage).toContain('Folder parent scope mismatch')
+    expect(directUnderBastion.ok).toBe(false)
+    expect(directUnderBastion.errorMessage).toContain('Folder parent scope mismatch')
+  })
+
   it('owns asset group listing, renaming, and deletion from backend asset rows', async () => {
     const backend = await loadBackend()
 
