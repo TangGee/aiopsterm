@@ -491,7 +491,15 @@ let offExit: (() => void) | null = null
 let zmodemProgressHideTimer: number | null = null
 const fontSize = ref(12)
 const terminalElements = new Map<string, HTMLElement>()
-const terminalViews = new Map<string, { terminal: XtermTerminal; fit: FitAddon; search: SearchAddon; lastOutput: string }>()
+type TerminalView = {
+  terminal: XtermTerminal
+  fit: FitAddon
+  search: SearchAddon
+  lastOutput: string
+  resizeObserver?: ResizeObserver
+}
+
+const terminalViews = new Map<string, TerminalView>()
 const commandDialog = reactive({
   visible: false,
   panelId: '',
@@ -721,12 +729,32 @@ const syncTerminalView = (panel: TerminalPanel) => {
     }
     view.lastOutput = displayOutput
   }
-  window.requestAnimationFrame(() => {
-    view.fit.fit()
-    view.terminal.scrollToBottom()
-  })
+  scheduleTerminalFit(panel.id, { scrollToBottom: true })
   updateSelectionButtonPosition(panel.id)
   updateSuggestionsPosition(panel.id)
+}
+
+const scheduleTerminalFit = (panelId: string, options: { scrollToBottom?: boolean; frames?: number } = {}) => {
+  const frames = options.frames ?? 2
+  const run = (remaining: number) => {
+    window.requestAnimationFrame(() => {
+      const view = terminalViews.get(panelId)
+      const element = terminalElements.get(panelId)
+      if (!view || !element?.isConnected) return
+      view.fit.fit()
+      if (options.scrollToBottom) view.terminal.scrollToBottom()
+      updateSelectionButtonPosition(panelId)
+      updateSuggestionsPosition(panelId)
+      if (remaining > 1) run(remaining - 1)
+    })
+  }
+  run(Math.max(1, frames))
+}
+
+const scheduleVisibleTerminalFit = (options: { scrollToBottom?: boolean; frames?: number } = {}) => {
+  visibleTerminalPanels.value
+    .filter((panel) => panel.kind !== 'knowledge')
+    .forEach((panel) => scheduleTerminalFit(panel.id, options))
 }
 
 const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
@@ -752,7 +780,14 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
   terminal.loadAddon(fit)
   terminal.loadAddon(searchAddon)
   terminal.open(element)
-  terminalViews.set(panel.id, { terminal, fit, search: searchAddon, lastOutput: '' })
+  const view: TerminalView = { terminal, fit, search: searchAddon, lastOutput: '' }
+  if (typeof ResizeObserver !== 'undefined') {
+    view.resizeObserver = new ResizeObserver(() => {
+      scheduleTerminalFit(panel.id, { frames: 2 })
+    })
+    view.resizeObserver.observe(element)
+  }
+  terminalViews.set(panel.id, view)
   writeRuntimeLog('debug', 'renderer.terminal-view.created', {
     panelId: panel.id,
     hasSession: Boolean(panel.sessionId)
@@ -858,6 +893,7 @@ const setTerminalElement = (panelId: string, element: Element | ComponentPublicI
     terminalElements.delete(panelId)
     const view = terminalViews.get(panelId)
     if (view) {
+      view.resizeObserver?.disconnect()
       view.terminal.dispose()
       terminalViews.delete(panelId)
     }
@@ -1161,7 +1197,10 @@ const splitSelected = (direction: 'right' | 'below') => {
 const unsplitSelected = () => {
   workspace.unsplitPanel(menu.panelId)
   menu.visible = false
-  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+  nextTick(() => {
+    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
+    terminalViews.get(workspace.activePanelId)?.terminal.focus()
+  })
 }
 
 const forkSelected = async () => {
@@ -1265,7 +1304,10 @@ const handleTabDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
   }
   workspace.attachPanelToSplit(draggedId, targetPanel.id, 'right')
   clearTerminalTabDragState()
-  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+  nextTick(() => {
+    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
+    terminalViews.get(workspace.activePanelId)?.terminal.focus()
+  })
 }
 
 const handleTabBarDragOver = (event: DragEvent) => {
@@ -1286,7 +1328,10 @@ const handleTabBarDrop = (event: DragEvent) => {
   const draggedId = getDraggedTerminalPanelId(event)
   if (draggedId) workspace.unsplitPanel(draggedId)
   clearTerminalTabDragState()
-  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+  nextTick(() => {
+    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
+    terminalViews.get(workspace.activePanelId)?.terminal.focus()
+  })
 }
 
 const handlePaneDragEnter = (event: DragEvent, panel: TerminalPanel) => {
@@ -1313,7 +1358,10 @@ const handlePaneDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
   }
   workspace.attachPanelToSplit(draggedId, targetPanel.id, 'right')
   clearTerminalTabDragState()
-  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+  nextTick(() => {
+    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
+    terminalViews.get(workspace.activePanelId)?.terminal.focus()
+  })
 }
 
 const copySelection = async (panelId = workspace.activePanelId) => {
@@ -1919,7 +1967,10 @@ const splitFromTermMenu = (direction: 'right' | 'below') => {
 const unsplitFromTermMenu = () => {
   workspace.unsplitPanel(termMenu.panelId)
   termMenu.visible = false
-  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+  nextTick(() => {
+    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
+    terminalViews.get(workspace.activePanelId)?.terminal.focus()
+  })
 }
 
 const openFileManagerFromMenu = () => {
@@ -1978,7 +2029,10 @@ onUnmounted(() => {
     window.clearTimeout(zmodemProgressHideTimer)
     zmodemProgressHideTimer = null
   }
-  terminalViews.forEach((view) => view.terminal.dispose())
+  terminalViews.forEach((view) => {
+    view.resizeObserver?.disconnect()
+    view.terminal.dispose()
+  })
   terminalViews.clear()
   window.removeEventListener('keydown', handleShortcut)
 })
@@ -2056,12 +2110,21 @@ watch(
       for (const panelId of terminalViews.keys()) {
         if (!workspace.panels.some((panel) => panel.id === panelId)) {
           terminalViews.get(panelId)?.terminal.dispose()
+          terminalViews.get(panelId)?.resizeObserver?.disconnect()
           terminalViews.delete(panelId)
           terminalElements.delete(panelId)
         }
       }
     })
   }
+)
+
+watch(
+  () => splitLayoutItems.value.map(({ panel, style }) => `${panel.id}:${panel.splitGroupId || ''}:${panel.split || ''}:${JSON.stringify(style)}`).join('|'),
+  () => {
+    nextTick(() => scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 }))
+  },
+  { flush: 'post' }
 )
 
 watch(

@@ -393,6 +393,12 @@ const waitForMockCall = async (mock: { mock: { calls: unknown[] } }, label: stri
   throw new Error(`${label} was not called`)
 }
 
+const waitForAnimationFrames = async (count = 1) => {
+  for (let index = 0; index < count; index += 1) {
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  }
+}
+
 const withMockExecCommand = async <T>(handler: () => boolean, callback: (execCommandSpy: ReturnType<typeof vi.fn>) => Promise<T>) => {
   const originalExecCommand = document.execCommand
   const execCommandSpy = vi.fn(handler)
@@ -5692,16 +5698,21 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(2)
     expect(wrapper.find('.terminal-grid').classes()).toContain('split')
 
+    const splitTerminal = mockXtermInstances.at(-1)!
+    const splitFitAddon = splitTerminal.loadAddon.mock.calls.find(([addon]) => 'fit' in addon)?.[0]
+    const fitCallsBeforeUnsplit = splitFitAddon.fit.mock.calls.length
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     expect(wrapper.find('.terminal-context-menu').text()).toContain('取消拆分')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('取消拆分'))!.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
+    await waitForAnimationFrames(4)
     expect(store.activePanelId).toBe(splitTabId)
     expect(store.activePanel.split).toBeUndefined()
     expect(store.activePanel.splitGroupId).toBeUndefined()
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
     expect(wrapper.find('.terminal-grid').classes()).not.toContain('split')
+    expect(splitFitAddon.fit.mock.calls.length).toBeGreaterThan(fitCallsBeforeUnsplit)
 
     const tabsAfterRestore = wrapper.findAll('.terminal-tab')
     const restoredTab = tabsAfterRestore.find((tab) => tab.classes().includes('active'))!
@@ -5716,6 +5727,7 @@ describe('AppShell', () => {
     sourceTab.element.dispatchEvent(attachDrop)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
+    await waitForAnimationFrames(4)
     expect(attachTransfer.setData).toHaveBeenCalledWith('application/x-aiopsterm-terminal-tab', splitTabId)
     expect(store.activePanelId).toBe(splitTabId)
     expect(store.activePanel.split).toBe('right')
@@ -5731,6 +5743,7 @@ describe('AppShell', () => {
     wrapper.find('.terminal-tabs').element.dispatchEvent(restoreDrop)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
+    await waitForAnimationFrames(4)
     expect(store.activePanelId).toBe(splitTabId)
     expect(store.activePanel.split).toBeUndefined()
     expect(store.activePanel.splitGroupId).toBeUndefined()
