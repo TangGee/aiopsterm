@@ -18,24 +18,17 @@
             @click="mode = 'editor'"
           >
             <Pencil />
-            编辑
+            源码
           </button>
           <button
             :class="{ active: mode === 'preview' }"
             @click="mode = 'preview'"
           >
             <Eye />
-            预览
+            渲染
           </button>
         </div>
         <em>{{ statusText }}</em>
-        <button
-          v-if="!isImage"
-          :disabled="saving || loading"
-          @click="saveNow"
-        >
-          保存
-        </button>
       </div>
     </header>
 

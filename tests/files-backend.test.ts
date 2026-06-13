@@ -1235,10 +1235,12 @@ describe('files backend content boundary', () => {
     expect(ssh2Mock.connectConfigs[0]).not.toHaveProperty('agentForward')
   })
 
-  it('returns backend errors instead of seed fallback when asset-backed SFTP fails', async () => {
+  it('falls back to remote root for missing asset-backed SFTP directories without seed rows', async () => {
     const sessionId = saveSftpAsset()
 
-    await expect(listFiles('/missing', { kind: 'remote', sessionId })).rejects.toThrow('No such file /missing')
+    const fallbackRows = await listFiles('/missing', { kind: 'remote', sessionId })
+    expect(fallbackRows.map((row) => row.path)).toEqual(['/srv'])
+    expect(ssh2Mock.calls).toEqual(expect.arrayContaining([{ method: 'stat', path: '/missing' }, { method: 'readdir', path: '/' }]))
 
     const read = await readFileContent('/srv/unknown.txt', { kind: 'remote', sessionId })
     expect(read).toMatchObject({ ok: true, data: { action: 'create', content: '' } })

@@ -60,15 +60,6 @@
           <X />
         </button>
       </div>
-      <button
-        class="new-tab-button"
-        title="新建终端"
-        @dragover.prevent="handleTabBarDragOver"
-        @drop.prevent="handleTabBarDrop"
-        @click="workspace.createPanel()"
-      >
-        <Plus />
-      </button>
     </div>
 
     <div
@@ -473,7 +464,7 @@ import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
@@ -1359,9 +1350,9 @@ const clearTerminalTabDragState = () => {
 
 const handleTabDragStart = (event: DragEvent, panel: TerminalPanel) => {
   if (!event.dataTransfer) return
+  draggedTerminalPanelId.value = panel.id
+  event.dataTransfer.setData(terminalTabDragType, panel.id)
   if (panel.kind === 'terminal') {
-    draggedTerminalPanelId.value = panel.id
-    event.dataTransfer.setData(terminalTabDragType, panel.id)
     event.dataTransfer.setData('text/plain', panel.title)
     event.dataTransfer.effectAllowed = 'move'
     return
@@ -1376,7 +1367,7 @@ const handleTabDragStart = (event: DragEvent, panel: TerminalPanel) => {
   event.dataTransfer.setData('application/x-aiopsterm-context', serialized)
   event.dataTransfer.setData('text/html', `<span data-aiopsterm-context="${encodeURIComponent(serialized)}"></span>`)
   event.dataTransfer.setData('text/plain', panel.knowledge.relPath)
-  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.effectAllowed = 'copyMove'
 }
 
 const handleTabDragEnd = () => {
@@ -1385,7 +1376,7 @@ const handleTabDragEnd = () => {
 
 const handleTabDragEnter = (event: DragEvent, panel: TerminalPanel) => {
   const draggedId = getDraggedTerminalPanelId(event)
-  if (!draggedId || panel.kind === 'knowledge' || draggedId === panel.id) return
+  if (!draggedId || draggedId === panel.id) return
   tabDragOverPanelId.value = panel.id
   tabBarDragOver.value = false
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
@@ -1401,7 +1392,7 @@ const handleTabDragLeave = (panelId: string) => {
 
 const handleTabDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
   const draggedId = getDraggedTerminalPanelId(event)
-  if (!draggedId || targetPanel.kind === 'knowledge' || draggedId === targetPanel.id) {
+  if (!draggedId || draggedId === targetPanel.id) {
     clearTerminalTabDragState()
     return
   }
@@ -1435,7 +1426,7 @@ const handleTabBarDrop = (event: DragEvent) => {
 
 const handlePaneDragEnter = (event: DragEvent, panel: TerminalPanel) => {
   const draggedId = getDraggedTerminalPanelId(event)
-  if (!draggedId || panel.kind === 'knowledge' || draggedId === panel.id) return
+  if (!draggedId || draggedId === panel.id) return
   paneDragOverPanelId.value = panel.id
   tabBarDragOver.value = false
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
@@ -1451,7 +1442,7 @@ const handlePaneDragLeave = (panelId: string) => {
 
 const handlePaneDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
   const draggedId = getDraggedTerminalPanelId(event)
-  if (!draggedId || targetPanel.kind === 'knowledge' || draggedId === targetPanel.id) {
+  if (!draggedId || draggedId === targetPanel.id) {
     clearTerminalTabDragState()
     return
   }

@@ -77,15 +77,7 @@
               </div>
               <button
                 class="asset-action-button"
-                data-testid="asset-new-host-button"
-                data-onboarding-id="asset-new-host-button"
-                @click="openNewPanel"
-              >
-                <Database />
-                新建主机
-              </button>
-              <button
-                class="asset-action-button"
+                title="支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 导入。"
                 @click="openImportDialog"
               >
                 <Import />
@@ -94,7 +86,7 @@
               <button
                 class="asset-action-button icon-only"
                 title="导入帮助"
-                @click="importNotice = '导入文件需要包含 username、ip、password、label、group_name、auth_type、port。'"
+                @click="importHelpOpen = true"
               >
                 <CircleHelp />
               </button>
@@ -109,7 +101,10 @@
           </div>
 
           <div class="asset-list-container">
-            <div class="asset-host-tree">
+            <div
+              class="asset-host-tree"
+              @contextmenu.prevent="openAssetBlankContextMenu"
+            >
               <template
                 v-for="group in filteredAssetGroups"
                 :key="group.key"
@@ -117,6 +112,7 @@
                 <button
                   class="asset-tree-group-row"
                   @click="toggleAssetGroup(group.key)"
+                  @contextmenu.prevent.stop="openAssetGroupContextMenu($event, group.key)"
                 >
                   <ChevronDown v-if="isAssetGroupExpanded(group.key)" />
                   <ChevronRight v-else />
@@ -177,15 +173,38 @@
             <div
               v-if="filteredAssetGroups.length === 0"
               class="asset-empty-state"
+              @contextmenu.prevent="openAssetBlankContextMenu"
             >
               <Laptop />
               <strong>{{ assetQuery ? '没有搜索结果' : '暂无资产' }}</strong>
-              <small v-if="!assetQuery">新建主机或导入已有会话。</small>
+              <small v-if="!assetQuery">右键树区域新建主机，或导入已有会话。</small>
               <div v-if="!assetQuery">
-                <button @click="openNewPanel">新建主机</button>
-                <button @click="importNotice = '请选择支持的导入文件。'">导入</button>
+                <button @click="openNewPanel()">新建主机</button>
+                <button @click="openImportDialog">导入</button>
               </div>
             </div>
+          </div>
+
+          <div
+            v-if="assetBlankContextMenuOpen"
+            class="asset-context-menu"
+            :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
+          >
+            <button @click="openNewPanelFromContext()">
+              <Laptop />
+              新建主机
+            </button>
+          </div>
+
+          <div
+            v-if="assetGroupContextMenuKey"
+            class="asset-context-menu"
+            :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
+          >
+            <button @click="openNewPanelFromContext(assetGroupContextMenuKey)">
+              <Laptop />
+              新建主机
+            </button>
           </div>
 
           <div
@@ -496,103 +515,6 @@
             </div>
           </div>
         </div>
-
-        <div
-          v-if="workspace.sshProxyAddModalOpen"
-          class="asset-host-modal file-modal"
-          @click.self="workspace.closeAddSshProxyConfig()"
-        >
-          <aside class="asset-form-panel asset-host-form-modal">
-            <header>
-              <strong>新增代理</strong>
-              <button
-                title="关闭"
-                @click="workspace.closeAddSshProxyConfig()"
-              >
-                <X />
-              </button>
-            </header>
-            <label>
-              <span>名称</span>
-              <input
-                :value="workspace.sshProxyForm.name"
-                @input="workspace.updateSshProxyForm({ name: ($event.target as HTMLInputElement).value })"
-              />
-            </label>
-            <label>
-              <span>类型</span>
-              <select
-                :value="workspace.sshProxyForm.type"
-                @change="workspace.updateSshProxyForm({ type: ($event.target as HTMLSelectElement).value as any })"
-              >
-                <option value="HTTP">HTTP</option>
-                <option value="HTTPS">HTTPS</option>
-                <option value="SOCKS4">SOCKS4</option>
-                <option value="SOCKS5">SOCKS5</option>
-              </select>
-            </label>
-            <label>
-              <span>主机</span>
-              <input
-                :value="workspace.sshProxyForm.host"
-                @input="workspace.updateSshProxyForm({ host: ($event.target as HTMLInputElement).value })"
-              />
-            </label>
-            <label>
-              <span>端口</span>
-              <input
-                type="number"
-                :value="workspace.sshProxyForm.port"
-                @input="workspace.updateSshProxyForm({ port: Number(($event.target as HTMLInputElement).value) })"
-              />
-            </label>
-            <label class="asset-inline-check">
-              <input
-                type="checkbox"
-                :checked="workspace.sshProxyForm.enableProxyIdentity"
-                @change="workspace.updateSshProxyForm({ enableProxyIdentity: ($event.target as HTMLInputElement).checked })"
-              />
-              <span>需要代理认证</span>
-            </label>
-            <template v-if="workspace.sshProxyForm.enableProxyIdentity">
-              <label>
-                <span>用户名</span>
-                <input
-                  :value="workspace.sshProxyForm.username"
-                  @input="workspace.updateSshProxyForm({ username: ($event.target as HTMLInputElement).value })"
-                />
-              </label>
-              <label>
-                <span>密码</span>
-                <input
-                  type="password"
-                  :value="workspace.sshProxyForm.password"
-                  @input="workspace.updateSshProxyForm({ password: ($event.target as HTMLInputElement).value })"
-                />
-              </label>
-            </template>
-            <small
-              v-if="workspace.settingsNotice"
-              class="asset-form-error"
-            >
-              {{ workspace.settingsNotice }}
-            </small>
-            <div class="asset-form-actions">
-              <button
-                class="asset-submit-button secondary"
-                @click="workspace.closeAddSshProxyConfig()"
-              >
-                取消
-              </button>
-              <button
-                class="asset-submit-button"
-                @click="saveProxyFormFromAssetPanel"
-              >
-                保存
-              </button>
-            </div>
-          </aside>
-        </div>
       </div>
     </template>
 
@@ -872,72 +794,211 @@
           </div>
         </div>
 
-        <aside
+        <div
           v-if="keyEditorOpen"
-          class="asset-form-panel key-form-panel"
+          class="asset-host-modal file-modal"
+          @click.self="keyEditorOpen = false"
         >
-          <header>
-            <strong>{{ keyEditMode ? '编辑密钥' : '新建密钥' }}</strong>
-            <button
-              title="关闭"
-              @click="keyEditorOpen = false"
+          <aside class="asset-form-panel key-form-panel asset-host-form-modal">
+            <header>
+              <strong>{{ keyEditMode ? '编辑密钥' : '新建密钥' }}</strong>
+              <button
+                title="关闭"
+                @click="keyEditorOpen = false"
+              >
+                <X />
+              </button>
+            </header>
+            <label>
+              <span>名称</span>
+              <input v-model="keyForm.name" />
+            </label>
+            <label>
+              <span>私钥</span>
+              <textarea
+                v-model="keyForm.privateKey"
+                spellcheck="false"
+              />
+            </label>
+            <label>
+              <span>公钥</span>
+              <textarea
+                v-model="keyForm.publicKey"
+                spellcheck="false"
+              />
+            </label>
+            <label>
+              <span>Passphrase</span>
+              <input
+                v-model="keyForm.passphrase"
+                type="password"
+              />
+            </label>
+            <div
+              class="key-drop-area"
+              :class="{ 'drag-over': keyDragOver }"
+              @dragover.prevent
+              @dragenter.prevent="keyDragOver = true"
+              @dragleave.prevent="keyDragOver = false"
+              @drop.prevent="handleKeyDrop"
+              @click="openKeyImportDialog"
             >
-              <X />
-            </button>
-          </header>
-          <label>
-            <span>名称</span>
-            <input v-model="keyForm.name" />
-          </label>
-          <label>
-            <span>私钥</span>
-            <textarea
-              v-model="keyForm.privateKey"
-              spellcheck="false"
-            />
-          </label>
-          <label>
-            <span>公钥</span>
-            <textarea
-              v-model="keyForm.publicKey"
-              spellcheck="false"
-            />
-          </label>
-          <label>
-            <span>Passphrase</span>
-            <input
-              v-model="keyForm.passphrase"
-              type="password"
-            />
-          </label>
-          <div
-            class="key-drop-area"
-            :class="{ 'drag-over': keyDragOver }"
-            @dragover.prevent
-            @dragenter.prevent="keyDragOver = true"
-            @dragleave.prevent="keyDragOver = false"
-            @drop.prevent="handleKeyDrop"
-            @click="openKeyImportDialog"
-          >
-            <Upload />
-            <span>拖拽或点击导入密钥文件</span>
-          </div>
-          <small
-            v-if="keyFormError"
-            class="key-form-error"
-          >
-            {{ keyFormError }}
-          </small>
-          <small v-if="keyImportNotice">{{ keyImportNotice }}</small>
-          <button
-            class="asset-submit-button"
-            @click="submitKeyForm"
-          >
-            {{ keyEditMode ? '保存密钥' : '创建密钥' }}
-          </button>
-        </aside>
+              <Upload />
+              <span>拖拽或点击导入密钥文件</span>
+            </div>
+            <small
+              v-if="keyFormError"
+              class="key-form-error"
+            >
+              {{ keyFormError }}
+            </small>
+            <small v-if="keyImportNotice">{{ keyImportNotice }}</small>
+            <div class="asset-form-actions">
+              <button
+                class="asset-submit-button secondary"
+                @click="keyEditorOpen = false"
+              >
+                取消
+              </button>
+              <button
+                class="asset-submit-button"
+                @click="submitKeyForm"
+              >
+                {{ keyEditMode ? '保存密钥' : '创建密钥' }}
+              </button>
+            </div>
+          </aside>
+        </div>
       </div>
     </template>
+
+    <div
+      v-if="workspace.sshProxyAddModalOpen"
+      class="asset-host-modal file-modal"
+      @click.self="closeProxyModal"
+    >
+      <aside class="asset-form-panel asset-host-form-modal asset-proxy-form-modal">
+        <header>
+          <strong>新增代理</strong>
+          <button
+            title="关闭"
+            @click="closeProxyModal"
+          >
+            <X />
+          </button>
+        </header>
+        <label>
+          <span>名称</span>
+          <input
+            :value="workspace.sshProxyForm.name"
+            @input="workspace.updateSshProxyForm({ name: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+        <label>
+          <span>类型</span>
+          <select
+            :value="workspace.sshProxyForm.type"
+            @change="workspace.updateSshProxyForm({ type: ($event.target as HTMLSelectElement).value as any })"
+          >
+            <option value="HTTP">HTTP</option>
+            <option value="HTTPS">HTTPS</option>
+            <option value="SOCKS4">SOCKS4</option>
+            <option value="SOCKS5">SOCKS5</option>
+          </select>
+        </label>
+        <label>
+          <span>主机</span>
+          <input
+            :value="workspace.sshProxyForm.host"
+            @input="workspace.updateSshProxyForm({ host: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+        <label class="asset-proxy-port-field">
+          <span>端口</span>
+          <input
+            type="number"
+            :value="workspace.sshProxyForm.port"
+            @input="workspace.updateSshProxyForm({ port: Number(($event.target as HTMLInputElement).value) })"
+          />
+        </label>
+        <label class="asset-inline-check asset-form-wide">
+          <input
+            type="checkbox"
+            :checked="workspace.sshProxyForm.enableProxyIdentity"
+            @change="workspace.updateSshProxyForm({ enableProxyIdentity: ($event.target as HTMLInputElement).checked })"
+          />
+          <span>需要代理认证</span>
+        </label>
+        <template v-if="workspace.sshProxyForm.enableProxyIdentity">
+          <label>
+            <span>用户名</span>
+            <input
+              :value="workspace.sshProxyForm.username"
+              @input="workspace.updateSshProxyForm({ username: ($event.target as HTMLInputElement).value })"
+            />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              type="password"
+              :value="workspace.sshProxyForm.password"
+              @input="workspace.updateSshProxyForm({ password: ($event.target as HTMLInputElement).value })"
+            />
+          </label>
+        </template>
+        <small
+          v-if="workspace.settingsNotice"
+          class="asset-form-error asset-form-wide"
+        >
+          {{ workspace.settingsNotice }}
+        </small>
+        <div class="asset-form-actions asset-form-wide">
+          <button
+            class="asset-submit-button secondary"
+            @click="closeProxyModal"
+          >
+            取消
+          </button>
+          <button
+            class="asset-submit-button"
+            @click="saveProxyFormFromAssetPanel"
+          >
+            保存
+          </button>
+        </div>
+      </aside>
+    </div>
+
+    <div
+      v-if="importHelpOpen"
+      class="asset-host-modal file-modal"
+      @click.self="importHelpOpen = false"
+    >
+      <aside class="asset-form-panel asset-host-form-modal asset-import-help-modal">
+        <header>
+          <strong>导入说明</strong>
+          <button
+            title="关闭"
+            @click="importHelpOpen = false"
+          >
+            <X />
+          </button>
+        </header>
+        <div class="asset-import-help-content">
+          <p>支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 等会话文件。</p>
+          <p>CSV 建议包含 username、ip、password、label、group_name、auth_type、port 字段；缺失字段会在预览阶段提示。</p>
+          <p>点击导入后先打开预览确认，确认前不会写入资产库。</p>
+        </div>
+        <div class="asset-form-actions">
+          <button
+            class="asset-submit-button"
+            @click="importHelpOpen = false"
+          >
+            知道了
+          </button>
+        </div>
+      </aside>
+    </div>
 
     <div
       v-if="exportModalOpen"
@@ -1162,8 +1223,11 @@ const editorOpen = ref(false)
 const editMode = ref(false)
 const selectedAssetId = ref<string | null>(null)
 const assetContextMenuId = ref<string | null>(null)
+const assetBlankContextMenuOpen = ref(false)
+const assetGroupContextMenuKey = ref('')
 const contextPosition = reactive({ x: 0, y: 0 })
 const importNotice = ref('')
+const importHelpOpen = ref(false)
 const assetFormError = ref('')
 const managedFormError = ref('')
 const exportModalOpen = ref(false)
@@ -1504,7 +1568,7 @@ const resetAssetConnectionTest = () => {
   assetTestOk.value = false
 }
 
-const resetForm = () => {
+const resetForm = (groupName = firstAssetGroupName.value) => {
   assetFormError.value = ''
   resetAssetConnectionTest()
   Object.assign(form, {
@@ -1512,7 +1576,7 @@ const resetForm = () => {
     title: '',
     host: '',
     username: '',
-    group: firstAssetGroupName.value,
+    group: groupName,
     port: 22,
     asset_type: 'person',
     auth_type: 'password',
@@ -1525,11 +1589,24 @@ const resetForm = () => {
   })
 }
 
-const openNewPanel = () => {
+const closeAssetContextMenus = () => {
+  assetContextMenuId.value = null
+  assetBlankContextMenuOpen.value = false
+  assetGroupContextMenuKey.value = ''
+}
+
+const groupNameFromKey = (groupKey = '') => groupKey.replace(/^group-/, '')
+
+const openNewPanel = (groupKey = '') => {
   activeAssetView.value = 'assetConfig'
   editMode.value = false
-  resetForm()
+  resetForm(groupKey ? groupNameFromKey(groupKey) : firstAssetGroupName.value)
   editorOpen.value = true
+  closeAssetContextMenus()
+}
+
+const openNewPanelFromContext = (groupKey = '') => {
+  openNewPanel(groupKey)
 }
 
 const openHostManagement = async () => {
@@ -1563,6 +1640,7 @@ const openOnboardingCreatePanel = () => {
   editMode.value = false
   resetForm()
   editorOpen.value = true
+  closeAssetContextMenus()
 }
 
 const resolveConfiguredSshProxyName = (proxyName?: string) => {
@@ -1579,9 +1657,13 @@ const openSshProxySettings = () => {
   workspace.openAddSshProxyConfig()
 }
 
+const closeProxyModal = () => {
+  workspace.closeAddSshProxyConfig()
+  pendingHostDraftReturn.value = false
+}
+
 const openProxyAddPanel = (returnToHostForm = false) => {
   pendingHostDraftReturn.value = returnToHostForm
-  activeAssetView.value = 'proxyManagement'
   workspace.openAddSshProxyConfig()
 }
 
@@ -1619,6 +1701,7 @@ const editAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset) return
+  closeAssetContextMenus()
   activeAssetView.value = 'assetConfig'
   editMode.value = true
   assetFormError.value = ''
@@ -1640,13 +1723,13 @@ const editAsset = (assetId: string | null) => {
     switchBrand: asset.asset_type === 'switch' ? 'cisco' : 'cisco'
   })
   editorOpen.value = true
-  assetContextMenuId.value = null
 }
 
 const cloneAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset) return
+  closeAssetContextMenus()
   activeAssetView.value = 'assetConfig'
   editMode.value = false
   assetFormError.value = ''
@@ -1668,14 +1751,13 @@ const cloneAsset = (assetId: string | null) => {
     switchBrand: 'cisco'
   })
   editorOpen.value = true
-  assetContextMenuId.value = null
 }
 
 const removeAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset) return
-  assetContextMenuId.value = null
+  closeAssetContextMenus()
   confirmState.open = true
   confirmState.title = '删除主机'
   confirmState.message = `确定删除 ${asset.title}？此操作会更新本地资产库。`
@@ -1716,7 +1798,7 @@ const connectAsset = async (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset || asset.asset_type === 'organization') {
-    assetContextMenuId.value = null
+    closeAssetContextMenus()
     return
   }
   selectedAssetId.value = asset.id
@@ -1729,7 +1811,7 @@ const connectAsset = async (assetId: string | null) => {
   if (!window.aiops?.createTerminal) {
     importNotice.value = 'SSH 终端启动服务不可用'
     discardPendingPanel()
-    assetContextMenuId.value = null
+    closeAssetContextMenus()
     return
   }
   workspace.registerSshSession(panelId, asset)
@@ -1745,13 +1827,13 @@ const connectAsset = async (assetId: string | null) => {
     if (!connected) {
       importNotice.value = 'SSH 终端启动失败'
       discardPendingPanel()
-      assetContextMenuId.value = null
+      closeAssetContextMenus()
       return
     }
   } catch (error) {
     importNotice.value = error instanceof Error ? error.message : 'SSH 终端启动失败'
     discardPendingPanel()
-    assetContextMenuId.value = null
+    closeAssetContextMenus()
     return
   }
   workspace.selectedContexts = [
@@ -1764,16 +1846,39 @@ const connectAsset = async (assetId: string | null) => {
     workspace.nextOnboardingStep()
   }
   workspace.setActiveModule('workspace')
-  assetContextMenuId.value = null
+  closeAssetContextMenus()
 }
 
 const openAssetContextMenu = (event: MouseEvent, assetId: string) => {
   assetContextMenuId.value = assetId
+  assetBlankContextMenuOpen.value = false
+  assetGroupContextMenuKey.value = ''
   const menuWidth = 150
   const menuHeight = 220
   const padding = 10
   contextPosition.x = Math.max(padding, Math.min(event.clientX, window.innerWidth - menuWidth - padding))
   contextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
+}
+
+const positionAssetContextMenu = (event: MouseEvent, menuWidth = 150, menuHeight = 90) => {
+  const padding = 10
+  contextPosition.x = Math.max(padding, Math.min(event.clientX, window.innerWidth - menuWidth - padding))
+  contextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
+}
+
+const openAssetBlankContextMenu = (event: MouseEvent) => {
+  if ((event.target as HTMLElement | null)?.closest('.asset-tree-group-row, .asset-tree-host-row, .asset-context-menu')) return
+  assetContextMenuId.value = null
+  assetGroupContextMenuKey.value = ''
+  assetBlankContextMenuOpen.value = true
+  positionAssetContextMenu(event)
+}
+
+const openAssetGroupContextMenu = (event: MouseEvent, groupKey: string) => {
+  assetContextMenuId.value = null
+  assetBlankContextMenuOpen.value = false
+  assetGroupContextMenuKey.value = groupKey
+  positionAssetContextMenu(event)
 }
 
 const buildAssetFormInput = (): { asset: AiopsAssetInput; title: string } | null => {
@@ -1882,7 +1987,7 @@ const refreshOrganizationAsset = async () => {
       importNotice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败。'
     }
   }
-  assetContextMenuId.value = null
+  closeAssetContextMenus()
 }
 
 const openOrganizationManagement = () => {
@@ -1892,7 +1997,7 @@ const openOrganizationManagement = () => {
   assetManagementPage.value = 1
   managedEditorOpen.value = false
   activeAssetView.value = 'assetManagement'
-  assetContextMenuId.value = null
+  closeAssetContextMenus()
 }
 
 const openManagedAssetAdd = () => {
@@ -2062,7 +2167,6 @@ const loadAssetImportPreviewFromPath = async (filePath: string) => {
 }
 
 const openImportDialog = async () => {
-  importNotice.value = '支持 external-reference.json、CSV、XSH/XTS、INI/XML、MXTSESSIONS 导入。'
   const showOpenDialog = window.aiops?.showOpenDialog
   if (typeof showOpenDialog !== 'function') {
     importNotice.value = '导入文件选择服务不可用。'
@@ -2081,10 +2185,7 @@ const openImportDialog = async () => {
     importNotice.value = '导入文件选择失败。'
     return
   }
-  if (result?.canceled) {
-    importNotice.value = '已取消导入。'
-    return
-  }
+  if (result?.canceled) return
   await loadAssetImportPreviewFromPath(result?.filePaths?.[0] || '')
 }
 

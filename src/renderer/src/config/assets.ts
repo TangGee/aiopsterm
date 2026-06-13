@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { KeyRound, Network, Server } from 'lucide-vue-next'
+import { Database, KeyRound, Network, Server } from 'lucide-vue-next'
 
 export type AssetManagementEntry = {
   key: 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
@@ -14,6 +14,12 @@ export const assetManagementEntries: AssetManagementEntry[] = [
     name: '主机管理',
     description: '管理 SSH 主机、分组、导入导出和连接动作。',
     icon: Server
+  },
+  {
+    key: 'assetManagement',
+    name: '堡垒机管理',
+    description: '管理堡垒机组织资产、刷新来源资产和人工资产。',
+    icon: Database
   },
   {
     key: 'keyManagement',

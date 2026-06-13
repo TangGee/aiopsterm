@@ -499,17 +499,6 @@
               placeholder="留空则保留已保存密码"
             />
           </label>
-          <label
-            v-else
-            class="workspace-host-form-wide"
-          >
-            <span>私钥</span>
-            <textarea
-              v-model="hostForm.privateKey"
-              rows="4"
-              placeholder="留空则使用 SSH Agent 或已保存私钥"
-            />
-          </label>
           <label v-if="hostForm.authType === 'keyBased'">
             <span class="workspace-field-heading">
               KeyChain
@@ -667,6 +656,274 @@
               class="primary"
             >
               确定
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div
+      v-if="hostChildModal === 'proxy'"
+      class="files-folder-modal-backdrop workspace-child-modal-backdrop"
+      @click.self="closeHostChildModal"
+    >
+      <section class="files-folder-modal workspace-child-modal workspace-proxy-child-modal">
+        <header>
+          <h3>新增代理</h3>
+          <button
+            type="button"
+            @click="closeHostChildModal"
+          >
+            <X />
+          </button>
+        </header>
+        <form
+          class="files-folder-form workspace-proxy-form"
+          @submit.prevent="saveHostProxyForm"
+        >
+          <label>
+            <span>名称 *</span>
+            <input
+              :value="workspace.sshProxyForm.name"
+              @input="workspace.updateSshProxyForm({ name: ($event.target as HTMLInputElement).value })"
+            />
+          </label>
+          <label>
+            <span>类型</span>
+            <select
+              :value="workspace.sshProxyForm.type"
+              @change="workspace.updateSshProxyForm({ type: ($event.target as HTMLSelectElement).value as any })"
+            >
+              <option value="HTTP">HTTP</option>
+              <option value="HTTPS">HTTPS</option>
+              <option value="SOCKS4">SOCKS4</option>
+              <option value="SOCKS5">SOCKS5</option>
+            </select>
+          </label>
+          <label>
+            <span>主机 *</span>
+            <input
+              :value="workspace.sshProxyForm.host"
+              @input="workspace.updateSshProxyForm({ host: ($event.target as HTMLInputElement).value })"
+            />
+          </label>
+          <label class="workspace-port-field">
+            <span>端口 *</span>
+            <input
+              type="number"
+              :value="workspace.sshProxyForm.port"
+              @input="workspace.updateSshProxyForm({ port: Number(($event.target as HTMLInputElement).value) })"
+            />
+          </label>
+          <label class="asset-inline-check workspace-host-form-wide">
+            <input
+              type="checkbox"
+              :checked="workspace.sshProxyForm.enableProxyIdentity"
+              @change="workspace.updateSshProxyForm({ enableProxyIdentity: ($event.target as HTMLInputElement).checked })"
+            />
+            <span>需要代理认证</span>
+          </label>
+          <template v-if="workspace.sshProxyForm.enableProxyIdentity">
+            <label>
+              <span>用户名</span>
+              <input
+                :value="workspace.sshProxyForm.username"
+                @input="workspace.updateSshProxyForm({ username: ($event.target as HTMLInputElement).value })"
+              />
+            </label>
+            <label>
+              <span>密码</span>
+              <input
+                type="password"
+                :value="workspace.sshProxyForm.password"
+                @input="workspace.updateSshProxyForm({ password: ($event.target as HTMLInputElement).value })"
+              />
+            </label>
+          </template>
+          <p
+            v-if="hostChildFormError"
+            class="files-folder-error workspace-host-form-wide"
+          >
+            {{ hostChildFormError }}
+          </p>
+          <footer class="workspace-host-form-wide">
+            <button
+              type="button"
+              @click="closeHostChildModal"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="primary"
+            >
+              保存
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div
+      v-if="hostChildModal === 'key'"
+      class="files-folder-modal-backdrop workspace-child-modal-backdrop"
+      @click.self="closeHostChildModal"
+    >
+      <section class="files-folder-modal workspace-child-modal workspace-key-child-modal">
+        <header>
+          <h3>新建密钥</h3>
+          <button
+            type="button"
+            @click="closeHostChildModal"
+          >
+            <X />
+          </button>
+        </header>
+        <form
+          class="files-folder-form workspace-key-form"
+          @submit.prevent="saveHostKeyForm"
+        >
+          <label>
+            <span>名称 *</span>
+            <input v-model="hostKeyForm.name" />
+          </label>
+          <label class="workspace-host-form-wide">
+            <span>私钥 *</span>
+            <textarea
+              v-model="hostKeyForm.privateKey"
+              spellcheck="false"
+              rows="6"
+            />
+          </label>
+          <label class="workspace-host-form-wide">
+            <span>公钥</span>
+            <textarea
+              v-model="hostKeyForm.publicKey"
+              spellcheck="false"
+              rows="3"
+            />
+          </label>
+          <label>
+            <span>Passphrase</span>
+            <input
+              v-model="hostKeyForm.passphrase"
+              type="password"
+            />
+          </label>
+          <p
+            v-if="hostChildFormError"
+            class="files-folder-error workspace-host-form-wide"
+          >
+            {{ hostChildFormError }}
+          </p>
+          <footer class="workspace-host-form-wide">
+            <button
+              type="button"
+              @click="closeHostChildModal"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="primary"
+            >
+              保存
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div
+      v-if="hostChildModal === 'jumpHost'"
+      class="files-folder-modal-backdrop workspace-child-modal-backdrop"
+      @click.self="closeHostChildModal"
+    >
+      <section class="files-folder-modal workspace-child-modal workspace-jump-child-modal">
+        <header>
+          <h3>新建跳板机</h3>
+          <button
+            type="button"
+            @click="closeHostChildModal"
+          >
+            <X />
+          </button>
+        </header>
+        <form
+          class="workspace-host-form files-folder-form"
+          @submit.prevent="saveHostJumpHostForm"
+        >
+          <label>
+            <span>主机名 *</span>
+            <input
+              v-model="hostJumpForm.title"
+              placeholder="jump-host"
+            />
+          </label>
+          <label>
+            <span>地址 *</span>
+            <input v-model="hostJumpForm.host" />
+          </label>
+          <label>
+            <span>认证方式</span>
+            <select v-model="hostJumpForm.authType">
+              <option value="password">密码</option>
+              <option value="keyBased">密钥</option>
+            </select>
+          </label>
+          <label>
+            <span>用户名 *</span>
+            <input v-model="hostJumpForm.username" />
+          </label>
+          <label v-if="hostJumpForm.authType === 'password'">
+            <span>密码</span>
+            <input
+              v-model="hostJumpForm.password"
+              type="password"
+            />
+          </label>
+          <label v-else>
+            <span>KeyChain</span>
+            <select v-model="hostJumpForm.keychainId">
+              <option value="">不使用 KeyChain</option>
+              <option
+                v-for="keychain in keychainOptions"
+                :key="keychain.id"
+                :value="keychain.id"
+              >
+                {{ keychain.name }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>端口 *</span>
+            <input
+              v-model="hostJumpForm.port"
+              inputmode="numeric"
+            />
+          </label>
+          <label>
+            <span>分组</span>
+            <input v-model="hostJumpForm.group" />
+          </label>
+          <p
+            v-if="hostChildFormError"
+            class="files-folder-error workspace-host-form-wide"
+          >
+            {{ hostChildFormError }}
+          </p>
+          <footer class="workspace-host-form-wide">
+            <button
+              type="button"
+              @click="closeHostChildModal"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="primary"
+            >
+              保存
             </button>
           </footer>
         </form>
@@ -903,7 +1160,9 @@ import type {
   AiopsAssetType,
   AiopsCustomFolderRecord,
   AiopsCustomFolderSaveInput,
+  AiopsKeychainInput,
   AiopsKeychainRecord,
+  AiopsKeychainType,
   AiopsSshTunnelMutationResult,
   AiopsSshTunnelType
 } from '@shared/preload'
@@ -918,6 +1177,7 @@ import {
   isAiopsDeletedCustomFolderData,
   isAiopsJumpserverOrganizationAssetRefreshData,
   isAiopsKeychainListData,
+  isAiopsKeychainRecord,
   isAiopsSavedAssetRecord,
   isAiopsSavedCustomFolderRecord,
   isAiopsSshTunnelMutationData,
@@ -999,8 +1259,6 @@ const hostForm = reactive({
   authType: 'password' as AiopsAssetAuthType,
   comment: '',
   password: '',
-  privateKey: '',
-  passphrase: '',
   keychainId: '',
   proxyName: '',
   jumpHostId: ''
@@ -1009,6 +1267,24 @@ const hostFormError = ref('')
 const hostTestLoading = ref(false)
 const hostTestMessage = ref('')
 const hostTestOk = ref(false)
+const hostChildModal = ref<'' | 'proxy' | 'key' | 'jumpHost'>('')
+const hostChildFormError = ref('')
+const hostKeyForm = reactive({
+  name: '',
+  privateKey: '',
+  publicKey: '',
+  passphrase: ''
+})
+const hostJumpForm = reactive({
+  title: 'jump-host',
+  host: '',
+  username: 'root',
+  group: '',
+  port: '22',
+  authType: 'password' as AiopsAssetAuthType,
+  password: '',
+  keychainId: ''
+})
 const deleteAssetModal = reactive({ visible: false, assetId: '' })
 const managementModal = reactive({ visible: false, organizationId: '', query: '' })
 const tunnelModal = reactive({ visible: false, assetId: '' })
@@ -1368,6 +1644,121 @@ const saveAssetRecord = async (input: AiopsAssetInput) => {
   return saved
 }
 
+const detectHostKeyType = (privateKey = '', publicKey = ''): AiopsKeychainType => {
+  const publicAlgorithm = publicKey.trim().split(/\s+/)[0]?.toLowerCase()
+  if (publicAlgorithm === 'ssh-ed25519') return 'ed25519'
+  if (publicAlgorithm === 'ssh-rsa') return 'rsa'
+  if (publicAlgorithm?.startsWith('ecdsa-')) return 'ecdsa'
+  if (privateKey.includes('ssh-ed25519')) return 'ed25519'
+  if (privateKey.includes('BEGIN EC PRIVATE KEY') || privateKey.includes('ecdsa-sha2')) return 'ecdsa'
+  return 'rsa'
+}
+
+const saveHostProxyForm = async () => {
+  hostChildFormError.value = ''
+  const proxyName = workspace.sshProxyForm.name.trim()
+  try {
+    const saved = await workspace.saveSshProxyForm()
+    if (!saved || !proxyName) {
+      hostChildFormError.value = workspace.settingsNotice || '代理保存失败'
+      return
+    }
+    hostForm.proxyName = proxyName
+    closeHostChildModal()
+  } catch (error) {
+    hostChildFormError.value = error instanceof Error ? error.message : '代理保存失败'
+  }
+}
+
+const saveHostKeyForm = async () => {
+  hostChildFormError.value = ''
+  const name = hostKeyForm.name.trim()
+  const privateKey = hostKeyForm.privateKey.trim()
+  if (!name || !privateKey) {
+    hostChildFormError.value = '请填写名称和私钥'
+    return
+  }
+  const duplicate = keychainOptions.value.some((keychain) => keychain.name === name)
+  if (duplicate) {
+    hostChildFormError.value = `密钥 ${name} 已存在`
+    return
+  }
+  const saveKeychain = window.aiops?.saveKeychain
+  if (typeof saveKeychain !== 'function') {
+    hostChildFormError.value = '密钥保存服务不可用'
+    return
+  }
+  const input: AiopsKeychainInput = {
+    name,
+    type: detectHostKeyType(privateKey, hostKeyForm.publicKey),
+    privateKey,
+    publicKey: hostKeyForm.publicKey.trim(),
+    passphrase: hostKeyForm.passphrase
+  }
+  try {
+    const result = await saveKeychain(input)
+    if (!result?.ok) throw new Error(result?.errorMessage || '密钥保存失败')
+    if (!isAiopsKeychainRecord(result.data)) throw new Error(malformedAssetBackendResultMessage)
+    await loadKeychainOptions()
+    hostForm.authType = 'keyBased'
+    hostForm.keychainId = result.data.id
+    closeHostChildModal()
+  } catch (error) {
+    hostChildFormError.value = error instanceof Error ? error.message : '密钥保存失败'
+  }
+}
+
+const parseHostJumpPort = () => {
+  const port = Number(hostJumpForm.port)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    hostChildFormError.value = '端口必须是 1-65535 的整数'
+    return null
+  }
+  return port
+}
+
+const saveHostJumpHostForm = async () => {
+  hostChildFormError.value = ''
+  const title = hostJumpForm.title.trim()
+  const host = hostJumpForm.host.trim()
+  const username = hostJumpForm.username.trim()
+  const port = parseHostJumpPort()
+  if (!title || !host || !username || port === null) {
+    if (!hostChildFormError.value) hostChildFormError.value = '请填写主机名、地址和用户名'
+    return
+  }
+  const duplicate = workspaceAssets.value.some((asset) => asset.name === title)
+  if (duplicate) {
+    hostChildFormError.value = '主机名已存在'
+    return
+  }
+  const input: AiopsAssetInput = {
+    name: title,
+    title,
+    host,
+    ip: host,
+    username,
+    port,
+    asset_type: 'person',
+    auth_type: hostJumpForm.authType,
+    group: hostJumpForm.group.trim() || '跳板机',
+    group_name: hostJumpForm.group.trim() || '跳板机',
+    comment: '跳板机',
+    data_source: 'manual',
+    status: 'online',
+    tags: ['jump-host'],
+    keychainId: hostJumpForm.authType === 'keyBased' && hostJumpForm.keychainId ? hostJumpForm.keychainId : undefined,
+    ...(hostJumpForm.password.trim() ? { password: hostJumpForm.password } : {})
+  }
+  try {
+    const saved = await saveAssetRecord(input)
+    hostForm.jumpHostId = saved.id
+    closeHostChildModal()
+  } catch (error) {
+    hostChildFormError.value = error instanceof Error ? error.message : '跳板机保存失败'
+  }
+}
+
 const deleteAssetRecord = async (assetId: string) => {
   const deleteAsset = window.aiops?.deleteAsset
   if (typeof deleteAsset !== 'function') throw new Error('资产删除服务不可用')
@@ -1557,8 +1948,6 @@ const openCreateHost = (targetGroup?: WorkspaceGroup | null) => {
   hostForm.authType = 'password'
   hostForm.comment = ''
   hostForm.password = ''
-  hostForm.privateKey = ''
-  hostForm.passphrase = ''
   hostForm.keychainId = ''
   hostForm.proxyName = ''
   hostForm.jumpHostId = ''
@@ -1592,12 +1981,11 @@ const closeHostModal = () => {
   hostModal.assetId = ''
   hostModal.targetGroupKey = ''
   hostForm.password = ''
-  hostForm.privateKey = ''
-  hostForm.passphrase = ''
   hostForm.keychainId = ''
   hostForm.proxyName = ''
   hostForm.jumpHostId = ''
   hostFormError.value = ''
+  closeHostChildModal()
   resetHostConnectionTest()
 }
 
@@ -2310,8 +2698,6 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostForm.authType = asset?.auth_type || (activeWorkspace.value === 'bastion' ? 'keyBased' : 'password')
   hostForm.comment = asset?.comment || ''
   hostForm.password = ''
-  hostForm.privateKey = ''
-  hostForm.passphrase = ''
   hostForm.keychainId = asset?.keychainId || ''
   hostForm.proxyName = asset?.proxyName || ''
   hostForm.jumpHostId = asset?.jumpHostId || ''
@@ -2320,24 +2706,36 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   closeContextMenu()
 }
 
+const closeHostChildModal = () => {
+  hostChildModal.value = ''
+  hostChildFormError.value = ''
+}
+
 const openKeyManagementFromHostForm = () => {
-  workspace.openAssetManagement(undefined, 'keyManagement', 'create-key')
-  closeHostModal()
+  hostChildModal.value = 'key'
+  hostChildFormError.value = ''
+  Object.assign(hostKeyForm, { name: '', privateKey: '', publicKey: '', passphrase: '' })
 }
 
 const openProxyManagementFromHostForm = () => {
-  workspace.openAssetManagement(undefined, 'proxyManagement', 'create-proxy')
-  closeHostModal()
+  hostChildModal.value = 'proxy'
+  hostChildFormError.value = ''
+  workspace.openAddSshProxyConfig()
 }
 
 const openJumpHostCreateFromHostForm = () => {
-  const previousTargetGroupKey = hostModal.targetGroupKey
-  openHostEditor('create')
-  hostModal.targetGroupKey = previousTargetGroupKey
-  hostForm.assetType = 'person'
-  hostForm.authType = 'keyBased'
-  hostForm.title = 'jump-host'
-  hostForm.group = activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '未分组'
+  hostChildModal.value = 'jumpHost'
+  hostChildFormError.value = ''
+  Object.assign(hostJumpForm, {
+    title: 'jump-host',
+    host: '',
+    username: hostForm.username || 'root',
+    group: activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '跳板机',
+    port: '22',
+    authType: 'password',
+    password: '',
+    keychainId: ''
+  })
 }
 
 const editContextAsset = () => {
@@ -2368,8 +2766,6 @@ const buildHostInput = (id: string | undefined, port: number, sourceAsset?: Work
   const keychainId = String(hostForm.keychainId || '').trim()
   const jumpHostId = String(hostForm.jumpHostId || '').trim()
   const password = String(hostForm.password || '').trim()
-  const privateKey = String(hostForm.privateKey || '').trim()
-  const passphrase = String(hostForm.passphrase || '').trim()
   const targetPatch = targetGroup ? groupTargetPatch(targetGroup, sourceAsset) : {}
   return {
     ...(id ? { id } : {}),
@@ -2401,9 +2797,7 @@ const buildHostInput = (id: string | undefined, port: number, sourceAsset?: Work
     keychainId: hostForm.authType === 'keyBased' && keychainId ? keychainId : undefined,
     jumpHostId: jumpHostId || undefined,
     ...(targetPatch.group ? { group: targetPatch.group, group_name: targetPatch.group_name || targetPatch.group } : {}),
-    ...(password ? { password: hostForm.password } : {}),
-    ...(privateKey ? { privateKey: hostForm.privateKey } : {}),
-    ...(passphrase ? { passphrase: hostForm.passphrase } : {})
+    ...(password ? { password: hostForm.password } : {})
   }
 }
 

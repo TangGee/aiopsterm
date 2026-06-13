@@ -498,6 +498,27 @@ describe('workspace store', () => {
     expect(store.hasSplitState(rightId)).toBe(true)
   })
 
+  it('reattaches and restores knowledge tabs in split groups', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshKnowledgeTree({ persist: false })
+
+    const rootId = store.activePanelId
+    const knowledgePanel = store.openKnowledgeFile('Markdown语法指南.md')!
+    expect(knowledgePanel.kind).toBe('knowledge')
+
+    expect(store.attachPanelToSplit(knowledgePanel.id, rootId, 'right')).toBe(true)
+    expect(store.activePanelId).toBe(knowledgePanel.id)
+    expect(knowledgePanel.split).toBe('right')
+    expect(knowledgePanel.splitSourceId).toBe(rootId)
+    expect(knowledgePanel.splitGroupId).toBe(rootId)
+    expect(store.hasSplitState(knowledgePanel.id)).toBe(true)
+
+    expect(store.unsplitPanel(knowledgePanel.id)).toBe(true)
+    expect(knowledgePanel.split).toBeUndefined()
+    expect(knowledgePanel.splitSourceId).toBeUndefined()
+    expect(knowledgePanel.splitGroupId).toBeUndefined()
+  })
+
   it('applies keyword highlight to terminal display without mutating raw output', () => {
     const store = useWorkspaceStore()
     store.keywordHighlightSettings = {
@@ -1434,7 +1455,8 @@ describe('workspace store', () => {
         },
         workspacePreferences: {
           expandedGroups: ['org-1', 'custom-folder-a'],
-          showIpMode: true
+          showIpMode: true,
+          recentAssetIds: []
         },
         editorSettings: defaultEditorSettings,
         sshProxyConfigs: defaultSshProxyConfigs,
@@ -4907,7 +4929,7 @@ describe('workspace store', () => {
         data: {
           sessions: JSON.parse(sessionsBefore),
           folders: JSON.parse(foldersBefore),
-          folderUuid: 'files-folder-a'
+          folderUuid: 'unexpected-folder'
         }
       } as any)
       await expect(store.deleteFileSessionFolder('files-folder-a')).resolves.toBe(false)
@@ -6612,6 +6634,7 @@ describe('workspace store', () => {
 
     const file = (await store.createKnowledgeNode('file', 'Runbooks', 'Deploy.md'))!
     expect(store.findKnowledgeNode('Runbooks/Deploy.md')).toBeTruthy()
+    expect(store.activePanel).toEqual(expect.objectContaining({ kind: 'knowledge', id: 'kb:Runbooks/Deploy.md' }))
     expect(store.kbUsedBytes).toBeGreaterThan(knowledgeBytesAfterFolder)
     expect(window.aiops.kbCreateFile).toHaveBeenCalledWith('Runbooks', 'Deploy.md', '')
 
@@ -9403,7 +9426,8 @@ describe('workspace store', () => {
     const originalSaveConfig = window.aiops.saveConfig
     const initialPreferences = {
       showIpMode: store.workspacePreferences.showIpMode,
-      expandedGroups: [...store.workspacePreferences.expandedGroups]
+      expandedGroups: [...store.workspacePreferences.expandedGroups],
+      recentAssetIds: [...(store.workspacePreferences.recentAssetIds || [])]
     }
     const assertPreferencesUnchanged = () => {
       expect(store.workspacePreferences).toEqual(initialPreferences)
@@ -9449,11 +9473,13 @@ describe('workspace store', () => {
       await expect(store.updateWorkspacePreferences({ showIpMode: true, expandedGroups: ['recent_connections', 'group-生产', 'group-生产'] })).resolves.toBe(true)
       expect(store.workspacePreferences).toEqual({
         showIpMode: true,
-        expandedGroups: ['recent_connections', 'group-生产']
+        expandedGroups: ['recent_connections', 'group-生产'],
+        recentAssetIds: []
       })
       expect(store.config.workspacePreferences).toEqual({
         showIpMode: true,
-        expandedGroups: ['recent_connections', 'group-生产']
+        expandedGroups: ['recent_connections', 'group-生产'],
+        recentAssetIds: []
       })
     } finally {
       ;(window.aiops as any).saveConfig = originalSaveConfig
@@ -9525,7 +9551,8 @@ describe('workspace store', () => {
       expect.objectContaining({
         workspacePreferences: {
           showIpMode: true,
-          expandedGroups: ['recent_connections', 'group-生产']
+          expandedGroups: ['recent_connections', 'group-生产'],
+          recentAssetIds: []
         }
       })
     )

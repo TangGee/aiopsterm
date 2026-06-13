@@ -1147,6 +1147,28 @@ em {
   max-height: min(640px, calc(100vh - 48px));
 }
 
+.workspace-child-modal-backdrop {
+  z-index: 70;
+}
+
+.workspace-child-modal {
+  width: min(460px, calc(100vw - 44px));
+  max-height: min(620px, calc(100vh - 56px));
+}
+
+.workspace-key-child-modal,
+.workspace-jump-child-modal {
+  width: min(540px, calc(100vw - 44px));
+}
+
+.workspace-proxy-form {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+
+.workspace-port-field input {
+  max-width: 112px;
+}
+
 .workspace-tunnel-modal {
   width: min(520px, calc(100vw - 32px));
 }
@@ -1686,6 +1708,35 @@ em {
   width: min(620px, calc(100vw - 40px));
 }
 
+.asset-proxy-form-modal {
+  width: min(460px, calc(100vw - 40px));
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+
+.asset-proxy-port-field input {
+  max-width: 112px;
+}
+
+.asset-form-wide {
+  grid-column: 1 / -1;
+}
+
+.asset-import-help-modal {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.asset-import-help-content {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.asset-import-help-content p {
+  margin: 0;
+}
+
 .asset-form-panel.collapsed {
   width: 0;
   padding: 0;
@@ -1908,7 +1959,7 @@ em {
 }
 
 .key-form-panel {
-  width: 300px;
+  width: min(520px, calc(100vw - 40px));
 }
 
 .key-drop-area {
@@ -4536,30 +4587,32 @@ kbd {
 }
 
 .file-row-actions {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 8;
-  display: none;
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
-  background: var(--surface-2);
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
   border-radius: 6px;
   padding: 1px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  box-shadow: none;
 }
 
 .file-table tr:hover .file-row-actions {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.file-table tr {
+.file-actions-heading,
+.file-actions-cell {
+  width: 116px;
+  min-width: 116px;
+  text-align: right;
+}
+
+.file-actions-cell {
   position: relative;
-}
-
-.file-table tr:hover td:first-child {
-  padding-right: 112px;
 }
 
 .file-row-actions button,
@@ -5997,9 +6050,26 @@ code {
 
 .kb-title-text {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kb-node-kind {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 16px;
+  padding: 0 4px;
+}
+
+.kb-node-kind.document {
+  color: #22c55e;
+  border-color: color-mix(in srgb, #22c55e 38%, transparent);
 }
 
 .kb-rename-input {

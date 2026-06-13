@@ -34,7 +34,7 @@
           </button>
           <button @click="createInline('file')">
             <FilePlus />
-            新建文件
+            新建文档
           </button>
           <button @click="createInline('dir')">
             <FolderPlus />
@@ -130,7 +130,7 @@
         v-if="nodeMenu.type === 'dir'"
         @click="createInline('file', nodeMenu.relPath)"
       >
-        新建文件
+        新建文档
       </button>
       <button
         v-if="nodeMenu.type === 'dir'"
@@ -170,7 +170,7 @@
       class="kb-context-menu"
       :style="{ left: `${blankMenu.x}px`, top: `${blankMenu.y}px` }"
     >
-      <button @click="createInline('file')">新建文件</button>
+      <button @click="createInline('file')">新建文档</button>
       <button @click="createInline('dir')">新建文件夹</button>
       <button
         :disabled="!workspace.kbClipboard"
@@ -284,6 +284,10 @@ const KnowledgeTreeNode = defineComponent({
   emits: ['select', 'toggle', 'context', 'renameInput', 'confirmRename', 'cancelRename'],
   setup(nodeProps, { emit }) {
     const store = useWorkspaceStore()
+    const nodeKindLabel = (node: KnowledgeNode) => {
+      if (node.type === 'dir') return '文件夹'
+      return /\.(md|markdown)$/i.test(node.relPath) ? '文档' : '文件'
+    }
     const renderNode = (node: KnowledgeNode, level: number): VNode => {
       const expanded = store.kbExpandedKeys.includes(node.relPath)
       const selected = store.kbSelectedKeys.includes(node.relPath)
@@ -336,7 +340,10 @@ const KnowledgeTreeNode = defineComponent({
                   },
                   onBlur: () => emit('cancelRename')
                 })
-              : h('span', { class: 'kb-title-text' }, node.title)
+              : [
+                  h('span', { class: 'kb-title-text' }, node.title),
+                  h('em', { class: ['kb-node-kind', node.type === 'dir' ? 'folder' : /\.(md|markdown)$/i.test(node.relPath) ? 'document' : 'file'] }, nodeKindLabel(node))
+                ]
           ]
         ),
         node.type === 'dir' && expanded && node.children?.length ? node.children.map((child) => renderNode(child, level + 1)) : null
@@ -413,7 +420,7 @@ const createInline = async (kind: 'file' | 'dir', parentRelDir = selectedTargetD
   addMenuOpen.value = false
   nodeMenu.visible = false
   blankMenu.visible = false
-  const node = await workspace.createKnowledgeNode(kind, parentRelDir, kind === 'dir' ? 'New Folder' : 'New File.md')
+  const node = await workspace.createKnowledgeNode(kind, parentRelDir, kind === 'dir' ? 'New Folder' : 'New Document.md')
   if (node) startRename(node.relPath)
 }
 

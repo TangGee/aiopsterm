@@ -542,6 +542,16 @@ const sftpReaddir = (sftp: SFTPWrapper, path: string) =>
     sftp.readdir(path, (error, entries) => (error ? reject(error) : resolve(entries || [])))
   })
 
+const remotePathExistsAsDirectory = async (sftp: SFTPWrapper, path: string) => {
+  try {
+    const stats = await sftpStat(sftp, path)
+    return sftpEntryType(stats) === 'directory'
+  } catch (error) {
+    if (isNotFoundError(error)) return false
+    throw error
+  }
+}
+
 const sftpEntryType = (attrs: Partial<SftpStats>): FileListEntry['type'] => {
   if (typeof attrs.isDirectory === 'function' && attrs.isDirectory()) return 'directory'
   if (typeof attrs.isSymbolicLink === 'function' && attrs.isSymbolicLink()) return 'link'
@@ -687,11 +697,12 @@ const listRemoteFilesViaSftp = async (directory: string, options: FileListOption
   if (!target) return null
   const path = normalizeRemotePath(directory)
   return withRemoteSftp(target, async (sftp) => {
-    const rows = (await sftpReaddir(sftp, path))
+    const readablePath = path === '/' || (await remotePathExistsAsDirectory(sftp, path)) ? path : '/'
+    const rows = (await sftpReaddir(sftp, readablePath))
       .filter((item) => item.filename !== '.' && item.filename !== '..')
       .slice(0, 500)
-      .map((item) => sftpEntryToFileListEntry(path, item))
-    const parent = path === '/' ? [] : [entry('..', dirname(path), 'directory', 0, 'drwxr-xr-x', seedTime)]
+      .map((item) => sftpEntryToFileListEntry(readablePath, item))
+    const parent = readablePath === '/' ? [] : [entry('..', dirname(readablePath), 'directory', 0, 'drwxr-xr-x', seedTime)]
     return [...parent, ...sortEntries(rows)]
   })
 }
@@ -886,7 +897,12 @@ const cloneFileSessionCatalog = (catalog: FileSessionCatalog): FileSessionCatalo
 })
 
 const fileSessionLocalEntry = () => cloneSession(defaultFileSessions[0])
-const rootPathForAssetUsername = (username: string) => (username && username !== 'local' ? `/home/${username}` : '/')
+const rootPathForAssetUsername = (username: string, fallback = '/') => {
+  const name = textSecret(username)
+  if (!name || name === 'local') return fallback
+  if (name === 'root') return '/root'
+  return `/home/${name}`
+}
 const seedFileSessionForField = (session?: FileSessionInfo) => (session?.id ? seedFileSessionById.get(session.id) : undefined)
 const isUserChangedFileSessionField = <K extends keyof FileSessionInfo>(session: FileSessionInfo | undefined, field: K) => {
   if (!session) return false
@@ -1670,7 +1686,7 @@ export const saveFileSessionFromSftpPayload = async (payload: FileSessionSftpPay
     return { ok: false, errorCode: 'FILES_SESSION_PAYLOAD_INVALID', errorMessage: 'SFTP asset payload requires an id or host.' }
   }
   const username = payloadString(payload, ['username', 'user', 'loginName']) || 'deploy'
-  const rootPath = payloadString(payload, ['rootPath', 'homePath', 'cwd']) || (username ? `/home/${username}` : '/home/deploy')
+  const rootPath = payloadString(payload, ['rootPath', 'homePath', 'cwd']) || rootPathForAssetUsername(username, '/home/deploy')
   const rawAssetType = payloadString(payload, ['asset_type', 'assetType']).toLowerCase()
   const session: FileSessionInfo = {
     id,
@@ -1715,7 +1731,7 @@ export const saveFileSessionFromTerminalContext = async (context: FileSessionTer
   const username = asset?.username || terminalContextString(ssh.username) || 'deploy'
   const title = asset?.title || asset?.name || terminalContextString(ssh.assetName) || terminalContextString(context.panelTitle) || host
   const group = asset?.group_name || asset?.group || terminalContextString(ssh.organizationId) || '终端连接'
-  const rootPath = terminalContextString(context.cwd) || (username ? `/home/${username}` : '/home/deploy')
+  const rootPath = terminalContextString(context.cwd) || rootPathForAssetUsername(username, '/home/deploy')
   return saveFileSession({
     id,
     label: title,

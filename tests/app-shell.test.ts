@@ -268,6 +268,20 @@ const findFilesGroupRow = (wrapper: VueWrapper<any>, label: string) => {
   return row
 }
 
+const openAssetTreeCreateHost = async (wrapper: VueWrapper<any>) => {
+  await wrapper.find('.asset-host-tree').trigger('contextmenu', { clientX: 160, clientY: 220 })
+  const button = wrapper.find('.asset-context-menu').findAll('button').find((item) => item.text().includes('新建主机'))
+  if (!button) throw new Error('Asset create host context button not found')
+  await button.trigger('click')
+  await flushPromises()
+}
+
+const keySubmitButton = (wrapper: VueWrapper<any>) => {
+  const button = wrapper.findAll('.key-form-panel .asset-submit-button').find((item) => !item.classes().includes('secondary'))
+  if (!button) throw new Error('Key submit button not found')
+  return button
+}
+
 const openTerminalMenuButton = async (wrapper: VueWrapper<any>, label: string, hostSelector = '.xterm-host') => {
   await wrapper.find(hostSelector).trigger('contextmenu')
   return findMenuButton(wrapper, '.terminal-context-menu', label)
@@ -275,7 +289,7 @@ const openTerminalMenuButton = async (wrapper: VueWrapper<any>, label: string, h
 
 const ensureVisibleTerminalTab = async (wrapper: VueWrapper<any>) => {
   if (wrapper.find('.terminal-tab.active').exists()) return
-  await wrapper.find('.new-tab-button').trigger('click')
+  useWorkspaceStore().createPanel()
   await flushPromises()
 }
 
@@ -935,6 +949,7 @@ describe('AppShell', () => {
     await flushPromises()
     const store = useWorkspaceStore()
     expect(assets.text()).toContain('主机管理')
+    expect(assets.text()).toContain('堡垒机管理')
     expect(assets.text()).toContain('密钥管理')
 
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
@@ -946,7 +961,7 @@ describe('AppShell', () => {
     await assets.find('.asset-search-clear').trigger('click')
     expect((assets.find('.asset-search-input input').element as HTMLInputElement).value).toBe('')
 
-    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    await openAssetTreeCreateHost(assets)
     expect(assets.text()).toContain('新建主机')
     expect(assets.text()).toContain('暂无 SSH 代理配置')
     expect(assets.text()).toContain('新增代理')
@@ -983,6 +998,13 @@ describe('AppShell', () => {
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
     expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.10.10.10', port: 2222, username: 'ops' }))
     expect(store.activeModule).toBe('workspace')
+
+    store.setActiveModule('assets')
+    await assets.findAll('.asset-action-button').find((button) => button.text().includes('导入'))!.trigger('mouseenter')
+    await assets.findAll('.asset-action-button.icon-only').find((button) => button.attributes('title') === '导入帮助')!.trigger('click')
+    expect(assets.find('.asset-import-help-modal').text()).toContain('导入说明')
+    expect(assets.find('.asset-import-help-modal').text()).toContain('预览')
+    await assets.find('.asset-import-help-modal .asset-submit-button').trigger('click')
 
     store.selectedContexts = []
     store.setActiveModule('assets')
@@ -1074,10 +1096,10 @@ describe('AppShell', () => {
     await keys.find('[data-testid="key-new-button"]').trigger('click')
     expect(keys.text()).toContain('新建密钥')
     await keys.find('.key-form-panel input').setValue('unit-key')
-    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    await keySubmitButton(keys).trigger('click')
     expect(keys.text()).toContain('请输入私钥')
     await keys.find('.key-form-panel textarea').setValue('-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----')
-    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    await keySubmitButton(keys).trigger('click')
     await flushPromises()
     expect(window.aiops.saveKeychain).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1091,7 +1113,7 @@ describe('AppShell', () => {
     await keys.find('[data-testid="key-new-button"]').trigger('click')
     await keys.find('.key-form-panel input').setValue('prod-ed25519')
     await keys.find('.key-form-panel textarea').setValue('-----BEGIN RSA PRIVATE KEY-----')
-    await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+    await keySubmitButton(keys).trigger('click')
     expect(keys.text()).toContain('密钥 prod-ed25519 已存在')
 
     const originalKeyFileReader = window.FileReader
@@ -1120,7 +1142,7 @@ describe('AppShell', () => {
       )
       expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/unit-rsa.pem')
       expect(keys.text()).toContain('已导入 unit-rsa.pem，识别为 RSA')
-      await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+      await keySubmitButton(keys).trigger('click')
       await flushPromises()
       expect(keys.findAll('.keychain-card').find((button) => button.text().includes('import-unit'))!.text()).toContain('类型rsa')
 
@@ -1140,7 +1162,7 @@ describe('AppShell', () => {
       expect(window.aiops.getPathForFile).toHaveBeenCalledWith(droppedKeyFile)
       expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/drop-ed25519.key')
       expect(keys.text()).toContain('已导入 drop-ed25519.key，识别为 ED25519')
-      await keys.find('.key-form-panel .asset-submit-button').trigger('click')
+      await keySubmitButton(keys).trigger('click')
       await flushPromises()
       expect(keys.findAll('.keychain-card').find((button) => button.text().includes('drop-unit'))!.text()).toContain('类型ed25519')
     } finally {
@@ -1221,7 +1243,7 @@ describe('AppShell', () => {
       await saveMissing.find('[data-testid="key-new-button"]').trigger('click')
       await saveMissing.find('.key-form-panel input').setValue('bridge-missing-key')
       await saveMissing.find('.key-form-panel textarea').setValue('-----BEGIN RSA PRIVATE KEY-----')
-      await saveMissing.find('.key-form-panel .asset-submit-button').trigger('click')
+      await keySubmitButton(saveMissing).trigger('click')
       await flushPromises()
       expect(saveMissing.text()).toContain('密钥保存服务不可用')
       expect(saveMissing.findAll('.keychain-card').some((button) => button.text().includes('bridge-missing-key'))).toBe(false)
@@ -1286,7 +1308,7 @@ describe('AppShell', () => {
       await saveMalformed.find('.key-form-panel input').setValue('malformed-save-key')
       await saveMalformed.find('.key-form-panel textarea').setValue('-----BEGIN RSA PRIVATE KEY-----')
       vi.mocked(window.aiops.saveKeychain).mockResolvedValueOnce({ ok: true, data: { id: 'broken-save-key' } } as any)
-      await saveMalformed.find('.key-form-panel .asset-submit-button').trigger('click')
+      await keySubmitButton(saveMalformed).trigger('click')
       await flushPromises()
       expect(saveMalformed.text()).toContain(malformedMessage)
       expect(saveMalformed.find('.key-form-panel').exists()).toBe(true)
@@ -1553,7 +1575,7 @@ describe('AppShell', () => {
     })
     await flushPromises()
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
-    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    await openAssetTreeCreateHost(assets)
     await assets.vm.$nextTick()
 
     const proxySelect = assets.find('[data-testid="asset-proxy-select"]')
@@ -1669,11 +1691,11 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
 
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
-    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    await openAssetTreeCreateHost(assets)
     await assets.find('.asset-proxy-empty button').trigger('click')
 
-    expect(store.activeModule).toBe('workspace')
-    expect(assets.text()).toContain('代理管理')
+    expect(assets.find('.asset-proxy-form-modal').exists()).toBe(true)
+    expect(assets.text()).toContain('新增代理')
     expect(store.sshProxyAddModalOpen).toBe(true)
   })
 
@@ -1867,7 +1889,7 @@ describe('AppShell', () => {
     await flushPromises()
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
 
-    await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
+    await openAssetTreeCreateHost(assets)
     const assetFormInputs = () => assets.findAll('.asset-form-panel input')
     await assetFormInputs().at(0)!.setValue('malformed-save-host')
     await assetFormInputs().at(1)!.setValue('10.77.77.77')
@@ -2015,7 +2037,7 @@ describe('AppShell', () => {
       return wrapper
     }
     const fillNewHostForm = async (wrapper: ReturnType<typeof mount>, name: string) => {
-      await wrapper.find('[data-testid="asset-new-host-button"]').trigger('click')
+      await openAssetTreeCreateHost(wrapper)
       const inputs = () => wrapper.findAll('.asset-form-panel input')
       await inputs().at(0)!.setValue(name)
       await inputs().at(1)!.setValue('10.88.77.66')
@@ -5752,8 +5774,9 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.terminal-tab')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('欢迎')
     expect(wrapper.text()).not.toContain('local shell')
+    expect(wrapper.find('.new-tab-button').exists()).toBe(false)
 
-    await wrapper.find('.new-tab-button').trigger('click')
+    store.createPanel()
     store.appendTerminalOutput(store.activePanelId, 'new tab output\n')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
@@ -5769,7 +5792,7 @@ describe('AppShell', () => {
     expect(store.activePanel.title).toBe('欢迎')
     expect(wrapper.findAll('.terminal-tab')).toHaveLength(0)
 
-    await wrapper.find('.new-tab-button').trigger('click')
+    store.createPanel()
     const sourceSplitPanelId = store.activePanelId
     store.appendTerminalOutput(store.activePanelId, 'new tab output\n')
     await wrapper.vm.$nextTick()
@@ -5855,7 +5878,7 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
 
-    await wrapper.find('.new-tab-button').trigger('click')
+    store.createPanel()
     const firstTabId = store.activePanelId
     store.appendTerminalOutput(firstTabId, 'first terminal\n')
     await wrapper.vm.$nextTick()
@@ -8120,6 +8143,7 @@ describe('AppShell', () => {
   })
 
   it('opens External reference-style knowledge files in the main workspace editor and adds them to AI context', async () => {
+    vi.useFakeTimers()
     ;(globalThis as any).__resetKnowledgeTreeMock?.()
     mockXtermInstances.length = 0
     const pinia = createPinia()
@@ -8188,7 +8212,7 @@ describe('AppShell', () => {
     const activeMarkdownTextarea = workspace.find('.kb-editor-textarea')
     expect((activeMarkdownTextarea.element as HTMLTextAreaElement).value).toBe('content:Markdown语法指南.md')
     await activeMarkdownTextarea.setValue(markdownContent)
-    await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('预览'))!.trigger('click')
+    await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('渲染'))!.trigger('click')
     await flushPromises()
     await workspace.vm.$nextTick()
     const preview = workspace.find('.kb-markdown-preview')
@@ -8205,13 +8229,14 @@ describe('AppShell', () => {
     expect(preview.html()).not.toContain('javascript:')
     expect(window.aiops.kbReadFile).toHaveBeenCalledWith('images/interface.png', 'base64')
 
-    await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('编辑'))!.trigger('click')
+    await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('源码'))!.trigger('click')
     await workspace.vm.$nextTick()
     const editedTextarea = workspace.find('.kb-editor-textarea')
     await editedTextarea.setValue('updated markdown')
-    await workspace.findAll('.kb-editor-actions > button').find((button) => button.text().includes('保存'))!.trigger('click')
+    vi.advanceTimersByTime(900)
     await flushPromises()
     expect(window.aiops.kbWriteFile).toHaveBeenCalledWith('Markdown语法指南.md', 'updated markdown')
+    vi.useRealTimers()
 
     const originalFileReader = window.FileReader
     const originalGlobalFileReader = globalThis.FileReader
@@ -8457,13 +8482,15 @@ describe('AppShell', () => {
       malformedImageRead.unmount()
 
       const malformedSave = await mountEditor({ relPath: 'runbooks/save.md' })
+      vi.useFakeTimers()
       await malformedSave.find('.kb-editor-textarea').setValue('dirty backend-only content')
       await malformedSave.vm.$nextTick()
       expect(malformedSave.text()).toContain('unsaved')
       vi.mocked(window.aiops.kbWriteFile).mockResolvedValueOnce({ mtimeMs: Number.NaN } as any)
-      await malformedSave.findAll('.kb-editor-actions > button').find((button) => button.text().includes('保存'))!.trigger('click')
+      vi.advanceTimersByTime(900)
       await flushPromises()
       await malformedSave.vm.$nextTick()
+      vi.useRealTimers()
       expect(malformedSave.text()).toContain(malformedMessage)
       expect(malformedSave.text()).toContain('unsaved')
       malformedSave.unmount()

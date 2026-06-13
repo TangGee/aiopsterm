@@ -10103,6 +10103,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (kind === 'dir' && !kbExpandedKeys.value.includes(relPath)) {
       kbExpandedKeys.value.push(relPath)
     }
+    if (kind === 'file') {
+      openKnowledgeFile(relPath)
+    }
     return created
   }
 
@@ -12179,7 +12182,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const unsplitPanel = (panelId = activePanelId.value) => {
     const panel = panels.value.find((item) => item.id === panelId)
-    if (!panel || panel.kind === 'knowledge') return false
+    if (!panel) return false
     detachPanelFromSplit(panel)
     activePanelId.value = panel.id
     return true
@@ -12188,7 +12191,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const attachPanelToSplit = (panelId: string, targetPanelId: string, direction: PanelDirection = 'right') => {
     const panel = panels.value.find((item) => item.id === panelId)
     const target = panels.value.find((item) => item.id === targetPanelId)
-    if (!panel || !target || panel.kind === 'knowledge' || target.kind === 'knowledge' || panel.id === target.id) return false
+    if (!panel || !target || panel.id === target.id) return false
     detachPanelFromSplit(panel)
     const groupId = target.splitGroupId || target.id
     target.splitGroupId = groupId

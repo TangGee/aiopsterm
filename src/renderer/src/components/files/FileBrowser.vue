@@ -79,6 +79,7 @@
             <th v-if="uiMode !== 'transfer'">权限</th>
             <th>大小</th>
             <th>修改日期</th>
+            <th class="file-actions-heading">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -135,36 +136,41 @@
                   </button>
                 </div>
 
-                <div
-                  v-if="editingPath !== entry.path && entry.name !== '..'"
-                  class="file-row-actions"
+              </div>
+            </td>
+            <td v-if="uiMode !== 'transfer'">{{ entry.mode }}</td>
+            <td>{{ entry.type === 'file' ? formatSize(entry.size) : '' }}</td>
+            <td>{{ entry.modifiedAt }}</td>
+            <td class="file-actions-cell">
+              <div
+                v-if="editingPath !== entry.path && entry.name !== '..'"
+                class="file-row-actions"
+              >
+                <button
+                  v-if="entry.type === 'file'"
+                  title="下载"
+                  @click.stop="downloadEntry(entry)"
                 >
-                  <button
-                    v-if="entry.type === 'file'"
-                    title="下载"
-                    @click.stop="downloadEntry(entry)"
-                  >
-                    <Download />
-                  </button>
-                  <button
-                    title="重命名"
-                    @click.stop="startRename(entry)"
-                  >
-                    <Pencil />
-                  </button>
-                  <button
-                    title="权限"
-                    @click.stop="openPermissions(entry)"
-                  >
-                    <Lock />
-                  </button>
-                  <button
-                    title="更多"
-                    @click.stop="toggleMore(entry.path)"
-                  >
-                    <MoreHorizontal />
-                  </button>
-                </div>
+                  <Download />
+                </button>
+                <button
+                  title="重命名"
+                  @click.stop="startRename(entry)"
+                >
+                  <Pencil />
+                </button>
+                <button
+                  title="权限"
+                  @click.stop="openPermissions(entry)"
+                >
+                  <Lock />
+                </button>
+                <button
+                  title="更多"
+                  @click.stop="toggleMore(entry.path)"
+                >
+                  <MoreHorizontal />
+                </button>
               </div>
 
               <div
@@ -189,9 +195,6 @@
                 </button>
               </div>
             </td>
-            <td v-if="uiMode !== 'transfer'">{{ entry.mode }}</td>
-            <td>{{ entry.type === 'file' ? formatSize(entry.size) : '' }}</td>
-            <td>{{ entry.modifiedAt }}</td>
           </tr>
         </tbody>
       </table>
@@ -651,18 +654,31 @@ const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
   modifiedAt: formatDate(entry.modifiedAt)
 })
 
+const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntry[]) => {
+  const firstChild = rows.find((entry) => entry.name !== '..')
+  if (!firstChild) return requestedPath
+  const parentPath = dirname(firstChild.path)
+  return parentPath || requestedPath
+}
+
 const loadDirectoryEntries = async (path: string) => {
   if (typeof window.aiops?.listFiles !== 'function') throw new Error('文件列表服务不可用')
   const list = await window.aiops.listFiles(path, getListOptions())
   if (!Array.isArray(list) || !list.every(isFileListEntryData)) throw new Error(malformedFilesBackendResultMessage)
   const rows = list.map(mapFileEntry)
-  if (rows.some((entry) => entry.name === '..') || path === '/') return rows
-  return [{ name: '..', path: dirname(path), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '' }, ...rows]
+  const listedDirectoryPath = resolveListedDirectoryPath(path, rows)
+  if (rows.some((entry) => entry.name === '..') || listedDirectoryPath === '/') {
+    return { rows, path: listedDirectoryPath }
+  }
+  return {
+    rows: [{ name: '..', path: dirname(listedDirectoryPath), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '' }, ...rows],
+    path: listedDirectoryPath
+  }
 }
 
 const listDirectoryEntries = async (path: string) => {
   const normalized = normalizePath(path)
-  return loadDirectoryEntries(normalized)
+  return (await loadDirectoryEntries(normalized)).rows
 }
 
 const applyMutationResult = (result: FileEntryMutationResult, mutation: FileEntryMutation, fallbackError: string) => {
@@ -736,9 +752,10 @@ const loadEntries = async (path = currentPath.value, options: { preserveOnFailur
   loading.value = true
   error.value = ''
   try {
-    entries.value = await loadDirectoryEntries(normalizedPath)
-    currentPath.value = normalizedPath
-    pathInput.value = normalizedPath
+    const result = await loadDirectoryEntries(normalizedPath)
+    entries.value = result.rows
+    currentPath.value = result.path
+    pathInput.value = result.path
     return true
   } catch (fileError) {
     error.value = fileError instanceof Error ? fileError.message : '读取文件失败'
