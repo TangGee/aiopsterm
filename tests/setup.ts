@@ -5929,6 +5929,7 @@ Object.defineProperty(window, 'aiops', {
     openSettingsDocumentation: vi.fn(async () => ({ path: '/tmp/aiopsterm/docs/index.md' })),
     submitSettingsFeedbackReport: vi.fn(async () => ({ path: '/tmp/aiopsterm/feedback/aiopsterm-feedback.md' })),
     openLogDir: vi.fn(async () => ({ path: '/tmp/aiopsterm/logs' })),
+    writeRuntimeLog: vi.fn(async (_level: string, event: string) => ({ ok: true, data: { event } })),
     minimizeWindow: vi.fn(async () => undefined),
     maximizeWindow: vi.fn(async () => undefined),
     unmaximizeWindow: vi.fn(async () => undefined),

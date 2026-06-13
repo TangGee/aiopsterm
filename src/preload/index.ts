@@ -69,6 +69,7 @@ const api: AiopsPreloadApi = {
   openSettingsDocumentation: () => ipcRenderer.invoke('settings:open-documentation'),
   submitSettingsFeedbackReport: () => ipcRenderer.invoke('settings:submit-feedback-report'),
   openLogDir: () => ipcRenderer.invoke('app:open-log-dir'),
+  writeRuntimeLog: (level, event, fields) => ipcRenderer.invoke('app:runtime-log', level, event, fields),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   unmaximizeWindow: () => ipcRenderer.invoke('window:unmaximize'),

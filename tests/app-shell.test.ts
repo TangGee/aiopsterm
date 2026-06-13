@@ -12,6 +12,7 @@ type MockXtermInstance = {
   selectionPosition: MockSelectionPosition | undefined
   selectionCallbacks: Array<() => void>
   resizeCallbacks: Array<(size: { cols: number; rows: number }) => void>
+  dataCallbacks: Array<(data: string) => void>
   open: ReturnType<typeof vi.fn>
   loadAddon: ReturnType<typeof vi.fn>
   write: ReturnType<typeof vi.fn>
@@ -24,7 +25,9 @@ type MockXtermInstance = {
   getSelectionPosition: () => MockSelectionPosition | undefined
   onSelectionChange: (callback: () => void) => void
   onResize: (callback: (size: { cols: number; rows: number }) => void) => void
+  onData: (callback: (data: string) => void) => { dispose: ReturnType<typeof vi.fn> }
   emitSelection: (text: string, position?: MockSelectionPosition) => void
+  emitData: (data: string) => void
 }
 
 const { mockXtermInstances, monacoMocks } = vi.hoisted(() => ({
@@ -75,6 +78,7 @@ vi.mock('@xterm/xterm', () => ({
       selectionPosition: undefined,
       selectionCallbacks: [],
       resizeCallbacks: [],
+      dataCallbacks: [],
       open: vi.fn(),
       loadAddon: vi.fn(),
       write: vi.fn(),
@@ -100,10 +104,17 @@ vi.mock('@xterm/xterm', () => ({
       onResize(callback: (size: { cols: number; rows: number }) => void) {
         this.resizeCallbacks.push(callback)
       },
+      onData(callback: (data: string) => void) {
+        this.dataCallbacks.push(callback)
+        return { dispose: vi.fn() }
+      },
       emitSelection(text: string, position = { start: { x: 0, y: 4 }, end: { x: text.length, y: 4 } }) {
         this.selectedText = text
         this.selectionPosition = position
         this.selectionCallbacks.forEach((callback) => callback())
+      },
+      emitData(data: string) {
+        this.dataCallbacks.forEach((callback) => callback(data))
       }
     }
     mockXtermInstances.push(instance)
@@ -5868,6 +5879,47 @@ describe('AppShell', () => {
         Reflect.deleteProperty(document, 'execCommand')
       }
     }
+
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.writeRuntimeLog!).mockClear()
+    terminalAfterReconnect.emitData('pwd\n')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'pwd\n')
+    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
+      'debug',
+      'renderer.terminal-input.write-request',
+      expect.objectContaining({
+        panelId: store.activePanelId,
+        sessionId: 'test-session-local',
+        bytes: 4
+      })
+    )
+    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
+      'debug',
+      'renderer.terminal-input.write-accepted',
+      expect.objectContaining({
+        panelId: store.activePanelId,
+        sessionId: 'test-session-local',
+        bytes: 4
+      })
+    )
+    expect(store.activePanel.output).not.toContain('pwd')
+
+    vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({ ok: true, data: { id: 'wrong-session', bytes: 4 } })
+    terminalAfterReconnect.emitData('date')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'date')
+    expect(store.topNotice).toBe('终端写入服务返回数据无效')
+    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
+      'warn',
+      'renderer.terminal-input.write-rejected',
+      expect.objectContaining({
+        panelId: store.activePanelId,
+        sessionId: 'test-session-local',
+        bytes: 4,
+        ok: true
+      })
+    )
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
     await wrapper.find('.command-line input').setValue('whoami')

@@ -57,6 +57,7 @@ import {
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
 } from './backend/chatImageAttachment'
+import { configureRuntimeLog, logRuntimeEvent, writeRuntimeLog } from './backend/runtimeLog'
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
@@ -589,6 +590,10 @@ const terminalDataPayload = (id: string, chunk: string | Buffer) => {
 }
 
 const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buffer) => {
+  logRuntimeEvent('debug', 'terminal.data', {
+    id,
+    bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
+  })
   owner.webContents.send('terminal:data', terminalDataPayload(id, chunk))
 }
 
@@ -1233,6 +1238,7 @@ const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiop
 const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
+configureRuntimeLog({ getLogDir: getLogDirPath })
 const settingsExternalActionRuntime = () => ({
   userDataPath: app.getPath('userData'),
   appPath: app.getAppPath(),
@@ -2540,10 +2546,36 @@ const startMcpConfigWatcher = async () => {
 
 const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
   return createSshTerminalSession(id, options, {
-    lifecycle: (event) => owner.webContents.send('terminal:lifecycle', event),
-    exit: (event, code) => sendTerminalExit(owner, event, code ?? event.code ?? null),
+    lifecycle: (event) => {
+      logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
+        id: event.id,
+        kind: event.kind,
+        stage: event.stage,
+        reason: event.reason,
+        errorCode: event.errorCode,
+        errorMessage: event.errorMessage,
+        host: event.host,
+        port: event.port,
+        username: event.username
+      })
+      owner.webContents.send('terminal:lifecycle', event)
+    },
+    exit: (event, code) => {
+      logRuntimeEvent('info', 'terminal.exit', {
+        id: event.id,
+        kind: event.kind,
+        code: code ?? event.code ?? null,
+        reason: event.reason,
+        errorCode: event.errorCode,
+        errorMessage: event.errorMessage
+      })
+      sendTerminalExit(owner, event, code ?? event.code ?? null)
+    },
     data: (chunk) => sendTerminalData(owner, id, chunk),
-    closed: () => sessions.delete(id)
+    closed: () => {
+      sessions.delete(id)
+      logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'ssh' })
+    }
   })
 }
 
@@ -2622,6 +2654,13 @@ const registerIpc = () => {
     const result = await shell.openPath(logDir)
     if (result) throw new Error(result)
     return { path: logDir }
+  })
+  ipcMain.handle('app:runtime-log', async (_event, level: unknown, eventName: unknown, fields: unknown) => {
+    const cleanLevel = level === 'debug' || level === 'info' || level === 'warn' || level === 'error' ? level : 'info'
+    const cleanEvent = typeof eventName === 'string' && eventName.trim() ? eventName.trim().slice(0, 120) : 'renderer.event'
+    const cleanFields = fields && typeof fields === 'object' && !Array.isArray(fields) ? (fields as Record<string, unknown>) : {}
+    await writeRuntimeLog(cleanLevel, cleanEvent, cleanFields)
+    return { ok: true, data: { event: cleanEvent } }
   })
   ipcMain.handle('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
@@ -3343,10 +3382,20 @@ const registerIpc = () => {
   ipcMain.handle('terminal:create', (event, options: TerminalCreateOptions = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner) {
+      logRuntimeEvent('error', 'terminal.create.no-owner', { kind: options.kind || (options.ssh || options.assetId ? 'ssh' : 'local') })
       throw new Error('No owner window for terminal session')
     }
 
     const id = randomUUID()
+    const requestedKind = options.kind || (options.ssh || options.assetId ? 'ssh' : 'local')
+    logRuntimeEvent('info', 'terminal.create.request', {
+      id,
+      kind: requestedKind,
+      cols: options.cols,
+      rows: options.rows,
+      hasAssetId: Boolean(options.assetId),
+      hasSshOptions: Boolean(options.ssh)
+    })
     if (options.kind === 'ssh' || options.ssh || options.assetId) {
       const result = createSshTerminal(owner, id, options)
       if (result.session) {
@@ -3358,6 +3407,14 @@ const registerIpc = () => {
           window: owner,
           kind: 'ssh',
           host: result.connection.host
+        })
+        logRuntimeEvent('info', 'terminal.create.ready', {
+          id,
+          kind: 'ssh',
+          shell: result.shell,
+          cwd: result.cwd,
+          host: result.connection.host,
+          username: result.connection.username
         })
       }
       return {
@@ -3371,10 +3428,35 @@ const registerIpc = () => {
     }
 
     const result = createLocalTerminalSession(id, options, {
-      lifecycle: (event) => owner.webContents.send('terminal:lifecycle', event),
-      exit: (event, code) => sendTerminalExit(owner, event, code ?? event.code ?? null),
+      lifecycle: (event) => {
+        logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
+          id: event.id,
+          kind: event.kind,
+          stage: event.stage,
+          shell: event.shell,
+          cwd: event.cwd,
+          reason: event.reason,
+          errorCode: event.errorCode,
+          errorMessage: event.errorMessage
+        })
+        owner.webContents.send('terminal:lifecycle', event)
+      },
+      exit: (event, code) => {
+        logRuntimeEvent('info', 'terminal.exit', {
+          id: event.id,
+          kind: event.kind,
+          code: code ?? event.code ?? null,
+          reason: event.reason,
+          errorCode: event.errorCode,
+          errorMessage: event.errorMessage
+        })
+        sendTerminalExit(owner, event, code ?? event.code ?? null)
+      },
       data: (chunk) => sendTerminalData(owner, id, chunk),
-      closed: () => sessions.delete(id)
+      closed: () => {
+        sessions.delete(id)
+        logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
+      }
     })
     sessions.set(id, {
       id,
@@ -3385,19 +3467,32 @@ const registerIpc = () => {
       kind: 'local',
       host: 'local'
     })
+    logRuntimeEvent('info', 'terminal.create.ready', {
+      id,
+      kind: 'local',
+      shell: result.shell,
+      cwd: result.cwd,
+      runtimeKind: result.runtimeKind
+    })
 
     return { id, shell: result.shell, cwd: result.cwd, kind: 'local' as const, lifecycle: result.lifecycle }
   })
 
   ipcMain.handle('terminal:write', (_event, id: string, data: string) => {
     const session = sessions.get(id)
-    if (!session) return createTerminalWriteResult(id, data, false)
+    const bytes = Buffer.byteLength(String(data || ''), 'utf8')
+    if (!session) {
+      logRuntimeEvent('warn', 'terminal.write.missing-session', { id, bytes })
+      return createTerminalWriteResult(id, data, false)
+    }
+    logRuntimeEvent('debug', 'terminal.write.request', { id, kind: session.kind, bytes })
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).write(data)
     } else {
       ;(session.process as LocalTerminalSession).write(data)
     }
     terminalHistoryLinesFromWrite(data).forEach((command) => recordTerminalCommandHistory(command, { host: session.host }))
+    logRuntimeEvent('debug', 'terminal.write.accepted', { id, kind: session.kind, bytes })
     return createTerminalWriteResult(id, data, true)
   })
 
@@ -3427,7 +3522,11 @@ const registerIpc = () => {
 
   ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) => {
     const session = sessions.get(id)
-    if (!session) return
+    if (!session) {
+      logRuntimeEvent('warn', 'terminal.resize.missing-session', { id, cols, rows })
+      return
+    }
+    logRuntimeEvent('debug', 'terminal.resize', { id, kind: session.kind, cols, rows })
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).resize(cols, rows)
     } else {
@@ -3437,7 +3536,11 @@ const registerIpc = () => {
 
   ipcMain.handle('terminal:kill', (_event, id: string) => {
     const session = sessions.get(id)
-    if (!session) return createTerminalKillResult(id, false)
+    if (!session) {
+      logRuntimeEvent('warn', 'terminal.kill.missing-session', { id })
+      return createTerminalKillResult(id, false)
+    }
+    logRuntimeEvent('info', 'terminal.kill.request', { id, kind: session.kind })
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).kill('manual')
     } else {

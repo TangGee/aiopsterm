@@ -52,6 +52,8 @@ export type TerminalWriteResult = AiopsMutationResult<{
   bytes: number
 }>
 
+export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
 export type TerminalKillResult = AiopsMutationResult<{
   id: string
 }>
@@ -2937,6 +2939,7 @@ export type AiopsPreloadApi = {
   openSettingsDocumentation: () => Promise<OpenPathResult>
   submitSettingsFeedbackReport: () => Promise<OpenPathResult>
   openLogDir: () => Promise<OpenPathResult>
+  writeRuntimeLog?: (level: RuntimeLogLevel, event: string, fields?: Record<string, unknown>) => Promise<AiopsMutationResult<{ event: string }>>
   minimizeWindow: () => Promise<void>
   maximizeWindow: () => Promise<void>
   unmaximizeWindow: () => Promise<void>

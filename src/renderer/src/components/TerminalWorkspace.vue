@@ -445,7 +445,7 @@ import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
-import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
+import type { RuntimeLogLevel, TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -505,6 +505,10 @@ const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
 const isReconnectablePanel = (panel?: TerminalPanel | null) => panel?.status === 'closed' || panel?.status === 'error'
 let suggestionRequestId = 0
 let commandGenerationRequestId = 0
+
+const writeRuntimeLog = (level: RuntimeLogLevel, event: string, fields: Record<string, unknown> = {}) => {
+  void window.aiops?.writeRuntimeLog?.(level, event, fields)
+}
 
 const showDashboard = ref(true)
 
@@ -612,7 +616,14 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
   terminal.loadAddon(searchAddon)
   terminal.open(element)
   terminalViews.set(panel.id, { terminal, fit, search: searchAddon, lastOutput: '' })
+  writeRuntimeLog('debug', 'renderer.terminal-view.created', {
+    panelId: panel.id,
+    hasSession: Boolean(panel.sessionId)
+  })
   syncTerminalView(panel)
+  terminal.onData((data) => {
+    void writeXtermInput(panel.id, data)
+  })
   terminal.onSelectionChange(() => {
     const selectedText = terminal.getSelection()
     if (selectedText.trim()) void mirrorTextToClipboardQuietly(selectedText.trim())
@@ -621,6 +632,12 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
   terminal.onResize(({ cols, rows }) => {
     if (panel.sessionId && window.aiops) {
       window.aiops.resizeTerminal(panel.sessionId, cols, rows)
+      writeRuntimeLog('debug', 'renderer.terminal.resize', {
+        panelId: panel.id,
+        sessionId: panel.sessionId,
+        cols,
+        rows
+      })
     }
     updateSelectionButtonPosition(panel.id)
     updateSuggestionsPosition(panel.id)
@@ -633,6 +650,63 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
     },
     { passive: true }
   )
+}
+
+const writeXtermInput = async (panelId: string, data: string) => {
+  const panel = workspace.panels.find((item) => item.id === panelId || item.sessionId === panelId)
+  const sessionId = panel?.sessionId
+  const bytes = new TextEncoder().encode(data).length
+  if (!panel || !sessionId) {
+    workspace.setTopNotice('终端会话不可用，请先打开本地 shell 或连接 SSH')
+    writeRuntimeLog('warn', 'renderer.terminal-input.missing-session', {
+      panelId,
+      bytes
+    })
+    return
+  }
+  if (typeof window.aiops?.writeTerminal !== 'function') {
+    workspace.setTopNotice('终端写入服务不可用')
+    writeRuntimeLog('warn', 'renderer.terminal-input.missing-bridge', {
+      panelId,
+      sessionId,
+      bytes
+    })
+    return
+  }
+  try {
+    writeRuntimeLog('debug', 'renderer.terminal-input.write-request', {
+      panelId,
+      sessionId,
+      bytes
+    })
+    const result = await window.aiops.writeTerminal(sessionId, data)
+    if (!result?.ok || !isRecord(result.data) || result.data.id !== sessionId || result.data.bytes !== bytes) {
+      workspace.setTopNotice(result?.errorMessage || '终端写入服务返回数据无效')
+      writeRuntimeLog('warn', 'renderer.terminal-input.write-rejected', {
+        panelId,
+        sessionId,
+        bytes,
+        ok: result?.ok,
+        errorCode: result?.errorCode,
+        errorMessage: result?.errorMessage
+      })
+      return
+    }
+    writeRuntimeLog('debug', 'renderer.terminal-input.write-accepted', {
+      panelId,
+      sessionId,
+      bytes
+    })
+  } catch (error) {
+    const message = error instanceof Error && error.message.trim() ? error.message.trim() : '终端写入失败，请重新打开本地 shell 或连接 SSH'
+    workspace.setTopNotice(message)
+    writeRuntimeLog('error', 'renderer.terminal-input.write-error', {
+      panelId,
+      sessionId,
+      bytes,
+      message
+    })
+  }
 }
 
 const getPanelTitle = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId)?.title || ''
@@ -1499,9 +1573,24 @@ const startRealShell = async () => {
     })
     if (!workspace.applyLocalTerminalSession(panel.id, session)) {
       workspace.setTopNotice('本地终端启动失败')
+      writeRuntimeLog('warn', 'renderer.local-terminal.apply-failed', {
+        panelId: panel.id,
+        sessionId: session?.id
+      })
+    } else {
+      writeRuntimeLog('info', 'renderer.local-terminal.ready', {
+        panelId: panel.id,
+        sessionId: session.id,
+        shell: session.shell,
+        cwd: session.cwd
+      })
     }
   } catch (error) {
     workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+    writeRuntimeLog('error', 'renderer.local-terminal.create-error', {
+      panelId: panel.id,
+      message: error instanceof Error ? error.message : '本地终端启动失败'
+    })
   }
 }
 
