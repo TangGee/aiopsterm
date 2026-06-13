@@ -269,6 +269,8 @@ type OnboardingAiRequest =
   | 'open-context-hosts'
   | 'prepare-send'
 type OnboardingAssetRequest = 'none' | 'open-host-management' | 'open-create-form'
+type AssetManagementViewRequest = 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
+type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
 type UserExternalActionData = NonNullable<AiopsUserExternalActionResult['data']>
 type UserMutationData = NonNullable<AiopsUserMutationResult['data']>
 type UserCodeData = NonNullable<AiopsUserCodeResult['data']>
@@ -4112,7 +4114,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionPendingPackageRequestId = ref('')
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
-  const assetManagementOpenRequest = ref<{ sequence: number; organizationId?: string }>({ sequence: 0 })
+  const assetManagementOpenRequest = ref<{
+    sequence: number
+    organizationId?: string
+    view?: AssetManagementViewRequest
+    action?: AssetManagementOpenAction
+  }>({ sequence: 0, action: 'none' })
   const aliasCommands = ref<AliasCommand[]>([])
   const aliasEditSnapshot = ref<AliasCommand | null>(null)
   const aliasSearchQuery = ref('')
@@ -8924,7 +8931,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const openAssetManagement = (organizationId?: string) => {
+  const openAssetManagement = (
+    organizationId?: string,
+    view: AssetManagementViewRequest = organizationId ? 'assetManagement' : 'assetConfig',
+    action: AssetManagementOpenAction = 'none'
+  ) => {
     mode.value = 'terminal'
     activeModule.value = 'assets'
     leftPanelOpen.value = true
@@ -8932,6 +8943,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     onboardingGuideOpen.value = false
     assetManagementOpenRequest.value = {
       sequence: assetManagementOpenRequest.value.sequence + 1,
+      view,
+      action,
       ...(organizationId ? { organizationId } : {})
     }
     setTopNotice(organizationId ? '已打开组织资产管理' : '已打开资产管理')
@@ -9173,7 +9186,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput) => {
-    const normalized = { ...(folder.uuid ? { uuid: folder.uuid } : {}), name: folder.name.trim(), description: (folder.description || '').trim() }
+    const normalized = {
+      ...(folder.uuid ? { uuid: folder.uuid } : {}),
+      name: folder.name.trim(),
+      description: (folder.description || '').trim(),
+      ...(folder.parentUuid ? { parentUuid: folder.parentUuid } : {}),
+      ...(folder.scope ? { scope: folder.scope } : {})
+    }
     if (!normalized.name) return null
     const saveFileSessionFolderBridge = window.aiops?.saveFileSessionFolder
     if (typeof saveFileSessionFolderBridge !== 'function') {
@@ -12051,6 +12070,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const createPanel = (split?: PanelDirection) => {
     const sourcePanel = split ? panels.value.find((panel) => panel.id === activePanelId.value) : undefined
+    const welcomePlaceholder =
+      !split &&
+      panels.value.length === 1 &&
+      panels.value[0].id === 'panel-main' &&
+      panels.value[0].title === defaultTerminalPanelTitle &&
+      panels.value[0].kind !== 'knowledge' &&
+      !panels.value[0].sessionId &&
+      !panels.value[0].output &&
+      panels.value[0].outputSegments.length === 0 &&
+      !panels.value[0].sshSession &&
+      panels.value[0].status === 'ready'
+    if (welcomePlaceholder) {
+      const panel = panels.value[0]
+      panel.id = createRendererLocalId('panel')
+      panel.title = 'Terminal 1'
+      activePanelId.value = panel.id
+      return panel
+    }
     const sourceId = sourcePanel?.id
     const groupId = split ? sourcePanel?.splitGroupId || sourceId : undefined
     const splitOrder = split ? Date.now() + panels.value.length : undefined

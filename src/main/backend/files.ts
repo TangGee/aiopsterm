@@ -15,6 +15,7 @@ import type {
   FileSessionPatch,
   FileSessionSftpPayload,
   FileSessionTerminalContext,
+  AiopsAssetInput,
   FileContentOptions,
   FileEntryMutation,
   FileEntryMutationResult,
@@ -31,7 +32,7 @@ import type {
 } from '@shared/preload'
 import { shouldUseFilesSeedData } from '@shared/runtimeSwitches'
 import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'
-import { getAsset, getAssetSecret, getKeychainSecret } from './assets'
+import { deleteAssetFolder, getAsset, getAssetSecret, getKeychainSecret, listAssets, saveAsset, saveAssetFolder } from './assets'
 import { loadSsh2 } from './ssh2Runtime'
 import { createConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
@@ -885,6 +886,106 @@ const cloneFileSessionCatalog = (catalog: FileSessionCatalog): FileSessionCatalo
 })
 
 const fileSessionLocalEntry = () => cloneSession(defaultFileSessions[0])
+const rootPathForAssetUsername = (username: string) => (username && username !== 'local' ? `/home/${username}` : '/')
+const seedFileSessionForField = (session?: FileSessionInfo) => (session?.id ? seedFileSessionById.get(session.id) : undefined)
+const isUserChangedFileSessionField = <K extends keyof FileSessionInfo>(session: FileSessionInfo | undefined, field: K) => {
+  if (!session) return false
+  const seed = seedFileSessionForField(session)
+  return !seed || stableJson(session[field]) !== stableJson(seed[field])
+}
+
+const assetToFileSession = (asset: ReturnType<typeof listAssets>['assets'][number], existing?: FileSessionInfo): FileSessionInfo | null => {
+  if (asset.isLocalShell) return null
+  const host = textSecret(asset.host || asset.ip)
+  const username = textSecret(asset.username)
+  if (!asset.id || !host) return null
+  const isOrganization = asset.asset_type === 'organization'
+  return {
+    id: asset.id,
+    label: asset.title || asset.name || host,
+    host,
+    ...(username ? { username } : {}),
+    group: isUserChangedFileSessionField(existing, 'group') && existing?.group ? existing.group : asset.group_name || asset.group || (isOrganization ? '堡垒机资源' : '主机'),
+    kind: 'remote',
+    rootPath: isUserChangedFileSessionField(existing, 'rootPath') && existing?.rootPath ? existing.rootPath : rootPathForAssetUsername(username),
+    status: isUserChangedFileSessionField(existing, 'status') && existing?.status ? existing.status : asset.status === 'offline' ? 'idle' : 'active',
+    favorite: isUserChangedFileSessionField(existing, 'favorite') && typeof existing?.favorite === 'boolean' ? existing.favorite : Boolean(asset.favorite),
+    assetType: isOrganization ? 'organization' : 'person',
+    ...(asset.folderUuid ? { folderUuid: asset.folderUuid } : {}),
+    ...(isUserChangedFileSessionField(existing, 'comment') && existing?.comment ? { comment: existing.comment } : asset.comment ? { comment: asset.comment } : {})
+  }
+}
+
+const assetFoldersToFileFolders = (folders: ReturnType<typeof listAssets>['folders']): FileSessionFolderRecord[] =>
+  folders.map((folder) => ({ ...folder }))
+
+const findAssetFolder = (uuid: string) => listAssets().folders.find((folder) => folder.uuid === uuid)
+
+const assetInputFromRecord = (asset: ReturnType<typeof listAssets>['assets'][number]): AiopsAssetInput => ({
+  id: asset.id,
+  name: asset.name,
+  title: asset.title,
+  host: asset.host,
+  ip: asset.ip,
+  group: asset.group,
+  group_name: asset.group_name,
+  status: asset.status,
+  username: asset.username,
+  port: asset.port,
+  asset_type: asset.asset_type,
+  auth_type: asset.auth_type,
+  comment: asset.comment,
+  data_source: asset.data_source,
+  tags: asset.tags,
+  favorite: asset.favorite,
+  ...(asset.folderUuid ? { folderUuid: asset.folderUuid } : {}),
+  ...(asset.organizationId ? { organizationId: asset.organizationId } : {}),
+  ...(asset.tunnelState ? { tunnelState: asset.tunnelState } : {}),
+  ...(typeof asset.needProxy === 'boolean' ? { needProxy: asset.needProxy } : {}),
+  ...(asset.proxyName ? { proxyName: asset.proxyName } : {}),
+  ...(asset.keychainId ? { keychainId: asset.keychainId } : {}),
+  ...(asset.jumpHostId ? { jumpHostId: asset.jumpHostId } : {})
+})
+
+const syncAssetFromFileSessionPatch = (id: string, patch: FileSessionPatch) => {
+  const asset = getAsset(id)
+  if (!asset || asset.isLocalShell) return null
+  const input = assetInputFromRecord(asset)
+  if (Object.prototype.hasOwnProperty.call(patch, 'favorite')) input.favorite = patch.favorite
+  if (Object.prototype.hasOwnProperty.call(patch, 'comment')) input.comment = patch.comment || ''
+  if (Object.prototype.hasOwnProperty.call(patch, 'folderUuid')) {
+    delete input.folderUuid
+    const folderUuid = String(patch.folderUuid || '').trim()
+    if (folderUuid) input.folderUuid = folderUuid
+  }
+  const result = saveAsset(input)
+  if (!result.ok) {
+    return {
+      ok: false as const,
+      errorCode: result.errorCode || 'FILES_ASSET_SYNC_FAILED',
+      errorMessage: result.errorMessage || 'Asset sync failed.'
+    }
+  }
+  return { ok: true as const }
+}
+
+const mergeAssetCatalogIntoFileSessions = (catalog: FileSessionCatalog): FileSessionCatalog => {
+  const assetSnapshot = listAssets()
+  const byId = new Map(catalog.sessions.map((session) => [session.id, session]))
+  const local = normalizeSession(byId.get('local') || fileSessionLocalEntry()) || fileSessionLocalEntry()
+  const assetSessions = assetSnapshot.assets
+    .map((asset) => assetToFileSession(asset, byId.get(asset.id)))
+    .filter((session): session is FileSessionInfo => Boolean(session))
+  const assetIds = new Set(assetSnapshot.assets.map((asset) => asset.id))
+  const customSessions = catalog.sessions.filter((session) => session.id !== 'local' && !assetIds.has(session.id) && !isUnmodifiedSeedFileSession(session))
+  const assetFolders = assetFoldersToFileFolders(assetSnapshot.folders)
+  const assetFolderIds = new Set(assetFolders.map((folder) => folder.uuid))
+  const customFolders = catalog.folders.filter((folder) => !assetFolderIds.has(folder.uuid) && !isUnmodifiedSeedFileSessionFolder(folder))
+  return normalizeFileSessionCatalog({
+    sessions: [local, ...assetSessions, ...customSessions],
+    folders: [...assetFolders, ...customFolders]
+  })
+}
 
 const stableJson = (value: unknown) => JSON.stringify(value)
 
@@ -1404,6 +1505,7 @@ const normalizeSession = (session: FileSessionInfo): FileSessionInfo | null => {
     id,
     label,
     host,
+    ...(session.username ? { username: String(session.username).trim() } : {}),
     group: String(session.group || (session.kind === 'local' ? '本地连接' : '资产')).trim(),
     kind: session.kind === 'local' ? 'local' : 'remote',
     rootPath,
@@ -1443,7 +1545,9 @@ const normalizeFileSessionFolderInput = (folder: FileSessionFolderSaveInput, exi
   return {
     uuid: existing?.uuid || `files-folder-${randomUUID()}`,
     name,
-    description: String(folder.description ?? existing?.description ?? '').trim()
+    description: String(folder.description ?? existing?.description ?? '').trim(),
+    ...(folder.parentUuid || existing?.parentUuid ? { parentUuid: folder.parentUuid || existing?.parentUuid } : {}),
+    ...(folder.scope || existing?.scope ? { scope: folder.scope || existing?.scope } : {})
   }
 }
 
@@ -1454,7 +1558,9 @@ const normalizeStoredFileSessionFolder = (folder: Partial<FileSessionFolderRecor
   return {
     uuid,
     name,
-    description: String(folder.description || '').trim()
+    description: String(folder.description || '').trim(),
+    ...(folder.parentUuid ? { parentUuid: String(folder.parentUuid).trim() } : {}),
+    ...(folder.scope === 'direct' || folder.scope === 'bastion' ? { scope: folder.scope } : {})
   }
 }
 
@@ -1570,6 +1676,7 @@ export const saveFileSessionFromSftpPayload = async (payload: FileSessionSftpPay
     id,
     label: payloadString(payload, ['title', 'hostname', 'name', 'label']) || host,
     host,
+    username,
     group: payloadString(payload, ['group', 'group_name', 'organizationName']) || '资产',
     kind: 'remote',
     rootPath,
@@ -1613,6 +1720,7 @@ export const saveFileSessionFromTerminalContext = async (context: FileSessionTer
     id,
     label: title,
     host,
+    username,
     group,
     kind: 'remote',
     rootPath,
@@ -1625,7 +1733,8 @@ export const saveFileSessionFromTerminalContext = async (context: FileSessionTer
 }
 
 export const listFileSessionCatalog = async (): Promise<FileSessionCatalogResult> => {
-  const catalog = loadFileSessionCatalog()
+  const catalog = mergeAssetCatalogIntoFileSessions(loadFileSessionCatalog())
+  saveFileSessionCatalog(catalog)
   return fileSessionResult(cloneFileSessionCatalog(catalog))
 }
 
@@ -1645,15 +1754,21 @@ export const saveFileSession = async (session: FileSessionInfo): Promise<FileSes
 }
 
 export const updateFileSession = async (id: string, patch: FileSessionPatch): Promise<FileSessionMutationResult> => {
-  const catalog = loadFileSessionCatalog()
+  const catalog = mergeAssetCatalogIntoFileSessions(loadFileSessionCatalog())
   const session = catalog.sessions.find((item) => item.id === id)
   if (!session) return { ok: false, errorCode: 'FILES_SESSION_NOT_FOUND', errorMessage: 'File session not found.' }
+  const assetSyncResult = syncAssetFromFileSessionPatch(id, patch)
+  if (assetSyncResult && !assetSyncResult.ok) {
+    return { ok: false, errorCode: assetSyncResult.errorCode, errorMessage: assetSyncResult.errorMessage }
+  }
   const normalized = normalizeSession({ ...session, ...patch, id })
   if (!normalized) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
-  const saved = saveFileSessionCatalog({
+  const saved = saveFileSessionCatalog(
+    mergeAssetCatalogIntoFileSessions({
     ...catalog,
     sessions: catalog.sessions.map((item) => (item.id === id ? normalized : item))
-  })
+    })
+  )
   return fileSessionResult({ ...cloneFileSessionCatalog(saved), session: cloneSession(normalized) })
 }
 
@@ -1672,9 +1787,24 @@ export const deleteFileSession = async (id: string): Promise<FileSessionCatalogR
 
 export const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput): Promise<FileSessionFolderMutationResult> => {
   const catalog = loadFileSessionCatalog()
-  const existing = folder.uuid ? catalog.folders.find((item) => item.uuid === folder.uuid) : undefined
+  const assetFolder = folder.uuid ? findAssetFolder(folder.uuid) : undefined
+  const existing = assetFolder || (folder.uuid ? catalog.folders.find((item) => item.uuid === folder.uuid) : undefined)
   const normalized = normalizeFileSessionFolderInput(folder, existing)
   if (!normalized) return { ok: false, errorCode: 'FILES_FOLDER_NAME_REQUIRED', errorMessage: 'Folder name is required.' }
+  if (assetFolder || normalized.scope === 'bastion') {
+    const result = saveAssetFolder({
+      ...(assetFolder ? { uuid: normalized.uuid } : {}),
+      name: normalized.name,
+      description: normalized.description,
+      scope: normalized.scope || assetFolder?.scope || 'bastion',
+      parentUuid: normalized.parentUuid || assetFolder?.parentUuid
+    })
+    if (!result.ok) return { ok: false, errorCode: result.errorCode || 'FILES_FOLDER_SAVE_FAILED', errorMessage: result.errorMessage || 'Folder save failed.' }
+    if (!result.data) return { ok: false, errorCode: 'FILES_FOLDER_SAVE_FAILED', errorMessage: 'Folder save failed.' }
+    const merged = mergeAssetCatalogIntoFileSessions(loadFileSessionCatalog())
+    saveFileSessionCatalog(merged)
+    return fileSessionResult({ ...cloneFileSessionCatalog(merged), folder: cloneFolder(result.data) })
+  }
   const saved = saveFileSessionCatalog({
     ...catalog,
     folders: catalog.folders.some((item) => item.uuid === normalized.uuid)
@@ -1687,6 +1817,13 @@ export const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput):
 export const deleteFileSessionFolder = async (uuid: string): Promise<FileSessionFolderDeleteResult> => {
   const folderUuid = String(uuid || '').trim()
   if (!folderUuid) return { ok: false, errorCode: 'FILES_FOLDER_UUID_REQUIRED', errorMessage: 'Folder uuid is required.' }
+  if (findAssetFolder(folderUuid)) {
+    const result = deleteAssetFolder(folderUuid)
+    if (!result.ok) return { ok: false, errorCode: result.errorCode || 'FILES_FOLDER_DELETE_FAILED', errorMessage: result.errorMessage || 'Folder delete failed.' }
+    const merged = mergeAssetCatalogIntoFileSessions(loadFileSessionCatalog())
+    saveFileSessionCatalog(merged)
+    return fileSessionResult({ ...cloneFileSessionCatalog(merged), folderUuid })
+  }
   const catalog = loadFileSessionCatalog()
   const saved = saveFileSessionCatalog({
     folders: catalog.folders.filter((folder) => folder.uuid !== folderUuid),

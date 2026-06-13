@@ -47,15 +47,21 @@ describe('files sqlite session catalog seed boundary', () => {
     })
   })
 
-  it('strips unchanged legacy SQLite file session seeds in non-seed runtime while preserving user edits', async () => {
+  it('strips unchanged legacy SQLite file session seeds in non-seed runtime while preserving custom user sessions', async () => {
     await withFileSessionDatabase(async (databasePath) => {
       const backend = await loadBackend()
       backend.configureFilesBackendRuntime({ databasePath, useSeedData: true, sqliteFactory: Database })
       backend.__resetFileSessionCatalogForTests()
-      const edited = await backend.updateFileSession('asset-1', {
-        label: 'sqlite-user-owned-prod-files',
+      const edited = await backend.saveFileSession({
+        id: 'sqlite-custom-files',
+        label: 'sqlite-custom-files',
+        host: '10.77.0.19',
+        group: '资产',
+        kind: 'remote',
         rootPath: '/srv/sqlite-user-owned',
-        folderUuid: 'files-folder-a'
+        status: 'active',
+        favorite: false,
+        assetType: 'person'
       })
       expect(edited.ok).toBe(true)
 
@@ -67,16 +73,14 @@ describe('files sqlite session catalog seed boundary', () => {
         expect.arrayContaining([
           expect.objectContaining({ id: 'local', kind: 'local' }),
           expect.objectContaining({
-            id: 'asset-1',
-            label: 'sqlite-user-owned-prod-files',
-            rootPath: '/srv/sqlite-user-owned',
-            folderUuid: 'files-folder-a'
+            id: 'sqlite-custom-files',
+            label: 'sqlite-custom-files',
+            rootPath: '/srv/sqlite-user-owned'
           })
         ])
       )
-      expect(catalog.data.sessions.some((session: { id: string }) => session.id === 'folder_asset-2')).toBe(false)
-      expect(catalog.data.folders).toContainEqual(expect.objectContaining({ uuid: 'files-folder-a' }))
-      expect(catalog.data.folders.some((folder: { uuid: string }) => folder.uuid === 'files-folder-b')).toBe(false)
+      expect(catalog.data.sessions.some((session: { id: string }) => session.id === 'asset-2')).toBe(false)
+      expect(catalog.data.folders).toEqual([])
     })
   })
 })

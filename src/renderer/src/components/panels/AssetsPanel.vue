@@ -109,22 +109,29 @@
           </div>
 
           <div class="asset-list-container">
-            <template
-              v-for="group in filteredAssetGroups"
-              :key="group.key"
-            >
-              <div class="group-title">{{ group.title }}</div>
-              <div
-                class="host-cards"
-                :class="{ 'wide-layout': !editorOpen }"
+            <div class="asset-host-tree">
+              <template
+                v-for="group in filteredAssetGroups"
+                :key="group.key"
               >
+                <button
+                  class="asset-tree-group-row"
+                  @click="toggleAssetGroup(group.key)"
+                >
+                  <ChevronDown v-if="isAssetGroupExpanded(group.key)" />
+                  <ChevronRight v-else />
+                  <span>{{ group.title }}</span>
+                  <small>{{ group.children.length }}</small>
+                </button>
                 <div
-                  v-for="asset in group.children"
-                  :key="asset.id"
-                  class="host-card-wrapper"
+                  v-if="isAssetGroupExpanded(group.key)"
+                  class="asset-tree-children"
                 >
                   <div
-                    class="host-card"
+                    v-for="asset in group.children"
+                    :key="asset.id"
+                    class="host-card asset-tree-host-row"
+                    :class="{ selected: selectedAssetId === asset.id }"
                     role="button"
                     tabindex="0"
                     :aria-label="`${asset.title} 主机${asset.username ? `, ${asset.username}` : ''}`"
@@ -145,7 +152,7 @@
                     </span>
                     <span class="host-card-info">
                       <strong>{{ asset.title }}</strong>
-                      <small>主机{{ asset.username ? `, ${asset.username}` : '' }}</small>
+                      <small>{{ asset.username }}@{{ asset.host }}:{{ asset.port }} · {{ asset.asset_type === 'organization' ? '堡垒机' : '主机' }}</small>
                     </span>
                     <span class="host-card-actions">
                       <button
@@ -164,8 +171,8 @@
                     </span>
                   </div>
                 </div>
-              </div>
-            </template>
+              </template>
+            </div>
 
             <div
               v-if="filteredAssetGroups.length === 0"
@@ -225,9 +232,15 @@
           </div>
         </div>
 
+      </div>
+
+      <div
+        v-if="editorOpen"
+        class="asset-host-modal file-modal"
+        @click.self="editorOpen = false"
+      >
         <aside
-          class="asset-form-panel"
-          :class="{ collapsed: !editorOpen }"
+          class="asset-form-panel asset-host-form-modal"
           :data-onboarding-id="editorOpen ? 'asset-form-fields' : undefined"
         >
           <template v-if="editorOpen">
@@ -289,7 +302,15 @@
               />
             </label>
             <label v-else>
-              <span>密钥链</span>
+              <span class="asset-field-heading">
+                密钥链
+                <button
+                  type="button"
+                  @click="openKeyCreateFromHostForm"
+                >
+                  新建密钥
+                </button>
+              </span>
               <select v-model="form.keyId">
                 <option value="">请选择密钥</option>
                 <option
@@ -323,7 +344,15 @@
               />
             </label>
             <label>
-              <span>代理</span>
+              <span class="asset-field-heading">
+                代理
+                <button
+                  type="button"
+                  @click="openProxyAddPanel(true)"
+                >
+                  新增代理
+                </button>
+              </span>
               <select
                 v-if="sshProxyOptions.length"
                 v-model="form.proxyName"
@@ -345,14 +374,22 @@
                 <small>暂无 SSH 代理配置</small>
                 <button
                   type="button"
-                  @click="openSshProxySettings"
+                  @click="openProxyAddPanel(true)"
                 >
-                  去设置代理
+                  新增代理
                 </button>
               </div>
             </label>
             <label>
-              <span>跳板机</span>
+              <span class="asset-field-heading">
+                跳板机
+                <button
+                  type="button"
+                  @click="openJumpHostCreateFromHostForm"
+                >
+                  新建跳板机
+                </button>
+              </span>
               <select v-model="form.jumpHostId">
                 <option value="">不使用跳板机</option>
                 <option
@@ -396,6 +433,166 @@
             </small>
           </template>
         </aside>
+      </div>
+    </template>
+
+    <template v-else-if="activeAssetView === 'proxyManagement'">
+      <div class="asset-proxy-management-page">
+        <div class="asset-search-container">
+          <div class="asset-search-row">
+            <div class="asset-management-title">
+              <strong>代理管理</strong>
+              <small>SSH 代理作为资源配置供主机、数据库和文件会话复用。</small>
+            </div>
+            <button
+              class="asset-action-button"
+              @click="openProxyAddPanel()"
+            >
+              <Network />
+              新增代理
+            </button>
+          </div>
+        </div>
+        <div class="asset-proxy-list">
+          <div
+            v-if="workspace.sshProxyConfigs.length"
+            class="asset-table-scroll"
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>地址</th>
+                  <th>认证</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="proxy in workspace.sshProxyConfigs"
+                  :key="proxy.name"
+                >
+                  <td>{{ proxy.name }}</td>
+                  <td>{{ proxy.type }}</td>
+                  <td>{{ proxy.host }}:{{ proxy.port }}</td>
+                  <td>{{ proxy.enableProxyIdentity ? proxy.username || '-' : '无' }}</td>
+                  <td>
+                    <button @click="workspace.removeSshProxyConfig(proxy.name)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div
+            v-else
+            class="asset-empty-state"
+          >
+            <Network />
+            <strong>暂无代理配置</strong>
+            <small>添加后可在主机、数据库和远程文件会话中选择。</small>
+            <div>
+              <button @click="openProxyAddPanel()">新增代理</button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="workspace.sshProxyAddModalOpen"
+          class="asset-host-modal file-modal"
+          @click.self="workspace.closeAddSshProxyConfig()"
+        >
+          <aside class="asset-form-panel asset-host-form-modal">
+            <header>
+              <strong>新增代理</strong>
+              <button
+                title="关闭"
+                @click="workspace.closeAddSshProxyConfig()"
+              >
+                <X />
+              </button>
+            </header>
+            <label>
+              <span>名称</span>
+              <input
+                :value="workspace.sshProxyForm.name"
+                @input="workspace.updateSshProxyForm({ name: ($event.target as HTMLInputElement).value })"
+              />
+            </label>
+            <label>
+              <span>类型</span>
+              <select
+                :value="workspace.sshProxyForm.type"
+                @change="workspace.updateSshProxyForm({ type: ($event.target as HTMLSelectElement).value as any })"
+              >
+                <option value="HTTP">HTTP</option>
+                <option value="HTTPS">HTTPS</option>
+                <option value="SOCKS4">SOCKS4</option>
+                <option value="SOCKS5">SOCKS5</option>
+              </select>
+            </label>
+            <label>
+              <span>主机</span>
+              <input
+                :value="workspace.sshProxyForm.host"
+                @input="workspace.updateSshProxyForm({ host: ($event.target as HTMLInputElement).value })"
+              />
+            </label>
+            <label>
+              <span>端口</span>
+              <input
+                type="number"
+                :value="workspace.sshProxyForm.port"
+                @input="workspace.updateSshProxyForm({ port: Number(($event.target as HTMLInputElement).value) })"
+              />
+            </label>
+            <label class="asset-inline-check">
+              <input
+                type="checkbox"
+                :checked="workspace.sshProxyForm.enableProxyIdentity"
+                @change="workspace.updateSshProxyForm({ enableProxyIdentity: ($event.target as HTMLInputElement).checked })"
+              />
+              <span>需要代理认证</span>
+            </label>
+            <template v-if="workspace.sshProxyForm.enableProxyIdentity">
+              <label>
+                <span>用户名</span>
+                <input
+                  :value="workspace.sshProxyForm.username"
+                  @input="workspace.updateSshProxyForm({ username: ($event.target as HTMLInputElement).value })"
+                />
+              </label>
+              <label>
+                <span>密码</span>
+                <input
+                  type="password"
+                  :value="workspace.sshProxyForm.password"
+                  @input="workspace.updateSshProxyForm({ password: ($event.target as HTMLInputElement).value })"
+                />
+              </label>
+            </template>
+            <small
+              v-if="workspace.settingsNotice"
+              class="asset-form-error"
+            >
+              {{ workspace.settingsNotice }}
+            </small>
+            <div class="asset-form-actions">
+              <button
+                class="asset-submit-button secondary"
+                @click="workspace.closeAddSshProxyConfig()"
+              >
+                取消
+              </button>
+              <button
+                class="asset-submit-button"
+                @click="saveProxyFormFromAssetPanel"
+              >
+                保存
+              </button>
+            </div>
+          </aside>
+        </div>
       </div>
     </template>
 
@@ -905,6 +1102,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
+  ChevronDown,
+  ChevronRight,
   CircleHelp,
   Copy,
   Database,
@@ -1024,6 +1223,8 @@ const keyForm = reactive({
   publicKey: '',
   passphrase: ''
 })
+const expandedAssetGroupKeys = ref<string[]>([])
+const pendingHostDraftReturn = ref(false)
 
 const confirmInput = ref('')
 const confirmState = reactive<{
@@ -1290,6 +1491,12 @@ const filteredKeychains = computed(() => {
   if (!keyword) return keychains.value
   return keychains.value.filter((key) => `${key.name} ${key.type} ${key.publicKey}`.toLowerCase().includes(keyword))
 })
+const isAssetGroupExpanded = (key: string) => Boolean(assetQuery.value.trim()) || expandedAssetGroupKeys.value.includes(key)
+const toggleAssetGroup = (key: string) => {
+  expandedAssetGroupKeys.value = isAssetGroupExpanded(key)
+    ? expandedAssetGroupKeys.value.filter((item) => item !== key)
+    : [...expandedAssetGroupKeys.value, key]
+}
 
 const resetAssetConnectionTest = () => {
   assetTestLoading.value = false
@@ -1370,6 +1577,42 @@ const openSshProxySettings = () => {
   workspace.setActiveSettingsSection('terminal')
   workspace.openSshProxyConfig()
   workspace.openAddSshProxyConfig()
+}
+
+const openProxyAddPanel = (returnToHostForm = false) => {
+  pendingHostDraftReturn.value = returnToHostForm
+  activeAssetView.value = 'proxyManagement'
+  workspace.openAddSshProxyConfig()
+}
+
+const saveProxyFormFromAssetPanel = async () => {
+  const proxyName = workspace.sshProxyForm.name.trim()
+  const saved = await workspace.saveSshProxyForm()
+  if (!saved) return
+  if (pendingHostDraftReturn.value && proxyName) {
+    form.proxyName = proxyName
+    activeAssetView.value = 'assetConfig'
+    editorOpen.value = true
+    pendingHostDraftReturn.value = false
+  }
+}
+
+const openKeyCreateFromHostForm = () => {
+  pendingHostDraftReturn.value = true
+  activeAssetView.value = 'keyManagement'
+  openNewKeyPanel()
+}
+
+const openJumpHostCreateFromHostForm = () => {
+  pendingHostDraftReturn.value = true
+  activeAssetView.value = 'assetConfig'
+  editMode.value = false
+  resetForm()
+  form.asset_type = 'person'
+  form.auth_type = 'keyBased'
+  form.group = firstAssetGroupName.value || '跳板机'
+  form.title = 'jump-host'
+  editorOpen.value = true
 }
 
 const editAsset = (assetId: string | null) => {
@@ -1994,6 +2237,13 @@ const submitKeyForm = async () => {
   try {
     const saved = await saveKeychainRecord(row)
     selectedKeyId.value = saved.id
+    if (pendingHostDraftReturn.value) {
+      form.auth_type = 'keyBased'
+      form.keyId = saved.id
+      activeAssetView.value = 'assetConfig'
+      editorOpen.value = true
+      pendingHostDraftReturn.value = false
+    }
     keyFormError.value = ''
     keyImportNotice.value = `${keyEditMode.value ? '已保存' : '已创建'} ${saved.name}。`
     keyEditorOpen.value = false
@@ -2167,6 +2417,15 @@ watch(
 )
 
 watch(
+  filteredAssetGroups,
+  (groups) => {
+    const keys = groups.map((group) => group.key)
+    expandedAssetGroupKeys.value = Array.from(new Set([...expandedAssetGroupKeys.value.filter((key) => keys.includes(key)), ...keys]))
+  },
+  { immediate: true }
+)
+
+watch(
   configuredSshProxyNames,
   () => {
     if (form.proxyName && !configuredSshProxyNames.value.has(form.proxyName)) {
@@ -2195,12 +2454,21 @@ watch(
   () => workspace.assetManagementOpenRequest.sequence,
   (sequence) => {
     if (!sequence) return
-    managedOrganizationId.value = workspace.assetManagementOpenRequest.organizationId || null
-    selectedRows.value = []
-    assetManagementQuery.value = ''
-    assetManagementPage.value = 1
-    managedEditorOpen.value = false
-    activeAssetView.value = 'assetManagement'
+    const request = workspace.assetManagementOpenRequest
+    activeAssetView.value = request.view || (request.organizationId ? 'assetManagement' : 'assetConfig')
+    if (activeAssetView.value === 'assetManagement') {
+      managedOrganizationId.value = request.organizationId || null
+      selectedRows.value = []
+      assetManagementQuery.value = ''
+      assetManagementPage.value = 1
+      managedEditorOpen.value = false
+    }
+    if (request.action === 'create-key') {
+      openNewKeyPanel()
+    }
+    if (request.action === 'create-proxy') {
+      workspace.openAddSshProxyConfig()
+    }
   },
   { immediate: true }
 )

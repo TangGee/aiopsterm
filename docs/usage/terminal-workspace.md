@@ -2,7 +2,7 @@
 
 Terminal tabs behave like standalone sessions until a split action groups them.
 
-- The terminal starts on a welcome dashboard; use the tab or pane context menu to open a local shell, reconnect, disconnect, search, run AI command generation, show the floating command input, broadcast commands, open file management, or adjust font size.
+- The terminal starts on a welcome dashboard background, not a closable tab. The first new terminal reuses that placeholder; later new terminals create additional tabs. Use the tab or pane context menu to open a local shell, reconnect, disconnect, search, run AI command generation, show the floating command input, broadcast commands, open file management, or adjust font size.
 - Terminal tabs show close controls on the active tab and on hover for inactive tabs. Routine `running`/`ready` state text is not shown in the tab label; only exceptional connection states use compact indicators.
 - The command input is not persistent at the bottom of each terminal. Right-click a terminal pane and choose `输入命令` to show it as a floating input near the cursor; it stays open for rejected/unavailable commands and closes after successful shell writes.
 - Right-click a terminal tab or terminal pane and choose `向右拆分` or `向下拆分` to split the selected pane region.

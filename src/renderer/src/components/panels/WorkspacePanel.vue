@@ -511,7 +511,15 @@
             />
           </label>
           <label v-if="hostForm.authType === 'keyBased'">
-            <span>KeyChain</span>
+            <span class="workspace-field-heading">
+              KeyChain
+              <button
+                type="button"
+                @click="openKeyManagementFromHostForm"
+              >
+                新建密钥
+              </button>
+            </span>
             <select v-model="hostForm.keychainId">
               <option value="">不使用 KeyChain</option>
               <option
@@ -547,8 +555,19 @@
             />
           </label>
           <label>
-            <span>代理</span>
-            <select v-model="hostForm.proxyName">
+            <span class="workspace-field-heading">
+              代理
+              <button
+                type="button"
+                @click="openProxyManagementFromHostForm"
+              >
+                新增代理
+              </button>
+            </span>
+            <select
+              v-if="workspace.sshProxyConfigs.length"
+              v-model="hostForm.proxyName"
+            >
               <option value="">不使用代理</option>
               <option
                 v-for="proxy in workspace.sshProxyConfigs"
@@ -558,10 +577,33 @@
                 {{ proxy.name }}
               </option>
             </select>
+            <div
+              v-else
+              class="asset-proxy-empty workspace-host-inline-empty"
+            >
+              <small>暂无 SSH 代理配置</small>
+              <button
+                type="button"
+                @click="openProxyManagementFromHostForm"
+              >
+                添加代理
+              </button>
+            </div>
           </label>
           <label>
-            <span>登录跳板机</span>
-            <select v-model="hostForm.jumpHostId">
+            <span class="workspace-field-heading">
+              登录跳板机
+              <button
+                type="button"
+                @click="openJumpHostCreateFromHostForm"
+              >
+                新建跳板机
+              </button>
+            </span>
+            <select
+              v-if="jumpHostOptions.length"
+              v-model="hostForm.jumpHostId"
+            >
               <option value="">不使用跳板机</option>
               <option
                 v-for="jumpHost in jumpHostOptions"
@@ -571,6 +613,18 @@
                 {{ jumpHost.name }}
               </option>
             </select>
+            <div
+              v-else
+              class="asset-proxy-empty workspace-host-inline-empty"
+            >
+              <small>暂无可用跳板机主机</small>
+              <button
+                type="button"
+                @click="openJumpHostCreateFromHostForm"
+              >
+                新建跳板机
+              </button>
+            </div>
           </label>
           <label class="workspace-host-form-wide">
             <span>备注</span>
@@ -2264,6 +2318,26 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostFormError.value = ''
   resetHostConnectionTest()
   closeContextMenu()
+}
+
+const openKeyManagementFromHostForm = () => {
+  workspace.openAssetManagement(undefined, 'keyManagement', 'create-key')
+  closeHostModal()
+}
+
+const openProxyManagementFromHostForm = () => {
+  workspace.openAssetManagement(undefined, 'proxyManagement', 'create-proxy')
+  closeHostModal()
+}
+
+const openJumpHostCreateFromHostForm = () => {
+  const previousTargetGroupKey = hostModal.targetGroupKey
+  openHostEditor('create')
+  hostModal.targetGroupKey = previousTargetGroupKey
+  hostForm.assetType = 'person'
+  hostForm.authType = 'keyBased'
+  hostForm.title = 'jump-host'
+  hostForm.group = activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '未分组'
 }
 
 const editContextAsset = () => {

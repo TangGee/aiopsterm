@@ -628,15 +628,19 @@ describe('files backend content boundary', () => {
   it('loads and mutates file session catalog behind the main-process boundary', async () => {
     const initial = await listFileSessionCatalog()
     expect(initial.ok).toBe(true)
-    expect(initial.data.sessions).toEqual([
-      expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' }),
-      expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', host: '10.24.8.12' }),
-      expect.objectContaining({ id: 'folder_asset-2', folderUuid: 'files-folder-a' })
-    ])
-    expect(initial.data.folders).toEqual([
-      expect.objectContaining({ uuid: 'files-folder-a', name: '核心业务' }),
-      expect.objectContaining({ uuid: 'files-folder-b', name: '临时排障' })
-    ])
+    expect(initial.data.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' }),
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', host: '10.24.8.12' }),
+        expect.objectContaining({ id: 'asset-3', folderUuid: 'custom-folder-a' })
+      ])
+    )
+    expect(initial.data.folders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ uuid: 'custom-folder-a', name: '核心业务' }),
+        expect.objectContaining({ uuid: 'custom-folder-b', name: '临时排障' })
+      ])
+    )
 
     const savedFolder = await saveFileSessionFolder({ name: '发布窗口', description: '发布期文件入口' })
     expect(savedFolder.ok).toBe(true)
@@ -778,19 +782,24 @@ describe('files backend content boundary', () => {
     expect(deletedSession.data.sessions.some((session: any) => session.id === 'asset-release')).toBe(false)
   })
 
-  it('starts non-seed file session catalog with only the backend-owned local file session', async () => {
+  it('starts non-seed file session catalog from the backend asset source plus local session', async () => {
     configureFilesBackendRuntime({ useSeedData: false, forceFallbackStore: true })
     resetFileSessionCatalog()
 
     const catalog = await listFileSessionCatalog()
 
     expect(catalog.ok).toBe(true)
-    expect(catalog.data.sessions).toEqual([expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' })])
-    expect(catalog.data.sessions.some((session: any) => ['asset-1', 'folder_asset-2'].includes(session.id))).toBe(false)
-    expect(catalog.data.folders).toEqual([])
+    expect(catalog.data.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' }),
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion' }),
+        expect.objectContaining({ id: 'asset-2', label: 'staging-api' })
+      ])
+    )
+    expect(catalog.data.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'custom-folder-a' })]))
   })
 
-  it('does not infer file session seed mode from NODE_ENV test', async () => {
+  it('does not infer file session seed mode from NODE_ENV test but still follows asset source rows', async () => {
     configureFilesBackendRuntime({ forceFallbackStore: true })
     resetFileSessionCatalog()
 
@@ -798,9 +807,13 @@ describe('files backend content boundary', () => {
 
     expect(process.env.NODE_ENV).toBe('test')
     expect(catalog.ok).toBe(true)
-    expect(catalog.data.sessions).toEqual([expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' })])
-    expect(catalog.data.sessions.some((session: any) => session.id === 'asset-1')).toBe(false)
-    expect(catalog.data.folders).toEqual([])
+    expect(catalog.data.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' }),
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion' })
+      ])
+    )
+    expect(catalog.data.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'custom-folder-a' })]))
   })
 
   it('loads file session development seeds only when the seed environment switch is enabled', async () => {
@@ -814,10 +827,10 @@ describe('files backend content boundary', () => {
     expect(catalog.data.sessions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'asset-1', label: 'prod-bastion' }),
-        expect.objectContaining({ id: 'folder_asset-2', label: 'staging-files', folderUuid: 'files-folder-a' })
+        expect.objectContaining({ id: 'asset-2', label: 'staging-api' })
       ])
     )
-    expect(catalog.data.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'files-folder-a' })]))
+    expect(catalog.data.folders).toEqual(expect.arrayContaining([expect.objectContaining({ uuid: 'custom-folder-a' })]))
   })
 
   it('keeps development file session seeds available only when seed mode is enabled', async () => {
@@ -831,18 +844,18 @@ describe('files backend content boundary', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'local', kind: 'local' }),
         expect.objectContaining({ id: 'asset-1', label: 'prod-bastion' }),
-        expect.objectContaining({ id: 'folder_asset-2', label: 'staging-files', folderUuid: 'files-folder-a' })
+        expect.objectContaining({ id: 'asset-2', label: 'staging-api' })
       ])
     )
     expect(catalog.data.folders).toEqual(
-      expect.arrayContaining([expect.objectContaining({ uuid: 'files-folder-a' }), expect.objectContaining({ uuid: 'files-folder-b' })])
+      expect.arrayContaining([expect.objectContaining({ uuid: 'custom-folder-a' }), expect.objectContaining({ uuid: 'custom-folder-b' })])
     )
   })
 
   it('strips unchanged legacy fallback file session seeds in non-seed runtime while preserving user edits', async () => {
     configureFilesBackendRuntime({ useSeedData: true, forceFallbackStore: true })
     resetFileSessionCatalog()
-    const edited = await updateFileSession('asset-1', { label: 'user-owned-prod-files', rootPath: '/srv/user-owned', folderUuid: 'files-folder-a' })
+    const edited = await updateFileSession('asset-1', { label: 'user-owned-prod-files', rootPath: '/srv/user-owned', folderUuid: 'custom-folder-a' })
     expect(edited.ok).toBe(true)
 
     configureFilesBackendRuntime({ useSeedData: false, forceFallbackStore: true })
@@ -852,12 +865,24 @@ describe('files backend content boundary', () => {
     expect(catalog.data.sessions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'local', kind: 'local' }),
-        expect.objectContaining({ id: 'asset-1', label: 'user-owned-prod-files', rootPath: '/srv/user-owned', folderUuid: 'files-folder-a' })
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', rootPath: '/srv/user-owned', folderUuid: 'custom-folder-a' })
       ])
     )
-    expect(catalog.data.sessions.some((session: any) => session.id === 'folder_asset-2')).toBe(false)
-    expect(catalog.data.folders).toContainEqual(expect.objectContaining({ uuid: 'files-folder-a' }))
-    expect(catalog.data.folders.some((folder: any) => folder.uuid === 'files-folder-b')).toBe(false)
+    expect(catalog.data.sessions).toContainEqual(expect.objectContaining({ id: 'asset-2', label: 'staging-api' }))
+    expect(catalog.data.folders).toContainEqual(expect.objectContaining({ uuid: 'custom-folder-a' }))
+    expect(catalog.data.folders).toContainEqual(expect.objectContaining({ uuid: 'custom-folder-b' }))
+  })
+
+  it('starts with only local when both file seeds and asset seeds are disabled', async () => {
+    configureAssetBackendRuntime?.({ useSeedData: false, forceFallbackStore: true })
+    configureFilesBackendRuntime({ useSeedData: false, forceFallbackStore: true })
+    resetFileSessionCatalog()
+
+    const catalog = await listFileSessionCatalog()
+
+    expect(catalog.ok).toBe(true)
+    expect(catalog.data.sessions).toEqual([expect.objectContaining({ id: 'local', kind: 'local', rootPath: '/' })])
+    expect(catalog.data.folders).toEqual([])
   })
 
   it('persists file session catalog mutations behind the backend store', async () => {
@@ -1940,18 +1965,18 @@ describe('files backend content boundary', () => {
       await writeFileContent(localUpload, 'dropped through transfer boundary\n', { kind: 'local', sessionId: 'local' })
       await mkdir(localDirectory)
 
-      await expect(mutateFileEntry({ kind: 'rename', oldPath: '/home/staging/app.ini', newPath: '/home/staging/app-v2.ini' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(mutateFileEntry({ kind: 'chmod', path: '/home/staging/app.ini', mode: '700' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(mutateFileEntry({ kind: 'copy', srcPath: '/home/staging/app.ini', targetPath: '/home/staging/app-copy.ini' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(mutateFileEntry({ kind: 'move', srcPath: '/home/staging/app.ini', targetPath: '/home/staging/app-moved.ini' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(mutateFileEntry({ kind: 'delete', path: '/home/staging/app.ini' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'copy-remote', remotePath: '/home/staging/app.ini', targetPath: '/home/staging/app-copy.ini' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'download-file', remotePath: '/home/staging/app.ini', localPath: join(dir, 'app.ini') }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'download-directory', remotePath: '/home/staging/boot', localDirectory: dir }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'upload-file', localPath: localUpload, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'upload-directory', localPath: localDirectory, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'upload-path', localPath: localUpload, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
-      await expect(transferFileEntry({ kind: 'upload-path', localPath: localDirectory, remoteDirectory: '/home/staging' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'rename', oldPath: '/home/deploy/app.ini', newPath: '/home/deploy/app-v2.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'chmod', path: '/home/deploy/app.ini', mode: '700' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'copy', srcPath: '/home/deploy/app.ini', targetPath: '/home/deploy/app-copy.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'move', srcPath: '/home/deploy/app.ini', targetPath: '/home/deploy/app-moved.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(mutateFileEntry({ kind: 'delete', path: '/home/deploy/app.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'copy-remote', remotePath: '/home/deploy/app.ini', targetPath: '/home/deploy/app-copy.ini' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'download-file', remotePath: '/home/deploy/app.ini', localPath: join(dir, 'app.ini') }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'download-directory', remotePath: '/home/deploy/boot', localDirectory: dir }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-file', localPath: localUpload, remoteDirectory: '/home/deploy' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-directory', localPath: localDirectory, remoteDirectory: '/home/deploy' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-path', localPath: localUpload, remoteDirectory: '/home/deploy' }, remoteOptions)).resolves.toEqual(unavailable)
+      await expect(transferFileEntry({ kind: 'upload-path', localPath: localDirectory, remoteDirectory: '/home/deploy' }, remoteOptions)).resolves.toEqual(unavailable)
       await expect(listFileTransferTasks()).resolves.toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })

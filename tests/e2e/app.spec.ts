@@ -371,7 +371,7 @@ test('aiopsterm primary desktop flows', async () => {
     await installVoiceRecorderDouble(page)
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
-    await expect(page.locator('.terminal-tab').filter({ hasText: '欢迎' })).toBeVisible()
+    await expect(page.locator('.terminal-tab').filter({ hasText: '欢迎' })).toHaveCount(0)
     await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
     await expect(page.getByText('智能助手')).toBeVisible()
     await expect(page.locator('.top-bar[data-onboarding-id="top-layout-controls"]')).toBeVisible()

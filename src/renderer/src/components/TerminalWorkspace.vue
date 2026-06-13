@@ -9,7 +9,7 @@
       @drop.prevent="handleTabBarDrop"
     >
       <div
-        v-for="panel in workspace.panels"
+        v-for="panel in visibleTerminalTabPanels"
         :key="panel.id"
         class="terminal-tab"
         :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id }"
@@ -149,7 +149,7 @@
       v-if="globalInputVisible"
       class="terminal-global-command"
     >
-      <span><RadioTower /> Broadcast to {{ workspace.panels.filter((panel) => panel.kind !== 'knowledge').length }} windows</span>
+      <span><RadioTower /> Broadcast to {{ connectedTerminalPanels.length }} windows</span>
       <input
         v-model="globalCommand"
         placeholder="Execute command to all windows"
@@ -579,7 +579,23 @@ const tabBarDragOver = ref(false)
 let suggestionRequestId = 0
 let commandGenerationRequestId = 0
 
-const activeTerminalPanel = computed(() => workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0])
+const isWelcomePlaceholderPanel = (panel?: TerminalPanel | null) =>
+  Boolean(
+    panel &&
+      panel.id === 'panel-main' &&
+      panel.kind !== 'knowledge' &&
+      panel.title === '欢迎' &&
+      !panel.sessionId &&
+      !panel.output &&
+      !panel.outputSegments.length &&
+      !panel.sshSession &&
+      panel.status === 'ready' &&
+      !panel.split &&
+      !panel.splitGroupId
+  )
+const visibleTerminalTabPanels = computed(() => workspace.panels.filter((panel) => !isWelcomePlaceholderPanel(panel)))
+const connectedTerminalPanels = computed(() => visibleTerminalTabPanels.value.filter((panel) => panel.kind !== 'knowledge'))
+const activeTerminalPanel = computed(() => workspace.panels.find((panel) => panel.id === workspace.activePanelId) || visibleTerminalTabPanels.value[0] || workspace.panels[0])
 const visibleTerminalPanels = computed(() => {
   const active = activeTerminalPanel.value
   if (!active) return []

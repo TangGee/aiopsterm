@@ -262,9 +262,21 @@ const findMenuButton = (wrapper: VueWrapper<any>, menuSelector: string, label: s
   return button
 }
 
+const findFilesGroupRow = (wrapper: VueWrapper<any>, label: string) => {
+  const row = wrapper.findAll('.files-tree-group-row').find((item) => item.text().includes(label))
+  if (!row) throw new Error(`Files group row not found: ${label}`)
+  return row
+}
+
 const openTerminalMenuButton = async (wrapper: VueWrapper<any>, label: string, hostSelector = '.xterm-host') => {
   await wrapper.find(hostSelector).trigger('contextmenu')
   return findMenuButton(wrapper, '.terminal-context-menu', label)
+}
+
+const ensureVisibleTerminalTab = async (wrapper: VueWrapper<any>) => {
+  if (wrapper.find('.terminal-tab.active').exists()) return
+  await wrapper.find('.new-tab-button').trigger('click')
+  await flushPromises()
 }
 
 const openTerminalCommandLine = async (wrapper: VueWrapper<any>, hostSelector = '.xterm-host') => {
@@ -274,6 +286,7 @@ const openTerminalCommandLine = async (wrapper: VueWrapper<any>, hostSelector = 
 }
 
 const openLocalShellFromActiveTab = async (wrapper: VueWrapper<any>) => {
+  await ensureVisibleTerminalTab(wrapper)
   await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
   const connectionButton = ['打开本地 shell', '重新连接', '连接 SSH']
     .map((label) => wrapper.find('.tab-menu').findAll('button').find((item) => item.text().includes(label)))
@@ -562,8 +575,9 @@ describe('AppShell', () => {
     expect(wrapper.find('.module-panel-pane').exists()).toBe(false)
     expect(wrapper.find('.ai-panel-pane').exists()).toBe(false)
     expect(wrapper.find('.asset-workspace-tabs').text()).toContain('主机管理')
-    expect(wrapper.find('.asset-workspace-tabs').text()).toContain('组织资产管理')
     expect(wrapper.find('.asset-workspace-tabs').text()).toContain('密钥管理')
+    expect(wrapper.find('.asset-workspace-tabs').text()).toContain('代理管理')
+    expect(wrapper.find('.asset-workspace-tabs').text()).not.toContain('组织资产管理')
     expect(wrapper.find('[data-onboarding-id="host-management-entry"]').exists()).toBe(true)
     expect(wrapper.find('.host-card').text()).toContain('prod-bastion')
 
@@ -740,8 +754,8 @@ describe('AppShell', () => {
 
     expect(store.panels).toHaveLength(1)
     expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(true)
-    expect(store.panels).toHaveLength(2)
-    expect(store.activePanelId).toBe(store.panels[1].id)
+    expect(store.panels).toHaveLength(1)
+    expect(store.activePanelId).toBe(store.panels[0].id)
 
     expect(store.rightPanelOpen).toBe(true)
     expect(dispatchShortcut('A', { ctrlKey: true, shiftKey: true, code: 'KeyA' })).toBe(true)
@@ -750,21 +764,21 @@ describe('AppShell', () => {
 
     store.startShortcutRecording('newTerminal')
     expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(false)
-    expect(store.panels).toHaveLength(2)
+    expect(store.panels).toHaveLength(1)
     store.cancelShortcutRecording()
 
     store.startShortcutRecording('newTerminal')
     store.updateShortcutRecording('Ctrl+Alt+N')
     expect(await store.saveShortcutRecording()).toBe(true)
     expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(false)
-    expect(store.panels).toHaveLength(2)
+    expect(store.panels).toHaveLength(1)
     expect(dispatchShortcut('N', { ctrlKey: true, altKey: true, code: 'KeyN' })).toBe(true)
-    expect(store.panels).toHaveLength(3)
+    expect(store.panels).toHaveLength(2)
 
     expect(dispatchShortcut('1', { altKey: true, code: 'Digit1' })).toBe(true)
     expect(store.activePanelId).toBe(store.panels[0].id)
-    expect(dispatchShortcut('3', { altKey: true, code: 'Digit3' })).toBe(true)
-    expect(store.activePanelId).toBe(store.panels[2].id)
+    expect(dispatchShortcut('2', { altKey: true, code: 'Digit2' })).toBe(true)
+    expect(store.activePanelId).toBe(store.panels[1].id)
 
     expect(dispatchShortcut('P', { ctrlKey: true, shiftKey: true, code: 'KeyP' })).toBe(true)
     expect(store.activeModule).toBe('snippets')
@@ -935,7 +949,7 @@ describe('AppShell', () => {
     await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
     expect(assets.text()).toContain('新建主机')
     expect(assets.text()).toContain('暂无 SSH 代理配置')
-    expect(assets.text()).toContain('去设置代理')
+    expect(assets.text()).toContain('新增代理')
     expect(assets.find('[data-testid="asset-proxy-select"]').exists()).toBe(false)
     expect(assets.text()).not.toContain('prod-proxy')
     expect(assets.text()).not.toContain('office-proxy')
@@ -1365,7 +1379,8 @@ describe('AppShell', () => {
     })
     await flushPromises()
 
-    expect(assets.text()).toContain('组织资产管理')
+    expect(assets.text()).toContain('代理管理')
+    expect(assets.text()).not.toContain('组织资产管理')
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
     expect(window.aiops.listAssetGroups).toHaveBeenCalledWith({ assetTypes: ['person', 'switch'] })
 
@@ -1441,7 +1456,8 @@ describe('AppShell', () => {
       props: { query: '' },
       global: { plugins: [pinia] }
     })
-    await managed.findAll('.asset-management-item').find((button) => button.text().includes('组织资产管理'))!.trigger('click')
+    useWorkspaceStore().openAssetManagement(undefined, 'assetManagement')
+    await flushPromises()
     expect(managed.text()).toContain('全部组织资产')
     expect(managed.find('.asset-table-footer').text()).toContain('共 6 条')
     expect(managed.text()).not.toContain('127.0.0.1')
@@ -1483,7 +1499,9 @@ describe('AppShell', () => {
       props: { query: '' },
       global: { plugins: [pinia] }
     })
-    await organization.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    await flushPromises()
+    useWorkspaceStore().openAssetManagement(undefined, 'assetConfig')
+    await flushPromises()
     await organization.findAll('.host-card').find((button) => button.text().includes('jumpserver-org'))!.trigger('contextmenu', {
       clientX: 220,
       clientY: 180
@@ -1654,9 +1672,8 @@ describe('AppShell', () => {
     await assets.find('[data-testid="asset-new-host-button"]').trigger('click')
     await assets.find('.asset-proxy-empty button').trigger('click')
 
-    expect(store.activeModule).toBe('settings')
-    expect(store.activeSettingsSection).toBe('terminal')
-    expect(store.sshProxyConfigModalOpen).toBe(true)
+    expect(store.activeModule).toBe('workspace')
+    expect(assets.text()).toContain('代理管理')
     expect(store.sshProxyAddModalOpen).toBe(true)
   })
 
@@ -1925,7 +1942,8 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     await flushPromises()
-    await managed.findAll('.asset-management-item').find((button) => button.text().includes('组织资产管理'))!.trigger('click')
+    useWorkspaceStore().openAssetManagement(undefined, 'assetManagement')
+    await flushPromises()
     await managed.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('prod-bastion'))!.find('input[type="checkbox"]').setValue(true)
     vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
       ok: true,
@@ -1943,7 +1961,8 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     await flushPromises()
-    await organization.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+    useWorkspaceStore().openAssetManagement(undefined, 'assetConfig')
+    await flushPromises()
     await organization.findAll('.host-card').find((button) => button.text().includes('jumpserver-org'))!.trigger('contextmenu')
     const wrongOrganizationAssets = await window.aiops.listAssets()
     vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
@@ -2653,15 +2672,15 @@ describe('AppShell', () => {
     expect(filesPanel.text()).toContain('prod-bastion')
 
     rejectNextPreferenceSave()
-    await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+    await findFilesGroupRow(filesPanel, '主机').trigger('click')
     await flushPromises()
-    expect(store.workspacePreferences.expandedGroups).toContain('recent_connections')
-    expect(filesPanel.text()).toContain('prod-bastion')
+    expect(store.workspacePreferences.expandedGroups).not.toContain('files-hosts')
+    expect(filesPanel.text()).not.toContain('staging-api')
 
-    await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+    await findFilesGroupRow(filesPanel, '主机').trigger('click')
     await flushPromises()
-    expect(store.workspacePreferences.expandedGroups).not.toContain('recent_connections')
-    expect(filesPanel.text()).not.toContain('prod-bastion')
+    expect(store.workspacePreferences.expandedGroups).toContain('files-hosts')
+    expect(filesPanel.text()).toContain('staging-api')
     filesPanel.unmount()
   })
 
@@ -2724,15 +2743,15 @@ describe('AppShell', () => {
       remounted.unmount()
 
       await filesPanel.vm.$nextTick()
-      expect(filesPanel.text()).not.toContain('10.24.8.12')
-      expect(filesPanel.text()).not.toContain('prod-bastion')
-      await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+      expect(filesPanel.text()).not.toContain('10.24.12.44')
+      expect(filesPanel.text()).not.toContain('staging-api')
+      await findFilesGroupRow(filesPanel, '主机').trigger('click')
       await flushPromises()
-      expect(store.workspacePreferences.expandedGroups).toContain('recent_connections')
+      expect(store.workspacePreferences.expandedGroups).toContain('files-hosts')
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
           workspacePreferences: expect.objectContaining({
-            expandedGroups: expect.arrayContaining(['recent_connections'])
+            expandedGroups: expect.arrayContaining(['files-hosts'])
           })
         })
       )
@@ -2898,9 +2917,9 @@ describe('AppShell', () => {
       })
       const filesContextMenu = filesPanel.find('.asset-context-menu')
       expect(filesContextMenu.exists()).toBe(true)
-      expect(filesContextMenu.text()).toContain('加入收藏')
+      expect(filesContextMenu.text()).toContain('取消收藏')
       expect(filesContextMenu.text()).toContain('编辑备注')
-      expect(filesContextMenu.text()).toContain('移动到文件夹')
+      expect(filesContextMenu.text()).toContain('从文件夹移除')
       expect(filesContextMenu.text()).not.toContain('左侧打开')
       expect(filesPanel.find('.files-tree-session.selected').text()).toContain('prod-bastion')
       await filesContextMenu.findAll('button').find((button) => button.text().includes('编辑备注'))!.trigger('click')
@@ -2917,7 +2936,7 @@ describe('AppShell', () => {
       await flushPromises()
       expect(filesPanel.find('.files-comment-edit').exists()).toBe(false)
       expect(filesPanel.text()).toContain('(新备注)')
-      await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
+      await findFilesGroupRow(filesPanel, '核心业务').trigger('click')
       await flushPromises()
       expect(filesPanel.text()).not.toContain('prod-bastion')
       await filesPanel.find('.files-search input').setValue('prod')
@@ -2941,7 +2960,7 @@ describe('AppShell', () => {
           title: 'prod-bastion',
           host: '10.24.8.12',
           port: 22,
-          username: 'deploy',
+          username: 'ops',
           asset_type: 'person',
           proxyCommand: ''
         })
@@ -2960,7 +2979,7 @@ describe('AppShell', () => {
       await filesPanel.findAll('.files-folder-option').find((button) => button.text().includes('临时排障'))!.trigger('click')
       await flushPromises()
       expect(filesPanel.find('.files-folder-modal').exists()).toBe(false)
-      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBe('files-folder-b')
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBe('custom-folder-b')
       expect(filesPanel.text()).toContain('临时排障')
       const originalInnerWidth = window.innerWidth
       const originalInnerHeight = window.innerHeight
@@ -2972,7 +2991,7 @@ describe('AppShell', () => {
       })
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(true)
       expect(filesPanel.find('.asset-context-menu').attributes('style')).toContain('left: 155px')
-      expect(filesPanel.find('.asset-context-menu').attributes('style')).toContain('top: 129px')
+      expect(filesPanel.find('.asset-context-menu').attributes('style')).toContain('top: 104px')
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
       await filesPanel.findAll('.files-source-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
@@ -2991,14 +3010,14 @@ describe('AppShell', () => {
       expect(filesPanel.text()).toContain('核心业务')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('click')
       await flushPromises()
-      expect(filesPanel.text()).toContain('staging-files')
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('staging-files'))!.trigger('contextmenu')
+      expect(filesPanel.text()).toContain('mysql-primary')
+      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('mysql-primary'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('从文件夹移除')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
       await flushPromises()
-      expect(store.fileSessions.find((session) => session.id === 'folder_asset-2')?.folderUuid).toBeUndefined()
-      expect(store.fileSessions.find((session) => session.id === 'folder_asset-2')?.group).toBe('最近连接')
-      expect(filesPanel.text()).toContain('最近连接')
+      expect(store.fileSessions.find((session) => session.id === 'asset-3')?.folderUuid).toBeUndefined()
+      expect(store.fileSessions.find((session) => session.id === 'asset-3')?.group).toBe('数据库')
+      expect(filesPanel.text()).toContain('主机')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('临时排障'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('编辑文件夹')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('删除文件夹')
@@ -3021,10 +3040,8 @@ describe('AppShell', () => {
       await filesPanel.find('.files-folder-confirm footer .danger').trigger('click')
       await flushPromises()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBeUndefined()
-      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('最近连接')
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('未分组')
       expect(filesPanel.text()).not.toContain('临时归档')
-      await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
-      await flushPromises()
       expect(filesPanel.text()).toContain('prod-bastion')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('contextmenu')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
@@ -3075,17 +3092,13 @@ describe('AppShell', () => {
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
       expect(wrapper.find('.workspace-node-menu').exists()).toBe(true)
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑备注'))!.trigger('click')
-      expect((wrapper.find('.workspace-comment-edit input').element as HTMLInputElement).value).toBe('生产入口')
+      expect((wrapper.find('.workspace-comment-edit input').element as HTMLInputElement).value).toBe('新备注')
       await wrapper.find('.workspace-comment-edit input').setValue('工作区备注')
       await wrapper.find('.workspace-comment-edit input').trigger('keydown', { key: 'Enter' })
       await flushPromises()
       expect(wrapper.text()).toContain('(工作区备注)')
       await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
-      expect(wrapper.find('.workspace-node-menu').text()).toContain('从文件夹移除')
-      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
-      await flushPromises()
-      expect(wrapper.find('.workspace-node-menu').exists()).toBe(false)
-      await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
+      expect(wrapper.find('.workspace-node-menu').text()).not.toContain('从文件夹移除')
       expect(wrapper.find('.workspace-node-menu').text()).toContain('移动到文件夹')
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
       expect(wrapper.find('.workspace-folder-modal').text()).toContain('值班归档')
@@ -5460,6 +5473,7 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
 
+    await ensureVisibleTerminalTab(wrapper)
     await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
     expect(wrapper.find('.tab-menu').text()).not.toContain('Fork SSH Channel')
     store.registerSshSession(store.activePanelId, {
@@ -5735,16 +5749,15 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-dashboard').exists()).toBe(true)
     expect(wrapper.text()).toContain('与AI对话')
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(0)
-    expect(wrapper.find('.terminal-tab.active').text()).toContain('欢迎')
-    expect(wrapper.find('.terminal-tab.active').text()).not.toContain('ready')
-    expect(wrapper.find('.terminal-tab.active .terminal-tab-close').exists()).toBe(true)
+    expect(wrapper.findAll('.terminal-tab')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('欢迎')
     expect(wrapper.text()).not.toContain('local shell')
 
     await wrapper.find('.new-tab-button').trigger('click')
     store.appendTerminalOutput(store.activePanelId, 'new tab output\n')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    expect(store.panels).toHaveLength(2)
+    expect(store.panels).toHaveLength(1)
     expect(store.activePanel.split).toBeUndefined()
     expect(wrapper.find('.terminal-dashboard').exists()).toBe(false)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
@@ -5754,8 +5767,10 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(store.panels).toHaveLength(1)
     expect(store.activePanel.title).toBe('欢迎')
+    expect(wrapper.findAll('.terminal-tab')).toHaveLength(0)
 
     await wrapper.find('.new-tab-button').trigger('click')
+    const sourceSplitPanelId = store.activePanelId
     store.appendTerminalOutput(store.activePanelId, 'new tab output\n')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
@@ -5765,7 +5780,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(store.activePanel.split).toBe('right')
-    expect(store.activePanel.splitSourceId).toBe(store.panels[1].id)
+    expect(store.activePanel.splitSourceId).toBe(sourceSplitPanelId)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(2)
     expect(wrapper.find('.terminal-grid').classes()).toContain('split')
 
@@ -5779,13 +5794,14 @@ describe('AppShell', () => {
     expect(splitTerminal.options.fontSize).toBe(13)
     expect(sourceTerminal.options.fontSize).toBe(12)
 
+    const secondSplitSourceId = store.activePanelId
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('向下拆分'))!.trigger('click')
     store.appendTerminalOutput(store.activePanelId, 'third split output\n')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(store.activePanel.split).toBe('below')
-    expect(store.activePanel.splitSourceId).toBe(store.panels[2].id)
+    expect(store.activePanel.splitSourceId).toBe(secondSplitSourceId)
     expect(store.panels.filter((panel) => panel.splitGroupId === store.activePanel.splitGroupId)).toHaveLength(3)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(3)
     const firstPaneStyle = wrapper.findAll('.terminal-pane').at(0)!.attributes('style')
@@ -5808,14 +5824,14 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(3)
 
     await wrapper.findAll('.terminal-pane').at(0)!.find('.xterm-host').trigger('mousedown', { button: 0 })
-    expect(store.activePanelId).toBe(store.panels[1].id)
+    expect(store.activePanelId).toBe(sourceSplitPanelId)
     await wrapper.findAll('.terminal-pane').at(0)!.find('.xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('向右拆分'))!.trigger('click')
     store.appendTerminalOutput(store.activePanelId, 'fourth split output\n')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(store.activePanel.split).toBe('right')
-    expect(store.activePanel.splitSourceId).toBe(store.panels[1].id)
+    expect(store.activePanel.splitSourceId).toBe(sourceSplitPanelId)
     expect(store.panels.filter((panel) => panel.splitGroupId === store.activePanel.splitGroupId)).toHaveLength(4)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(4)
 
@@ -6628,9 +6644,9 @@ describe('AppShell', () => {
       await wrapper.findAll('.add-conn-tabs button').find((button) => button.text().includes('从资产添加'))!.trigger('click')
       await wrapper.find('.add-conn-search input').setValue('staging')
       await wrapper.find('.add-conn-search input').trigger('keydown', { key: 'ArrowDown' })
-      expect(wrapper.find('.add-conn-list button.keyboard-selected').text()).toContain('staging-files')
+      expect(wrapper.find('.add-conn-list button.keyboard-selected').text()).toContain('staging-api')
       await wrapper.find('.add-conn-search input').trigger('keydown', { key: 'Enter' })
-      expect(store.selectedRightFileSessionId).toBe('folder_asset-2')
+      expect(store.selectedRightFileSessionId).toBe('asset-2')
       expect(wrapper.find('.file-modal-card.add-conn').exists()).toBe(false)
 
       store.openFileSession('local', 'left')
@@ -6677,15 +6693,15 @@ describe('AppShell', () => {
       })
       await flushPromises()
       expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
-        { kind: 'upload-file', localPath: '/release-note.md', remoteDirectory: '/home/staging/boot' },
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+        { kind: 'upload-file', localPath: '/release-note.md', remoteDirectory: '/home/deploy/boot' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2' })
       )
-      expect(store.fileTransferTasks.find((task) => task.source === '/release-note.md' && task.target === '/home/staging/boot/release-note.md')).toEqual(
+      expect(store.fileTransferTasks.find((task) => task.source === '/release-note.md' && task.target === '/home/deploy/boot/release-note.md')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'release-note.md',
           fromHost: '127.0.0.1',
-          toHost: '10.24.9.20',
+          toHost: '10.24.12.44',
           status: 'success'
         })
       )
@@ -6700,9 +6716,9 @@ describe('AppShell', () => {
       expect(JSON.parse(remoteDirectoryDragPayload.get('application/x-synchro-fs-item') || '{}')).toEqual(
         expect.objectContaining({
           kind: 'fs-item',
-          fromUuid: 'folder_asset-2',
+          fromUuid: 'asset-2',
           fromSide: 'right',
-          srcPath: '/home/staging/boot',
+          srcPath: '/home/deploy/boot',
           name: 'boot',
           isDir: true
         })
@@ -6714,15 +6730,15 @@ describe('AppShell', () => {
       })
       await flushPromises()
       expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
-        { kind: 'download-directory', remotePath: '/home/staging/boot', localDirectory: '/' },
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2', host: '10.24.9.20', fromHost: '10.24.9.20', toHost: '127.0.0.1' })
+        { kind: 'download-directory', remotePath: '/home/deploy/boot', localDirectory: '/' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2', host: '10.24.12.44', fromHost: '10.24.12.44', toHost: '127.0.0.1' })
       )
-      expect(store.fileTransferTasks.find((task) => task.source === '/home/staging/boot' && task.target === '/boot')).toEqual(
+      expect(store.fileTransferTasks.find((task) => task.source === '/home/deploy/boot' && task.target === '/boot')).toEqual(
         expect.objectContaining({
           type: 'download',
           name: 'boot',
           isGroup: true,
-          fromHost: '10.24.9.20',
+          fromHost: '10.24.12.44',
           toHost: '127.0.0.1',
           status: 'success'
         })
@@ -6736,14 +6752,14 @@ describe('AppShell', () => {
       })
       await flushPromises()
       expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
-        { kind: 'upload-path', localPath: '/tmp/os-drop.log', remoteDirectory: '/home/staging' },
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+        { kind: 'upload-path', localPath: '/tmp/os-drop.log', remoteDirectory: '/home/deploy' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2' })
       )
-      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/os-drop.log' && task.target === '/home/staging/os-drop.log')).toEqual(
+      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/os-drop.log' && task.target === '/home/deploy/os-drop.log')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'os-drop.log',
-          toHost: '10.24.9.20',
+          toHost: '10.24.12.44',
           status: 'success'
         })
       )
@@ -6753,16 +6769,16 @@ describe('AppShell', () => {
       const uploadFileButton = rightBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传文件')!
       await uploadFileButton.trigger('click')
       await flushPromises()
-      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openFile'], defaultPath: '/home/staging' }))
+      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openFile'], defaultPath: '/home/deploy' }))
       expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
-        { kind: 'upload-file', localPath: '/tmp/local-upload.log', remoteDirectory: '/home/staging' },
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+        { kind: 'upload-file', localPath: '/tmp/local-upload.log', remoteDirectory: '/home/deploy' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2' })
       )
-      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload.log' && task.target === '/home/staging/local-upload.log')).toEqual(
+      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload.log' && task.target === '/home/deploy/local-upload.log')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'local-upload.log',
-          toHost: '10.24.9.20',
+          toHost: '10.24.12.44',
           status: 'success'
         })
       )
@@ -6771,12 +6787,12 @@ describe('AppShell', () => {
       const uploadDirectoryButton = rightBrowser.findAll('.file-icon-button').find((button) => button.attributes('title') === '上传目录')!
       await uploadDirectoryButton.trigger('click')
       await flushPromises()
-      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openDirectory'], defaultPath: '/home/staging' }))
+      expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openDirectory'], defaultPath: '/home/deploy' }))
       expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
-        { kind: 'upload-directory', localPath: '/tmp/local-upload-dir', remoteDirectory: '/home/staging' },
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2' })
+        { kind: 'upload-directory', localPath: '/tmp/local-upload-dir', remoteDirectory: '/home/deploy' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2' })
       )
-      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload-dir' && task.target === '/home/staging/local-upload-dir')).toEqual(
+      expect(store.fileTransferTasks.find((task) => task.source === '/tmp/local-upload-dir' && task.target === '/home/deploy/local-upload-dir')).toEqual(
         expect.objectContaining({
           type: 'upload',
           name: 'local-upload-dir',
@@ -6790,12 +6806,12 @@ describe('AppShell', () => {
       await remoteFileRow.trigger('dblclick')
       await flushPromises()
       expect(window.aiops.readFileContent).toHaveBeenCalledWith(
-        '/home/staging/release-note.md',
-        expect.objectContaining({ kind: 'remote', sessionId: 'folder_asset-2', host: '10.24.9.20', rootPath: '/home/staging' })
+        '/home/deploy/release-note.md',
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2', host: '10.24.12.44', rootPath: '/home/deploy' })
       )
       expect(wrapper.find('.files-floating-editor').exists()).toBe(true)
       expect(wrapper.find('[data-testid="files-editor-monaco"]').exists()).toBe(true)
-      expect(wrapper.find('.files-editor-toolbar').text()).toContain('编辑文件 /home/staging/release-note.md')
+      expect(wrapper.find('.files-editor-toolbar').text()).toContain('编辑文件 /home/deploy/release-note.md')
       const editorCount = wrapper.findAll('.files-floating-editor').length
       await remoteFileRow.trigger('dblclick')
       expect(wrapper.findAll('.files-floating-editor')).toHaveLength(editorCount)
@@ -6817,22 +6833,22 @@ describe('AppShell', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }))
       await flushPromises()
       expect(window.aiops.writeFileContent).toHaveBeenCalledWith(
-        '/home/staging/release-note.md',
+        '/home/deploy/release-note.md',
         'changed remote note',
         expect.objectContaining({
           kind: 'remote',
-          sessionId: 'folder_asset-2',
-          host: '10.24.9.20',
-          rootPath: '/home/staging',
+          sessionId: 'asset-2',
+          host: '10.24.12.44',
+          rootPath: '/home/deploy',
           expectedAction: 'edit',
           expectedMtimeMs: 1717200000000,
-          expectedSize: '/home/staging/release-note.md'.length + 64
+          expectedSize: '/home/deploy/release-note.md'.length + 64
         })
       )
-      expect(store.fileTransferTasks.find((task) => task.name === 'save release-note.md' && task.source === '/home/staging/release-note.md')).toEqual(
+      expect(store.fileTransferTasks.find((task) => task.name === 'save release-note.md' && task.source === '/home/deploy/release-note.md')).toEqual(
         expect.objectContaining({
           type: 'r2r',
-          target: '/home/staging/release-note.md',
+          target: '/home/deploy/release-note.md',
           status: 'success',
           speed: '已保存'
         })
@@ -7133,7 +7149,7 @@ describe('AppShell', () => {
     expect(malformedListBrowser.text()).not.toContain('backend-missing-path.txt')
     malformedListBrowser.unmount()
 
-    const remoteSession = await loadTestFileSession('folder_asset-2')
+    const remoteSession = await loadTestFileSession('asset-2')
     const remoteBrowser = mount(FileBrowser, {
       props: {
         session: remoteSession,
@@ -7150,7 +7166,7 @@ describe('AppShell', () => {
       data: {
         status: 'success',
         source: '/tmp/backend-missing-task.log',
-        target: '/home/staging/backend-missing-task.log',
+        target: '/home/deploy/backend-missing-task.log',
         bytes: 128,
         files: 1,
         mtimeMs: Date.now()
@@ -7662,7 +7678,7 @@ describe('AppShell', () => {
       localBrowser.unmount()
 
       ;(window.aiops as any).showOpenDialog = originalAiops.showOpenDialog
-      const remoteSession = await loadTestFileSession('folder_asset-2')
+      const remoteSession = await loadTestFileSession('asset-2')
       const remoteBrowser = mount(FileBrowser, {
         props: {
           session: remoteSession,

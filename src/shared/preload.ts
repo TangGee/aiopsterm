@@ -417,6 +417,7 @@ export type FileSessionInfo = {
   id: string
   label: string
   host: string
+  username?: string
   group: string
   kind: FileSessionKind
   rootPath: string

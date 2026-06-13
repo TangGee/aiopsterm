@@ -4657,6 +4657,7 @@ type TestFileSessionInfo = {
   id: string
   label: string
   host: string
+  username?: string
   group: string
   kind: TestFileSessionKind
   rootPath: string
@@ -4671,11 +4672,15 @@ type TestFileSessionFolderRecord = {
   uuid: string
   name: string
   description: string
+  parentUuid?: string
+  scope?: 'direct' | 'bastion'
 }
 type TestFileSessionFolderSaveInput = {
   uuid?: string
   name: string
   description?: string
+  parentUuid?: string
+  scope?: 'direct' | 'bastion'
 }
 type TestFileSessionCatalog = {
   sessions: TestFileSessionInfo[]
@@ -4711,8 +4716,8 @@ type TestFileEntry = {
   mode: string
 }
 const defaultFileSessionFolders: TestFileSessionFolderRecord[] = [
-  { uuid: 'files-folder-a', name: '核心业务', description: '常用远程文件资产' },
-  { uuid: 'files-folder-b', name: '临时排障', description: '短期调试入口' }
+  { uuid: 'custom-folder-a', name: '核心业务', description: '常用远程文件资产', scope: 'bastion' },
+  { uuid: 'custom-folder-b', name: '临时排障', description: '短期调试入口', scope: 'bastion' }
 ]
 const defaultFileSessions: TestFileSessionInfo[] = [
   {
@@ -4738,16 +4743,16 @@ const defaultFileSessions: TestFileSessionInfo[] = [
     comment: '生产入口'
   },
   {
-    id: 'folder_asset-2',
-    label: 'staging-files',
-    host: '10.24.9.20',
+    id: 'asset-2',
+    label: 'staging-api',
+    host: '10.24.12.44',
     group: '主机',
     kind: 'remote',
-    rootPath: '/home/staging',
+    rootPath: '/home/deploy',
     status: 'idle',
     favorite: false,
     assetType: 'person',
-    folderUuid: 'files-folder-a',
+    folderUuid: 'custom-folder-a',
     comment: '预发文件'
   }
 ]
@@ -4782,6 +4787,70 @@ const cloneFileSessionCatalogMock = (): TestFileSessionCatalog => ({
   folders: fileSessionCatalogMock.folders.map((folder) => ({ ...folder }))
 })
 
+const isDefaultFileSessionMock = (session: TestFileSessionInfo) => {
+  const seed = defaultFileSessions.find((item) => item.id === session.id)
+  return Boolean(seed && JSON.stringify(seed) === JSON.stringify(session))
+}
+
+const defaultFileSessionByIdMock = (id: string) => defaultFileSessions.find((item) => item.id === id)
+
+const isUserChangedFileSessionFieldMock = <K extends keyof TestFileSessionInfo>(session: TestFileSessionInfo | undefined, field: K) => {
+  if (!session) return false
+  const seed = defaultFileSessionByIdMock(session.id)
+  return !seed || JSON.stringify(session[field]) !== JSON.stringify(seed[field])
+}
+
+const rootPathForAssetUsernameMock = (username?: string) => {
+  const name = String(username || '').trim()
+  return name && name !== 'local' ? `/home/${name}` : '/'
+}
+
+const assetFileSessionCatalogMock = (): TestFileSessionCatalog => {
+  const existingById = new Map(fileSessionCatalogMock.sessions.map((session) => [session.id, session]))
+  const local = existingById.get('local') || defaultFileSessions[0]
+  const assetSessions = assetStoreMock
+    .filter((asset) => !asset.isLocalShell && asset.id && (asset.host || asset.ip))
+    .map((asset) => {
+      const existing = existingById.get(asset.id)
+      const isOrganization = asset.asset_type === 'organization'
+      return normalizeFileSessionMock({
+        id: asset.id,
+        label: asset.title || asset.name || asset.host || asset.ip,
+        host: asset.host || asset.ip,
+        username: asset.username,
+        group: isUserChangedFileSessionFieldMock(existing, 'group') && existing?.group ? existing.group : asset.group_name || asset.group || (isOrganization ? '堡垒机资源' : '主机'),
+        kind: 'remote',
+        rootPath: isUserChangedFileSessionFieldMock(existing, 'rootPath') && existing?.rootPath ? existing.rootPath : rootPathForAssetUsernameMock(asset.username),
+        status: isUserChangedFileSessionFieldMock(existing, 'status') && existing?.status ? existing.status : asset.status === 'offline' ? 'idle' : 'active',
+        favorite: isUserChangedFileSessionFieldMock(existing, 'favorite') && typeof existing?.favorite === 'boolean' ? existing.favorite : Boolean(asset.favorite),
+        assetType: isOrganization ? 'organization' : 'person',
+        folderUuid: asset.folderUuid,
+        comment: isUserChangedFileSessionFieldMock(existing, 'comment') && existing?.comment ? existing.comment : asset.comment || undefined
+      } as TestFileSessionInfo)
+    })
+    .filter((session): session is TestFileSessionInfo => Boolean(session))
+  const assetIds = new Set(assetStoreMock.map((asset) => asset.id))
+  const customSessions = fileSessionCatalogMock.sessions.filter((session) => session.id !== 'local' && !assetIds.has(session.id) && !isDefaultFileSessionMock(session))
+  return {
+    sessions: [{ ...local }, ...assetSessions, ...customSessions].map((session) => ({ ...session })),
+    folders: assetFolderStoreMock.map((folder) => ({
+      uuid: folder.uuid,
+      name: folder.name,
+      description: folder.description,
+      ...(folder.parentUuid ? { parentUuid: folder.parentUuid } : {}),
+      ...(folder.scope ? { scope: folder.scope } : {})
+    }))
+  }
+}
+
+const assetFolderToFileFolderMock = (folder: TestAssetFolder): TestFileSessionFolderRecord => ({
+  uuid: folder.uuid,
+  name: folder.name,
+  description: folder.description,
+  ...(folder.parentUuid ? { parentUuid: folder.parentUuid } : {}),
+  ...(folder.scope ? { scope: folder.scope } : {})
+})
+
 const resetFileSessionCatalogMock = () => {
   fileSessionCatalogMock = {
     sessions: defaultFileSessions.map((session) => ({ ...session })),
@@ -4802,6 +4871,7 @@ const normalizeFileSessionMock = (session: TestFileSessionInfo): TestFileSession
     id,
     label,
     host,
+    ...(session.username ? { username: String(session.username) } : {}),
     group: String(session.group || (session.kind === 'local' ? '本地连接' : '资产')).trim(),
     kind: session.kind === 'local' ? 'local' : 'remote',
     rootPath,
@@ -8290,14 +8360,14 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     }),
-    listFileSessionCatalog: vi.fn(async () => fileSessionResultMock(cloneFileSessionCatalogMock())),
+    listFileSessionCatalog: vi.fn(async () => fileSessionResultMock(assetFileSessionCatalogMock())),
     saveFileSession: vi.fn(async (session: TestFileSessionInfo) => {
       const normalized = normalizeFileSessionMock(session)
       if (!normalized) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === normalized.id)
         ? fileSessionCatalogMock.sessions.map((item) => (item.id === normalized.id ? normalized : item))
         : [...fileSessionCatalogMock.sessions, normalized]
-      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...normalized } })
+      return fileSessionResultMock({ ...assetFileSessionCatalogMock(), session: { ...normalized } })
     }),
     saveFileSessionFromSftpPayload: vi.fn(async (payload: Record<string, unknown>) => {
       const id = stringFromSftpPayloadMock(payload, ['uuid', 'id', 'assetId', 'host', 'ip'])
@@ -8321,7 +8391,7 @@ Object.defineProperty(window, 'aiops', {
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === session.id)
         ? fileSessionCatalogMock.sessions.map((item) => (item.id === session.id ? session : item))
         : [...fileSessionCatalogMock.sessions, session]
-      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...session } })
+      return fileSessionResultMock({ ...assetFileSessionCatalogMock(), session: { ...session } })
     }),
     saveFileSessionFromTerminalContext: vi.fn(async (context: TestFileSessionTerminalContext) => {
       if (context?.kind !== 'ssh') {
@@ -8339,7 +8409,7 @@ Object.defineProperty(window, 'aiops', {
         fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === session.id)
           ? fileSessionCatalogMock.sessions.map((item) => (item.id === session.id ? session : item))
           : [...fileSessionCatalogMock.sessions, session]
-        return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...session } })
+        return fileSessionResultMock({ ...assetFileSessionCatalogMock(), session: { ...session } })
       }
       const ssh = context.ssh || {}
       const assetId = terminalContextStringMock(ssh.assetId)
@@ -8366,43 +8436,77 @@ Object.defineProperty(window, 'aiops', {
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.some((item) => item.id === session.id)
         ? fileSessionCatalogMock.sessions.map((item) => (item.id === session.id ? session : item))
         : [...fileSessionCatalogMock.sessions, session]
-      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...session } })
+      return fileSessionResultMock({ ...assetFileSessionCatalogMock(), session: { ...session } })
     }),
     updateFileSession: vi.fn(async (id: string, patch: Partial<Omit<TestFileSessionInfo, 'id'>>) => {
-      const session = fileSessionCatalogMock.sessions.find((item) => item.id === id)
+      const session = assetFileSessionCatalogMock().sessions.find((item) => item.id === id)
       if (!session) return { ok: false, errorCode: 'FILES_SESSION_NOT_FOUND', errorMessage: 'File session not found.' }
       const normalized = normalizeFileSessionMock({ ...session, ...patch, id })
       if (!normalized) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
+      const asset = assetStoreMock.find((item) => item.id === id)
+      if (asset && !asset.isLocalShell) {
+        assetStoreMock = assetStoreMock.map((item) => {
+          if (item.id !== id) return item
+          return {
+            ...item,
+            ...(hasOwn(patch, 'favorite') ? { favorite: patch.favorite } : {}),
+            ...(hasOwn(patch, 'comment') ? { comment: patch.comment || '' } : {}),
+            ...(hasOwn(patch, 'folderUuid') ? { folderUuid: patch.folderUuid } : {})
+          }
+        })
+      }
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.map((item) => (item.id === id ? normalized : item))
-      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), session: { ...normalized } })
+      if (!fileSessionCatalogMock.sessions.some((item) => item.id === id)) fileSessionCatalogMock.sessions = [...fileSessionCatalogMock.sessions, normalized]
+      return fileSessionResultMock({ ...assetFileSessionCatalogMock(), session: { ...normalized } })
     }),
     deleteFileSession: vi.fn(async (id: string) => {
       if (id === 'local') return { ok: false, errorCode: 'FILES_SESSION_LOCAL_REQUIRED', errorMessage: 'Local file session cannot be deleted.' }
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.filter((session) => session.id !== id)
-      return fileSessionResultMock(cloneFileSessionCatalogMock())
+      return fileSessionResultMock(assetFileSessionCatalogMock())
     }),
     saveFileSessionFolder: vi.fn(async (folder: TestFileSessionFolderSaveInput) => {
       const name = String(folder.name || '').trim()
       if (!name) return { ok: false, errorCode: 'FILES_FOLDER_NAME_REQUIRED', errorMessage: 'Folder name is required.' }
+      const existingAssetFolder = folder.uuid ? assetFolderStoreMock.find((item) => item.uuid === folder.uuid) : undefined
+      if (existingAssetFolder || folder.scope === 'bastion') {
+        const normalized: TestAssetFolder = {
+          ...(existingAssetFolder || { uuid: `folder-test-${assetFolderStoreMock.length + 1}`, parentUuid: folder.parentUuid, scope: 'bastion' as const }),
+          name,
+          description: String(folder.description ?? existingAssetFolder?.description ?? '').trim()
+        }
+        assetFolderStoreMock = assetFolderStoreMock.some((item) => item.uuid === normalized.uuid)
+          ? assetFolderStoreMock.map((item) => (item.uuid === normalized.uuid ? normalized : item))
+          : [...assetFolderStoreMock, normalized]
+        return fileSessionResultMock({ ...assetFileSessionCatalogMock(), folder: assetFolderToFileFolderMock(normalized) })
+      }
       const existing = folder.uuid ? fileSessionCatalogMock.folders.find((item) => item.uuid === folder.uuid) : undefined
       const normalized: TestFileSessionFolderRecord = {
         uuid: existing?.uuid || `files-folder-test-${fileSessionFolderSequenceMock++}`,
         name,
-        description: String(folder.description ?? existing?.description ?? '').trim()
+        description: String(folder.description ?? existing?.description ?? '').trim(),
+        ...(folder.parentUuid || existing?.parentUuid ? { parentUuid: folder.parentUuid || existing?.parentUuid } : {}),
+        ...(folder.scope || existing?.scope ? { scope: folder.scope || existing?.scope } : {})
       }
       fileSessionCatalogMock.folders = fileSessionCatalogMock.folders.some((item) => item.uuid === normalized.uuid)
         ? fileSessionCatalogMock.folders.map((item) => (item.uuid === normalized.uuid ? normalized : item))
         : [...fileSessionCatalogMock.folders, normalized]
-      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), folder: { ...normalized } })
+      return fileSessionResultMock({ ...assetFileSessionCatalogMock(), folder: { ...normalized } })
     }),
     deleteFileSessionFolder: vi.fn(async (uuid: string) => {
       const folderUuid = String(uuid || '').trim()
       if (!folderUuid) return { ok: false, errorCode: 'FILES_FOLDER_UUID_REQUIRED', errorMessage: 'Folder uuid is required.' }
+      if (assetFolderStoreMock.some((folder) => folder.uuid === folderUuid)) {
+        assetFolderStoreMock = assetFolderStoreMock
+          .filter((folder) => folder.uuid !== folderUuid)
+          .map((folder) => (folder.parentUuid === folderUuid ? { ...folder, parentUuid: undefined } : folder))
+        assetStoreMock = assetStoreMock.map((asset) => (asset.folderUuid === folderUuid ? { ...asset, folderUuid: undefined } : asset))
+        return fileSessionResultMock({ ...assetFileSessionCatalogMock(), folderUuid })
+      }
       fileSessionCatalogMock.folders = fileSessionCatalogMock.folders.filter((folder) => folder.uuid !== folderUuid)
       fileSessionCatalogMock.sessions = fileSessionCatalogMock.sessions.map((session) =>
         session.folderUuid === folderUuid ? { ...session, folderUuid: undefined, group: '最近连接' } : session
       )
-      return fileSessionResultMock({ ...cloneFileSessionCatalogMock(), folderUuid })
+      return fileSessionResultMock({ ...assetFileSessionCatalogMock(), folderUuid })
     }),
     listFiles: vi.fn(async (directory: string, options?: { kind?: 'local' | 'remote' }) => {
       const dir = normalizeFileDirMock(directory)

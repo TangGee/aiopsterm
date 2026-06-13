@@ -476,8 +476,8 @@ const buildSessionContextOptions = (session: FileSessionInfo | null): ContextMen
   return {
     favorite: session?.favorite !== undefined,
     comment: isOrganizationAsset(session) && !sessionKey.startsWith('common_'),
-    move: isOrganizationAsset(session) && !sessionKey.startsWith('common_') && !sessionKey.startsWith('folder_'),
-    remove: isOrganizationAsset(session) && sessionKey.startsWith('folder_') && !!session?.folderUuid,
+    move: isOrganizationAsset(session) && !sessionKey.startsWith('common_'),
+    remove: isOrganizationAsset(session) && !!session?.folderUuid,
     editFolder: false,
     deleteFolder: false
   }
@@ -619,7 +619,7 @@ const buildSftpDragPayload = (session: FileSessionInfo) => ({
   hostname: session.label,
   host: session.host,
   port: session.kind === 'remote' ? 22 : undefined,
-  username: session.kind === 'remote' ? 'deploy' : undefined,
+  username: session.kind === 'remote' ? session.username || 'root' : undefined,
   organizationId: undefined,
   sshType: session.kind,
   asset_type: session.kind === 'remote' ? 'person' : 'local',
@@ -718,14 +718,14 @@ const moveContextSession = () => {
 const moveAssetToFolder = async (folderUuid: string) => {
   const session = workspace.fileSessions.find((item) => item.id === moveModal.sessionId)
   if (!session) return
-  await workspace.updateFileSession(session.id, { folderUuid, group: '主机' })
+  await workspace.updateFileSession(session.id, { folderUuid })
   closeMoveModal()
 }
 
 const removeFromFolderContextSession = async () => {
   const session = contextSession.value
   if (session) {
-    await workspace.updateFileSession(session.id, { folderUuid: undefined, group: '最近连接' })
+    await workspace.updateFileSession(session.id, { folderUuid: undefined })
   }
   contextMenu.visible = false
 }

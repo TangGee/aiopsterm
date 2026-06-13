@@ -94,6 +94,8 @@
             :draggable="isDraggableEntry(entry)"
             @dragstart="startFileDrag($event, entry)"
             @dragend="clearOutgoingFileDrag"
+            @dragover.prevent="handleEntryDragOver($event, entry)"
+            @drop.prevent.stop="handleEntryDrop($event, entry)"
             @dblclick="entry.type === 'file' && openFile(entry)"
           >
             <td>
@@ -859,12 +861,16 @@ const readFsDragPayload = (event: DragEvent): FsDragPayload | null => {
   }
 }
 
+const getEntryDropDirectory = (entry?: FileBrowserEntry | null) => {
+  if (entry?.type === 'directory' && entry.name !== '..') return entry.path
+  return currentPath.value
+}
+
 const getDropTargetDirectory = (event: DragEvent) => {
   const row = (event.target as HTMLElement | null)?.closest?.('tr') as HTMLTableRowElement | null
   const rowPath = row?.dataset?.path || ''
   const entry = entries.value.find((item) => item.path === rowPath)
-  if (entry?.type === 'directory' && entry.name !== '..') return entry.path
-  return currentPath.value
+  return getEntryDropDirectory(entry)
 }
 
 const getTargetType = () => (props.session.kind === 'local' ? 'local' : 'remote')
@@ -959,6 +965,12 @@ const handleDragOver = (event: DragEvent) => {
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
 }
 
+const handleEntryDragOver = (event: DragEvent, entry: FileBrowserEntry) => {
+  if (entry.type !== 'directory' || entry.name === '..') return handleDragOver(event)
+  handleDragOver(event)
+  if (!dropForbidden.value) dropTargetPath.value = entry.path
+}
+
 const clearFileDropState = () => {
   dragActive.value = false
   dropForbidden.value = false
@@ -970,6 +982,33 @@ const handleDrop = async (event: DragEvent) => {
   const sourceSide = getGlobalDragSide()
   if (payload && props.panelSide) {
     const targetDir = getDropTargetDirectory(event)
+    clearOutgoingFileDrag()
+    if (!sourceSide || payload.fromSide === props.panelSide || payload.fromUuid === props.session.id) {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+      fileNotice.value = '同侧文件拖拽不可用'
+      return
+    }
+    queueCrossTransfer(payload, targetDir)
+    return
+  }
+  clearFileDropState()
+  const sessionId = event.dataTransfer?.getData('application/x-aiopsterm-file-session')
+  if (sessionId && props.panelSide) {
+    workspace.openFileSession(sessionId, props.panelSide)
+    return
+  }
+  await handleOsFileDrop(event)
+}
+
+const handleEntryDrop = async (event: DragEvent, entry: FileBrowserEntry) => {
+  if (entry.type !== 'directory' || entry.name === '..') {
+    await handleDrop(event)
+    return
+  }
+  const payload = readFsDragPayload(event)
+  const sourceSide = getGlobalDragSide()
+  const targetDir = getEntryDropDirectory(entry)
+  if (payload && props.panelSide) {
     clearOutgoingFileDrag()
     if (!sourceSide || payload.fromSide === props.panelSide || payload.fromUuid === props.session.id) {
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'

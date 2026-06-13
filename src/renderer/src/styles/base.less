@@ -1482,6 +1482,69 @@ em {
   padding: 0 10px 12px;
 }
 
+.asset-host-tree {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.asset-tree-group-row,
+.asset-tree-host-row {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.asset-tree-group-row:hover,
+.asset-tree-host-row:hover,
+.asset-tree-host-row.selected {
+  background: var(--surface-2);
+}
+
+.asset-tree-group-row small {
+  color: var(--muted);
+}
+
+.asset-tree-children {
+  display: grid;
+  gap: 2px;
+  padding-left: 22px;
+}
+
+.asset-tree-host-row.host-card {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  padding: 4px 8px;
+}
+
+.asset-tree-host-row.host-card:hover,
+.asset-tree-host-row.host-card.selected {
+  background: var(--surface-2);
+}
+
+.asset-tree-host-row .host-card-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.asset-tree-host-row .host-card-info {
+  display: grid;
+  gap: 1px;
+}
+
 .group-title {
   margin: 14px 0 8px;
   font-size: 13px;
@@ -1607,8 +1670,20 @@ em {
   overflow: auto;
 }
 
+.asset-host-form-modal {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(760px, calc(100vh - 40px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
 .assets-panel-workspace-mode .asset-form-panel {
   width: 340px;
+}
+
+.assets-panel-workspace-mode .asset-host-form-modal {
+  width: min(620px, calc(100vw - 40px));
 }
 
 .asset-form-panel.collapsed {
@@ -1642,6 +1717,32 @@ em {
 .asset-form-panel label span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.asset-field-heading,
+.workspace-field-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.asset-field-heading button,
+.workspace-field-heading button {
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.asset-field-heading button:hover,
+.workspace-field-heading button:hover {
+  background: var(--surface-3);
 }
 
 .asset-form-panel input,
@@ -1692,6 +1793,45 @@ em {
 
 .asset-proxy-empty button:hover {
   background: var(--surface-3);
+}
+
+.asset-proxy-management-page {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.asset-management-title {
+  flex: 1;
+  min-width: 180px;
+  display: grid;
+  gap: 2px;
+}
+
+.asset-management-title small {
+  color: var(--muted);
+}
+
+.asset-proxy-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.asset-inline-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.asset-inline-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.workspace-host-inline-empty {
+  min-height: 56px;
 }
 
 .key-management-container {
@@ -1772,7 +1912,7 @@ em {
 }
 
 .key-drop-area {
-  min-height: 88px;
+  min-height: 132px;
   border: 1px dashed var(--border);
   border-radius: 8px;
   background: var(--surface-2);
@@ -4345,16 +4485,14 @@ kbd {
 }
 
 .file-table td:first-child {
-  position: relative;
+  position: static;
 }
 
 .file-name-action-wrap {
-  position: relative;
+  position: static;
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: block;
   align-items: center;
-  gap: 8px;
 }
 
 .file-name-cell {
@@ -4375,6 +4513,15 @@ kbd {
   cursor: pointer;
 }
 
+.file-browser.transfer-mode .file-table tr.directory {
+  outline-offset: -2px;
+}
+
+.file-browser.transfer-mode .file-table tr.directory.file-row-drag-target {
+  outline: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .file-name-cell span {
   min-width: 0;
   overflow: hidden;
@@ -4389,10 +4536,11 @@ kbd {
 }
 
 .file-row-actions {
-  position: relative;
-  right: auto;
-  top: auto;
-  transform: none;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 8;
   display: none;
   align-items: center;
   gap: 2px;
@@ -4406,6 +4554,14 @@ kbd {
   display: flex;
 }
 
+.file-table tr {
+  position: relative;
+}
+
+.file-table tr:hover td:first-child {
+  padding-right: 112px;
+}
+
 .file-row-actions button,
 .file-rename-row button {
   width: 24px;
@@ -4416,8 +4572,8 @@ kbd {
 .file-more-menu {
   position: absolute;
   z-index: 35;
-  right: 0;
-  top: 30px;
+  right: 8px;
+  top: calc(100% - 2px);
   width: 150px;
   border: 1px solid var(--border);
   border-radius: 7px;
