@@ -216,54 +216,6 @@
       </div>
 
       <div
-        v-if="assetFolderModal.visible"
-        class="file-modal"
-        @click.self="closeAssetFolderModal"
-      >
-        <div class="file-modal-card asset-folder-modal">
-          <header>
-            <strong>{{ assetFolderModal.parentKey ? '新建子目录' : '新建目录' }}</strong>
-            <button
-              title="关闭"
-              @click="closeAssetFolderModal"
-            >
-              <X />
-            </button>
-          </header>
-          <label class="modal-field">
-            <span>目录名称 *</span>
-            <input
-              v-model="assetFolderForm.name"
-              placeholder="请输入目录名称"
-            />
-          </label>
-          <label class="modal-field">
-            <span>目录描述</span>
-            <textarea
-              v-model="assetFolderForm.description"
-              rows="3"
-              placeholder="请输入目录描述"
-            />
-          </label>
-          <small
-            v-if="assetFolderFormError"
-            class="asset-form-error"
-          >
-            {{ assetFolderFormError }}
-          </small>
-          <footer>
-            <button @click="closeAssetFolderModal">取消</button>
-            <button
-              class="primary"
-              @click="submitAssetFolderForm"
-            >
-              确定
-            </button>
-          </footer>
-        </div>
-      </div>
-
-      <div
         v-if="editorOpen"
         class="asset-host-modal file-modal"
         @click.self="editorOpen = false"
@@ -552,7 +504,7 @@
             </span>
             <button
               class="asset-action-button"
-              @click="openCreateAssetFolder()"
+              @click="openCreateAssetFolder(null, 'bastion')"
             >
               <Folder />
               新建目录
@@ -599,37 +551,63 @@
               </thead>
               <tbody>
                 <tr
-                  v-for="asset in pagedManagedAssets"
-                  :key="asset.id"
-                  :class="{ selected: selectedRows.includes(asset.id) }"
+                  v-for="row in pagedManagedRows"
+                  :key="row.key"
+                  :class="[
+                    row.kind === 'group' ? 'asset-management-tree-group-row' : 'asset-management-tree-asset-row',
+                    row.kind === 'asset' && selectedRows.includes(row.asset.id) ? 'selected' : ''
+                  ]"
                 >
-                  <td>
+                  <td v-if="row.kind === 'group'">
+                    <button
+                      class="asset-management-tree-toggle"
+                      :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
+                      @click="toggleManagedGroup(row.group.key)"
+                    >
+                      <ChevronDown v-if="isManagedGroupExpanded(row.group.key)" />
+                      <ChevronRight v-else />
+                      <Folder />
+                      <span>{{ row.group.title }}</span>
+                      <em>{{ assetGroupAssetCount(row.group) }}</em>
+                    </button>
+                  </td>
+                  <td v-else>
                     <input
                       v-model="selectedRows"
                       type="checkbox"
-                      :value="asset.id"
+                      :value="row.asset.id"
                     />
                   </td>
-                  <td>{{ asset.title }}</td>
-                  <td>{{ asset.host }}</td>
+                  <td v-if="row.kind === 'group'" colspan="5"></td>
+                  <template v-else>
+                  <td>
+                    <span
+                      class="asset-management-tree-title"
+                      :style="{ paddingLeft: `${row.depth * 14}px` }"
+                    >
+                      {{ row.asset.title }}
+                    </span>
+                  </td>
+                  <td>{{ row.asset.host }}</td>
                   <td>
                     <span
                       class="asset-source-tag"
-                      :class="asset.data_source === 'manual' ? 'manual' : 'refresh'"
+                      :class="row.asset.data_source === 'manual' ? 'manual' : 'refresh'"
                     >
-                      {{ asset.data_source === 'manual' ? '手动' : '刷新' }}
+                      {{ row.asset.data_source === 'manual' ? '手动' : '刷新' }}
                     </span>
                   </td>
-                  <td>{{ asset.comment }}</td>
+                  <td>{{ row.asset.comment }}</td>
                   <td>
-                    <button @click="openManagedAssetEdit(asset.id)">编辑</button>
-                    <button @click="removeAsset(asset.id)">删除</button>
+                    <button @click="openManagedAssetEdit(row.asset.id)">编辑</button>
+                    <button @click="removeAsset(row.asset.id)">删除</button>
                   </td>
+                  </template>
                 </tr>
               </tbody>
             </table>
             <div
-              v-if="pagedManagedAssets.length === 0"
+              v-if="pagedManagedRows.length === 0"
               class="asset-empty-state compact"
             >
               <Laptop />
@@ -1175,6 +1153,54 @@
     >
       {{ importNotice }}
     </small>
+
+    <div
+      v-if="assetFolderModal.visible"
+      class="file-modal"
+      @click.self="closeAssetFolderModal"
+    >
+      <div class="file-modal-card asset-folder-modal">
+        <header>
+          <strong>{{ assetFolderModal.parentKey ? '新建子目录' : '新建目录' }}</strong>
+          <button
+            title="关闭"
+            @click="closeAssetFolderModal"
+          >
+            <X />
+          </button>
+        </header>
+        <label class="modal-field">
+          <span>目录名称 *</span>
+          <input
+            v-model="assetFolderForm.name"
+            placeholder="请输入目录名称"
+          />
+        </label>
+        <label class="modal-field">
+          <span>目录描述</span>
+          <textarea
+            v-model="assetFolderForm.description"
+            rows="3"
+            placeholder="请输入目录描述"
+          />
+        </label>
+        <small
+          v-if="assetFolderFormError"
+          class="asset-form-error"
+        >
+          {{ assetFolderFormError }}
+        </small>
+        <footer>
+          <button @click="closeAssetFolderModal">取消</button>
+          <button
+            class="primary"
+            @click="submitAssetFolderForm"
+          >
+            确定
+          </button>
+        </footer>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1271,11 +1297,16 @@ type AssetGroup = {
   title: string
   children: AssetRecord[]
   childGroups: AssetGroup[]
-  type: 'direct-group' | 'custom-folder'
+  type: 'direct-group' | 'custom-folder' | 'organization'
   folderUuid?: string
   parentKey?: string
   groupName?: string
+  organizationId?: string
 }
+
+type AssetManagementTreeRow =
+  | { key: string; kind: 'group'; group: AssetGroup; depth: number }
+  | { key: string; kind: 'asset'; asset: AssetRecord; depth: number; parentGroupKey: string }
 
 const assets = ref<AssetRecord[]>([])
 const customFolders = ref<AiopsCustomFolderRecord[]>([])
@@ -1317,8 +1348,9 @@ const keyForm = reactive({
   passphrase: ''
 })
 const expandedAssetGroupKeys = ref<string[]>([])
+const expandedManagedGroupKeys = ref<string[]>([])
 const pendingHostDraftReturn = ref(false)
-const assetFolderModal = reactive({ visible: false, parentKey: '' })
+const assetFolderModal = reactive<{ visible: boolean; parentKey: string; scope: 'direct' | 'bastion' }>({ visible: false, parentKey: '', scope: 'direct' })
 const assetFolderForm = reactive({ name: '', description: '' })
 const assetFolderFormError = ref('')
 
@@ -1475,7 +1507,7 @@ const saveAssetRecord = async (input: AiopsAssetInput, options: { requireGroups?
 const applyAssetSnapshot = (snapshot: unknown) => {
   if (!isAiopsAssetSnapshot(snapshot)) return false
   assets.value = snapshot.assets.filter((asset) => !asset.isLocalShell).map((asset) => ({ ...asset, tags: [...asset.tags] }))
-  customFolders.value = snapshot.folders.filter((folder) => folder.scope === 'direct').map((folder) => ({ ...folder }))
+  customFolders.value = snapshot.folders.map((folder) => ({ ...folder }))
   return true
 }
 
@@ -1503,13 +1535,19 @@ const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?:
   if (refresh.groups) applyAssetGroups(refresh.groups)
 }
 
+const normalizeDirectAssetGroupName = (name?: string) => {
+  const trimmed = String(name || '').trim()
+  return !trimmed || trimmed === '未分组' || trimmed === 'Hosts' ? '主机' : trimmed
+}
 const directGroupKey = (name: string) => `group-${name}`
 const flattenAssetGroups = (groups: AssetGroup[]): AssetGroup[] => groups.flatMap((group) => [group, ...flattenAssetGroups(group.childGroups)])
 const assetGroupByKey = (key: string) => flattenAssetGroups(assetGroups.value).find((group) => group.key === key) || null
+const directAssetFolders = computed(() => customFolders.value.filter((folder) => folder.scope === 'direct'))
+const bastionAssetFolders = computed(() => customFolders.value.filter((folder) => folder.scope !== 'direct'))
 const assetFolderByGroup = (group: AssetGroup | null) => {
   if (!group) return null
-  if (group.folderUuid) return customFolders.value.find((folder) => folder.uuid === group.folderUuid) || null
-  return customFolders.value.find((folder) => folder.name === group.groupName || folder.name === group.title) || null
+  if (group.folderUuid) return directAssetFolders.value.find((folder) => folder.uuid === group.folderUuid) || null
+  return directAssetFolders.value.find((folder) => folder.name === group.groupName || folder.name === group.title) || null
 }
 
 const makeAssetGroup = (input: Omit<AssetGroup, 'childGroups' | 'children'> & Partial<Pick<AssetGroup, 'children' | 'childGroups'>>): AssetGroup => ({
@@ -1522,13 +1560,20 @@ const assetGroupAssetCount = (group: AssetGroup): number => group.children.lengt
 
 const assetGroups = computed<AssetGroup[]>(() => {
   if (!assetGroupOptionsReady.value) return []
-  const folderByName = new Map(customFolders.value.map((folder) => [folder.name, folder]))
-  const groupNames = Array.from(new Set([...customFolders.value.map((folder) => folder.name), ...assetGroupOptions.value.map((group) => group.name), ...assets.value.map((asset) => asset.group || asset.group_name || 'Hosts')]))
+  const folderByName = new Map(directAssetFolders.value.map((folder) => [folder.name, folder]))
+  const groupNames = Array.from(
+    new Set([
+      '主机',
+      ...directAssetFolders.value.map((folder) => folder.name),
+      ...assetGroupOptions.value.map((group) => normalizeDirectAssetGroupName(group.name)),
+      ...assets.value.map((asset) => normalizeDirectAssetGroupName(asset.group || asset.group_name))
+    ])
+  )
   const groupsByName = new Map<string, AssetGroup>()
   groupNames.filter(Boolean).forEach((name) => {
     const folder = folderByName.get(name)
-    const parentFolder = folder?.parentUuid ? customFolders.value.find((item) => item.uuid === folder.parentUuid) : null
-    const children = assets.value.filter((asset) => (asset.group || asset.group_name || 'Hosts') === name)
+    const parentFolder = folder?.parentUuid ? directAssetFolders.value.find((item) => item.uuid === folder.parentUuid) : null
+    const children = assets.value.filter((asset) => normalizeDirectAssetGroupName(asset.group || asset.group_name) === name)
     groupsByName.set(
       name,
       makeAssetGroup({
@@ -1601,30 +1646,120 @@ const resolvedExportIds = computed(() => exportCheckedIds.value.filter((id) => e
 const managedSourceAssets = computed(() => {
   const nonOrganizationAssets = assets.value.filter((asset) => asset.asset_type !== 'organization')
   if (!managedOrganization.value) return nonOrganizationAssets
-  return nonOrganizationAssets.filter((asset) => asset.group_name === managedOrganization.value?.group_name || asset.tags.includes('synced'))
+  return nonOrganizationAssets.filter((asset) => asset.organizationId === managedOrganization.value?.uuid || asset.group_name === managedOrganization.value?.group_name || asset.tags.includes('synced'))
 })
-const managedFilteredGroups = computed<AssetGroup[]>(() => {
-  const groups = Array.from(new Set(managedSourceAssets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
-  return filterGroups(
-    groups.map((group) => ({
-      key: `managed-${group}`,
+const collectManagedAssetFallbackGroup = (asset: AssetRecord) => asset.group || asset.group_name || '主机'
+const pruneGroupForOrganization = (group: AssetGroup, organizationId: string): AssetGroup | null => {
+  const children = group.children.filter((asset) => asset.organizationId === organizationId)
+  const childGroups = group.childGroups.map((child) => pruneGroupForOrganization(child, organizationId)).filter((child): child is AssetGroup => Boolean(child))
+  if (!children.length && !childGroups.length) return null
+  return { ...group, children, childGroups }
+}
+const pruneGroupWithoutOrganizations = (group: AssetGroup, organizationIds: Set<string>): AssetGroup | null => {
+  const children = group.children.filter((asset) => !asset.organizationId || !organizationIds.has(asset.organizationId))
+  const childGroups = group.childGroups.map((child) => pruneGroupWithoutOrganizations(child, organizationIds)).filter((child): child is AssetGroup => Boolean(child))
+  if (!children.length && !childGroups.length) return null
+  return { ...group, children, childGroups }
+}
+const rewriteGroupKeyPrefix = (group: AssetGroup, prefix: string): AssetGroup => {
+  const key = `${prefix}-${group.key}`
+  return {
+    ...group,
+    key,
+    parentKey: group.parentKey ? `${prefix}-${group.parentKey}` : group.parentKey,
+    childGroups: group.childGroups.map((child) => rewriteGroupKeyPrefix(child, prefix))
+  }
+}
+const buildManagedFolderGroups = (sourceAssets: AssetRecord[]) => {
+  const foldersByUuid = new Map(
+    bastionAssetFolders.value.map((folder) => {
+      const children = sourceAssets.filter((asset) => asset.folderUuid === folder.uuid)
+      return [
+        folder.uuid,
+        makeAssetGroup({
+          key: `managed-folder-${folder.uuid}`,
+          title: folder.name,
+          children,
+          type: 'custom-folder' as const,
+          folderUuid: folder.uuid,
+          ...(folder.parentUuid ? { parentKey: `managed-folder-${folder.parentUuid}` } : {})
+        })
+      ] as const
+    })
+  )
+  const roots: AssetGroup[] = []
+  foldersByUuid.forEach((group) => {
+    const parent = group.parentKey ? foldersByUuid.get(group.parentKey.replace(/^managed-folder-/, '')) : null
+    if (parent && parent.key !== group.key) parent.childGroups.push(group)
+    else roots.push(group)
+  })
+  return roots
+}
+const buildManagedLooseGroups = (sourceAssets: AssetRecord[]) => {
+  const groups = Array.from(new Set(sourceAssets.filter((asset) => !asset.folderUuid && !asset.organizationId).map(collectManagedAssetFallbackGroup)))
+  return groups.map((group) =>
+    makeAssetGroup({
+      key: `managed-group-${group}`,
       title: group,
-      children: managedSourceAssets.value.filter((asset) => (asset.group || asset.group_name) === group),
+      children: sourceAssets.filter((asset) => !asset.folderUuid && !asset.organizationId && collectManagedAssetFallbackGroup(asset) === group),
       childGroups: [],
       type: 'direct-group' as const,
       groupName: group
-    })),
-    assetManagementQuery.value
+    })
   )
+}
+const buildManagedGroups = (sourceAssets: AssetRecord[]): AssetGroup[] => {
+  const folderGroups = buildManagedFolderGroups(sourceAssets)
+  const looseGroups = buildManagedLooseGroups(sourceAssets)
+  const organizations = assets.value.filter((asset) => asset.asset_type === 'organization' && (!managedOrganization.value || asset.id === managedOrganization.value.id))
+  const organizationGroups = organizations.map((organization) => {
+    const organizationId = organization.uuid || organization.id
+    return makeAssetGroup({
+      key: `managed-org-${organization.uuid || organization.id}`,
+      title: organization.title || organization.name,
+      children: sourceAssets.filter((asset) => !asset.folderUuid && asset.organizationId === organizationId),
+      childGroups: folderGroups
+        .map((group) => pruneGroupForOrganization(group, organizationId))
+        .filter((group): group is AssetGroup => Boolean(group))
+        .map((group) => rewriteGroupKeyPrefix(group, `managed-org-folder-${organizationId}`)),
+      type: 'organization' as const,
+      organizationId
+    })
+  })
+  const organizationIds = new Set(organizations.map((organization) => organization.uuid || organization.id))
+  const orphanFolderGroups = folderGroups.map((group) => pruneGroupWithoutOrganizations(group, organizationIds)).filter((group): group is AssetGroup => Boolean(group))
+  return [...organizationGroups.filter((group) => assetGroupAssetCount(group) > 0), ...orphanFolderGroups, ...looseGroups.filter((group) => assetGroupAssetCount(group) > 0)]
+}
+const managedFilteredGroups = computed<AssetGroup[]>(() => {
+  return filterGroups(buildManagedGroups(managedSourceAssets.value), assetManagementQuery.value)
 })
-const managedAssets = computed(() => managedFilteredGroups.value.flatMap((group) => group.children))
-const assetManagementPageCount = computed(() => Math.max(1, Math.ceil(managedAssets.value.length / assetManagementPageSize.value)))
-const pagedManagedAssets = computed(() => {
+const managedAssets = computed(() => managedFilteredGroups.value.flatMap((group) => flattenAssetGroups([group]).flatMap((item) => item.children)))
+const isManagedGroupExpanded = (key: string) => Boolean(assetManagementQuery.value.trim()) || expandedManagedGroupKeys.value.includes(key)
+const toggleManagedGroup = (key: string) => {
+  expandedManagedGroupKeys.value = isManagedGroupExpanded(key)
+    ? expandedManagedGroupKeys.value.filter((item) => item !== key)
+    : [...expandedManagedGroupKeys.value, key]
+}
+const collectManagedRows = (groups: AssetGroup[], depth = 0): AssetManagementTreeRow[] =>
+  groups.flatMap((group) => {
+    const rows: AssetManagementTreeRow[] = [{ key: `managed-group-${group.key}`, kind: 'group', group, depth }]
+    if (isManagedGroupExpanded(group.key)) {
+      rows.push(...collectManagedRows(group.childGroups, depth + 1))
+      rows.push(...group.children.map((asset) => ({ key: `managed-asset-${group.key}-${asset.id}`, kind: 'asset' as const, asset, depth: depth + 1, parentGroupKey: group.key })))
+    }
+    return rows
+  })
+const managedRows = computed(() => collectManagedRows(managedFilteredGroups.value))
+const assetManagementPageCount = computed(() => Math.max(1, Math.ceil(managedRows.value.length / assetManagementPageSize.value)))
+const pagedManagedRows = computed(() => {
   const start = (assetManagementPage.value - 1) * assetManagementPageSize.value
-  return managedAssets.value.slice(start, start + assetManagementPageSize.value)
+  return managedRows.value.slice(start, start + assetManagementPageSize.value)
 })
 const managedVisibleAllSelected = computed(
-  () => pagedManagedAssets.value.length > 0 && pagedManagedAssets.value.every((asset) => selectedRows.value.includes(asset.id))
+  () => {
+    const visibleAssets = pagedManagedRows.value.filter((row): row is Extract<AssetManagementTreeRow, { kind: 'asset' }> => row.kind === 'asset')
+    return visibleAssets.length > 0 && visibleAssets.every((row) => selectedRows.value.includes(row.asset.id))
+  }
 )
 const managedOrganizationTitle = computed(() => (managedOrganization.value ? `管理资产 · ${managedOrganization.value.title}` : '全部组织资产'))
 const importDuplicateCount = computed(() => importPreviewAssets.value.filter((asset) => asset.duplicateId).length)
@@ -1651,7 +1786,7 @@ const resetAssetConnectionTest = () => {
   assetTestOk.value = false
 }
 
-const resetForm = (groupName = firstAssetGroupName.value) => {
+const resetForm = (groupName = '主机') => {
   assetFormError.value = ''
   resetAssetConnectionTest()
   Object.assign(form, {
@@ -1659,7 +1794,7 @@ const resetForm = (groupName = firstAssetGroupName.value) => {
     title: '',
     host: '',
     username: '',
-    group: groupName,
+    group: normalizeDirectAssetGroupName(groupName),
     port: 22,
     asset_type: 'person',
     auth_type: 'password',
@@ -1683,7 +1818,7 @@ const groupNameFromKey = (groupKey = '') => groupKey.replace(/^group-/, '')
 const openNewPanel = (groupKey = '') => {
   activeAssetView.value = 'assetConfig'
   editMode.value = false
-  resetForm(groupKey ? groupNameFromKey(groupKey) : firstAssetGroupName.value)
+  resetForm(groupKey ? groupNameFromKey(groupKey) : '主机')
   editorOpen.value = true
   closeAssetContextMenus()
 }
@@ -1709,9 +1844,10 @@ const ensureAssetFolderForGroup = async (group: AssetGroup) => {
   return saveAssetFolderRecord({ name: group.title, description: '', scope: 'direct' })
 }
 
-const openCreateAssetFolder = (parentGroup?: AssetGroup | null) => {
+const openCreateAssetFolder = (parentGroup?: AssetGroup | null, scope: 'direct' | 'bastion' = 'direct') => {
   assetFolderModal.visible = true
   assetFolderModal.parentKey = parentGroup?.key || ''
+  assetFolderModal.scope = scope
   assetFolderForm.name = ''
   assetFolderForm.description = ''
   assetFolderFormError.value = ''
@@ -1725,6 +1861,7 @@ const openCreateAssetFolderFromContext = (groupKey = '') => {
 const closeAssetFolderModal = () => {
   assetFolderModal.visible = false
   assetFolderModal.parentKey = ''
+  assetFolderModal.scope = 'direct'
   assetFolderForm.name = ''
   assetFolderForm.description = ''
   assetFolderFormError.value = ''
@@ -1736,7 +1873,10 @@ const submitAssetFolderForm = async () => {
     assetFolderFormError.value = '请输入目录名称'
     return
   }
-  const duplicate = flattenAssetGroups(assetGroups.value).some((group) => group.title === name)
+  const duplicate =
+    assetFolderModal.scope === 'direct'
+      ? flattenAssetGroups(assetGroups.value).some((group) => group.title === name)
+      : bastionAssetFolders.value.some((folder) => folder.name === name)
   if (duplicate) {
     assetFolderFormError.value = '目录名称已存在'
     return
@@ -1755,10 +1895,14 @@ const submitAssetFolderForm = async () => {
     const saved = await saveAssetFolderRecord({
       name,
       description: assetFolderForm.description.trim(),
-      scope: 'direct',
+      scope: assetFolderModal.scope,
       ...(parentUuid ? { parentUuid } : {})
     })
-    expandedAssetGroupKeys.value = Array.from(new Set([...expandedAssetGroupKeys.value, directGroupKey(saved.name), ...(parentGroup ? [parentGroup.key] : [])]))
+    if (assetFolderModal.scope === 'direct') {
+      expandedAssetGroupKeys.value = Array.from(new Set([...expandedAssetGroupKeys.value, directGroupKey(saved.name), ...(parentGroup ? [parentGroup.key] : [])]))
+    } else {
+      expandedManagedGroupKeys.value = Array.from(new Set([...expandedManagedGroupKeys.value, `managed-folder-${saved.uuid}`, ...(parentGroup ? [parentGroup.key] : [])]))
+    }
     importNotice.value = `已创建目录 ${saved.name}。`
     closeAssetFolderModal()
   } catch (error) {
@@ -1846,7 +1990,7 @@ const openJumpHostCreateFromHostForm = () => {
   pendingHostDraftReturn.value = true
   activeAssetView.value = 'assetConfig'
   editMode.value = false
-  const currentGroup = form.group.trim() || firstAssetGroupName.value || '跳板机'
+  const currentGroup = normalizeDirectAssetGroupName(form.group)
   resetForm(currentGroup)
   form.asset_type = 'person'
   form.auth_type = 'keyBased'
@@ -1948,7 +2092,9 @@ const confirmBulkDelete = () => {
 }
 
 const toggleManagedVisibleSelection = (checked: boolean) => {
-  const visibleIds = pagedManagedAssets.value.map((asset) => asset.id)
+  const visibleIds = pagedManagedRows.value
+    .filter((row): row is Extract<AssetManagementTreeRow, { kind: 'asset' }> => row.kind === 'asset')
+    .map((row) => row.asset.id)
   selectedRows.value = checked ? Array.from(new Set([...selectedRows.value, ...visibleIds])) : selectedRows.value.filter((id) => !visibleIds.includes(id))
 }
 
@@ -2778,6 +2924,15 @@ watch(
     assetManagementPage.value = 1
     selectedRows.value = []
   }
+)
+
+watch(
+  managedFilteredGroups,
+  (groups) => {
+    const keys = flattenAssetGroups(groups).map((group) => group.key)
+    expandedManagedGroupKeys.value = Array.from(new Set([...expandedManagedGroupKeys.value.filter((key) => keys.includes(key)), ...keys]))
+  },
+  { immediate: true }
 )
 
 watch(

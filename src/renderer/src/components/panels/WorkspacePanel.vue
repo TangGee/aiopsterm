@@ -57,7 +57,7 @@
           <ChevronDown v-if="isGroupExpanded(row.group.key)" />
           <ChevronRight v-else />
           <span>{{ row.group.title }}</span>
-          <em>({{ row.group.originalCount }})</em>
+          <em>({{ assetGroupAssetCount(row.group) }})</em>
           <span
             v-if="activeWorkspace === 'bastion' && row.group.refreshable"
             class="workspace-row-action refresh"
@@ -1370,12 +1370,16 @@ const buildDirectGroups = (): WorkspaceGroup[] => {
   const source = directAssets.value
   const localAssets = localShellAssets.value
   const foldersByName = new Map(directFolders.value.map((folder) => [folder.name, folder]))
-  const groupNames = [...new Set([...directFolders.value.map((folder) => folder.name), ...source.map(assetGroupName)])].filter(Boolean)
+  const normalizeDirectGroupName = (name: string) => {
+    const trimmed = name.trim()
+    return !trimmed || trimmed === '未分组' ? '主机' : trimmed
+  }
+  const groupNames = [...new Set(['主机', ...directFolders.value.map((folder) => folder.name), ...source.map((asset) => normalizeDirectGroupName(assetGroupName(asset)))])].filter(Boolean)
   const groupsByName = new Map<string, WorkspaceGroup>()
   groupNames.forEach((name) => {
     const folder = foldersByName.get(name)
     const parentFolder = folder?.parentUuid ? directFolders.value.find((item) => item.uuid === folder.parentUuid) : null
-    const children = source.filter((asset) => assetGroupName(asset) === name)
+    const children = source.filter((asset) => normalizeDirectGroupName(assetGroupName(asset)) === name)
     groupsByName.set(
       name,
       makeGroup({
@@ -1497,6 +1501,7 @@ const filteredGroups = computed(() => {
 })
 
 const collectGroupAssets = (group: WorkspaceGroup): WorkspaceAsset[] => [...group.children, ...group.childGroups.flatMap(collectGroupAssets)]
+const assetGroupAssetCount = (group: WorkspaceGroup): number => collectGroupAssets(group).length
 const collectTreeRows = (groups: WorkspaceGroup[], depth = 0): WorkspaceTreeRow[] =>
   groups.flatMap((group) => {
     const rows: WorkspaceTreeRow[] = [{ key: `group-row-${group.key}`, kind: 'group', group, depth }]
@@ -1990,7 +1995,7 @@ const folderByGroup = (group: WorkspaceGroup | null) => {
 const groupTargetPatch = (group: WorkspaceGroup | null, sourceAsset?: WorkspaceAsset): Partial<AiopsAssetInput> => {
   if (!group) {
     if (activeWorkspace.value === 'direct') {
-      return { group: '未分组', group_name: '未分组', folderUuid: undefined }
+      return { group: '主机', group_name: '主机', folderUuid: undefined }
     }
     if (activeWorkspace.value === 'bastion' && sourceAsset?.asset_type !== 'organization') {
       return { folderUuid: undefined, organizationId: organizationAssets.value[0]?.uuid || sourceAsset?.organizationId }
@@ -2036,7 +2041,7 @@ const openCreateHost = (targetGroup?: WorkspaceGroup | null) => {
   hostForm.title = ''
   hostForm.host = ''
   hostForm.username = 'root'
-  hostForm.group = targetGroup?.type === 'direct-group' ? targetGroup.title : activeWorkspace.value === 'bastion' ? targetGroup?.title || '企业' : '未分组'
+  hostForm.group = targetGroup?.type === 'direct-group' ? targetGroup.title : activeWorkspace.value === 'bastion' ? targetGroup?.title || '企业' : '主机'
   hostForm.port = '22'
   hostForm.authType = 'password'
   hostForm.comment = ''
@@ -2753,7 +2758,7 @@ const confirmDeleteGroup = () => {
     }
     const input = {
       name: group.groupName,
-      fallbackName: '未分组',
+      fallbackName: '主机',
       assetTypes: ['person' as const, 'switch' as const]
     }
     deleteAssetGroup(input)
@@ -2786,7 +2791,7 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostForm.title = mode === 'clone' ? `${asset?.name || ''}_Clone` : asset?.name || ''
   hostForm.host = asset?.host || asset?.ip || ''
   hostForm.username = asset?.username || 'root'
-  hostForm.group = asset?.group || (activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '未分组')
+  hostForm.group = asset?.group || (activeWorkspace.value === 'bastion' ? '企业' : '主机')
   hostForm.port = String(asset?.port || 22)
   hostForm.authType = asset?.auth_type || (activeWorkspace.value === 'bastion' ? 'keyBased' : 'password')
   hostForm.comment = asset?.comment || ''
@@ -2822,7 +2827,7 @@ const openJumpHostCreateFromHostForm = () => {
   hostChildFormError.value = ''
   const targetGroup = hostModal.targetGroupKey ? groupByKey(hostModal.targetGroupKey) : null
   const currentGroup = String(hostForm.group || '').trim()
-  const defaultGroup = currentGroup || (targetGroup?.type === 'direct-group' ? targetGroup.title : targetGroup?.title) || (activeWorkspace.value === 'bastion' ? '企业' : firstDirectGroupName.value || '跳板机')
+  const defaultGroup = currentGroup || (targetGroup?.type === 'direct-group' ? targetGroup.title : targetGroup?.title) || (activeWorkspace.value === 'bastion' ? '企业' : '主机')
   Object.assign(hostJumpForm, {
     title: 'jump-host',
     host: '',

@@ -1835,6 +1835,7 @@ export type FileListEntry = {
   size: number
   modifiedAt: number
   mode?: string
+  linkTarget?: string
 }
 
 export type FileListOptions = {

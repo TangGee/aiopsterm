@@ -106,7 +106,8 @@ export const isFileListEntryData = (value: unknown): value is FileListEntry =>
   fileEntryTypes.has(String(value.type)) &&
   isNonNegativeFiniteNumber(value.size) &&
   isFiniteNumber(value.modifiedAt) &&
-  isOptionalString(value.mode)
+  isOptionalString(value.mode) &&
+  isOptionalString(value.linkTarget)
 
 export const isFileReadContentData = (value: unknown): value is FileReadContentData =>
   isRecord(value) &&

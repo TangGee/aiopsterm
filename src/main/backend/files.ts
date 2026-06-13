@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'crypto'
 import { app } from 'electron'
 import Store from 'electron-store'
 import { basename as getLocalBasename, dirname as getLocalDirname, isAbsolute, join, resolve } from 'path'
-import { chmod, cp, mkdir, open as openFile, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'fs/promises'
+import { chmod, cp, lstat, mkdir, open as openFile, readFile, readdir, readlink, rename, rm, stat, unlink, writeFile } from 'fs/promises'
 import type {
   FileSessionCatalog,
   FileSessionCatalogResult,
@@ -79,6 +79,9 @@ type SftpLowLevelWrapper = SFTPWrapper & {
   read(handle: SftpFileHandle, buffer: Buffer, offset: number, length: number, position: number, callback: (error: Error | null, bytesRead?: number) => void): void
   write(handle: SftpFileHandle, buffer: Buffer, offset: number, length: number, position: number, callback: (error?: Error | null) => void): void
   close(handle: SftpFileHandle, callback: (error?: Error | null) => void): void
+}
+type SftpReadlinkWrapper = SFTPWrapper & {
+  readlink(path: string, callback: (error: Error | null, target?: string) => void): void
 }
 
 type FilesBackendRuntimeConfig = {
@@ -542,6 +545,14 @@ const sftpReaddir = (sftp: SFTPWrapper, path: string) =>
     sftp.readdir(path, (error, entries) => (error ? reject(error) : resolve(entries || [])))
   })
 
+const sftpReadlink = (sftp: SFTPWrapper, path: string) => {
+  const reader = sftp as Partial<SftpReadlinkWrapper>
+  if (typeof reader.readlink !== 'function') return Promise.resolve('')
+  return new Promise<string>((resolve) => {
+    reader.readlink!(path, (error, target) => resolve(error ? '' : String(target || '')))
+  })
+}
+
 const remotePathExistsAsDirectory = async (sftp: SFTPWrapper, path: string) => {
   try {
     const stats = await sftpStat(sftp, path)
@@ -575,6 +586,15 @@ const sftpEntryToFileListEntry = (parentPath: string, item: SftpFileEntry): File
     ...(mode ? { mode: modeString(type, mode) } : {})
   }
 }
+
+const hydrateRemoteLinkTargets = async (sftp: SFTPWrapper, entries: FileListEntry[]) =>
+  Promise.all(
+    entries.map(async (entry) => {
+      if (entry.type !== 'link') return entry
+      const linkTarget = await sftpReadlink(sftp, entry.path)
+      return linkTarget ? { ...entry, linkTarget } : entry
+    })
+  )
 
 const ensureRemoteParentDirs = async (sftp: SFTPWrapper, remoteDir: string) => {
   const normalized = normalizeRemotePath(remoteDir)
@@ -702,8 +722,9 @@ const listRemoteFilesViaSftp = async (directory: string, options: FileListOption
       .filter((item) => item.filename !== '.' && item.filename !== '..')
       .slice(0, 500)
       .map((item) => sftpEntryToFileListEntry(readablePath, item))
+    const hydratedRows = await hydrateRemoteLinkTargets(sftp, rows)
     const parent = readablePath === '/' ? [] : [entry('..', dirname(readablePath), 'directory', 0, 'drwxr-xr-x', seedTime)]
-    return [...parent, ...sortEntries(rows)]
+    return [...parent, ...sortEntries(hydratedRows)]
   })
 }
 
@@ -1882,14 +1903,17 @@ export const listFiles = async (directory: string, options: FileListOptions = {}
     const result = await Promise.all(
       entries.slice(0, 500).map(async (item) => {
         const fullPath = join(path, item.name)
-        const metadata = await stat(fullPath)
+        const metadata = await lstat(fullPath)
+        const type = item.isDirectory() ? ('directory' as const) : item.isSymbolicLink() ? ('link' as const) : ('file' as const)
+        const linkTarget = type === 'link' ? await readlink(fullPath).catch(() => '') : ''
         return {
           name: item.name,
           path: fullPath,
-          type: item.isDirectory() ? ('directory' as const) : item.isSymbolicLink() ? ('link' as const) : ('file' as const),
+          type,
           size: metadata.size,
           modifiedAt: metadata.mtimeMs,
-          mode: modeString(item.isDirectory() ? 'directory' : item.isSymbolicLink() ? 'link' : 'file', metadata.mode)
+          mode: modeString(type, metadata.mode),
+          ...(linkTarget ? { linkTarget } : {})
         }
       })
     )

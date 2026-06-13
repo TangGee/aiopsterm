@@ -148,6 +148,12 @@
                   <Link v-else-if="entry.type === 'link'" />
                   <File v-else />
                   <span>{{ entry.name }}</span>
+                  <small
+                    v-if="entry.type === 'link' && entry.linkTarget"
+                    class="file-link-target"
+                  >
+                    -> {{ entry.linkTarget }}
+                  </small>
                 </button>
                 <div
                   v-else
@@ -522,6 +528,7 @@ type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
   mode: string
   modifiedAt: string
   modifiedAtMs: number
+  linkTarget?: string
 }
 
 const props = defineProps<{
@@ -578,6 +585,7 @@ const moveDialog = reactive<{
 const conflictDialog = reactive({ visible: false, newName: '' })
 const targetSubDirs = reactive<Record<number, FileBrowserEntry[]>>({})
 const movePathContainer = ref<HTMLElement | null>(null)
+let fileNoticeTimer: number | null = null
 const sortState = reactive<{ key: 'name' | 'size' | 'modifiedAt'; direction: 'asc' | 'desc' }>({
   key: 'name',
   direction: 'asc'
@@ -665,6 +673,16 @@ const formatDate = (time: number) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+const setFileNotice = (message: string) => {
+  fileNotice.value = message
+  if (fileNoticeTimer) window.clearTimeout(fileNoticeTimer)
+  if (!message) return
+  fileNoticeTimer = window.setTimeout(() => {
+    fileNotice.value = ''
+    fileNoticeTimer = null
+  }, 4500)
+}
+
 const toggleSort = (key: typeof sortState.key) => {
   if (sortState.key === key) {
     sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'
@@ -706,11 +724,11 @@ const applyTransferResult = (transfer: FileTransferOperationResult, fallbackErro
   if (!isFileTransferOperationData(data)) throw new Error(malformedFilesBackendResultMessage)
   pushBackendTransferTask(data.task, fallbackError)
   if (data.status === 'cancelled') {
-    fileNotice.value = cancelledNotice
+    setFileNotice(cancelledNotice)
     return false
   }
   if (data.status === 'skipped') {
-    fileNotice.value = skippedNotice
+    setFileNotice(skippedNotice)
     return false
   }
   return true
@@ -723,7 +741,8 @@ const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
   mode: entry.mode || (entry.type === 'directory' ? 'drwxr-xr-x' : entry.type === 'link' ? 'lrwxrwxrwx' : '-rw-r--r--'),
   size: entry.size,
   modifiedAt: formatDate(entry.modifiedAt),
-  modifiedAtMs: entry.modifiedAt
+  modifiedAtMs: entry.modifiedAt,
+  linkTarget: entry.linkTarget
 })
 
 const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntry[]) => {
@@ -782,14 +801,14 @@ const pickLocalPath = async (
 ) => {
   const showOpenDialog = window.aiops?.showOpenDialog
   if (typeof showOpenDialog !== 'function') {
-    fileNotice.value = unavailableMessage
+    setFileNotice(unavailableMessage)
     return ''
   }
   try {
     const result = await showOpenDialog(options)
     return result?.canceled ? '' : result?.filePaths?.[0] || ''
   } catch {
-    fileNotice.value = failureMessage
+    setFileNotice(failureMessage)
     return ''
   }
 }
@@ -801,14 +820,14 @@ const pickSavePath = async (
 ) => {
   const showSaveDialog = window.aiops?.showSaveDialog
   if (typeof showSaveDialog !== 'function') {
-    fileNotice.value = unavailableMessage
+    setFileNotice(unavailableMessage)
     return ''
   }
   try {
     const result = await showSaveDialog(options)
     return result?.canceled ? '' : result?.filePath || ''
   } catch {
-    fileNotice.value = failureMessage
+    setFileNotice(failureMessage)
     return ''
   }
 }
@@ -855,7 +874,7 @@ const openDirectory = async (entry: FileBrowserEntry) => {
   const loaded = await loadEntries(entry.path, { preserveOnFailure: true })
   if (!loaded && entry.type === 'link') {
     pathInput.value = currentPath.value
-    fileNotice.value = error.value || '软连接已选中，不能作为目录展开'
+    setFileNotice(error.value || '软连接已选中，不能作为目录展开')
   }
 }
 
@@ -889,7 +908,7 @@ const openLocalFolder = async () => {
   )
   if (!pickedPath) return
   const loaded = await loadEntries(pickedPath)
-  if (loaded) fileNotice.value = `已打开 ${currentPath.value}`
+  if (loaded) setFileNotice(`已打开 ${currentPath.value}`)
 }
 
 const queueUpload = async (kind: 'file' | 'directory') => {
@@ -915,9 +934,9 @@ const queueUpload = async (kind: 'file' | 'directory') => {
     )
     if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
     await requireEntriesReload()
-    fileNotice.value = `${name} 上传成功`
+    setFileNotice(`${name} 上传成功`)
   } catch (uploadError) {
-    fileNotice.value = uploadError instanceof Error ? uploadError.message : '上传失败'
+    setFileNotice(uploadError instanceof Error ? uploadError.message : '上传失败')
   } finally {
     loading.value = false
   }
@@ -996,12 +1015,12 @@ const getDroppedLocalPath = (event: DragEvent) => {
 const handleOsFileDrop = async (event: DragEvent) => {
   const localPath = getDroppedLocalPath(event)
   if (!localPath) {
-    fileNotice.value = '无法读取拖入文件路径'
+    setFileNotice('无法读取拖入文件路径')
     return
   }
   if (props.session.kind === 'local') {
     const loaded = await loadEntries(dirname(localPath))
-    if (loaded) fileNotice.value = `已打开 ${currentPath.value}`
+    if (loaded) setFileNotice(`已打开 ${currentPath.value}`)
     return
   }
 
@@ -1011,9 +1030,9 @@ const handleOsFileDrop = async (event: DragEvent) => {
     const transfer = await runObservedFileTransfer({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
     if (!applyTransferResult(transfer, '上传失败', `${name} 上传已取消`, `${name} 上传已跳过`)) return
     await requireEntriesReload()
-    fileNotice.value = `${name} 上传成功`
+    setFileNotice(`${name} 上传成功`)
   } catch (uploadError) {
-    fileNotice.value = uploadError instanceof Error ? uploadError.message : '上传失败'
+    setFileNotice(uploadError instanceof Error ? uploadError.message : '上传失败')
   } finally {
     loading.value = false
   }
@@ -1046,10 +1065,10 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
     )
     if (!applyTransferResult(transfer, '传输失败', `${payload.name} 传输已取消`, `${payload.name} 传输已跳过`)) return
     await requireEntriesReload()
-    fileNotice.value = `${payload.name} 传输成功`
+    setFileNotice(`${payload.name} 传输成功`)
   } catch (transferError) {
     const message = transferError instanceof Error ? transferError.message : '传输失败'
-    fileNotice.value = message.includes('传输失败') ? message : `传输失败：${message}`
+    setFileNotice(message.includes('传输失败') ? message : `传输失败：${message}`)
   } finally {
     loading.value = false
   }
@@ -1099,7 +1118,7 @@ const handleDrop = async (event: DragEvent) => {
     clearOutgoingFileDrag()
     if (!sourceSide || payload.fromSide === props.panelSide || payload.fromUuid === props.session.id) {
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
-      fileNotice.value = '同侧文件拖拽不可用'
+      setFileNotice('同侧文件拖拽不可用')
       return
     }
     queueCrossTransfer(payload, targetDir)
@@ -1126,7 +1145,7 @@ const handleEntryDrop = async (event: DragEvent, entry: FileBrowserEntry) => {
     clearOutgoingFileDrag()
     if (!sourceSide || payload.fromSide === props.panelSide || payload.fromUuid === props.session.id) {
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
-      fileNotice.value = '同侧文件拖拽不可用'
+      setFileNotice('同侧文件拖拽不可用')
       return
     }
     queueCrossTransfer(payload, targetDir)
@@ -1150,7 +1169,7 @@ const startRename = (entry: FileBrowserEntry) => {
 const confirmRename = async (entry: FileBrowserEntry) => {
   const name = renameValue.value.trim()
   if (!name) {
-    fileNotice.value = '请输入新文件名'
+    setFileNotice('请输入新文件名')
     return
   }
   const newPath = `${dirname(entry.path)}/${name}`.replace(/\/+/g, '/')
@@ -1163,9 +1182,9 @@ const confirmRename = async (entry: FileBrowserEntry) => {
     await mutateEntry({ kind: 'rename', oldPath: entry.path, newPath }, '重命名失败')
     await requireEntriesReload()
     cancelRename()
-    fileNotice.value = '重命名成功'
+    setFileNotice('重命名成功')
   } catch (renameError) {
-    fileNotice.value = renameError instanceof Error ? renameError.message : '重命名失败'
+    setFileNotice(renameError instanceof Error ? renameError.message : '重命名失败')
   } finally {
     loading.value = false
   }
@@ -1206,10 +1225,10 @@ const confirmPermissions = async () => {
   try {
     await mutateEntry({ kind: 'chmod', path: target.path, mode: permissionCode.value, recursive: recursivePermission.value }, '权限更新失败')
     await requireEntriesReload()
-    fileNotice.value = `权限已更新为 ${permissionCode.value}`
+    setFileNotice(`权限已更新为 ${permissionCode.value}`)
     permissionsTarget.value = null
   } catch (permissionError) {
-    fileNotice.value = permissionError instanceof Error ? permissionError.message : '权限更新失败'
+    setFileNotice(permissionError instanceof Error ? permissionError.message : '权限更新失败')
   } finally {
     loading.value = false
   }
@@ -1232,9 +1251,9 @@ const downloadEntry = async (entry: FileBrowserEntry) => {
   try {
     const transfer = await runObservedFileTransfer({ kind: 'download-file', remotePath: entry.path, localPath }, getListOptions())
     if (!applyTransferResult(transfer, '下载失败', `${entry.name} 下载已取消`, `${entry.name} 下载已跳过`)) return
-    fileNotice.value = `${entry.name} 下载成功`
+    setFileNotice(`${entry.name} 下载成功`)
   } catch (downloadError) {
-    fileNotice.value = downloadError instanceof Error ? downloadError.message : '下载失败'
+    setFileNotice(downloadError instanceof Error ? downloadError.message : '下载失败')
   } finally {
     loading.value = false
   }
@@ -1299,7 +1318,7 @@ const toggleTargetMenu = async (index: number) => {
       await loadTargetSubDirs(index)
     } catch (targetError) {
       moveDialog.activeMenuIndex = null
-      fileNotice.value = targetError instanceof Error ? targetError.message : '文件列表加载失败'
+      setFileNotice(targetError instanceof Error ? targetError.message : '文件列表加载失败')
     }
   }
 }
@@ -1352,7 +1371,7 @@ const confirmMove = async () => {
       return
     }
   } catch (targetError) {
-    fileNotice.value = targetError instanceof Error ? targetError.message : '文件列表加载失败'
+    setFileNotice(targetError instanceof Error ? targetError.message : '文件列表加载失败')
     return
   }
   queueMoveTarget(targetName)
@@ -1369,12 +1388,12 @@ const queueMoveTarget = async (name: string, overwrite = false) => {
       moveDialog.type === 'copy' ? '复制失败' : '移动失败'
     )
     if (dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await requireEntriesReload()
-    fileNotice.value = moveDialog.type === 'copy' ? '复制成功' : '移动成功'
+    setFileNotice(moveDialog.type === 'copy' ? '复制成功' : '移动成功')
     closeMoveDialog()
   } catch (moveError) {
     const fallback = moveDialog.type === 'copy' ? '复制失败' : '移动失败'
     const message = moveError instanceof Error ? moveError.message : fallback
-    fileNotice.value = message.includes(fallback) ? message : `${fallback}：${message}`
+    setFileNotice(message.includes(fallback) ? message : `${fallback}：${message}`)
   } finally {
     loading.value = false
   }
@@ -1388,7 +1407,7 @@ const handleConflictAction = async (action: 'cancel' | 'rename' | 'overwrite') =
   if (action === 'rename') {
     const name = conflictDialog.newName.trim()
     if (!name) {
-      fileNotice.value = '请输入新文件名'
+      setFileNotice('请输入新文件名')
       return
     }
     await queueMoveTarget(name)
@@ -1415,10 +1434,10 @@ const confirmDeleteEntry = async () => {
   try {
     await mutateEntry({ kind: 'delete', path: entry.path, recursive: entry.type === 'directory' }, '删除失败')
     await requireEntriesReload()
-    fileNotice.value = '删除成功'
+    setFileNotice('删除成功')
     closeDeleteDialog()
   } catch (deleteError) {
-    fileNotice.value = deleteError instanceof Error ? deleteError.message : '删除失败'
+    setFileNotice(deleteError instanceof Error ? deleteError.message : '删除失败')
   } finally {
     loading.value = false
   }
@@ -1427,9 +1446,9 @@ const confirmDeleteEntry = async () => {
 const copyPath = async (entry: FileBrowserEntry) => {
   const copied = await copyTextToClipboard(entry.path)
   if (copied) {
-    fileNotice.value = '绝对路径已复制'
+    setFileNotice('绝对路径已复制')
   } else {
-    fileNotice.value = '复制绝对路径失败'
+    setFileNotice('复制绝对路径失败')
   }
   moreForPath.value = ''
 }
@@ -1466,5 +1485,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onGlobalClick)
+  if (fileNoticeTimer) window.clearTimeout(fileNoticeTimer)
 })
 </script>

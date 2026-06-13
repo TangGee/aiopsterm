@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -2111,6 +2111,30 @@ describe('files backend content boundary', () => {
         })
       )
       expect((await listFiles(dir, { kind: 'local', sessionId: 'local' })).map((entry) => entry.name)).not.toContain('renamed.txt')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('lists local symbolic links with their readlink target', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-file-link-'))
+    const targetPath = join(dir, 'target.txt')
+    const linkPath = join(dir, 'linked-target')
+    try {
+      await writeFile(targetPath, 'link target\n', 'utf-8')
+      await symlink('target.txt', linkPath)
+      const rows = await listFiles(dir, { kind: 'local', sessionId: 'local' })
+      expect(rows).toContainEqual(
+        expect.objectContaining({
+          name: 'linked-target',
+          path: linkPath,
+          type: 'link',
+          linkTarget: 'target.txt'
+        })
+      )
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM' || (error as NodeJS.ErrnoException).code === 'EACCES') return
+      throw error
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

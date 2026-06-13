@@ -958,6 +958,7 @@ describe('AppShell', () => {
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
     await assets.find('.asset-search-input input').setValue('')
     expect(assets.text()).toContain('prod-bastion')
+    expect(assets.findAll('.asset-tree-group-row').some((row) => row.text().includes('主机'))).toBe(true)
 
     await assets.find('.asset-host-tree').trigger('contextmenu', { clientX: 140, clientY: 180 })
     expect(assets.find('.asset-context-menu').text()).toContain('新建目录')
@@ -1509,6 +1510,19 @@ describe('AppShell', () => {
     expect(managed.text()).toContain('全部组织资产')
     expect(managed.find('.asset-table-footer').text()).toContain('共 6 条')
     expect(managed.text()).not.toContain('127.0.0.1')
+    expect(managed.findAll('.asset-management-tree-group-row').length).toBeGreaterThan(0)
+    expect(managed.findAll('.asset-management-tree-group-row').some((row) => row.text().includes('jumpserver-org'))).toBe(true)
+    expect(managed.findAll('.asset-management-tree-group-row').some((row) => row.text().includes('核心业务'))).toBe(true)
+    const visibleAssetCheckboxes = () => managed.findAll('.asset-management-tree-asset-row input[type="checkbox"]')
+    const groupToggle = managed.findAll('.asset-management-tree-toggle').find((button) => button.text().includes('jumpserver-org'))!
+    await groupToggle.trigger('click')
+    expect(managed.text()).not.toContain('prod-bastion')
+    await groupToggle.trigger('click')
+    expect(managed.text()).toContain('prod-bastion')
+    await managed.find('.asset-table-scroll thead input[type="checkbox"]').setValue(true)
+    expect(managed.findAll('.asset-management-tree-group-row input[type="checkbox"]')).toHaveLength(0)
+    expect(visibleAssetCheckboxes().every((input) => (input.element as HTMLInputElement).checked)).toBe(true)
+    await managed.find('.asset-table-scroll thead input[type="checkbox"]').setValue(false)
     vi.mocked(window.aiops.refreshOrganizationAssets).mockClear()
     await managed.find('.asset-table-toolbar button[title="刷新"]').trigger('click')
     await flushPromises()
@@ -1518,6 +1532,12 @@ describe('AppShell', () => {
     expect(managed.text()).toContain('mysql-primary')
     expect(managed.text()).not.toContain('prod-bastion')
     await managed.find('.asset-search-clear').trigger('click')
+    await managed.findAll('.asset-table-toolbar .asset-action-button').find((button) => button.text().includes('新建目录'))!.trigger('click')
+    await managed.find('.asset-folder-modal input').setValue('堡垒目录')
+    await managed.find('.asset-folder-modal footer .primary').trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveAssetFolder).toHaveBeenCalledWith(expect.objectContaining({ name: '堡垒目录', scope: 'bastion' }))
+    expect(managed.text()).toContain('堡垒目录')
     await managed.findAll('.asset-table-toolbar .asset-action-button').find((button) => button.text().includes('添加资产'))!.trigger('click')
     vi.mocked(window.aiops.saveAsset).mockClear()
     await managed.find('.managed-asset-form .asset-submit-button').trigger('click')
@@ -2311,6 +2331,9 @@ describe('AppShell', () => {
     }
     const menuButton = (label: string) => findMenuButton(wrapper, '.workspace-node-menu', label)
 
+    expect(groupRow('主机').text()).toContain('(0)')
+    expect(groupRow('生产').text()).toContain('(2)')
+
     await groupRow('生产').trigger('contextmenu', { clientX: 180, clientY: 160 })
     await menuButton('新建子分组').trigger('click')
     await wrapper.find('.workspace-folder-modal input').setValue('生产子组')
@@ -2399,6 +2422,18 @@ describe('AppShell', () => {
     groupRow('预发').element.dispatchEvent(drop)
     await flushPromises()
     expect(window.aiops.saveAsset).toHaveBeenCalledWith(expect.objectContaining({ name: 'tree-linked-host', group: '预发', group_name: '预发' }))
+
+    await wrapper.find('.workspace-tree').trigger('contextmenu', { clientX: 260, clientY: 300 })
+    await menuButton('新建主机').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('root-default-host')
+    await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.66.0.9')
+    await wrapper.findAll('.workspace-host-form input').at(2)!.setValue('ops')
+    await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('22')
+    await wrapper.find('.workspace-host-form').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.saveAsset).toHaveBeenCalledWith(expect.objectContaining({ name: 'root-default-host', group: '主机', group_name: '主机' }))
+    expect(wrapper.text()).toContain('root-default-host')
 
     vi.mocked(window.aiops.createTerminal).mockClear()
     await hostRow('tree-linked-host').trigger('dblclick')
@@ -2986,9 +3021,9 @@ describe('AppShell', () => {
       vi.mocked(window.aiops.deleteAssetGroup).mockClear()
       await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
       await flushPromises()
-      expect(window.aiops.deleteAssetGroup).toHaveBeenCalledWith({ name: '生产归档', fallbackName: '未分组', assetTypes: ['person', 'switch'] })
+      expect(window.aiops.deleteAssetGroup).toHaveBeenCalledWith({ name: '生产归档', fallbackName: '主机', assetTypes: ['person', 'switch'] })
       expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产归档'))).toBe(false)
-      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('未分组'))).toBe(true)
+      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('主机'))).toBe(true)
 
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
@@ -3121,7 +3156,7 @@ describe('AppShell', () => {
       await filesPanel.find('.files-folder-confirm footer .danger').trigger('click')
       await flushPromises()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBeUndefined()
-      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('未分组')
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('主机')
       expect(filesPanel.text()).not.toContain('临时归档')
       expect(filesPanel.text()).toContain('prod-bastion')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('contextmenu')
@@ -7033,20 +7068,23 @@ describe('AppShell', () => {
   })
 
   it('supports External reference-style file table hidden toggle, rename, more menu, and move dialog', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const pinia = createPinia()
     setActivePinia(pinia)
-    const localSession = await loadTestFileSession('local')
-    const wrapper = mount(FileBrowser, {
-      props: {
-        session: localSession,
-        uiMode: 'default'
-      },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    try {
+      const localSession = await loadTestFileSession('local')
+      const wrapper = mount(FileBrowser, {
+        props: {
+          session: localSession,
+          uiMode: 'default'
+        },
+        global: { plugins: [pinia] }
+      })
+      const store = useWorkspaceStore()
 
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    expect(wrapper.text()).toContain('.hidden')
+      await vi.runOnlyPendingTimersAsync()
+      await flushPromises()
+      expect(wrapper.text()).toContain('.hidden')
 
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/local-picked'] })
     await wrapper.findAll('.file-icon-button').find((button) => button.attributes('title') === '打开文件夹')!.trigger('click')
@@ -7061,7 +7099,7 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
       { name: 'zeta.log', path: '/tmp/local-picked/zeta.log', type: 'file', size: 30, modifiedAt: 1717200003000, mode: '-rw-r--r--' },
       { name: 'alpha.log', path: '/tmp/local-picked/alpha.log', type: 'file', size: 10, modifiedAt: 1717200001000, mode: '-rw-r--r--' },
-      { name: 'linked-file', path: '/tmp/local-picked/linked-file', type: 'link', size: 1, modifiedAt: 1717200002000, mode: 'lrwxrwxrwx' },
+      { name: 'linked-file', path: '/tmp/local-picked/linked-file', type: 'link', size: 1, modifiedAt: 1717200002000, mode: 'lrwxrwxrwx', linkTarget: '../target.txt' },
       { name: 'subdir', path: '/tmp/local-picked/subdir', type: 'directory', size: 0, modifiedAt: 1717200004000, mode: 'drwxr-xr-x' }
     ])
     await wrapper.findAll('.file-icon-button').find((button) => button.attributes('title') === '刷新')!.trigger('click')
@@ -7073,12 +7111,17 @@ describe('AppShell', () => {
     await wrapper.findAll('.file-sort-button').find((button) => button.text().includes('大小'))!.trigger('click')
     expect(rowNames()).toEqual(['..', 'subdir', 'linked-file', 'zeta.log', 'alpha.log'])
     const linkedFileRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('linked-file'))!
+    expect(linkedFileRow.text()).toContain('-> ../target.txt')
     vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('linked file is not directory'))
     await linkedFileRow.find('td').trigger('click')
     await flushPromises()
     expect(linkedFileRow.classes()).toContain('selected')
     expect(wrapper.text()).toContain('linked file is not directory')
+    expect(wrapper.find('.file-browser-notice').text()).toContain('linked file is not directory')
     expect((wrapper.find('.file-path-input').element as HTMLInputElement).value).toBe('/tmp/local-picked')
+    await vi.advanceTimersByTimeAsync(4500)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.file-browser-notice').exists()).toBe(false)
     vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
       { name: 'parent-entry.md', path: '/tmp/parent-entry.md', type: 'file', size: 3, modifiedAt: 1717200005000, mode: '-rw-r--r--' }
     ])
@@ -7268,6 +7311,9 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('删除成功')
     expect(wrapper.text()).not.toContain('release-note-v2.md')
     expect((window.aiops as any).recordFileTransferTask).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('fails closed on malformed Files backend transfer and mutation success envelopes', async () => {
