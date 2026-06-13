@@ -12124,14 +12124,9 @@ describe('AppShell', () => {
     expect(workspace.find('.proxy-config-add-modal').exists()).toBe(true)
     const proxyInputs = workspace.findAll('.proxy-config-add-modal .settings-input')
     await proxyInputs[0].setValue('release-proxy')
-    await workspace.find('.proxy-config-add-modal .settings-select').setValue('SOCKS5')
+    await workspace.find('.proxy-config-add-modal .settings-select').setValue('TCP')
     await proxyInputs[1].setValue('10.0.0.8')
-    await proxyInputs[2].setValue('1080')
-    await workspace.find('.proxy-config-add-modal input[type="checkbox"]').setValue(true)
-    await workspace.vm.$nextTick()
-    const credentialInputs = workspace.findAll('.proxy-config-add-modal .settings-input')
-    await credentialInputs[3].setValue('ops')
-    await credentialInputs[4].setValue('secret')
+    await proxyInputs[2].setValue('2222')
     await workspace.find('.proxy-config-add-modal footer .primary').trigger('click')
     expect(store.sshProxyConfigs.some((config) => config.name === 'release-proxy')).toBe(true)
     expect(workspace.text()).toContain('release-proxy')
@@ -12140,12 +12135,12 @@ describe('AppShell', () => {
         sshProxyConfigs: [
           {
             name: 'release-proxy',
-            type: 'SOCKS5',
+            type: 'TCP',
             host: '10.0.0.8',
-            port: 1080,
-            enableProxyIdentity: true,
-            username: 'ops',
-            password: 'secret'
+            port: 2222,
+            enableProxyIdentity: false,
+            username: '',
+            password: ''
           }
         ]
       })

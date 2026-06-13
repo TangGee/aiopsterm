@@ -9832,12 +9832,12 @@ describe('workspace store', () => {
     const initialSnapshot = proxyConfigSnapshot()
     const draftProxy = {
       name: 'release-proxy',
-      type: 'SOCKS5' as const,
+      type: 'TCP' as const,
       host: '10.0.0.8',
-      port: 1080,
-      enableProxyIdentity: true,
-      username: 'ops',
-      password: 'secret'
+      port: 2222,
+      enableProxyIdentity: false,
+      username: '',
+      password: ''
     }
 
     const openDraft = () => {

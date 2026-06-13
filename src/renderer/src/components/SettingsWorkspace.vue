@@ -681,7 +681,7 @@ const TerminalSettings = defineComponent({
                       value: workspace.sshProxyForm.type,
                       onChange: (event: Event) => workspace.updateSshProxyForm({ type: (event.target as HTMLSelectElement).value as any })
                     },
-                    ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].map((type) => h('option', { value: type }, type))
+                    ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5', 'TCP'].map((type) => h('option', { value: type }, type))
                   )
                 ]),
                 h('label', [

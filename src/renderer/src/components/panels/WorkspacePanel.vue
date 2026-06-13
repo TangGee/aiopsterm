@@ -698,6 +698,7 @@
               <option value="HTTPS">HTTPS</option>
               <option value="SOCKS4">SOCKS4</option>
               <option value="SOCKS5">SOCKS5</option>
+              <option value="TCP">TCP</option>
             </select>
           </label>
           <label>

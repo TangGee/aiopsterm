@@ -855,7 +855,7 @@ export type TerminalCursorStyle = 'block' | 'bar' | 'underline'
 
 export type TerminalMouseEventAction = 'none' | 'paste' | 'contextMenu' | 'closeTab'
 
-export type SshProxyType = 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5'
+export type SshProxyType = 'HTTP' | 'HTTPS' | 'SOCKS4' | 'SOCKS5' | 'TCP'
 
 export type SshProxyConfig = {
   name: string

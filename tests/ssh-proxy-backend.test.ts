@@ -30,6 +30,12 @@ const closeServer = (server: net.Server) =>
     server.close(() => resolve())
   })
 
+const readSocketData = (socket: net.Socket) =>
+  new Promise<Buffer>((resolve, reject) => {
+    socket.once('data', (chunk) => resolve(Buffer.from(chunk)))
+    socket.once('error', reject)
+  })
+
 beforeAll(async () => {
   const modulePath = '../src/main/backend/sshProxy'
   const backend = await import(modulePath)
@@ -170,6 +176,37 @@ describe('SSH proxy backend boundary', () => {
 
     expect(request.subarray(0, 8)).toEqual(Buffer.from([0x04, 0x01, 0x08, 0xae, 0, 0, 0, 1]))
     expect(request.subarray(8).toString('utf8')).toBe('ops\0target.example.test\0')
+    socket.destroy()
+  })
+
+  it('opens raw TCP proxy sockets without HTTP or SOCKS handshakes', async () => {
+    const observed: Buffer[] = []
+    const server = net.createServer((socket) => {
+      socket.on('data', (chunk) => {
+        observed.push(Buffer.from(chunk))
+        socket.write('tcp-proxy-echo')
+      })
+      socket.write('ssh-banner')
+    })
+    const port = await listen(server)
+
+    const socket = await createSshProxySocket(
+      baseProxy({
+        type: 'TCP',
+        port,
+        enableProxyIdentity: true,
+        username: 'ignored',
+        password: 'ignored'
+      }),
+      'target.example.test',
+      2222,
+      { timeoutMs: 1000 }
+    )
+
+    await expect(readSocketData(socket).then((chunk) => chunk.toString('utf8'))).resolves.toBe('ssh-banner')
+    socket.write('client-bytes')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(observed.map((chunk) => chunk.toString('utf8'))).toEqual(['client-bytes'])
     socket.destroy()
   })
 })

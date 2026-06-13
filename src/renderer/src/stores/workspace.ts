@@ -944,7 +944,8 @@ const middleMouseEventActions: TerminalMouseEventAction[] = ['none', 'paste', 'c
 const rightMouseEventActions: TerminalSettings['rightMouseEvent'][] = ['none', 'paste', 'contextMenu']
 const modelApiFormats: NonNullable<ModelProviderSettings['apiFormat']>[] = ['chat-completions', 'responses']
 const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standard', 'custom']
-const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
+const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5', 'TCP']
+const standardProxyTypes: Array<Exclude<SshProxyType, 'TCP'>> = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const malformedModelProviderResultMessage = '模型 Provider 检查服务返回数据无效'
@@ -2162,7 +2163,7 @@ const isNumberOrNull = (value: unknown): value is number | null => value === nul
 const isK8sAgentProxyConfig = (source: unknown): source is K8sProxyConfig =>
   isRecord(source) &&
   typeof source.enabled === 'boolean' &&
-  sshProxyTypes.includes(source.type as SshProxyType) &&
+  standardProxyTypes.includes(source.type as Exclude<SshProxyType, 'TCP'>) &&
   typeof source.host === 'string' &&
   isNonNegativeFiniteNumber(source.port) &&
   typeof source.enableProxyIdentity === 'boolean' &&

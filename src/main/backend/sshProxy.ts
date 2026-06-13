@@ -208,6 +208,11 @@ const createHttpProxySocket = async (config: SshProxyConfig, targetHost: string,
   return socket
 }
 
+const createTcpProxySocket = async (config: SshProxyConfig, targetHost: string, targetPort: number, timeoutMs: number): Promise<net.Socket> => {
+  const proxy = normalizeProxyConfig(config, targetHost, targetPort, timeoutMs)
+  return (await connectProxyTransport(proxy.host, proxy.port, timeoutMs, false)) as net.Socket
+}
+
 const createSocks4ProxySocket = async (config: SshProxyConfig, targetHost: string, targetPort: number, timeoutMs: number): Promise<net.Socket> => {
   const proxy = normalizeProxyConfig(config, targetHost, targetPort, timeoutMs)
   const socket = (await connectProxyTransport(proxy.host, proxy.port, timeoutMs, false)) as net.Socket
@@ -281,6 +286,7 @@ export const createSshProxySocket = async (
   if (config.type === 'HTTP' || config.type === 'HTTPS') return createHttpProxySocket(config, targetHost, targetPort, timeoutMs)
   if (config.type === 'SOCKS4') return createSocks4ProxySocket(config, targetHost, targetPort, timeoutMs)
   if (config.type === 'SOCKS5') return createSocks5ProxySocket(config, targetHost, targetPort, timeoutMs)
+  if (config.type === 'TCP') return createTcpProxySocket(config, targetHost, targetPort, timeoutMs)
   throw new SshProxyConnectionError(`Unsupported SSH proxy type: ${(config as { type?: string }).type || 'unknown'}.`)
 }
 
