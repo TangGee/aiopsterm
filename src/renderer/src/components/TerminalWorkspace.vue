@@ -3,16 +3,25 @@
     <div
       class="terminal-tabs"
       data-onboarding-id="main-workspace-tabs"
+      :class="{ 'drag-restore': tabBarDragOver }"
+      @dragover.prevent="handleTabBarDragOver"
+      @dragleave="handleTabBarDragLeave"
+      @drop.prevent="handleTabBarDrop"
     >
       <button
         v-for="panel in workspace.panels"
         :key="panel.id"
         class="terminal-tab"
-        :class="{ active: panel.id === workspace.activePanelId }"
-        :draggable="panel.kind === 'knowledge'"
+        :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id }"
+        :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
         @click="workspace.activePanelId = panel.id"
         @contextmenu.prevent="openMenu($event, panel.id)"
         @dragstart="handleTabDragStart($event, panel)"
+        @dragenter.prevent.stop="handleTabDragEnter($event, panel)"
+        @dragover.prevent.stop="handleTabDragOver($event, panel)"
+        @dragleave="handleTabDragLeave(panel.id)"
+        @drop.prevent.stop="handleTabDrop($event, panel)"
+        @dragend="handleTabDragEnd"
       >
         <span
           v-if="renamingId !== panel.id"
@@ -30,6 +39,8 @@
       <button
         class="new-tab-button"
         title="新建终端"
+        @dragover.prevent="handleTabBarDragOver"
+        @drop.prevent="handleTabBarDrop"
         @click="workspace.createPanel()"
       >
         <Plus />
@@ -55,6 +66,12 @@
       </button>
       <button @click="splitSelected('right')">向右拆分</button>
       <button @click="splitSelected('below')">向下拆分</button>
+      <button
+        v-if="workspace.hasSplitState(menu.panelId)"
+        @click="unsplitSelected"
+      >
+        取消拆分
+      </button>
     </div>
 
     <div
@@ -75,6 +92,12 @@
       <i />
       <button @click="splitFromTermMenu('right')">向右拆分</button>
       <button @click="splitFromTermMenu('below')">向下拆分</button>
+      <button
+        v-if="workspace.hasSplitState(termMenu.panelId)"
+        @click="unsplitFromTermMenu"
+      >
+        取消拆分
+      </button>
       <i />
       <button @click="toggleGlobalInput">{{ globalInputVisible ? '关闭全局执行' : '全局执行' }}</button>
       <i />
@@ -208,9 +231,13 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge' }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'drag-over': paneDragOverPanelId === panel.id }"
         :style="style"
         @click="activatePanel(panel.id)"
+        @dragenter.prevent="handlePaneDragEnter($event, panel)"
+        @dragover.prevent="handlePaneDragOver($event, panel)"
+        @dragleave="handlePaneDragLeave(panel.id)"
+        @drop.prevent.stop="handlePaneDrop($event, panel)"
       >
         <KnowledgeCenterEditor
           v-if="panel.kind === 'knowledge' && panel.knowledge"
@@ -504,6 +531,11 @@ const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
 const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
 const isReconnectablePanel = (panel?: TerminalPanel | null) => panel?.status === 'closed' || panel?.status === 'error'
+const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
+const draggedTerminalPanelId = ref('')
+const tabDragOverPanelId = ref('')
+const paneDragOverPanelId = ref('')
+const tabBarDragOver = ref(false)
 let suggestionRequestId = 0
 let commandGenerationRequestId = 0
 
@@ -1110,6 +1142,12 @@ const splitSelected = (direction: 'right' | 'below') => {
   menu.visible = false
 }
 
+const unsplitSelected = () => {
+  workspace.unsplitPanel(menu.panelId)
+  menu.visible = false
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+}
+
 const forkSelected = async () => {
   const sourcePanelId = menu.panelId
   const forkPanel = workspace.forkSshPanel(menu.panelId)
@@ -1149,8 +1187,28 @@ const getSuggestionContext = (panelId: string, mode: TerminalCommandSuggestionCo
   }
 }
 
+const getDraggedTerminalPanelId = (event: DragEvent) => {
+  const transferredId = event.dataTransfer?.getData(terminalTabDragType)
+  return transferredId || draggedTerminalPanelId.value
+}
+
+const clearTerminalTabDragState = () => {
+  draggedTerminalPanelId.value = ''
+  tabDragOverPanelId.value = ''
+  paneDragOverPanelId.value = ''
+  tabBarDragOver.value = false
+}
+
 const handleTabDragStart = (event: DragEvent, panel: TerminalPanel) => {
-  if (panel.kind !== 'knowledge' || !panel.knowledge?.relPath || !event.dataTransfer) return
+  if (!event.dataTransfer) return
+  if (panel.kind === 'terminal') {
+    draggedTerminalPanelId.value = panel.id
+    event.dataTransfer.setData(terminalTabDragType, panel.id)
+    event.dataTransfer.setData('text/plain', panel.title)
+    event.dataTransfer.effectAllowed = 'move'
+    return
+  }
+  if (panel.kind !== 'knowledge' || !panel.knowledge?.relPath) return
   const payload = {
     contextType: panel.knowledge.isImage ? 'image' : 'doc',
     relPath: panel.knowledge.relPath,
@@ -1161,6 +1219,85 @@ const handleTabDragStart = (event: DragEvent, panel: TerminalPanel) => {
   event.dataTransfer.setData('text/html', `<span data-aiopsterm-context="${encodeURIComponent(serialized)}"></span>`)
   event.dataTransfer.setData('text/plain', panel.knowledge.relPath)
   event.dataTransfer.effectAllowed = 'copy'
+}
+
+const handleTabDragEnd = () => {
+  clearTerminalTabDragState()
+}
+
+const handleTabDragEnter = (event: DragEvent, panel: TerminalPanel) => {
+  const draggedId = getDraggedTerminalPanelId(event)
+  if (!draggedId || panel.kind === 'knowledge' || draggedId === panel.id) return
+  tabDragOverPanelId.value = panel.id
+  tabBarDragOver.value = false
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+const handleTabDragOver = (event: DragEvent, panel: TerminalPanel) => {
+  handleTabDragEnter(event, panel)
+}
+
+const handleTabDragLeave = (panelId: string) => {
+  if (tabDragOverPanelId.value === panelId) tabDragOverPanelId.value = ''
+}
+
+const handleTabDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
+  const draggedId = getDraggedTerminalPanelId(event)
+  if (!draggedId || targetPanel.kind === 'knowledge' || draggedId === targetPanel.id) {
+    clearTerminalTabDragState()
+    return
+  }
+  workspace.attachPanelToSplit(draggedId, targetPanel.id, 'right')
+  clearTerminalTabDragState()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+}
+
+const handleTabBarDragOver = (event: DragEvent) => {
+  const draggedId = getDraggedTerminalPanelId(event)
+  if (!draggedId) return
+  tabBarDragOver.value = true
+  tabDragOverPanelId.value = ''
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+const handleTabBarDragLeave = (event: DragEvent) => {
+  const target = event.currentTarget as HTMLElement | null
+  const related = event.relatedTarget as Node | null
+  if (!target || !related || !target.contains(related)) tabBarDragOver.value = false
+}
+
+const handleTabBarDrop = (event: DragEvent) => {
+  const draggedId = getDraggedTerminalPanelId(event)
+  if (draggedId) workspace.unsplitPanel(draggedId)
+  clearTerminalTabDragState()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+}
+
+const handlePaneDragEnter = (event: DragEvent, panel: TerminalPanel) => {
+  const draggedId = getDraggedTerminalPanelId(event)
+  if (!draggedId || panel.kind === 'knowledge' || draggedId === panel.id) return
+  paneDragOverPanelId.value = panel.id
+  tabBarDragOver.value = false
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+const handlePaneDragOver = (event: DragEvent, panel: TerminalPanel) => {
+  handlePaneDragEnter(event, panel)
+}
+
+const handlePaneDragLeave = (panelId: string) => {
+  if (paneDragOverPanelId.value === panelId) paneDragOverPanelId.value = ''
+}
+
+const handlePaneDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
+  const draggedId = getDraggedTerminalPanelId(event)
+  if (!draggedId || targetPanel.kind === 'knowledge' || draggedId === targetPanel.id) {
+    clearTerminalTabDragState()
+    return
+  }
+  workspace.attachPanelToSplit(draggedId, targetPanel.id, 'right')
+  clearTerminalTabDragState()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const copySelection = async (panelId = workspace.activePanelId) => {
@@ -1676,6 +1813,12 @@ const closeTerminalFromMenu = () => {
 const splitFromTermMenu = (direction: 'right' | 'below') => {
   void createSplitPanel(direction, termMenu.panelId)
   termMenu.visible = false
+}
+
+const unsplitFromTermMenu = () => {
+  workspace.unsplitPanel(termMenu.panelId)
+  termMenu.visible = false
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const openFileManagerFromMenu = () => {

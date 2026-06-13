@@ -6,5 +6,6 @@
 - [Kubernetes](kubernetes.md)
 - [MCP Servers](mcp-servers.md)
 - [Package Verification](package-verification.md)
+- [Terminal Workspace](terminal-workspace.md)
 - [Troubleshooting](troubleshooting.md)
 - [User Account](user-account.md)

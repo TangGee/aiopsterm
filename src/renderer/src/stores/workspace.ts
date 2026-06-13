@@ -12072,6 +12072,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.splitOrder = undefined
   }
 
+  const hasSplitState = (panelId: string) => {
+    const panel = panels.value.find((item) => item.id === panelId)
+    if (!panel) return false
+    if (panel.split || panel.splitGroupId) return true
+    return panels.value.some((item) => item.splitSourceId === panel.id || (panel.splitGroupId && item.splitGroupId === panel.splitGroupId))
+  }
+
   const normalizeSplitState = () => {
     const ids = new Set(panels.value.map((panel) => panel.id))
     const groupCounts = new Map<string, number>()
@@ -12093,6 +12100,66 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         clearPanelSplitState(panel)
       }
     })
+  }
+
+  const detachPanelFromSplit = (panel: TerminalPanel) => {
+    const previousGroupId = panel.splitGroupId
+    const previousSourceId = panel.splitSourceId
+    const groupSiblings = previousGroupId
+      ? panels.value.filter((item) => item.id !== panel.id && item.splitGroupId === previousGroupId)
+      : []
+    const fallbackSourceId =
+      (previousSourceId && groupSiblings.some((item) => item.id === previousSourceId) ? previousSourceId : undefined) ||
+      groupSiblings[0]?.id
+
+    clearPanelSplitState(panel)
+    panels.value.forEach((item) => {
+      if (item.id === panel.id || item.splitSourceId !== panel.id) return
+      if (!fallbackSourceId) {
+        clearPanelSplitState(item)
+        return
+      }
+      if (item.id === fallbackSourceId) {
+        item.split = undefined
+        item.splitSourceId = undefined
+        item.splitOrder = undefined
+        item.splitGroupId = previousGroupId
+        return
+      }
+      item.splitSourceId = fallbackSourceId
+    })
+    normalizeSplitState()
+  }
+
+  const unsplitPanel = (panelId = activePanelId.value) => {
+    const panel = panels.value.find((item) => item.id === panelId)
+    if (!panel || panel.kind === 'knowledge') return false
+    detachPanelFromSplit(panel)
+    activePanelId.value = panel.id
+    return true
+  }
+
+  const attachPanelToSplit = (panelId: string, targetPanelId: string, direction: PanelDirection = 'right') => {
+    const panel = panels.value.find((item) => item.id === panelId)
+    const target = panels.value.find((item) => item.id === targetPanelId)
+    if (!panel || !target || panel.kind === 'knowledge' || target.kind === 'knowledge' || panel.id === target.id) return false
+    detachPanelFromSplit(panel)
+    const groupId = target.splitGroupId || target.id
+    target.splitGroupId = groupId
+    panel.split = direction
+    panel.splitSourceId = target.id
+    panel.splitGroupId = groupId
+    panel.splitOrder = Date.now() + panels.value.length
+    const currentIndex = panels.value.findIndex((item) => item.id === panel.id)
+    const targetIndex = panels.value.findIndex((item) => item.id === target.id)
+    if (currentIndex >= 0 && targetIndex >= 0 && currentIndex !== targetIndex + 1) {
+      const [moved] = panels.value.splice(currentIndex, 1)
+      const nextTargetIndex = panels.value.findIndex((item) => item.id === target.id)
+      panels.value.splice(nextTargetIndex + 1, 0, moved)
+    }
+    normalizeSplitState()
+    activePanelId.value = panel.id
+    return true
   }
 
   const resetToDefaultTerminalPanel = (panel: TerminalPanel) => {
@@ -13746,6 +13813,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     quickCloseLeftPanel,
     quickCloseRightPanel,
     createPanel,
+    hasSplitState,
+    unsplitPanel,
+    attachPanelToSplit,
     registerSshSession,
     applySshTerminalSession,
     applyLocalTerminalSession,

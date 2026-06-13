@@ -453,6 +453,51 @@ describe('workspace store', () => {
     expect(store.activePanel.sshSession?.connectionId).toBeUndefined()
   })
 
+  it('restores split panes and reattaches terminal tabs to selected split targets', () => {
+    const store = useWorkspaceStore()
+
+    const rootId = store.activePanelId
+    store.createPanel('right')
+    const rightId = store.activePanelId
+    store.createPanel('below')
+    const nestedId = store.activePanelId
+
+    expect(store.panels.filter((panel) => panel.splitGroupId === rootId)).toHaveLength(3)
+    expect(store.hasSplitState(rootId)).toBe(true)
+    expect(store.hasSplitState(rightId)).toBe(true)
+    expect(store.hasSplitState(nestedId)).toBe(true)
+
+    expect(store.unsplitPanel(rightId)).toBe(true)
+    const restoredRight = store.panels.find((panel) => panel.id === rightId)!
+    const nested = store.panels.find((panel) => panel.id === nestedId)!
+    expect(store.activePanelId).toBe(rightId)
+    expect(restoredRight.split).toBeUndefined()
+    expect(restoredRight.splitSourceId).toBeUndefined()
+    expect(restoredRight.splitGroupId).toBeUndefined()
+    expect(nested.splitSourceId).toBe(rootId)
+    expect(nested.splitGroupId).toBe(rootId)
+    expect(store.panels.filter((panel) => panel.splitGroupId === rootId)).toHaveLength(2)
+
+    expect(store.attachPanelToSplit(rightId, rootId, 'right')).toBe(true)
+    expect(store.activePanelId).toBe(rightId)
+    expect(restoredRight.split).toBe('right')
+    expect(restoredRight.splitSourceId).toBe(rootId)
+    expect(restoredRight.splitGroupId).toBe(rootId)
+    expect(store.panels.filter((panel) => panel.splitGroupId === rootId)).toHaveLength(3)
+
+    expect(store.unsplitPanel(rootId)).toBe(true)
+    const restoredRoot = store.panels.find((panel) => panel.id === rootId)!
+    const replacementRoot = store.panels.find((panel) => panel.id === rightId)!
+    expect(restoredRoot.split).toBeUndefined()
+    expect(restoredRoot.splitSourceId).toBeUndefined()
+    expect(restoredRoot.splitGroupId).toBeUndefined()
+    expect(replacementRoot.split).toBeUndefined()
+    expect(replacementRoot.splitSourceId).toBeUndefined()
+    expect(replacementRoot.splitGroupId).toBe(rootId)
+    expect(store.hasSplitState(rootId)).toBe(false)
+    expect(store.hasSplitState(rightId)).toBe(true)
+  })
+
   it('applies keyword highlight to terminal display without mutating raw output', () => {
     const store = useWorkspaceStore()
     store.keywordHighlightSettings = {

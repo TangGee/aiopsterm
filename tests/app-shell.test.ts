@@ -244,6 +244,16 @@ const waitForDatabaseDbAiDone = async () => {
   await flushPromises()
 }
 
+const createTestDataTransfer = () => {
+  const data = new Map<string, string>()
+  return {
+    effectAllowed: '',
+    dropEffect: '',
+    setData: vi.fn((type: string, value: string) => data.set(type, value)),
+    getData: vi.fn((type: string) => data.get(type) || '')
+  }
+}
+
 const buildNonJumpserverOrganizationRefreshData = async () => {
   const snapshot = await window.aiops.listAssets()
   return {
@@ -5628,6 +5638,77 @@ describe('AppShell', () => {
     await wrapper.findAll('.terminal-pane').at(1)!.trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(4)
+
+    wrapper.unmount()
+  })
+
+  it('restores and reattaches terminal splits from context menus and tab dragging', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    await wrapper.find('.new-tab-button').trigger('click')
+    const firstTabId = store.activePanelId
+    store.appendTerminalOutput(firstTabId, 'first terminal\n')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('向右拆分'))!.trigger('click')
+    const splitTabId = store.activePanelId
+    store.appendTerminalOutput(splitTabId, 'split terminal\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(2)
+    expect(wrapper.find('.terminal-grid').classes()).toContain('split')
+
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    expect(wrapper.find('.terminal-context-menu').text()).toContain('取消拆分')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('取消拆分'))!.trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(store.activePanelId).toBe(splitTabId)
+    expect(store.activePanel.split).toBeUndefined()
+    expect(store.activePanel.splitGroupId).toBeUndefined()
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
+    expect(wrapper.find('.terminal-grid').classes()).not.toContain('split')
+
+    const tabsAfterRestore = wrapper.findAll('.terminal-tab')
+    const restoredTab = tabsAfterRestore.find((tab) => tab.classes().includes('active'))!
+    const sourceTabIndex = store.panels.findIndex((panel) => panel.id === firstTabId)
+    const sourceTab = tabsAfterRestore.at(sourceTabIndex)!
+    const attachTransfer = createTestDataTransfer()
+    const attachDragStart = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(attachDragStart, 'dataTransfer', { configurable: true, value: attachTransfer })
+    restoredTab.element.dispatchEvent(attachDragStart)
+    const attachDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(attachDrop, 'dataTransfer', { configurable: true, value: attachTransfer })
+    sourceTab.element.dispatchEvent(attachDrop)
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(attachTransfer.setData).toHaveBeenCalledWith('application/x-aiopsterm-terminal-tab', splitTabId)
+    expect(store.activePanelId).toBe(splitTabId)
+    expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.splitSourceId).toBe(firstTabId)
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(2)
+
+    const restoreTransfer = createTestDataTransfer()
+    const restoreDragStart = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(restoreDragStart, 'dataTransfer', { configurable: true, value: restoreTransfer })
+    wrapper.find('.terminal-tab.active').element.dispatchEvent(restoreDragStart)
+    const restoreDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(restoreDrop, 'dataTransfer', { configurable: true, value: restoreTransfer })
+    wrapper.find('.terminal-tabs').element.dispatchEvent(restoreDrop)
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(store.activePanelId).toBe(splitTabId)
+    expect(store.activePanel.split).toBeUndefined()
+    expect(store.activePanel.splitGroupId).toBeUndefined()
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
 
     wrapper.unmount()
   })
