@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 type MockSelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } }
@@ -252,6 +252,33 @@ const createTestDataTransfer = () => {
     setData: vi.fn((type: string, value: string) => data.set(type, value)),
     getData: vi.fn((type: string) => data.get(type) || '')
   }
+}
+
+const findMenuButton = (wrapper: VueWrapper<any>, menuSelector: string, label: string) => {
+  const button = wrapper.find(menuSelector).findAll('button').find((item) => item.text().includes(label))
+  if (!button) throw new Error(`Menu button not found: ${label}`)
+  return button
+}
+
+const openTerminalMenuButton = async (wrapper: VueWrapper<any>, label: string, hostSelector = '.xterm-host') => {
+  await wrapper.find(hostSelector).trigger('contextmenu')
+  return findMenuButton(wrapper, '.terminal-context-menu', label)
+}
+
+const openTerminalCommandLine = async (wrapper: VueWrapper<any>, hostSelector = '.xterm-host') => {
+  await (await openTerminalMenuButton(wrapper, '输入命令', hostSelector)).trigger('click')
+  await wrapper.vm.$nextTick()
+  return wrapper.find('.command-line input')
+}
+
+const openLocalShellFromActiveTab = async (wrapper: VueWrapper<any>) => {
+  await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
+  const connectionButton = ['打开本地 shell', '重新连接', '连接 SSH']
+    .map((label) => wrapper.find('.tab-menu').findAll('button').find((item) => item.text().includes(label)))
+    .find(Boolean)
+  if (!connectionButton) throw new Error('Menu connection button not found')
+  await connectionButton.trigger('click')
+  await flushPromises()
 }
 
 const buildNonJumpserverOrganizationRefreshData = async () => {
@@ -5477,8 +5504,7 @@ describe('AppShell', () => {
 
     expect(window.aiops.onTerminalLifecycle).toHaveBeenCalled()
     vi.mocked(window.aiops.createTerminal).mockClear()
-    await wrapper.findAll('.terminal-toolbar button').find((button) => button.text().includes('打开本地 shell'))!.trigger('click')
-    await flushPromises()
+    await openLocalShellFromActiveTab(wrapper)
     expect(store.activePanel.sessionId).toBe('test-session-local')
 
     const lifecycleListener = vi.mocked(window.aiops.onTerminalLifecycle).mock.calls.at(-1)?.[0]
@@ -5723,8 +5749,7 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
 
-    await wrapper.findAll('.terminal-toolbar button').find((button) => button.text().includes('打开本地 shell'))!.trigger('click')
-    await flushPromises()
+    await openLocalShellFromActiveTab(wrapper)
     const localSourcePanelId = store.activePanelId
     expect(store.activePanel.sessionId).toBe('test-session-local')
 
@@ -5905,9 +5930,12 @@ describe('AppShell', () => {
     Object.defineProperty(firstHost.element, 'clientWidth', { configurable: true, value: 720 })
     xterm.buffer.active.cursorX = 6
     xterm.buffer.active.cursorY = 8
-    await wrapper.find('.command-line input').setValue('df')
+    expect(wrapper.find('.terminal-toolbar').exists()).toBe(false)
+    expect(wrapper.find('.command-line input').exists()).toBe(false)
+    await (await openTerminalCommandLine(wrapper)).setValue('df')
     await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(wrapper.find('.command-line.floating').exists()).toBe(true)
     const suggestions = wrapper.find('.terminal-suggestions')
     expect(suggestions.exists()).toBe(true)
     expect(window.aiops.getTerminalCommandSuggestions).toHaveBeenCalledWith(
@@ -6099,8 +6127,7 @@ describe('AppShell', () => {
     expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('uptime')
 
     vi.mocked(window.aiops.createTerminal).mockClear()
-    await wrapper.findAll('.terminal-toolbar button').find((button) => button.text().includes('打开本地 shell'))!.trigger('click')
-    await flushPromises()
+    await openLocalShellFromActiveTab(wrapper)
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local' }))
     expect(store.activePanel.sessionId).toBe('test-session-local')
     expect(store.activePanel.status).toBe('running')
@@ -6212,12 +6239,13 @@ describe('AppShell', () => {
     )
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
+    if (!wrapper.find('.command-line input').exists()) await openTerminalCommandLine(wrapper)
     await wrapper.find('.command-line input').setValue('whoami')
     await wrapper.find('.command-line input').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'whoami\n')
     expect(store.activePanel.output).not.toContain('whoami')
-    expect((wrapper.find('.command-line input').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('.command-line input').exists()).toBe(false)
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))
     await wrapper.vm.$nextTick()

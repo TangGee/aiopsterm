@@ -54,10 +54,22 @@
       @click.stop
     >
       <button @click="closeSelected">关闭</button>
-      <button @click="workspace.closeOthers(); menu.visible = false">关闭其他</button>
-      <button @click="workspace.closeAllPanels(); menu.visible = false">关闭全部</button>
+      <button @click="closeOtherTabsFromMenu">关闭其他</button>
+      <button @click="closeAllTabsFromMenu">关闭全部</button>
       <button @click="renameSelected">重命名</button>
       <button @click="cloneSelected">克隆</button>
+      <button
+        v-if="isTerminalMenuPanel"
+        @click="toggleTabConnectionFromMenu"
+      >
+        {{ connectionActionLabel(panelById(menu.panelId)) }}
+      </button>
+      <button
+        v-if="isTerminalMenuPanel"
+        @click="openCommandDialogFromTabMenu"
+      >
+        AI 命令
+      </button>
       <button
         v-if="canForkSelected"
         @click="forkSelected"
@@ -84,8 +96,10 @@
       <button @click="pasteClipboard(termMenu.panelId)"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
       <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+F</kbd></button>
       <i />
-      <button @click="togglePanelConnection(termMenu.panelId)">{{ isReconnectablePanel(panelById(termMenu.panelId)) ? '重新连接' : '断开连接' }}<kbd>{{ isReconnectablePanel(panelById(termMenu.panelId)) ? 'Enter' : 'Ctrl+D' }}</kbd></button>
+      <button @click="togglePanelConnection(termMenu.panelId)">{{ connectionActionLabel(panelById(termMenu.panelId)) }}<kbd>{{ connectionActionShortcut(panelById(termMenu.panelId)) }}</kbd></button>
       <i />
+      <button @click="openCommandDialogFromTermMenu"><span>AI 命令</span><kbd>Ctrl+K</kbd></button>
+      <button @click="openCommandLineFromMenu"><span>输入命令</span><kbd>Enter</kbd></button>
       <button @click="createTerminalFromMenu"><span>新建终端</span><kbd>Ctrl+N</kbd></button>
       <button @click="closeTerminalFromMenu"><span>关闭终端</span><kbd>Ctrl+W</kbd></button>
       <button @click="clearTerminal(termMenu.panelId)"><span>清屏</span><kbd>Ctrl+L</kbd></button>
@@ -103,45 +117,8 @@
       <i />
       <button @click="openFileManagerFromMenu"><span>文件管理</span><kbd>Ctrl+M</kbd></button>
       <i />
-      <button @click="increaseFont"><span>字体放大</span><kbd>Ctrl+=</kbd></button>
-      <button @click="decreaseFont"><span>字体缩小</span><kbd>Ctrl+-</kbd></button>
-    </div>
-
-    <div class="terminal-toolbar">
-      <div class="toolbar-group">
-        <button @click="startRealShell"><Terminal /> 打开本地 shell</button>
-        <button
-          :class="{ active: commandDialog.visible }"
-          title="AI 命令生成"
-          @click="openCommandDialog(workspace.activePanelId)"
-        ><Sparkles /> AI 命令</button>
-        <button
-          :class="{ active: globalInputVisible }"
-          @click="toggleGlobalInput"
-        ><RadioTower /> 全局执行</button>
-        <button @click="decreaseFont"><Minus /> 缩小</button>
-        <button @click="increaseFont"><Plus /> 放大</button>
-      </div>
-      <div class="terminal-search">
-        <Search />
-        <input
-          v-model="search"
-          placeholder="搜索终端输出"
-          @keydown.enter="findNext"
-        />
-        <button
-          title="上一个"
-          @click="findPrevious"
-        >
-          <ChevronUp />
-        </button>
-        <button
-          title="下一个"
-          @click="findNext"
-        >
-          <ChevronDown />
-        </button>
-      </div>
+      <button @click="increaseFontFromMenu"><span>字体放大</span><kbd>Ctrl+=</kbd></button>
+      <button @click="decreaseFontFromMenu"><span>字体缩小</span><kbd>Ctrl+-</kbd></button>
     </div>
 
     <div
@@ -349,6 +326,25 @@
             </div>
           </div>
         </div>
+        <div
+          v-if="commandLinePanelId === panel.id"
+          class="command-line floating"
+          :style="commandLineStyle(panel.id)"
+        >
+          <span>$</span>
+          <input
+            ref="commandLineInput"
+            v-model="command"
+            placeholder="输入命令，Enter 发送"
+            @focus="workspace.activePanelId = panel.id"
+            @input="updateSuggestions(panel.id)"
+            @keydown.right.prevent="enterSuggestionSelection"
+            @keydown.down.prevent="moveSuggestion(1)"
+            @keydown.up.prevent="moveSuggestion(-1)"
+            @keydown.esc.prevent="closeCommandLine"
+            @keydown.enter.prevent="sendCommand(panel)"
+          />
+        </div>
         <div class="pane-title">
           <span>{{ panel.title }}</span>
           <small>{{ panel.cwd }}</small>
@@ -438,20 +434,6 @@
             </span>
           </div>
         </div>
-        <div class="command-line">
-          <span>$</span>
-          <input
-            v-model="command"
-            placeholder="输入命令，Enter 发送"
-            @focus="workspace.activePanelId = panel.id"
-            @input="updateSuggestions(panel.id)"
-            @keydown.right.prevent="enterSuggestionSelection"
-            @keydown.down.prevent="moveSuggestion(1)"
-            @keydown.up.prevent="moveSuggestion(-1)"
-            @keydown.esc.prevent="hideSuggestions"
-            @keydown.enter.prevent="sendCommand(panel)"
-          />
-        </div>
         </template>
       </div>
       </template>
@@ -467,7 +449,7 @@ import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
@@ -489,6 +471,7 @@ const menu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
 const termMenu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
 const terminalGrid = ref<HTMLElement | null>(null)
 const searchOverlayInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
+const commandLineInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 const commandDialogInput = ref<HTMLTextAreaElement | HTMLTextAreaElement[] | null>(null)
 const commandDialogRef = ref<HTMLElement | HTMLElement[] | null>(null)
 const searchOverlayPanelId = ref('')
@@ -501,6 +484,7 @@ const suggestionPosition = reactive({ left: 38, top: 0 })
 const suggestionSelectionMode = ref(false)
 const activeSuggestion = ref(-1)
 const aiSuggestLoading = ref(false)
+const commandLinePanelId = ref('')
 let offData: (() => void) | null = null
 let offLifecycle: (() => void) | null = null
 let offExit: (() => void) | null = null
@@ -530,7 +514,16 @@ const unavailableTerminalSuggestionMessage = '终端命令建议服务不可用'
 const suggestionItems = ref<TerminalSuggestion[]>([])
 const hasAiSuggestion = computed(() => suggestionItems.value.some((item) => item.source === 'ai'))
 const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
-const isReconnectablePanel = (panel?: TerminalPanel | null) => panel?.status === 'closed' || panel?.status === 'error'
+const isTerminalMenuPanel = computed(() => panelById(menu.panelId)?.kind === 'terminal')
+const isReconnectablePanel = (panel?: TerminalPanel | null) => !panel?.sessionId || panel.status === 'closed' || panel.status === 'error'
+const connectionActionLabel = (panel?: TerminalPanel | null) => {
+  if (!panel?.sessionId) {
+    if (panel?.sshSession) return panel.status === 'ready' ? '连接 SSH' : '重新连接'
+    return panel?.status === 'ready' ? '打开本地 shell' : '重新连接'
+  }
+  return '断开连接'
+}
+const connectionActionShortcut = (panel?: TerminalPanel | null) => (panel?.sessionId ? 'Ctrl+D' : 'Enter')
 const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
 const draggedTerminalPanelId = ref('')
 const tabDragOverPanelId = ref('')
@@ -1032,6 +1025,17 @@ const closeSelected = () => {
   menu.visible = false
 }
 
+const closeOtherTabsFromMenu = () => {
+  workspace.activePanelId = menu.panelId
+  workspace.closeOthers()
+  menu.visible = false
+}
+
+const closeAllTabsFromMenu = () => {
+  workspace.closeAllPanels()
+  menu.visible = false
+}
+
 const renameSelected = () => {
   startRename(menu.panelId, getPanelTitle(menu.panelId))
   menu.visible = false
@@ -1039,9 +1043,21 @@ const renameSelected = () => {
 
 const cloneSelected = () => {
   const source = workspace.panels.find((panel) => panel.id === menu.panelId)
+  const sourcePanelId = source?.id
   workspace.createPanel()
   if (source) {
     workspace.renamePanel(workspace.activePanelId, `${source.title} copy`)
+    const panel = panelById(workspace.activePanelId)
+    if (panel) {
+      panel.cwd = source.cwd
+      panel.sshSession = source.sshSession
+        ? {
+            ...source.sshSession,
+            connectionId: undefined,
+            sourcePanelId
+          }
+        : undefined
+    }
   }
   menu.visible = false
 }
@@ -1411,6 +1427,61 @@ const getCommandDialogInput = () => {
   return input
 }
 
+const getCommandLineInput = () => {
+  const input = commandLineInput.value
+  if (Array.isArray(input)) {
+    return input.find((item) => item?.isConnected) || input[0] || null
+  }
+  return input
+}
+
+const focusCommandLineInput = () => {
+  const input = getCommandLineInput()
+  if (input && typeof input.focus === 'function') input.focus({ preventScroll: true })
+}
+
+const commandLineStyle = (panelId: string) => {
+  if (commandLinePanelId.value !== panelId) return {}
+  const view = terminalViews.get(panelId)
+  if (!view) return {}
+  const { width: cellWidth, height: cellHeight, hostWidth, hostHeight } = estimateTerminalCellSize(view, panelId)
+  const width = Math.max(320, Math.min(720, hostWidth - 24))
+  const cursorLeft = (view.terminal.buffer.active.cursorX || 0) * cellWidth
+  const cursorTop = (view.terminal.buffer.active.cursorY || 0) * cellHeight + cellHeight + 6
+  const top = Math.min(Math.max(42, cursorTop), Math.max(42, hostHeight - 56))
+  const left = Math.min(Math.max(12, cursorLeft), Math.max(12, hostWidth - width - 12))
+  return {
+    width: `${Math.floor(width)}px`,
+    left: `${Math.floor(left)}px`,
+    top: `${Math.floor(top)}px`
+  }
+}
+
+const openCommandLine = async (panelId = workspace.activePanelId) => {
+  const panel = panelById(panelId)
+  if (!panel || panel.kind === 'knowledge') return
+  workspace.activePanelId = panel.id
+  commandLinePanelId.value = panel.id
+  command.value = ''
+  hideSuggestions()
+  termMenu.visible = false
+  menu.visible = false
+  aiButtonPanelId.value = ''
+  await nextTick()
+  focusCommandLineInput()
+}
+
+const openCommandLineFromMenu = () => {
+  void openCommandLine(termMenu.panelId)
+}
+
+const closeCommandLine = () => {
+  command.value = ''
+  commandLinePanelId.value = ''
+  hideSuggestions()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
+}
+
 const focusCommandDialogInput = () => {
   const input = getCommandDialogInput()
   if (input && typeof input.focus === 'function') {
@@ -1484,6 +1555,14 @@ const openCommandDialog = async (panelId = workspace.activePanelId) => {
   resizeCommandDialogInput()
   await updateCommandDialogPosition(panelId)
   focusCommandDialogInput()
+}
+
+const openCommandDialogFromTabMenu = () => {
+  void openCommandDialog(menu.panelId)
+}
+
+const openCommandDialogFromTermMenu = () => {
+  void openCommandDialog(termMenu.panelId)
 }
 
 const closeCommandDialog = () => {
@@ -1601,6 +1680,16 @@ const updateFontSize = (nextSize: number) => {
 
 const increaseFont = () => updateFontSize(fontSize.value + 1)
 const decreaseFont = () => updateFontSize(fontSize.value - 1)
+const increaseFontFromMenu = () => {
+  increaseFont()
+  termMenu.visible = false
+  menu.visible = false
+}
+const decreaseFontFromMenu = () => {
+  decreaseFont()
+  termMenu.visible = false
+  menu.visible = false
+}
 
 const sendCommand = async (panel: TerminalPanel) => {
   if (suggestionSelectionMode.value && activeSuggestion.value >= 0 && suggestionItems.value[activeSuggestion.value]) {
@@ -1615,6 +1704,7 @@ const sendCommand = async (panel: TerminalPanel) => {
   })
   if (decision.status === 'allow') {
     command.value = ''
+    commandLinePanelId.value = ''
     syncTerminalView(panel)
   }
 }
@@ -1732,7 +1822,12 @@ const sendGlobalCommand = async () => {
 const approveSecurityPrompt = async () => {
   const execution = workspace.approveTerminalSecurityPrompt()
   if (!execution) return
-  if (execution.writeToShell) await workspace.writeTerminalExecution(execution)
+  const decision = execution.writeToShell ? await workspace.writeTerminalExecution(execution) : null
+  if (!execution.writeToShell || decision?.status === 'allow') {
+    command.value = ''
+    commandLinePanelId.value = ''
+    hideSuggestions()
+  }
   workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
 }
 
@@ -1789,15 +1884,21 @@ const disconnectTerminalPanel = async (panel: TerminalPanel) => {
 const togglePanelConnection = async (panelId: string) => {
   const panel = panelById(panelId)
   if (!panel || panel.kind === 'knowledge') return
-  if (isReconnectablePanel(panel)) {
+  const wasNeverConnected = !panel.sessionId && panel.status === 'ready'
+  if (!panel.sessionId) {
     const connected = await reconnectTerminalPanel(panel)
-    if (connected) workspace.setTopNotice('终端已重新连接')
+    if (connected) workspace.setTopNotice(wasNeverConnected && !panel.sshSession ? '本地 shell 已打开' : '终端已重新连接')
   } else {
     const disconnected = await disconnectTerminalPanel(panel)
     if (disconnected) workspace.setTopNotice('终端已断开连接')
   }
   syncTerminalView(panel)
   termMenu.visible = false
+}
+
+const toggleTabConnectionFromMenu = async () => {
+  await togglePanelConnection(menu.panelId)
+  menu.visible = false
 }
 
 const createTerminalFromMenu = () => {
@@ -1855,33 +1956,6 @@ const chatSelectionToAi = (panelId: string) => {
     view?.terminal.clearSelection()
   }
   aiButtonPanelId.value = ''
-}
-
-const startRealShell = async () => {
-  const panel = workspace.activePanel
-  if (panel.kind === 'knowledge') return
-  try {
-    const connected = await startLocalTerminalForPanel(panel)
-    if (!connected) {
-      workspace.setTopNotice('本地终端启动失败')
-      writeRuntimeLog('warn', 'renderer.local-terminal.apply-failed', {
-        panelId: panel.id
-      })
-    } else {
-      writeRuntimeLog('info', 'renderer.local-terminal.ready', {
-        panelId: panel.id,
-        sessionId: panel.sessionId,
-        shell: panel.title,
-        cwd: panel.cwd
-      })
-    }
-  } catch (error) {
-    workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
-    writeRuntimeLog('error', 'renderer.local-terminal.create-error', {
-      panelId: panel.id,
-      message: error instanceof Error ? error.message : '本地终端启动失败'
-    })
-  }
 }
 
 onMounted(() => {

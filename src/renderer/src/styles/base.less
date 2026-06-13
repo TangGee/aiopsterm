@@ -691,8 +691,7 @@ h2 {
   font-weight: 650;
 }
 
-.panel-search,
-.terminal-search {
+.panel-search {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -705,7 +704,6 @@ h2 {
 }
 
 .panel-search input,
-.terminal-search input,
 .path-bar input,
 .command-line input,
 .settings-form input,
@@ -6511,14 +6509,10 @@ code {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  display: grid;
-  grid-template-rows: 36px 42px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   position: relative;
-}
-
-.terminal-workspace:has(.terminal-global-command) {
-  grid-template-rows: 36px 42px 36px minmax(0, 1fr);
 }
 
 .terminal-tabs {
@@ -6646,54 +6640,6 @@ code {
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   font-weight: 500;
-}
-
-.terminal-toolbar {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  overflow: hidden;
-}
-
-.terminal-toolbar .toolbar-group {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.terminal-toolbar .toolbar-group::-webkit-scrollbar {
-  display: none;
-}
-
-.terminal-toolbar .toolbar-group button {
-  flex: 0 0 auto;
-}
-
-.terminal-toolbar button.active {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-}
-
-.terminal-search {
-  flex: 0 1 220px;
-  width: min(220px, 40%);
-  min-width: 132px;
-  height: 30px;
-  margin: 0;
-  gap: 6px;
-}
-
-.terminal-search button {
-  flex: 0 0 auto;
-  width: 28px;
-  min-width: 28px;
-  height: 26px;
-  padding: 0;
 }
 
 .terminal-global-command {
@@ -6841,6 +6787,7 @@ code {
 }
 
 .terminal-grid {
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -6905,7 +6852,7 @@ code {
 .terminal-pane {
   min-height: 0;
   display: grid;
-  grid-template-rows: 28px minmax(0, 1fr) 34px;
+  grid-template-rows: 28px minmax(0, 1fr);
   border: 1px solid var(--border);
   background: #090b10;
   border-radius: 8px;
@@ -7765,9 +7712,18 @@ code {
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 4px;
   align-items: center;
-  border-top: 1px solid #202637;
   padding: 0 10px;
   color: var(--accent-2);
+}
+
+.command-line.floating {
+  position: absolute;
+  z-index: 12;
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #090b10 92%, var(--surface));
+  box-shadow: var(--shadow);
 }
 
 .ai-panel {

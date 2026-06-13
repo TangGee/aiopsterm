@@ -1164,6 +1164,17 @@ test('terminal tab operations and visual baseline', async () => {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
+    const openTerminalContextAction = async (label: string) => {
+      await page.locator('.xterm-host').first().click({ button: 'right' })
+      await expect(page.locator('.terminal-context-menu')).toBeVisible()
+      await page.locator('.terminal-context-menu button').filter({ hasText: label }).click()
+      await expect(page.locator('.terminal-context-menu')).not.toBeVisible()
+    }
+    const openFloatingCommandLine = async () => {
+      await openTerminalContextAction('输入命令')
+      await expect(page.locator('.command-line.floating input')).toBeVisible()
+      return page.locator('.command-line.floating input')
+    }
 
     await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
     await expect(page.locator('.terminal-pane')).toHaveCount(0)
@@ -1211,35 +1222,30 @@ test('terminal tab operations and visual baseline', async () => {
     await page.locator('.terminal-tab').nth(1).click()
     await expect(page.locator('.terminal-pane')).toHaveCount(3)
 
-    await page.locator('.command-line input').first().fill('df -h')
-    await page.locator('.command-line input').first().press('Enter')
+    await expect(page.locator('.terminal-toolbar')).toHaveCount(0)
+    await expect(page.locator('.command-line input')).toHaveCount(0)
+    const commandInput = await openFloatingCommandLine()
+    await commandInput.fill('df -h')
+    await commandInput.press('Enter')
     await expect(page.locator('.top-notice')).toContainText('终端会话不可用')
     await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] no live terminal session for: df -h')
-    await expect(page.locator('.command-line input').first()).toHaveValue('df -h')
+    await expect(commandInput).toHaveValue('df -h')
 
     await page.locator('.terminal-tab').first().click({ button: 'right' })
     await expect(page.locator('.tab-menu')).toBeVisible()
     await expect(page.locator('.tab-menu')).not.toContainText('Fork SSH Channel')
     await page.keyboard.press('Escape')
 
-    await page.locator('.terminal-search input').fill('aiopsterm')
-    await page.getByTitle('下一个').click()
-
-    await page.locator('.xterm-host').first().click({ button: 'right' })
-    await expect(page.locator('.terminal-context-menu')).toBeVisible()
-    await page.locator('.terminal-context-menu button').filter({ hasText: '搜索' }).click()
+    await openTerminalContextAction('搜索')
     await expect(page.locator('.terminal-search-overlay')).toBeVisible()
     await page.locator('.terminal-search-overlay input').fill('aiopsterm')
     await expect(page.locator('.terminal-search-overlay')).not.toContainText(/1\/\d+/)
     await page.keyboard.press('Escape')
 
-    await page.locator('.xterm-host').first().click({ button: 'right' })
-    await expect(page.locator('.terminal-context-menu')).toBeVisible()
-    await page.locator('.terminal-context-menu button').filter({ hasText: '清屏' }).click()
+    await openTerminalContextAction('清屏')
     await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] no live terminal session for: df -h')
 
-    await page.locator('.xterm-host').first().click({ button: 'right' })
-    await page.locator('.terminal-context-menu button').filter({ hasText: '全局执行' }).click()
+    await openTerminalContextAction('全局执行')
     await expect(page.locator('.terminal-global-command')).toBeVisible()
     await page.locator('.terminal-global-command input').fill('uptime')
     await page.locator('.terminal-global-command input').press('Enter')
@@ -1256,18 +1262,17 @@ test('terminal tab operations and visual baseline', async () => {
     await page.keyboard.press('Escape')
     await expect(page.locator('.terminal-command-dialog')).not.toBeVisible()
 
-    await page.locator('.command-line input').first().fill('kubectl ge')
+    await (await openFloatingCommandLine()).fill('kubectl ge')
     await expect(page.locator('.terminal-suggestions')).toBeVisible()
     await expect(page.locator('.terminal-suggestions')).toContainText('kubectl get')
 
-    await page.locator('.xterm-host').first().click({ button: 'right' })
-    await page.locator('.terminal-context-menu button').filter({ hasText: '文件管理' }).click()
+    await openTerminalContextAction('文件管理')
     await expect(page.locator('.files-workspace')).toBeVisible()
     await expect(page.locator('.files-transfer-side').first()).toContainText('Local')
     await page.getByTitle('工作区').click()
 
-    await page.getByRole('button', { name: '放大' }).click()
-    await page.getByRole('button', { name: '缩小' }).click()
+    await openTerminalContextAction('字体放大')
+    await openTerminalContextAction('字体缩小')
 
     await page.screenshot({ path: path.join('test-results', 'aiopsterm-terminal.png'), fullPage: true })
   } finally {
