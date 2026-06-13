@@ -75,10 +75,46 @@
       <table class="file-table">
         <thead>
           <tr>
-            <th>名称</th>
+            <th>
+              <button
+                class="file-sort-button"
+                :class="{ active: sortState.key === 'name' }"
+                @click="toggleSort('name')"
+              >
+                名称
+                <span class="file-sort-indicator">
+                  <ChevronUp :class="{ active: sortState.key === 'name' && sortState.direction === 'asc' }" />
+                  <ChevronDown :class="{ active: sortState.key === 'name' && sortState.direction === 'desc' }" />
+                </span>
+              </button>
+            </th>
             <th v-if="uiMode !== 'transfer'">权限</th>
-            <th>大小</th>
-            <th>修改日期</th>
+            <th>
+              <button
+                class="file-sort-button"
+                :class="{ active: sortState.key === 'size' }"
+                @click="toggleSort('size')"
+              >
+                大小
+                <span class="file-sort-indicator">
+                  <ChevronUp :class="{ active: sortState.key === 'size' && sortState.direction === 'asc' }" />
+                  <ChevronDown :class="{ active: sortState.key === 'size' && sortState.direction === 'desc' }" />
+                </span>
+              </button>
+            </th>
+            <th>
+              <button
+                class="file-sort-button"
+                :class="{ active: sortState.key === 'modifiedAt' }"
+                @click="toggleSort('modifiedAt')"
+              >
+                修改日期
+                <span class="file-sort-indicator">
+                  <ChevronUp :class="{ active: sortState.key === 'modifiedAt' && sortState.direction === 'asc' }" />
+                  <ChevronDown :class="{ active: sortState.key === 'modifiedAt' && sortState.direction === 'desc' }" />
+                </span>
+              </button>
+            </th>
             <th class="file-actions-heading">操作</th>
           </tr>
         </thead>
@@ -91,6 +127,7 @@
               directory: entry.type === 'directory',
               link: entry.type === 'link',
               editing: editingPath === entry.path,
+              selected: selectedPath === entry.path,
               'file-row-drag-target': dropTargetPath === entry.path
             }"
             :draggable="isDraggableEntry(entry)"
@@ -98,7 +135,7 @@
             @dragend="clearOutgoingFileDrag"
             @dragover.prevent="handleEntryDragOver($event, entry)"
             @drop.prevent.stop="handleEntryDrop($event, entry)"
-            @dblclick="entry.type === 'file' && openFile(entry)"
+            @dblclick="handleRowDoubleClick(entry)"
           >
             <td @click="editingPath !== entry.path && handleNameAreaClick(entry)">
               <div class="file-name-action-wrap">
@@ -449,6 +486,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Check,
   ChevronDown,
+  ChevronUp,
   Copy,
   Download,
   Eye,
@@ -483,6 +521,7 @@ import type { FileEntryMutation, FileEntryMutationResult, FileListEntry, FileLis
 type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
   mode: string
   modifiedAt: string
+  modifiedAtMs: number
 }
 
 const props = defineProps<{
@@ -508,6 +547,7 @@ const dropTargetPath = ref('')
 const editingPath = ref('')
 const renameValue = ref('')
 const moreForPath = ref('')
+const selectedPath = ref('')
 const permissionsTarget = ref<FileBrowserEntry | null>(null)
 const recursivePermission = ref(false)
 const fileNotice = ref('')
@@ -538,6 +578,10 @@ const moveDialog = reactive<{
 const conflictDialog = reactive({ visible: false, newName: '' })
 const targetSubDirs = reactive<Record<number, FileBrowserEntry[]>>({})
 const movePathContainer = ref<HTMLElement | null>(null)
+const sortState = reactive<{ key: 'name' | 'size' | 'modifiedAt'; direction: 'asc' | 'desc' }>({
+  key: 'name',
+  direction: 'asc'
+})
 
 const FS_DND_MIME = 'application/x-synchro-fs-item'
 const FS_DND_TEXT_PREFIX = 'synchro-fs-item:'
@@ -572,8 +616,24 @@ const permissionCode = computed(() => {
   return `${score(permissions.owner)}${score(permissions.group)}${score(permissions.public)}`
 })
 const visibleEntries = computed(() => {
-  if (showHidden.value) return entries.value
-  return entries.value.filter((entry) => entry.name === '..' || !entry.name.startsWith('.'))
+  const visible = showHidden.value ? entries.value : entries.value.filter((entry) => entry.name === '..' || !entry.name.startsWith('.'))
+  const parentRows = visible.filter((entry) => entry.name === '..')
+  const rows = visible.filter((entry) => entry.name !== '..')
+  const direction = sortState.direction === 'asc' ? 1 : -1
+  const typeRank = (entry: FileBrowserEntry) => (entry.type === 'directory' ? 0 : entry.type === 'link' ? 1 : 2)
+  const compareName = (left: FileBrowserEntry, right: FileBrowserEntry) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+  rows.sort((left, right) => {
+    const rankDelta = typeRank(left) - typeRank(right)
+    if (rankDelta !== 0) return rankDelta
+    if (sortState.key === 'name') return compareName(left, right) * direction
+    if (sortState.key === 'size') {
+      const sizeDelta = left.size - right.size
+      return (sizeDelta === 0 ? compareName(left, right) : sizeDelta) * direction
+    }
+    const dateDelta = left.modifiedAtMs - right.modifiedAtMs
+    return (dateDelta === 0 ? compareName(left, right) : dateDelta) * direction
+  })
+  return [...parentRows, ...rows]
 })
 const targetBreadcrumb = computed(() => ['/', ...moveDialog.targetPath.split('/').filter(Boolean)])
 
@@ -600,8 +660,18 @@ const formatSize = (size: number) => {
 const getLocalPathName = (path: string, fallback = 'upload') => path.split(/[\\/]/).filter(Boolean).at(-1) || fallback
 
 const formatDate = (time: number) => {
+  if (!time) return ''
   const date = new Date(time)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+const toggleSort = (key: typeof sortState.key) => {
+  if (sortState.key === key) {
+    sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  sortState.key = key
+  sortState.direction = key === 'modifiedAt' ? 'desc' : 'asc'
 }
 
 const getListOptions = (overrides: Partial<FileListOptions> = {}): FileListOptions => ({
@@ -652,7 +722,8 @@ const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
   type: entry.type,
   mode: entry.mode || (entry.type === 'directory' ? 'drwxr-xr-x' : entry.type === 'link' ? 'lrwxrwxrwx' : '-rw-r--r--'),
   size: entry.size,
-  modifiedAt: formatDate(entry.modifiedAt)
+  modifiedAt: formatDate(entry.modifiedAt),
+  modifiedAtMs: entry.modifiedAt
 })
 
 const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntry[]) => {
@@ -672,7 +743,7 @@ const loadDirectoryEntries = async (path: string) => {
     return { rows, path: listedDirectoryPath }
   }
   return {
-    rows: [{ name: '..', path: dirname(listedDirectoryPath), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '' }, ...rows],
+    rows: [{ name: '..', path: dirname(listedDirectoryPath), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '', modifiedAtMs: 0 }, ...rows],
     path: listedDirectoryPath
   }
 }
@@ -757,6 +828,7 @@ const loadEntries = async (path = currentPath.value, options: { preserveOnFailur
     entries.value = result.rows
     currentPath.value = result.path
     pathInput.value = result.path
+    if (!entries.value.some((entry) => entry.path === selectedPath.value)) selectedPath.value = ''
     return true
   } catch (fileError) {
     error.value = fileError instanceof Error ? fileError.message : '读取文件失败'
@@ -776,19 +848,30 @@ const commitPath = async () => {
   if (!loaded) pathInput.value = currentPath.value
 }
 
-const canAttemptOpenDirectory = (entry: FileBrowserEntry) => entry.name !== '..' && (entry.type === 'directory' || entry.type === 'link')
+const canAttemptOpenDirectory = (entry: FileBrowserEntry) => entry.name === '..' || entry.type === 'directory' || entry.type === 'link'
 
 const openDirectory = async (entry: FileBrowserEntry) => {
+  selectedPath.value = entry.path
   const loaded = await loadEntries(entry.path, { preserveOnFailure: true })
   if (!loaded && entry.type === 'link') {
     pathInput.value = currentPath.value
-    fileNotice.value = error.value || '软连接不是可展开目录'
+    fileNotice.value = error.value || '软连接已选中，不能作为目录展开'
   }
 }
 
 const handleNameAreaClick = (entry: FileBrowserEntry) => {
-  if (!canAttemptOpenDirectory(entry)) return
+  selectedPath.value = entry.path
+  if (entry.type === 'file') return
   void openDirectory(entry)
+}
+
+const handleRowDoubleClick = (entry: FileBrowserEntry) => {
+  if (entry.type === 'file') {
+    selectedPath.value = entry.path
+    openFile(entry)
+    return
+  }
+  handleNameAreaClick(entry)
 }
 
 const goBack = async () => {
@@ -965,7 +1048,8 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
     await requireEntriesReload()
     fileNotice.value = `${payload.name} 传输成功`
   } catch (transferError) {
-    fileNotice.value = transferError instanceof Error ? transferError.message : '传输失败'
+    const message = transferError instanceof Error ? transferError.message : '传输失败'
+    fileNotice.value = message.includes('传输失败') ? message : `传输失败：${message}`
   } finally {
     loading.value = false
   }
@@ -1288,7 +1372,9 @@ const queueMoveTarget = async (name: string, overwrite = false) => {
     fileNotice.value = moveDialog.type === 'copy' ? '复制成功' : '移动成功'
     closeMoveDialog()
   } catch (moveError) {
-    fileNotice.value = moveError instanceof Error ? moveError.message : moveDialog.type === 'copy' ? '复制失败' : '移动失败'
+    const fallback = moveDialog.type === 'copy' ? '复制失败' : '移动失败'
+    const message = moveError instanceof Error ? moveError.message : fallback
+    fileNotice.value = message.includes(fallback) ? message : `${fallback}：${message}`
   } finally {
     loading.value = false
   }

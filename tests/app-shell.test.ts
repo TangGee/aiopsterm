@@ -961,6 +961,10 @@ describe('AppShell', () => {
 
     await assets.find('.asset-host-tree').trigger('contextmenu', { clientX: 140, clientY: 180 })
     expect(assets.find('.asset-context-menu').text()).toContain('新建目录')
+    document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    await assets.vm.$nextTick()
+    expect(assets.find('.asset-context-menu').exists()).toBe(false)
+    await assets.find('.asset-host-tree').trigger('contextmenu', { clientX: 140, clientY: 180 })
     await assets.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('新建目录'))!.trigger('click')
     await assets.find('.asset-folder-modal input').setValue('资产目录')
     await assets.find('.asset-folder-modal footer .primary').trigger('click')
@@ -6792,6 +6796,31 @@ describe('AppShell', () => {
         })
       )
 
+      await sourceRow.trigger('dragstart', {
+        dataTransfer: {
+          effectAllowed: '',
+          setData: vi.fn((type: string, value: string) => dragPayload.set(type, value))
+        }
+      })
+      await rightBrowser.find('.file-drop-zone').trigger('drop', {
+        dataTransfer: {
+          getData: vi.fn((type: string) => dragPayload.get(type) || '')
+        }
+      })
+      await flushPromises()
+      expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+        { kind: 'upload-file', localPath: '/release-note.md', remoteDirectory: '/home/deploy' },
+        expect.objectContaining({ kind: 'remote', sessionId: 'asset-2' })
+      )
+      expect(store.fileTransferTasks.find((task) => task.source === '/release-note.md' && task.target === '/home/deploy/release-note.md')).toEqual(
+        expect.objectContaining({
+          type: 'upload',
+          name: 'release-note.md',
+          toHost: '10.24.12.44',
+          status: 'success'
+        })
+      )
+
       const remoteDirectoryDragPayload = new Map<string, string>()
       await rightDirectoryRow.trigger('dragstart', {
         dataTransfer: {
@@ -7028,6 +7057,38 @@ describe('AppShell', () => {
 
     await wrapper.findAll('.file-icon-button').find((button) => button.attributes('title') === '隐藏隐藏文件')!.trigger('click')
     expect(wrapper.text()).not.toContain('.hidden')
+
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      { name: 'zeta.log', path: '/tmp/local-picked/zeta.log', type: 'file', size: 30, modifiedAt: 1717200003000, mode: '-rw-r--r--' },
+      { name: 'alpha.log', path: '/tmp/local-picked/alpha.log', type: 'file', size: 10, modifiedAt: 1717200001000, mode: '-rw-r--r--' },
+      { name: 'linked-file', path: '/tmp/local-picked/linked-file', type: 'link', size: 1, modifiedAt: 1717200002000, mode: 'lrwxrwxrwx' },
+      { name: 'subdir', path: '/tmp/local-picked/subdir', type: 'directory', size: 0, modifiedAt: 1717200004000, mode: 'drwxr-xr-x' }
+    ])
+    await wrapper.findAll('.file-icon-button').find((button) => button.attributes('title') === '刷新')!.trigger('click')
+    await flushPromises()
+    const rowNames = () => wrapper.findAll('tbody tr').map((row) => row.find('.file-name-cell span').text())
+    expect(rowNames()).toEqual(['..', 'subdir', 'linked-file', 'alpha.log', 'zeta.log'])
+    await wrapper.findAll('.file-sort-button').find((button) => button.text().includes('大小'))!.trigger('click')
+    expect(rowNames()).toEqual(['..', 'subdir', 'linked-file', 'alpha.log', 'zeta.log'])
+    await wrapper.findAll('.file-sort-button').find((button) => button.text().includes('大小'))!.trigger('click')
+    expect(rowNames()).toEqual(['..', 'subdir', 'linked-file', 'zeta.log', 'alpha.log'])
+    const linkedFileRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('linked-file'))!
+    vi.mocked(window.aiops.listFiles).mockRejectedValueOnce(new Error('linked file is not directory'))
+    await linkedFileRow.find('td').trigger('click')
+    await flushPromises()
+    expect(linkedFileRow.classes()).toContain('selected')
+    expect(wrapper.text()).toContain('linked file is not directory')
+    expect((wrapper.find('.file-path-input').element as HTMLInputElement).value).toBe('/tmp/local-picked')
+    vi.mocked(window.aiops.listFiles).mockResolvedValueOnce([
+      { name: 'parent-entry.md', path: '/tmp/parent-entry.md', type: 'file', size: 3, modifiedAt: 1717200005000, mode: '-rw-r--r--' }
+    ])
+    await wrapper.findAll('tbody tr').find((row) => row.text().includes('..'))!.find('td').trigger('click')
+    await flushPromises()
+    expect(window.aiops.listFiles).toHaveBeenLastCalledWith('/tmp', expect.objectContaining({ kind: 'local', sessionId: 'local' }))
+    expect((wrapper.find('.file-path-input').element as HTMLInputElement).value).toBe('/tmp')
+    await wrapper.find('.file-path-input').setValue('/tmp/local-picked')
+    await wrapper.find('.file-path-input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
 
     const releaseRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('release-note.md'))!
     await releaseRow.find('.file-row-actions button[title="重命名"]').trigger('click')
@@ -8134,6 +8195,22 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(window.aiops.kbMove).toHaveBeenCalledWith('Markdown语法指南.md', 'commands')
     expect(store.findKnowledgeNode('commands/Markdown语法指南.md')).toBeTruthy()
+
+    await commandsDropNode.trigger('contextmenu')
+    expect(wrapper.find('.kb-context-menu').text()).toContain('上传文件')
+    document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.kb-context-menu').exists()).toBe(false)
+    vi.mocked(window.aiops.kbCheckPath).mockClear()
+    vi.mocked(window.aiops.kbImportFile).mockClear()
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/commands-upload.md'] })
+    await commandsDropNode.trigger('contextmenu')
+    await wrapper.find('.kb-context-menu').findAll('button').find((button) => button.text().includes('上传文件'))!.trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.kbCheckPath).toHaveBeenCalledWith('/tmp/commands-upload.md')
+    expect(window.aiops.kbImportFile).toHaveBeenCalledWith('/tmp/commands-upload.md', 'commands')
+    expect(wrapper.find('.kb-context-menu').exists()).toBe(false)
 
     const markdownNode = wrapper.findAll('.kb-tree-node').find((node) => node.text().includes('Markdown语法指南.md'))!
     await markdownNode.trigger('contextmenu')

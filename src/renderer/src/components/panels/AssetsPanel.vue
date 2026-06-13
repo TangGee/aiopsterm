@@ -1179,7 +1179,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { defineComponent, h, type VNode } from 'vue'
 import {
   ChevronDown,
@@ -2673,6 +2673,14 @@ const openKeyContextMenu = (event: MouseEvent, keyId: string) => {
   keyContextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
 }
 
+const onDocumentPointerDown = (event: MouseEvent) => {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.asset-context-menu')) return
+  if (event.button === 2 && target?.closest('.asset-tree-group-row, .asset-tree-host-row, .keychain-card')) return
+  closeAssetContextMenus()
+  keyContextMenuId.value = null
+}
+
 const applyImportedKeyFile = (fileName: string, content: string) => {
   const text = content.trim()
   if (!text) {
@@ -2844,6 +2852,7 @@ watch(
 )
 
 onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
   refreshAssets().catch((error) => {
     importNotice.value = error instanceof Error ? error.message : '资产加载失败。'
   })
@@ -2854,5 +2863,9 @@ onMounted(() => {
   refreshKeychains().catch((error) => {
     keyServiceNotice.value = error instanceof Error ? error.message : '密钥加载失败。'
   })
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
 })
 </script>

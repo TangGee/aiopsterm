@@ -28,7 +28,7 @@
           v-if="addMenuOpen"
           class="kb-add-menu"
         >
-          <button @click="uploadFile">
+          <button @click="uploadFile()">
             <UploadCloud />
             上传文件
           </button>
@@ -150,6 +150,13 @@
       >
         新建文件夹
       </button>
+      <button
+        v-if="nodeMenu.type === 'dir'"
+        @click="uploadFile(nodeMenu.relPath)"
+      >
+        <UploadCloud />
+        上传文件
+      </button>
       <i v-if="nodeMenu.type === 'dir'"></i>
       <button @click="startRename(nodeMenu.relPath)">重命名</button>
       <button @click="deleteSelection">删除</button>
@@ -247,7 +254,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, nextTick, onMounted, reactive, ref, watch, type VNode } from 'vue'
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type VNode } from 'vue'
 import { ChevronDown, ChevronRight, Cloud, File, FilePlus, Folder, FolderPlus, Plus, RefreshCw, Search, UploadCloud, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
@@ -270,6 +277,11 @@ const modifierKey = computed(() => (navigator.platform.toUpperCase().includes('M
 
 onMounted(() => {
   void workspace.refreshKnowledgeTree({ persist: false })
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
 })
 
 watch(
@@ -428,6 +440,7 @@ const toggleExpanded = (relPath: string) => {
 }
 
 const openNodeMenu = (event: MouseEvent, node: KnowledgeNode) => {
+  addMenuOpen.value = false
   blankMenu.visible = false
   workspace.selectKnowledgeNode(node.relPath, false)
   nodeMenu.visible = true
@@ -439,6 +452,7 @@ const openNodeMenu = (event: MouseEvent, node: KnowledgeNode) => {
 
 const openBlankMenu = (event: MouseEvent) => {
   if ((event.target as HTMLElement).closest('.kb-tree-node')) return
+  addMenuOpen.value = false
   nodeMenu.visible = false
   blankMenu.visible = true
   blankMenu.x = event.clientX
@@ -448,6 +462,18 @@ const openBlankMenu = (event: MouseEvent) => {
 const clearBlankSelection = (event: MouseEvent) => {
   if ((event.target as HTMLElement).closest('.kb-tree-node') || (event.target as HTMLElement).closest('.kb-capacity-bar')) return
   workspace.kbSelectedKeys = []
+}
+
+const closeFloatingMenus = () => {
+  addMenuOpen.value = false
+  nodeMenu.visible = false
+  blankMenu.visible = false
+}
+
+const onDocumentPointerDown = (event: MouseEvent) => {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.kb-add-wrapper, .kb-context-menu')) return
+  closeFloatingMenus()
 }
 
 const createInline = async (kind: 'file' | 'dir', parentRelDir = selectedTargetDir()) => {
@@ -630,8 +656,10 @@ const importKnowledgePath = async (filePath: string, targetDir: string, fallback
   workspace.setTopNotice('知识库导入路径类型不支持')
 }
 
-const uploadFile = async () => {
+const uploadFile = async (targetDirOverride?: string) => {
   addMenuOpen.value = false
+  nodeMenu.visible = false
+  blankMenu.visible = false
   if (!window.aiops?.showOpenDialog) {
     workspace.setTopNotice('知识库导入需要文件选择服务')
     return
@@ -640,7 +668,7 @@ const uploadFile = async () => {
     properties: ['openFile', 'openDirectory', 'multiSelections']
   })
   if (result?.canceled || !result?.filePaths.length) return
-  const targetDir = selectedTargetDir()
+  const targetDir = targetDirOverride ?? selectedTargetDir()
   for (const filePath of result.filePaths) {
     await importKnowledgePath(filePath, targetDir, 'imported-note.md')
   }
