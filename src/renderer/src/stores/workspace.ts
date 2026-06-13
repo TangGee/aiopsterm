@@ -425,6 +425,7 @@ export type TerminalPanel = {
   kind?: 'terminal' | 'knowledge'
   split?: PanelDirection
   splitSourceId?: string
+  splitGroupId?: string
   sessionId?: string
   knowledge?: {
     relPath: string
@@ -3786,7 +3787,8 @@ const createEmptyTerminalPanel = (
   id: string,
   title: string,
   split?: PanelDirection,
-  splitSourceId?: string
+  splitSourceId?: string,
+  splitGroupId?: string
 ): TerminalPanel => ({
   id,
   title,
@@ -3795,7 +3797,7 @@ const createEmptyTerminalPanel = (
   output: '',
   outputSegments: [],
   status: 'ready',
-  ...(split ? { split, splitSourceId } : {})
+  ...(split ? { split, splitSourceId, splitGroupId } : {})
 })
 
 const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedKind?: 'local' | 'ssh'): value is TerminalLifecycleEvent => {
@@ -12027,14 +12029,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createPanel = (split?: PanelDirection) => {
-    const sourceId = split ? activePanelId.value : undefined
+    const sourcePanel = split ? panels.value.find((panel) => panel.id === activePanelId.value) : undefined
+    const sourceId = sourcePanel?.id
+    const groupId = split ? sourcePanel?.splitGroupId || sourceId : undefined
     const panel = createEmptyTerminalPanel(
       createRendererLocalId('panel'),
       split ? `split ${panels.value.length}` : `Terminal ${panels.value.length}`,
       split,
-      sourceId
+      sourceId,
+      groupId
     )
-    panels.value.push(panel)
+    if (split && sourcePanel && groupId) {
+      sourcePanel.splitGroupId = groupId
+      const sourceIndex = panels.value.findIndex((item) => item.id === sourcePanel.id)
+      panels.value.splice(sourceIndex + 1, 0, panel)
+    } else {
+      panels.value.push(panel)
+    }
     activePanelId.value = panel.id
     return panel
   }
@@ -12042,16 +12053,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const clearPanelSplitState = (panel: TerminalPanel) => {
     panel.split = undefined
     panel.splitSourceId = undefined
+    panel.splitGroupId = undefined
   }
 
   const normalizeSplitState = () => {
     const ids = new Set(panels.value.map((panel) => panel.id))
+    const groupCounts = new Map<string, number>()
     panels.value.forEach((panel) => {
-      if (!panel.split) {
+      if (!panel.split && !panel.splitGroupId) {
         panel.splitSourceId = undefined
         return
       }
-      if (!panel.splitSourceId || !ids.has(panel.splitSourceId) || panel.splitSourceId === panel.id) {
+      if (panel.split && (!panel.splitSourceId || !ids.has(panel.splitSourceId) || panel.splitSourceId === panel.id)) {
+        clearPanelSplitState(panel)
+        return
+      }
+      if (panel.splitGroupId) {
+        groupCounts.set(panel.splitGroupId, (groupCounts.get(panel.splitGroupId) || 0) + 1)
+      }
+    })
+    panels.value.forEach((panel) => {
+      if (panel.splitGroupId && (groupCounts.get(panel.splitGroupId) || 0) < 2) {
         clearPanelSplitState(panel)
       }
     })

@@ -510,6 +510,10 @@ const activeTerminalPanel = computed(() => workspace.panels.find((panel) => pane
 const visibleTerminalPanels = computed(() => {
   const active = activeTerminalPanel.value
   if (!active) return []
+  if (active.splitGroupId) {
+    const groupPanels = workspace.panels.filter((panel) => panel.splitGroupId === active.splitGroupId)
+    return groupPanels.length ? groupPanels : [active]
+  }
   if (active.split && active.splitSourceId) {
     const source = workspace.panels.find((panel) => panel.id === active.splitSourceId)
     return source && source.id !== active.id ? [source, active] : [active]
@@ -884,9 +888,9 @@ const handleTerminalContextMenu = async (panelId: string, event: MouseEvent) => 
 }
 
 const handleTerminalMouseDown = async (panelId: string, event: MouseEvent) => {
+  workspace.activePanelId = panelId
   if (event.button !== 1) return
   event.preventDefault()
-  workspace.activePanelId = panelId
   switch (workspace.terminalSettings.middleMouseEvent) {
     case 'paste':
       await pasteClipboard(panelId)

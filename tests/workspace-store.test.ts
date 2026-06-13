@@ -320,8 +320,26 @@ describe('workspace store', () => {
     expect(store.panels).toHaveLength(2)
     expect(store.activePanel.split).toBe('right')
     expect(store.activePanel.splitSourceId).toBe('panel-main')
+    expect(store.activePanel.splitGroupId).toBe('panel-main')
+    expect(store.panels[0].splitGroupId).toBe('panel-main')
     expect(store.activePanel.output).toBe('')
     expect(store.activePanel.outputSegments).toEqual([])
+
+    const secondSplitSourceId = store.activePanelId
+    store.createPanel('below')
+    expect(store.panels).toHaveLength(3)
+    expect(store.activePanel.split).toBe('below')
+    expect(store.activePanel.splitSourceId).toBe(secondSplitSourceId)
+    expect(store.activePanel.splitGroupId).toBe('panel-main')
+    expect(store.panels.filter((panel) => panel.splitGroupId === 'panel-main')).toHaveLength(3)
+
+    const thirdSplitSourceId = store.activePanelId
+    store.createPanel('right')
+    expect(store.panels).toHaveLength(4)
+    expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.splitSourceId).toBe(thirdSplitSourceId)
+    expect(store.activePanel.splitGroupId).toBe('panel-main')
+    expect(store.panels.filter((panel) => panel.splitGroupId === 'panel-main')).toHaveLength(4)
 
     store.renamePanel(store.activePanelId, 'prod shell')
     expect(store.activePanel.title).toBe('prod shell')
