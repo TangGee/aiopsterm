@@ -426,6 +426,7 @@ export type TerminalPanel = {
   split?: PanelDirection
   splitSourceId?: string
   splitGroupId?: string
+  splitOrder?: number
   sessionId?: string
   knowledge?: {
     relPath: string
@@ -3789,6 +3790,7 @@ const createEmptyTerminalPanel = (
   split?: PanelDirection,
   splitSourceId?: string,
   splitGroupId?: string,
+  splitOrder?: number,
   sourcePanel?: TerminalPanel
 ): TerminalPanel => ({
   id,
@@ -3798,7 +3800,7 @@ const createEmptyTerminalPanel = (
   output: '',
   outputSegments: [],
   status: sourcePanel?.sessionId ? 'connecting' : 'ready',
-  ...(split ? { split, splitSourceId, splitGroupId } : {}),
+  ...(split ? { split, splitSourceId, splitGroupId, splitOrder } : {}),
   ...(split && sourcePanel?.sshSession
     ? {
         sshSession: {
@@ -12042,12 +12044,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const sourcePanel = split ? panels.value.find((panel) => panel.id === activePanelId.value) : undefined
     const sourceId = sourcePanel?.id
     const groupId = split ? sourcePanel?.splitGroupId || sourceId : undefined
+    const splitOrder = split ? Date.now() + panels.value.length : undefined
     const panel = createEmptyTerminalPanel(
       createRendererLocalId('panel'),
       split && sourcePanel ? sourcePanel.title : `Terminal ${panels.value.length}`,
       split,
       sourceId,
       groupId,
+      splitOrder,
       sourcePanel
     )
     if (split && sourcePanel && groupId) {
@@ -12065,6 +12069,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.split = undefined
     panel.splitSourceId = undefined
     panel.splitGroupId = undefined
+    panel.splitOrder = undefined
   }
 
   const normalizeSplitState = () => {

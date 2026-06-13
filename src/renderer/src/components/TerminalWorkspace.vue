@@ -205,10 +205,11 @@
       </div>
       <template v-else>
       <div
-        v-for="panel in visibleTerminalPanels"
+        v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
         :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge' }"
+        :style="style"
         @click="activatePanel(panel.id)"
       >
         <KnowledgeCenterEditor
@@ -522,12 +523,77 @@ const visibleTerminalPanels = computed(() => {
   return splitPanels.length ? [active, ...splitPanels] : [active]
 })
 const isSplitView = computed(() => visibleTerminalPanels.value.length > 1)
+type SplitLayoutRect = { x: number; y: number; width: number; height: number }
+
+const splitPercent = (value: number) => `${Number(value.toFixed(5))}%`
+
+const splitPaneStyle = (rect: SplitLayoutRect) => ({
+  left: `calc(${splitPercent(rect.x)} + 4px)`,
+  top: `calc(${splitPercent(rect.y)} + 4px)`,
+  width: `calc(${splitPercent(rect.width)} - 8px)`,
+  height: `calc(${splitPercent(rect.height)} - 8px)`
+})
+
+const buildSplitLayoutRects = (panels: TerminalPanel[]) => {
+  const rects = new Map<string, SplitLayoutRect>()
+  if (!panels.length) return rects
+  const panelIds = new Set(panels.map((panel) => panel.id))
+  const rootPanel = panels.find((panel) => !panel.split || !panel.splitSourceId || !panelIds.has(panel.splitSourceId)) || panels[0]
+  rects.set(rootPanel.id, { x: 0, y: 0, width: 100, height: 100 })
+
+  const panelIndex = new Map(panels.map((panel, index) => [panel.id, index]))
+  const splitPanels = panels
+    .filter((panel) => panel.split && panel.splitSourceId && panelIds.has(panel.splitSourceId))
+    .sort((left, right) => (left.splitOrder ?? panelIndex.get(left.id) ?? 0) - (right.splitOrder ?? panelIndex.get(right.id) ?? 0))
+
+  splitPanels.forEach((panel) => {
+    if (!panel.splitSourceId) return
+    const sourceRect = rects.get(panel.splitSourceId)
+    if (!sourceRect) return
+    const original = { ...sourceRect }
+    if (panel.split === 'right') {
+      const leftWidth = original.width / 2
+      sourceRect.width = leftWidth
+      rects.set(panel.id, {
+        x: original.x + leftWidth,
+        y: original.y,
+        width: original.width - leftWidth,
+        height: original.height
+      })
+      return
+    }
+    const topHeight = original.height / 2
+    sourceRect.height = topHeight
+    rects.set(panel.id, {
+      x: original.x,
+      y: original.y + topHeight,
+      width: original.width,
+      height: original.height - topHeight
+    })
+  })
+
+  panels.forEach((panel) => {
+    if (!rects.has(panel.id)) rects.set(panel.id, { x: 0, y: 0, width: 100, height: 100 })
+  })
+  return rects
+}
+
+const splitLayoutItems = computed(() => {
+  if (!isSplitView.value) return visibleTerminalPanels.value.map((panel) => ({ panel, style: {} }))
+  const rects = buildSplitLayoutRects(visibleTerminalPanels.value)
+  return visibleTerminalPanels.value.map((panel) => ({
+    panel,
+    style: splitPaneStyle(rects.get(panel.id) || { x: 0, y: 0, width: 100, height: 100 })
+  }))
+})
+
 const terminalGridClasses = computed(() => {
   if (!isSplitView.value) return {}
   const splitDirections = visibleTerminalPanels.value.filter((panel) => panel.split).map((panel) => panel.split)
   const lastDirection = splitDirections.at(-1)
   return {
     split: true,
+    'split-tree': true,
     'split-right': splitDirections.includes('right'),
     'split-below': lastDirection === 'below' && !splitDirections.includes('right')
   }

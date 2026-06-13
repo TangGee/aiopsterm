@@ -6880,6 +6880,10 @@ code {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.terminal-grid.split-tree {
+  display: block;
+}
+
 .terminal-pane {
   min-height: 0;
   display: grid;
@@ -6890,6 +6894,12 @@ code {
   overflow: hidden;
   position: relative;
   z-index: 1;
+}
+
+.terminal-grid.split-tree .terminal-pane {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
 }
 
 .terminal-search-overlay {
