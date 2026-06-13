@@ -371,7 +371,8 @@ test('aiopsterm primary desktop flows', async () => {
     await installVoiceRecorderDouble(page)
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
-    await expect(page.locator('.terminal-tab').filter({ hasText: 'local shell' })).toBeVisible()
+    await expect(page.locator('.terminal-tab').filter({ hasText: '欢迎' })).toBeVisible()
+    await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
     await expect(page.getByText('智能助手')).toBeVisible()
     await expect(page.locator('.top-bar[data-onboarding-id="top-layout-controls"]')).toBeVisible()
     await expect(page.locator('.mode-button')).toHaveCount(1)
@@ -1164,11 +1165,18 @@ test('terminal tab operations and visual baseline', async () => {
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
 
+    await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
+    await expect(page.locator('.terminal-pane')).toHaveCount(0)
     await page.getByTitle('新建终端').click()
     await expect(page.locator('.terminal-tab')).toHaveCount(2)
+    await expect(page.locator('.terminal-grid')).not.toHaveClass(/split/)
 
-    await page.getByText('向右拆分').click()
+    await page.locator('.terminal-tab').last().click({ button: 'right' })
+    await expect(page.locator('.tab-menu')).toBeVisible()
+    await page.locator('.tab-menu button').filter({ hasText: '向右拆分' }).click()
     await expect(page.locator('.terminal-tab')).toHaveCount(3)
+    await expect(page.locator('.terminal-grid')).toHaveClass(/split/)
+    await expect(page.locator('.terminal-pane')).toHaveCount(2)
 
     await page.locator('.command-line input').first().fill('df -h')
     await page.locator('.command-line input').first().press('Enter')

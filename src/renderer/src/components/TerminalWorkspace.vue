@@ -53,8 +53,8 @@
       >
         Fork SSH Channel
       </button>
-      <button @click="workspace.createPanel('right'); menu.visible = false">向右拆分</button>
-      <button @click="workspace.createPanel('below'); menu.visible = false">向下拆分</button>
+      <button @click="splitSelected('right')">向右拆分</button>
+      <button @click="splitSelected('below')">向下拆分</button>
     </div>
 
     <div
@@ -86,8 +86,6 @@
 
     <div class="terminal-toolbar">
       <div class="toolbar-group">
-        <button @click="workspace.createPanel('right')"><PanelRight /> 向右拆分</button>
-        <button @click="workspace.createPanel('below')"><PanelBottom /> 向下拆分</button>
         <button @click="startRealShell"><Terminal /> 打开本地 shell</button>
         <button
           :class="{ active: commandDialog.visible }"
@@ -190,10 +188,10 @@
     <div
       ref="terminalGrid"
       class="terminal-grid"
-      :class="{ split: workspace.panels.length > 1 }"
+      :class="{ split: isSplitView }"
     >
       <div
-        v-if="showDashboard"
+        v-if="showTerminalDashboard"
         class="terminal-dashboard"
       >
         <div class="terminal-dashboard-icon"><Terminal /></div>
@@ -205,8 +203,9 @@
           <span>切换布局 (Terminal/Agents) <kbd>Ctrl</kbd><kbd>E</kbd></span>
         </div>
       </div>
+      <template v-else>
       <div
-        v-for="panel in workspace.panels"
+        v-for="panel in visibleTerminalPanels"
         :key="panel.id"
         class="terminal-pane"
         :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge' }"
@@ -427,6 +426,7 @@
         </div>
         </template>
       </div>
+      </template>
     </div>
 
     <TransferProgress v-if="workspace.activeModule === 'workspace'" />
@@ -439,7 +439,7 @@ import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, PanelBottom, PanelRight, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, Minus, Plus, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
@@ -506,11 +506,32 @@ const isReconnectablePanel = (panel?: TerminalPanel | null) => panel?.status ===
 let suggestionRequestId = 0
 let commandGenerationRequestId = 0
 
+const activeTerminalPanel = computed(() => workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0])
+const visibleTerminalPanels = computed(() => {
+  const active = activeTerminalPanel.value
+  if (!active) return []
+  if (active.split && active.splitSourceId) {
+    const source = workspace.panels.find((panel) => panel.id === active.splitSourceId)
+    return source && source.id !== active.id ? [source, active] : [active]
+  }
+  const splitPanels = workspace.panels.filter((panel) => panel.split && panel.splitSourceId === active.id)
+  return splitPanels.length ? [active, ...splitPanels] : [active]
+})
+const isSplitView = computed(() => visibleTerminalPanels.value.length > 1)
+const showTerminalDashboard = computed(() => {
+  const panel = visibleTerminalPanels.value[0]
+  return (
+    visibleTerminalPanels.value.length === 1 &&
+    panel?.kind !== 'knowledge' &&
+    !panel.sessionId &&
+    !panel.output &&
+    panel.status === 'ready'
+  )
+})
+
 const writeRuntimeLog = (level: RuntimeLogLevel, event: string, fields: Record<string, unknown> = {}) => {
   void window.aiops?.writeRuntimeLog?.(level, event, fields)
 }
-
-const showDashboard = ref(true)
 
 const emptyZmodemProgress = (): TerminalZmodemProgress => ({
   visible: false,
@@ -584,13 +605,21 @@ const syncTerminalView = (panel: TerminalPanel) => {
   if (panel.kind === 'knowledge') return
   const view = terminalViews.get(panel.id)
   if (!view) return
-  const displayOutput = workspace.getHighlightedTerminalOutput(panel.id)
+  const displayOutput = panel.sessionId ? panel.output : workspace.getHighlightedTerminalOutput(panel.id)
   if (displayOutput !== view.lastOutput) {
-    view.terminal.clear()
-    view.terminal.write(displayOutput.replace(/\n/g, '\r\n'))
+    if (displayOutput.startsWith(view.lastOutput)) {
+      const chunk = displayOutput.slice(view.lastOutput.length)
+      if (chunk) view.terminal.write(chunk)
+    } else {
+      view.terminal.clear()
+      view.terminal.write(displayOutput)
+    }
     view.lastOutput = displayOutput
   }
-  window.requestAnimationFrame(() => view.fit.fit())
+  window.requestAnimationFrame(() => {
+    view.fit.fit()
+    view.terminal.scrollToBottom()
+  })
   updateSelectionButtonPosition(panel.id)
   updateSuggestionsPosition(panel.id)
 }
@@ -599,10 +628,13 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
   if (panel.kind === 'knowledge') return
   if (terminalViews.has(panel.id)) return
   const terminal = new XtermTerminal({
-    cursorBlink: true,
+    cursorBlink: workspace.terminalSettings.cursorBlink,
     convertEol: true,
-    fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-    fontSize: 12,
+    cursorStyle: workspace.terminalSettings.cursorStyle,
+    fontFamily: workspace.terminalSettings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+    fontSize: workspace.terminalSettings.fontSize || 12,
+    lineHeight: workspace.terminalSettings.lineHeight || 1,
+    scrollback: workspace.terminalSettings.scrollBack,
     theme: {
       background: '#090b10',
       foreground: '#d7dae3',
@@ -717,7 +749,15 @@ const activatePanel = (panelId: string) => {
 }
 
 const setTerminalElement = (panelId: string, element: Element | ComponentPublicInstance | null) => {
-  if (!(element instanceof HTMLElement)) return
+  if (!(element instanceof HTMLElement)) {
+    terminalElements.delete(panelId)
+    const view = terminalViews.get(panelId)
+    if (view) {
+      view.terminal.dispose()
+      terminalViews.delete(panelId)
+    }
+    return
+  }
   terminalElements.set(panelId, element)
   const panel = workspace.panels.find((item) => item.id === panelId)
   if (panel && panel.kind !== 'knowledge') {
@@ -726,23 +766,35 @@ const setTerminalElement = (panelId: string, element: Element | ComponentPublicI
 }
 
 const openMenu = (event: MouseEvent, panelId: string) => {
+  const position = clampFloatingMenuPosition(event, 154, 320)
   menu.visible = true
-  menu.x = event.clientX
-  menu.y = event.clientY
+  menu.x = position.x
+  menu.y = position.y
   menu.panelId = panelId
   termMenu.visible = false
   aiButtonPanelId.value = ''
 }
 
 const openTerminalMenu = (event: MouseEvent, panelId: string) => {
+  const position = clampFloatingMenuPosition(event, 214, 560)
   workspace.activePanelId = panelId
   hideSuggestions()
   termMenu.visible = true
-  termMenu.x = event.clientX
-  termMenu.y = event.clientY
+  termMenu.x = position.x
+  termMenu.y = position.y
   termMenu.panelId = panelId
   menu.visible = false
   aiButtonPanelId.value = ''
+}
+
+const clampFloatingMenuPosition = (event: MouseEvent, width: number, height: number) => {
+  const padding = 8
+  const maxX = Math.max(padding, window.innerWidth - width - padding)
+  const maxY = Math.max(padding, window.innerHeight - height - padding)
+  return {
+    x: Math.max(padding, Math.min(event.clientX, maxX)),
+    y: Math.max(padding, Math.min(event.clientY, maxY))
+  }
 }
 
 const getSelectionVisibleRow = (view: { terminal: XtermTerminal }, panelId: string) => {
@@ -882,12 +934,18 @@ const cloneSelected = () => {
   menu.visible = false
 }
 
+const splitSelected = (direction: 'right' | 'below') => {
+  workspace.activePanelId = menu.panelId
+  workspace.createPanel(direction)
+  menu.visible = false
+}
+
 const terminalViewSize = (panelId: string) => {
   const view = terminalViews.get(panelId)
   view?.fit.fit()
   return {
-    cols: view?.terminal.cols,
-    rows: view?.terminal.rows
+    cols: view?.terminal.cols || 80,
+    rows: view?.terminal.rows || 24
   }
 }
 
@@ -1305,7 +1363,6 @@ const sendCommand = async (panel: TerminalPanel) => {
   })
   if (decision.status === 'allow') {
     command.value = ''
-    showDashboard.value = false
     syncTerminalView(panel)
   }
 }
@@ -1417,7 +1474,6 @@ const sendGlobalCommand = async () => {
   const decision = await workspace.runGlobalTerminalCommand(text)
   workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
   if (decision.status !== 'allow') return
-  showDashboard.value = false
   globalCommand.value = ''
 }
 
@@ -1517,6 +1573,7 @@ const closeTerminalFromMenu = () => {
 }
 
 const splitFromTermMenu = (direction: 'right' | 'below') => {
+  workspace.activePanelId = termMenu.panelId
   workspace.createPanel(direction)
   termMenu.visible = false
 }

@@ -20,6 +20,7 @@ type MockXtermInstance = {
   focus: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
   clearSelection: ReturnType<typeof vi.fn>
+  scrollToBottom: ReturnType<typeof vi.fn>
   hasSelection: () => boolean
   getSelection: () => string
   getSelectionPosition: () => MockSelectionPosition | undefined
@@ -85,6 +86,7 @@ vi.mock('@xterm/xterm', () => ({
       clear: vi.fn(),
       focus: vi.fn(),
       dispose: vi.fn(),
+      scrollToBottom: vi.fn(),
       clearSelection: vi.fn(function (this: any) {
         this.selectedText = ''
         this.selectionPosition = undefined
@@ -488,7 +490,9 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('堡垒机资源')
     expect(wrapper.text()).toContain('prod-bastion')
     expect(wrapper.text()).toContain('智能助手')
-    expect(wrapper.text()).toContain('local shell')
+    expect(wrapper.text()).toContain('与AI对话')
+    expect(wrapper.text()).toContain('切换布局')
+    expect(wrapper.text()).not.toContain('local shell')
   })
 
   it('consumes pending aiopsterm protocol links on mount and unregisters listener', async () => {
@@ -5328,14 +5332,14 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.createTerminal).mockClear()
     await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
     await flushPromises()
-    expect(store.activePanel.title).toBe('local shell fork')
+    expect(store.activePanel.title).toBe('fork-source fork')
     expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.8.0.6:2222')
     expect(store.activePanel.outputSegments).toEqual([])
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'ssh',
         assetId: 'asset-fork-unit',
-        title: 'local shell fork',
+        title: 'fork-source fork',
         ssh: expect.objectContaining({ host: '10.8.0.6', port: 2222, username: 'ops', forkFromConnectionId: 'ssh-source-fork-unit' })
       })
     )
@@ -5411,7 +5415,7 @@ describe('AppShell', () => {
       expect.objectContaining({
         kind: 'ssh',
         assetId: 'asset-fork-unit',
-        title: 'local shell fork',
+        title: 'fork-source fork',
         ssh: expect.objectContaining({ host: '10.8.0.6', port: 2222, username: 'ops', forkFromConnectionId: 'ssh-source-fork-unit' })
       })
     )
@@ -5538,6 +5542,45 @@ describe('AppShell', () => {
     expect(store.activePanel.sessionId).toBeUndefined()
     expect(store.activePanel.status).toBe('closed')
     expect(store.topNotice).toBe('本地终端启动失败')
+
+    wrapper.unmount()
+  })
+
+  it('opens the default dashboard, keeps new terminals as tabs, and splits only from context menus', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    expect(wrapper.find('.terminal-dashboard').exists()).toBe(true)
+    expect(wrapper.text()).toContain('与AI对话')
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(0)
+    expect(wrapper.find('.terminal-tab.active').text()).toContain('欢迎')
+    expect(wrapper.text()).not.toContain('local shell')
+
+    await wrapper.find('.new-tab-button').trigger('click')
+    store.appendTerminalOutput(store.activePanelId, 'new tab output\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(store.panels).toHaveLength(2)
+    expect(store.activePanel.split).toBeUndefined()
+    expect(wrapper.find('.terminal-dashboard').exists()).toBe(false)
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
+    expect(wrapper.find('.terminal-grid').classes()).not.toContain('split')
+
+    await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
+    await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('向右拆分'))!.trigger('click')
+    store.appendTerminalOutput(store.activePanelId, 'split output\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.splitSourceId).toBe(store.panels[1].id)
+    expect(wrapper.findAll('.terminal-pane')).toHaveLength(2)
+    expect(wrapper.find('.terminal-grid').classes()).toContain('split')
 
     wrapper.unmount()
   })
@@ -5882,9 +5925,17 @@ describe('AppShell', () => {
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
     vi.mocked(window.aiops.writeRuntimeLog!).mockClear()
+    store.appendTerminalOutput('test-session-local', 'Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(terminalAfterReconnect.write).toHaveBeenLastCalledWith('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
+    const clearCallsBeforeInput = terminalAfterReconnect.clear.mock.calls.length
     terminalAfterReconnect.emitData('pwd\n')
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'pwd\n')
+    expect(terminalAfterReconnect.clear.mock.calls).toHaveLength(clearCallsBeforeInput)
+    expect(terminalAfterReconnect.write).not.toHaveBeenCalledWith(expect.stringContaining('root@tlinux:~# pWelcome'))
+    expect(terminalAfterReconnect.scrollToBottom).toHaveBeenCalled()
     expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
       'debug',
       'renderer.terminal-input.write-request',
@@ -6040,10 +6091,12 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-context-menu').exists()).toBe(true)
 
     store.createPanel()
+    store.appendTerminalOutput(store.activePanelId, 'second terminal output\n')
+    await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     const activePanelId = store.activePanelId
     await expect(store.updateTerminalSettings({ middleMouseEvent: 'closeTab' })).resolves.toBe(true)
-    await wrapper.findAll('.xterm-host').at(1)!.trigger('mousedown', { button: 1 })
+    await wrapper.find('.xterm-host').trigger('mousedown', { button: 1 })
     expect(store.panels.some((panel) => panel.id === activePanelId)).toBe(false)
 
     wrapper.unmount()
@@ -7661,7 +7714,9 @@ describe('AppShell', () => {
 
     const markdownContent =
       '# Runbook\n\n![diagram](images/interface.png)\n\n| Name | State |\n| :--- | ---: |\n| api | ok |\n\n```bash\necho ok\n```\n\n```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```\n\n<script>alert(1)</script>\n<img src="javascript:alert(1)" onerror="alert(2)" alt="bad">\n<a href="javascript:alert(3)" onclick="alert(4)">bad link</a>'
-    await textarea.setValue(markdownContent)
+    const activeMarkdownTextarea = workspace.find('.kb-editor-textarea')
+    expect((activeMarkdownTextarea.element as HTMLTextAreaElement).value).toBe('content:Markdown语法指南.md')
+    await activeMarkdownTextarea.setValue(markdownContent)
     await workspace.findAll('.kb-editor-mode button').find((button) => button.text().includes('预览'))!.trigger('click')
     await flushPromises()
     await workspace.vm.$nextTick()

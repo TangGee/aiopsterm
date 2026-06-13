@@ -424,6 +424,7 @@ export type TerminalPanel = {
   status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
   kind?: 'terminal' | 'knowledge'
   split?: PanelDirection
+  splitSourceId?: string
   sessionId?: string
   knowledge?: {
     relPath: string
@@ -882,6 +883,7 @@ const ctrlSequences = Object.entries(ctrlKeyMap).sort(([, first], [, second]) =>
 const defaultTerminalSettings: TerminalSettings = {
   ...defaultConfig.terminal!
 }
+const defaultTerminalPanelTitle = '欢迎'
 
 const defaultEditorSettings: EditorSettings = {
   ...defaultConfig.editorSettings!
@@ -3783,7 +3785,8 @@ const setTerminalOutput = (panel: TerminalPanel, text: string, scope: TerminalOu
 const createEmptyTerminalPanel = (
   id: string,
   title: string,
-  split?: PanelDirection
+  split?: PanelDirection,
+  splitSourceId?: string
 ): TerminalPanel => ({
   id,
   title,
@@ -3792,7 +3795,7 @@ const createEmptyTerminalPanel = (
   output: '',
   outputSegments: [],
   status: 'ready',
-  ...(split ? { split } : {})
+  ...(split ? { split, splitSourceId } : {})
 })
 
 const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedKind?: 'local' | 'ssh'): value is TerminalLifecycleEvent => {
@@ -3899,7 +3902,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   })
   const activePanelId = ref('panel-main')
   const panels = ref<TerminalPanel[]>([
-    createEmptyTerminalPanel('panel-main', 'local shell')
+    createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle)
   ])
 
   const applyCurrentTheme = () => {
@@ -4015,6 +4018,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.kind = 'terminal'
     panel.status = 'connecting'
     panel.sshSession = session
+    panel.title = session.assetName || session.host || panel.title
     if (terminalSession.lifecycle) applyTerminalLifecycle(terminalSession.lifecycle)
     return session
   }
@@ -12023,21 +12027,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createPanel = (split?: PanelDirection) => {
-    const panel = createEmptyTerminalPanel(createRendererLocalId('panel'), split ? `split ${panels.value.length}` : `shell ${panels.value.length}`, split)
+    const sourceId = split ? activePanelId.value : undefined
+    const panel = createEmptyTerminalPanel(
+      createRendererLocalId('panel'),
+      split ? `split ${panels.value.length}` : `Terminal ${panels.value.length}`,
+      split,
+      sourceId
+    )
     panels.value.push(panel)
     activePanelId.value = panel.id
+    return panel
+  }
+
+  const clearPanelSplitState = (panel: TerminalPanel) => {
+    panel.split = undefined
+    panel.splitSourceId = undefined
+  }
+
+  const normalizeSplitState = () => {
+    const ids = new Set(panels.value.map((panel) => panel.id))
+    panels.value.forEach((panel) => {
+      if (!panel.split) {
+        panel.splitSourceId = undefined
+        return
+      }
+      if (!panel.splitSourceId || !ids.has(panel.splitSourceId) || panel.splitSourceId === panel.id) {
+        clearPanelSplitState(panel)
+      }
+    })
   }
 
   const resetToDefaultTerminalPanel = (panel: TerminalPanel) => {
     panel.id = 'panel-main'
-    panel.title = 'local shell'
+    panel.title = defaultTerminalPanelTitle
     panel.cwd = '~'
     panel.kind = 'terminal'
     panel.status = 'ready'
-    panel.split = undefined
+    clearPanelSplitState(panel)
     panel.sessionId = undefined
     panel.knowledge = undefined
     panel.sshSession = undefined
+    panel.terminalLifecycle = undefined
+    panel.terminalExit = undefined
     setTerminalOutput(panel, '')
   }
 
@@ -12048,6 +12079,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     panels.value = panels.value.filter((panel) => panel.id !== id)
+    normalizeSplitState()
     if (!panels.value.some((panel) => panel.id === activePanelId.value)) {
       activePanelId.value = panels.value[0].id
     }
@@ -12063,6 +12095,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const wasActive = activePanelId.value === id
     panels.value = panels.value.filter((item) => item.id !== id)
+    normalizeSplitState()
     if (preferredActiveId && panels.value.some((item) => item.id === preferredActiveId)) {
       activePanelId.value = preferredActiveId
     } else if (wasActive || !panels.value.some((item) => item.id === activePanelId.value)) {
@@ -12073,10 +12106,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const closeOthers = () => {
     panels.value = panels.value.filter((panel) => panel.id === activePanelId.value)
+    panels.value.forEach(clearPanelSplitState)
   }
 
   const closeAllPanels = () => {
-    panels.value = [createEmptyTerminalPanel('panel-main', 'local shell')]
+    panels.value = [createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle)]
     activePanelId.value = 'panel-main'
   }
 

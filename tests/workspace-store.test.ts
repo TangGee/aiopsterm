@@ -313,11 +313,13 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
 
     expect(store.panels).toHaveLength(1)
+    expect(store.activePanel.title).toBe('欢迎')
     expect(store.activePanel.output).toBe('')
     expect(store.activePanel.outputSegments).toEqual([])
     store.createPanel('right')
     expect(store.panels).toHaveLength(2)
     expect(store.activePanel.split).toBe('right')
+    expect(store.activePanel.splitSourceId).toBe('panel-main')
     expect(store.activePanel.output).toBe('')
     expect(store.activePanel.outputSegments).toEqual([])
 
@@ -327,17 +329,23 @@ describe('workspace store', () => {
     store.closeOthers()
     expect(store.panels).toHaveLength(1)
     expect(store.panels[0].title).toBe('prod shell')
+    expect(store.panels[0].split).toBeUndefined()
+    expect(store.panels[0].splitSourceId).toBeUndefined()
 
     store.createPanel('below')
+    const splitPanelId = store.activePanelId
     store.createPanel()
     expect(store.panels).toHaveLength(3)
+    expect(store.activePanel.split).toBeUndefined()
     store.closePanels('others', store.activePanelId)
     expect(store.panels).toHaveLength(1)
+    expect(store.panels[0].id).not.toBe(splitPanelId)
 
     store.createPanel()
     store.closePanels('all')
     expect(store.panels).toHaveLength(1)
     expect(store.panels[0].id).toBe('panel-main')
+    expect(store.panels[0].title).toBe('欢迎')
     expect(store.panels[0].output).toBe('')
     expect(store.panels[0].outputSegments).toEqual([])
   })
