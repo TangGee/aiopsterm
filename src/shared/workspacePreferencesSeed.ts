@@ -12,7 +12,8 @@ const developmentSeedExpandedGroups = [
 
 const cloneWorkspacePreferences = (expandedGroups: string[]) => ({
   expandedGroups: [...expandedGroups],
-  showIpMode: false
+  showIpMode: false,
+  recentAssetIds: ['asset-1', 'asset-2']
 })
 
 export const shouldUseWorkspacePreferencesSeedData = runtimeShouldUseWorkspacePreferencesSeedData

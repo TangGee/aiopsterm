@@ -21,6 +21,7 @@ type MockXtermInstance = {
   dispose: ReturnType<typeof vi.fn>
   clearSelection: ReturnType<typeof vi.fn>
   scrollToBottom: ReturnType<typeof vi.fn>
+  refresh: ReturnType<typeof vi.fn>
   hasSelection: () => boolean
   getSelection: () => string
   getSelectionPosition: () => MockSelectionPosition | undefined
@@ -87,6 +88,7 @@ vi.mock('@xterm/xterm', () => ({
       focus: vi.fn(),
       dispose: vi.fn(),
       scrollToBottom: vi.fn(),
+      refresh: vi.fn(),
       clearSelection: vi.fn(function (this: any) {
         this.selectedText = ''
         this.selectionPosition = undefined
@@ -538,6 +540,40 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('local shell')
   })
 
+  it('opens asset management as a full workspace instead of a narrow side panel', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    store.setActiveModule('assets')
+    await flushPromises()
+
+    expect(wrapper.find('.assets-workspace').exists()).toBe(true)
+    expect(wrapper.find('.module-panel-pane').exists()).toBe(false)
+    expect(wrapper.find('.ai-panel-pane').exists()).toBe(false)
+    expect(wrapper.find('.asset-workspace-tabs').text()).toContain('主机管理')
+    expect(wrapper.find('.asset-workspace-tabs').text()).toContain('组织资产管理')
+    expect(wrapper.find('.asset-workspace-tabs').text()).toContain('密钥管理')
+    expect(wrapper.find('[data-onboarding-id="host-management-entry"]').exists()).toBe(true)
+    expect(wrapper.find('.host-card').text()).toContain('prod-bastion')
+
+    await wrapper.findAll('.asset-workspace-tab').find((tab) => tab.text().includes('密钥管理'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.keychain-card').text()).toContain('prod-ed25519')
+
+    wrapper.unmount()
+  })
+
   it('consumes pending aiopsterm protocol links on mount and unregisters listener', async () => {
     const stopDeepLink = vi.fn()
     vi.mocked(window.aiops.consumeDeepLinks).mockResolvedValueOnce([
@@ -932,8 +968,10 @@ describe('AppShell', () => {
     expect(store.activePanel.outputSegments).toEqual([])
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'unit-host' }))
     expect(store.activePanel.sshSession).toEqual(expect.objectContaining({ host: '10.10.10.10', port: 2222, username: 'ops' }))
+    expect(store.activeModule).toBe('workspace')
 
     store.selectedContexts = []
+    store.setActiveModule('assets')
     const assetConnectedPanelId = store.activePanelId
     const assetConnectedPanelCount = store.panels.length
     vi.mocked(window.aiops.createTerminal).mockRejectedValueOnce(new Error('unit ssh refused'))
@@ -946,6 +984,7 @@ describe('AppShell', () => {
     expect(store.activePanel.output).not.toContain('[aiopsterm] SSH launch failed')
     expect(store.selectedContexts.some((context) => context.id === 'asset-test-')).toBe(false)
     expect(store.selectedContexts.some((context) => context.label === '10.10.10.10')).toBe(false)
+    expect(store.activeModule).toBe('assets')
     expect(assets.text()).toContain('unit ssh refused')
 
     vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
@@ -2172,6 +2211,104 @@ describe('AppShell', () => {
     expect(hostRow('prod-bastion').find('.tunnel-icon').attributes('title')).toBe('隧道已连接')
   })
 
+  it('supports Workspace tree context creation, drag moves, linked SSH options, and recent connections', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
+    store.updateSshProxyForm({
+      name: 'release-proxy',
+      type: 'SOCKS5',
+      host: '10.0.0.8',
+      port: 1080,
+      username: '',
+      password: '',
+      enableProxyIdentity: false
+    })
+    await store.saveSshProxyForm()
+    const wrapper = mount(WorkspacePanel, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    const groupRow = (name: string) => {
+      const row = wrapper.findAll('.workspace-folder-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace group row not found: ${name}`)
+      return row
+    }
+    const hostRow = (name: string) => {
+      const row = wrapper.findAll('.workspace-host-row').find((item) => item.text().includes(name))
+      if (!row) throw new Error(`Workspace host row not found: ${name}`)
+      return row
+    }
+    const menuButton = (label: string) => findMenuButton(wrapper, '.workspace-node-menu', label)
+
+    await groupRow('生产').trigger('contextmenu', { clientX: 180, clientY: 160 })
+    await menuButton('新建子分组').trigger('click')
+    await wrapper.find('.workspace-folder-modal input').setValue('生产子组')
+    await wrapper.find('.workspace-folder-modal form').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.saveAssetFolder).toHaveBeenCalledWith(expect.objectContaining({ name: '生产子组', scope: 'direct' }))
+    expect(wrapper.text()).toContain('生产子组')
+
+    await groupRow('生产子组').trigger('contextmenu', { clientX: 190, clientY: 180 })
+    await menuButton('新建主机').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.workspace-host-modal').exists()).toBe(true)
+    expect((wrapper.findAll('.workspace-host-form input').at(2)!.element as HTMLInputElement).value).toBe('root')
+    expect((wrapper.findAll('.workspace-host-form input').at(5)!.element as HTMLInputElement).value).toBe('22')
+    await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('tree-linked-host')
+    await wrapper.findAll('.workspace-host-form input').at(1)!.setValue('10.55.0.9')
+    await wrapper.find('.workspace-host-form select').setValue('person')
+    await wrapper.findAll('.workspace-host-form select').at(1)!.setValue('keyBased')
+    await flushPromises()
+    await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('22')
+    await wrapper.findAll('.workspace-host-form select').at(2)!.setValue('key-1')
+    await wrapper.findAll('.workspace-host-form select').at(3)!.setValue('release-proxy')
+    await wrapper.findAll('.workspace-host-form select').at(4)!.setValue('asset-2')
+    await wrapper.find('.workspace-host-form').trigger('submit')
+    await flushPromises()
+    expect(window.aiops.saveAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'tree-linked-host',
+        username: 'root',
+        port: 22,
+        group: '生产子组',
+        auth_type: 'keyBased',
+        keychainId: 'key-1',
+        needProxy: true,
+        proxyName: 'release-proxy',
+        jumpHostId: 'asset-2'
+      })
+    )
+    expect(wrapper.text()).toContain('tree-linked-host')
+
+    await wrapper.find('.workspace-tree').trigger('contextmenu', { clientX: 240, clientY: 280 })
+    expect(wrapper.find('.workspace-node-menu').text()).toContain('新建顶级分组')
+    await document.body.click()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.workspace-node-menu').exists()).toBe(false)
+
+    const transfer = createTestDataTransfer()
+    const dragStart = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(dragStart, 'dataTransfer', { configurable: true, value: transfer })
+    hostRow('tree-linked-host').element.dispatchEvent(dragStart)
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(drop, 'dataTransfer', { configurable: true, value: transfer })
+    groupRow('预发').element.dispatchEvent(drop)
+    await flushPromises()
+    expect(window.aiops.saveAsset).toHaveBeenCalledWith(expect.objectContaining({ name: 'tree-linked-host', group: '预发', group_name: '预发' }))
+
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await hostRow('tree-linked-host').trigger('dblclick')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'tree-linked-host' }))
+    expect(store.workspacePreferences.recentAssetIds?.[0]).toMatch(/^asset-test-/)
+
+    wrapper.unmount()
+  })
+
   it('fails closed on malformed successful Workspace asset result envelopes', async () => {
     const malformedMessage = '资产服务返回数据无效'
     const pinia = createPinia()
@@ -2197,7 +2334,8 @@ describe('AppShell', () => {
       return button
     }
 
-    await wrapper.find('.workspace-button[title="主机"]').trigger('click')
+    await wrapper.find('.workspace-tree').trigger('contextmenu', { clientX: 220, clientY: 260 })
+    await menuButton('新建主机').trigger('click')
     const hostFormInputs = () => wrapper.findAll('.workspace-host-form input')
     await hostFormInputs().at(0)!.setValue('workspace-malformed-host')
     await hostFormInputs().at(1)!.setValue('10.66.0.8')
@@ -2343,7 +2481,8 @@ describe('AppShell', () => {
       malformedGroups.unmount()
 
       const saveRefreshMissing = await mountWorkspace()
-      await saveRefreshMissing.find('.workspace-button[title="主机"]').trigger('click')
+      await saveRefreshMissing.find('.workspace-tree').trigger('contextmenu', { clientX: 220, clientY: 260 })
+      await menuButton(saveRefreshMissing, '新建主机').trigger('click')
       const hostInputs = () => saveRefreshMissing.findAll('.workspace-host-form input')
       await hostInputs().at(0)!.setValue('workspace-missing-refresh')
       await hostInputs().at(1)!.setValue('10.88.66.55')
@@ -2637,7 +2776,8 @@ describe('AppShell', () => {
       expect(store.activePanel.output).not.toContain('[aiopsterm] open local shell from Workspace')
       expect(wrapper.text()).toContain('已打开本地 shell 127.0.0.1')
 
-      await wrapper.find('.workspace-button[title="主机"]').trigger('click')
+      await wrapper.find('.workspace-tree').trigger('contextmenu', { clientX: 220, clientY: 260 })
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('新建主机'))!.trigger('click')
       expect(wrapper.find('.workspace-host-modal').text()).toContain('新建主机')
       await wrapper.find('.workspace-host-form').trigger('submit')
       expect(wrapper.text()).toContain('请填写主机名、地址和用户名')
@@ -2909,9 +3049,9 @@ describe('AppShell', () => {
 
       await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
       expect(wrapper.text()).toContain('jumpserver-org')
-      await wrapper.find('.workspace-button[title="新建"]').trigger('click')
-      expect(wrapper.find('.workspace-add-menu').text()).toContain('自定义文件夹')
-      await wrapper.find('.workspace-add-menu').findAll('button').find((button) => button.text().includes('自定义文件夹'))!.trigger('click')
+      await wrapper.find('.workspace-tree').trigger('contextmenu', { clientX: 220, clientY: 260 })
+      expect(wrapper.find('.workspace-node-menu').text()).toContain('新建顶级分组')
+      await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('新建顶级分组'))!.trigger('click')
       expect(wrapper.find('.workspace-folder-modal').text()).toContain('创建文件夹')
       await wrapper.find('.workspace-folder-modal .files-folder-form').trigger('submit')
       expect(wrapper.text()).toContain('请输入文件夹名称')
@@ -5701,6 +5841,17 @@ describe('AppShell', () => {
     const splitTerminal = mockXtermInstances.at(-1)!
     const splitFitAddon = splitTerminal.loadAddon.mock.calls.find(([addon]) => 'fit' in addon)?.[0]
     const fitCallsBeforeUnsplit = splitFitAddon.fit.mock.calls.length
+    const activeHost = wrapper.find('.terminal-pane.active .xterm-host').element as HTMLElement
+    activeHost.innerHTML = `
+      <div class="xterm" style="width: 320px; height: 160px; max-width: 320px;">
+        <div class="xterm-screen" style="width: 320px; height: 160px;">
+          <canvas width="320" height="160" style="width: 320px; height: 160px;"></canvas>
+          <div class="xterm-text-layer" style="width: 320px; height: 160px;"></div>
+        </div>
+        <div class="xterm-viewport" style="width: 320px; height: 160px;"></div>
+        <div class="xterm-scroll-area" style="width: 320px; height: 160px;"></div>
+      </div>
+    `
     await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
     expect(wrapper.find('.terminal-context-menu').text()).toContain('取消拆分')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('取消拆分'))!.trigger('click')
@@ -5712,7 +5863,12 @@ describe('AppShell', () => {
     expect(store.activePanel.splitGroupId).toBeUndefined()
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
     expect(wrapper.find('.terminal-grid').classes()).not.toContain('split')
+    expect((activeHost.querySelector('.xterm') as HTMLElement).style.width).toBe('')
+    expect((activeHost.querySelector('.xterm-screen') as HTMLElement).style.height).toBe('')
+    expect((activeHost.querySelector('.xterm-viewport') as HTMLElement).style.width).toBe('')
+    expect((activeHost.querySelector('canvas') as HTMLCanvasElement).getAttribute('width')).toBeNull()
     expect(splitFitAddon.fit.mock.calls.length).toBeGreaterThan(fitCallsBeforeUnsplit)
+    expect(splitTerminal.refresh).toHaveBeenCalledWith(0, expect.any(Number))
 
     const tabsAfterRestore = wrapper.findAll('.terminal-tab')
     const restoredTab = tabsAfterRestore.find((tab) => tab.classes().includes('active'))!
@@ -5748,6 +5904,7 @@ describe('AppShell', () => {
     expect(store.activePanel.split).toBeUndefined()
     expect(store.activePanel.splitGroupId).toBeUndefined()
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
+    expect(splitTerminal.refresh).toHaveBeenCalledWith(0, expect.any(Number))
 
     wrapper.unmount()
   })

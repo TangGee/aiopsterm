@@ -67,14 +67,20 @@ export const isAiopsAssetRecord = (value: unknown): value is AiopsAssetRecord =>
   if (!isOptionalString(value.folderUuid) || !isOptionalString(value.organizationId)) return false
   if (value.tunnelState !== undefined && !sshTunnelStates.has(String(value.tunnelState))) return false
   if (!isOptionalBoolean(value.needProxy)) return false
-  if (!isOptionalString(value.proxyName) || !isOptionalString(value.keychainId)) return false
+  if (!isOptionalString(value.proxyName) || !isOptionalString(value.keychainId) || !isOptionalString(value.jumpHostId)) return false
   if (!isOptionalBoolean(value.hasPassword) || !isOptionalBoolean(value.hasPrivateKey) || !isOptionalBoolean(value.isLocalShell)) return false
   return true
 }
 
 export const isAiopsCustomFolderRecord = (value: unknown): value is AiopsCustomFolderRecord => {
   if (!isRecord(value)) return false
-  return isNonEmptyString(value.uuid) && isNonEmptyString(value.name) && typeof value.description === 'string'
+  return (
+    isNonEmptyString(value.uuid) &&
+    isNonEmptyString(value.name) &&
+    typeof value.description === 'string' &&
+    isOptionalString(value.parentUuid) &&
+    (value.scope === undefined || value.scope === 'direct' || value.scope === 'bastion')
+  )
 }
 
 export const isAiopsAssetSnapshot = (value: unknown): value is AiopsAssetSnapshot => {
@@ -132,6 +138,7 @@ export const isAiopsSavedAssetRecord = (value: unknown, input: AiopsAssetInput):
   if (!optionalBooleanMatches(value.needProxy, input.needProxy)) return false
   if (!optionalPresentStringMatches(value.proxyName, input, 'proxyName')) return false
   if (!optionalPresentStringMatches(value.keychainId, input, 'keychainId')) return false
+  if (!optionalPresentStringMatches(value.jumpHostId, input, 'jumpHostId')) return false
   return true
 }
 
@@ -148,6 +155,11 @@ export const isAiopsSavedCustomFolderRecord = (
   if (input.uuid && value.uuid !== input.uuid) return false
   if (value.name !== text(input.name)) return false
   if (hasOwn(input, 'description') && value.description !== text(input.description)) return false
+  if (hasOwn(input, 'parentUuid')) {
+    if (input.parentUuid === undefined && value.parentUuid !== undefined) return false
+    if (input.parentUuid !== undefined && text(value.parentUuid) !== text(input.parentUuid)) return false
+  }
+  if (hasOwn(input, 'scope') && value.scope !== input.scope) return false
   return true
 }
 

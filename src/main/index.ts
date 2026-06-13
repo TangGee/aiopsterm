@@ -1084,7 +1084,8 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
   workspacePreferences: {
     ...base.workspacePreferences!,
     ...(patch.workspacePreferences || {}),
-    expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || []
+    expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || [],
+    recentAssetIds: patch.workspacePreferences?.recentAssetIds || base.workspacePreferences?.recentAssetIds || []
   },
   editorSettings: cloneEditorSettings(patch.editorSettings || base.editorSettings),
   sshProxyConfigs: cloneSshProxyConfigs(patch.sshProxyConfigs || base.sshProxyConfigs),

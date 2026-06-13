@@ -138,8 +138,12 @@ class AssetExportError extends Error {
 }
 
 const defaultFolders: AiopsCustomFolderRecord[] = [
-  { uuid: 'custom-folder-a', name: '核心业务', description: '常用堡垒机业务资产' },
-  { uuid: 'custom-folder-b', name: '临时排障', description: '短期排障入口' }
+  { uuid: 'direct-folder-prod', name: '生产', description: '生产直连主机', scope: 'direct' },
+  { uuid: 'direct-folder-staging', name: '预发', description: '预发直连主机', scope: 'direct' },
+  { uuid: 'direct-folder-db', name: '数据库', description: '数据库直连主机', parentUuid: 'direct-folder-prod', scope: 'direct' },
+  { uuid: 'direct-folder-maintenance', name: '维护', description: '维护直连主机', scope: 'direct' },
+  { uuid: 'custom-folder-a', name: '核心业务', description: '常用堡垒机业务资产', scope: 'bastion' },
+  { uuid: 'custom-folder-b', name: '临时排障', description: '短期排障入口', scope: 'bastion' }
 ]
 
 const seedTimestamp = 1717200000000
@@ -712,10 +716,15 @@ const connectAssetSshClient = (client: AssetSshTestClient, connectConfig: Connec
 const normalizeFolderInput = (input: AiopsCustomFolderSaveInput, existing?: AiopsCustomFolderRecord): AiopsCustomFolderRecord => {
   const name = String(input.name || '').trim()
   if (!name) throw new Error('Folder name is required')
+  const parentUuid = String(hasOwn(input, 'parentUuid') ? input.parentUuid || '' : existing?.parentUuid || '').trim()
+  const inputScope = String(hasOwn(input, 'scope') ? input.scope || 'bastion' : existing?.scope || 'bastion').trim()
+  const scope = inputScope === 'direct' ? 'direct' : 'bastion'
   return {
     uuid: existing?.uuid || `folder-${randomUUID()}`,
     name,
-    description: String(input.description ?? existing?.description ?? '').trim()
+    description: String(input.description ?? existing?.description ?? '').trim(),
+    ...(parentUuid ? { parentUuid } : {}),
+    scope
   }
 }
 
@@ -749,6 +758,7 @@ const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAssetRecord
     needProxy: input.needProxy ?? existing?.needProxy ?? false,
     proxyName: hasOwn(input, 'proxyName') ? input.proxyName : existing?.proxyName,
     keychainId: hasOwn(input, 'keychainId') ? input.keychainId : existing?.keychainId,
+    jumpHostId: hasOwn(input, 'jumpHostId') ? input.jumpHostId : existing?.jumpHostId,
     hasPassword: Boolean(input.password || existing?.hasPassword),
     hasPrivateKey: Boolean(input.privateKey || existing?.hasPrivateKey)
   }
@@ -1005,7 +1015,9 @@ class FallbackAssetStore {
   deleteFolder(uuid: string): void {
     this.store.set(
       'folders',
-      (this.store.get('folders') || []).filter((folder) => folder.uuid !== uuid)
+      (this.store.get('folders') || [])
+        .filter((folder) => folder.uuid !== uuid)
+        .map((folder) => (folder.parentUuid === uuid ? { ...folder, parentUuid: undefined } : folder))
     )
     const nextAssets = (this.store.get('assets') || []).map((asset) => (asset.folderUuid === uuid ? { ...asset, folderUuid: undefined } : asset))
     this.store.set('assets', nextAssets)
@@ -1250,6 +1262,14 @@ class SqliteAssetStore {
   deleteFolder(uuid: string): void {
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM asset_folders WHERE uuid = ?').run(uuid)
+      const folderRows = this.db.prepare('SELECT uuid, data FROM asset_folders').all()
+      for (const row of folderRows) {
+        const data = row as { uuid: string; data: string }
+        const folder = JSON.parse(data.data) as AiopsCustomFolderRecord
+        if (folder.parentUuid !== uuid) continue
+        const next = { ...folder, parentUuid: undefined }
+        this.db.prepare('UPDATE asset_folders SET data = ? WHERE uuid = ?').run(JSON.stringify(next), data.uuid)
+      }
       const rows = this.rawAssets()
       for (const { asset, secret } of rows) {
         if (asset.folderUuid !== uuid) continue

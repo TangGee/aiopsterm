@@ -395,7 +395,7 @@ const folderFormError = ref('')
 const showIpMode = computed(() => workspace.workspacePreferences.showIpMode)
 const expandedGroups = computed(() => workspace.workspacePreferences.expandedGroups)
 let sessionClickTimer: number | null = null
-const customFolders = computed<CustomFolder[]>(() => workspace.fileSessionFolders)
+const customFolders = computed<CustomFolder[]>(() => workspace.fileSessionFolders.filter((folder) => folder.scope !== 'direct'))
 
 const filesGroupKeys: Record<string, string> = {
   最近连接: 'recent_connections',
@@ -744,7 +744,8 @@ const saveCreatedFolder = async () => {
   }
   await workspace.saveFileSessionFolder({
     name,
-    description: createFolderForm.description.trim()
+    description: createFolderForm.description.trim(),
+    scope: 'bastion'
   })
   closeCreateFolderModal()
 }

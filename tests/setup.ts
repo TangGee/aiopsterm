@@ -3643,6 +3643,7 @@ type TestAssetRecord = {
   needProxy?: boolean
   proxyName?: string
   keychainId?: string
+  jumpHostId?: string
   hasPassword?: boolean
   hasPrivateKey?: boolean
   isLocalShell?: boolean
@@ -3674,11 +3675,15 @@ type TestAssetFolder = {
   uuid: string
   name: string
   description: string
+  parentUuid?: string
+  scope?: 'direct' | 'bastion'
 }
 type TestAssetFolderSaveInput = {
   uuid?: string
   name: string
   description?: string
+  parentUuid?: string
+  scope?: 'direct' | 'bastion'
 }
 
 type TestKeychainRecord = {
@@ -4142,8 +4147,12 @@ const setAiTodoSnapshotMock = (todos: AiTodoItem[]) => {
 }
 
 const defaultAssetFolders: TestAssetFolder[] = [
-  { uuid: 'custom-folder-a', name: '核心业务', description: '常用堡垒机业务资产' },
-  { uuid: 'custom-folder-b', name: '临时排障', description: '短期排障入口' }
+  { uuid: 'direct-folder-prod', name: '生产', description: '生产直连主机', scope: 'direct' },
+  { uuid: 'direct-folder-staging', name: '预发', description: '预发直连主机', scope: 'direct' },
+  { uuid: 'direct-folder-db', name: '数据库', description: '数据库直连主机', parentUuid: 'direct-folder-prod', scope: 'direct' },
+  { uuid: 'direct-folder-maintenance', name: '维护', description: '维护直连主机', scope: 'direct' },
+  { uuid: 'custom-folder-a', name: '核心业务', description: '常用堡垒机业务资产', scope: 'bastion' },
+  { uuid: 'custom-folder-b', name: '临时排障', description: '短期排障入口', scope: 'bastion' }
 ]
 
 const defaultKeychains: TestKeychainRecord[] = [
@@ -4902,8 +4911,21 @@ const normalizeAssetInputMock = (input: TestAssetInput, existing?: TestAssetReco
     needProxy: input.needProxy ?? existing?.needProxy ?? false,
     proxyName: hasOwn(input, 'proxyName') ? input.proxyName : existing?.proxyName,
     keychainId: hasOwn(input, 'keychainId') ? input.keychainId : existing?.keychainId,
+    jumpHostId: hasOwn(input, 'jumpHostId') ? input.jumpHostId : existing?.jumpHostId,
     hasPassword: Boolean(input.password || input.hasPassword || existing?.hasPassword),
     hasPrivateKey: Boolean(input.privateKey || input.keychainId || input.hasPrivateKey || existing?.hasPrivateKey)
+  }
+}
+
+const normalizeAssetFolderInputMock = (input: TestAssetFolderSaveInput, existing?: TestAssetFolder): TestAssetFolder => {
+  const parentUuid = String(hasOwn(input, 'parentUuid') ? input.parentUuid || '' : existing?.parentUuid || '').trim()
+  const scope = (hasOwn(input, 'scope') ? input.scope : existing?.scope) || 'bastion'
+  return {
+    uuid: existing?.uuid || input.uuid || `folder-test-${assetFolderStoreMock.length + 1}`,
+    name: String(input.name || existing?.name || 'folder').trim(),
+    description: String(input.description ?? existing?.description ?? '').trim(),
+    ...(parentUuid ? { parentUuid } : {}),
+    scope: scope === 'direct' ? 'direct' : 'bastion'
   }
 }
 
@@ -6668,11 +6690,8 @@ Object.defineProperty(window, 'aiops', {
       const name = String(folder.name || '').trim()
       if (!name) return { ok: false, errorCode: 'ASSET_FOLDER_NAME_REQUIRED', errorMessage: 'Folder name is required.' }
       const existing = folder.uuid ? assetFolderStoreMock.find((item) => item.uuid === folder.uuid) : undefined
-      const normalized: TestAssetFolder = {
-        uuid: existing?.uuid || `folder-test-${assetFolderSequenceMock++}`,
-        name,
-        description: String(folder.description ?? existing?.description ?? '').trim()
-      }
+      const normalized: TestAssetFolder = normalizeAssetFolderInputMock({ ...folder, name }, existing)
+      if (!existing && !folder.uuid) normalized.uuid = `folder-test-${assetFolderSequenceMock++}`
       assetFolderStoreMock = assetFolderStoreMock.some((item) => item.uuid === normalized.uuid)
         ? assetFolderStoreMock.map((item) => (item.uuid === normalized.uuid ? normalized : item))
         : [...assetFolderStoreMock, normalized]

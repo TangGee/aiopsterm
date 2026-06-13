@@ -1,5 +1,6 @@
 # Usage Docs
 
+- [Assets And Workspace Resources](assets-workspace.md)
 - [AI Command Tools](ai-command-tools.md)
 - [Development Commands](development-commands.md)
 - [Desktop Protocol](desktop-protocol.md)

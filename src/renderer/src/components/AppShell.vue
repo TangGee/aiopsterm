@@ -53,6 +53,7 @@
           @mousedown="startResize('left', $event)"
         ></button>
         <FilesWorkspace v-if="workspace.activeModule === 'files'" />
+        <AssetsWorkspace v-else-if="workspace.activeModule === 'assets'" />
         <ExtensionsWorkspace v-else-if="workspace.activeModule === 'extensions'" />
         <KubernetesWorkspace v-else-if="workspace.activeModule === 'kubernetes'" />
         <SettingsWorkspace v-else-if="workspace.activeModule === 'settings'" />
@@ -89,6 +90,7 @@ import SideRail from '@/components/SideRail.vue'
 import ModulePanel from '@/components/ModulePanel.vue'
 import TerminalWorkspace from '@/components/TerminalWorkspace.vue'
 import FilesWorkspace from '@/components/FilesWorkspace.vue'
+import AssetsWorkspace from '@/components/AssetsWorkspace.vue'
 import ExtensionsWorkspace from '@/components/ExtensionsWorkspace.vue'
 import KubernetesWorkspace from '@/components/KubernetesWorkspace.vue'
 import SettingsWorkspace from '@/components/SettingsWorkspace.vue'
@@ -114,10 +116,10 @@ let stopDeepLink: (() => void) | undefined
 
 const showAgentsLeftPane = computed(() => workspace.mode === 'agents' && workspace.agentsLeftOpen)
 const showTerminalLeftPane = computed(
-  () => workspace.mode === 'terminal' && workspace.isLeftVisible && !['settings', 'database', 'user'].includes(workspace.activeModule)
+  () => workspace.mode === 'terminal' && workspace.isLeftVisible && !['assets', 'settings', 'database', 'user'].includes(workspace.activeModule)
 )
 const showTerminalRightPane = computed(
-  () => workspace.mode === 'terminal' && workspace.isRightVisible && workspace.activeModule !== 'database' && workspace.activeModule !== 'user'
+  () => workspace.mode === 'terminal' && workspace.isRightVisible && !['assets', 'database', 'user'].includes(workspace.activeModule)
 )
 const hasLeftPane = computed(() => showAgentsLeftPane.value || showTerminalLeftPane.value)
 const hasRightPane = computed(() => showTerminalRightPane.value)

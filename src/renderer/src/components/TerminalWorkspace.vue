@@ -489,6 +489,10 @@ let offData: (() => void) | null = null
 let offLifecycle: (() => void) | null = null
 let offExit: (() => void) | null = null
 let zmodemProgressHideTimer: number | null = null
+const closeTerminalMenusFromDocument = () => {
+  menu.visible = false
+  termMenu.visible = false
+}
 const fontSize = ref(12)
 const terminalElements = new Map<string, HTMLElement>()
 type TerminalView = {
@@ -496,6 +500,8 @@ type TerminalView = {
   fit: FitAddon
   search: SearchAddon
   lastOutput: string
+  lastFitCols?: number
+  lastFitRows?: number
   resizeObserver?: ResizeObserver
 }
 
@@ -734,14 +740,53 @@ const syncTerminalView = (panel: TerminalPanel) => {
   updateSuggestionsPosition(panel.id)
 }
 
-const scheduleTerminalFit = (panelId: string, options: { scrollToBottom?: boolean; frames?: number } = {}) => {
+const notifyBackendResize = (panelId: string, view: TerminalView) => {
+  const panel = workspace.panels.find((item) => item.id === panelId)
+  if (!panel?.sessionId || !window.aiops) return
+  if (view.lastFitCols === view.terminal.cols && view.lastFitRows === view.terminal.rows) return
+  view.lastFitCols = view.terminal.cols
+  view.lastFitRows = view.terminal.rows
+  window.aiops.resizeTerminal(panel.sessionId, view.terminal.cols, view.terminal.rows)
+  writeRuntimeLog('debug', 'renderer.terminal.fit-resize', {
+    panelId,
+    sessionId: panel.sessionId,
+    cols: view.terminal.cols,
+    rows: view.terminal.rows
+  })
+}
+
+const resetTerminalHostGeometry = (element: HTMLElement) => {
+  element.style.width = ''
+  element.style.height = ''
+  element.style.maxWidth = ''
+  element.style.maxHeight = ''
+  const sizedNodes = element.querySelectorAll<HTMLElement>(
+    '.xterm, .xterm-rows, .xterm-screen, .xterm-viewport, .xterm-scroll-area, .xterm-screen canvas, .xterm-screen .xterm-decoration-container, .xterm-screen .xterm-selection-layer, .xterm-screen .xterm-link-layer, .xterm-screen .xterm-text-layer'
+  )
+  sizedNodes.forEach((node) => {
+    if (!node) return
+    node.style.width = ''
+    node.style.height = ''
+    node.style.maxWidth = ''
+    node.style.maxHeight = ''
+    if (node instanceof HTMLCanvasElement) {
+      node.removeAttribute('width')
+      node.removeAttribute('height')
+    }
+  })
+}
+
+const scheduleTerminalFit = (panelId: string, options: { scrollToBottom?: boolean; frames?: number; forceGeometry?: boolean } = {}) => {
   const frames = options.frames ?? 2
   const run = (remaining: number) => {
     window.requestAnimationFrame(() => {
       const view = terminalViews.get(panelId)
       const element = terminalElements.get(panelId)
       if (!view || !element?.isConnected) return
+      if (options.forceGeometry) resetTerminalHostGeometry(element)
       view.fit.fit()
+      notifyBackendResize(panelId, view)
+      if (options.forceGeometry) view.terminal.refresh(0, Math.max(0, view.terminal.rows - 1))
       if (options.scrollToBottom) view.terminal.scrollToBottom()
       updateSelectionButtonPosition(panelId)
       updateSuggestionsPosition(panelId)
@@ -751,10 +796,14 @@ const scheduleTerminalFit = (panelId: string, options: { scrollToBottom?: boolea
   run(Math.max(1, frames))
 }
 
-const scheduleVisibleTerminalFit = (options: { scrollToBottom?: boolean; frames?: number } = {}) => {
+const scheduleVisibleTerminalFit = (options: { scrollToBottom?: boolean; frames?: number; forceGeometry?: boolean } = {}) => {
   visibleTerminalPanels.value
     .filter((panel) => panel.kind !== 'knowledge')
     .forEach((panel) => scheduleTerminalFit(panel.id, options))
+}
+
+const refitAfterLayoutChange = () => {
+  nextTick(() => scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 6, forceGeometry: true }))
 }
 
 const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
@@ -1197,10 +1246,8 @@ const splitSelected = (direction: 'right' | 'below') => {
 const unsplitSelected = () => {
   workspace.unsplitPanel(menu.panelId)
   menu.visible = false
-  nextTick(() => {
-    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
-    terminalViews.get(workspace.activePanelId)?.terminal.focus()
-  })
+  refitAfterLayoutChange()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const forkSelected = async () => {
@@ -1304,10 +1351,8 @@ const handleTabDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
   }
   workspace.attachPanelToSplit(draggedId, targetPanel.id, 'right')
   clearTerminalTabDragState()
-  nextTick(() => {
-    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
-    terminalViews.get(workspace.activePanelId)?.terminal.focus()
-  })
+  refitAfterLayoutChange()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const handleTabBarDragOver = (event: DragEvent) => {
@@ -1328,10 +1373,8 @@ const handleTabBarDrop = (event: DragEvent) => {
   const draggedId = getDraggedTerminalPanelId(event)
   if (draggedId) workspace.unsplitPanel(draggedId)
   clearTerminalTabDragState()
-  nextTick(() => {
-    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
-    terminalViews.get(workspace.activePanelId)?.terminal.focus()
-  })
+  refitAfterLayoutChange()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const handlePaneDragEnter = (event: DragEvent, panel: TerminalPanel) => {
@@ -1358,10 +1401,8 @@ const handlePaneDrop = (event: DragEvent, targetPanel: TerminalPanel) => {
   }
   workspace.attachPanelToSplit(draggedId, targetPanel.id, 'right')
   clearTerminalTabDragState()
-  nextTick(() => {
-    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
-    terminalViews.get(workspace.activePanelId)?.terminal.focus()
-  })
+  refitAfterLayoutChange()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const copySelection = async (panelId = workspace.activePanelId) => {
@@ -1967,10 +2008,8 @@ const splitFromTermMenu = (direction: 'right' | 'below') => {
 const unsplitFromTermMenu = () => {
   workspace.unsplitPanel(termMenu.panelId)
   termMenu.visible = false
-  nextTick(() => {
-    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 })
-    terminalViews.get(workspace.activePanelId)?.terminal.focus()
-  })
+  refitAfterLayoutChange()
+  nextTick(() => terminalViews.get(workspace.activePanelId)?.terminal.focus())
 }
 
 const openFileManagerFromMenu = () => {
@@ -2013,10 +2052,7 @@ onMounted(() => {
   offData = window.aiops?.onTerminalData(handleTerminalData) || null
   offLifecycle = window.aiops?.onTerminalLifecycle((event) => workspace.applyTerminalLifecycle(event)) || null
   offExit = window.aiops?.onTerminalExit((event) => workspace.applyTerminalExit(event)) || null
-  document.addEventListener('click', () => {
-    menu.visible = false
-    termMenu.visible = false
-  })
+  document.addEventListener('click', closeTerminalMenusFromDocument)
   window.addEventListener('keydown', handleShortcut)
 })
 
@@ -2034,6 +2070,7 @@ onUnmounted(() => {
     view.terminal.dispose()
   })
   terminalViews.clear()
+  document.removeEventListener('click', closeTerminalMenusFromDocument)
   window.removeEventListener('keydown', handleShortcut)
 })
 
@@ -2122,7 +2159,7 @@ watch(
 watch(
   () => splitLayoutItems.value.map(({ panel, style }) => `${panel.id}:${panel.splitGroupId || ''}:${panel.split || ''}:${JSON.stringify(style)}`).join('|'),
   () => {
-    nextTick(() => scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3 }))
+    refitAfterLayoutChange()
   },
   { flush: 'post' }
 )

@@ -161,6 +161,7 @@ export type AiopsAssetRecord = {
   needProxy?: boolean
   proxyName?: string
   keychainId?: string
+  jumpHostId?: string
   hasPassword?: boolean
   hasPrivateKey?: boolean
   isLocalShell?: boolean
@@ -209,6 +210,7 @@ export type AiopsAssetInput = {
   needProxy?: boolean
   proxyName?: string
   keychainId?: string
+  jumpHostId?: string
   password?: string
   privateKey?: string
   passphrase?: string
@@ -262,12 +264,16 @@ export type AiopsCustomFolderRecord = {
   uuid: string
   name: string
   description: string
+  parentUuid?: string
+  scope?: 'direct' | 'bastion'
 }
 
 export type AiopsCustomFolderSaveInput = {
   uuid?: string
   name: string
   description?: string
+  parentUuid?: string
+  scope?: 'direct' | 'bastion'
 }
 
 export type AiopsAssetSnapshot = {
@@ -893,6 +899,7 @@ export type TerminalUserConfig = {
 export type WorkspaceUserConfig = {
   expandedGroups: string[]
   showIpMode: boolean
+  recentAssetIds?: string[]
 }
 
 export type EditorUserConfig = {

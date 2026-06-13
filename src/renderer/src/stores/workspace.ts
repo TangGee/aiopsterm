@@ -1348,16 +1348,23 @@ const normalizeWorkspacePreferences = (source?: Partial<WorkspaceUserConfig>) =>
   const incomingExpandedGroups = Array.isArray(incoming.expandedGroups)
     ? incoming.expandedGroups.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : defaultWorkspacePreferences.expandedGroups
+  const incomingRecentAssetIds = Array.isArray(incoming.recentAssetIds)
+    ? incoming.recentAssetIds.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : defaultWorkspacePreferences.recentAssetIds || []
   const normalized: WorkspaceUserConfig = {
     expandedGroups: Array.from(new Set(incomingExpandedGroups)),
-    showIpMode: typeof incoming.showIpMode === 'boolean' ? incoming.showIpMode : defaultWorkspacePreferences.showIpMode
+    showIpMode: typeof incoming.showIpMode === 'boolean' ? incoming.showIpMode : defaultWorkspacePreferences.showIpMode,
+    recentAssetIds: Array.from(new Set(incomingRecentAssetIds)).slice(0, 10)
   }
   const changed =
     !isRecord(source) ||
     !Array.isArray(incoming.expandedGroups) ||
+    !Array.isArray(incoming.recentAssetIds) ||
     incoming.expandedGroups.length !== normalized.expandedGroups.length ||
     incoming.expandedGroups.some((item, index) => item !== normalized.expandedGroups[index]) ||
-    incoming.showIpMode !== normalized.showIpMode
+    incoming.showIpMode !== normalized.showIpMode ||
+    incoming.recentAssetIds.length !== (normalized.recentAssetIds || []).length ||
+    incoming.recentAssetIds.some((item, index) => item !== (normalized.recentAssetIds || [])[index])
 
   return {
     normalized,
@@ -1366,14 +1373,15 @@ const normalizeWorkspacePreferences = (source?: Partial<WorkspaceUserConfig>) =>
 }
 
 const isWorkspacePreferencesSnapshot = (source: unknown): source is WorkspaceUserConfig => {
-  if (!isRecord(source) || !Array.isArray(source.expandedGroups) || typeof source.showIpMode !== 'boolean') return false
+  if (!isRecord(source) || !Array.isArray(source.expandedGroups) || typeof source.showIpMode !== 'boolean' || !Array.isArray(source.recentAssetIds)) return false
   const { changed } = normalizeWorkspacePreferences(source)
   return !changed
 }
 
 const cloneWorkspacePreferencesSnapshot = (preferences: WorkspaceUserConfig): WorkspaceUserConfig => ({
   showIpMode: preferences.showIpMode,
-  expandedGroups: [...preferences.expandedGroups]
+  expandedGroups: [...preferences.expandedGroups],
+  recentAssetIds: [...(preferences.recentAssetIds || [])]
 })
 
 const workspacePreferenceSnapshotsMatch = (left: WorkspaceUserConfig, right: WorkspaceUserConfig) =>
@@ -3443,7 +3451,8 @@ const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): Use
   workspacePreferences: {
     ...(base.workspacePreferences || defaultWorkspacePreferences),
     ...(patch.workspacePreferences || {}),
-    expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || defaultWorkspacePreferences.expandedGroups
+    expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || defaultWorkspacePreferences.expandedGroups,
+    recentAssetIds: patch.workspacePreferences?.recentAssetIds || base.workspacePreferences?.recentAssetIds || defaultWorkspacePreferences.recentAssetIds || []
   },
   editorSettings: normalizeEditorSettingsConfig({
     ...(base.editorSettings || defaultEditorSettings),

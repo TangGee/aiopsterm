@@ -30,7 +30,8 @@ describe('workspace preferences seed config', () => {
     expect(shouldUseWorkspacePreferencesSeedData()).toBe(false)
     expect(defaultWorkspacePreferencesConfig()).toEqual({
       expandedGroups: ['recent_connections', 'local_connections'],
-      showIpMode: false
+      showIpMode: false,
+      recentAssetIds: []
     })
     expect(defaultWorkspacePreferencesConfig()).toEqual(defaultWorkspacePreferencesData())
   })
@@ -42,7 +43,8 @@ describe('workspace preferences seed config', () => {
     expect(shouldUseWorkspacePreferencesSeedData()).toBe(true)
     expect(defaultWorkspacePreferencesConfig()).toEqual({
       expandedGroups: ['recent_connections', 'group-生产', 'group-预发', 'local_connections', 'org-1', 'custom-folder-a'],
-      showIpMode: false
+      showIpMode: false,
+      recentAssetIds: ['asset-1', 'asset-2']
     })
     expect(defaultWorkspacePreferencesConfig()).toEqual(defaultWorkspacePreferencesSeedData())
   })

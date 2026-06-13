@@ -8,4 +8,5 @@ Terminal tabs behave like standalone sessions until a split action groups them.
 - Right-click a split tab or pane and choose `取消拆分` to restore that pane as a standalone tab.
 - Drag a terminal tab onto another terminal tab or pane to attach it as a right-side split of the target.
 - Drag a split terminal tab onto the tab bar empty area or the new-tab button area to restore it as a standalone tab.
+- Split restore forces xterm host geometry cleanup, multi-frame fit, terminal refresh, scroll-to-bottom, and backend resize notification when a backend session is attached.
 - When many terminal tabs are open, tab titles shrink and ellipsize so later tabs remain reachable.

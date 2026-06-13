@@ -1,5 +1,30 @@
 <template>
-  <div class="assets-panel-native">
+  <div
+    class="assets-panel-native"
+    :class="{ 'assets-panel-workspace-mode': isWorkspaceMode }"
+  >
+    <div
+      v-if="isWorkspaceMode"
+      class="asset-workspace-tabs"
+      role="tablist"
+      aria-label="资产管理"
+    >
+      <button
+        v-for="entry in assetManagementEntries"
+        :key="entry.key"
+        type="button"
+        class="asset-workspace-tab"
+        :class="{ active: activeAssetView === entry.key }"
+        :data-onboarding-id="entry.key === 'assetConfig' ? 'host-management-entry' : undefined"
+        role="tab"
+        :aria-selected="activeAssetView === entry.key"
+        @click="openManagementEntry(entry.key)"
+      >
+        <component :is="entry.icon" />
+        <span>{{ entry.name }}</span>
+      </button>
+    </div>
+
     <template v-if="activeAssetView === 'menu'">
       <div class="asset-management-header">
         <strong>管理</strong>
@@ -925,10 +950,13 @@ import {
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
 
-defineProps<{ query: string }>()
+const props = withDefaults(defineProps<{ query: string; mode?: 'panel' | 'workspace' }>(), {
+  mode: 'panel'
+})
 
 const workspace = useWorkspaceStore()
-const activeAssetView = ref('menu')
+const isWorkspaceMode = computed(() => props.mode === 'workspace')
+const activeAssetView = ref(isWorkspaceMode.value ? 'assetConfig' : 'menu')
 const managementQuery = ref('')
 const assetQuery = ref('')
 const editorOpen = ref(false)
@@ -1492,6 +1520,7 @@ const connectAsset = async (assetId: string | null) => {
   if (workspace.onboardingActiveTour === 'addAndConnectHost') {
     workspace.nextOnboardingStep()
   }
+  workspace.setActiveModule('workspace')
   assetContextMenuId.value = null
 }
 
