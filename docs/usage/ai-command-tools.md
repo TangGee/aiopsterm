@@ -21,7 +21,7 @@ The AI input context row starts empty. The backend may expose suggested/default 
 
 Sent user messages are read-only in the transcript. They can be copied, but clicking them no longer reopens an editable composer or mutates previous user turns.
 
-The Todo/progress strip is hidden until a backend-owned task snapshot or focused task exists. If an AI request cannot reach a configured provider, or the prompt is rejected before generation starts, the backend clears the request Todo snapshot instead of leaving a failed sample Focus Chain in the panel. Model, context, history, export, and input controls remain functional from the initial empty state.
+The Todo/progress strip is Agent-mode only and remains hidden until a backend-owned task snapshot or focused task exists. Command mode does not render that task-progress area; command-tool work is tracked on the generated Command card through its pending, sent, or failed execution status. If an AI request cannot reach a configured provider, or the prompt is rejected before generation starts, the backend clears the request Todo snapshot instead of leaving a failed sample Focus Chain in the panel. Model, context, history, export, and input controls remain functional from the initial empty state.
 
 OpenAI-compatible provider endpoints are called from the main process. Base URLs that already include a version segment such as `/v1` or `/v3` are preserved, and aiopsterm appends only the operation path such as `chat/completions` or `responses`. Add `#` at the end of the Base URL only when the provider needs aiopsterm to skip the automatic `/v1` version prefix; aiopsterm strips the `#` and still appends the selected operation path.
 

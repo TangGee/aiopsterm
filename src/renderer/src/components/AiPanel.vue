@@ -1456,7 +1456,7 @@ const focusedTodo = computed(() => workspace.todoItems.find((todo) => todo.isFoc
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
 const focusedTodoId = computed(() => focusedTodo.value?.id || null)
 const visibleTodos = computed(() => workspace.todoItems.slice(0, todoMaxItems))
-const showTodoInlineDisplay = computed(() => Boolean(focusedTodo.value || workspace.todoProgress.total > 0))
+const showTodoInlineDisplay = computed(() => chatMode.value === 'agent' && Boolean(focusedTodo.value || workspace.todoProgress.total > 0))
 const filteredHistoryConversations = computed(() => {
   const keyword = historySearchTerm.value.trim().toLowerCase()
   return workspace.sortedConversations.filter((conversation) => {

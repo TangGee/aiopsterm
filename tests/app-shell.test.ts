@@ -5387,6 +5387,17 @@ describe('AppShell', () => {
     store.aiContextUsage = null
     await wrapper.vm.$nextTick()
 
+    await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
+    await wrapper.findAll('.ai-mode-popup .select-list button').find((button) => button.text().includes('Command'))!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.todo-inline-display').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('任务进度')
+
+    await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
+    await wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.todo-inline-display').exists()).toBe(true)
+
     await wrapper.find('.todo-inline-header').trigger('click')
     expect(wrapper.find('.todo-inline-display ol').exists()).toBe(false)
     expect(wrapper.find('.focus-chain-highlight').exists()).toBe(false)
