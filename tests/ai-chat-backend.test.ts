@@ -366,7 +366,7 @@ describe('ai chat backend response boundary', () => {
       }
     })
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://ark.example.test/api/coding/v3',
+      'https://ark.example.test/api/coding/v3/chat/completions',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ Authorization: 'Bearer sk-test' })

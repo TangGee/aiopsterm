@@ -83,22 +83,23 @@ function appendEndpointPath(baseUrl: string, path: string): string {
 
 function normalizeOpenAiBaseUrl(baseUrl: string): string {
   if (!baseUrl) return ''
-  if (baseUrl.endsWith('#')) return baseUrl.slice(0, -1)
+  const skipVersionPrefix = baseUrl.endsWith('#')
+  const normalizedBaseUrl = skipVersionPrefix ? baseUrl.slice(0, -1) : baseUrl
   try {
-    const parsed = new URL(baseUrl)
+    const parsed = new URL(normalizedBaseUrl)
     const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-    if (!hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
+    if (!skipVersionPrefix && !hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
     parsed.search = ''
     parsed.hash = ''
     return parsed.toString().replace(/\/$/, '')
   } catch {
-    return baseUrl
+    return normalizedBaseUrl
   }
 }
 
 function normalizeOpenAiOperationEndpoint(baseUrl: string, path: string): string {
   const normalized = normalizeOpenAiBaseUrl(baseUrl)
-  return baseUrl.endsWith('#') ? normalized : appendEndpointPath(normalized, path)
+  return appendEndpointPath(normalized, path)
 }
 
 const normalizeMessages = (messagesOrUserPrompt: string | AiProviderTextMessage[]): AiProviderTextMessage[] => {

@@ -179,7 +179,7 @@ describe('model provider backend boundary', () => {
     })
   })
 
-  it('treats trailing hash OpenAI-compatible base URLs as complete endpoints', async () => {
+  it('uses trailing hash OpenAI-compatible base URLs to skip only the version prefix', async () => {
     const server = await startProviderServer((_request, response) => {
       sendJson(response, 200, { id: 'chat-test', choices: [{ message: { content: 'OK' } }] })
     })
@@ -198,10 +198,10 @@ describe('model provider backend boundary', () => {
     expect(result.data).toMatchObject({
       provider: 'openai',
       modelId: 'test-code-model',
-      endpoint: `${server.baseUrl}/api/coding/v3`
+      endpoint: `${server.baseUrl}/api/coding/v3/chat/completions`
     })
     expect(server.requests).toHaveLength(1)
-    expect(server.requests[0]).toEqual(expect.objectContaining({ method: 'POST', url: '/api/coding/v3' }))
+    expect(server.requests[0]).toEqual(expect.objectContaining({ method: 'POST', url: '/api/coding/v3/chat/completions' }))
     expect(JSON.parse(server.requests[0].body)).toEqual({
       model: 'test-code-model',
       messages: [{ role: 'user', content: 'test' }],

@@ -123,22 +123,8 @@ const defaultEndpoints: Record<ModelProviderCheckKey, string> = {
 
 const normalizeOpenAiEndpoint = (baseUrl: string, apiFormat: ModelProviderUserConfig['apiFormat']) => {
   if (!baseUrl) return ''
-  if (baseUrl.endsWith('#')) return baseUrl.slice(0, -1)
-
-  let normalized = baseUrl
-  try {
-    const parsed = new URL(baseUrl)
-    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-    if (!hasVersionSegment) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-      normalized = parsed.toString().replace(/\/$/, '')
-    }
-  } catch {
-    return baseUrl
-  }
-
   const path = apiFormat === 'responses' ? 'responses' : 'chat/completions'
-  return `${normalized}${normalized.endsWith('/') ? '' : '/'}${path}`
+  return normalizeOpenAiOperationEndpoint(baseUrl, path)
 }
 
 const appendEndpointPath = (baseUrl: string, path: string) => {
@@ -160,22 +146,23 @@ const appendEndpointPath = (baseUrl: string, path: string) => {
 
 const normalizeOpenAiBaseUrl = (baseUrl: string) => {
   if (!baseUrl) return ''
-  if (baseUrl.endsWith('#')) return baseUrl.slice(0, -1)
+  const skipVersionPrefix = baseUrl.endsWith('#')
+  const normalizedBaseUrl = skipVersionPrefix ? baseUrl.slice(0, -1) : baseUrl
   try {
-    const parsed = new URL(baseUrl)
+    const parsed = new URL(normalizedBaseUrl)
     const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-    if (!hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
+    if (!skipVersionPrefix && !hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
     parsed.search = ''
     parsed.hash = ''
     return parsed.toString().replace(/\/$/, '')
   } catch {
-    return baseUrl
+    return normalizedBaseUrl
   }
 }
 
 const normalizeOpenAiOperationEndpoint = (baseUrl: string, path: string) => {
   const normalized = normalizeOpenAiBaseUrl(baseUrl)
-  return baseUrl.endsWith('#') ? normalized : appendEndpointPath(normalized, path)
+  return appendEndpointPath(normalized, path)
 }
 
 const validateUrl = (value: string, field: string): string | null => {

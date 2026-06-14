@@ -1634,8 +1634,9 @@ const ProviderCard = defineComponent({
       const url = providerState.value.baseUrl.trim()
       if (!url) return ''
       let baseUrl = url
-      if (url.endsWith('#')) {
-        return url.slice(0, -1)
+      const skipVersionPrefix = url.endsWith('#')
+      if (skipVersionPrefix) {
+        baseUrl = url.slice(0, -1)
       } else {
         let hasV1 = false
         try {

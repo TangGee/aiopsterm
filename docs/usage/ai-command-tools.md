@@ -19,7 +19,7 @@ The right AI sidebar starts as a real empty chat surface, not with client-fabric
 
 The Todo/progress strip is hidden until a backend-owned task snapshot or focused task exists. If an AI request cannot reach a configured provider, or the prompt is rejected before generation starts, the backend clears the request Todo snapshot instead of leaving a failed sample Focus Chain in the panel. Model, context, history, export, and input controls remain functional from the initial empty state.
 
-OpenAI-compatible provider endpoints are called from the main process. Base URLs that already include a version segment such as `/v1` or `/v3` are preserved, and aiopsterm appends only the operation path such as `chat/completions` or `responses`. If a provider requires a complete operation endpoint, add `#` at the end of the Base URL; aiopsterm strips the `#` and sends the request to that exact URL without appending another path.
+OpenAI-compatible provider endpoints are called from the main process. Base URLs that already include a version segment such as `/v1` or `/v3` are preserved, and aiopsterm appends only the operation path such as `chat/completions` or `responses`. Add `#` at the end of the Base URL only when the provider needs aiopsterm to skip the automatic `/v1` version prefix; aiopsterm strips the `#` and still appends the selected operation path.
 
 Command execution still follows the terminal security policy from Settings -> AI Preferences -> Security Configuration. Commands blocked by policy stay blocked, commands requiring confirmation show the approval bar, and successful writes are accepted only after the terminal bridge confirms the exact backend session and byte count. Terminal output is rendered only from backend `terminal:data` events.
 
