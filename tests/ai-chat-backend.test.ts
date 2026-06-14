@@ -515,6 +515,130 @@ describe('ai chat backend response boundary', () => {
     })
   })
 
+  it('turns command-mode fenced shell output into backend-owned read-only command cards', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: '可以先查询进程：\n\n```bash\nps aux | grep nginx\n```'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 66_000,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-command-fence',
+      assistantMessageId: 'aichat-request-command-fence-assistant',
+      prompt: '生成查询 nginx 进程的命令',
+      model: 'ops-chat',
+      mode: 'command',
+      contexts: [{ id: 'host-prod-1', kind: 'hosts', label: 'prod-1', detail: 'production' }]
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      message: {
+        id: 'aichat-request-command-fence-assistant',
+        role: 'assistant',
+        text: 'ps aux | grep nginx',
+        state: 'done',
+        ask: 'command',
+        commandExecution: {
+          ip: 'prod-1',
+          command: 'ps aux | grep nginx',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    })
+  })
+
+  it('keeps command-mode state-changing command suggestions approval-gated', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'Command: systemctl restart nginx'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 67_000,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-command-risky',
+      assistantMessageId: 'aichat-request-command-risky-assistant',
+      prompt: '生成重启 nginx 的命令',
+      model: 'ops-chat',
+      mode: 'command'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      message: {
+        id: 'aichat-request-command-risky-assistant',
+        ask: 'command',
+        commandExecution: {
+          ip: 'local',
+          command: 'systemctl restart nginx',
+          requiresApproval: true,
+          interactive: false
+        }
+      }
+    })
+  })
+
   it('turns provider MCP resource blocks into backend-owned approval messages', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

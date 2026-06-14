@@ -384,7 +384,7 @@
           </template>
         </div>
         <p
-          v-else
+          v-else-if="!isCommandSuggestionMessage(message)"
           :data-testid="message.role === 'user' ? 'ai-user-message-content' : undefined"
         >
           {{ message.text }}
@@ -499,6 +499,14 @@
             <span class="message-command-title">
               <Code2 />
               <strong>Command</strong>
+              <button
+                type="button"
+                class="message-command-help"
+                title="AI 生成的可执行命令会先进入确认卡片，不会自动写入终端。"
+                @click.stop
+              >
+                <CircleHelp />
+              </button>
             </span>
             <span
               v-if="commandHostForMessage(message)"
@@ -518,12 +526,31 @@
             >
               交互式
             </span>
+            <span class="message-command-card-spacer"></span>
+            <span
+              class="message-command-line-count"
+              data-testid="ai-message-command-line-count"
+            >
+              {{ commandLineCountForMessage(message) }} line{{ commandLineCountForMessage(message) === 1 ? '' : 's' }}
+            </span>
+            <button
+              type="button"
+              class="message-command-icon-button"
+              title="复制命令"
+              data-testid="ai-message-command-copy"
+              @click.stop="copyCommandToClipboard(message)"
+            >
+              <Copy />
+            </button>
           </div>
-          <pre data-testid="ai-message-command-text"><code>{{ commandTextForMessage(message) }}</code></pre>
+          <pre
+            class="message-command-code"
+            data-testid="ai-message-command-text"
+          ><code>{{ commandTextForMessage(message) }}</code></pre>
           <div
-            v-if="message.commandExecutionMessage || message.executedCommand"
+            v-if="message.commandExecutionMessage || message.executedCommand || message.action === 'rejected'"
             class="message-command-status"
-            :class="message.commandExecutionStatus"
+            :class="[message.commandExecutionStatus, message.action]"
             data-testid="ai-message-command-status"
           >
             <LoaderCircle
@@ -531,9 +558,9 @@
               class="spinning"
             />
             <Check v-else-if="message.commandExecutionStatus === 'succeeded'" />
-            <X v-else-if="message.commandExecutionStatus === 'failed'" />
+            <X v-else-if="message.commandExecutionStatus === 'failed' || message.action === 'rejected'" />
             <Zap v-else />
-            <span>{{ message.commandExecutionMessage || `已发送到终端：${message.executedCommand}` }}</span>
+            <span>{{ message.commandExecutionMessage || (message.action === 'rejected' ? '已拒绝执行。' : `已发送到终端：${message.executedCommand}`) }}</span>
           </div>
           <div
             class="message-command-actions"
@@ -541,18 +568,30 @@
           >
             <button
               type="button"
-              class="secondary"
-              data-testid="ai-message-command-copy"
-              @click.stop="copyCommandToClipboard(message)"
+              class="secondary danger"
+              data-testid="ai-message-command-reject"
+              :disabled="isCommandTerminalActionDisabled(message)"
+              @click.stop="rejectMessageCommand(message)"
             >
-              <Copy />
-              <span>复制</span>
+              <X />
+              <span>拒绝</span>
+            </button>
+            <button
+              v-if="isReadOnlyCommandMessage(message)"
+              type="button"
+              class="secondary success"
+              data-testid="ai-message-command-auto-run"
+              :disabled="isCommandTerminalActionDisabled(message)"
+              @click.stop="void runMessageCommand(message, { autoReadOnly: true })"
+            >
+              <CheckCircle />
+              <span>查询类自动执行</span>
             </button>
             <button
               type="button"
               class="primary"
               data-testid="ai-message-command-run"
-              :disabled="message.commandExecutionStatus === 'running'"
+              :disabled="isCommandTerminalActionDisabled(message)"
               @click.stop="void runMessageCommand(message)"
             >
               <LoaderCircle
@@ -586,7 +625,7 @@
           </button>
         </div>
         <div
-          v-if="message.role === 'assistant'"
+          v-if="message.role === 'assistant' && !isCommandSuggestionMessage(message)"
           class="message-actions"
         >
           <button
@@ -1108,6 +1147,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
   Code2,
   Copy,
   Download,
@@ -1425,6 +1465,7 @@ type CommandSuggestionMessage = {
   text: string
   state?: string
   ask?: string
+  action?: ChatMessage['action']
   commandExecution?: {
     ip?: string
     command: string
@@ -1444,6 +1485,13 @@ const isCommandSuggestionMessage = (message: CommandSuggestionMessage) => {
 
 const commandTextForMessage = (message: { text: string; contentParts?: AiContentPart[]; commandExecution?: { command: string } }) =>
   message.commandExecution?.command.trim() || messagePlainText(message).trim()
+
+const commandLineCountForMessage = (message: CommandSuggestionMessage) => commandTextForMessage(message).split(/\r?\n/).filter((line) => line.trim()).length || 1
+
+const isReadOnlyCommandMessage = (message: CommandSuggestionMessage) => message.commandExecution?.requiresApproval === false && message.commandExecution.interactive !== true
+
+const isCommandTerminalActionDisabled = (message: CommandSuggestionMessage) =>
+  message.commandExecutionStatus === 'running' || message.commandExecutionStatus === 'succeeded' || message.action === 'rejected'
 
 const commandHostForMessage = (message: { commandExecution?: { ip?: string } }) => {
   const ip = message.commandExecution?.ip?.trim()
@@ -1475,7 +1523,19 @@ const persistCommandExecutionState = () => {
   void workspace.syncCurrentConversationSnapshot({ notifyFailure: true, notifyUnavailable: true })
 }
 
-const runMessageCommand = async (message: CommandSuggestionMessage) => {
+const rejectMessageCommand = (message: CommandSuggestionMessage) => {
+  if (message.commandExecutionStatus === 'running') return
+  message.action = 'rejected'
+  message.commandExecutionMessage = '已拒绝执行。'
+  persistCommandExecutionState()
+  showChatExportNotice('命令已拒绝。')
+}
+
+const runMessageCommand = async (message: CommandSuggestionMessage, options: { autoReadOnly?: boolean } = {}) => {
+  if (message.action === 'rejected') {
+    showChatExportNotice('命令已拒绝，无法执行。')
+    return
+  }
   const command = commandTextForMessage(message)
   if (!command) {
     setCommandExecutionState(message, 'failed', '没有可运行的命令。')
@@ -1483,7 +1543,7 @@ const runMessageCommand = async (message: CommandSuggestionMessage) => {
     showChatExportNotice('没有可运行的命令。')
     return
   }
-  setCommandExecutionState(message, 'running', '正在发送到当前终端...')
+  setCommandExecutionState(message, 'running', options.autoReadOnly ? '查询类命令正在发送到当前终端...' : '正在发送到当前终端...')
   const decision = await workspace.runActiveTerminalCommand(command, 'agent')
   if (!decision) {
     setCommandExecutionState(message, 'failed', '终端会话不可用，请先打开本地 shell 或连接 SSH。')
@@ -1509,9 +1569,9 @@ const runMessageCommand = async (message: CommandSuggestionMessage) => {
     showChatExportNotice(decision.reason)
     return
   }
-  setCommandExecutionState(message, 'succeeded', `已发送到终端：${command}`, command)
+  setCommandExecutionState(message, 'succeeded', options.autoReadOnly ? `查询类命令已发送到终端：${command}` : `已发送到终端：${command}`, command)
   persistCommandExecutionState()
-  showChatExportNotice('命令已写入终端输入区。')
+  showChatExportNotice(options.autoReadOnly ? '查询类命令已写入终端输入区。' : '命令已写入终端输入区。')
 }
 
 const formatMcpToolArguments = (message: Pick<ChatMessage, 'mcpToolCall'>) => {

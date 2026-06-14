@@ -8937,6 +8937,7 @@ code {
   align-items: center;
   gap: 8px;
   margin-top: 10px;
+  flex-wrap: wrap;
 }
 
 .message-command-actions button {
@@ -8969,6 +8970,23 @@ code {
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
 }
 
+.message-command-actions button.secondary.danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-3));
+}
+
+.message-command-actions button.secondary.success {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 38%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-3));
+}
+
+.message-command-actions button.secondary.success:hover {
+  border-color: color-mix(in srgb, var(--success) 62%, var(--border));
+  background: color-mix(in srgb, var(--success) 14%, var(--surface-3));
+}
+
 .message-command-actions button:disabled {
   opacity: 0.68;
   cursor: wait;
@@ -8978,10 +8996,11 @@ code {
   display: grid;
   gap: 8px;
   margin-top: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent) 12%);
-  padding: 9px;
+  background: var(--surface-2);
+  padding: 10px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .message-command-card-header {
@@ -9001,10 +9020,45 @@ code {
 }
 
 .message-command-title svg,
-.message-command-status svg {
+.message-command-status svg,
+.message-command-icon-button svg,
+.message-command-help svg {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+}
+
+.message-command-help,
+.message-command-icon-button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.message-command-help:hover,
+.message-command-icon-button:hover {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--surface-3);
+}
+
+.message-command-card-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.message-command-line-count {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .message-command-host,
@@ -9027,7 +9081,7 @@ code {
   background: color-mix(in srgb, var(--warn) 10%, transparent);
 }
 
-.message-command-card pre {
+.message-command-code {
   max-height: 180px;
   overflow: auto;
   margin: 0;
@@ -9042,7 +9096,7 @@ code {
   word-break: break-word;
 }
 
-.message-command-card code {
+.message-command-code code {
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
 
@@ -9082,6 +9136,12 @@ code {
 }
 
 .message-command-status.failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.message-command-status.rejected {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
   background: color-mix(in srgb, var(--danger) 10%, transparent);

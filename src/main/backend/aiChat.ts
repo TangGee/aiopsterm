@@ -418,6 +418,16 @@ const createAiChatSystemPrompt = (input: AiChatResponseInput) => {
     'When an action is risky, explain the risk and ask for confirmation before providing an executable command.',
     '',
     `Mode: ${modeLabel}`,
+    input.mode === 'command'
+      ? [
+          'Command mode output contract:',
+          '- Return exactly one executable shell command as an <execute_command> block when the operator asks for a command.',
+          '- Include <ip>, <command>, <requires_approval>, and <interactive> fields.',
+          '- Use <requires_approval>false</requires_approval> only for read-only diagnostic/query commands.',
+          '- Use <requires_approval>true</requires_approval> for destructive, state-changing, write, restart, install, delete, or uncertain commands.',
+          '- Do not wrap the command in Markdown when an <execute_command> block is suitable.'
+        ].join('\n')
+      : '',
     `Selected context: ${contextSummary}`,
     command ? `Selected command chip: ${command}` : '',
     skills ? `Activated skills:\n${skills}` : ''
@@ -456,6 +466,205 @@ type AiCommandExecutionInput = {
   command: string
   requiresApproval: boolean
   interactive: boolean
+}
+
+const commandFenceLanguages = new Set(['', 'bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'terminal', 'cmd', 'powershell', 'ps1'])
+
+const readOnlyCommandExecutables = new Set([
+  'awk',
+  'cat',
+  'column',
+  'crictl',
+  'cut',
+  'date',
+  'df',
+  'dig',
+  'dmesg',
+  'docker',
+  'du',
+  'env',
+  'egrep',
+  'fgrep',
+  'file',
+  'find',
+  'free',
+  'grep',
+  'head',
+  'host',
+  'hostname',
+  'id',
+  'ifconfig',
+  'ip',
+  'iostat',
+  'journalctl',
+  'jq',
+  'kubectl',
+  'last',
+  'less',
+  'll',
+  'ls',
+  'lsblk',
+  'lscpu',
+  'lsof',
+  'more',
+  'mpstat',
+  'netstat',
+  'nslookup',
+  'pgrep',
+  'pidof',
+  'podman',
+  'printenv',
+  'ps',
+  'pwd',
+  'route',
+  'sed',
+  'service',
+  'sort',
+  'ss',
+  'stat',
+  'systemctl',
+  'tail',
+  'top',
+  'traceroute',
+  'uname',
+  'uniq',
+  'uptime',
+  'vmstat',
+  'w',
+  'watch',
+  'wc',
+  'who',
+  'whoami',
+  'yq'
+])
+
+const writeOrRiskyCommandPattern =
+  /(^|\s)(rm|rmdir|mv|cp|touch|mkdir|chmod|chown|chgrp|dd|mkfs|fdisk|parted|reboot|shutdown|halt|poweroff|kill|killall|pkill|sudo|su|tee|truncate|mount|umount|apt|apt-get|yum|dnf|rpm|dpkg|pip|npm|pnpm|yarn|systemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask|daemon-reload)|service\s+\S+\s+(start|stop|restart|reload)|docker\s+(rm|rmi|run|restart|stop|start|kill|exec|compose|volume|network|system)|podman\s+(rm|rmi|run|restart|stop|start|kill|exec|compose|volume|network|system)|kubectl\s+(apply|delete|replace|patch|edit|scale|rollout|cordon|uncordon|drain|taint|exec|attach|cp|create|set|annotate|label))(\s|$)/i
+
+const commandWritesOutputPattern = /(^|[^<])>>?|<<|(\s|^)(curl|wget)\s+[\s\S]*\s(-o|--output|-O|--post|--request\s+(POST|PUT|PATCH|DELETE)|-X\s*(POST|PUT|PATCH|DELETE)|--data|-d)(\s|$)/i
+const interactiveCommandPattern = /(^|\s)(top|htop|less|more|watch|vim|vi|nano|ssh|mysql|psql|redis-cli)(\s|$)|\b(kubectl|docker|podman)\s+exec\s+(-it|-ti|--interactive|--tty)/i
+
+const stripShellPrompt = (line: string) =>
+  line
+    .replace(/^\s*(?:[$>]\s+|#\s+(?=\S))/, '')
+    .replace(/^\s*[\w.-]+@[\w.-]+:[^#$\n]*[#$]\s+/, '')
+
+const cleanupCommandCandidate = (value: string) => {
+  const lines = value
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => stripShellPrompt(line).trimEnd())
+  while (lines.length && !lines[0].trim()) lines.shift()
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
+  return lines.join('\n').trim()
+}
+
+const commandHasCjkText = (value: string) => /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/.test(value)
+const commandHasMarkdownOrXml = (value: string) => /```|<\/?[a-z][\w:-]*>/i.test(value)
+
+const commandLooksExecutable = (value: string) => {
+  const command = cleanupCommandCandidate(value)
+  if (!command || command.length > 4000 || commandHasMarkdownOrXml(command)) return false
+  const firstLine = command.split('\n').find((line) => line.trim())?.trim() || ''
+  if (!firstLine || commandHasCjkText(firstLine)) return false
+  return /^[A-Za-z0-9_./:-]+(?:\s|$)/.test(firstLine)
+}
+
+const extractFencedCommandCandidate = (text: string) => {
+  const fences = [...text.matchAll(/```([A-Za-z0-9_-]*)[^\n]*\n([\s\S]*?)```/g)]
+  const commandFences = fences
+    .map((match) => ({
+      language: normalizeText(match[1]).toLowerCase(),
+      body: cleanupCommandCandidate(match[2])
+    }))
+    .filter((item) => commandFenceLanguages.has(item.language) && commandLooksExecutable(item.body))
+  return commandFences.length === 1 ? commandFences[0].body : ''
+}
+
+const extractLabeledCommandCandidate = (text: string) => {
+  const labelMatch = text.match(/(?:^|\n)\s*(?:command|cmd|命令|执行命令)\s*[:：]\s*(?:`([^`\n]+)`|([^\n]+)|\n([\s\S]+))$/i)
+  if (!labelMatch) return ''
+  const candidate = cleanupCommandCandidate(labelMatch[1] || labelMatch[2] || labelMatch[3] || '')
+  return commandLooksExecutable(candidate) ? candidate : ''
+}
+
+const extractPlainCommandCandidate = (text: string) => {
+  const candidate = cleanupCommandCandidate(text)
+  const nonEmptyLines = candidate.split('\n').filter((line) => line.trim())
+  if (nonEmptyLines.length > 3) return ''
+  return commandLooksExecutable(candidate) ? candidate : ''
+}
+
+const splitShellSegments = (command: string) => {
+  const segments: string[] = []
+  let current = ''
+  let quote = ''
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]
+    const next = command[index + 1]
+    if ((char === '"' || char === "'") && command[index - 1] !== '\\') {
+      quote = quote === char ? '' : quote || char
+      current += char
+      continue
+    }
+    if (!quote && (char === ';' || char === '|' || (char === '&' && next === '&') || (char === '|' && next === '|'))) {
+      if (current.trim()) segments.push(current.trim())
+      current = ''
+      if ((char === '&' && next === '&') || (char === '|' && next === '|')) index += 1
+      continue
+    }
+    current += char
+  }
+  if (current.trim()) segments.push(current.trim())
+  return segments
+}
+
+const executableName = (segment: string) => {
+  const trimmed = segment.trim().replace(/^(?:env\s+|command\s+|builtin\s+|time\s+)/, '')
+  const token = trimmed.match(/^([A-Za-z0-9_./:-]+)/)?.[1] || ''
+  const parts = token.split('/')
+  return (parts[parts.length - 1] || token).toLowerCase()
+}
+
+const isReadOnlyCommand = (command: string) => {
+  if (!command || writeOrRiskyCommandPattern.test(command) || commandWritesOutputPattern.test(command)) return false
+  const segments = splitShellSegments(command)
+  if (!segments.length) return false
+  return segments.every((segment) => {
+    const executable = executableName(segment)
+    if (!readOnlyCommandExecutables.has(executable)) return false
+    if (executable === 'systemctl' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*systemctl\s+(status|is-active|is-enabled|list-|show|cat)\b/i.test(segment)) return false
+    if (executable === 'service' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*service\s+\S+\s+status\b/i.test(segment)) return false
+    if ((executable === 'docker' || executable === 'podman') && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*(?:docker|podman)\s+(ps|logs|inspect|stats|images|version|info)\b/i.test(segment)) {
+      return false
+    }
+    if (executable === 'kubectl' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*kubectl\s+(get|describe|logs|top|version|cluster-info|config\s+(view|get-contexts|current-context))\b/i.test(segment)) {
+      return false
+    }
+    if (executable === 'sed' && /\s-i(\s|$)/.test(segment)) return false
+    return true
+  })
+}
+
+const inferCommandHost = (input: AiChatResponseInput) => {
+  const hostContext = (input.contexts || []).find((context) => normalizeText(context.kind) === 'hosts' && normalizeText(context.label))
+  return normalizeText(hostContext?.label || hostContext?.detail || input.command?.path || input.command?.label) || 'local'
+}
+
+const parseCommandModeSuggestion = (input: AiChatResponseInput, text: string): AiCommandExecutionInput | null => {
+  if (input.mode !== 'command') return null
+  const command =
+    extractFencedCommandCandidate(text) ||
+    extractLabeledCommandCandidate(text) ||
+    extractPlainCommandCandidate(text)
+  if (!command) return null
+  const readOnly = isReadOnlyCommand(command)
+  return {
+    ip: inferCommandHost(input),
+    command,
+    requiresApproval: !readOnly,
+    interactive: interactiveCommandPattern.test(command)
+  }
 }
 
 const decodeMcpTagValue = (value: string) =>
@@ -742,7 +951,7 @@ const resolveCommandExecutionResponse = (
   startedAt: number,
   control: AiChatResponseControl
 ): AiChatResponseResult | null => {
-  const commandExecution = parseExecuteCommandBlock(text)
+  const commandExecution = parseExecuteCommandBlock(text) || parseCommandModeSuggestion(input, text)
   if (!commandExecution) return null
   const message = createCommandExecutionAskMessage(commandExecution, control)
   return {

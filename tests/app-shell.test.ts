@@ -3933,6 +3933,9 @@ describe('AppShell', () => {
     expect(commandMessage).toBeTruthy()
     expect(commandMessage!.find('[data-testid="ai-message-command-card"]').exists()).toBe(true)
     expect(commandMessage!.find('[data-testid="ai-message-command-text"]').text()).toContain('uptime')
+    expect(commandMessage!.find('[data-testid="ai-message-command-line-count"]').text()).toContain('1 line')
+    expect(commandMessage!.find('[data-testid="ai-message-command-reject"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(false)
     await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已复制')
@@ -3975,6 +3978,29 @@ describe('AppShell', () => {
         ])
       })
     )
+
+    store.chatMessages.push({
+      id: 'command-reject-assistant',
+      role: 'assistant',
+      text: 'df -h',
+      state: 'done',
+      ask: 'command',
+      commandExecution: {
+        ip: 'local',
+        command: 'df -h',
+        requiresApproval: false,
+        interactive: false
+      }
+    })
+    await wrapper.vm.$nextTick()
+    const rejectableCommandMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('df -h'))
+    expect(rejectableCommandMessage).toBeTruthy()
+    expect(rejectableCommandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(true)
+    await rejectableCommandMessage!.find('[data-testid="ai-message-command-reject"]').trigger('click')
+    await flushPromises()
+    expect(store.chatMessages.find((message) => message.id === 'command-reject-assistant')?.action).toBe('rejected')
+    expect(rejectableCommandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('已拒绝执行')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已拒绝')
 
     const findContextButton = (label: string) =>
       wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes(label))
@@ -4866,6 +4892,8 @@ describe('AppShell', () => {
     expect(commandMessage!.find('[data-testid="ai-message-command-text"]').text()).toContain('uptime')
     expect(commandMessage!.text()).toContain('Host 10.24.8.12')
     expect(commandMessage!.find('[data-testid="ai-message-command-run"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-line-count"]').text()).toContain('1 line')
 
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
     await flushPromises()
@@ -4875,7 +4903,7 @@ describe('AppShell', () => {
 
     store.activePanel.sessionId = 'terminal-command-panel'
     vi.mocked(window.aiops.writeTerminal).mockClear()
-    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    await commandMessage!.find('[data-testid="ai-message-command-auto-run"]').trigger('click')
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
     expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
@@ -4886,7 +4914,7 @@ describe('AppShell', () => {
         command: 'uptime'
       }
     })
-    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('已发送到终端：uptime')
+    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('查询类命令已发送到终端：uptime')
 
     wrapper.unmount()
   })
