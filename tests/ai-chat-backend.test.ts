@@ -515,6 +515,104 @@ describe('ai chat backend response boundary', () => {
     })
   })
 
+  it('sends agent command output back to the provider with the execute_command loop contract', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: '负载正常，无需继续执行命令。'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      now: () => 66_000,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      requestId: 'aichat-request-agent-loop',
+      assistantMessageId: 'aichat-request-agent-loop-assistant',
+      prompt: 'Command output from the approved execute_command tool is available.',
+      model: 'ops-chat',
+      mode: 'agent',
+      messages: [
+        { role: 'user', text: '检查负载' },
+        {
+          role: 'assistant',
+          text: 'uptime',
+          ask: 'command',
+          commandExecution: {
+            ip: '10.24.8.12',
+            command: 'uptime',
+            requiresApproval: false,
+            interactive: false
+          }
+        },
+        {
+          role: 'assistant',
+          text: 'load average: 0.10, 0.20, 0.30',
+          say: 'command_output',
+          action: 'approved',
+          commandExecution: {
+            ip: '10.24.8.12',
+            command: 'uptime',
+            requiresApproval: false,
+            interactive: false
+          }
+        }
+      ]
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        text: '负载正常，无需继续执行命令。',
+        provider: 'openai',
+        model: 'ops-chat'
+      }
+    })
+    const fetchCalls = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls
+    const requestBody = JSON.parse(String(fetchCalls[0]?.[1]?.body || '{}')) as { messages: Array<{ role: string; content: string }> }
+    expect(requestBody.messages[0]?.role).toBe('system')
+    expect(requestBody.messages[0]?.content).toContain('Agent mode tool contract:')
+    expect(requestBody.messages[0]?.content).toContain('After the conversation includes command_output from an approved command')
+    expect(requestBody.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.stringContaining('Requested command:')
+        }),
+        expect.objectContaining({
+          role: 'user',
+          content: expect.stringContaining('Command output for "uptime":')
+        })
+      ])
+    )
+  })
+
   it('turns command-mode fenced shell output into backend-owned read-only command cards', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

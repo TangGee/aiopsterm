@@ -1460,6 +1460,7 @@ const copyMessageToClipboard = async (message: { text: string; contentParts?: Ai
 }
 
 type CommandSuggestionMessage = {
+  id: string
   role: string
   contentParts?: AiContentPart[]
   text: string
@@ -1543,6 +1544,9 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
     showChatExportNotice('没有可运行的命令。')
     return
   }
+  const terminalPanel = workspace.activePanel.kind === 'knowledge' ? workspace.panels.find((panel) => panel.kind !== 'knowledge') : workspace.activePanel
+  const outputStartLength = terminalPanel?.output.length ?? 0
+  const terminalPanelId = terminalPanel?.id || ''
   setCommandExecutionState(message, 'running', options.autoReadOnly ? '查询类命令正在发送到当前终端...' : '正在发送到当前终端...')
   const decision = await workspace.runActiveTerminalCommand(command, 'agent')
   if (!decision) {
@@ -1571,7 +1575,39 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
   }
   setCommandExecutionState(message, 'succeeded', options.autoReadOnly ? `查询类命令已发送到终端：${command}` : `已发送到终端：${command}`, command)
   persistCommandExecutionState()
-  showChatExportNotice(options.autoReadOnly ? '查询类命令已写入终端输入区。' : '命令已写入终端输入区。')
+  if (chatMode.value !== 'agent' || message.ask !== 'command') {
+    showChatExportNotice(options.autoReadOnly ? '查询类命令已写入终端输入区。' : '命令已写入终端输入区。')
+    return
+  }
+  if (!terminalPanelId) {
+    setCommandExecutionState(message, 'failed', '终端会话不可用，请先打开本地 shell 或连接 SSH。')
+    persistCommandExecutionState()
+    showChatExportNotice('终端会话不可用，请先打开本地 shell 或连接 SSH。')
+    return
+  }
+  setCommandExecutionState(message, 'running', '命令已发送，正在等待终端输出...')
+  persistCommandExecutionState()
+  const loopResult = await workspace.continueAgentCommandLoop({
+    commandMessageId: message.id,
+    command,
+    commandExecution: message.commandExecution
+      ? {
+          ip: message.commandExecution.ip || commandHostForMessage(message).replace(/^Host\s+/, '') || '127.0.0.1',
+          command: message.commandExecution.command,
+          requiresApproval: message.commandExecution.requiresApproval === true,
+          interactive: message.commandExecution.interactive === true
+        }
+      : undefined,
+    terminalPanelId,
+    outputStartLength
+  })
+  if (loopResult.status === 'continued') {
+    setCommandExecutionState(message, 'succeeded', `命令输出已回传 Agent：${command}`, command)
+    persistCommandExecutionState()
+    showChatExportNotice('命令输出已回传 Agent，正在继续分析。')
+    return
+  }
+  showChatExportNotice(loopResult.reason)
 }
 
 const formatMcpToolArguments = (message: Pick<ChatMessage, 'mcpToolCall'>) => {

@@ -1108,6 +1108,109 @@ describe('workspace store', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-session', 'uptime\n')
   })
 
+  it('continues the agent loop with real terminal output after an approved command', async () => {
+    const store = useWorkspaceStore()
+    store.chatMessages = [
+      {
+        id: 'command-ask',
+        role: 'assistant',
+        text: 'uptime',
+        state: 'done',
+        ask: 'command',
+        commandExecution: {
+          ip: '10.24.8.12',
+          command: 'uptime',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    ]
+    store.activePanel.sessionId = 'terminal-agent-loop-session'
+    const outputStartLength = store.activePanel.output.length
+    store.appendTerminalOutput('terminal-agent-loop-session', 'uptime\nload average: 0.10, 0.20, 0.30\n')
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        text: '负载正常。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: input.requestId,
+        assistantMessageId: input.assistantMessageId
+      }
+    }))
+
+    const result = await store.continueAgentCommandLoop({
+      commandMessageId: 'command-ask',
+      command: 'uptime',
+      commandExecution: store.chatMessages[0].commandExecution,
+      terminalPanelId: store.activePanel.id,
+      outputStartLength
+    })
+
+    expect(result.status).toBe('continued')
+    expect(store.chatMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          say: 'command_output',
+          action: 'approved',
+          executedCommand: 'uptime',
+          text: expect.stringContaining('load average')
+        })
+      ])
+    )
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'agent',
+        prompt: expect.stringContaining('Command output from the approved execute_command tool is available.'),
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            say: 'command_output',
+            action: 'approved',
+            text: expect.stringContaining('load average')
+          })
+        ])
+      })
+    )
+  })
+
+  it('does not continue the agent loop when no terminal output is captured', async () => {
+    const store = useWorkspaceStore()
+    store.chatMessages = [
+      {
+        id: 'command-ask',
+        role: 'assistant',
+        text: 'uptime',
+        state: 'done',
+        ask: 'command',
+        commandExecutionStatus: 'running',
+        commandExecution: {
+          ip: '10.24.8.12',
+          command: 'uptime',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    ]
+
+    const result = await store.continueAgentCommandLoop({
+      commandMessageId: 'command-ask',
+      command: 'uptime',
+      terminalPanelId: store.activePanel.id,
+      outputStartLength: store.activePanel.output.length,
+      outputTimeoutMs: 0
+    })
+
+    expect(result.status).toBe('no-output')
+    expect(store.chatMessages.some((message) => message.say === 'command_output')).toBe(false)
+    expect(store.chatMessages.find((message) => message.id === 'command-ask')).toMatchObject({
+      commandExecutionStatus: 'failed',
+      commandExecutionMessage: '命令已发送，但未捕获到终端输出，未继续 Agent 循环。'
+    })
+    expect(window.aiops.generateAiChatResponse).not.toHaveBeenCalled()
+  })
+
   it('keeps configuration changes in local state before bridge persistence', async () => {
     const store = useWorkspaceStore()
 

@@ -823,7 +823,7 @@ const defaultConfig: UserConfig = {
 
 const ONBOARDING_VERSION = 2
 const onboardingModuleIds: OnboardingModuleId[] = ['interfaceGuide', 'systemSettings', 'addAndConnectHost', 'aiChat']
-type RendererLocalIdPrefix = 'panel' | 'terminal-security'
+type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
 const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
 const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
 const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
@@ -2612,6 +2612,13 @@ const isAiContentPart = (source: unknown): source is AiContentPart => {
   return false
 }
 
+const isAiChatCommandExecution = (source: unknown): source is NonNullable<AiChatHistoryMessage['commandExecution']> =>
+  isRecord(source) &&
+  isNonEmptyString(source.ip) &&
+  isNonEmptyString(source.command) &&
+  typeof source.requiresApproval === 'boolean' &&
+  typeof source.interactive === 'boolean'
+
 const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage =>
   isRecord(source) &&
   isNonEmptyString(source.id) &&
@@ -2629,12 +2636,7 @@ const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage
   (source.ask === undefined || aiChatAskValues.includes(source.ask as NonNullable<AiChatHistoryMessage['ask']>)) &&
   (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatHistoryMessage['say']>)) &&
   (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatHistoryMessage['action']>)) &&
-  (source.commandExecution === undefined ||
-    (isRecord(source.commandExecution) &&
-      isNonEmptyString(source.commandExecution.ip) &&
-      isNonEmptyString(source.commandExecution.command) &&
-      typeof source.commandExecution.requiresApproval === 'boolean' &&
-      typeof source.commandExecution.interactive === 'boolean')) &&
+  (source.commandExecution === undefined || isAiChatCommandExecution(source.commandExecution)) &&
   (source.mcpToolCall === undefined ||
     (isRecord(source.mcpToolCall) &&
       isNonEmptyString(source.mcpToolCall.serverName) &&
@@ -2686,7 +2688,13 @@ const isAiChatMessageMetadataData = (source: unknown): source is AiChatMessageMe
   source.messages.every(isAiChatHistoryMessage)
 
 const isAiChatMessageInput = (source: unknown): source is AiChatMessageInput =>
-  isRecord(source) && aiChatHistoryMessageRoles.includes(source.role as AiChatMessageInput['role']) && typeof source.text === 'string'
+  isRecord(source) &&
+  aiChatHistoryMessageRoles.includes(source.role as AiChatMessageInput['role']) &&
+  typeof source.text === 'string' &&
+  (source.ask === undefined || aiChatAskValues.includes(source.ask as NonNullable<AiChatMessageInput['ask']>)) &&
+  (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatMessageInput['say']>)) &&
+  (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatMessageInput['action']>)) &&
+  (source.commandExecution === undefined || isAiChatCommandExecution(source.commandExecution))
 
 const isAiChatContextInput = (source: unknown): source is NonNullable<AiChatResponseInput['contexts']>[number] =>
   isRecord(source) &&
@@ -12756,6 +12764,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const resolveActiveWritableTerminalPanel = () =>
     activePanel.value.kind === 'knowledge' ? panels.value.find((item) => item.kind !== 'knowledge') : activePanel.value
 
+  const sleep = (delayMs: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, delayMs)))
+
+  const waitForTerminalOutputAfter = async (panelId: string, startLength: number, timeoutMs = 2_500) => {
+    const startedAt = Date.now()
+    const panelForOutput = () => panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    let panel = panelForOutput()
+    if (!panel) return ''
+    while (Date.now() - startedAt < timeoutMs) {
+      panel = panelForOutput()
+      if (!panel) return ''
+      const output = panel.output.slice(startLength)
+      if (output.trim()) return output
+      await sleep(80)
+    }
+    panel = panelForOutput()
+    return panel?.output.slice(startLength) || ''
+  }
+
   const stageActiveTerminalCommand = (command: string) => {
     const panel = resolveActiveWritableTerminalPanel()
     const text = command.trim()
@@ -12768,6 +12794,81 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const text = command.trim()
     if (!panel || !text) return null
     return runTerminalCommand(panel.id, text, { source, writeToShell: true })
+  }
+
+  const aiChatMessageInputFromChatMessage = (message: ChatMessage): AiChatMessageInput => ({
+    role: message.role,
+    text: message.text,
+    ask: message.ask,
+    say: message.say,
+    action: message.action,
+    commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined
+  })
+
+  const buildAgentCommandOutputPrompt = (command: string, output: string) =>
+    [
+      'Command output from the approved execute_command tool is available.',
+      '',
+      `<command>${command}</command>`,
+      '',
+      'Output:',
+      '```',
+      output.trimEnd(),
+      '```',
+      '',
+      'Continue the Agent loop: analyze this observation, request another <execute_command> block only if another terminal step is needed, otherwise provide the final answer.'
+    ].join('\n')
+
+  const continueAgentCommandLoop = async (input: {
+    commandMessageId: string
+    command: string
+    commandExecution?: ChatMessage['commandExecution']
+    terminalPanelId: string
+    outputStartLength: number
+    outputTimeoutMs?: number
+    output?: string
+  }) => {
+    const command = input.command.trim()
+    const commandMessage = chatMessages.value.find((message) => message.id === input.commandMessageId)
+    if (!command || !commandMessage) return { status: 'unavailable' as const, reason: '命令卡片不可用，无法继续 Agent 循环。' }
+    const output = (input.output ?? (await waitForTerminalOutputAfter(input.terminalPanelId, input.outputStartLength, input.outputTimeoutMs))).trimEnd()
+    if (!output.trim()) {
+      commandMessage.commandExecutionStatus = 'failed'
+      commandMessage.commandExecutionMessage = '命令已发送，但未捕获到终端输出，未继续 Agent 循环。'
+      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+      return { status: 'no-output' as const, reason: commandMessage.commandExecutionMessage }
+    }
+    const requestId = createRendererLocalId('aichat-agent-loop')
+    const commandOutputMessage: ChatMessage = {
+      id: `${requestId}-command-output`,
+      role: 'assistant',
+      text: output,
+      state: 'done',
+      say: 'command_output',
+      action: 'approved',
+      commandExecution: input.commandExecution ? cloneStructuredValue(input.commandExecution) : undefined,
+      executedCommand: command
+    }
+    const assistantMessage: ChatMessage = {
+      id: `${requestId}-assistant`,
+      role: 'assistant',
+      text: '正在分析命令输出...',
+      state: 'streaming'
+    }
+    chatMessages.value.push(commandOutputMessage, assistantMessage)
+    const prompt = buildAgentCommandOutputPrompt(command, output)
+    const messages: AiChatMessageInput[] = chatMessages.value.slice(-16).map(aiChatMessageInputFromChatMessage)
+    void refreshAiTodoSnapshot()
+    void generateAiResponseForMessage(assistantMessage.id, {
+      requestId,
+      assistantMessageId: assistantMessage.id,
+      prompt,
+      messages,
+      model: config.value.modelName,
+      mode: 'agent'
+    })
+    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+    return { status: 'continued' as const, output, assistantMessageId: assistantMessage.id, requestId }
   }
 
   const appendActiveTerminalInput = (command: string) => {
@@ -13940,6 +14041,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cancelTerminalSecurityPrompt,
     stageActiveTerminalCommand,
     runActiveTerminalCommand,
+    continueAgentCommandLoop,
     appendActiveTerminalInput,
     generateTerminalCommand,
     injectGeneratedTerminalCommand,

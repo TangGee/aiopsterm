@@ -441,6 +441,15 @@ const waitForMockCall = async (mock: { mock: { calls: unknown[] } }, label: stri
   throw new Error(`${label} was not called`)
 }
 
+const waitForMockCallCount = async (mock: { mock: { calls: unknown[] } }, count: number, label: string) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await flushPromises()
+    await new Promise((resolve) => window.setTimeout(resolve, 25))
+    if (mock.mock.calls.length >= count) return
+  }
+  throw new Error(`${label} was not called ${count} times`)
+}
+
 const waitForAnimationFrames = async (count = 1) => {
   for (let index = 0; index < count; index += 1) {
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -4908,9 +4917,25 @@ describe('AppShell', () => {
 
     store.activePanel.sessionId = 'terminal-command-panel'
     vi.mocked(window.aiops.writeTerminal).mockClear()
-    await commandMessage!.find('[data-testid="ai-message-command-auto-run"]').trigger('click')
+    const runCommandPromise = commandMessage!.find('[data-testid="ai-message-command-auto-run"]').trigger('click')
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
+    store.appendTerminalOutput('terminal-command-panel', 'uptime\n 12:00:00 up 3 days, 1 user, load average: 0.10, 0.20, 0.30\n')
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        text: '负载正常，无需继续执行命令。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: input.requestId,
+        assistantMessageId: input.assistantMessageId
+      }
+    }))
+    await runCommandPromise
+    await waitForMockCallCount(vi.mocked(window.aiops.generateAiChatResponse), 2, 'generateAiChatResponse')
+    await flushPromises()
     expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
       executedCommand: 'uptime',
       commandExecutionStatus: 'succeeded',
@@ -4919,7 +4944,32 @@ describe('AppShell', () => {
         command: 'uptime'
       }
     })
-    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('查询类命令已发送到终端：uptime')
+    expect(store.chatMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          say: 'command_output',
+          action: 'approved',
+          text: expect.stringContaining('load average')
+        }),
+        expect.objectContaining({
+          role: 'assistant',
+          state: 'done',
+          text: '负载正常，无需继续执行命令。'
+        })
+      ])
+    )
+    expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'agent',
+      prompt: expect.stringContaining('Command output from the approved execute_command tool is available.'),
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          say: 'command_output',
+          action: 'approved',
+          text: expect.stringContaining('load average')
+        })
+      ])
+    })
+    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('命令输出已回传 Agent：uptime')
 
     wrapper.unmount()
   })

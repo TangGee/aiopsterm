@@ -333,7 +333,14 @@ const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, promp
     .map((message): AiChatMessageInput | null => {
       const text = normalizeText(message.text)
       if (!text) return null
-      return { role: message.role, text }
+      return {
+        role: message.role,
+        text,
+        ask: message.ask,
+        say: message.say,
+        action: message.action,
+        commandExecution: message.commandExecution
+      }
     })
     .filter(Boolean) as AiChatMessageInput[]
   const last = history[history.length - 1]
@@ -427,6 +434,17 @@ const createAiChatSystemPrompt = (input: AiChatResponseInput) => {
           '- Use <requires_approval>true</requires_approval> for destructive, state-changing, write, restart, install, delete, or uncertain commands.',
           '- Do not wrap the command in Markdown when an <execute_command> block is suitable.'
         ].join('\n')
+      : input.mode === 'agent'
+        ? [
+            'Agent mode tool contract:',
+            '- When terminal observation is needed, request exactly one executable shell command as an <execute_command> block.',
+            '- Include <ip>, <command>, <requires_approval>, and <interactive> fields.',
+            '- Use <requires_approval>false</requires_approval> only for read-only diagnostic/query commands.',
+            '- Use <requires_approval>true</requires_approval> for destructive, state-changing, write, restart, install, delete, or uncertain commands.',
+            '- After the conversation includes command_output from an approved command, analyze that output before deciding whether another <execute_command> block is needed.',
+            '- If no more terminal step is needed, provide the final answer and do not request another command.',
+            '- Do not claim that a command ran unless command_output is present in the conversation.'
+          ].join('\n')
       : '',
     `Selected context: ${contextSummary}`,
     command ? `Selected command chip: ${command}` : '',
@@ -442,6 +460,15 @@ const mapConversationForProvider = (messages: AiChatMessageInput[] | undefined, 
     .map((message): AiProviderTextMessage | null => {
       const content = normalizeText(message.text)
       if (!content) return null
+      if (message.say === 'command_output') {
+        const command = normalizeText(message.commandExecution?.command)
+        const label = command ? `Command output for "${command}":` : 'Command output:'
+        return { role: 'user', content: `${label}\n${content}` }
+      }
+      if (message.ask === 'command') {
+        const command = normalizeText(message.commandExecution?.command || content)
+        return { role: 'assistant', content: command ? `Requested command:\n${command}` : content }
+      }
       if (message.role === 'assistant') return { role: 'assistant', content }
       if (message.role === 'system') return { role: 'user', content: `System note: ${content}` }
       return { role: 'user', content }
