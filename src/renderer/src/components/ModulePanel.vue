@@ -28,17 +28,17 @@
     <template v-else>
       <header class="panel-header">
         <div>
-          <p class="eyebrow">{{ activeMeta?.label }}</p>
+          <p class="eyebrow">{{ activeMeta ? t(activeMeta.labelKey) : '' }}</p>
           <h2>{{ title }}</h2>
         </div>
-        <button class="compact-button">新建</button>
+        <button class="compact-button">{{ t('common.new') }}</button>
       </header>
 
       <div class="panel-search">
         <Search />
         <input
           v-model="query"
-          placeholder="搜索"
+          :placeholder="t('common.search')"
         />
       </div>
 
@@ -52,6 +52,7 @@
 import { computed, ref } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { menuItems } from '@/config/navigation'
+import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import WorkspacePanel from '@/components/panels/WorkspacePanel.vue'
 import AssetsPanel from '@/components/panels/AssetsPanel.vue'
@@ -64,7 +65,8 @@ import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 const query = ref('')
 const activeMeta = computed(() => menuItems.find((item) => item.key === workspace.activeModule))
-const title = computed(() => activeMeta.value?.label || '工作区')
+const title = computed(() => (activeMeta.value ? t(activeMeta.value.labelKey) : t('module.workspace')))
 </script>

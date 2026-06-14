@@ -85,7 +85,8 @@ import { isLegacyLocalModelName, isLegacyLocalModelProvider } from '@shared/mode
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
-import { settingsLanguageOptions, type SettingSectionKey } from '@/config/settings'
+import { type SettingSectionKey } from '@/config/settings'
+import { applyDocumentLocale, isLocaleSetting, resolveLocale } from '@/i18n/runtime'
 import type {
   AppUpdateCheckResult,
   AppUpdateDownloadResult,
@@ -3292,8 +3293,6 @@ type LayoutPreferencesPatch = Partial<
 type BackgroundUserConfig = UserConfig['background']
 type CustomBackgroundSaveData = Awaited<ReturnType<AiopsPreloadApi['saveCustomBackground']>>
 
-const settingsLanguageValues = settingsLanguageOptions.map((option) => option.value)
-
 const isThemeSnapshot = (value: unknown): value is ThemeId => typeof value === 'string' && isThemeId(value)
 
 const isDefaultModeValue = (value: unknown): value is UserConfig['defaultMode'] => value === 'terminal' || value === 'agents'
@@ -3302,7 +3301,7 @@ const isBooleanValue = (value: unknown): value is boolean => typeof value === 'b
 
 const isWatermarkValue = (value: unknown): value is UserConfig['watermark'] => value === 'open' || value === 'close'
 
-const isSettingsLanguageValue = (value: unknown): value is string => typeof value === 'string' && settingsLanguageValues.includes(value)
+const isSettingsLanguageValue = (value: unknown): value is string => isLocaleSetting(value)
 
 const normalizeGeneralBaseSettingsPatch = (patch: GeneralBaseSettingsPatch) => {
   const normalized: GeneralBaseSettingsPatch = {}
@@ -3944,6 +3943,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   })
   const onboardingAutoApprovalEvent = ref(0)
   const config = ref<UserConfig>(defaultConfig)
+  const savedGeneralBaseSettingsSnapshot = ref<GeneralBaseSettingsPatch>({})
   const themeListenerCleanup = ref<(() => void) | null>(null)
   const workspacePreferences = ref<WorkspaceUserConfig>({
     ...defaultWorkspacePreferences,
@@ -3960,6 +3960,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const applyCurrentEditorSettings = () => {
     applyEditorSettingsToDocument(editorSettings.value)
+  }
+
+  const hasSavedGeneralBaseSettingsSnapshot = () => Object.keys(savedGeneralBaseSettingsSnapshot.value).length > 0
+
+  const restoreSavedGeneralBaseSettings = () => {
+    if (!hasSavedGeneralBaseSettingsSnapshot()) return
+    config.value = mergeGenericSavedConfig(config.value, savedGeneralBaseSettingsSnapshot.value)
   }
 
   const shortcutHandlers: Record<string, ShortcutActionHandler> = {
@@ -4852,6 +4859,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const missingSkills = !Array.isArray(savedConfig.skills)
     const missingMcpServers = !Array.isArray(savedConfig.mcpServers)
     config.value = mergeUserConfig(defaultConfig, savedConfig)
+    restoreSavedGeneralBaseSettings()
     const { normalized: normalizedTerminal, changed: terminalChanged } = normalizeTerminalConfig(config.value.terminal)
     terminalSettings.value = normalizedTerminal
     const { normalized: normalizedWorkspacePreferences, changed: workspacePreferencesChanged } = normalizeWorkspacePreferences(config.value.workspacePreferences)
@@ -5004,6 +5012,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       mcpToolStates: normalizedMcpSnapshot.toolStates,
       onboarding: normalized
     })
+    restoreSavedGeneralBaseSettings()
     if (
       changed ||
       terminalChanged ||
@@ -5057,6 +5066,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         })
       )
     }
+    restoreSavedGeneralBaseSettings()
     mode.value = config.value.defaultMode
     leftPanelOpen.value = config.value.leftPanelOpen
     rightPanelOpen.value = config.value.rightPanelOpen
@@ -5065,6 +5075,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     rightPanelWidth.value = layoutWidthFromConfig(config.value.rightPanelWidth, defaultConfig.rightPanelWidth!)
     agentsLeftWidth.value = layoutWidthFromConfig(config.value.agentsLeftWidth, defaultConfig.agentsLeftWidth!)
     config.value.theme = normalizeThemeId(config.value.theme)
+    applyDocumentLocale(resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
     applyCurrentTheme()
     applyCurrentEditorSettings()
     refreshShortcutRuntime()
@@ -5080,6 +5091,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await refreshAiTodoSnapshot()
     await refreshAiContextCatalog({ hydrateSelection: false })
     await refreshAiCommandCatalog()
+    restoreSavedGeneralBaseSettings()
+    applyDocumentLocale(resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
   }
 
   const saveConfig = async (patch: Partial<UserConfig>) => {
@@ -6272,7 +6285,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('基础设置保存失败')
         return false
       }
+      savedGeneralBaseSettingsSnapshot.value = {
+        defaultMode: savedConfig.defaultMode,
+        language: savedConfig.language,
+        watermark: savedConfig.watermark
+      }
       config.value = mergeGenericSavedConfig(config.value, savedConfig)
+      if (normalizedPatch.language !== undefined) {
+        applyDocumentLocale(resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
+      }
       setSettingsNotice('基础设置已保存')
       return true
     } catch (error) {

@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
 import ModulePanel from '@/components/ModulePanel.vue'
@@ -100,9 +100,11 @@ import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
+import { applyDocumentLocale, useI18n } from '@/i18n'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 
 const workspace = useWorkspaceStore()
+const { locale } = useI18n()
 type ResizeSide = 'left' | 'right' | 'agents-left'
 
 const draggingSide = ref<ResizeSide | null>(null)
@@ -246,4 +248,12 @@ onUnmounted(() => {
   document.body.classList.remove('layout-resizing')
   workspace.uninstallShortcutRuntime()
 })
+
+watch(
+  locale,
+  (value) => {
+    applyDocumentLocale(value)
+  },
+  { immediate: true }
+)
 </script>

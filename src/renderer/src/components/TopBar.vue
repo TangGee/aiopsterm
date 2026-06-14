@@ -63,14 +63,14 @@
       >
         <button
           class="window-control-button"
-          title="最小化窗口"
+          :title="t('top.windowMinimize')"
           @click="minimizeWindow"
         >
           <Minus />
         </button>
         <button
           class="window-control-button"
-          :title="isMaximized ? '还原窗口' : '最大化窗口'"
+          :title="isMaximized ? t('top.windowRestore') : t('top.windowMaximize')"
           @click="toggleMaximize"
         >
           <CopyMinus v-if="isMaximized" />
@@ -78,7 +78,7 @@
         </button>
         <button
           class="window-control-button close"
-          title="退出应用"
+          :title="t('top.windowClose')"
           @click="closeWindow"
         >
           <X />
@@ -107,8 +107,10 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useI18n } from '@/i18n'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 const platform = ref('')
 const isMaximized = ref(false)
 let stopMaximized: (() => void) | undefined
@@ -118,22 +120,30 @@ const isMac = computed(() => platform.value.includes('darwin'))
 const isLeftCollapsed = computed(() => (workspace.mode === 'agents' ? !workspace.agentsLeftOpen : !workspace.leftPanelOpen))
 const isRightCollapsed = computed(() => !workspace.rightPanelOpen)
 const rightToggleDisabled = computed(() => workspace.activeModule === 'database' || workspace.activeModule === 'user')
-const modeToggleTitle = computed(() => (workspace.mode === 'terminal' ? '切换到 Agents 模式' : '切换到终端模式'))
-const leftToggleTitle = computed(() => (workspace.mode === 'agents' ? (isLeftCollapsed.value ? '展开会话侧栏' : '收起会话侧栏') : isLeftCollapsed.value ? '展开左侧面板' : '收起左侧面板'))
+const modeToggleTitle = computed(() => (workspace.mode === 'terminal' ? t('top.modeToAgents') : t('top.modeToTerminal')))
+const leftToggleTitle = computed(() =>
+  workspace.mode === 'agents'
+    ? isLeftCollapsed.value
+      ? t('top.expandSessions')
+      : t('top.collapseSessions')
+    : isLeftCollapsed.value
+      ? t('top.expandLeft')
+      : t('top.collapseLeft')
+)
 const rightToggleTitle = computed(() => {
-  if (rightToggleDisabled.value) return '当前模块不显示 AI 面板'
-  return isRightCollapsed.value ? '展开 AI 面板' : '收起 AI 面板'
+  if (rightToggleDisabled.value) return t('top.aiUnavailable')
+  return isRightCollapsed.value ? t('top.expandAi') : t('top.collapseAi')
 })
 const updateLabel = computed(() => {
-  if (workspace.topUpdateState === 'checking') return 'Checking'
-  if (workspace.topUpdateState === 'available') return '点击更新'
-  if (workspace.topUpdateState === 'install-requested') return '待安装'
-  return '本地版本'
+  if (workspace.topUpdateState === 'checking') return t('top.updateChecking')
+  if (workspace.topUpdateState === 'available') return t('top.updateAvailable')
+  if (workspace.topUpdateState === 'install-requested') return t('top.updateInstallRequested')
+  return t('top.updateLocal')
 })
 const updateTitle = computed(() => {
-  if (workspace.topUpdateState === 'available') return '安装可用更新'
-  if (workspace.topUpdateState === 'install-requested') return '安装请求已提交'
-  return '检查更新'
+  if (workspace.topUpdateState === 'available') return t('top.updateAvailable')
+  if (workspace.topUpdateState === 'install-requested') return t('top.updateInstallRequested')
+  return t('top.updateChecking')
 })
 
 const minimizeWindow = () => {

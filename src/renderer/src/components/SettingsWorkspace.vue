@@ -4,10 +4,10 @@
     :style="workspace.config.background.mode !== 'none' ? workspaceBackgroundStyle : undefined"
   >
     <header class="settings-workspace-title">
-      <h2>设置</h2>
+      <h2>{{ t('common.settings') }}</h2>
       <button
         class="settings-tab-close"
-        title="关闭"
+        :title="t('common.close')"
         @click="workspace.setActiveModule('workspace')"
       >
         <X />
@@ -172,8 +172,10 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
+import { useI18n } from '@/i18n'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 
 const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi']
 const terminalFonts = [
@@ -314,10 +316,10 @@ const GeneralSettings = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('h3', '基础设置'),
+        h('h3', t('settings.general.base')),
         h('div', { class: 'settings-form-card' }, [
           h('div', { class: 'settings-form-row' }, [
-            h('label', '主题'),
+            h('label', t('settings.general.theme')),
             h(
               'select',
               {
@@ -326,14 +328,14 @@ const GeneralSettings = defineComponent({
                 onChange: (event: Event) => restoreSelectOnFailedSave(event, workspace.config.theme, (value) => workspace.selectTheme(value))
               },
               [
-                h('optgroup', { label: '系统' }, themeGroups.value.system.map((option) => h('option', { value: option.value }, option.label))),
-                h('optgroup', { label: '默认' }, themeGroups.value.default.map((option) => h('option', { value: option.value }, option.label))),
-                h('optgroup', { label: '官方主题' }, themeGroups.value.official.map((option) => h('option', { value: option.value }, option.label)))
+                h('optgroup', { label: t('settings.general.themeSystem') }, themeGroups.value.system.map((option) => h('option', { value: option.value }, option.label))),
+                h('optgroup', { label: t('settings.general.themeDefault') }, themeGroups.value.default.map((option) => h('option', { value: option.value }, option.label))),
+                h('optgroup', { label: t('settings.general.themeOfficial') }, themeGroups.value.official.map((option) => h('option', { value: option.value }, option.label)))
               ]
             )
           ]),
           h('div', { class: 'settings-form-row align-start', 'data-onboarding-id': 'settings-background-section' }, [
-            h('label', '背景'),
+            h('label', t('settings.general.background')),
             h('div', { class: 'settings-backgrounds' }, [
               h('div', { class: 'settings-bg-grid' }, [
                 h(
@@ -342,7 +344,7 @@ const GeneralSettings = defineComponent({
                     class: ['settings-bg-tile default', { active: workspace.config.background.mode === 'none' }],
                     onClick: () => workspace.selectBackground('none')
                   },
-                  [h(Monitor), h('span', '默认背景')]
+                  [h(Monitor), h('span', t('settings.general.defaultBackground'))]
                 ),
                 ...settingsBackgroundPresets.map((preset) =>
                   h('button', {
@@ -356,7 +358,7 @@ const GeneralSettings = defineComponent({
                 )
               ]),
               h('div', { class: 'settings-upload-section' }, [
-                h('span', '自定义上传（支持JPG、PNG、WebP、GIF）'),
+                h('span', t('settings.general.customUpload')),
                 h('div', { class: 'settings-bg-grid compact' }, [
                   customBackgroundImage.value
                     ? h(
@@ -364,7 +366,7 @@ const GeneralSettings = defineComponent({
                         {
                           class: ['settings-bg-tile preset custom-preview', { active: workspace.config.background.mode === 'custom' }],
                           style: { backgroundImage: backgroundImageCss(customBackgroundImage.value) },
-                          title: '自定义背景',
+                          title: t('settings.general.customBackground'),
                           onClick: () => workspace.selectCustomBackground()
                         },
                         [
@@ -372,7 +374,7 @@ const GeneralSettings = defineComponent({
                             'span',
                             {
                               class: 'settings-bg-delete',
-                              title: '删除自定义背景',
+                              title: t('settings.general.deleteCustomBackground'),
                               onClick: (event: MouseEvent) => {
                                 event.stopPropagation()
                                 workspace.clearCustomBackground()
@@ -387,7 +389,7 @@ const GeneralSettings = defineComponent({
                     'button',
                     {
                       class: 'settings-bg-tile upload',
-                      title: '上传',
+                      title: t('settings.general.upload'),
                       onClick: () => workspace.uploadCustomBackground()
                     },
                     [h(Upload)]
@@ -397,7 +399,7 @@ const GeneralSettings = defineComponent({
               hasSelectedBackgroundImage.value
                 ? h('div', { class: 'settings-sliders' }, [
                     h('label', [
-                      h('span', '透明度'),
+                      h('span', t('settings.general.opacity')),
                       h('input', {
                         value: workspace.config.background.opacity,
                         min: 0,
@@ -411,7 +413,7 @@ const GeneralSettings = defineComponent({
                       })
                     ]),
                     h('label', [
-                      h('span', '亮度'),
+                      h('span', t('settings.general.brightness')),
                       h('input', {
                         value: workspace.config.background.brightness,
                         min: 0,
@@ -428,12 +430,12 @@ const GeneralSettings = defineComponent({
                 : null
             ])
           ]),
-          radioRow('默认布局', 'defaultLayout', [
+          radioRow(t('settings.general.defaultLayout'), 'defaultLayout', [
             { label: 'Terminal', checked: workspace.config.defaultMode === 'terminal', onChange: () => workspace.updateDefaultLayout('terminal') },
             { label: 'Agents', checked: workspace.config.defaultMode === 'agents', onChange: () => workspace.updateDefaultLayout('agents') }
           ]),
           h('div', { class: 'settings-form-row' }, [
-            h('label', '语言'),
+            h('label', t('settings.general.language')),
             h(
               'select',
               {
@@ -441,31 +443,31 @@ const GeneralSettings = defineComponent({
                 value: workspace.config.language,
                 onChange: (event: Event) => restoreSelectOnFailedSave(event, workspace.config.language, (value) => workspace.updateLanguage(value))
               },
-              settingsLanguageOptions.map((language) => h('option', { value: language.value }, language.label))
+              settingsLanguageOptions.map((language) => h('option', { value: language.value }, language.labelKey ? t(language.labelKey) : language.label))
             )
           ]),
-          radioRow('水印', 'watermark', [
-            { label: '开启', checked: workspace.config.watermark === 'open', onChange: () => workspace.updateWatermark('open') },
-            { label: '关闭', checked: workspace.config.watermark === 'close', onChange: () => workspace.updateWatermark('close') }
+          radioRow(t('settings.general.watermark'), 'watermark', [
+            { label: t('settings.general.enabled'), checked: workspace.config.watermark === 'open', onChange: () => workspace.updateWatermark('open') },
+            { label: t('settings.general.disabled'), checked: workspace.config.watermark === 'close', onChange: () => workspace.updateWatermark('close') }
           ]),
           h('div', { class: 'settings-form-row' }, [
-            h('label', '入门引导'),
+            h('label', t('settings.general.onboarding')),
             h(
               'button',
               {
                 class: 'settings-button primary',
                 onClick: () => workspace.openOnboardingGuide()
               },
-              '打开入门引导'
+              t('settings.general.openOnboarding')
             )
           ])
         ]),
-        h('h3', '编辑器设置'),
+        h('h3', t('settings.general.editor')),
         h('div', { class: 'settings-form-card' }, [
-          numberRow('字体大小', workspace.editorSettings.fontSize, 8, 32, (value) => workspace.updateEditorSettings({ fontSize: value })),
-          numberRow('行高', workspace.editorSettings.lineHeight, 0, 48, (value) => workspace.updateEditorSettings({ lineHeight: value })),
+          numberRow(t('settings.general.fontSize'), workspace.editorSettings.fontSize, 8, 32, (value) => workspace.updateEditorSettings({ fontSize: value })),
+          numberRow(t('settings.general.lineHeight'), workspace.editorSettings.lineHeight, 0, 48, (value) => workspace.updateEditorSettings({ lineHeight: value })),
           h('div', { class: 'settings-form-row' }, [
-            h('label', '字体'),
+            h('label', t('settings.general.font')),
             h(
               'select',
               {

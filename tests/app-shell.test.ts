@@ -595,6 +595,62 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('local shell')
   })
 
+  it('switches core shell and AI labels through the External reference locale set', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+    store.setActiveModule('settings')
+    await flushPromises()
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      language: 'en-US'
+    })
+    const languageSelect = wrapper.findAll('.settings-form-row').find((row) => row.find('label').text() === '语言')!.find('select.settings-select')
+    await languageSelect.setValue('en-US')
+    await flushPromises()
+
+    expect(store.config.language).toBe('en-US')
+    expect(document.documentElement.lang).toBe('en-US')
+    expect(document.documentElement.dir).toBe('ltr')
+    expect(wrapper.find('.settings-workspace-title h2').text()).toBe('Settings')
+    expect(wrapper.find('.settings-side-panel').text()).toContain('General')
+    expect(wrapper.find('.settings-side-panel').text()).toContain('AI Preferences')
+    expect(wrapper.text()).toContain('Basic Settings')
+    expect(wrapper.text()).toContain('Default Layout')
+
+    store.setActiveModule('workspace')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.ai-header h2').text()).toBe('AI')
+    expect(wrapper.find('[data-testid="ai-new-chat"]').attributes('title')).toBe('New chat')
+    expect(wrapper.find('[data-onboarding-id="ai-input-editable"]').attributes('data-placeholder')).toBe('Describe your operations goal')
+
+    vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
+      ...store.config,
+      language: 'ar-AR'
+    })
+    store.setActiveModule('settings')
+    await flushPromises()
+    const translatedLanguageSelect = wrapper.findAll('.settings-form-row').find((row) => row.find('label').text() === 'Language')!.find('select.settings-select')
+    await translatedLanguageSelect.setValue('ar-AR')
+    await flushPromises()
+    expect(document.documentElement.lang).toBe('ar-AR')
+    expect(document.documentElement.dir).toBe('rtl')
+
+    wrapper.unmount()
+  })
+
   it('opens asset management as a full workspace instead of a narrow side panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

@@ -13,7 +13,7 @@
               ? 'left-module-switcher'
               : undefined
         "
-        :title="item.label"
+        :title="t(item.labelKey)"
         @click="workspace.setActiveModule(item.key)"
       >
         <component :is="item.icon" />
@@ -28,7 +28,7 @@
           v-if="item.key === 'user'"
           class="rail-button user-rail-trigger"
           :class="{ active: workspace.activeModule === item.key, 'has-avatar': !workspace.userProfile.skippedLogin }"
-          :title="item.label"
+          :title="t(item.labelKey)"
           @click.stop="userMenuOpen = !userMenuOpen"
         >
           <span
@@ -48,7 +48,7 @@
           class="rail-button"
           :class="{ active: workspace.activeModule === item.key }"
           :data-onboarding-id="item.key === 'settings' ? 'setting-entry' : undefined"
-          :title="item.label"
+          :title="t(item.labelKey)"
           @click="openModule(item.key)"
         >
           <component :is="item.icon" />
@@ -90,9 +90,11 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Gauge, LogIn, LogOut, User } from 'lucide-vue-next'
 import { menuItems, type ModuleKey } from '@/config/navigation'
+import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 const mainItems = computed(() => menuItems.filter((item) => item.position === 'main'))
 const bottomItems = computed(() => menuItems.filter((item) => item.position === 'bottom'))
 const userMenuOpen = ref(false)

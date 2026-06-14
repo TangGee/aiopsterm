@@ -79,16 +79,37 @@ Build Linux packages:
 npm run build:linux
 ```
 
-`build:linux` first regenerates the self-owned app icon PNGs, then runs `rebuild:native` with an explicit Electron headers URL, then runs electron-builder with automatic rebuild disabled. Linux packaging uses the self-owned PNG icon set under `resources/icons`, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide a local Electron headers cache.
+Build only the Debian package:
+
+```bash
+npm run build:deb
+```
+
+Build macOS packages on a macOS runner:
+
+```bash
+npm run build:mac
+```
+
+For a macOS unpacked directory build during package debugging:
+
+```bash
+npm run build:mac:dir
+```
+
+`build:linux` and `build:deb` first regenerate the self-owned app icon PNGs, then run `rebuild:native` with an explicit Electron headers URL, then run electron-builder with automatic rebuild disabled. Linux packaging uses the self-owned PNG icon set under `resources/icons`, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide a local Electron headers cache.
+
+`build:mac` uses the same self-owned build output and electron-builder config, with `dmg` and `zip` targets matching the External reference-style desktop package split. Run it on macOS because macOS targets require the platform signing and packaging toolchain; Linux development machines should use `audit:package-config` to verify the macOS target configuration without attempting to produce a macOS package.
 
 Successful Linux packaging produces:
 
 - `dist/aiopsterm-0.1.0-linux-x86_64.AppImage`
 - `dist/aiopsterm-0.1.0-linux-amd64.deb`
 
-Run package-level smoke and audit checks after Linux packaging:
+Run package-level smoke and audit checks after Linux packaging, and run the cross-platform package config audit before packaging changes are merged:
 
 ```bash
+npm run audit:package-config
 npm run smoke:packaged
 npm run audit:linux-package
 ```

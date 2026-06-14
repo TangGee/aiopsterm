@@ -14,14 +14,14 @@
               ? 'settings-ai-preferences-tab'
               : undefined
       "
-      :title="item.label"
+      :title="t(item.labelKey)"
       @click="workspace.setActiveSettingsSection(item.key)"
     >
       <component
         :is="item.icon"
         class="settings-nav-icon"
       />
-      <span>{{ item.label }}</span>
+      <span>{{ t(item.labelKey) }}</span>
       <ExternalLink
         v-if="item.external"
         class="settings-nav-external"
@@ -33,7 +33,9 @@
 <script setup lang="ts">
 import { ExternalLink } from 'lucide-vue-next'
 import { settingsNavItems } from '@/config/settings'
+import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 </script>

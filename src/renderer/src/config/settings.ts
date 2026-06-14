@@ -1,5 +1,6 @@
 import type { Component } from 'vue'
 import { BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Plug, Settings, ShieldCheck, SlidersHorizontal, Smartphone, SquareTerminal, Zap } from 'lucide-vue-next'
+import { localeDisplayNames, supportedLocales, type I18nKey } from '@/i18n/messages'
 
 export type SettingSectionKey =
   | 'general'
@@ -20,25 +21,26 @@ export type SettingSectionKey =
 export type SettingsNavItem = {
   key: SettingSectionKey
   label: string
+  labelKey: I18nKey
   icon: Component
   external?: boolean
 }
 
 export const settingsNavItems: SettingsNavItem[] = [
-  { key: 'general', label: '通用', icon: Settings },
-  { key: 'terminal', label: '终端', icon: SquareTerminal },
-  { key: 'extensions', label: '扩展', icon: Box },
-  { key: 'models', label: '模型', icon: Bot },
-  { key: 'billing', label: '计费概览', icon: CreditCard },
-  { key: 'ai', label: 'AI 偏好设置', icon: SlidersHorizontal },
-  { key: 'mcp', label: 'MCP', icon: Plug },
-  { key: 'skills', label: 'Skills', icon: Zap },
-  { key: 'rules', label: '规则', icon: ShieldCheck },
-  { key: 'shortcuts', label: '快捷键', icon: Keyboard },
-  { key: 'trustedDevices', label: '可信设备', icon: Smartphone },
-  { key: 'privacy', label: '隐私', icon: Lock },
-  { key: 'about', label: '关于', icon: Info },
-  { key: 'docs', label: '文档', icon: BookOpen, external: true }
+  { key: 'general', label: '通用', labelKey: 'settings.nav.general', icon: Settings },
+  { key: 'terminal', label: '终端', labelKey: 'settings.nav.terminal', icon: SquareTerminal },
+  { key: 'extensions', label: '扩展', labelKey: 'settings.nav.extensions', icon: Box },
+  { key: 'models', label: '模型', labelKey: 'settings.nav.models', icon: Bot },
+  { key: 'billing', label: '计费概览', labelKey: 'settings.nav.billing', icon: CreditCard },
+  { key: 'ai', label: 'AI 偏好设置', labelKey: 'settings.nav.ai', icon: SlidersHorizontal },
+  { key: 'mcp', label: 'MCP', labelKey: 'settings.nav.mcp', icon: Plug },
+  { key: 'skills', label: 'Skills', labelKey: 'settings.nav.skills', icon: Zap },
+  { key: 'rules', label: '规则', labelKey: 'settings.nav.rules', icon: ShieldCheck },
+  { key: 'shortcuts', label: '快捷键', labelKey: 'settings.nav.shortcuts', icon: Keyboard },
+  { key: 'trustedDevices', label: '可信设备', labelKey: 'settings.nav.trustedDevices', icon: Smartphone },
+  { key: 'privacy', label: '隐私', labelKey: 'settings.nav.privacy', icon: Lock },
+  { key: 'about', label: '关于', labelKey: 'settings.nav.about', icon: Info },
+  { key: 'docs', label: '文档', labelKey: 'settings.nav.docs', icon: BookOpen, external: true }
 ]
 
 export type ThemeOption = {
@@ -105,18 +107,8 @@ export const settingsBackgroundPresets: BackgroundPreset[] = [
 ]
 
 export const settingsLanguageOptions = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'zh-CN', label: '简体中文' },
-  { value: 'zh-TW', label: '繁體中文' },
-  { value: 'en-US', label: 'English' },
-  { value: 'de-DE', label: 'Deutsch' },
-  { value: 'fr-FR', label: 'Français' },
-  { value: 'it-IT', label: 'Italiano' },
-  { value: 'pt-PT', label: 'Português' },
-  { value: 'ru-RU', label: 'Русский' },
-  { value: 'ja-JP', label: '日本語' },
-  { value: 'ko-KR', label: '한국어' },
-  { value: 'ar-AR', label: 'العربية' }
+  { value: 'system', label: '跟随系统', labelKey: 'settings.general.followSystem' as const },
+  ...supportedLocales.map((locale) => ({ value: locale, label: localeDisplayNames[locale], labelKey: null }))
 ]
 
 export const settingsSecretPatterns = [

@@ -8,13 +8,13 @@
   >
     <header class="ai-header">
       <div>
-        <h2>{{ agentMode ? 'Agents' : 'AI' }}</h2>
+        <h2>{{ agentMode ? t('common.agents') : t('common.ai') }}</h2>
       </div>
       <div class="ai-header-actions">
         <button
           type="button"
           class="ai-header-icon-button"
-          title="新建会话"
+          :title="t('ai.newChat')"
           data-testid="ai-new-chat"
           @click.stop="createNewAiConversation"
         >
@@ -27,7 +27,7 @@
           <button
             type="button"
             class="ai-header-icon-button"
-            title="会话历史"
+            :title="t('ai.history')"
             data-testid="ai-history-open"
             @click.stop="toggleHistoryMenu"
           >
@@ -45,14 +45,14 @@
                   ref="historySearchInputRef"
                   v-model="historySearchTerm"
                   type="search"
-                  placeholder="搜索历史"
+                  :placeholder="t('ai.searchHistory')"
                   data-testid="ai-history-search-input"
                   @keydown.esc.prevent="closeHistoryMenu"
                 />
                 <button
                   v-if="historySearchTerm"
                   type="button"
-                  title="清空搜索"
+                  :title="t('ai.clearSearch')"
                   @click="clearHistorySearch"
                 >
                   <X />
@@ -62,7 +62,7 @@
                 type="button"
                 class="ai-history-favorite-toggle"
                 :class="{ active: historyFavoritesOnly }"
-                title="只看收藏"
+                :title="t('ai.favoritesOnly')"
                 data-testid="ai-history-favorites-toggle"
                 @click="historyFavoritesOnly = !historyFavoritesOnly"
               >
@@ -121,14 +121,14 @@
                       <template v-if="editingHistoryId === conversation.id">
                         <button
                           type="button"
-                          title="保存"
+                          :title="t('common.save')"
                           @click.stop="saveHistoryTitle(conversation.id)"
                         >
                           <Check />
                         </button>
                         <button
                           type="button"
-                          title="取消"
+                          :title="t('ai.cancelEdit')"
                           @click.stop="cancelHistoryTitleEdit"
                         >
                           <X />
@@ -137,7 +137,7 @@
                       <template v-else>
                         <button
                           type="button"
-                          title="收藏"
+                          :title="t('ai.favorite')"
                           :class="{ active: conversation.favorite }"
                           @click.stop="toggleHistoryFavorite(conversation.id)"
                         >
@@ -145,14 +145,14 @@
                         </button>
                         <button
                           type="button"
-                          title="编辑标题"
+                          :title="t('ai.editTitle')"
                           @click.stop="editHistoryTitle(conversation.id)"
                         >
                           <Pencil />
                         </button>
                         <button
                           type="button"
-                          title="删除历史"
+                          :title="t('ai.deleteHistory')"
                           @click.stop="deleteHistoryConversation(conversation.id)"
                         >
                           <Trash2 />
@@ -169,14 +169,14 @@
                   data-testid="ai-history-load-more"
                   @click="loadMoreHistoryConversations"
                 >
-                  {{ historyLoadingMore ? '加载中...' : '加载更多' }}
+                  {{ historyLoadingMore ? t('ai.loadingMore') : t('ai.loadMore') }}
                 </button>
               </template>
               <div
                 v-else
                 class="ai-history-empty"
               >
-                暂无数据
+                {{ t('ai.noData') }}
               </div>
             </div>
           </div>
@@ -184,7 +184,7 @@
         <button
           type="button"
           class="ai-header-icon-button"
-          title="搜索聊天"
+          :title="t('ai.searchChat')"
           data-testid="ai-chat-search-open"
           @click.stop="openChatSearch"
         >
@@ -193,7 +193,7 @@
         <button
           type="button"
           class="ai-header-icon-button"
-          title="导出聊天"
+          :title="t('ai.exportChat')"
           data-testid="ai-chat-export"
           @click.stop="exportCurrentChat"
         >
@@ -217,7 +217,7 @@
             ref="chatSearchInputRef"
             v-model="chatSearchTerm"
             type="search"
-            placeholder="搜索聊天"
+            :placeholder="t('ai.searchChat')"
             data-testid="ai-chat-search-input"
             @keydown.enter.exact.prevent="findNextChatMatch"
             @keydown.shift.enter.prevent="findPreviousChatMatch"
@@ -235,12 +235,12 @@
             class="ai-chat-search-count no-results"
             data-testid="ai-chat-search-count"
           >
-            无匹配
+            {{ t('ai.noMatches') }}
           </span>
           <button
             v-if="chatSearchTerm"
             type="button"
-            title="清空"
+            :title="t('ai.clear')"
             @click="clearChatSearch"
           >
             <X />
@@ -249,7 +249,7 @@
         <div class="ai-chat-search-controls">
           <button
             type="button"
-            title="上一个"
+            :title="t('ai.previous')"
             :disabled="chatSearchMatchCount === 0"
             @click="findPreviousChatMatch"
           >
@@ -257,7 +257,7 @@
           </button>
           <button
             type="button"
-            title="下一个"
+            :title="t('ai.next')"
             :disabled="chatSearchMatchCount === 0"
             @click="findNextChatMatch"
           >
@@ -265,7 +265,7 @@
           </button>
           <button
             type="button"
-            title="关闭"
+            :title="t('common.close')"
             @click="closeChatSearch"
           >
             <X />
@@ -288,10 +288,10 @@
             <button
               type="button"
               class="context-trigger-tag"
-              title="添加上下文"
+              :title="t('ai.addContext')"
               @click.stop="openEditContextPopup"
             >
-              {{ editHostContexts.length ? '@' : '@ 添加上下文' }}
+              {{ editHostContexts.length ? '@' : t('ai.addContext') }}
             </button>
             <span
               v-for="context in editHostContexts"
@@ -301,7 +301,7 @@
               {{ context.label }}
               <button
                 type="button"
-                title="移除上下文"
+                :title="t('ai.removeContext')"
                 @click.stop="removeEditHostContext(context.id)"
               >
                 <X />
@@ -312,7 +312,7 @@
             :ref="setEditEditableRef"
             class="chat-editable message-editable"
             :class="{ 'is-empty': !editDraft.trim() && !editImageInputParts.length && !editFileInputParts.length && !editHostContexts.length }"
-            data-placeholder="编辑消息"
+            :data-placeholder="t('ai.editMessagePlaceholder')"
             contenteditable="true"
             spellcheck="false"
             role="textbox"
@@ -397,7 +397,7 @@
           <div class="ai-rendered-block-header">
             <span class="ai-rendered-block-title">
               <Code2 />
-              <strong>OUTPUT</strong>
+              <strong>{{ t('ai.output') }}</strong>
             </span>
             <span class="ai-rendered-block-spacer"></span>
             <span class="ai-rendered-block-lines">{{ formatLineCount(commandOutputLineCount(message.text)) }}</span>
@@ -760,8 +760,8 @@
       >
         <template v-if="showNoAvailableModelPrompt">
           <Bot />
-          <strong>没有可用的模型</strong>
-          <p>{{ workspace.billingSettings.skippedLogin ? '请登录使用提供的内置模型或配置可用模型' : '请配置可用模型' }}</p>
+          <strong>{{ t('ai.emptyNoModelTitle') }}</strong>
+          <p>{{ workspace.billingSettings.skippedLogin ? t('ai.emptyNoModelLogin') : t('ai.emptyNoModelConfigure') }}</p>
           <div class="ai-empty-actions">
             <button
               v-if="workspace.billingSettings.skippedLogin"
@@ -770,7 +770,7 @@
               data-testid="ai-no-model-login"
               @click.stop="openModelLogin"
             >
-              登录
+              {{ t('common.login') }}
             </button>
             <button
               type="button"
@@ -779,7 +779,7 @@
               data-onboarding-id="ai-model-settings-button"
               @click.stop="openModelSettings"
             >
-              配置模型
+              {{ t('ai.configureModel') }}
             </button>
           </div>
         </template>
@@ -818,7 +818,7 @@
           title="添加上下文"
           @click.stop="toggleContextPopup"
         >
-          {{ workspace.selectedContexts.length ? '@' : '@ 添加上下文' }}
+          {{ workspace.selectedContexts.length ? '@' : t('ai.addContext') }}
         </button>
         <span
           v-for="context in workspace.selectedContexts"
@@ -828,7 +828,7 @@
           {{ context.label }}
           <button
             type="button"
-            title="移除上下文"
+            :title="t('ai.removeContext')"
             @click.stop="workspace.removeContext(context.id)"
           >
             <X />
@@ -852,7 +852,7 @@
           class="processing-indicator"
         >
           <span></span>
-          处理中
+          {{ t('ai.processing') }}
         </span>
       </div>
 
@@ -865,7 +865,7 @@
           <button
             v-if="contextLevel !== 'main'"
             type="button"
-            title="返回"
+            :title="t('ai.back')"
             @click="returnContextPopupToMain"
           >
             <ChevronLeft />
@@ -874,7 +874,7 @@
             v-model="contextQuery"
             ref="contextSearchInputRef"
             type="search"
-            :placeholder="contextLevel === 'main' ? '搜索上下文' : '搜索条目'"
+            :placeholder="contextLevel === 'main' ? t('ai.searchContext') : t('ai.searchItems')"
             autocomplete="off"
             @keydown="handleContextKeydown"
           />
@@ -933,7 +933,7 @@
             <ChevronRight v-if="option.kind === 'docs' && option.contextType === 'dir'" />
             <Check v-else-if="isContextSelectedForPopup(option)" />
           </button>
-          <small v-if="filteredContextOptions.length === 0">没有匹配的上下文</small>
+          <small v-if="filteredContextOptions.length === 0">{{ t('ai.noMatchingContext') }}</small>
         </div>
         <footer
           v-if="contextLevel === 'hosts' && chatMode === 'agent'"
@@ -946,7 +946,7 @@
           >
             <CheckSquare v-if="allVisibleHostContextsSelected" />
             <MinusSquare v-else />
-            <span>{{ allVisibleHostContextsSelected ? '取消全选' : '全选' }}</span>
+            <span>{{ allVisibleHostContextsSelected ? t('ai.deselectAll') : t('ai.selectAll') }}</span>
           </button>
           <button
             v-if="hostContextsForPopup.length > 0"
@@ -954,7 +954,7 @@
             class="batch-action-btn"
             @click.stop="clearHostContexts"
           >
-            <span>清空选择</span>
+            <span>{{ t('ai.clearSelection') }}</span>
           </button>
         </footer>
       </div>
@@ -969,7 +969,7 @@
             v-model="commandQuery"
             ref="commandSearchInputRef"
             type="search"
-            placeholder="搜索命令"
+            :placeholder="t('ai.searchCommand')"
             autocomplete="off"
             @keydown="handleCommandKeydown"
           />
@@ -986,7 +986,7 @@
             <Code2 />
             <span>{{ preset.name }}</span>
           </button>
-          <small v-if="filteredCommands.length === 0">没有匹配的命令</small>
+          <small v-if="filteredCommands.length === 0">{{ t('ai.noMatchingCommands') }}</small>
         </div>
       </div>
 
@@ -994,7 +994,7 @@
         ref="editableRef"
         class="chat-editable"
         :class="{ 'is-empty': !draft.trim() && !workspace.selectedContexts.length && !imageInputParts.length && !fileInputParts.length && !selectedCommand }"
-        data-placeholder="描述你的运维目标"
+        :data-placeholder="t('ai.inputPlaceholder')"
         data-testid="ai-message-input"
         data-onboarding-id="ai-input-editable"
         contenteditable="true"
@@ -1068,7 +1068,7 @@
                 v-model="modelQuery"
                 ref="modelSearchInputRef"
                 type="search"
-                placeholder="搜索模型"
+                :placeholder="t('ai.searchModel')"
                 autocomplete="off"
                 @keydown="handleModelKeydown"
               />
@@ -1105,7 +1105,7 @@
                 <strong>{{ model.tier }}</strong>
               </button>
               <small v-if="filteredModelOptions.length === 0 && filteredLockedModelOptions.length === 0">
-                没有匹配的模型
+                {{ t('ai.noMatchingModels') }}
               </small>
             </div>
           </div>
@@ -1256,6 +1256,7 @@ import {
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
 import { chatAttachmentPathSegments, normalizeChatAttachmentPath, normalizeChatAttachmentTaskId, parseChatAttachmentRef } from '@shared/chatAttachment'
+import { useI18n } from '@/i18n'
 import type {
   AiChatChipContentPart,
   AiChipContentPart,
@@ -1273,6 +1274,7 @@ import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOpt
 defineProps<{ agentMode?: boolean }>()
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 type AiChatMode = 'agent' | 'cmd'
 type AiContextCategoryView = {
   id: AiContextKind

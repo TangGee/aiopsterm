@@ -16,6 +16,9 @@
     "build": "npm run typecheck && electron-vite build",
     "rebuild:native": "electron-rebuild -f -w node-pty -v 31.7.7 -d https://www.electronjs.org/headers",
     "build:linux": "npm run generate:icons && npm run build && npm run rebuild:native && electron-builder --linux --config electron-builder.yml",
+    "build:deb": "npm run generate:icons && npm run build && npm run rebuild:native && electron-builder --linux deb --config electron-builder.yml",
+    "build:mac": "npm run generate:icons && npm run build && npm run rebuild:native && electron-builder --mac --config electron-builder.yml",
+    "build:mac:dir": "npm run generate:icons && npm run build && electron-builder --mac --dir --config electron-builder.yml",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:live:ssh": "vitest run tests/live-ssh-backend.test.ts",
@@ -24,6 +27,7 @@
     "generate:icons": "node scripts/generate-app-icons.mjs",
     "smoke:packaged": "xvfb-run -a node scripts/smoke-packaged-app.mjs",
     "audit:linux-package": "node scripts/audit-linux-package.mjs",
+    "audit:package-config": "node scripts/audit-package-config.mjs",
     "audit:client-mocks": "node scripts/audit-client-mocks.mjs"
   },
   "dependencies": {
