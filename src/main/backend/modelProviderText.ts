@@ -85,8 +85,8 @@ function normalizeOpenAiBaseUrl(baseUrl: string): string {
   if (!baseUrl) return ''
   try {
     const parsed = new URL(baseUrl)
-    const hasV1 = parsed.pathname.split('/').filter(Boolean).includes('v1')
-    if (!hasV1) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
+    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
+    if (!hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
     parsed.search = ''
     parsed.hash = ''
     return parsed.toString().replace(/\/$/, '')

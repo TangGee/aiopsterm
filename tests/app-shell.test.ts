@@ -3605,7 +3605,8 @@ describe('AppShell', () => {
       await flushPromises()
       expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
       expect(store.selectedConversationId).toMatch(/^conv-/)
-      expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+      expect(store.chatMessages).toEqual([])
+      expect(wrapper.text()).not.toContain('请输入本次运维目标')
       expect(window.aiops.createChatConversation).toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
@@ -3725,7 +3726,8 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-new-chat"]').trigger('click')
     await flushPromises()
     expect(store.selectedConversationId).toMatch(/^conv-/)
-    expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+    expect(store.chatMessages).toEqual([])
+    expect(wrapper.find('.ai-empty-chat').exists()).toBe(true)
     expect(window.aiops.createChatConversation).toHaveBeenCalled()
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
     store.selectedConversationId = 'history-1'
@@ -5520,6 +5522,21 @@ describe('AppShell', () => {
     expect(wrapper.find('.message.user').text()).toContain('编辑后的回滚窗口')
     expect(wrapper.find('.message.user .message-image-part img').exists()).toBe(true)
 
+    ;(globalThis as any).__setAiTodoSnapshotMock?.([
+      { id: 'todo-1', content: '收集上下文', description: '已接收本次对话输入', status: 'completed' },
+      {
+        id: 'todo-2',
+        content: '生成命令建议',
+        description: '正在为「编辑后的回滚窗口」生成只读诊断步骤',
+        status: 'in_progress',
+        isFocused: true,
+        subtasks: [
+          { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+          { id: 'todo-2-2', content: '关联响应 aichat-request-test-1-assistant' }
+        ]
+      },
+      { id: 'todo-3', content: '等待确认', description: '用户确认后才进入执行阶段', status: 'pending' }
+    ])
     await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
     await wrapper.vm.$nextTick()
     expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()

@@ -1038,7 +1038,8 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.agents-search input').fill('')
 
     await agentsSidebar.getByTitle('新建会话').click()
-    await expect(page.getByText('请输入本次运维目标。')).toBeVisible()
+    await expect(page.locator('.ai-empty-chat')).toBeVisible()
+    await expect(page.getByText('请输入本次运维目标。')).not.toBeVisible()
     const modeSelect = page.locator('[data-onboarding-id="ai-mode-select"]')
     await expect(modeSelect).toContainText('Agent')
     await expect(modeSelect).toHaveAttribute('style', /width:/)

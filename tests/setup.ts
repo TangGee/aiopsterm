@@ -3897,7 +3897,9 @@ const setChatHistoryStoreMock = (conversations: TestChatConversationRecord[], me
   }
 }
 
-const defaultAiTodoItems: AiTodoItem[] = [
+const defaultAiTodoItems: AiTodoItem[] = []
+
+const activeAiTodoItems: AiTodoItem[] = [
   { id: 'todo-1', content: '收集上下文', description: '读取终端输出、资产和知识库引用', status: 'completed' },
   {
     id: 'todo-2',
@@ -5526,6 +5528,7 @@ Object.assign(globalThis, {
   __setChatHistoryStoreMock: setChatHistoryStoreMock,
   __resetAiTodoSnapshotMock: resetAiTodoSnapshotMock,
   __setAiTodoSnapshotMock: setAiTodoSnapshotMock,
+  __setActiveAiTodoSnapshotMock: () => setAiTodoSnapshotMock(activeAiTodoItems),
   __resetAssetStoreMock: resetAssetStoreMock,
   __resetKubernetesCatalogMock: resetKubernetesCatalogMock,
 	  __resetFileSessionCatalogMock: resetFileSessionCatalogMock,
@@ -5653,9 +5656,7 @@ Object.defineProperty(window, 'aiops', {
       }
       chatHistoryStateMock.conversations.unshift(conversation)
       chatHistoryStateMock.selectedConversationId = conversation.id
-      chatHistoryStateMock.messagesByConversationId[conversation.id] = [
-        { id: `history-${conversation.id}-assistant`, role: 'assistant', text: '请输入本次运维目标。', state: 'done' }
-      ]
+      chatHistoryStateMock.messagesByConversationId[conversation.id] = []
       return {
         ok: true,
         data: {

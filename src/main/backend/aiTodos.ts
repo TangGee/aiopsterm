@@ -134,7 +134,26 @@ const stripLegacySeedTodos = (todos: AiTodoItem[]) => {
   return strippedTodos.map((todo, index) => ({ ...todo, isFocused: focusedIndex === -1 ? todo.isFocused : index === focusedIndex || undefined }))
 }
 
-const normalizeTodos = (value: unknown): AiTodoItem[] => stripLegacySeedTodos(normalizeTodoRows(value))
+const isLegacyProviderUnavailableTodoRows = (todos: AiTodoItem[]) => {
+  if (runtimeConfig.useSeedData || todos.length !== 3) return false
+  const [contextTodo, generationTodo, confirmationTodo] = todos
+  return (
+    contextTodo.content === '收集上下文' &&
+    contextTodo.status === 'completed' &&
+    generationTodo.content === '生成命令建议' &&
+    generationTodo.status === 'in_progress' &&
+    generationTodo.description === 'AI chat provider is unavailable' &&
+    generationTodo.isFocused === true &&
+    confirmationTodo.content === '等待确认' &&
+    confirmationTodo.status === 'pending' &&
+    confirmationTodo.description === '修复模型或网络问题后重试'
+  )
+}
+
+const normalizeTodos = (value: unknown): AiTodoItem[] => {
+  const todos = stripLegacySeedTodos(normalizeTodoRows(value))
+  return isLegacyProviderUnavailableTodoRows(todos) ? [] : todos
+}
 
 const normalizePersistedState = (value: unknown): AiTodoPersistedState | null => {
   if (!isRecord(value)) return null
@@ -256,6 +275,11 @@ const responseTodos = (input: AiChatResponseInput, result: AiChatResponseResult)
   ]
 }
 
+const shouldClearTodosForResponseResult = (result: AiChatResponseResult) => {
+  if (result.ok) return false
+  return result.errorCode === 'AI_CHAT_PROVIDER_UNAVAILABLE' || result.errorCode === 'empty_prompt'
+}
+
 export const configureAiTodoBackendRuntime = (config: AiTodoBackendRuntimeConfig = {}) => {
   runtimeConfig = {
     stateFilePath: config.stateFilePath ? (isAbsolute(config.stateFilePath) ? config.stateFilePath : resolve(config.stateFilePath)) : defaultAiTodoStateFilePath(),
@@ -305,13 +329,14 @@ export const recordAiTodoResponseResult = (input: AiChatResponseInput, result: A
   ensureTodoStateLoaded()
   const requestId = normalizeText(input.requestId) || todoState.requestId
   const assistantMessageId = normalizeText(input.assistantMessageId) || todoState.assistantMessageId
+  const shouldClearTodos = shouldClearTodosForResponseResult(result)
   todoState = {
     version: 1,
     requestId,
     assistantMessageId,
     prompt: normalizeText(input.prompt) || todoState.prompt,
     updatedAt: nowLabel(),
-    todos: responseTodos(input, result)
+    todos: shouldClearTodos ? [] : responseTodos(input, result)
   }
   persistTodoState()
 }

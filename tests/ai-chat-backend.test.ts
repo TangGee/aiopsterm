@@ -320,6 +320,60 @@ describe('ai chat backend response boundary', () => {
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: '检查生产磁盘' })
   })
 
+  it('preserves versioned OpenAI-compatible provider base URLs', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'Versioned provider response'
+              }
+            }
+          ]
+        })
+    })) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'versioned-code-model',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'versioned-code-model', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'https://ark.example.test/api/coding/v3',
+                apiKey: 'sk-test',
+                modelId: 'versioned-code-model',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    await expect(generateAiChatResponse({ prompt: '检查生产磁盘', model: 'versioned-code-model' })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        provider: 'openai',
+        model: 'versioned-code-model',
+        text: 'Versioned provider response'
+      }
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://ark.example.test/api/coding/v3/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer sk-test' })
+      })
+    )
+  })
+
   it('turns provider MCP tool blocks into backend-owned approval messages', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -640,6 +694,7 @@ describe('ai chat backend response boundary', () => {
       errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE',
       errorMessage: 'AI chat provider is unavailable'
     })
+    expect(listAiTodoSnapshot().data).toMatchObject({ focusedTodoId: null, totalTodos: 0, completedTodos: 0, todos: [] })
   })
 
   it('rejects local assistant generation unless the backend double is explicitly enabled', async () => {
@@ -659,6 +714,7 @@ describe('ai chat backend response boundary', () => {
       errorMessage: 'AI chat provider is unavailable'
     })
     expect(wait).not.toHaveBeenCalled()
+    expect(listAiTodoSnapshot().data).toMatchObject({ focusedTodoId: null, totalTodos: 0, completedTodos: 0, todos: [] })
   })
 
   it('allows local assistant generation when the backend double environment switch is enabled', async () => {
@@ -828,5 +884,6 @@ describe('ai chat backend response boundary', () => {
       errorMessage: 'Prompt is required'
     })
     expect(elapsedMs).toBeLessThan(localAiChatResponseMinDelayMs)
+    expect(listAiTodoSnapshot().data).toMatchObject({ focusedTodoId: null, totalTodos: 0, completedTodos: 0, todos: [] })
   })
 })

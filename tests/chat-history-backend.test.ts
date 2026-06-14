@@ -184,6 +184,7 @@ describe('AI chat history backend boundary', () => {
 
     expect(created.conversation).toMatchObject({ title: '新会话', summary: '等待输入运维目标' })
     expect(created.selectedConversationId).toBe(created.conversation.id)
+    expect(expectOkData(backend.restoreChatConversation(created.conversation.id)).messages).toEqual([])
 
     const saved = expectOkData(
       backend.updateChatConversation({
@@ -479,6 +480,36 @@ describe('AI chat history backend boundary', () => {
 
     expect(list.conversations).toEqual([])
     expect(list.selectedConversationId).toBe('')
+  })
+
+  it('strips legacy default empty-chat assistant messages from non-seed runtime state', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-legacy-empty-message-' })
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        selectedConversationId: 'legacy-empty-chat',
+        conversations: [
+          {
+            id: 'legacy-empty-chat',
+            title: '新会话',
+            summary: '等待输入运维目标',
+            updatedAt: '刚刚',
+            ts: 1234
+          }
+        ],
+        messagesByConversationId: {
+          'legacy-empty-chat': [{ id: 'history-legacy-empty-chat-assistant', role: 'assistant', text: '请输入本次运维目标。', state: 'done' }]
+        }
+      }),
+      'utf-8'
+    )
+
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    const restored = expectOkData(backend.restoreChatConversation('legacy-empty-chat'))
+
+    expect(restored.messages).toEqual([])
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).messagesByConversationId['legacy-empty-chat']).toEqual([])
   })
 
   it('migrates the legacy electron-store chat-history file when the new state file is empty', async () => {

@@ -217,6 +217,15 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
     .filter(Boolean) as AiChatHistoryMessage[]
 }
 
+const legacyEmptyConversationAssistantText = '请输入本次运维目标。'
+
+const stripLegacyEmptyConversationMessages = (messages: AiChatHistoryMessage[]) => {
+  if (runtimeConfig.useSeedData) return messages
+  if (messages.length !== 1) return messages
+  const [message] = messages
+  return message.role === 'assistant' && message.text === legacyEmptyConversationAssistantText && message.state === 'done' ? [] : messages
+}
+
 const uniqueId = (value: string, fallback: string, seenIds: Set<string>) => {
   let id = value || fallback
   let suffix = 2
@@ -250,7 +259,7 @@ const normalizeStateShape = (source?: Partial<ChatHistoryStoreShape> | null, fal
   const nextMessages: Record<string, AiChatHistoryMessage[]> = {}
   const rawMessages = isRecord(source?.messagesByConversationId) ? source.messagesByConversationId : fallback.messagesByConversationId
   conversations.forEach((conversation) => {
-    const messages = normalizeMessages(rawMessages[conversation.id])
+    const messages = stripLegacyEmptyConversationMessages(normalizeMessages(rawMessages[conversation.id]))
     nextMessages[conversation.id] = messages
   })
   const selectedConversationId = conversations.some((item) => item.id === source?.selectedConversationId)
@@ -425,7 +434,7 @@ export const createChatConversation = (): AiChatConversationMutationResult => {
   }
   state.conversations.unshift(conversation)
   state.selectedConversationId = conversation.id
-  state.messagesByConversationId[conversation.id] = [{ id: `history-${conversation.id}-assistant`, role: 'assistant', text: '请输入本次运维目标。', state: 'done' }]
+  state.messagesByConversationId[conversation.id] = []
   saveState(state)
   return mutationResult(state, conversation)
 }

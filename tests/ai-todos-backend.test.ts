@@ -155,6 +155,44 @@ describe('AI todo backend boundary', () => {
     expect(snapshot.todos).toEqual([])
   })
 
+  it('strips legacy provider-unavailable todo state from non-seed runtime state', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-ai-todos-provider-unavailable-legacy-' })
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        requestId: 'legacy-provider-request',
+        assistantMessageId: 'legacy-provider-request-assistant',
+        prompt: '检查生产磁盘',
+        todos: [
+          { id: 'todo-1', content: '收集上下文', description: '已整理会话输入', status: 'completed' },
+          {
+            id: 'todo-2',
+            content: '生成命令建议',
+            description: 'AI chat provider is unavailable',
+            status: 'in_progress',
+            isFocused: true,
+            subtasks: [
+              { id: 'todo-2-1', content: '检查风险级别', description: '危险命令需要二次确认' },
+              { id: 'todo-2-2', content: '生成回滚步骤' }
+            ]
+          },
+          { id: 'todo-3', content: '等待确认', description: '修复模型或网络问题后重试', status: 'pending' }
+        ],
+        updatedAt: 'legacy-provider-unavailable'
+      }),
+      'utf-8'
+    )
+
+    backend.configureAiTodoBackendRuntime({ stateFilePath, useSeedData: false })
+    const snapshot = expectOkSnapshot(backend.listAiTodoSnapshot())
+
+    expect(snapshot.focusedTodoId).toBeNull()
+    expect(snapshot.totalTodos).toBe(0)
+    expect(snapshot.todos).toEqual([])
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).todos).toEqual([])
+  })
+
   it('preserves user-edited seed-derived todos while stripping unchanged seeds', async () => {
     const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-ai-todos-legacy-seed-edited-' })
     await writeFile(
@@ -316,6 +354,44 @@ describe('AI todo backend boundary', () => {
       description: '生成已停止，可调整上下文后重试'
     })
     expect(snapshot.todos[2]).toMatchObject({ content: '等待确认', status: 'pending', description: '当前响应已取消' })
+  })
+
+  it('clears request todo state when the AI provider is unavailable before any real response', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-ai-todos-provider-unavailable-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'ai-todos.json')
+    backend.configureAiTodoBackendRuntime({ stateFilePath, useSeedData: false })
+    backend.resetAiTodosForTests()
+
+    backend.recordAiTodoExchangeRequest({ text: '检查生产磁盘' }, 'aichat-request-provider-missing', 'aichat-request-provider-missing-assistant')
+    expect(expectOkSnapshot(backend.listAiTodoSnapshot()).totalTodos).toBe(3)
+
+    backend.recordAiTodoResponseResult(
+      {
+        requestId: 'aichat-request-provider-missing',
+        assistantMessageId: 'aichat-request-provider-missing-assistant',
+        prompt: '检查生产磁盘'
+      },
+      {
+        ok: false,
+        errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE',
+        errorMessage: 'AI chat provider is unavailable'
+      }
+    )
+
+    backend.configureAiTodoBackendRuntime({ stateFilePath, useSeedData: false })
+    const snapshot = expectOkSnapshot(backend.listAiTodoSnapshot())
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as { todos: unknown[]; requestId: string; assistantMessageId: string }
+
+    expect(snapshot).toMatchObject({
+      focusedTodoId: null,
+      totalTodos: 0,
+      completedTodos: 0
+    })
+    expect(snapshot.todos).toEqual([])
+    expect(persisted.todos).toEqual([])
+    expect(persisted.requestId).toBe('aichat-request-provider-missing')
+    expect(persisted.assistantMessageId).toBe('aichat-request-provider-missing-assistant')
   })
 
   it('normalizes malformed persisted todo state and falls back on corrupt files', async () => {

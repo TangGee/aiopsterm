@@ -5023,7 +5023,7 @@ describe('workspace store', () => {
     expect(window.aiops.createChatConversation).toHaveBeenCalled()
     expect(created?.title).toBe('新会话')
     expect(store.selectedConversationId).toBe(created?.id)
-    expect(store.chatMessages.at(-1)?.text).toContain('请输入本次运维目标')
+    expect(store.chatMessages).toEqual([])
   })
 
   it('does not fabricate AI history title or favorite writes when the preload bridge is unavailable', async () => {
@@ -6430,6 +6430,7 @@ describe('workspace store', () => {
 
   it('loads AI todos from the backend bridge instead of renderer mock defaults', async () => {
     const store = useWorkspaceStore()
+    ;(globalThis as any).__setActiveAiTodoSnapshotMock?.()
 
     expect(store.todoItems).toEqual([])
     expect(store.todoProgress).toEqual({ total: 0, completed: 0, inProgress: 0, pending: 0, percent: 0 })
@@ -6449,6 +6450,7 @@ describe('workspace store', () => {
   it('does not fabricate AI todos when the backend bridge is unavailable or fails', async () => {
     const store = useWorkspaceStore()
     const originalListAiTodoSnapshot = window.aiops.listAiTodoSnapshot
+    ;(globalThis as any).__setActiveAiTodoSnapshotMock?.()
 
     try {
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
@@ -6494,6 +6496,7 @@ describe('workspace store', () => {
     }
 
     try {
+      ;(globalThis as any).__setActiveAiTodoSnapshotMock?.()
       await expect(store.loadChatConversationsFromBackend({ restoreIfEmpty: false })).resolves.toBe(true)
       await expect(store.refreshAiContextCatalog()).resolves.toBe(true)
       await expect(store.refreshAiCommandCatalog()).resolves.toBe(true)
