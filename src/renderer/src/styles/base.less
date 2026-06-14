@@ -642,14 +642,17 @@ svg {
 }
 
 .layout-resizer-right::before {
-  right: 0;
+  right: 6px;
 }
 
 .layout-pane-right > .layout-resizer-right {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -6px;
+  left: -10px;
+  width: 14px;
+  z-index: 12;
+  background: color-mix(in srgb, var(--surface) 24%, transparent);
 }
 
 .layout-resizer:hover,
@@ -8430,7 +8433,7 @@ code {
 .ai-panel-top {
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .chat-scroll {
@@ -8525,15 +8528,28 @@ code {
 }
 
 .ai-header-actions {
-  gap: 6px;
+  gap: 3px;
+  min-width: max-content;
+  flex: 0 0 auto;
+}
+
+.ai-header-title {
+  flex: 0 0 auto;
   min-width: 0;
 }
 
+.ai-header-title h2 {
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ai-header-icon-button {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--muted);
   background: var(--surface-2);
   cursor: pointer;
@@ -8543,8 +8559,8 @@ code {
 }
 
 .ai-header-icon-button svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 
 .ai-header-icon-button:hover {
@@ -8553,30 +8569,31 @@ code {
 }
 
 .ai-conversation-tabs {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  align-items: stretch;
-  gap: 4px;
+  align-items: flex-end;
+  gap: 3px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 0 2px;
+  padding: 0 1px;
   scrollbar-width: thin;
 }
 
 .ai-conversation-tab {
-  min-width: 74px;
-  max-width: 156px;
-  flex: 1 1 126px;
-  height: 30px;
+  min-width: 56px;
+  max-width: 142px;
+  flex: 1 1 102px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 1px solid var(--border);
-  border-radius: 7px 7px 0 0;
+  border-radius: 6px;
   color: var(--muted);
   background: color-mix(in srgb, var(--surface-2) 86%, transparent);
   cursor: pointer;
-  padding: 0 4px 0 9px;
+  padding: 0 3px 0 7px;
 }
 
 .ai-conversation-tab:hover,
@@ -8598,19 +8615,19 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .ai-conversation-tab-favorite {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
   color: var(--warn);
 }
 
 .ai-conversation-tab-close {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -8636,8 +8653,8 @@ code {
 }
 
 .ai-conversation-tab-close svg {
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
 }
 
 .ai-history-menu-wrap {
@@ -9856,42 +9873,42 @@ code {
 
 .input-controls-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
 }
 
 .ai-control-menu-wrap {
   position: relative;
-  flex: 0 0 88px;
+  flex: 0 0 70px;
   min-width: 0;
 }
 
 .input-controls-row > .ai-control-menu-wrap:first-child {
-  flex-basis: 88px;
-  max-width: 88px;
+  flex-basis: 70px;
+  max-width: 70px;
 }
 
 .ai-control-select {
   width: 100%;
   max-width: 100%;
-  height: 28px;
+  height: 24px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 5px;
   background: var(--surface-2);
   color: var(--text);
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 0 8px;
-  font-size: 12px;
+  gap: 3px;
+  padding: 0 5px;
+  font-size: 11px;
   cursor: pointer;
 }
 
 .model-control-wrap {
-  flex: 1 1 122px;
+  flex: 1 1 84px;
   max-width: none;
 }
 
@@ -9905,20 +9922,20 @@ code {
 .ai-control-select .model-select-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
 }
 
 .ai-control-select svg {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
 }
 
 .ai-control-select .thinking-icon,
 .ai-model-popup .thinking-icon {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
   color: var(--accent);
 }
 
@@ -9955,21 +9972,22 @@ code {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 2px;
   margin-left: auto;
   flex-wrap: nowrap;
 }
 
 .input-action-buttons-container button {
-  flex: 0 0 28px;
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
+  flex: 0 0 24px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 5px;
 }
 
 .context-usage-ring {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9983,14 +10001,14 @@ code {
 }
 
 .context-usage-ring svg {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
 }
 
 @media (max-width: 420px) {
   .input-controls-row {
-    gap: 6px;
+    gap: 3px;
   }
 
   .input-action-buttons-container {

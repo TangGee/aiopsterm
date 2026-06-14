@@ -8,9 +8,49 @@
   >
     <div class="ai-panel-top">
       <header class="ai-header">
-        <div>
+        <div class="ai-header-title">
           <h2>{{ agentMode ? t('common.agents') : t('common.ai') }}</h2>
         </div>
+        <nav
+          v-if="visibleConversationTabs.length"
+          class="ai-conversation-tabs"
+          role="tablist"
+          :aria-label="t('ai.conversationTabs')"
+          data-testid="ai-conversation-tabs"
+        >
+          <div
+            v-for="conversation in visibleConversationTabs"
+            :key="conversation.id"
+            class="ai-conversation-tab"
+            :class="{ active: workspace.selectedConversationId === conversation.id, favorite: conversation.favorite }"
+            role="tab"
+            tabindex="0"
+            :aria-selected="workspace.selectedConversationId === conversation.id"
+            :title="conversationTabTooltip(conversation)"
+            data-testid="ai-conversation-tab"
+            :data-conversation-id="conversation.id"
+            @click.stop="restoreConversationFromTab(conversation.id)"
+            @keydown.enter.prevent="restoreConversationFromTab(conversation.id)"
+            @keydown.space.prevent="restoreConversationFromTab(conversation.id)"
+            @keydown.delete.prevent="closeConversationTab(conversation.id)"
+            @keydown.backspace.prevent="closeConversationTab(conversation.id)"
+          >
+            <Star
+              v-if="conversation.favorite"
+              class="ai-conversation-tab-favorite"
+            />
+            <span class="ai-conversation-tab-title">{{ displayConversationTitle(conversation) }}</span>
+            <button
+              type="button"
+              class="ai-conversation-tab-close"
+              :title="`${t('ai.closeTab')}: ${displayConversationTitle(conversation)}`"
+              :aria-label="`${t('ai.closeTab')}: ${displayConversationTitle(conversation)}`"
+              @click.stop="closeConversationTab(conversation.id)"
+            >
+              <X />
+            </button>
+          </div>
+        </nav>
         <div class="ai-header-actions">
           <button
             type="button"
@@ -202,47 +242,6 @@
           </button>
         </div>
       </header>
-
-      <nav
-        v-if="visibleConversationTabs.length"
-        class="ai-conversation-tabs"
-        role="tablist"
-        :aria-label="t('ai.conversationTabs')"
-        data-testid="ai-conversation-tabs"
-      >
-        <div
-          v-for="conversation in visibleConversationTabs"
-          :key="conversation.id"
-          class="ai-conversation-tab"
-          :class="{ active: workspace.selectedConversationId === conversation.id, favorite: conversation.favorite }"
-          role="tab"
-          tabindex="0"
-          :aria-selected="workspace.selectedConversationId === conversation.id"
-          :title="conversationTabTooltip(conversation)"
-          data-testid="ai-conversation-tab"
-          :data-conversation-id="conversation.id"
-          @click.stop="restoreConversationFromTab(conversation.id)"
-          @keydown.enter.prevent="restoreConversationFromTab(conversation.id)"
-          @keydown.space.prevent="restoreConversationFromTab(conversation.id)"
-          @keydown.delete.prevent="closeConversationTab(conversation.id)"
-          @keydown.backspace.prevent="closeConversationTab(conversation.id)"
-        >
-          <Star
-            v-if="conversation.favorite"
-            class="ai-conversation-tab-favorite"
-          />
-          <span class="ai-conversation-tab-title">{{ displayConversationTitle(conversation) }}</span>
-          <button
-            type="button"
-            class="ai-conversation-tab-close"
-            :title="`${t('ai.closeTab')}: ${displayConversationTitle(conversation)}`"
-            :aria-label="`${t('ai.closeTab')}: ${displayConversationTitle(conversation)}`"
-            @click.stop="closeConversationTab(conversation.id)"
-          >
-            <X />
-          </button>
-        </div>
-      </nav>
     </div>
 
     <div

@@ -4325,6 +4325,33 @@ describe('workspace store', () => {
     await vi.runAllTimersAsync()
   })
 
+  it('derives External reference-style AI tab titles from the first prompt without overwriting named history', async () => {
+    const store = useWorkspaceStore()
+    const created = await store.createConversation()
+    expect(created?.title).toBe('新会话')
+
+    vi.mocked(window.aiops.updateChatConversation).mockClear()
+    await store.sendChat('排查磁盘容量持续升高 并给出只读检查命令')
+    expect(store.conversations.find((conversation) => conversation.id === created?.id)?.title).toBe('排查磁盘容量持续升高 并给出只读检查命令')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: created?.id,
+        title: '排查磁盘容量持续升高 并给出只读检查命令',
+        summary: '排查磁盘容量持续升高 并给出只读检查命令'
+      })
+    )
+
+    await vi.runAllTimersAsync()
+
+    store.selectConversation('conv-1')
+    vi.mocked(window.aiops.updateChatConversation).mockClear()
+    await store.sendChat('不要覆盖生产巡检标题')
+    expect(store.conversations.find((conversation) => conversation.id === 'conv-1')?.title).toBe('生产巡检')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'conv-1', title: '生产巡检' }))
+
+    await vi.runAllTimersAsync()
+  })
+
   it('does not fabricate conversation metadata after chat sends when the history write bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })

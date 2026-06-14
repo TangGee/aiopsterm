@@ -907,6 +907,10 @@ describe('AppShell', () => {
     const leftResizer = () => wrapper.find('[data-layout-resizer="terminal-left"]')
     const rightResizer = () => wrapper.find('[data-layout-resizer="terminal-right"]')
     const agentsResizer = () => wrapper.find('[data-layout-resizer="agents-left"]')
+    const styles = baseStyles()
+    expect(styles).toContain('.layout-pane-right > .layout-resizer-right')
+    expect(styles).toContain('left: -10px;')
+    expect(styles).toContain('width: 14px;')
 
     expect(leftPane().attributes('style')).toContain('286px')
     await leftResizer().trigger('mousedown', { clientX: 286 })
@@ -3736,6 +3740,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="ai-conversation-tabs"]').exists()).toBe(true)
+    expect(wrapper.find('.ai-header > [data-testid="ai-conversation-tabs"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').text()).toContain('生产巡检')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
@@ -3821,7 +3826,13 @@ describe('AppShell', () => {
     expect(window.aiops.createChatConversation).toHaveBeenCalled()
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
     expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).exists()).toBe(true)
+    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).text()).toContain('新会话')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').exists()).toBe(true)
+    store.conversations = store.conversations.map((conversation) =>
+      conversation.id === createdConversationId ? { ...conversation, title: '排查磁盘容量持续升高' } : conversation
+    )
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).text()).toContain('排查磁盘容量持续升高')
     vi.mocked(window.aiops.deleteChatConversation).mockClear()
     await wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"] .ai-conversation-tab-close`).trigger('click')
     await flushPromises()
@@ -3864,6 +3875,8 @@ describe('AppShell', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 210))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="ai-chat-search-count"]').text()).toBe('无匹配')
+    expect(baseStyles()).toContain('.input-controls-row {\n  display: flex;\n  flex-wrap: nowrap;')
+    expect(baseStyles()).toContain('.input-action-buttons-container button {\n  flex: 0 0 24px;')
     await wrapper.find('[data-testid="ai-chat-search-input"]').trigger('keydown', { key: 'Escape' })
     expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(false)
     expect(wrapper.find('.ai-chat-search-highlight').exists()).toBe(false)

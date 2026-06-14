@@ -830,6 +830,39 @@ const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme :
 const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
 const MACRO_MAX_COMMAND_COUNT = 50
 const MACRO_DEFAULT_SLEEP_THRESHOLD_MS = 500
+const autoNamedConversationTitles = new Set([
+  '新会话',
+  '新建会话',
+  '未命名会话',
+  '新建對話',
+  '未命名對話',
+  'New chat',
+  'Untitled chat',
+  'New Chat',
+  'Untitled Chat',
+  '新しいチャット',
+  '無題のチャット',
+  '새 채팅',
+  '제목 없는 채팅',
+  'Neuer Chat',
+  'Unbenannter Chat',
+  'Nouveau chat',
+  'Chat sans titre',
+  'Nuova chat',
+  'Chat senza titolo',
+  'Nova conversa',
+  'Conversa sem título',
+  'Новый чат',
+  'Чат без названия',
+  'محادثة جديدة',
+  'محادثة بلا عنوان'
+])
+const isAutoNamedConversationTitle = (title: string) => autoNamedConversationTitles.has(title.trim())
+const conversationTitleFromPrompt = (prompt: string) => {
+  const normalized = prompt.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  return normalized.length > 28 ? `${normalized.slice(0, 28)}...` : normalized
+}
 const k8sKindLabels: Record<K8sResourceKind, string> = {
   pods: 'Pods',
   deployments: 'Deployments',
@@ -4596,9 +4629,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const conversation = conversations.value.find((item) => item.id === id)
     if (!conversation) return false
+    const nextTitle = summary && isAutoNamedConversationTitle(conversation.title) ? conversationTitleFromPrompt(summary) || conversation.title : conversation.title
     const result = await window.aiops.updateChatConversation({
       id,
-      title: conversation.title,
+      title: nextTitle,
       summary: summary || conversation.summary,
       favorite: conversation.favorite,
       messages: currentChatHistoryMessages()
