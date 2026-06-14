@@ -832,148 +832,6 @@
         </span>
       </div>
 
-      <div class="input-controls-row">
-        <div class="ai-control-menu-wrap">
-          <button
-            type="button"
-            class="ai-control-select"
-            :style="{ width: `${modeSelectWidthPx}px` }"
-            data-onboarding-id="ai-mode-select"
-            @click.stop="toggleModeMenu"
-          >
-            <span>{{ currentChatMode.label }}</span>
-            <ChevronDown />
-          </button>
-          <div
-            v-if="modeMenuOpen"
-            class="select-popup ai-mode-popup"
-            :style="{ width: `${modeDropdownWidthPx}px`, minWidth: `${modeDropdownWidthPx}px` }"
-            @click.stop
-          >
-            <div class="select-list">
-              <button
-                v-for="option in aiChatModeOptions"
-                :key="option.id"
-                type="button"
-                :data-onboarding-id="option.id === 'agent' ? 'ai-mode-agent-option' : undefined"
-                :class="{ selected: chatMode === option.id }"
-                @click="selectChatMode(option.id)"
-              >
-                <span>{{ option.label }}</span>
-                <Check v-if="chatMode === option.id" />
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="ai-control-menu-wrap">
-          <button
-            type="button"
-            class="ai-control-select model-select-control"
-            :style="{ width: `${modelSelectWidthPx}px` }"
-            data-testid="ai-model-select"
-            data-onboarding-id="ai-model-select"
-            @click.stop="toggleModelMenu"
-          >
-            <span class="model-select-label">
-              <Brain
-                v-if="isThinkingModelName(workspace.config.modelName)"
-                class="thinking-icon"
-              />
-              <span>{{ displayModelName(workspace.config.modelName) }}</span>
-            </span>
-            <ChevronDown />
-          </button>
-          <div
-            v-if="modelMenuOpen"
-            class="select-popup ai-model-popup"
-            :style="{ width: `${modelDropdownWidthPx}px`, minWidth: `${modelDropdownWidthPx}px` }"
-            @click.stop
-          >
-            <header>
-              <input
-                v-model="modelQuery"
-                ref="modelSearchInputRef"
-                type="search"
-                placeholder="搜索模型"
-                autocomplete="off"
-                @keydown="handleModelKeydown"
-              />
-            </header>
-            <div class="select-list">
-              <button
-                v-for="model in filteredModelOptions"
-                :key="model.id"
-                type="button"
-                :data-onboarding-id="model.id === workspace.aiModelOptions[0]?.id ? 'ai-model-option' : undefined"
-                :class="{ selected: workspace.config.modelName === model.id }"
-                @click="selectModel(model.id)"
-              >
-                <Brain
-                  v-if="isThinkingModelName(model.label)"
-                  class="thinking-icon"
-                />
-                <Bot v-else />
-                <span>{{ displayModelName(model.label) }}</span>
-                <em>{{ model.detail }}</em>
-                <Check v-if="workspace.config.modelName === model.id" />
-              </button>
-              <button
-                v-for="model in filteredLockedModelOptions"
-                :key="`locked-${model.id}`"
-                type="button"
-                class="locked-model-option"
-                :title="lockedModelTooltip(model.tier || 'VIP')"
-                disabled
-              >
-                <LockKeyhole class="locked-model-icon" />
-                <span>{{ model.label }}</span>
-                <em>{{ model.detail }}</em>
-                <strong>{{ model.tier }}</strong>
-              </button>
-              <small v-if="filteredModelOptions.length === 0 && filteredLockedModelOptions.length === 0">
-                没有匹配的模型
-              </small>
-            </div>
-          </div>
-        </div>
-        <div class="input-action-buttons-container">
-          <div
-            v-if="contextUsage.contextWindow > 0"
-            class="context-usage-ring"
-            data-testid="ai-context-usage-ring"
-            :title="contextUsageTooltip"
-            :aria-label="contextUsageTooltip"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 22 22"
-            >
-              <circle
-                cx="11"
-                cy="11"
-                r="9"
-                fill="none"
-                :stroke="contextUsageTrackColor"
-                stroke-width="2.5"
-              />
-              <circle
-                class="context-usage-progress"
-                cx="11"
-                cy="11"
-                r="9"
-                fill="none"
-                :stroke="contextUsageColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                :stroke-dasharray="`${contextUsage.percent * 0.5655} 56.55`"
-                transform="rotate(-90 11 11)"
-              />
-            </svg>
-          </div>
-        </div>
-      </div>
-
       <div
         v-if="contextPopupOpen"
         class="select-popup context-select-popup"
@@ -1108,14 +966,6 @@
         </div>
       </div>
 
-      <button
-        type="button"
-        title="上传图片"
-        :disabled="streaming"
-        @click.stop="openImagePicker"
-      >
-        <Image />
-      </button>
       <div
         ref="editableRef"
         class="chat-editable"
@@ -1133,43 +983,191 @@
         @mouseup="saveEditableSelection"
         @paste="handleEditablePaste"
       ></div>
-      <button
-        type="button"
-        class="file-upload-button"
-        data-testid="ai-file-upload-button"
-        title="上传文件"
-        :disabled="streaming"
-        @click.stop="handleFileUpload"
-      >
-        <Upload />
-      </button>
-      <button
-        type="button"
-        class="voice-input-button"
-        :class="{ recording: voiceRecording, transcribing: voiceTranscribing }"
-        data-testid="ai-voice-button"
-        :title="voiceButtonTitle"
-        :aria-pressed="voiceRecording ? 'true' : 'false'"
-        :disabled="streaming || voiceTranscribing"
-        @click.stop="toggleVoiceInput"
-      >
-        <span
-          v-if="voiceRecording"
-          class="voice-recording-animation"
-          aria-hidden="true"
-        >
-          <span class="voice-recording-pulse"></span>
-        </span>
-        <LoaderCircle v-else-if="voiceTranscribing" />
-        <Mic v-else />
-      </button>
-      <button
-        type="submit"
-        data-onboarding-id="ai-send-button"
-      >
-        <Square v-if="streaming" />
-        <Send v-else />
-      </button>
+
+      <div class="input-controls-row">
+        <div class="ai-control-menu-wrap">
+          <button
+            type="button"
+            class="ai-control-select"
+            data-onboarding-id="ai-mode-select"
+            @click.stop="toggleModeMenu"
+          >
+            <span>{{ currentChatMode.label }}</span>
+            <ChevronDown />
+          </button>
+          <div
+            v-if="modeMenuOpen"
+            class="select-popup ai-mode-popup"
+            :style="{ width: `${modeDropdownWidthPx}px`, minWidth: `${modeDropdownWidthPx}px` }"
+            @click.stop
+          >
+            <div class="select-list">
+              <button
+                v-for="option in aiChatModeOptions"
+                :key="option.id"
+                type="button"
+                :data-onboarding-id="option.id === 'agent' ? 'ai-mode-agent-option' : undefined"
+                :class="{ selected: chatMode === option.id }"
+                @click="selectChatMode(option.id)"
+              >
+                <span>{{ option.label }}</span>
+                <Check v-if="chatMode === option.id" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="ai-control-menu-wrap model-control-wrap">
+          <button
+            type="button"
+            class="ai-control-select model-select-control"
+            data-testid="ai-model-select"
+            data-onboarding-id="ai-model-select"
+            @click.stop="toggleModelMenu"
+          >
+            <span class="model-select-label">
+              <Brain
+                v-if="isThinkingModelName(workspace.config.modelName)"
+                class="thinking-icon"
+              />
+              <span>{{ displayModelName(workspace.config.modelName) }}</span>
+            </span>
+            <ChevronDown />
+          </button>
+          <div
+            v-if="modelMenuOpen"
+            class="select-popup ai-model-popup"
+            :style="{ width: `${modelDropdownWidthPx}px`, minWidth: `${modelDropdownWidthPx}px` }"
+            @click.stop
+          >
+            <header>
+              <input
+                v-model="modelQuery"
+                ref="modelSearchInputRef"
+                type="search"
+                placeholder="搜索模型"
+                autocomplete="off"
+                @keydown="handleModelKeydown"
+              />
+            </header>
+            <div class="select-list">
+              <button
+                v-for="model in filteredModelOptions"
+                :key="model.id"
+                type="button"
+                :data-onboarding-id="model.id === workspace.aiModelOptions[0]?.id ? 'ai-model-option' : undefined"
+                :class="{ selected: workspace.config.modelName === model.id }"
+                @click="selectModel(model.id)"
+              >
+                <Brain
+                  v-if="isThinkingModelName(model.label)"
+                  class="thinking-icon"
+                />
+                <Bot v-else />
+                <span>{{ displayModelName(model.label) }}</span>
+                <em>{{ model.detail }}</em>
+                <Check v-if="workspace.config.modelName === model.id" />
+              </button>
+              <button
+                v-for="model in filteredLockedModelOptions"
+                :key="`locked-${model.id}`"
+                type="button"
+                class="locked-model-option"
+                :title="lockedModelTooltip(model.tier || 'VIP')"
+                disabled
+              >
+                <LockKeyhole class="locked-model-icon" />
+                <span>{{ model.label }}</span>
+                <em>{{ model.detail }}</em>
+                <strong>{{ model.tier }}</strong>
+              </button>
+              <small v-if="filteredModelOptions.length === 0 && filteredLockedModelOptions.length === 0">
+                没有匹配的模型
+              </small>
+            </div>
+          </div>
+        </div>
+        <div class="input-action-buttons-container">
+          <div
+            v-if="contextUsage.contextWindow > 0"
+            class="context-usage-ring"
+            data-testid="ai-context-usage-ring"
+            :title="contextUsageTooltip"
+            :aria-label="contextUsageTooltip"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 22 22"
+            >
+              <circle
+                cx="11"
+                cy="11"
+                r="9"
+                fill="none"
+                :stroke="contextUsageTrackColor"
+                stroke-width="2.5"
+              />
+              <circle
+                class="context-usage-progress"
+                cx="11"
+                cy="11"
+                r="9"
+                fill="none"
+                :stroke="contextUsageColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                :stroke-dasharray="`${contextUsage.percent * 0.5655} 56.55`"
+                transform="rotate(-90 11 11)"
+              />
+            </svg>
+          </div>
+          <button
+            type="button"
+            title="上传图片"
+            :disabled="streaming"
+            @click.stop="openImagePicker"
+          >
+            <Image />
+          </button>
+          <button
+            type="button"
+            class="file-upload-button"
+            data-testid="ai-file-upload-button"
+            title="上传文件"
+            :disabled="streaming"
+            @click.stop="handleFileUpload"
+          >
+            <Upload />
+          </button>
+          <button
+            type="button"
+            class="voice-input-button"
+            :class="{ recording: voiceRecording, transcribing: voiceTranscribing }"
+            data-testid="ai-voice-button"
+            :title="voiceButtonTitle"
+            :aria-pressed="voiceRecording ? 'true' : 'false'"
+            :disabled="streaming || voiceTranscribing"
+            @click.stop="toggleVoiceInput"
+          >
+            <span
+              v-if="voiceRecording"
+              class="voice-recording-animation"
+              aria-hidden="true"
+            >
+              <span class="voice-recording-pulse"></span>
+            </span>
+            <LoaderCircle v-else-if="voiceTranscribing" />
+            <Mic v-else />
+          </button>
+          <button
+            type="submit"
+            data-onboarding-id="ai-send-button"
+          >
+            <Square v-if="streaming" />
+            <Send v-else />
+          </button>
+        </div>
+      </div>
       <span
         v-if="inputPlaceholderNotice"
         class="input-placeholder-notice"
@@ -1964,25 +1962,12 @@ const measureUiTextWidthPx = (text: string) => {
   return context.measureText(text).width
 }
 
-const modeSelectWidthPx = computed(() => {
-  const width = Math.ceil(measureUiTextWidthPx(currentChatMode.value.label)) + SELECT_CHROME_PX
-  return Math.min(Math.max(width, 72), 160)
-})
-
 const modeDropdownWidthPx = computed(() => {
   const maxWidth = aiChatModeOptions.reduce((max, option) => {
     const width = Math.ceil(measureUiTextWidthPx(option.label)) + DROPDOWN_ROW_CHROME_PX
     return Math.max(max, width)
   }, 0)
   return Math.min(Math.max(maxWidth, 96), 400)
-})
-
-const modelSelectWidthPx = computed(() => {
-  const option = workspace.aiModelOptions.find((model) => model.id === workspace.config.modelName)
-  const raw = option?.label || workspace.config.modelName
-  const thinkingExtra = isThinkingModelName(raw) ? THINKING_ICON_SELECT_EXTRA_PX : 0
-  const width = Math.ceil(measureUiTextWidthPx(displayModelName(raw))) + SELECT_CHROME_PX + thinkingExtra
-  return Math.min(Math.max(width, 88), 360)
 })
 
 const modelDropdownWidthPx = computed(() => {
@@ -2687,10 +2672,6 @@ const renderEditableFromState = () => {
   syncingFromEditable.value = true
   const active = document.activeElement === editable
   editable.replaceChildren()
-  workspace.selectedContexts.forEach((context) => {
-    editable.appendChild(createContextChipElement(context))
-    editable.appendChild(document.createTextNode(' '))
-  })
   if (draft.value) {
     editable.appendChild(document.createTextNode(draft.value))
   }
@@ -3013,11 +2994,6 @@ const handleEditEditableKeydown = (event: KeyboardEvent) => {
 const syncStorePartsFromEditable = () => {
   const editable = editableRef.value
   if (!editable) return
-  const contextIds = new Set(
-    Array.from(editable.querySelectorAll<HTMLElement>('.mention-chip[data-context-id]'))
-      .map((chip) => chip.dataset.contextId || '')
-      .filter(Boolean)
-  )
   const commandPresent = Boolean(editable.querySelector('.mention-chip[data-command-chip]'))
   const domFileParts = Array.from(editable.querySelectorAll<HTMLElement>('.mention-chip[data-chip-type="doc"]:not([data-context-id])'))
     .map(chipPartFromChipElement)
@@ -3033,9 +3009,6 @@ const syncStorePartsFromEditable = () => {
     })
     .filter((part): part is AiImageContentPart => part !== null)
 
-  if (contextIds.size !== workspace.selectedContexts.length || workspace.selectedContexts.some((context) => !contextIds.has(context.id))) {
-    workspace.selectedContexts = workspace.selectedContexts.filter((context) => contextIds.has(context.id))
-  }
   if (!commandPresent && workspace.selectedCommandId) {
     workspace.selectCommandPreset(null)
   }

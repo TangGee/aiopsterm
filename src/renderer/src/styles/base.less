@@ -8284,15 +8284,23 @@ code {
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--muted);
   font-size: 12px;
+  text-align: center;
 }
 
 .ai-empty-chat svg {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   color: var(--accent);
+}
+
+.ai-empty-chat span {
+  max-width: min(220px, 70%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-header-actions,
@@ -9275,12 +9283,14 @@ code {
 
 .chat-input {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 32px 32px 32px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
-  padding: 7px;
+  padding: 8px;
   position: relative;
   border: 1px solid transparent;
   border-radius: 9px;
+  min-width: 0;
+  overflow: visible;
 }
 
 .chat-input.drop-active {
@@ -9306,13 +9316,14 @@ code {
 .chat-editable {
   min-width: 0;
   width: 100%;
-  min-height: 72px;
+  min-height: 52px;
+  max-height: 160px;
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: 0;
   background: var(--surface-2);
   color: var(--text);
-  padding: 8px 10px;
+  padding: 8px 9px;
   resize: none;
 }
 
@@ -9403,7 +9414,6 @@ code {
 }
 
 .input-placeholder-notice {
-  grid-column: 2 / 5;
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
@@ -9520,11 +9530,11 @@ code {
 }
 
 .input-controls-row {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(86px, 0.8fr) minmax(120px, 1.2fr) auto;
+  grid-template-columns: minmax(74px, 92px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .ai-control-menu-wrap {
@@ -9534,7 +9544,8 @@ code {
 
 .ai-control-select {
   width: 100%;
-  height: 26px;
+  max-width: 100%;
+  height: 28px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface-2);
@@ -9546,6 +9557,10 @@ code {
   padding: 0 8px;
   font-size: 12px;
   cursor: pointer;
+}
+
+.model-control-wrap {
+  max-width: min(100%, 190px);
 }
 
 .ai-control-select span {
@@ -9602,12 +9617,19 @@ code {
 }
 
 .input-action-buttons-container {
-  min-width: 18px;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   margin-left: auto;
+}
+
+.input-action-buttons-container button {
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
 }
 
 .context-usage-ring {
@@ -9631,9 +9653,25 @@ code {
   flex: 0 0 14px;
 }
 
+@media (max-width: 420px) {
+  .input-controls-row {
+    grid-template-columns: minmax(74px, 86px) minmax(0, 1fr);
+  }
+
+  .input-action-buttons-container {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .model-control-wrap {
+    max-width: 100%;
+  }
+}
+
 .ai-mode-popup,
 .ai-model-popup {
   left: 0;
+  bottom: calc(100% + 42px);
   width: min(260px, calc(100vw - 32px));
   max-width: min(92vw, 720px);
 }
@@ -9656,17 +9694,23 @@ code {
 }
 
 .input-context-row {
-  grid-column: 1 / -1;
-  min-height: 28px;
+  min-height: 26px;
+  max-height: 58px;
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 1px;
+  scrollbar-width: thin;
 }
 
 .context-trigger-tag,
 .context-tag {
+  min-width: 0;
+  max-width: min(210px, 52vw);
   min-height: 24px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -9676,13 +9720,21 @@ code {
   color: var(--text);
   padding: 0 8px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .context-trigger-tag {
+  max-width: none;
   cursor: pointer;
 }
 
+.context-tag {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .context-tag button {
+  flex: 0 0 16px;
   width: 16px;
   height: 16px;
   border: 0;
@@ -9724,7 +9776,7 @@ code {
   left: 7px;
   bottom: calc(100% + 8px);
   z-index: 40;
-  width: 260px;
+  width: min(300px, calc(100% - 14px));
   max-height: 300px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -9854,7 +9906,7 @@ code {
 }
 
 .command-select-popup {
-  width: 260px;
+  width: min(300px, calc(100% - 14px));
   max-height: 280px;
   border-radius: 6px;
   box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.15);

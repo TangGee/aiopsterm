@@ -4122,13 +4122,14 @@ describe('AppShell', () => {
 
     await wrapper.find('.host-batch-footer .batch-action-btn').trigger('click')
     expect(store.selectedContexts.some((context) => context.label === '10.32.6.9')).toBe(true)
-    expect(wrapper.findAll('.chat-editable .mention-chip').some((chip) => chip.text().includes('10.32.6.9'))).toBe(true)
+    expect(wrapper.findAll('.input-context-row .context-tag').some((chip) => chip.text().includes('10.32.6.9'))).toBe(true)
+    expect(wrapper.findAll('.chat-editable .mention-chip').some((chip) => chip.text().includes('10.32.6.9'))).toBe(false)
     expect(wrapper.find('.host-batch-footer').text()).toContain('取消全选')
     expect(wrapper.find('.host-batch-footer').text()).toContain('清空选择')
 
     await wrapper.findAll('.host-batch-footer .batch-action-btn').at(1)!.trigger('click')
     expect(store.selectedContexts.filter((context) => context.kind === 'hosts')).toHaveLength(0)
-    expect(wrapper.find('.chat-editable .mention-chip').exists()).toBe(false)
+    expect(wrapper.findAll('.input-context-row .context-tag').some((chip) => chip.text().includes('10.32.6.9'))).toBe(false)
 
     wrapper.unmount()
   })
@@ -5023,7 +5024,8 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').exists()).toBe(true)
-    expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toContain('width:')
+    expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toBeUndefined()
+    expect(wrapper.find('.chat-input > .chat-editable + .input-controls-row').exists()).toBe(true)
     await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
     expect(wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').exists()).toBe(true)
     expect(wrapper.find('.ai-mode-popup').attributes('style')).toContain('min-width:')
@@ -5034,7 +5036,7 @@ describe('AppShell', () => {
     expect(modeRows[1].text()).toContain('Command')
     await modeRows[1].trigger('click')
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').text()).toContain('Command')
-    expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toContain('width:')
+    expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toBeUndefined()
     await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
     await wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').trigger('click')
     expect(wrapper.text()).toContain('Agent')
@@ -5294,7 +5296,7 @@ describe('AppShell', () => {
     expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).toContain('Provider transcript from test voice backend')
 
     const markdownContext = store.selectedContexts.find((context) => context.label === 'Markdown语法指南.md')!
-    await wrapper.find(`.chat-editable [data-context-id="${markdownContext.id}"] button`).trigger('click')
+    await wrapper.findAll('.input-context-row .context-tag button').find((button) => button.element.closest('.context-tag')?.textContent?.includes('Markdown语法指南.md'))!.trigger('click')
     expect(store.selectedContexts.some((context) => context.id === markdownContext.id)).toBe(false)
 
     await wrapper.find('.context-trigger-tag').trigger('click')
@@ -8561,7 +8563,8 @@ describe('AppShell', () => {
     expect(store.selectedContexts.some((context) => context.id === 'kb-image:images/interface.png')).toBe(true)
     expect(window.aiops.kbReadFile).toHaveBeenCalledWith('images/interface.png', 'base64')
     expect(aiPanel.find('[data-testid="ai-message-input"]').text()).toContain('引用知识库：interface.png')
-    expect(aiPanel.find('.chat-editable .mention-chip-images').exists()).toBe(true)
+    expect(aiPanel.findAll('.input-context-row .context-tag').some((tag) => tag.text().includes('interface.png'))).toBe(true)
+    expect(aiPanel.find('.chat-editable .mention-chip-images').exists()).toBe(false)
 
     store.openKnowledgeFile('Markdown语法指南.md')
     await workspace.vm.$nextTick()
