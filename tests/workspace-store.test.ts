@@ -6455,10 +6455,11 @@ describe('workspace store', () => {
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
       const loadedSnapshot = JSON.stringify(store.todoItems)
       const loadedProgress = { ...store.todoProgress }
+      store.setTopNotice('保留已有通知')
 
       ;(window.aiops as any).listAiTodoSnapshot = undefined
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
-      expect(store.topNotice).toBe('AI Todo 加载服务不可用')
+      expect(store.topNotice).toBe('保留已有通知')
       expect(JSON.stringify(store.todoItems)).toBe(loadedSnapshot)
       expect(store.todoProgress).toEqual(loadedProgress)
 
@@ -6468,7 +6469,7 @@ describe('workspace store', () => {
         errorMessage: 'Todo backend unavailable.'
       }))
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
-      expect(store.topNotice).toBe('Todo backend unavailable.')
+      expect(store.topNotice).toBe('保留已有通知')
       expect(JSON.stringify(store.todoItems)).toBe(loadedSnapshot)
       expect(store.todoProgress).toEqual(loadedProgress)
 
@@ -6476,7 +6477,7 @@ describe('workspace store', () => {
         throw new Error('todo backend rejected')
       })
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
-      expect(store.topNotice).toBe('AI Todo 加载失败')
+      expect(store.topNotice).toBe('保留已有通知')
       expect(JSON.stringify(store.todoItems)).toBe(loadedSnapshot)
       expect(store.todoProgress).toEqual(loadedProgress)
     } finally {
@@ -6605,6 +6606,7 @@ describe('workspace store', () => {
       expect(store.topNotice).toBe('AI 服务返回数据无效')
       expect(JSON.stringify(store.aiCommandOptions)).toBe(commandsBefore)
 
+      store.setTopNotice('保留已有通知')
       vi.mocked(window.aiops.listAiTodoSnapshot!).mockResolvedValueOnce({
         ok: true,
         data: {
@@ -6617,7 +6619,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.refreshAiTodoSnapshot()).resolves.toBe(false)
-      expect(store.topNotice).toBe('AI 服务返回数据无效')
+      expect(store.topNotice).toBe('保留已有通知')
       expect(JSON.stringify(store.todoItems)).toBe(todosBefore)
     } finally {
       Object.assign(window.aiops, originalAiops)

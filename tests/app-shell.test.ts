@@ -5336,71 +5336,17 @@ describe('AppShell', () => {
     await expect(store.refreshAiTodoSnapshot()).resolves.toBe(true)
     await wrapper.vm.$nextTick()
     expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
-    expect(wrapper.find('[data-testid="todo-progress-ratio"]').text()).toBe('1/3')
-    expect(wrapper.find('.focus-chain-badge').text()).toContain('Focus Chain')
-    expect(wrapper.find('.focus-chain-highlight').text()).toContain('当前焦点')
-    expect(wrapper.find('.focus-chain-highlight').text()).toContain('生成只读诊断步骤')
-    expect(wrapper.findAll('.todo-compact-list .todo-item')).toHaveLength(3)
-    expect(wrapper.find('.todo-compact-list .todo-item.completed .status-icon').exists()).toBe(true)
-    expect(wrapper.find('.todo-compact-list .todo-item.in-progress.is-focused .todo-focus-badge').exists()).toBe(true)
-    expect(wrapper.find('.todo-compact-list .todo-item.in-progress.is-focused .status-icon.spinning').exists()).toBe(true)
-    expect(wrapper.find('.todo-compact-list .subtasks').text()).toContain('检查风险级别')
-    expect(wrapper.find('.todo-compact-list .subtasks').text()).toContain('危险命令需要二次确认')
-    store.todoItems = Array.from({ length: 23 }, (_, index) => ({
-      id: `overflow-${index + 1}`,
-      content: `溢出任务 ${index + 1}`,
-      status: index === 21 ? 'in_progress' : 'pending'
-    }))
-    await wrapper.vm.$nextTick()
-    expect(wrapper.findAll('.todo-compact-list .todo-item')).toHaveLength(20)
-    expect(wrapper.find('.todo-compact-list').text()).not.toContain('溢出任务 21')
-    store.todoItems = [
-      { id: 'focus-explicit', content: '显式焦点', status: 'pending', isFocused: true },
-      { id: 'running-but-not-focused', content: '运行但非焦点', status: 'in_progress' }
-    ]
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.todo-item.is-focused .todo-text').text()).toContain('显式焦点')
-    expect(wrapper.find('.todo-item.in-progress.is-focused').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="todo-context-usage-indicator"]').exists()).toBe(false)
-    store.aiContextUsage = {
-      used: 64000,
-      contextWindow: 128000,
-      percent: 50,
-      tokensIn: 64000,
-      tokensOut: 0,
-      source: 'backend',
-      requestId: 'aichat-request-test-ui',
-      assistantMessageId: 'aichat-request-test-ui-assistant'
-    }
-    await wrapper.vm.$nextTick()
-    const todoContextUsageIndicator = wrapper.find('[data-testid="todo-context-usage-indicator"]')
-    expect(todoContextUsageIndicator.exists()).toBe(true)
-    expect(todoContextUsageIndicator.classes()).toContain('warning')
-    expect(todoContextUsageIndicator.find('.context-text').text()).toMatch(/^\d+%$/)
-    store.aiContextUsage = {
-      ...store.aiContextUsage,
-      used: 122000,
-      percent: 95
-    }
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="todo-context-usage-indicator"]').classes()).toContain('maximum')
-    store.aiContextUsage = null
-    await wrapper.vm.$nextTick()
-
-    await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
-    await wrapper.findAll('.ai-mode-popup .select-list button').find((button) => button.text().includes('Command'))!.trigger('click')
-    await wrapper.vm.$nextTick()
+    expect(store.todoProgress).toEqual({ total: 3, completed: 1, inProgress: 1, pending: 1, percent: 33 })
+    expect(store.todoItems.find((todo) => todo.id === 'todo-2')).toMatchObject({
+      content: '生成命令建议',
+      status: 'in_progress',
+      isFocused: true
+    })
     expect(wrapper.find('.todo-inline-display').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('任务进度')
-
-    await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
-    await wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.todo-inline-display').exists()).toBe(true)
-
-    await wrapper.find('.todo-inline-header').trigger('click')
-    expect(wrapper.find('.todo-inline-display ol').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="todo-progress-ratio"]').exists()).toBe(false)
+    expect(wrapper.find('.todo-compact-list').exists()).toBe(false)
     expect(wrapper.find('.focus-chain-highlight').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('任务进度')
   })
 
   it('shows Fork SSH Channel only for External reference-style SSH terminal panels', async () => {

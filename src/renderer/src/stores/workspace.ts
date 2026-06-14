@@ -4540,25 +4540,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   )
 
   const refreshAiTodoSnapshot = async () => {
-    if (!window.aiops?.listAiTodoSnapshot) {
-      setTopNotice('AI Todo 加载服务不可用')
-      return false
-    }
+    const listAiTodoSnapshot = window.aiops?.listAiTodoSnapshot
+    if (typeof listAiTodoSnapshot !== 'function') return false
     let result
     try {
-      result = await window.aiops.listAiTodoSnapshot()
+      result = await listAiTodoSnapshot()
     } catch {
-      setTopNotice('AI Todo 加载失败')
       return false
     }
-    if (!result?.ok) {
-      setTopNotice(result?.errorMessage || 'AI Todo 加载失败')
-      return false
-    }
-    if (!isAiTodoSnapshotData(result.data)) {
-      setTopNotice(malformedAiBackendResultMessage)
-      return false
-    }
+    if (!result?.ok) return false
+    if (!isAiTodoSnapshotData(result.data)) return false
     todoItems.value = result.data.todos.map((todo) => ({
       ...todo,
       subtasks: todo.subtasks?.map((subtask) => ({ ...subtask }))

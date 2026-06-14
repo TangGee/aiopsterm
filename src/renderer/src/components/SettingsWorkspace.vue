@@ -932,7 +932,7 @@ const AiPreferenceSettings = defineComponent({
           }),
           h(SettingsCheckbox, {
             label: '命令输出过滤',
-            description: '压缩长输出，保留和任务相关的片段。',
+            description: '压缩长输出，保留和当前请求相关的片段。',
             checked: workspace.aiPreferences.commandOutputFilteringEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ commandOutputFilteringEnabled: checked })
           }),

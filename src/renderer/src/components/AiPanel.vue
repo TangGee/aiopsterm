@@ -684,158 +684,6 @@
       </div>
     </div>
 
-    <section
-      v-if="showTodoInlineDisplay"
-      class="todo-inline-display"
-      :class="{ 'has-focused': focusedTodo }"
-    >
-      <button
-        class="todo-inline-header"
-        @click.stop="todoExpanded = !todoExpanded"
-      >
-        <span class="todo-header-left">
-          <span class="todo-title">
-            <ListTodo class="todo-icon" />
-            <strong class="todo-title-text">任务进度</strong>
-            <span
-              v-if="focusedTodo"
-              class="focus-chain-badge"
-            >
-              <Zap />
-              <span>Focus Chain</span>
-            </span>
-          </span>
-          <span
-            class="todo-progress-ratio"
-            data-testid="todo-progress-ratio"
-          >
-            <span class="ratio-completed">{{ workspace.todoProgress.completed }}</span>
-            <span class="ratio-separator">/</span>
-            <span class="ratio-total">{{ workspace.todoProgress.total }}</span>
-          </span>
-        </span>
-        <span class="todo-header-right">
-          <span
-            v-if="contextUsage.percent > 0"
-            class="context-usage-indicator"
-            :class="todoContextUsageLevel"
-            data-testid="todo-context-usage-indicator"
-          >
-            <span class="context-bar-container">
-              <span
-                class="context-bar-fill"
-                :style="{ width: `${contextUsage.percent}%` }"
-              ></span>
-            </span>
-            <span class="context-text">{{ contextUsage.percent }}%</span>
-          </span>
-          <span class="todo-progress-indicator">
-            <span class="progress-bar-container">
-              <span
-                class="progress-bar-fill"
-                :style="{ width: `${workspace.todoProgress.percent}%` }"
-              ></span>
-            </span>
-            <em class="progress-text">{{ workspace.todoProgress.percent }}%</em>
-          </span>
-          <span class="todo-controls">
-            <ChevronUp
-              v-if="todoExpanded"
-              class="expand-icon"
-            />
-            <ChevronDown
-              v-else
-              class="expand-icon"
-            />
-          </span>
-        </span>
-      </button>
-      <div
-        v-if="todoExpanded && focusedTodo"
-        class="focus-chain-highlight"
-      >
-        <span class="focused-task-inline">
-          <Zap class="focused-icon" />
-          <span class="focused-label">当前焦点</span>
-          <strong class="focused-task-title">{{ focusedTodo.content }}</strong>
-          <span
-            v-if="focusedTodo.description"
-            class="focused-task-desc"
-          >
-            {{ focusedTodo.description }}
-          </span>
-        </span>
-      </div>
-      <div
-        v-if="todoExpanded"
-        class="todo-compact-list"
-      >
-        <div class="todo-items single-list">
-          <div
-            v-for="(todo, index) in visibleTodos"
-            :key="todo.id"
-            class="todo-item"
-            :class="[
-              todo.status === 'in_progress' ? 'in-progress' : todo.status,
-              {
-                'has-description': !!todo.description,
-                'is-focused': isTodoFocused(todo)
-              }
-            ]"
-          >
-            <div class="todo-content">
-              <div class="todo-left">
-                <span class="todo-index">{{ index + 1 }}.</span>
-                <component
-                  :is="todoStatusIcon(todo)"
-                  class="status-icon under-index"
-                  :class="{ 'focused-icon': isTodoFocused(todo), spinning: todo.status === 'in_progress' }"
-                />
-              </div>
-              <div class="todo-text-container">
-                <span class="todo-text">
-                  {{ todo.content }}
-                  <span
-                    v-if="isTodoFocused(todo)"
-                    class="todo-focus-badge"
-                  >
-                    <Zap />
-                  </span>
-                </span>
-                <div
-                  v-if="todo.description"
-                  class="todo-description"
-                >
-                  {{ todo.description }}
-                </div>
-              </div>
-            </div>
-            <div
-              v-if="todoShowSubtasks && todo.subtasks?.length"
-              class="subtasks"
-            >
-              <div
-                v-for="subtask in todo.subtasks"
-                :key="subtask.id"
-                class="subtask-item"
-              >
-                <Minus />
-                <div class="subtask-text-container">
-                  <span>{{ subtask.content }}</span>
-                  <div
-                    v-if="subtask.description"
-                    class="subtask-description"
-                  >
-                    {{ subtask.description }}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <span
       v-if="chatExportNotice"
       class="ai-operation-notice"
@@ -1260,7 +1108,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
   Code2,
   Copy,
   Download,
@@ -1268,11 +1115,9 @@ import {
   FileText,
   FolderGit2,
   Image,
-  ListTodo,
   LockKeyhole,
   Mic,
   MinusSquare,
-  Minus,
   Play,
   Pencil,
   Plus,
@@ -1313,7 +1158,6 @@ import type {
   ChatMessage,
   ConversationItem
 } from '@/stores/workspace'
-import type { TodoItem } from '@/stores/workspace'
 import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
 
 defineProps<{ agentMode?: boolean }>()
@@ -1328,7 +1172,7 @@ type AiContextCategoryView = {
 }
 
 const aiChatModeOptions: Array<{ id: AiChatMode; label: string; detail: string }> = [
-  { id: 'agent', label: 'Agent', detail: '自动规划并等待确认' },
+  { id: 'agent', label: 'Agent', detail: '上下文辅助与工具调用' },
   { id: 'cmd', label: 'Command', detail: '生成命令与解释' }
 ]
 
@@ -1368,7 +1212,6 @@ const contextKeyboardIndex = ref(-1)
 const commandKeyboardIndex = ref(-1)
 const docsCurrentRelDir = ref('')
 const docsDirStack = ref<string[]>([])
-const todoExpanded = ref(true)
 const chatMode = ref<AiChatMode>('agent')
 const modeMenuOpen = ref(false)
 const modelMenuOpen = ref(false)
@@ -1444,19 +1287,13 @@ const chatAttachmentFilters = [
   }
 ]
 const maxHostContexts = 5
-const todoMaxItems = 20
-const todoShowSubtasks = true
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
 const voiceButtonTitle = computed(() => {
   if (voiceRecording.value) return '停止语音录制'
   if (voiceTranscribing.value) return '语音转写中'
   return '开始语音输入'
 })
-const focusedTodo = computed(() => workspace.todoItems.find((todo) => todo.isFocused || todo.status === 'in_progress') || null)
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
-const focusedTodoId = computed(() => focusedTodo.value?.id || null)
-const visibleTodos = computed(() => workspace.todoItems.slice(0, todoMaxItems))
-const showTodoInlineDisplay = computed(() => chatMode.value === 'agent' && Boolean(focusedTodo.value || workspace.todoProgress.total > 0))
 const filteredHistoryConversations = computed(() => {
   const keyword = historySearchTerm.value.trim().toLowerCase()
   return workspace.sortedConversations.filter((conversation) => {
@@ -1479,17 +1316,6 @@ const groupedVisibleHistory = computed(() => {
     items: [...items].sort((first, second) => second.ts - first.ts)
   }))
 })
-
-const isTodoFocused = (todo: TodoItem) => {
-  if (focusedTodoId.value) return todo.id === focusedTodoId.value
-  if (todo.isFocused) return true
-  return todo.status === 'in_progress'
-}
-const todoStatusIcon = (todo: TodoItem) => {
-  if (todo.status === 'in_progress') return LoaderCircle
-  if (todo.status === 'completed') return Check
-  return Square
-}
 
 const closeModelMenu = () => {
   modelMenuOpen.value = false
@@ -2156,14 +1982,6 @@ const contextUsageColor = computed(() => {
   if (percent >= 90) return '#ef4444'
   if (percent >= 70) return '#f59e0b'
   return '#3b82f6'
-})
-
-const todoContextUsageLevel = computed(() => {
-  const percent = contextUsage.value.percent
-  if (percent >= 90) return 'maximum'
-  if (percent >= 70) return 'critical'
-  if (percent >= 50) return 'warning'
-  return 'normal'
 })
 
 const contextUsageTrackColor = computed(() => 'rgba(128, 128, 128, 0.2)')

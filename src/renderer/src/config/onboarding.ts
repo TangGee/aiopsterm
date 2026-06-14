@@ -58,7 +58,7 @@ export const onboardingTourSteps: Record<OnboardingModuleId, OnboardingStep[]> =
     { id: 'workspace', targetId: 'main-workspace-tabs', title: '主工作区', description: '终端标签、中央页面和主要操作结果显示在主工作区。' },
     { id: 'top-controls', targetId: 'top-layout-controls', title: '顶部布局控制', description: '这里切换 Terminal/Agents 模式、折叠侧栏、控制 AI 面板和窗口。' },
     { id: 'ai-toggle', targetId: 'right-ai-toggle', title: 'AI 面板开关', description: '点击可展开或收起右侧 AI 助手。', advanceOnTargetClick: true },
-    { id: 'ai-sidebar', targetId: 'right-ai-sidebar', title: 'AI 侧栏', description: 'AI 侧栏用于上下文、命令和运维对话；任务进度只在真实任务存在时出现。' }
+    { id: 'ai-sidebar', targetId: 'right-ai-sidebar', title: 'AI 侧栏', description: 'AI 侧栏用于上下文、命令和运维对话，执行状态在消息卡片中反馈。' }
   ],
   systemSettings: [
     { id: 'setting-entry', targetId: 'setting-entry', title: '设置入口', description: '底部设置入口会打开中央设置工作区。' },

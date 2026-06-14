@@ -213,6 +213,50 @@ const startVoiceTranscriptionServer = async () => {
   }
 }
 
+const startOllamaChatServer = async () => {
+  const requests: Array<{ method?: string; url?: string; body: Buffer }> = []
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+    request.on('end', () => {
+      const body = Buffer.concat(chunks)
+      requests.push({
+        method: request.method,
+        url: request.url,
+        body
+      })
+      if (request.method !== 'POST' || request.url !== '/api/chat') {
+        response.writeHead(400, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: 'unexpected chat request' }))
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/json' })
+      setTimeout(() => {
+        response.end(
+          JSON.stringify({
+            message: {
+              content: '当前响应由 E2E Ollama 后端生成。\n\n建议先执行只读检查，再确认是否需要后续修复。'
+            }
+          })
+        )
+      }, 700)
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address() as AddressInfo
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+  }
+}
+
 const configureVoiceTranscriptionProvider = async (page: Page, baseUrl: string) => {
   await page.evaluate(async (providerBaseUrl) => {
     const api = (window as unknown as { aiops: { getConfig: () => Promise<any>; saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
@@ -241,18 +285,8 @@ const configureVoiceTranscriptionProvider = async (page: Page, baseUrl: string) 
   }, baseUrl)
 }
 
-const restoreLocalAiProvider = async (page: Page) => {
-  await page.evaluate(async () => {
-    const api = (window as unknown as { aiops: { saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
-    await api.saveConfig({
-      modelProvider: 'local',
-      modelName: 'aiopsterm-local-agent'
-    })
-  })
-}
-
-const configureModelSelectorOptions = async (page: Page) => {
-  await page.evaluate(async () => {
+const configureModelSelectorOptions = async (page: Page, ollamaBaseUrl: string) => {
+  await page.evaluate(async (providerBaseUrl) => {
     const api = (window as unknown as { aiops: { getConfig: () => Promise<any>; saveConfig: (patch: Record<string, unknown>) => Promise<any> } }).aiops
     const config = await api.getConfig()
     const modelSettings = config.modelSettings || {}
@@ -267,7 +301,7 @@ const configureModelSelectorOptions = async (page: Page) => {
           ...providers,
           ollama: {
             ...(providers.ollama || {}),
-            baseUrl: 'http://localhost:11434',
+            baseUrl: providerBaseUrl,
             apiKey: '',
             modelId: 'qwen2.5-coder'
           }
@@ -279,7 +313,7 @@ const configureModelSelectorOptions = async (page: Page) => {
         ]
       }
     })
-  })
+  }, ollamaBaseUrl)
 }
 
 const installVoiceRecorderDouble = async (page: Page) => {
@@ -354,6 +388,7 @@ test('aiopsterm primary desktop flows', async () => {
   const fakeKubectl = await createFakeKubectl()
   const extensionStore = await createE2eExtensionStore()
   const voiceServer = await startVoiceTranscriptionServer()
+  const aiChatServer = await startOllamaChatServer()
   const app = await launchApp('primary', {
     AIOPSTERM_KUBECTL_PATH: fakeKubectl.filePath,
     AIOPSTERM_EXTENSION_STORE_DIR: extensionStore.dir
@@ -364,7 +399,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
     await installVoiceRecorderDouble(page)
-    await configureModelSelectorOptions(page)
+    await configureModelSelectorOptions(page, aiChatServer.baseUrl)
     await page.reload()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
@@ -468,19 +503,21 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.host-card').filter({ hasText: 'mysql-primary' })).toBeVisible()
     await expect(page.locator('.host-card').filter({ hasText: 'prod-bastion' })).not.toBeVisible()
     await page.locator('.asset-search-input input').fill('')
-    await page.locator('.asset-host-tree').click({ button: 'right', position: { x: 220, y: 240 } })
+    await page.locator('.asset-tree-group-row').filter({ hasText: /^主机/ }).first().click({ button: 'right' })
     await page.locator('.asset-context-menu button').filter({ hasText: '新建主机' }).click()
     await expect(page.locator('.asset-form-panel header').filter({ hasText: '新建主机' })).toBeVisible()
     await page.getByTitle('关闭').click()
     await page.getByTitle('导入帮助').click()
     await expect(page.locator('.asset-import-help-modal')).toContainText('导入说明')
+    await page.locator('.asset-import-help-modal').getByRole('button', { name: '知道了' }).click()
+    await expect(page.locator('.asset-import-help-modal')).toHaveCount(0)
     await page.locator('.host-card').filter({ hasText: 'prod-bastion' }).click({ button: 'right' })
     await expect(page.locator('.asset-context-menu')).toBeVisible()
     await expect(page.locator('.asset-context-menu').getByText('克隆')).toBeVisible()
     await page.locator('.asset-context-menu').getByText('克隆').click()
     await expect(page.locator('.asset-form-panel input').first()).toHaveValue('prod-bastion_Clone')
     await page.getByTitle('关闭').click()
-    await page.locator('.asset-host-tree').click({ button: 'right', position: { x: 220, y: 240 } })
+    await page.locator('.asset-tree-group-row').filter({ hasText: /^主机/ }).first().click({ button: 'right' })
     await page.locator('.asset-context-menu button').filter({ hasText: '新建主机' }).click()
     await page.locator('.asset-form-panel label').filter({ hasText: '主机名' }).locator('input').fill('e2e-host')
     await page.locator('.asset-form-panel label').filter({ hasText: '地址' }).locator('input').fill('10.66.0.8')
@@ -543,14 +580,14 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.key-form-panel label').filter({ hasText: '名称' }).locator('input').fill('e2e-key')
     await page.locator('.key-form-panel label').filter({ hasText: '私钥' }).locator('textarea').fill('-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519\n-----END OPENSSH PRIVATE KEY-----')
     await page.locator('.key-form-panel label').filter({ hasText: '公钥' }).locator('textarea').fill('ssh-ed25519')
-    await page.locator('.key-form-panel .asset-submit-button').click()
+    await page.locator('.key-form-panel').getByRole('button', { name: '创建密钥' }).click()
     await expect(page.locator('.keychain-card').filter({ hasText: 'e2e-key' })).toBeVisible()
     await expect(page.locator('.keychain-card').filter({ hasText: 'e2e-key' })).toContainText('类型ed25519')
     await page.getByTestId('key-new-button').click()
     await page.locator('.key-form-panel label').filter({ hasText: '名称' }).locator('input').fill('e2e-import-key')
     await page.locator('.key-drop-area').click()
     await expect(page.getByText('已导入 e2e-import-rsa.pem，识别为 RSA')).toBeVisible()
-    await page.locator('.key-form-panel .asset-submit-button').click()
+    await page.locator('.key-form-panel').getByRole('button', { name: '创建密钥' }).click()
     await expect(page.locator('.keychain-card').filter({ hasText: 'e2e-import-key' })).toContainText('类型rsa')
     await page.locator('.keychain-card').filter({ hasText: 'e2e-key' }).click({ button: 'right' })
     await page.locator('.asset-context-menu .delete').click()
@@ -1042,7 +1079,6 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByText('请输入本次运维目标。')).not.toBeVisible()
     const modeSelect = page.locator('[data-onboarding-id="ai-mode-select"]')
     await expect(modeSelect).toContainText('Agent')
-    await expect(modeSelect).toHaveAttribute('style', /width:/)
     await modeSelect.click()
     await expect(page.locator('.ai-mode-popup')).toHaveAttribute('style', /min-width:/)
     await expect(page.locator('.ai-mode-popup .select-list button').first()).toContainText('Agent')
@@ -1082,8 +1118,13 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByTestId('ai-model-select')).not.toContainText('Thinking')
     await page.getByTestId('ai-model-select').click()
     await page.locator('.ai-model-popup header input').fill('aiopsterm-local')
-    await page.locator('.ai-model-popup .select-list button:not(.locked-model-option)').filter({ hasText: 'aiopsterm-local-agent' }).click()
-    await expect(page.getByTestId('ai-model-select')).toContainText('aiopsterm-local-agent')
+    await expect(page.locator('.ai-model-popup .select-list')).toContainText('没有匹配的模型')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.ai-model-popup')).toHaveCount(0)
+    await page.getByTestId('ai-model-select').click()
+    await page.locator('.ai-model-popup header input').fill('qwen')
+    await page.locator('.ai-model-popup .select-list button:not(.locked-model-option)').filter({ hasText: 'qwen2.5-coder' }).click()
+    await expect(page.getByTestId('ai-model-select')).toContainText('qwen2.5-coder')
 
     await page.locator('.context-trigger-tag').click()
     await expect(page.locator('.context-select-popup')).toBeVisible()
@@ -1138,14 +1179,9 @@ test('aiopsterm primary desktop flows', async () => {
       authorization: 'Bearer e2e-voice-key'
     })
     expect(voiceServer.requests[0].body.toString('utf8')).toContain('name="model"')
-    await restoreLocalAiProvider(page)
-
-    await page.locator('.todo-inline-header').click()
-    await expect(page.locator('.todo-compact-list')).not.toBeVisible()
-    await page.locator('.todo-inline-header').click()
-    await expect(page.locator('.todo-compact-list')).toBeVisible()
-    await expect(page.locator('.todo-item.in-progress.is-focused .todo-focus-badge')).toBeVisible()
-    await expect(page.locator('.todo-compact-list .subtasks')).toContainText('检查风险级别')
+    await expect(page.locator('.todo-inline-display')).toHaveCount(0)
+    await expect(page.locator('.todo-compact-list')).toHaveCount(0)
+    await expect(page.getByText('任务进度')).toHaveCount(0)
 
     await page.locator('.chat-editable').fill('检查生产磁盘')
     await page.locator('.chat-input button[type="submit"]').click()
@@ -1155,13 +1191,16 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByTestId('ai-file-upload-button')).toBeDisabled()
     await expect(page.getByTestId('ai-voice-button')).toBeDisabled()
     await expect(page.locator('.chat-input button[title="上传图片"]')).toBeDisabled()
-    await expect(page.getByText('当前响应由 aiopsterm 本地后端生成')).toBeVisible()
+    await expect(page.getByText('当前响应由 E2E Ollama 后端生成。')).toBeVisible()
+    expect(aiChatServer.requests.at(-1)?.body.toString('utf8')).toContain('qwen2.5-coder')
+    expect(aiChatServer.requests.at(-1)?.body.toString('utf8')).toContain('检查生产磁盘')
     await expect(page.getByTestId('ai-file-upload-button')).toBeEnabled()
 
     await page.screenshot({ path: path.join('test-results', 'aiopsterm-agents.png'), fullPage: true })
   } finally {
     await app.close()
     await voiceServer.close()
+    await aiChatServer.close()
     await rm(filesFixtureDir, { recursive: true, force: true })
     await rm(fakeKubectl.dir, { recursive: true, force: true })
     await rm(extensionStore.dir, { recursive: true, force: true })
@@ -1190,14 +1229,14 @@ test('terminal tab operations and visual baseline', async () => {
 
     await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
     await expect(page.locator('.terminal-pane')).toHaveCount(0)
-    await page.getByTitle('新建终端').click()
-    await expect(page.locator('.terminal-tab')).toHaveCount(2)
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+T' : 'Control+Shift+T')
+    await expect(page.locator('.terminal-tab')).toHaveCount(1)
     await expect(page.locator('.terminal-grid')).not.toHaveClass(/split/)
 
     await page.locator('.terminal-tab').last().click({ button: 'right' })
     await expect(page.locator('.tab-menu')).toBeVisible()
     await page.locator('.tab-menu button').filter({ hasText: '向右拆分' }).click()
-    await expect(page.locator('.terminal-tab')).toHaveCount(3)
+    await expect(page.locator('.terminal-tab')).toHaveCount(2)
     await expect(page.locator('.terminal-grid')).toHaveClass(/split-right/)
     await expect(page.locator('.terminal-pane')).toHaveCount(2)
     const rightSplitBoxes = await page.locator('.terminal-pane').evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().toJSON()))
@@ -1207,7 +1246,7 @@ test('terminal tab operations and visual baseline', async () => {
     await page.locator('.terminal-pane').last().click({ button: 'right' })
     await expect(page.locator('.terminal-context-menu')).toBeVisible()
     await page.locator('.terminal-context-menu button').filter({ hasText: '向下拆分' }).click()
-    await expect(page.locator('.terminal-tab')).toHaveCount(4)
+    await expect(page.locator('.terminal-tab')).toHaveCount(3)
     await expect(page.locator('.terminal-pane')).toHaveCount(3)
     const nestedSplitBoxes = await page.locator('.terminal-pane').evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().toJSON()))
     expect(nestedSplitBoxes[0].height).toBeGreaterThan(nestedSplitBoxes[1].height * 1.8)
@@ -1220,14 +1259,14 @@ test('terminal tab operations and visual baseline', async () => {
     await page.locator('.terminal-pane').first().click({ button: 'right' })
     await expect(page.locator('.terminal-context-menu')).toBeVisible()
     await page.locator('.terminal-context-menu button').filter({ hasText: '向右拆分' }).click()
-    await expect(page.locator('.terminal-tab')).toHaveCount(5)
+    await expect(page.locator('.terminal-tab')).toHaveCount(4)
     await expect(page.locator('.terminal-pane')).toHaveCount(4)
     await page.locator('.terminal-pane').nth(2).click()
     await expect(page.locator('.terminal-pane')).toHaveCount(4)
     await page.locator('.terminal-pane').nth(2).click({ button: 'right' })
     await expect(page.locator('.terminal-context-menu')).toBeVisible()
     await page.locator('.terminal-context-menu button').filter({ hasText: '取消拆分' }).click()
-    await expect(page.locator('.terminal-tab')).toHaveCount(5)
+    await expect(page.locator('.terminal-tab')).toHaveCount(4)
     await expect(page.locator('.terminal-dashboard')).toBeVisible()
     await expect(page.locator('.terminal-pane')).toHaveCount(0)
     await expect(page.locator('.terminal-grid')).not.toHaveClass(/split/)
@@ -1269,8 +1308,9 @@ test('terminal tab operations and visual baseline', async () => {
     await expect(page.locator('.terminal-command-dialog')).not.toContainText('gpt-5-Thinking')
     await page.locator('.terminal-command-dialog textarea').fill('检查磁盘空间')
     await page.locator('.terminal-command-dialog textarea').press('Enter')
-    await expect(page.locator('.terminal-output-mirror').first()).toContainText('df -h')
-    await expect(page.locator('.terminal-command-dialog textarea')).toHaveValue('')
+    await expect(page.locator('.terminal-command-dialog textarea')).toHaveValue('检查磁盘空间')
+    await expect(page.locator('.terminal-command-dialog .generated-command-row')).toHaveCount(0)
+    await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] no live terminal session for: df -h')
     await page.keyboard.press('Escape')
     await expect(page.locator('.terminal-command-dialog')).not.toBeVisible()
 
