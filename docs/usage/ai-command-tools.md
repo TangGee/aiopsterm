@@ -21,6 +21,8 @@ Assistant transcript text renders as sanitized Markdown. Fenced code blocks are 
 
 The right AI sidebar starts as a real empty chat surface, not with client-fabricated assistant messages or sample workflow cards. New chat conversations persist and restore with an empty message list until the user sends a request. Legacy persisted welcome assistant prompts are stripped by the chat-history backend during non-seed startup, including old welcome rows embedded in otherwise real saved conversations.
 
+The right AI sidebar now keeps a External reference-style open conversation tab strip above the transcript. The tab strip is the set of currently opened AI conversations, not the full history list: the active backend-selected conversation is opened automatically, New Chat keeps the previous tab visible while adding the backend-created empty conversation, and restoring a conversation from History opens it as another tab. Closing a tab only removes it from the visible tab strip and switches to the nearest open conversation; it does not delete the persisted history row. Deleting history remains a separate History menu action backed by `deleteChatConversation()`.
+
 The AI input context row starts empty. The backend may expose suggested/default contexts in the catalog, but the renderer does not auto-select those hosts during startup or panel mount; users add contexts explicitly through `@ 添加上下文`, and every selected context chip has a remove control.
 
 Sent user messages are read-only in the transcript. They can be copied, but clicking them no longer reopens an editable composer or mutates previous user turns.

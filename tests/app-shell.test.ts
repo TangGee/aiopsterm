@@ -3735,6 +3735,12 @@ describe('AppShell', () => {
     store.selectedConversationId = 'history-1'
     await wrapper.vm.$nextTick()
 
+    expect(wrapper.find('[data-testid="ai-conversation-tabs"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').text()).toContain('生产巡检')
+    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-2"]').exists()).toBe(false)
+
     await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -3789,6 +3795,13 @@ describe('AppShell', () => {
     expect(store.chatMessages.at(-1)?.text).toContain('发布回滚会话后端恢复内容')
     expect(store.chatMessages.at(-1)?.text).not.toContain('本地历史摘要')
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(2)
+    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-2"]').attributes('aria-selected')).toBe('true')
+    await wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').trigger('click')
+    await flushPromises()
+    expect(store.selectedConversationId).toBe('history-1')
+    expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('history-1')
+    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
 
     await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
     await flushPromises()
@@ -3802,10 +3815,21 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-new-chat"]').trigger('click')
     await flushPromises()
     expect(store.selectedConversationId).toMatch(/^conv-/)
+    const createdConversationId = store.selectedConversationId
     expect(store.chatMessages).toEqual([])
     expect(wrapper.find('.ai-empty-chat').exists()).toBe(true)
     expect(window.aiops.createChatConversation).toHaveBeenCalled()
     expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
+    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').exists()).toBe(true)
+    vi.mocked(window.aiops.deleteChatConversation).mockClear()
+    await wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"] .ai-conversation-tab-close`).trigger('click')
+    await flushPromises()
+    expect(window.aiops.deleteChatConversation).not.toHaveBeenCalled()
+    expect(store.selectedConversationId).not.toBe(createdConversationId)
+    expect(store.conversations.some((conversation) => conversation.id === createdConversationId)).toBe(true)
+    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]').length).toBeGreaterThan(0)
     store.selectedConversationId = 'history-1'
     store.chatMessages = [
       { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },

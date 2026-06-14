@@ -8427,6 +8427,12 @@ code {
   cursor: pointer;
 }
 
+.ai-panel-top {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
 .chat-scroll {
   min-height: 0;
   position: relative;
@@ -8544,6 +8550,94 @@ code {
 .ai-header-icon-button:hover {
   color: var(--text);
   background: var(--surface-3);
+}
+
+.ai-conversation-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 0 2px;
+  scrollbar-width: thin;
+}
+
+.ai-conversation-tab {
+  min-width: 74px;
+  max-width: 156px;
+  flex: 1 1 126px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px 7px 0 0;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+  cursor: pointer;
+  padding: 0 4px 0 9px;
+}
+
+.ai-conversation-tab:hover,
+.ai-conversation-tab:focus-visible {
+  color: var(--text);
+  background: var(--surface-3);
+  outline: 0;
+}
+
+.ai-conversation-tab.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+
+.ai-conversation-tab-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ai-conversation-tab-favorite {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--warn);
+}
+
+.ai-conversation-tab-close {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+}
+
+.ai-conversation-tab:hover .ai-conversation-tab-close,
+.ai-conversation-tab.active .ai-conversation-tab-close,
+.ai-conversation-tab:focus-within .ai-conversation-tab-close {
+  opacity: 1;
+}
+
+.ai-conversation-tab-close:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.ai-conversation-tab-close svg {
+  width: 13px;
+  height: 13px;
 }
 
 .ai-history-menu-wrap {

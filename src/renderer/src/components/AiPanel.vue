@@ -6,201 +6,244 @@
     @click="closePopups()"
     @keydown="handlePanelKeydown"
   >
-    <header class="ai-header">
-      <div>
-        <h2>{{ agentMode ? t('common.agents') : t('common.ai') }}</h2>
-      </div>
-      <div class="ai-header-actions">
-        <button
-          type="button"
-          class="ai-header-icon-button"
-          :title="t('ai.newChat')"
-          data-testid="ai-new-chat"
-          @click.stop="createNewAiConversation"
-        >
-          <Plus />
-        </button>
-        <div
-          class="ai-history-menu-wrap"
-          @click.stop
-        >
+    <div class="ai-panel-top">
+      <header class="ai-header">
+        <div>
+          <h2>{{ agentMode ? t('common.agents') : t('common.ai') }}</h2>
+        </div>
+        <div class="ai-header-actions">
           <button
             type="button"
             class="ai-header-icon-button"
-            :title="t('ai.history')"
-            data-testid="ai-history-open"
-            @click.stop="toggleHistoryMenu"
+            :title="t('ai.newChat')"
+            data-testid="ai-new-chat"
+            @click.stop="createNewAiConversation"
           >
-            <History />
+            <Plus />
           </button>
           <div
-            v-if="historyMenuOpen"
-            class="ai-history-dropdown"
-            data-testid="ai-history-dropdown"
+            class="ai-history-menu-wrap"
+            @click.stop
           >
-            <div class="ai-history-search-row">
-              <label class="ai-history-search">
-                <Search />
-                <input
-                  ref="historySearchInputRef"
-                  v-model="historySearchTerm"
-                  type="search"
-                  :placeholder="t('ai.searchHistory')"
-                  data-testid="ai-history-search-input"
-                  @keydown.esc.prevent="closeHistoryMenu"
-                />
+            <button
+              type="button"
+              class="ai-header-icon-button"
+              :title="t('ai.history')"
+              data-testid="ai-history-open"
+              @click.stop="toggleHistoryMenu"
+            >
+              <History />
+            </button>
+            <div
+              v-if="historyMenuOpen"
+              class="ai-history-dropdown"
+              data-testid="ai-history-dropdown"
+            >
+              <div class="ai-history-search-row">
+                <label class="ai-history-search">
+                  <Search />
+                  <input
+                    ref="historySearchInputRef"
+                    v-model="historySearchTerm"
+                    type="search"
+                    :placeholder="t('ai.searchHistory')"
+                    data-testid="ai-history-search-input"
+                    @keydown.esc.prevent="closeHistoryMenu"
+                  />
+                  <button
+                    v-if="historySearchTerm"
+                    type="button"
+                    :title="t('ai.clearSearch')"
+                    @click="clearHistorySearch"
+                  >
+                    <X />
+                  </button>
+                </label>
                 <button
-                  v-if="historySearchTerm"
                   type="button"
-                  :title="t('ai.clearSearch')"
-                  @click="clearHistorySearch"
+                  class="ai-history-favorite-toggle"
+                  :class="{ active: historyFavoritesOnly }"
+                  :title="t('ai.favoritesOnly')"
+                  data-testid="ai-history-favorites-toggle"
+                  @click="historyFavoritesOnly = !historyFavoritesOnly"
                 >
-                  <X />
+                  <Star />
                 </button>
-              </label>
-              <button
-                type="button"
-                class="ai-history-favorite-toggle"
-                :class="{ active: historyFavoritesOnly }"
-                :title="t('ai.favoritesOnly')"
-                data-testid="ai-history-favorites-toggle"
-                @click="historyFavoritesOnly = !historyFavoritesOnly"
-              >
-                <Star />
-              </button>
-            </div>
+              </div>
 
-            <div class="ai-history-list">
-              <template v-if="groupedVisibleHistory.length">
-                <section
-                  v-for="group in groupedVisibleHistory"
-                  :key="group.label"
-                  class="ai-history-group"
-                >
-                  <div
-                    class="ai-history-date"
-                    :class="{ favorite: group.label === historyFavoriteLabel }"
+              <div class="ai-history-list">
+                <template v-if="groupedVisibleHistory.length">
+                  <section
+                    v-for="group in groupedVisibleHistory"
+                    :key="group.label"
+                    class="ai-history-group"
                   >
-                    <Star v-if="group.label === historyFavoriteLabel" />
-                    <span>{{ group.label }}</span>
-                  </div>
-                  <div
-                    v-for="conversation in group.items"
-                    :key="conversation.id"
-                    class="ai-history-item"
-                    :class="{ active: workspace.selectedConversationId === conversation.id, favorite: conversation.favorite }"
-                    role="button"
-                    tabindex="0"
-                    @click="restoreHistoryConversation(conversation.id)"
-                    @keydown.enter.prevent="restoreHistoryConversation(conversation.id)"
-                    @keydown.delete.prevent="deleteHistoryConversation(conversation.id)"
-                    @keydown.backspace.prevent="deleteHistoryConversation(conversation.id)"
+                    <div
+                      class="ai-history-date"
+                      :class="{ favorite: group.label === historyFavoriteLabel }"
+                    >
+                      <Star v-if="group.label === historyFavoriteLabel" />
+                      <span>{{ group.label }}</span>
+                    </div>
+                    <div
+                      v-for="conversation in group.items"
+                      :key="conversation.id"
+                      class="ai-history-item"
+                      :class="{ active: workspace.selectedConversationId === conversation.id, favorite: conversation.favorite }"
+                      role="button"
+                      tabindex="0"
+                      @click="restoreHistoryConversation(conversation.id)"
+                      @keydown.enter.prevent="restoreHistoryConversation(conversation.id)"
+                      @keydown.delete.prevent="deleteHistoryConversation(conversation.id)"
+                      @keydown.backspace.prevent="deleteHistoryConversation(conversation.id)"
+                    >
+                      <div class="ai-history-content">
+                        <input
+                          v-if="editingHistoryId === conversation.id"
+                          v-model="editingHistoryTitle"
+                          class="ai-history-title-input"
+                          data-testid="ai-history-title-input"
+                          @click.stop
+                          @keydown.enter.prevent="saveHistoryTitle(conversation.id)"
+                          @keydown.esc.prevent="cancelHistoryTitleEdit"
+                        />
+                        <span
+                          v-else
+                          class="ai-history-title"
+                        >
+                          {{ conversation.title }}
+                        </span>
+                        <span class="ai-history-meta">
+                          <span>{{ formatHistoryTime(conversation.ts) }}</span>
+                          <span v-if="conversation.ipAddress">{{ conversation.ipAddress }}</span>
+                        </span>
+                      </div>
+                      <div class="ai-history-actions">
+                        <template v-if="editingHistoryId === conversation.id">
+                          <button
+                            type="button"
+                            :title="t('common.save')"
+                            @click.stop="saveHistoryTitle(conversation.id)"
+                          >
+                            <Check />
+                          </button>
+                          <button
+                            type="button"
+                            :title="t('ai.cancelEdit')"
+                            @click.stop="cancelHistoryTitleEdit"
+                          >
+                            <X />
+                          </button>
+                        </template>
+                        <template v-else>
+                          <button
+                            type="button"
+                            :title="t('ai.favorite')"
+                            :class="{ active: conversation.favorite }"
+                            @click.stop="toggleHistoryFavorite(conversation.id)"
+                          >
+                            <Star />
+                          </button>
+                          <button
+                            type="button"
+                            :title="t('ai.editTitle')"
+                            @click.stop="editHistoryTitle(conversation.id)"
+                          >
+                            <Pencil />
+                          </button>
+                          <button
+                            type="button"
+                            :title="t('ai.deleteHistory')"
+                            @click.stop="deleteHistoryConversation(conversation.id)"
+                          >
+                            <Trash2 />
+                          </button>
+                        </template>
+                      </div>
+                    </div>
+                  </section>
+                  <button
+                    v-if="hasMoreHistoryConversations"
+                    type="button"
+                    class="ai-history-load-more"
+                    :disabled="historyLoadingMore"
+                    data-testid="ai-history-load-more"
+                    @click="loadMoreHistoryConversations"
                   >
-                    <div class="ai-history-content">
-                      <input
-                        v-if="editingHistoryId === conversation.id"
-                        v-model="editingHistoryTitle"
-                        class="ai-history-title-input"
-                        data-testid="ai-history-title-input"
-                        @click.stop
-                        @keydown.enter.prevent="saveHistoryTitle(conversation.id)"
-                        @keydown.esc.prevent="cancelHistoryTitleEdit"
-                      />
-                      <span
-                        v-else
-                        class="ai-history-title"
-                      >
-                        {{ conversation.title }}
-                      </span>
-                      <span class="ai-history-meta">
-                        <span>{{ formatHistoryTime(conversation.ts) }}</span>
-                        <span v-if="conversation.ipAddress">{{ conversation.ipAddress }}</span>
-                      </span>
-                    </div>
-                    <div class="ai-history-actions">
-                      <template v-if="editingHistoryId === conversation.id">
-                        <button
-                          type="button"
-                          :title="t('common.save')"
-                          @click.stop="saveHistoryTitle(conversation.id)"
-                        >
-                          <Check />
-                        </button>
-                        <button
-                          type="button"
-                          :title="t('ai.cancelEdit')"
-                          @click.stop="cancelHistoryTitleEdit"
-                        >
-                          <X />
-                        </button>
-                      </template>
-                      <template v-else>
-                        <button
-                          type="button"
-                          :title="t('ai.favorite')"
-                          :class="{ active: conversation.favorite }"
-                          @click.stop="toggleHistoryFavorite(conversation.id)"
-                        >
-                          <Star />
-                        </button>
-                        <button
-                          type="button"
-                          :title="t('ai.editTitle')"
-                          @click.stop="editHistoryTitle(conversation.id)"
-                        >
-                          <Pencil />
-                        </button>
-                        <button
-                          type="button"
-                          :title="t('ai.deleteHistory')"
-                          @click.stop="deleteHistoryConversation(conversation.id)"
-                        >
-                          <Trash2 />
-                        </button>
-                      </template>
-                    </div>
-                  </div>
-                </section>
-                <button
-                  v-if="hasMoreHistoryConversations"
-                  type="button"
-                  class="ai-history-load-more"
-                  :disabled="historyLoadingMore"
-                  data-testid="ai-history-load-more"
-                  @click="loadMoreHistoryConversations"
+                    {{ historyLoadingMore ? t('ai.loadingMore') : t('ai.loadMore') }}
+                  </button>
+                </template>
+                <div
+                  v-else
+                  class="ai-history-empty"
                 >
-                  {{ historyLoadingMore ? t('ai.loadingMore') : t('ai.loadMore') }}
-                </button>
-              </template>
-              <div
-                v-else
-                class="ai-history-empty"
-              >
-                {{ t('ai.noData') }}
+                  {{ t('ai.noData') }}
+                </div>
               </div>
             </div>
           </div>
+          <button
+            type="button"
+            class="ai-header-icon-button"
+            :title="t('ai.searchChat')"
+            data-testid="ai-chat-search-open"
+            @click.stop="openChatSearch"
+          >
+            <Search />
+          </button>
+          <button
+            type="button"
+            class="ai-header-icon-button"
+            :title="t('ai.exportChat')"
+            data-testid="ai-chat-export"
+            @click.stop="exportCurrentChat"
+          >
+            <Download />
+          </button>
         </div>
-        <button
-          type="button"
-          class="ai-header-icon-button"
-          :title="t('ai.searchChat')"
-          data-testid="ai-chat-search-open"
-          @click.stop="openChatSearch"
+      </header>
+
+      <nav
+        v-if="visibleConversationTabs.length"
+        class="ai-conversation-tabs"
+        role="tablist"
+        :aria-label="t('ai.conversationTabs')"
+        data-testid="ai-conversation-tabs"
+      >
+        <div
+          v-for="conversation in visibleConversationTabs"
+          :key="conversation.id"
+          class="ai-conversation-tab"
+          :class="{ active: workspace.selectedConversationId === conversation.id, favorite: conversation.favorite }"
+          role="tab"
+          tabindex="0"
+          :aria-selected="workspace.selectedConversationId === conversation.id"
+          :title="conversationTabTooltip(conversation)"
+          data-testid="ai-conversation-tab"
+          :data-conversation-id="conversation.id"
+          @click.stop="restoreConversationFromTab(conversation.id)"
+          @keydown.enter.prevent="restoreConversationFromTab(conversation.id)"
+          @keydown.space.prevent="restoreConversationFromTab(conversation.id)"
+          @keydown.delete.prevent="closeConversationTab(conversation.id)"
+          @keydown.backspace.prevent="closeConversationTab(conversation.id)"
         >
-          <Search />
-        </button>
-        <button
-          type="button"
-          class="ai-header-icon-button"
-          :title="t('ai.exportChat')"
-          data-testid="ai-chat-export"
-          @click.stop="exportCurrentChat"
-        >
-          <Download />
-        </button>
-      </div>
-    </header>
+          <Star
+            v-if="conversation.favorite"
+            class="ai-conversation-tab-favorite"
+          />
+          <span class="ai-conversation-tab-title">{{ displayConversationTitle(conversation) }}</span>
+          <button
+            type="button"
+            class="ai-conversation-tab-close"
+            :title="`${t('ai.closeTab')}: ${displayConversationTitle(conversation)}`"
+            :aria-label="`${t('ai.closeTab')}: ${displayConversationTitle(conversation)}`"
+            @click.stop="closeConversationTab(conversation.id)"
+          >
+            <X />
+          </button>
+        </div>
+      </nav>
+    </div>
 
     <div
       ref="chatScrollRef"
@@ -1286,7 +1329,7 @@ import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOpt
 defineProps<{ agentMode?: boolean }>()
 
 const workspace = useWorkspaceStore()
-const { t } = useI18n()
+const { locale, t } = useI18n()
 type AiChatMode = 'agent' | 'cmd'
 type AiContextCategoryView = {
   id: AiContextKind
@@ -1363,13 +1406,14 @@ const historyLoadingMore = ref(false)
 const editingHistoryId = ref<string | null>(null)
 const editingHistoryTitle = ref('')
 const chatExportNotice = ref('')
+const openConversationTabIds = ref<string[]>([])
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
 let chatExportNoticeTimer: number | undefined
 let voiceRecordingLimitTimer: number | undefined
 let chatScrollFrame: number | undefined
 const historyPageSize = 20
-const historyFavoriteLabel = '收藏'
+const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
 const voiceRecordingLimitMs = 60_000
 const voiceRecordingMinimumMs = 220
 const voiceMaxAudioBytes = 50 * 1024 * 1024
@@ -1419,6 +1463,26 @@ const voiceButtonTitle = computed(() => {
   return '开始语音输入'
 })
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
+const visibleConversationTabs = computed(() => {
+  const conversationsById = new Map(workspace.conversations.map((conversation) => [conversation.id, conversation]))
+  return openConversationTabIds.value.map((id) => conversationsById.get(id)).filter((conversation): conversation is ConversationItem => Boolean(conversation))
+})
+const displayConversationTitle = (conversation: Pick<ConversationItem, 'title'>) => conversation.title.trim() || t('ai.untitledChat')
+const conversationTabTooltip = (conversation: ConversationItem) => {
+  const title = displayConversationTitle(conversation)
+  const summary = conversation.summary.trim()
+  return summary && summary !== title ? `${title}\n${summary}` : title
+}
+const ensureConversationTab = (id: string) => {
+  if (!id || openConversationTabIds.value.includes(id) || !workspace.conversations.some((conversation) => conversation.id === id)) return
+  openConversationTabIds.value = [...openConversationTabIds.value, id]
+}
+
+const pruneConversationTabs = () => {
+  const existingIds = new Set(workspace.conversations.map((conversation) => conversation.id))
+  const nextIds = openConversationTabIds.value.filter((id) => existingIds.has(id))
+  if (nextIds.length !== openConversationTabIds.value.length) openConversationTabIds.value = nextIds
+}
 const filteredHistoryConversations = computed(() => {
   const keyword = historySearchTerm.value.trim().toLowerCase()
   return workspace.sortedConversations.filter((conversation) => {
@@ -1432,7 +1496,7 @@ const hasMoreHistoryConversations = computed(() => visibleHistoryConversations.v
 const groupedVisibleHistory = computed(() => {
   const groups = new Map<string, ConversationItem[]>()
   visibleHistoryConversations.value.forEach((conversation) => {
-    const label = historyFavoritesOnly.value ? historyFavoriteLabel : historyDateLabel(conversation.ts)
+    const label = historyFavoritesOnly.value ? historyFavoriteLabel.value : historyDateLabel(conversation.ts)
     if (!groups.has(label)) groups.set(label, [])
     groups.get(label)!.push(conversation)
   })
@@ -1453,17 +1517,17 @@ const historyDateLabel = (timestamp: number) => {
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
   const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
   const diffDays = Math.floor((startOfToday - startOfTarget) / (1000 * 60 * 60 * 24))
-  if (diffDays <= 0) return '今天'
-  if (diffDays === 1) return '昨天'
-  if (diffDays < 7) return `${diffDays}天前`
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  if (diffDays <= 0) return t('ai.historyToday')
+  if (diffDays === 1) return t('ai.historyYesterday')
+  if (diffDays < 7) return t('ai.historyDaysAgo').replace('{count}', String(diffDays))
+  return date.toLocaleDateString(locale.value, { month: '2-digit', day: '2-digit' })
 }
 
 const formatHistoryTime = (timestamp: number) => {
   const date = new Date(timestamp || Date.now())
   const today = new Date()
   if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   }
   return historyDateLabel(timestamp)
 }
@@ -2070,20 +2134,51 @@ const createNewAiConversation = async () => {
   historyCurrentPage.value = 1
   if (created) {
     closeHistoryMenu()
-    showChatExportNotice('已新建会话。')
+    showChatExportNotice(t('ai.chatCreated'))
   } else {
-    showChatExportNotice('新建会话失败。')
+    showChatExportNotice(t('ai.chatCreateFailed'))
   }
 }
 
-const restoreHistoryConversation = async (id: string) => {
-  if (editingHistoryId.value) return
+const restoreConversationById = async (id: string, successMessage = t('ai.chatRestored'), failureMessage = t('ai.chatRestoreFailed')) => {
+  if (editingHistoryId.value) return false
   const restored = await workspace.restoreConversation(id)
+  if (restored) ensureConversationTab(id)
+  showChatExportNotice(restored ? successMessage : failureMessage)
+  return restored
+}
+
+const restoreConversationFromTab = async (id: string) => {
+  if (workspace.selectedConversationId === id) return
+  closeHistoryMenu()
+  await restoreConversationById(id)
+}
+
+const closeConversationTab = async (id: string) => {
+  closeHistoryMenu()
+  const visibleTabs = visibleConversationTabs.value
+  if (visibleTabs.length <= 1) {
+    showChatExportNotice(t('ai.keepOneTab'))
+    return
+  }
+  openConversationTabIds.value = openConversationTabIds.value.filter((openId) => openId !== id)
+  if (workspace.selectedConversationId !== id) {
+    showChatExportNotice(t('ai.tabClosed'))
+    return
+  }
+  const closedIndex = visibleTabs.findIndex((conversation) => conversation.id === id)
+  const nextConversation = visibleTabs[closedIndex + 1] || visibleTabs[closedIndex - 1]
+  if (nextConversation) {
+    await restoreConversationById(nextConversation.id, t('ai.tabClosed'), t('ai.chatRestoreFailed'))
+    return
+  }
+  showChatExportNotice(t('ai.tabClosed'))
+}
+
+const restoreHistoryConversation = async (id: string) => {
+  const restored = await restoreConversationById(id)
   if (restored) {
     closeHistoryMenu()
-    showChatExportNotice('已恢复历史会话。')
-  } else {
-    showChatExportNotice('历史会话恢复失败。')
   }
 }
 
@@ -2107,7 +2202,7 @@ const saveHistoryTitle = async (id: string) => {
   if (!editingHistoryId.value) return
   const saved = await workspace.renameConversation(id, editingHistoryTitle.value)
   cancelHistoryTitleEdit()
-  showChatExportNotice(saved ? '历史标题已更新。' : '历史标题未更新。')
+  showChatExportNotice(saved ? t('ai.historyTitleUpdated') : t('ai.historyTitleUpdateFailed'))
 }
 
 const deleteHistoryConversation = async (id: string) => {
@@ -2115,13 +2210,13 @@ const deleteHistoryConversation = async (id: string) => {
   if (visibleHistoryConversations.value.length === 0 && historyCurrentPage.value > 1) {
     historyCurrentPage.value -= 1
   }
-  showChatExportNotice(deleted ? '历史会话已删除。' : '历史会话删除失败。')
+  showChatExportNotice(deleted ? t('ai.chatDeleted') : t('ai.chatDeleteFailed'))
 }
 
 const toggleHistoryFavorite = async (id: string) => {
   const toggled = await workspace.toggleConversationFavorite(id)
   const conversation = workspace.conversations.find((item) => item.id === id)
-  showChatExportNotice(toggled ? (conversation?.favorite ? '历史会话已收藏。' : '已取消历史收藏。') : '历史收藏更新失败。')
+  showChatExportNotice(toggled ? (conversation?.favorite ? t('ai.historyFavorited') : t('ai.historyUnfavorited')) : t('ai.historyFavoriteUpdateFailed'))
 }
 
 const loadMoreHistoryConversations = async () => {
@@ -4417,6 +4512,15 @@ watch([historySearchTerm, historyFavoritesOnly], () => {
   editingHistoryId.value = null
   editingHistoryTitle.value = ''
 })
+
+watch(
+  [() => workspace.selectedConversationId, () => workspace.conversations.map((conversation) => conversation.id).join('|')],
+  ([selectedConversationId]) => {
+    pruneConversationTabs()
+    ensureConversationTab(selectedConversationId)
+  },
+  { immediate: true }
+)
 
 watch(
   () =>
