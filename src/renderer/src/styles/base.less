@@ -9756,8 +9756,8 @@ code {
 }
 
 .input-controls-row {
-  display: grid;
-  grid-template-columns: minmax(74px, 88px) minmax(122px, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -9765,7 +9765,13 @@ code {
 
 .ai-control-menu-wrap {
   position: relative;
+  flex: 0 0 88px;
   min-width: 0;
+}
+
+.input-controls-row > .ai-control-menu-wrap:first-child {
+  flex-basis: 88px;
+  max-width: 88px;
 }
 
 .ai-control-select {
@@ -9786,6 +9792,7 @@ code {
 }
 
 .model-control-wrap {
+  flex: 1 1 122px;
   max-width: none;
 }
 
@@ -9843,6 +9850,8 @@ code {
 }
 
 .input-action-buttons-container {
+  flex: 0 0 auto;
+  max-width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -9882,7 +9891,7 @@ code {
 
 @media (max-width: 420px) {
   .input-controls-row {
-    grid-template-columns: minmax(72px, 82px) minmax(112px, 1fr) auto;
+    gap: 6px;
   }
 
   .input-action-buttons-container {
