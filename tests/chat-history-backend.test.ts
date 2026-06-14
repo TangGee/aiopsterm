@@ -482,7 +482,7 @@ describe('AI chat history backend boundary', () => {
     expect(list.selectedConversationId).toBe('')
   })
 
-  it('strips legacy default empty-chat assistant messages from non-seed runtime state', async () => {
+  it('strips legacy default welcome assistant messages from non-seed runtime state', async () => {
     const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-legacy-empty-message-' })
     await writeFile(
       stateFilePath,
@@ -510,6 +510,98 @@ describe('AI chat history backend boundary', () => {
 
     expect(restored.messages).toEqual([])
     expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).messagesByConversationId['legacy-empty-chat']).toEqual([])
+  })
+
+  it('strips legacy welcome assistant messages from mixed saved conversations', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-legacy-mixed-message-' })
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        selectedConversationId: 'legacy-mixed-chat',
+        conversations: [
+          {
+            id: 'legacy-mixed-chat',
+            title: '新会话',
+            summary: '检查生产磁盘',
+            updatedAt: '刚刚',
+            ts: 1234
+          }
+        ],
+        messagesByConversationId: {
+          'legacy-mixed-chat': [
+            { id: 'history-legacy-welcome', role: 'assistant', text: '请输入本次运维目标。', state: 'done' },
+            { id: 'history-real-user', role: 'user', text: '检查生产磁盘' },
+            { id: 'history-real-assistant', role: 'assistant', text: '磁盘使用率检查已完成。', state: 'done' }
+          ]
+        }
+      }),
+      'utf-8'
+    )
+
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    const restored = expectOkData(backend.restoreChatConversation('legacy-mixed-chat'))
+
+    expect(restored.messages).toEqual([
+      { id: 'history-real-user', role: 'user', text: '检查生产磁盘' },
+      { id: 'history-real-assistant', role: 'assistant', text: '磁盘使用率检查已完成。', state: 'done' }
+    ])
+    expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).messagesByConversationId['legacy-mixed-chat']).toEqual(restored.messages)
+  })
+
+  it('also normalizes the legacy compatibility state file when the primary state file exists', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-legacy-compat-cleanup-' })
+    const legacyStateFilePath = join(stateFilePath, '..', 'aiopsterm-chat-history.json')
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        selectedConversationId: 'primary-chat',
+        conversations: [
+          {
+            id: 'primary-chat',
+            title: 'Primary Chat',
+            summary: 'current state',
+            updatedAt: 'Today',
+            ts: 2222
+          }
+        ],
+        messagesByConversationId: {
+          'primary-chat': [{ id: 'primary-user', role: 'user', text: 'current prompt' }]
+        }
+      }),
+      'utf-8'
+    )
+    await writeFile(
+      legacyStateFilePath,
+      JSON.stringify({
+        version: 1,
+        selectedConversationId: 'legacy-compat-chat',
+        conversations: [
+          {
+            id: 'legacy-compat-chat',
+            title: 'Legacy Compat Chat',
+            summary: 'legacy state',
+            updatedAt: 'Yesterday',
+            ts: 1111
+          }
+        ],
+        messagesByConversationId: {
+          'legacy-compat-chat': [
+            { id: 'legacy-compat-welcome', role: 'assistant', text: '请输入本次运维目标。', state: 'done' },
+            { id: 'legacy-compat-user', role: 'user', text: 'legacy prompt' }
+          ]
+        }
+      }),
+      'utf-8'
+    )
+
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    const list = expectOkData(backend.listChatConversations())
+    const legacyState = JSON.parse(await readFile(legacyStateFilePath, 'utf-8'))
+
+    expect(list.conversations.map((conversation: { id: string }) => conversation.id)).toEqual(['primary-chat'])
+    expect(legacyState.messagesByConversationId['legacy-compat-chat']).toEqual([{ id: 'legacy-compat-user', role: 'user', text: 'legacy prompt' }])
   })
 
   it('migrates the legacy electron-store chat-history file when the new state file is empty', async () => {

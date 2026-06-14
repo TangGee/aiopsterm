@@ -217,13 +217,14 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
     .filter(Boolean) as AiChatHistoryMessage[]
 }
 
-const legacyEmptyConversationAssistantText = '请输入本次运维目标。'
+const legacyWelcomeAssistantText = '请输入本次运维目标。'
 
-const stripLegacyEmptyConversationMessages = (messages: AiChatHistoryMessage[]) => {
+const isLegacyWelcomeAssistantMessage = (message: AiChatHistoryMessage) =>
+  message.role === 'assistant' && message.text === legacyWelcomeAssistantText && message.state === 'done'
+
+const stripLegacyWelcomeAssistantMessages = (messages: AiChatHistoryMessage[]) => {
   if (runtimeConfig.useSeedData) return messages
-  if (messages.length !== 1) return messages
-  const [message] = messages
-  return message.role === 'assistant' && message.text === legacyEmptyConversationAssistantText && message.state === 'done' ? [] : messages
+  return messages.filter((message) => !isLegacyWelcomeAssistantMessage(message))
 }
 
 const uniqueId = (value: string, fallback: string, seenIds: Set<string>) => {
@@ -259,7 +260,7 @@ const normalizeStateShape = (source?: Partial<ChatHistoryStoreShape> | null, fal
   const nextMessages: Record<string, AiChatHistoryMessage[]> = {}
   const rawMessages = isRecord(source?.messagesByConversationId) ? source.messagesByConversationId : fallback.messagesByConversationId
   conversations.forEach((conversation) => {
-    const messages = stripLegacyEmptyConversationMessages(normalizeMessages(rawMessages[conversation.id]))
+    const messages = stripLegacyWelcomeAssistantMessages(normalizeMessages(rawMessages[conversation.id]))
     nextMessages[conversation.id] = messages
   })
   const selectedConversationId = conversations.some((item) => item.id === source?.selectedConversationId)
@@ -301,16 +302,35 @@ const readPersistedState = (stateFilePath: string) => {
   return normalizeState(parsed)
 }
 
+const writeStateToFilePath = (stateFilePath: string, state: ChatHistoryStoreShape) => {
+  mkdirSync(dirname(stateFilePath), { recursive: true })
+  const tempPath = `${stateFilePath}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')
+  renameSync(tempPath, stateFilePath)
+}
+
+const rewriteNormalizedStateFile = (stateFilePath: string) => {
+  try {
+    if (!existsSync(stateFilePath)) return
+    writeStateToFilePath(stateFilePath, readPersistedState(stateFilePath))
+  } catch {
+    /* Legacy compatibility files are best-effort cleanup only. */
+  }
+}
+
 const ensureStateLoaded = () => {
   if (chatHistoryStateLoaded && loadedStateFilePath === runtimeConfig.stateFilePath) return
   chatHistoryStateLoaded = true
   loadedStateFilePath = runtimeConfig.stateFilePath
   applyInitialState()
-  const stateFilePath = existsSync(runtimeConfig.stateFilePath) ? runtimeConfig.stateFilePath : legacyChatHistoryStateFilePath()
+  const primaryStateExists = existsSync(runtimeConfig.stateFilePath)
+  const legacyStateFilePath = legacyChatHistoryStateFilePath()
+  const stateFilePath = primaryStateExists ? runtimeConfig.stateFilePath : legacyStateFilePath
   if (!existsSync(stateFilePath)) return
   try {
     chatHistoryState = readPersistedState(stateFilePath)
     if (stateFilePath !== runtimeConfig.stateFilePath || !runtimeConfig.useSeedData) saveState(chatHistoryState)
+    if (!runtimeConfig.useSeedData && primaryStateExists) rewriteNormalizedStateFile(legacyStateFilePath)
   } catch {
     /* Keep the backend-owned empty or seed state when persisted chat history is corrupt. */
   }
@@ -324,10 +344,7 @@ const getState = () => {
 const saveState = (state: ChatHistoryStoreShape) => {
   chatHistoryState = normalizeState(state)
   try {
-    mkdirSync(dirname(runtimeConfig.stateFilePath), { recursive: true })
-    const tempPath = `${runtimeConfig.stateFilePath}.${process.pid}.${Date.now()}.tmp`
-    writeFileSync(tempPath, JSON.stringify(chatHistoryState, null, 2), 'utf-8')
-    renameSync(tempPath, runtimeConfig.stateFilePath)
+    writeStateToFilePath(runtimeConfig.stateFilePath, chatHistoryState)
   } catch {
     /* Chat history persistence should not turn successful UI mutations into failures. */
   }

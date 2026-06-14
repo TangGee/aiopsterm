@@ -15,7 +15,7 @@ The main process parses this block before the assistant response reaches the ren
 
 The AI panel renders that backend-owned message as a command card. Copy uses the structured command text. Run sends the command through the existing terminal command path and requires an active backend terminal session; without one, aiopsterm shows the normal terminal-unavailable notice and does not report a fake command result.
 
-The right AI sidebar starts as a real empty chat surface, not with client-fabricated assistant messages or sample workflow cards. New chat conversations persist and restore with an empty message list until the user sends a request. Legacy persisted empty-chat assistant prompts are stripped by the chat-history backend during non-seed startup.
+The right AI sidebar starts as a real empty chat surface, not with client-fabricated assistant messages or sample workflow cards. New chat conversations persist and restore with an empty message list until the user sends a request. Legacy persisted welcome assistant prompts are stripped by the chat-history backend during non-seed startup, including old welcome rows embedded in otherwise real saved conversations.
 
 The Todo/progress strip is hidden until a backend-owned task snapshot or focused task exists. If an AI request cannot reach a configured provider, or the prompt is rejected before generation starts, the backend clears the request Todo snapshot instead of leaving a failed sample Focus Chain in the panel. Model, context, history, export, and input controls remain functional from the initial empty state.
 
