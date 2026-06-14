@@ -578,20 +578,32 @@
             <span
               v-if="commandHostForMessage(message)"
               class="message-command-host"
+              :title="commandHostTooltipForMessage(message)"
+              :aria-label="commandHostTooltipForMessage(message)"
+              data-testid="ai-message-command-host"
             >
-              {{ commandHostForMessage(message) }}
+              <Server />
+              <span class="visually-hidden">{{ commandHostForMessage(message) }}</span>
             </span>
             <span
               v-if="message.commandExecution?.requiresApproval"
               class="message-command-badge warning"
+              title="需要确认"
+              aria-label="需要确认"
+              data-testid="ai-message-command-approval-badge"
             >
-              需要确认
+              <CheckSquare />
+              <span class="visually-hidden">需要确认</span>
             </span>
             <span
               v-if="message.commandExecution?.interactive"
               class="message-command-badge"
+              title="交互式命令"
+              aria-label="交互式命令"
+              data-testid="ai-message-command-interactive-badge"
             >
-              交互式
+              <Zap />
+              <span class="visually-hidden">交互式</span>
             </span>
             <span class="message-command-card-spacer"></span>
             <span
@@ -1355,6 +1367,7 @@ let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
 let chatExportNoticeTimer: number | undefined
 let voiceRecordingLimitTimer: number | undefined
+let chatScrollFrame: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = '收藏'
 const voiceRecordingLimitMs = 60_000
@@ -1798,6 +1811,27 @@ const isCommandTerminalActionDisabled = (message: CommandSuggestionMessage) =>
 const commandHostForMessage = (message: { commandExecution?: { ip?: string } }) => {
   const ip = message.commandExecution?.ip?.trim()
   return ip ? `Host ${ip}` : ''
+}
+
+const commandHostTooltipForMessage = (message: { commandExecution?: { ip?: string } }) => {
+  const ip = message.commandExecution?.ip?.trim()
+  return ip ? `目标主机：${ip}` : ''
+}
+
+const scrollChatToBottom = () => {
+  const root = chatScrollRef.value
+  if (!root) return
+  root.scrollTop = root.scrollHeight
+}
+
+const scheduleChatScrollToBottom = () => {
+  void nextTick(() => {
+    if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
+    chatScrollFrame = window.requestAnimationFrame(() => {
+      chatScrollFrame = undefined
+      scrollChatToBottom()
+    })
+  })
 }
 
 const copyCommandToClipboard = async (message: CommandSuggestionMessage) => {
@@ -4385,12 +4419,32 @@ watch([historySearchTerm, historyFavoritesOnly], () => {
 })
 
 watch(
-  () => workspace.chatMessages.map((message) => `${message.id}:${message.text}:${message.state || ''}`).join('|'),
+  () =>
+    workspace.chatMessages
+      .map((message) =>
+        [
+          message.id,
+          message.text,
+          message.state || '',
+          message.ask || '',
+          message.say || '',
+          message.action || '',
+          message.executedCommand || '',
+          message.commandExecutionStatus || '',
+          message.commandExecutionMessage || '',
+          message.contentParts?.length || 0
+        ].join(':')
+      )
+      .join('|'),
   async () => {
-    if (!chatSearchOpen.value || !chatSearchTerm.value.trim()) return
+    if (!chatSearchOpen.value || !chatSearchTerm.value.trim()) {
+      scheduleChatScrollToBottom()
+      return
+    }
     await nextTick()
     runChatSearch()
-  }
+  },
+  { immediate: true }
 )
 
 watch(
@@ -4458,6 +4512,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
   if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
   if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
   if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)

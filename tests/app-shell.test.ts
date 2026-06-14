@@ -4744,6 +4744,30 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('keeps the AI chat scrolled to the newest rendered message', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    const chatScroll = wrapper.find('.chat-scroll').element as HTMLElement
+    Object.defineProperty(chatScroll, 'scrollHeight', { configurable: true, value: 1400 })
+    Object.defineProperty(chatScroll, 'clientHeight', { configurable: true, value: 360 })
+    chatScroll.scrollTop = 0
+
+    store.chatMessages.push({
+      id: 'scroll-user',
+      role: 'user',
+      text: '滚动到底部',
+      state: 'done'
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await waitForAnimationFrames(1)
+
+    expect(chatScroll.scrollTop).toBe(1400)
+
+    wrapper.unmount()
+  })
+
   it('renders malformed AI response envelopes as backend errors instead of fabricated answers', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -5001,7 +5025,12 @@ describe('AppShell', () => {
     expect(commandMessage).toBeTruthy()
     expect(commandMessage!.find('[data-testid="ai-message-command-card"]').exists()).toBe(true)
     expect(commandMessage!.find('[data-testid="ai-message-command-text"]').text()).toContain('uptime')
-    expect(commandMessage!.text()).toContain('Host 10.24.8.12')
+    const hostBadge = commandMessage!.find('[data-testid="ai-message-command-host"]')
+    expect(hostBadge.exists()).toBe(true)
+    expect(hostBadge.attributes('title')).toBe('目标主机：10.24.8.12')
+    expect(hostBadge.attributes('aria-label')).toBe('目标主机：10.24.8.12')
+    expect(hostBadge.find('svg').exists()).toBe(true)
+    expect(hostBadge.text()).toContain('Host 10.24.8.12')
     expect(commandMessage!.find('[data-testid="ai-message-command-run"]').exists()).toBe(true)
     expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(true)
     expect(commandMessage!.find('[data-testid="ai-message-command-line-count"]').text()).toContain('1 line')

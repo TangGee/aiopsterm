@@ -6990,6 +6990,7 @@ code {
   gap: 8px;
 }
 
+.visually-hidden,
 .visually-hidden-input {
   position: absolute;
   width: 1px !important;
@@ -9238,7 +9239,9 @@ code {
 .message-command-title svg,
 .message-command-status svg,
 .message-command-icon-button svg,
-.message-command-help svg {
+.message-command-help svg,
+.message-command-host svg,
+.message-command-badge svg {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
@@ -9279,17 +9282,19 @@ code {
 
 .message-command-host,
 .message-command-badge {
-  min-width: 0;
-  max-width: 152px;
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  height: 24px;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--muted);
   background: var(--surface-3);
-  padding: 2px 7px;
-  font-size: 11px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .message-command-badge.warning {
