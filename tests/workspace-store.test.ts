@@ -6329,10 +6329,13 @@ describe('workspace store', () => {
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'chats')?.options).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'chat:conv-2', label: 'K8s 发布失败' })])
     )
+    expect(store.selectedContexts).toEqual([])
+
+    await store.refreshAiContextCatalog({ hydrateSelection: true })
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['opened-local', 'asset-1'])
 
     store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
-    await store.refreshAiContextCatalog()
+    await store.refreshAiContextCatalog({ hydrateSelection: true })
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
   })
 

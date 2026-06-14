@@ -696,6 +696,8 @@ export type AiChatHistoryMessage = {
   favorite?: boolean
   feedback?: 'up' | 'down'
   executedCommand?: string
+  commandExecutionStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
+  commandExecutionMessage?: string
   ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'

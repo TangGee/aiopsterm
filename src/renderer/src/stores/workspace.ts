@@ -469,6 +469,8 @@ export type ChatMessage = {
   favorite?: boolean
   feedback?: 'up' | 'down'
   executedCommand?: string
+  commandExecutionStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
+  commandExecutionMessage?: string
   ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
   say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
   action?: 'approved' | 'rejected'
@@ -2556,6 +2558,7 @@ const aiChatFeedbackValues: NonNullable<AiChatHistoryMessage['feedback']>[] = ['
 const aiChatAskValues: NonNullable<AiChatHistoryMessage['ask']>[] = ['command', 'mcp_tool_call', 'mcp_resource_access', 'followup']
 const aiChatSayValues: NonNullable<AiChatHistoryMessage['say']>[] = ['command', 'command_output', 'search_result', 'context_truncated']
 const aiChatActionValues: NonNullable<AiChatHistoryMessage['action']>[] = ['approved', 'rejected']
+const aiChatCommandExecutionStatusValues: NonNullable<AiChatHistoryMessage['commandExecutionStatus']>[] = ['pending', 'running', 'succeeded', 'failed']
 const aiChatModes: NonNullable<AiChatResponseInput['mode']>[] = ['agent', 'command', 'chat']
 const aiSupportedImageTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
 const aiProviderKeys = ['aiopsterm-local', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama']
@@ -2620,6 +2623,9 @@ const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage
   isOptionalBoolean(source.favorite) &&
   (source.feedback === undefined || aiChatFeedbackValues.includes(source.feedback as NonNullable<AiChatHistoryMessage['feedback']>)) &&
   isOptionalString(source.executedCommand) &&
+  (source.commandExecutionStatus === undefined ||
+    aiChatCommandExecutionStatusValues.includes(source.commandExecutionStatus as NonNullable<AiChatHistoryMessage['commandExecutionStatus']>)) &&
+  isOptionalString(source.commandExecutionMessage) &&
   (source.ask === undefined || aiChatAskValues.includes(source.ask as NonNullable<AiChatHistoryMessage['ask']>)) &&
   (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatHistoryMessage['say']>)) &&
   (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatHistoryMessage['action']>)) &&
@@ -4362,6 +4368,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     favorite: message.favorite,
     feedback: message.feedback,
     executedCommand: message.executedCommand,
+    commandExecutionStatus: message.commandExecutionStatus,
+    commandExecutionMessage: message.commandExecutionMessage,
     ask: message.ask,
     say: message.say,
     action: message.action,
@@ -4394,6 +4402,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       feedback: message.feedback,
       contentParts: message.contentParts ? cloneStructuredValue(message.contentParts) : undefined,
       executedCommand: message.executedCommand,
+      commandExecutionStatus: message.commandExecutionStatus,
+      commandExecutionMessage: message.commandExecutionMessage,
       ask: message.ask,
       say: message.say,
       action: message.action,
@@ -4467,7 +4477,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = {}) => {
+  const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = { hydrateSelection: false }) => {
     if (!window.aiops?.listAiContextCatalog) {
       setTopNotice('AI 上下文加载服务不可用')
       return false
@@ -4495,7 +4505,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openedHosts: result.data.openedHosts.map((host) => ({ ...host })),
       selectedDefaults: result.data.selectedDefaults.map((context) => ({ ...context }))
     }
-    if (options.hydrateSelection !== false && selectedContexts.value.length === 0) {
+    if (options.hydrateSelection === true && selectedContexts.value.length === 0) {
       selectedContexts.value = aiContextCatalog.value.selectedDefaults.map((context) => ({ ...context }))
     }
     return true
@@ -4597,6 +4607,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
     return true
   }
+
+  const syncCurrentConversationSnapshot = (options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) =>
+    updateCurrentConversationSnapshot(undefined, options)
 
   const selectedLeftFileSession = computed(() => fileSessions.value.find((session) => session.id === selectedLeftFileSessionId.value) || null)
   const selectedRightFileSession = computed(() => fileSessions.value.find((session) => session.id === selectedRightFileSessionId.value) || null)
@@ -5066,7 +5079,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await refreshKubernetesCatalog()
     await loadChatConversationsFromBackend({ restoreIfEmpty: true })
     await refreshAiTodoSnapshot()
-    await refreshAiContextCatalog({ hydrateSelection: true })
+    await refreshAiContextCatalog({ hydrateSelection: false })
     await refreshAiCommandCatalog()
   }
 
@@ -13661,6 +13674,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiContextCatalog,
     hydrateConfig,
     loadChatConversationsFromBackend,
+    syncCurrentConversationSnapshot,
     refreshAiTodoSnapshot,
     refreshAiContextCatalog,
     refreshAiCommandCatalog,

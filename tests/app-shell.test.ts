@@ -3931,20 +3931,50 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     const commandMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('uptime'))
     expect(commandMessage).toBeTruthy()
+    expect(commandMessage!.find('[data-testid="ai-message-command-card"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-text"]').text()).toContain('uptime')
     await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已复制')
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
     await flushPromises()
     expect(store.activePanel.output).not.toContain('[aiopsterm] no live terminal session for: uptime')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBeUndefined()
+    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.commandExecutionStatus).toBe('failed')
+    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('终端会话不可用')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('终端会话不可用')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'command-assistant',
+            commandExecutionStatus: 'failed',
+            commandExecutionMessage: expect.stringContaining('终端会话不可用')
+          })
+        ])
+      })
+    )
     store.activePanel.sessionId = 'terminal-command-panel'
     vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(window.aiops.updateChatConversation).mockClear()
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime')
-    expect(commandMessage!.find('[data-testid="ai-message-executed-command"]').text()).toContain('uptime')
+    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.commandExecutionStatus).toBe('succeeded')
+    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('已发送到终端：uptime')
+    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'command-assistant',
+            executedCommand: 'uptime',
+            commandExecutionStatus: 'succeeded',
+            commandExecutionMessage: '已发送到终端：uptime'
+          })
+        ])
+      })
+    )
 
     const findContextButton = (label: string) =>
       wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes(label))
@@ -4072,42 +4102,17 @@ describe('AppShell', () => {
     expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-message-input"]').element)
 
     store.chatMessages.push({
-      id: 'msg-edit-context-return',
+      id: 'msg-readonly-user',
       role: 'user',
       text: '检查数据库主机',
       contentParts: [{ type: 'text', text: '检查数据库主机' }],
       hosts: []
     })
     await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-message-edit"]').exists()).toBe(false)
     await wrapper.find('.message.user .message-parts').trigger('click')
     await wrapper.vm.$nextTick()
-    const selectedContextIdsBeforeEditContext = store.selectedContexts.map((context) => context.id)
-    await wrapper.find('.user-message-edit-container .context-trigger-tag').trigger('click')
-    await wrapper.vm.$nextTick()
-    await findContextButton('文档')!.trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    await findContextButton('commands')!.trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Escape' })
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.context-select-popup header button').exists()).toBe(true)
-    expect(findContextButton('commands')).toBeTruthy()
-    await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Escape' })
-    await wrapper.vm.$nextTick()
-    expectContextMainMenu()
-    await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Escape' })
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.context-select-popup').exists()).toBe(false)
-    expect(document.activeElement).toBe(wrapper.find('.user-message-edit-container .message-editable').element)
-    await wrapper.find('.user-message-edit-container .context-trigger-tag').trigger('click')
-    await wrapper.vm.$nextTick()
-    await findContextButton('10.32.6.9')!.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.findAll('.user-message-edit-container .context-tag').some((tag) => tag.text().includes('10.32.6.9'))).toBe(true)
-    expect(store.selectedContexts.map((context) => context.id)).toEqual(selectedContextIdsBeforeEditContext)
+    expect(wrapper.find('.user-message-edit-container').exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -4442,15 +4447,15 @@ describe('AppShell', () => {
     }
   })
 
-  it('fails closed on edit-mode AI input and voice transcription backend boundaries', async () => {
+  it('keeps sent user messages readonly and fails closed on voice transcription backend boundaries', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
-    store.selectedConversationId = 'conv-edit-ai-boundary'
+    store.selectedConversationId = 'conv-readonly-ai-boundary'
     store.conversations = [
       {
-        id: 'conv-edit-ai-boundary',
-        title: 'Edit AI boundary',
+        id: 'conv-readonly-ai-boundary',
+        title: 'Readonly AI boundary',
         summary: '',
         updatedAt: '刚刚',
         ts: 1
@@ -4466,94 +4471,16 @@ describe('AppShell', () => {
       }
     ]
 
-    const originalPrepareClipboardImage = window.aiops.prepareChatImageAttachmentFromClipboard
-    const originalStageChatAttachment = window.aiops.stageChatAttachment
     const originalTranscribeVoiceInput = window.aiops.transcribeVoiceInput
     const originalVoiceBlobArrayBuffer = Blob.prototype.arrayBuffer
 
     try {
       await wrapper.vm.$nextTick()
-      await wrapper.find('[data-testid="ai-message-edit"]').trigger('click')
-      await flushPromises()
+      expect(wrapper.find('[data-testid="ai-message-edit"]').exists()).toBe(false)
+      expect(wrapper.find('.user-message-edit-container').exists()).toBe(false)
+      await wrapper.find('[data-testid="ai-user-message-content"]').trigger('click')
       await wrapper.vm.$nextTick()
-
-      const editInput = wrapper.find('.user-message-edit-container .message-editable')
-      editInput.element.replaceChildren(document.createTextNode('编辑态保留文本'))
-      const editRange = document.createRange()
-      editRange.selectNodeContents(editInput.element)
-      editRange.collapse(false)
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(editRange)
-      await editInput.trigger('input')
-
-      const dispatchEditImagePaste = () => {
-        const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
-        Object.defineProperty(pasteEvent, 'clipboardData', {
-          configurable: true,
-          value: {
-            getData: vi.fn(() => ''),
-            items: [{ type: 'image/png', getAsFile: () => null }]
-          }
-        })
-        editInput.element.dispatchEvent(pasteEvent)
-      }
-
-      ;(window.aiops as any).prepareChatImageAttachmentFromClipboard = undefined
-      dispatchEditImagePaste()
-      await flushPromises()
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：剪贴板图片服务不可用')
-      expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(false)
-      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
-
-      ;(window.aiops as any).prepareChatImageAttachmentFromClipboard = originalPrepareClipboardImage
-      vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard!).mockResolvedValueOnce({
-        ok: true,
-        data: {
-          type: 'image',
-          mediaType: 'image/png',
-          data: '',
-          name: 'edit-malformed.png',
-          size: 16
-        }
-      } as any)
-      dispatchEditImagePaste()
-      await flushPromises()
-      await wrapper.vm.$nextTick()
-      expect(window.aiops.prepareChatImageAttachmentFromClipboard).toHaveBeenCalledWith()
-      expect(wrapper.find('.input-placeholder-notice').text()).toContain('图片上传失败：AI 服务返回数据无效')
-      expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(false)
-      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
-
-      ;(window.aiops as any).stageChatAttachment = undefined
-      vi.mocked(window.aiops.showOpenDialog).mockClear()
-      await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')
-      await flushPromises()
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：文件暂存服务不可用')
-      expect(window.aiops.showOpenDialog).not.toHaveBeenCalled()
-      expect(wrapper.find('.user-message-edit-container .mention-chip-doc').exists()).toBe(false)
-      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
-
-      ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
-      vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/edit-wrong-task.log'] })
-      vi.mocked(window.aiops.stageChatAttachment!).mockResolvedValueOnce({
-        mode: 'local',
-        taskId: 'other-conversation',
-        srcAbsPath: '/tmp/edit-wrong-task.log',
-        refPath: 'aiopsterm://chat-attachment/other-conversation/edit-wrong-task.log',
-        name: 'edit-wrong-task.log',
-        size: 128,
-        stagedPath: '/tmp/aiopsterm/chat-attachments/other-conversation/edit-wrong-task.log'
-      })
-      await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')
-      await flushPromises()
-      await wrapper.vm.$nextTick()
-      expect(window.aiops.stageChatAttachment).toHaveBeenLastCalledWith({ taskId: 'conv-edit-ai-boundary', srcAbsPath: '/tmp/edit-wrong-task.log' })
-      expect(wrapper.find('.input-placeholder-notice').text()).toContain('文件上传失败：AI 服务返回数据无效')
-      expect(wrapper.find('.user-message-edit-container .mention-chip-doc').exists()).toBe(false)
-      expect((editInput.element as HTMLElement).textContent).toContain('编辑态保留文本')
+      expect(wrapper.find('.user-message-edit-container').exists()).toBe(false)
 
       ;(window.aiops as any).transcribeVoiceInput = undefined
       Object.defineProperty(Blob.prototype, 'arrayBuffer', {
@@ -4576,8 +4503,6 @@ describe('AppShell', () => {
       expect((mainInput.element as HTMLElement).textContent).toContain('voice draft')
       expect(wrapper.find('[data-testid="ai-voice-button"]').classes()).not.toContain('recording')
     } finally {
-      ;(window.aiops as any).prepareChatImageAttachmentFromClipboard = originalPrepareClipboardImage
-      ;(window.aiops as any).stageChatAttachment = originalStageChatAttachment
       ;(window.aiops as any).transcribeVoiceInput = originalTranscribeVoiceInput
       Object.defineProperty(Blob.prototype, 'arrayBuffer', { configurable: true, writable: true, value: originalVoiceBlobArrayBuffer })
       wrapper.unmount()
@@ -4937,11 +4862,15 @@ describe('AppShell', () => {
 
     const commandMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('uptime'))
     expect(commandMessage).toBeTruthy()
+    expect(commandMessage!.find('[data-testid="ai-message-command-card"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-text"]').text()).toContain('uptime')
+    expect(commandMessage!.text()).toContain('Host 10.24.8.12')
     expect(commandMessage!.find('[data-testid="ai-message-command-run"]').exists()).toBe(true)
 
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
     await flushPromises()
     expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith(expect.any(String), 'uptime\n')
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')?.commandExecutionStatus).toBe('failed')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('终端会话不可用')
 
     store.activePanel.sessionId = 'terminal-command-panel'
@@ -4951,11 +4880,13 @@ describe('AppShell', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
     expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
       executedCommand: 'uptime',
+      commandExecutionStatus: 'succeeded',
       commandExecution: {
         ip: '10.24.8.12',
         command: 'uptime'
       }
     })
+    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('已发送到终端：uptime')
 
     wrapper.unmount()
   })
@@ -5373,147 +5304,18 @@ describe('AppShell', () => {
     expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
     expect(wrapper.find('[data-testid="ai-file-upload-button"]').attributes('disabled')).toBeUndefined()
 
-    const originalUserMessageId = store.chatMessages.at(-2)?.id
+    const sentUserMessageId = store.chatMessages.at(-2)?.id
     store.selectCommandPreset(null)
     await wrapper.find('.message.user .message-parts').trigger('click')
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('.user-message-edit-container .message-editable').exists()).toBe(true)
-    const editInput = wrapper.find('.user-message-edit-container .message-editable')
-    editInput.element.replaceChildren(document.createTextNode('编辑后的回滚窗口'))
-    const editRange = document.createRange()
-    editRange.selectNodeContents(editInput.element)
-    editRange.collapse(false)
-    const editSelection = window.getSelection()
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(editRange)
-    await editInput.trigger('input')
-    const editPathTextNode = document.createTextNode(' ssh user@host:/tmp')
-    editInput.element.appendChild(editPathTextNode)
-    const editPathSlashRange = document.createRange()
-    editPathSlashRange.setStart(editPathTextNode, ' ssh user@host:/'.length)
-    editPathSlashRange.collapse(true)
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(editPathSlashRange)
-    await editInput.trigger('input')
-    await editInput.trigger('keydown', { key: '/' })
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.command-select-popup').exists()).toBe(false)
-    editInput.element.replaceChildren(document.createTextNode('编辑后的回滚窗口'))
-    const editResetRange = document.createRange()
-    editResetRange.selectNodeContents(editInput.element)
-    editResetRange.collapse(false)
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(editResetRange)
-    await editInput.trigger('input')
-    editInput.element.appendChild(document.createTextNode(' /'))
-    placeCaretAfterTrailingSlash(editInput.element)
-    await editInput.trigger('input')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    placeCaretAfterTrailingSlash(editInput.element)
-    await editInput.trigger('keyup')
-    await editInput.trigger('keydown', { key: '/' })
-    await waitForSelector(wrapper, '.command-select-popup header input')
-    expect(wrapper.find('.command-select-popup').exists()).toBe(true)
-    await wrapper.find('.command-select-popup header input').setValue('rollback')
-    await wrapper.find('.command-select-popup header input').trigger('keydown', { key: 'Enter' })
-    expect(wrapper.find('.user-message-edit-container .mention-chip-command').exists()).toBe(false)
-    await wrapper.find('.command-select-popup header input').trigger('keydown', { key: 'ArrowDown' })
-    await wrapper.find('.command-select-popup header input').trigger('keydown', { key: 'Enter' })
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.user-message-edit-container .mention-chip-command').exists()).toBe(true)
-    expect(store.selectedCommandId).toBeNull()
-
-    const selectedContextIdsBeforeEditContext = store.selectedContexts.map((context) => context.id)
-    editInput.element.appendChild(document.createTextNode('@'))
-    const contextRange = document.createRange()
-    contextRange.selectNodeContents(editInput.element)
-    contextRange.collapse(false)
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(contextRange)
-    await editInput.trigger('input')
-    await editInput.trigger('keydown', { key: '@' })
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.context-select-popup').exists()).toBe(true)
-    const skillsCategory = wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('技能'))
-    expect(skillsCategory).toBeTruthy()
-    await skillsCategory!.trigger('click')
-    await wrapper.find('.context-select-popup header input').setValue('incident')
-    await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Enter' })
-    expect(wrapper.find('.user-message-edit-container .mention-chip-skill').exists()).toBe(false)
-    await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'ArrowDown' })
-    await wrapper.find('.context-select-popup header input').trigger('keydown', { key: 'Enter' })
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.user-message-edit-container .mention-chip-skill').text()).toContain('incident-triage')
-    expect(store.selectedContexts.map((context) => context.id)).toEqual(selectedContextIdsBeforeEditContext)
-
-    editInput.element.appendChild(document.createTextNode('@'))
-    const hostRange = document.createRange()
-    hostRange.selectNodeContents(editInput.element)
-    hostRange.collapse(false)
-    editSelection?.removeAllRanges()
-    editSelection?.addRange(hostRange)
-    await editInput.trigger('input')
-    await editInput.trigger('keydown', { key: '@' })
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
-    const mysqlHost = wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes('10.32.6.9'))
-    expect(mysqlHost).toBeTruthy()
-    await mysqlHost!.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.findAll('.user-message-edit-container .context-tag').some((tag) => tag.text().includes('10.32.6.9'))).toBe(true)
-    expect(store.selectedContexts.map((context) => context.id)).toEqual(selectedContextIdsBeforeEditContext)
-
-    vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard).mockClear()
-    vi.mocked(window.aiops.prepareChatImageAttachmentFromClipboard).mockResolvedValueOnce({
-      ok: true,
-      data: {
-        type: 'image',
-        mediaType: 'image/png',
-        data: 'ZWRpdC1pbWFnZQ==',
-        name: 'edit.png',
-        size: 16
-      }
-    })
-    const editPasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
-    Object.defineProperty(editPasteEvent, 'clipboardData', {
-      configurable: true,
-      value: {
-        getData: vi.fn(() => ''),
-        items: [
-          {
-            type: 'image/png',
-            getAsFile: () => null
-          }
-        ]
-      }
-    })
-    editInput.element.dispatchEvent(editPasteEvent)
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    expect(window.aiops.prepareChatImageAttachmentFromClipboard).toHaveBeenCalledWith()
-    expect(wrapper.find('.user-message-edit-container .image-preview-wrapper').exists()).toBe(true)
-
-    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/edit-attachment.sql'] })
-    await wrapper.find('[data-testid="ai-edit-file-upload-button"]').trigger('click')
-    await flushPromises()
-    expect(window.aiops.stageChatAttachment).toHaveBeenLastCalledWith({ taskId: store.selectedConversationId, srcAbsPath: '/tmp/edit-attachment.sql' })
-    expect(wrapper.find('.user-message-edit-container .mention-chip-doc').text()).toContain('edit-attachment.sql')
-
-    await wrapper.find('.message-edit-actions .primary').trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    expect(store.chatMessages.find((message) => message.id === originalUserMessageId)).toBeUndefined()
-    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'text' && part.text.includes('编辑后的回滚窗口'))).toBe(true)
-    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')).toBe(true)
-    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'skill')).toBe(true)
-    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc' && part.ref.name === 'edit-attachment.sql')).toBe(true)
-    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image' && part.name === 'edit.png')).toBe(true)
-    expect(store.chatMessages.at(-2)?.hosts?.map((context) => context.id)).toEqual(['asset-1', 'asset-3'])
     expect(wrapper.find('.user-message-edit-container').exists()).toBe(false)
-    expect(wrapper.find('.message.user').text()).toContain('编辑后的回滚窗口')
+    expect(wrapper.find('[data-testid="ai-message-edit"]').exists()).toBe(false)
+    expect(store.chatMessages.at(-2)?.id).toBe(sentUserMessageId)
+    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'text' && part.text.includes('检查回滚窗口'))).toBe(true)
+    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')).toBe(true)
+    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc')).toBe(true)
+    expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image')).toBe(true)
+    expect(wrapper.find('.message.user').text()).toContain('检查回滚窗口')
     expect(wrapper.find('.message.user .message-image-part img').exists()).toBe(true)
 
     ;(globalThis as any).__setAiTodoSnapshotMock?.([
@@ -5521,7 +5323,7 @@ describe('AppShell', () => {
       {
         id: 'todo-2',
         content: '生成命令建议',
-        description: '正在为「编辑后的回滚窗口」生成只读诊断步骤',
+        description: '正在为「检查回滚窗口」生成只读诊断步骤',
         status: 'in_progress',
         isFocused: true,
         subtasks: [
