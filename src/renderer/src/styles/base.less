@@ -8527,6 +8527,12 @@ code {
   align-items: center;
 }
 
+.ai-header {
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
 .ai-header-actions {
   gap: 4px;
   width: 54px;
@@ -8536,7 +8542,7 @@ code {
 }
 
 .ai-header-title {
-  flex: 0 0 auto;
+  flex: 0 0 48px;
   min-width: 0;
 }
 
@@ -8571,8 +8577,8 @@ code {
 }
 
 .ai-conversation-tabs {
-  flex: 1 1 auto;
-  max-width: 100%;
+  flex: 1 1 0;
+  width: 0;
   min-width: 0;
   display: flex;
   align-items: flex-end;
