@@ -68,12 +68,42 @@
             <button
               type="button"
               class="ai-header-icon-button"
-              :title="t('ai.history')"
-              data-testid="ai-history-open"
-              @click.stop="toggleHistoryMenu"
+              :title="t('ai.moreActions')"
+              data-testid="ai-more-actions-open"
+              @click.stop="toggleMoreActionsMenu"
             >
-              <History />
+              <Ellipsis />
             </button>
+            <div
+              v-if="moreActionsMenuOpen"
+              class="ai-more-actions-menu"
+              data-testid="ai-more-actions-menu"
+            >
+              <button
+                type="button"
+                data-testid="ai-history-open"
+                @click.stop="toggleHistoryMenu"
+              >
+                <History />
+                <span>{{ t('ai.history') }}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="ai-chat-search-open"
+                @click.stop="openChatSearch"
+              >
+                <Search />
+                <span>{{ t('ai.searchChat') }}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="ai-chat-export"
+                @click.stop="exportCurrentChat"
+              >
+                <Download />
+                <span>{{ t('ai.exportChat') }}</span>
+              </button>
+            </div>
             <div
               v-if="historyMenuOpen"
               class="ai-history-dropdown"
@@ -222,24 +252,6 @@
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            class="ai-header-icon-button"
-            :title="t('ai.searchChat')"
-            data-testid="ai-chat-search-open"
-            @click.stop="openChatSearch"
-          >
-            <Search />
-          </button>
-          <button
-            type="button"
-            class="ai-header-icon-button"
-            :title="t('ai.exportChat')"
-            data-testid="ai-chat-export"
-            @click.stop="exportCurrentChat"
-          >
-            <Download />
-          </button>
         </div>
       </header>
     </div>
@@ -654,6 +666,15 @@
             >
               {{ commandLineCountForMessage(message) }} line{{ commandLineCountForMessage(message) === 1 ? '' : 's' }}
             </span>
+            <button
+              type="button"
+              class="message-command-icon-button"
+              :title="t('ai.commandReviewTitle')"
+              data-testid="ai-message-command-review"
+              @click.stop="openCommandAuditDialog(message)"
+            >
+              <Pencil />
+            </button>
             <button
               type="button"
               class="message-command-icon-button"
@@ -1253,6 +1274,81 @@
         {{ inputPlaceholderNotice }}
       </span>
     </form>
+
+    <div
+      v-if="commandAuditDialog.open && activeCommandAuditMessage"
+      class="ai-command-audit-backdrop"
+      data-testid="ai-command-audit-dialog"
+      @click.stop="closeCommandAuditDialog"
+      @keydown.esc.prevent="closeCommandAuditDialog"
+    >
+      <section
+        class="ai-command-audit-dialog"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('ai.commandReviewTitle')"
+        @click.stop
+      >
+        <header>
+          <div>
+            <span>{{ t('ai.commandReview') }}</span>
+            <strong>{{ t('ai.commandReviewTitle') }}</strong>
+          </div>
+          <button
+            type="button"
+            :title="t('common.close')"
+            data-testid="ai-command-audit-close"
+            @click="closeCommandAuditDialog"
+          >
+            <X />
+          </button>
+        </header>
+        <p>{{ t('ai.commandReviewDescription') }}</p>
+        <label>
+          <span>Command</span>
+          <textarea
+            ref="commandAuditTextareaRef"
+            v-model="commandAuditDialog.draft"
+            data-testid="ai-command-audit-input"
+            spellcheck="false"
+            :readonly="!canEditActiveCommandAudit"
+            @keydown.stop
+          ></textarea>
+        </label>
+        <footer>
+          <span data-testid="ai-command-audit-line-count">
+            {{ commandLineCountForText(commandAuditDialog.draft) }} line{{ commandLineCountForText(commandAuditDialog.draft) === 1 ? '' : 's' }}
+          </span>
+          <button
+            type="button"
+            data-testid="ai-command-audit-copy"
+            @click="copyCommandAuditDraft"
+          >
+            <Copy />
+            <span>{{ t('ai.commandReviewCopy') }}</span>
+          </button>
+          <button
+            type="button"
+            data-testid="ai-command-audit-save"
+            :disabled="!canEditActiveCommandAudit || !commandAuditDialog.draft.trim()"
+            @click="saveCommandAuditDraft()"
+          >
+            <Check />
+            <span>{{ t('ai.commandReviewSave') }}</span>
+          </button>
+          <button
+            type="button"
+            class="primary"
+            data-testid="ai-command-audit-run"
+            :disabled="!canEditActiveCommandAudit || !commandAuditDialog.draft.trim()"
+            @click="void runCommandAuditDraft()"
+          >
+            <Play />
+            <span>{{ t('ai.commandReviewRun') }}</span>
+          </button>
+        </footer>
+      </section>
+    </div>
   </aside>
 </template>
 
@@ -1275,6 +1371,7 @@ import {
   Code2,
   Copy,
   Download,
+  Ellipsis,
   LoaderCircle,
   FileText,
   FolderGit2,
@@ -1397,6 +1494,7 @@ const chatSearchOpen = ref(false)
 const chatSearchTerm = ref('')
 const chatSearchMatchCount = ref(0)
 const chatSearchCurrentIndex = ref(0)
+const moreActionsMenuOpen = ref(false)
 const historyMenuOpen = ref(false)
 const historySearchTerm = ref('')
 const historyFavoritesOnly = ref(false)
@@ -1406,6 +1504,12 @@ const editingHistoryId = ref<string | null>(null)
 const editingHistoryTitle = ref('')
 const chatExportNotice = ref('')
 const openConversationTabIds = ref<string[]>([])
+const commandAuditTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const commandAuditDialog = ref({
+  open: false,
+  messageId: '',
+  draft: ''
+})
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
 let chatExportNoticeTimer: number | undefined
@@ -1861,15 +1965,32 @@ const isCommandSuggestionMessage = (message: CommandSuggestionMessage) => {
   return Boolean(message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command') || message.text.trim().startsWith('/'))
 }
 
-const commandTextForMessage = (message: { text: string; contentParts?: AiContentPart[]; commandExecution?: { command: string } }) =>
-  message.commandExecution?.command.trim() || messagePlainText(message).trim()
+const activeCommandAuditMessage = computed(() => {
+  if (!commandAuditDialog.value.open || !commandAuditDialog.value.messageId) return null
+  const message = workspace.chatMessages.find((item) => item.id === commandAuditDialog.value.messageId)
+  return message && isCommandSuggestionMessage(message) ? (message as CommandSuggestionMessage) : null
+})
 
-const commandLineCountForMessage = (message: CommandSuggestionMessage) => commandTextForMessage(message).split(/\r?\n/).filter((line) => line.trim()).length || 1
+const commandChipTextForMessage = (message: { contentParts?: AiContentPart[] }) => {
+  const commandPart = message.contentParts?.find((part): part is AiCommandChipContentPart => part.type === 'chip' && part.chipType === 'command')
+  return commandPart?.ref.command.trim() || ''
+}
+
+const commandTextForMessage = (message: { text: string; contentParts?: AiContentPart[]; commandExecution?: { command: string } }) =>
+  message.commandExecution?.command.trim() || commandChipTextForMessage(message) || messagePlainText(message).trim()
+
+const commandLineCountForText = (text: string) => text.split(/\r?\n/).filter((line) => line.trim()).length || 1
+
+const commandLineCountForMessage = (message: CommandSuggestionMessage) => commandLineCountForText(commandTextForMessage(message))
 
 const isReadOnlyCommandMessage = (message: CommandSuggestionMessage) => message.commandExecution?.requiresApproval === false && message.commandExecution.interactive !== true
 
 const isCommandTerminalActionDisabled = (message: CommandSuggestionMessage) =>
   message.commandExecutionStatus === 'running' || message.commandExecutionStatus === 'succeeded' || message.action === 'rejected'
+
+const canEditCommandMessage = (message: CommandSuggestionMessage | null) => Boolean(message && !isCommandTerminalActionDisabled(message))
+
+const canEditActiveCommandAudit = computed(() => canEditCommandMessage(activeCommandAuditMessage.value))
 
 const commandHostForMessage = (message: { commandExecution?: { ip?: string } }) => {
   const ip = message.commandExecution?.ip?.trim()
@@ -1905,6 +2026,92 @@ const copyCommandToClipboard = async (message: CommandSuggestionMessage) => {
   }
   const copied = await copyTextToClipboard(command)
   showChatExportNotice(copied ? '命令已复制。' : '复制失败。')
+}
+
+const closeCommandAuditDialog = () => {
+  commandAuditDialog.value = { open: false, messageId: '', draft: '' }
+}
+
+const openCommandAuditDialog = async (message: CommandSuggestionMessage) => {
+  commandAuditDialog.value = {
+    open: true,
+    messageId: message.id,
+    draft: commandTextForMessage(message)
+  }
+  closePopups()
+  await nextTick()
+  commandAuditTextareaRef.value?.focus()
+  commandAuditTextareaRef.value?.select()
+}
+
+const updateCommandChipParts = (parts: AiContentPart[] | undefined, command: string) => {
+  let updated = false
+  const nextParts = parts?.map((part) => {
+    if (part.type === 'chip' && part.chipType === 'command') {
+      updated = true
+      return {
+        ...part,
+        ref: {
+          ...part.ref,
+          command,
+          label: part.ref.label === part.ref.command ? command : part.ref.label
+        }
+      }
+    }
+    return part
+  })
+  return updated ? nextParts : parts
+}
+
+const applyCommandTextToMessage = (message: CommandSuggestionMessage, command: string) => {
+  const trimmed = command.trim()
+  if (!trimmed) return false
+  if (message.commandExecution) {
+    message.commandExecution.command = trimmed
+  } else if (message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')) {
+    message.contentParts = updateCommandChipParts(message.contentParts, trimmed)
+    message.text = trimmed
+  } else {
+    message.text = trimmed
+  }
+  if (message.commandExecutionStatus && message.commandExecutionStatus !== 'running') {
+    message.commandExecutionStatus = undefined
+    message.commandExecutionMessage = undefined
+    message.executedCommand = undefined
+  }
+  return true
+}
+
+const saveCommandAuditDraft = (options: { silent?: boolean } = {}) => {
+  const message = activeCommandAuditMessage.value
+  if (!message) return false
+  const saved = applyCommandTextToMessage(message, commandAuditDialog.value.draft)
+  if (!saved) {
+    showChatExportNotice('没有可运行的命令。')
+    return false
+  }
+  commandAuditDialog.value.draft = commandTextForMessage(message)
+  persistCommandExecutionState()
+  if (!options.silent) showChatExportNotice('命令已更新。')
+  return true
+}
+
+const copyCommandAuditDraft = async () => {
+  const command = commandAuditDialog.value.draft.trim()
+  if (!command) {
+    showChatExportNotice('没有可复制的命令。')
+    return
+  }
+  const copied = await copyTextToClipboard(command)
+  showChatExportNotice(copied ? '命令已复制。' : '复制失败。')
+}
+
+const runCommandAuditDraft = async () => {
+  const message = activeCommandAuditMessage.value
+  if (!message) return
+  if (!saveCommandAuditDraft({ silent: true })) return
+  closeCommandAuditDialog()
+  await runMessageCommand(message)
 }
 
 const setCommandExecutionState = (
@@ -1991,7 +2198,7 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
     commandExecution: message.commandExecution
       ? {
           ip: message.commandExecution.ip || commandHostForMessage(message).replace(/^Host\s+/, '') || '127.0.0.1',
-          command: message.commandExecution.command,
+          command,
           requiresApproval: message.commandExecution.requiresApproval === true,
           interactive: message.commandExecution.interactive === true
         }
@@ -2067,6 +2274,7 @@ const summarizeMessageToSkill = async (id: string) => {
 }
 
 const exportCurrentChat = async () => {
+  moreActionsMenuOpen.value = false
   if (workspace.chatMessages.length === 0) {
     showChatExportNotice('当前会话为空，无法导出。')
     return
@@ -2098,6 +2306,7 @@ const exportCurrentChat = async () => {
 
 const openHistoryMenu = async () => {
   chatSearchOpen.value = false
+  moreActionsMenuOpen.value = false
   closeContextPopup()
   closeCommandPopup()
   modeMenuOpen.value = false
@@ -2120,6 +2329,15 @@ const toggleHistoryMenu = () => {
     return
   }
   void openHistoryMenu()
+}
+
+const toggleMoreActionsMenu = () => {
+  if (moreActionsMenuOpen.value) {
+    moreActionsMenuOpen.value = false
+    return
+  }
+  closeHistoryMenu()
+  moreActionsMenuOpen.value = true
 }
 
 const clearHistorySearch = () => {
@@ -2325,6 +2543,7 @@ const scheduleChatSearch = () => {
 
 const openChatSearch = async () => {
   chatSearchOpen.value = true
+  moreActionsMenuOpen.value = false
   closePopups()
   await nextTick()
   chatSearchInputRef.value?.focus()
@@ -4021,6 +4240,7 @@ const handleDrop = async (event: DragEvent) => {
 const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFocus?: boolean } = {}) => {
   closeContextPopup({ restoreFocus: options.restoreContextFocus })
   closeCommandPopup({ restoreFocus: options.restoreCommandFocus })
+  moreActionsMenuOpen.value = false
   modeMenuOpen.value = false
   closeModelMenu()
   closeHistoryMenu()

@@ -99,6 +99,7 @@ export type I18nKey =
   | 'top.windowMaximize'
   | 'top.windowClose'
   | 'ai.newChat'
+  | 'ai.moreActions'
   | 'ai.history'
   | 'ai.conversationTabs'
   | 'ai.closeTab'
@@ -157,6 +158,12 @@ export type I18nKey =
   | 'ai.searchModel'
   | 'ai.noMatchingModels'
   | 'ai.output'
+  | 'ai.commandReview'
+  | 'ai.commandReviewTitle'
+  | 'ai.commandReviewDescription'
+  | 'ai.commandReviewCopy'
+  | 'ai.commandReviewSave'
+  | 'ai.commandReviewRun'
 
 export type LocaleMessages = Record<I18nKey, string>
 
@@ -242,6 +249,7 @@ const zhCN: LocaleMessages = {
   'top.windowMaximize': '最大化窗口',
   'top.windowClose': '退出应用',
   'ai.newChat': '新建会话',
+  'ai.moreActions': '更多',
   'ai.history': '会话历史',
   'ai.conversationTabs': 'AI 会话标签',
   'ai.closeTab': '关闭标签',
@@ -299,7 +307,13 @@ const zhCN: LocaleMessages = {
   'ai.searchCommand': '搜索命令',
   'ai.searchModel': '搜索模型',
   'ai.noMatchingModels': '没有匹配的模型',
-  'ai.output': 'OUTPUT'
+  'ai.output': 'OUTPUT',
+  'ai.commandReview': '命令审计',
+  'ai.commandReviewTitle': '审计并编辑命令',
+  'ai.commandReviewDescription': '执行前检查 AI 生成的命令。保存后会更新当前命令卡，执行会写入当前活动终端。',
+  'ai.commandReviewCopy': '复制命令',
+  'ai.commandReviewSave': '保存修改',
+  'ai.commandReviewRun': '保存并执行'
 }
 
 const enUS: LocaleMessages = {
@@ -384,6 +398,7 @@ const enUS: LocaleMessages = {
   'top.windowMaximize': 'Maximize window',
   'top.windowClose': 'Quit app',
   'ai.newChat': 'New chat',
+  'ai.moreActions': 'More',
   'ai.history': 'Chat history',
   'ai.conversationTabs': 'AI conversation tabs',
   'ai.closeTab': 'Close tab',
@@ -441,7 +456,13 @@ const enUS: LocaleMessages = {
   'ai.searchCommand': 'Search commands',
   'ai.searchModel': 'Search models',
   'ai.noMatchingModels': 'No matching models',
-  'ai.output': 'OUTPUT'
+  'ai.output': 'OUTPUT',
+  'ai.commandReview': 'Command review',
+  'ai.commandReviewTitle': 'Review and edit command',
+  'ai.commandReviewDescription': 'Review the AI-generated command before execution. Saving updates the current command card; running writes it to the active terminal.',
+  'ai.commandReviewCopy': 'Copy command',
+  'ai.commandReviewSave': 'Save changes',
+  'ai.commandReviewRun': 'Save and run'
 }
 
 const zhTW: LocaleMessages = {
@@ -488,6 +509,7 @@ const zhTW: LocaleMessages = {
   'settings.general.openOnboarding': '開啟入門導覽',
   'settings.general.editor': '編輯器設定',
   'ai.newChat': '新建對話',
+  'ai.moreActions': '更多',
   'ai.history': '對話歷史',
   'ai.conversationTabs': 'AI 對話標籤',
   'ai.closeTab': '關閉標籤',
@@ -554,6 +576,7 @@ const jaJP: LocaleMessages = {
   'settings.general.openOnboarding': 'オンボーディングを開く',
   'settings.general.editor': 'エディター設定',
   'ai.newChat': '新しいチャット',
+  'ai.moreActions': 'その他',
   'ai.history': 'チャット履歴',
   'ai.conversationTabs': 'AI チャットタブ',
   'ai.closeTab': 'タブを閉じる',
@@ -615,6 +638,7 @@ const koKR: LocaleMessages = {
   'settings.general.openOnboarding': '온보딩 열기',
   'settings.general.editor': '편집기 설정',
   'ai.newChat': '새 채팅',
+  'ai.moreActions': '더보기',
   'ai.history': '채팅 기록',
   'ai.conversationTabs': 'AI 채팅 탭',
   'ai.closeTab': '탭 닫기',
@@ -676,6 +700,7 @@ const deDE: LocaleMessages = {
   'settings.general.openOnboarding': 'Onboarding öffnen',
   'settings.general.editor': 'Editor-Einstellungen',
   'ai.newChat': 'Neuer Chat',
+  'ai.moreActions': 'Mehr',
   'ai.history': 'Chatverlauf',
   'ai.conversationTabs': 'AI-Chat-Tabs',
   'ai.closeTab': 'Tab schließen',
@@ -737,6 +762,7 @@ const frFR: LocaleMessages = {
   'settings.general.openOnboarding': 'Ouvrir l’accueil',
   'settings.general.editor': 'Paramètres de l’éditeur',
   'ai.newChat': 'Nouveau chat',
+  'ai.moreActions': 'Plus',
   'ai.history': 'Historique',
   'ai.conversationTabs': 'Onglets de chat IA',
   'ai.closeTab': 'Fermer l’onglet',
@@ -798,6 +824,7 @@ const itIT: LocaleMessages = {
   'settings.general.openOnboarding': 'Apri onboarding',
   'settings.general.editor': 'Impostazioni editor',
   'ai.newChat': 'Nuova chat',
+  'ai.moreActions': 'Altro',
   'ai.history': 'Cronologia chat',
   'ai.conversationTabs': 'Schede chat AI',
   'ai.closeTab': 'Chiudi scheda',
@@ -859,6 +886,7 @@ const ptPT: LocaleMessages = {
   'settings.general.openOnboarding': 'Abrir integração',
   'settings.general.editor': 'Definições do editor',
   'ai.newChat': 'Nova conversa',
+  'ai.moreActions': 'Mais',
   'ai.history': 'Histórico de conversas',
   'ai.conversationTabs': 'Separadores de conversa AI',
   'ai.closeTab': 'Fechar separador',
@@ -920,6 +948,7 @@ const ruRU: LocaleMessages = {
   'settings.general.openOnboarding': 'Открыть обучение',
   'settings.general.editor': 'Настройки редактора',
   'ai.newChat': 'Новый чат',
+  'ai.moreActions': 'Еще',
   'ai.history': 'История чата',
   'ai.conversationTabs': 'Вкладки чата AI',
   'ai.closeTab': 'Закрыть вкладку',
@@ -985,6 +1014,7 @@ const arAR: LocaleMessages = {
   'settings.general.openOnboarding': 'فتح الإرشاد',
   'settings.general.editor': 'إعدادات المحرر',
   'ai.newChat': 'محادثة جديدة',
+  'ai.moreActions': 'المزيد',
   'ai.history': 'سجل المحادثات',
   'ai.conversationTabs': 'تبويبات محادثة AI',
   'ai.closeTab': 'إغلاق التبويب',

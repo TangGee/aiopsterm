@@ -8528,9 +8528,11 @@ code {
 }
 
 .ai-header-actions {
-  gap: 3px;
-  min-width: max-content;
-  flex: 0 0 auto;
+  gap: 4px;
+  width: 54px;
+  min-width: 54px;
+  flex: 0 0 54px;
+  justify-content: flex-end;
 }
 
 .ai-header-title {
@@ -8570,20 +8572,22 @@ code {
 
 .ai-conversation-tabs {
   flex: 1 1 auto;
+  max-width: 100%;
   min-width: 0;
   display: flex;
   align-items: flex-end;
-  gap: 3px;
+  gap: 2px;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 1px;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 
 .ai-conversation-tab {
-  min-width: 56px;
-  max-width: 142px;
-  flex: 1 1 102px;
+  min-width: 42px;
+  max-width: 128px;
+  flex: 1 1 86px;
   height: 24px;
   display: inline-flex;
   align-items: center;
@@ -8659,6 +8663,53 @@ code {
 
 .ai-history-menu-wrap {
   position: relative;
+}
+
+.ai-more-actions-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 25;
+  width: 132px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 96%, transparent);
+  box-shadow: var(--shadow-soft);
+  padding: 4px;
+}
+
+.ai-more-actions-menu button {
+  width: 100%;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ai-more-actions-menu button:hover {
+  background: var(--surface-3);
+}
+
+.ai-more-actions-menu svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  color: var(--muted);
+}
+
+.ai-more-actions-menu span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .ai-history-dropdown {
@@ -9373,6 +9424,11 @@ code {
   cursor: pointer;
 }
 
+.message-command-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .message-command-help:hover,
 .message-command-icon-button:hover {
   color: var(--accent);
@@ -9434,6 +9490,148 @@ code {
 
 .message-command-code code {
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.ai-command-audit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  backdrop-filter: blur(8px);
+  padding: 24px;
+}
+
+.ai-command-audit-dialog {
+  width: min(860px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto auto minmax(320px, 1fr) auto;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-soft);
+  padding: 14px;
+}
+
+.ai-command-audit-dialog header,
+.ai-command-audit-dialog footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ai-command-audit-dialog header {
+  justify-content: space-between;
+}
+
+.ai-command-audit-dialog header div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.ai-command-audit-dialog header span,
+.ai-command-audit-dialog p,
+.ai-command-audit-dialog footer > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-command-audit-dialog header strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ai-command-audit-dialog header button,
+.ai-command-audit-dialog footer button {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.ai-command-audit-dialog header button {
+  width: 28px;
+  padding: 0;
+}
+
+.ai-command-audit-dialog header button svg,
+.ai-command-audit-dialog footer button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ai-command-audit-dialog footer {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.ai-command-audit-dialog footer > span {
+  margin-right: auto;
+}
+
+.ai-command-audit-dialog footer button.primary {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.ai-command-audit-dialog footer button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ai-command-audit-dialog p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ai-command-audit-dialog label {
+  min-height: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.ai-command-audit-dialog label span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-command-audit-dialog textarea {
+  width: 100%;
+  min-height: 320px;
+  max-height: 520px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+}
+
+.ai-command-audit-dialog textarea:focus {
+  outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
 .message-command-status {

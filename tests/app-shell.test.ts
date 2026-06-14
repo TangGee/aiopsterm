@@ -3741,11 +3741,21 @@ describe('AppShell', () => {
 
     expect(wrapper.find('[data-testid="ai-conversation-tabs"]').exists()).toBe(true)
     expect(wrapper.find('.ai-header > [data-testid="ai-conversation-tabs"]').exists()).toBe(true)
+    expect(wrapper.findAll('.ai-header > .ai-header-actions > .ai-header-icon-button')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="ai-more-actions-open"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-history-open"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ai-chat-search-open"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ai-chat-export"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').text()).toContain('生产巡检')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-2"]').exists()).toBe(false)
 
+    expect(baseStyles()).toContain('.ai-header-actions {\n  gap: 4px;\n  width: 54px;')
+    expect(baseStyles()).toContain('.ai-conversation-tab {\n  min-width: 42px;')
+    await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').findAll('button')).toHaveLength(3)
     await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -3781,6 +3791,8 @@ describe('AppShell', () => {
     expect(store.conversations.find((conversation) => conversation.id === 'history-1')?.title).toBe('生产巡检复盘')
     expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1', title: '生产巡检复盘' }))
     if (!wrapper.find('[data-testid="ai-history-dropdown"]').exists()) {
+      await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+      await wrapper.vm.$nextTick()
       await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
@@ -3808,6 +3820,8 @@ describe('AppShell', () => {
     expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('history-1')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
 
+    await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+    await wrapper.vm.$nextTick()
     await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -3857,7 +3871,9 @@ describe('AppShell', () => {
     })
     await wrapper.vm.$nextTick()
 
-    await wrapper.find('.ai-panel').trigger('keydown', { key: 'f', ctrlKey: true })
+    await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-chat-search-open"]').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(true)
     expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-chat-search-input"]').element)
@@ -3947,6 +3963,8 @@ describe('AppShell', () => {
       }
     )
 
+    await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+    await wrapper.vm.$nextTick()
     await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
     await flushPromises()
     const exportInput = vi.mocked(window.aiops.exportChat).mock.calls.at(-1)?.[0]
@@ -4084,6 +4102,7 @@ describe('AppShell', () => {
     expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(false)
     expect(baseStyles()).toContain('.message-command-actions {\n  display: grid;')
     expect(baseStyles()).toContain('grid-template-columns: minmax(70px, 0.75fr) minmax(122px, 1.35fr) minmax(74px, 0.8fr);')
+    expect(baseStyles()).toContain('.ai-command-audit-dialog {\n  width: min(860px, calc(100vw - 48px));')
     await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已复制')
@@ -4108,20 +4127,28 @@ describe('AppShell', () => {
     store.activePanel.sessionId = 'terminal-command-panel'
     vi.mocked(window.aiops.writeTerminal).mockClear()
     vi.mocked(window.aiops.updateChatConversation).mockClear()
-    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    await commandMessage!.find('[data-testid="ai-message-command-review"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-command-audit-dialog"]').exists()).toBe(true)
+    expect((wrapper.find('[data-testid="ai-command-audit-input"]').element as HTMLTextAreaElement).value).toBe('uptime')
+    await wrapper.find('[data-testid="ai-command-audit-input"]').setValue('uptime -p')
+    expect(wrapper.find('[data-testid="ai-command-audit-line-count"]').text()).toContain('1 line')
+    await wrapper.find('[data-testid="ai-command-audit-run"]').trigger('click')
     await flushPromises()
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
-    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime')
+    expect(wrapper.find('[data-testid="ai-command-audit-dialog"]').exists()).toBe(false)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime -p\n')
+    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.contentParts?.find((part) => part.type === 'chip' && part.chipType === 'command')?.ref.command).toBe('uptime -p')
+    expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.executedCommand).toBe('uptime -p')
     expect(store.chatMessages.find((message) => message.id === 'command-assistant')?.commandExecutionStatus).toBe('succeeded')
-    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('已发送到终端：uptime')
+    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('已发送到终端：uptime -p')
     expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([
           expect.objectContaining({
             id: 'command-assistant',
-            executedCommand: 'uptime',
+            executedCommand: 'uptime -p',
             commandExecutionStatus: 'succeeded',
-            commandExecutionMessage: '已发送到终端：uptime'
+            commandExecutionMessage: '已发送到终端：uptime -p'
           })
         ])
       })
@@ -4515,6 +4542,8 @@ describe('AppShell', () => {
           exported: 1
         }
       } as any)
+      await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+      await wrapper.vm.$nextTick()
       await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
@@ -4529,6 +4558,8 @@ describe('AppShell', () => {
           markdown: '# malformed export'
         }
       } as any)
+      await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+      await wrapper.vm.$nextTick()
       await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
@@ -5193,11 +5224,11 @@ describe('AppShell', () => {
     expect(wrapper.find('.chat-input > .chat-editable + .input-controls-row').exists()).toBe(true)
     expect(wrapper.find('.input-action-buttons-container button[type="submit"]').exists()).toBe(true)
     const styles = baseStyles()
-    expect(styles).toContain('.input-controls-row {\n  display: flex;\n  flex-wrap: wrap;')
-    expect(styles).toContain('.input-controls-row > .ai-control-menu-wrap:first-child {\n  flex-basis: 88px;\n  max-width: 88px;')
-    expect(styles).toContain('.model-control-wrap {\n  flex: 1 1 122px;')
+    expect(styles).toContain('.input-controls-row {\n  display: flex;\n  flex-wrap: nowrap;')
+    expect(styles).toContain('.input-controls-row > .ai-control-menu-wrap:first-child {\n  flex-basis: 70px;\n  max-width: 70px;')
+    expect(styles).toContain('.model-control-wrap {\n  flex: 1 1 84px;')
     expect(styles).toContain('.input-action-buttons-container {\n  flex: 0 0 auto;\n  max-width: 100%;')
-    expect(styles).toContain('min-height: 78px;')
+    expect(styles).toContain('.input-action-buttons-container button {\n  flex: 0 0 24px;')
     expect(styles).not.toContain('grid-column: 1 / -1;\n    justify-content: flex-end;')
     await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
     expect(wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').exists()).toBe(true)
