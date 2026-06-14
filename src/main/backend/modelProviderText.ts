@@ -83,6 +83,7 @@ function appendEndpointPath(baseUrl: string, path: string): string {
 
 function normalizeOpenAiBaseUrl(baseUrl: string): string {
   if (!baseUrl) return ''
+  if (baseUrl.endsWith('#')) return baseUrl.slice(0, -1)
   try {
     const parsed = new URL(baseUrl)
     const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
@@ -93,6 +94,11 @@ function normalizeOpenAiBaseUrl(baseUrl: string): string {
   } catch {
     return baseUrl
   }
+}
+
+function normalizeOpenAiOperationEndpoint(baseUrl: string, path: string): string {
+  const normalized = normalizeOpenAiBaseUrl(baseUrl)
+  return baseUrl.endsWith('#') ? normalized : appendEndpointPath(normalized, path)
 }
 
 const normalizeMessages = (messagesOrUserPrompt: string | AiProviderTextMessage[]): AiProviderTextMessage[] => {
@@ -243,12 +249,12 @@ export function createProviderTextRequest(
 
   const endpoint =
     input.provider === 'litellm'
-      ? appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'http://localhost:4000'), 'chat/completions')
+      ? normalizeOpenAiOperationEndpoint(baseUrl || 'http://localhost:4000', 'chat/completions')
       : input.provider === 'deepseek'
-        ? appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'https://api.deepseek.com'), 'chat/completions')
+        ? normalizeOpenAiOperationEndpoint(baseUrl || 'https://api.deepseek.com', 'chat/completions')
         : input.config.apiFormat === 'responses'
-          ? appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'https://api.openai.com'), 'responses')
-          : appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || 'https://api.openai.com'), 'chat/completions')
+          ? normalizeOpenAiOperationEndpoint(baseUrl || 'https://api.openai.com', 'responses')
+          : normalizeOpenAiOperationEndpoint(baseUrl || 'https://api.openai.com', 'chat/completions')
 
   const useResponses = input.provider === 'openai' && input.config.apiFormat === 'responses'
   return {

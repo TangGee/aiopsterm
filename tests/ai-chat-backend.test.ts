@@ -347,7 +347,7 @@ describe('ai chat backend response boundary', () => {
             options: [{ name: 'versioned-code-model', locked: false, checked: true, apiProvider: 'openai' }],
             providers: {
               openai: {
-                baseUrl: 'https://ark.example.test/api/coding/v3',
+                baseUrl: 'https://ark.example.test/api/coding/v3#',
                 apiKey: 'sk-test',
                 modelId: 'versioned-code-model',
                 apiFormat: 'chat-completions'
@@ -366,7 +366,7 @@ describe('ai chat backend response boundary', () => {
       }
     })
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://ark.example.test/api/coding/v3/chat/completions',
+      'https://ark.example.test/api/coding/v3',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ Authorization: 'Bearer sk-test' })

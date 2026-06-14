@@ -2553,9 +2553,6 @@ const cloneAiModelCatalog = (input?: { modelSettings?: typeof defaultModelSettin
   const localChatBackendAvailable = input?.localChatBackendAvailable ?? true
   const configuredModelIds = new Set(Object.values(settings.providers || {}).map((provider: any) => String(provider?.modelId || '').trim()).filter(Boolean))
   const settingsModels = (settings.options || defaultModelSettings.options).map((model: any) => ({ ...model }))
-  if (!settingsModels.some((model: any) => model.name === 'aiopsterm-local-agent')) {
-    settingsModels.unshift({ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' })
-  }
   const chatModels = settingsModels
     .filter((model: any) => {
       if (!model.checked || model.locked) return false

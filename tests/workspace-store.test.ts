@@ -1345,7 +1345,7 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
 
     expect(store.config.workspacePreferences?.expandedGroups).toEqual(['recent_connections', 'local_connections'])
-    expect(store.config.modelSettings?.options.map((option) => option.name)).toEqual(['aiopsterm-local-agent'])
+    expect(store.config.modelSettings?.options.map((option) => option.name)).toEqual([])
     expect(store.config.modelSettings?.options.some((option) => option.name === 'custom-maintenance')).toBe(false)
 
     await store.hydrateConfig()
@@ -1478,7 +1478,7 @@ describe('workspace store', () => {
           providers: expect.objectContaining({
             openai: expect.objectContaining({ modelId: 'gpt-5' })
           }),
-          options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent' })])
+          options: []
         }),
         skills: defaultSkills,
         onboarding: {
@@ -1565,7 +1565,7 @@ describe('workspace store', () => {
           providers: expect.objectContaining({
             openai: expect.objectContaining({ modelId: 'gpt-5' })
           }),
-          options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent' })])
+          options: []
         }),
         skills: defaultSkills
       })
@@ -4278,8 +4278,7 @@ describe('workspace store', () => {
     expect(store.activePanel.sshSession).toBeUndefined()
     expect(store.activePanel.output).not.toContain('[aiopsterm] shell started')
 
-    expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
-    expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
+    expect(store.terminalCommandModelOptions).toEqual([])
     vi.mocked(window.aiops.saveFileSession).mockClear()
     vi.mocked(window.aiops.saveFileSessionFromTerminalContext).mockClear()
     const localSession = await store.ensureFileSessionForTerminalPanel(store.activePanelId, 'left')
@@ -4374,17 +4373,22 @@ describe('workspace store', () => {
       expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('[file manager]') })])
     )
 
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
+    await expect(store.saveModelProvider('openai')).resolves.toBe(true)
+    expect(store.terminalCommandModelOptions).toContain('ops-model')
+    expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
+    vi.mocked(window.aiops.saveConfig).mockClear()
     vi.mocked(window.aiops.generateTerminalCommand).mockClear()
-    const record = await store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'aiopsterm-local-agent')
+    const record = await store.generateTerminalCommand(store.activePanelId, '检查磁盘空间', 'ops-model')
     expect(window.aiops.generateTerminalCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         panelId: store.activePanelId,
         instruction: '检查磁盘空间',
-        modelName: 'aiopsterm-local-agent',
+        modelName: 'ops-model',
         context: expect.objectContaining({ host: '10.8.0.9', username: 'deploy', connectionType: 'ssh' })
       })
     )
-    expect(record).toEqual(expect.objectContaining({ command: 'df -h', modelName: 'aiopsterm-local-agent' }))
+    expect(record).toEqual(expect.objectContaining({ command: 'df -h', modelName: 'ops-model' }))
     expect(record?.context).toEqual(expect.objectContaining({ host: '10.8.0.9', username: 'deploy', connectionType: 'ssh' }))
     expect(store.terminalCommandGenerationRecords[0]).toEqual(record)
 
@@ -6173,27 +6177,19 @@ describe('workspace store', () => {
         providers: expect.objectContaining({
           openai: expect.objectContaining({ modelId: expect.any(String) })
         }),
-        options: [expect.objectContaining({ name: 'aiopsterm-local-agent' })]
+        options: []
       })
     })
-    expect(store.aiModelOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'aiopsterm-local-agent', label: 'aiopsterm-local-agent' })
-      ])
-    )
+    expect(store.aiModelOptions).toEqual([])
     expect(store.aiModelOptions.some((model) => model.id === 'ops-model')).toBe(false)
     expect(store.aiModelOptions.some((model) => model.id === 'qwen2.5-coder')).toBe(false)
     expect(store.lockedAiModelOptions).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'gpt-5-pro', locked: true, tier: 'VIP' })])
     )
-    expect(store.settingModelOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true })
-      ])
-    )
+    expect(store.settingModelOptions).toEqual([])
     expect(store.settingModelOptions.some((model) => model.name === 'custom-maintenance')).toBe(false)
     expect(process.env.AIOPSTERM_MODEL_SETTINGS_ENABLE_SEED).toBe('1')
-    expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
+    expect(store.terminalCommandModelOptions).toEqual([])
     expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
   })
@@ -6223,7 +6219,7 @@ describe('workspace store', () => {
       expect(store.aiModelOptions).toEqual(loadedAiModels)
       expect(store.lockedAiModelOptions).toEqual(loadedLockedModels)
       expect(store.settingModelOptions).toEqual(loadedSettingModels)
-      expect(store.terminalCommandModelOptions).toContain('aiopsterm-local-agent')
+      expect(store.terminalCommandModelOptions).toEqual([])
     } finally {
       ;(window.aiops as any).listAiModels = originalListAiModels
     }
@@ -9743,12 +9739,12 @@ describe('workspace store', () => {
     )
 
     vi.mocked(window.aiops.saveConfig).mockClear()
-    await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(true)
-    expect(store.settingModelOptions.find((model) => model.name === 'aiopsterm-local-agent')?.checked).toBe(false)
+    await expect(store.updateModelOption('ops-model', false)).resolves.toBe(true)
+    expect(store.settingModelOptions.find((model) => model.name === 'ops-model')?.checked).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         modelSettings: expect.objectContaining({
-          options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent', checked: false })])
+          options: expect.arrayContaining([expect.objectContaining({ name: 'ops-model', checked: false })])
         })
       })
     )
@@ -10053,18 +10049,17 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     await store.hydrateConfig()
     const originalSaveConfig = window.aiops.saveConfig
-    const localAgent = () => store.settingModelOptions.find((model) => model.name === 'aiopsterm-local-agent')
     const customModelExists = () => store.settingModelOptions.some((model) => model.name === 'custom-maintenance')
 
-    expect(localAgent()?.checked).toBe(true)
+    expect(store.settingModelOptions.some((model) => model.name === 'aiopsterm-local-agent')).toBe(false)
     expect(customModelExists()).toBe(true)
     expect(store.addModelSwitch).toBe(true)
 
     try {
       ;(window.aiops as any).saveConfig = undefined
-      await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(false)
+      await expect(store.updateModelOption('custom-maintenance', true)).resolves.toBe(false)
       expect(store.settingsNotice).toBe('模型设置保存服务不可用')
-      expect(localAgent()?.checked).toBe(true)
+      expect(store.settingModelOptions.find((model) => model.name === 'custom-maintenance')?.checked).toBe(false)
 
       await expect(store.removeModelOption('custom-maintenance')).resolves.toBe(false)
       expect(customModelExists()).toBe(true)
@@ -10074,9 +10069,9 @@ describe('workspace store', () => {
 
       ;(window.aiops as any).saveConfig = originalSaveConfig
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
-      await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(false)
+      await expect(store.updateModelOption('custom-maintenance', true)).resolves.toBe(false)
       expect(store.settingsNotice).toBe('模型设置保存失败')
-      expect(localAgent()?.checked).toBe(true)
+      expect(store.settingModelOptions.find((model) => model.name === 'custom-maintenance')?.checked).toBe(false)
 
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
         ...store.config,
@@ -10094,12 +10089,12 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('model settings offline')
       expect(customModelExists()).toBe(true)
 
-      await expect(store.updateModelOption('aiopsterm-local-agent', false)).resolves.toBe(true)
-      expect(localAgent()?.checked).toBe(false)
+      await expect(store.updateModelOption('custom-maintenance', true)).resolves.toBe(true)
+      expect(store.settingModelOptions.find((model) => model.name === 'custom-maintenance')?.checked).toBe(true)
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
           modelSettings: expect.objectContaining({
-            options: expect.arrayContaining([expect.objectContaining({ name: 'aiopsterm-local-agent', checked: false })])
+            options: expect.arrayContaining([expect.objectContaining({ name: 'custom-maintenance', checked: true })])
           })
         })
       )

@@ -1,8 +1,6 @@
 import type { ModelOptionUserConfig, ModelSettingsUserConfig } from './preload'
 
-const defaultModelOptions: ModelOptionUserConfig[] = [
-  { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' }
-]
+const defaultModelOptions: ModelOptionUserConfig[] = []
 
 const cloneModelOptions = (options: ModelOptionUserConfig[]) => options.map((option) => ({ ...option }))
 

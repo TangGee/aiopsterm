@@ -125,17 +125,22 @@ describe('model provider backend boundary', () => {
     const catalog = await listAiModels()
 
     expect(catalog.chatModels).toEqual([])
-    expect(catalog.settingsModels).toEqual([
-      expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard' })
-    ])
-    expect(catalog.settingsModels.some((model: { name: string }) => model.name === 'aiopsterm-local-agent')).toBe(true)
+    expect(catalog.settingsModels).toEqual([])
+    expect(catalog.settingsModels.some((model: { name: string }) => model.name === 'aiopsterm-local-agent')).toBe(false)
     expect(catalog.chatModels.some((model: { id: string }) => model.id === 'aiopsterm-local-agent')).toBe(false)
     expect(catalog.chatModels.some((model: { id: string }) => model.id === 'ops-model')).toBe(false)
     expect(catalog.chatModels.some((model: { id: string }) => model.id === 'qwen2.5-coder')).toBe(false)
   })
 
   it('exposes the local placeholder model only when the local chat backend is explicitly available', async () => {
-    const catalog = await listAiModels({ localChatBackendAvailable: true })
+    const catalog = await listAiModels({
+      localChatBackendAvailable: true,
+      modelSettings: {
+        addModelSwitch: true,
+        providers: {},
+        options: [{ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' }]
+      }
+    })
 
     expect(catalog.chatModels.map((model: { id: string }) => model.id)).toEqual(['aiopsterm-local-agent'])
     expect(catalog.chatModels[0]).toEqual(expect.objectContaining({ label: 'aiopsterm-local-agent', apiProvider: 'default' }))
@@ -171,6 +176,36 @@ describe('model provider backend boundary', () => {
       model: 'gpt-5',
       input: 'test',
       max_output_tokens: 16
+    })
+  })
+
+  it('treats trailing hash OpenAI-compatible base URLs as complete endpoints', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { id: 'chat-test', choices: [{ message: { content: 'OK' } }] })
+    })
+    const result = await checkModelProvider({
+      provider: 'openai',
+      config: {
+        baseUrl: `${server.baseUrl}/api/coding/v3#`,
+        apiKey: 'sk-test',
+        modelId: 'test-code-model',
+        apiFormat: 'chat-completions'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({
+      provider: 'openai',
+      modelId: 'test-code-model',
+      endpoint: `${server.baseUrl}/api/coding/v3`
+    })
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toEqual(expect.objectContaining({ method: 'POST', url: '/api/coding/v3' }))
+    expect(JSON.parse(server.requests[0].body)).toEqual({
+      model: 'test-code-model',
+      messages: [{ role: 'user', content: 'test' }],
+      max_tokens: 1
     })
   })
 

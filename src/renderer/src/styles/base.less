@@ -2578,6 +2578,36 @@ em {
   font-size: 12px;
 }
 
+.provider-secret-field {
+  width: min(620px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 6px;
+}
+
+.provider-secret-toggle {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.provider-secret-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.provider-secret-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
 .provider-help,
 .setting-description-no-padding {
   display: block;

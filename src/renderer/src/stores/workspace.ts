@@ -1223,6 +1223,8 @@ const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUse
   }
 }
 
+const isVisibleModelSettingsOption = (model: ModelOptionUserConfig | SettingsModelOption) => model.name !== 'aiopsterm-local-agent'
+
 const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
   if (!isRecord(source)) return null
   const id = typeof source.id === 'string' ? source.id.trim() : ''
@@ -4613,13 +4615,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiModelOptions.value = catalog.chatModels.map((model) => ({ ...model }))
     lockedAiModelOptions.value = catalog.lockedChatModels.map((model) => ({ ...model, locked: true }))
     if (options.replaceSettingsOptions) {
-      settingModelOptions.value = catalog.settingsModels.map((model) => ({
-        name: model.name,
-        locked: model.locked,
-        checked: model.checked,
-        type: model.type,
-        apiProvider: model.apiProvider
-      }))
+      settingModelOptions.value = catalog.settingsModels
+        .filter(isVisibleModelSettingsOption)
+        .map((model) => ({
+          name: model.name,
+          locked: model.locked,
+          checked: model.checked,
+          type: model.type,
+          apiProvider: model.apiProvider
+        }))
     }
     return catalog
   }
@@ -5461,7 +5465,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       anthropic: { ...modelProviders.value.anthropic },
       ollama: { ...modelProviders.value.ollama }
     },
-    options: settingModelOptions.value.map((option) => ({
+    options: settingModelOptions.value.filter(isVisibleModelSettingsOption).map((option) => ({
       name: option.name,
       locked: Boolean(option.locked),
       checked: Boolean(option.checked),
@@ -5510,7 +5514,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const applyModelOptionSettingsSnapshot = (settings: ModelSettingsUserConfig) => {
     addModelSwitch.value = settings.addModelSwitch
-    settingModelOptions.value = settings.options.map((option) => ({
+    settingModelOptions.value = settings.options.filter(isVisibleModelSettingsOption).map((option) => ({
       name: option.name,
       locked: option.locked,
       checked: option.checked,
@@ -12755,7 +12759,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
     const prompt = instruction.trim()
     if (!panel || panel.kind === 'knowledge' || !prompt) return null
-    const selectedModel = modelName || terminalCommandModelOptions.value[0] || config.value.modelName || 'aiopsterm-local-agent'
+    const selectedModel = modelName || terminalCommandModelOptions.value[0]
+    if (!selectedModel) {
+      setTopNotice('请先配置可用模型')
+      return null
+    }
     const generateBridge = window.aiops?.generateTerminalCommand
     if (typeof generateBridge !== 'function') {
       setTopNotice('终端命令生成服务不可用')

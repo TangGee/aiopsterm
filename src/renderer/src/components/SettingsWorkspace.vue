@@ -159,8 +159,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h } from 'vue'
-import { BookOpen, Brain, ExternalLink, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
+import { computed, defineComponent, h, ref } from 'vue'
+import { BookOpen, Brain, ExternalLink, Eye, EyeOff, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   settingsBackgroundPresets,
   settingsLanguageOptions,
@@ -1626,6 +1626,7 @@ const ProviderCard = defineComponent({
     }
   },
   setup(props) {
+    const visibleSecrets = ref<Record<string, boolean>>({})
     const providerState = computed(() => workspace.modelProviders[props.provider])
     const checkLabel = computed(() => (workspace.modelCheckState[props.provider] === 'checking' ? 'Checking' : 'Check'))
     const openAiUrlPreview = computed(() => {
@@ -1634,11 +1635,11 @@ const ProviderCard = defineComponent({
       if (!url) return ''
       let baseUrl = url
       if (url.endsWith('#')) {
-        baseUrl = url.slice(0, -1)
+        return url.slice(0, -1)
       } else {
         let hasV1 = false
         try {
-          hasV1 = new URL(url).pathname.split('/').filter(Boolean).includes('v1')
+          hasV1 = new URL(url).pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
         } catch {
           hasV1 = false
         }
@@ -1650,17 +1651,43 @@ const ProviderCard = defineComponent({
       return `${baseUrl}${baseUrl.endsWith('/') ? '' : '/'}${apiPath}`
     })
     const update = (patch: Partial<typeof providerState.value>) => workspace.updateModelProviderConfig(props.provider, patch)
-    const field = (label: string, key: keyof typeof providerState.value, options: { type?: string; placeholder?: string; wide?: boolean } = {}) =>
-      h('label', { class: ['provider-field', { wide: options.wide }] }, [
+    const field = (label: string, key: keyof typeof providerState.value, options: { type?: string; placeholder?: string; wide?: boolean } = {}) => {
+      const secretKey = `${props.provider}:${String(key)}`
+      const isPassword = options.type === 'password'
+      const input = h('input', {
+        class: 'settings-input',
+        type: isPassword && visibleSecrets.value[secretKey] ? 'text' : options.type || 'text',
+        value: providerState.value[key] as string,
+        placeholder: options.placeholder,
+        onChange: (event: Event) => update({ [key]: (event.target as HTMLInputElement).value })
+      })
+      return h('label', { class: ['provider-field', { wide: options.wide }] }, [
         h('span', label),
-        h('input', {
-          class: 'settings-input',
-          type: options.type || 'text',
-          value: providerState.value[key] as string,
-          placeholder: options.placeholder,
-          onChange: (event: Event) => update({ [key]: (event.target as HTMLInputElement).value })
-        })
+        isPassword
+          ? h('div', { class: 'provider-secret-field' }, [
+              input,
+              h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'provider-secret-toggle',
+                  title: visibleSecrets.value[secretKey] ? '隐藏明文' : '显示明文',
+                  'aria-label': visibleSecrets.value[secretKey] ? '隐藏明文' : '显示明文',
+                  'data-testid': `provider-secret-toggle-${props.provider}-${String(key)}`,
+                  onClick: (event: Event) => {
+                    event.preventDefault()
+                    visibleSecrets.value = {
+                      ...visibleSecrets.value,
+                      [secretKey]: !visibleSecrets.value[secretKey]
+                    }
+                  }
+                },
+                [h(visibleSecrets.value[secretKey] ? EyeOff : Eye)]
+              )
+            ])
+          : input
       ])
+    }
     const checkbox = (label: string, key: keyof typeof providerState.value) =>
       h('label', { class: 'settings-check-line provider-check-line' }, [
         h('input', {

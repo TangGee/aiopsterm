@@ -30,7 +30,7 @@ describe('model settings seed config', () => {
     const settings = defaultModelSettingsConfig()
 
     expect(shouldUseModelSettingsSeedData()).toBe(false)
-    expect(settings.options.map((option) => option.name)).toEqual(['aiopsterm-local-agent'])
+    expect(settings.options.map((option) => option.name)).toEqual([])
     expect(settings.options.some((option) => option.name === 'custom-maintenance')).toBe(false)
     expect(settings).toEqual(defaultModelSettingsData())
   })

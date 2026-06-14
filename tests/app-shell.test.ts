@@ -236,6 +236,19 @@ const enableCatalogModelOptions = async (store: ReturnType<typeof useWorkspaceSt
   await store.refreshAiModelCatalog({ replaceSettingsOptions: true })
 }
 
+const mountAiPanelWithModels = async (pinia: ReturnType<typeof createPinia>) => {
+  const store = useWorkspaceStore()
+  await enableCatalogModelOptions(store)
+  const wrapper = mount(AiPanel, {
+    attachTo: document.body,
+    props: { agentMode: true },
+    global: { plugins: [pinia] }
+  })
+  await flushPromises()
+  await wrapper.vm.$nextTick()
+  return { wrapper, store }
+}
+
 const waitForDatabaseSqlResult = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 0))
   await flushPromises()
@@ -3616,12 +3629,7 @@ describe('AppShell', () => {
   it('returns External reference-style context submenus to main on Escape and empty Backspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
     vi.mocked(window.aiops.exportChat).mockClear()
     vi.mocked(window.aiops.showSaveDialog).mockClear()
     vi.mocked(window.aiops.writeLocalFile).mockClear()
@@ -4107,12 +4115,7 @@ describe('AppShell', () => {
   it('matches External reference-style Agent host context batch actions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     await wrapper.find('.context-trigger-tag').trigger('click')
     await wrapper.find('[data-onboarding-id="ai-context-hosts-menu"]').trigger('click')
@@ -4137,12 +4140,7 @@ describe('AppShell', () => {
   it('prepares AI image attachments through the preload boundary without writing system chat messages', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
     store.chatMessages = [{ id: 'existing-system', role: 'system', text: '已有后端消息。' }]
 
     const originalPrepareImageFromFile = window.aiops.prepareChatImageAttachmentFromFile
@@ -4188,12 +4186,7 @@ describe('AppShell', () => {
   it('does not fabricate AI file attachments when dialog or staging bridges are unavailable or fail', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
     const originalShowOpenDialog = window.aiops.showOpenDialog
     const originalStageChatAttachment = window.aiops.stageChatAttachment
 
@@ -4321,12 +4314,7 @@ describe('AppShell', () => {
   it('fails closed on malformed successful AI input and export backend results', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
     store.selectedConversationId = 'conv-malformed-ai-boundary'
     store.conversations = [
       {
@@ -4457,12 +4445,7 @@ describe('AppShell', () => {
   it('fails closed on edit-mode AI input and voice transcription backend boundaries', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
     store.selectedConversationId = 'conv-edit-ai-boundary'
     store.conversations = [
       {
@@ -4617,11 +4600,7 @@ describe('AppShell', () => {
 
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
+    const { wrapper } = await mountAiPanelWithModels(pinia)
 
     try {
       vi.mocked(window.aiops.transcribeVoiceInput).mockClear()
@@ -4648,11 +4627,7 @@ describe('AppShell', () => {
   it('opens and resets the AI command popup with External reference-style keyboard focus behavior', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
+    const { wrapper } = await mountAiPanelWithModels(pinia)
 
     const mainInput = wrapper.find('[data-testid="ai-message-input"]')
     ;(mainInput.element as HTMLElement).replaceChildren()
@@ -4710,12 +4685,7 @@ describe('AppShell', () => {
   it('renders malformed AI response envelopes as backend errors instead of fabricated answers', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
       ok: true,
@@ -4751,12 +4721,7 @@ describe('AppShell', () => {
   it('renders rejected AI response bridges as backend errors and re-enables input actions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     vi.mocked(window.aiops.generateAiChatResponse).mockRejectedValueOnce(new Error('provider bridge rejected'))
 
@@ -4789,12 +4754,7 @@ describe('AppShell', () => {
   it('renders and approves AI MCP tool calls through the backend bridge', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
       ok: true,
@@ -4865,12 +4825,7 @@ describe('AppShell', () => {
   it('renders and approves AI MCP resource access through the backend bridge', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
       ok: true,
@@ -4938,12 +4893,7 @@ describe('AppShell', () => {
   it('renders provider execute_command blocks as runnable backend-owned command cards', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AiPanel, {
-      attachTo: document.body,
-      props: { agentMode: true },
-      global: { plugins: [pinia] }
-    })
-    const store = useWorkspaceStore()
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
       ok: true,
@@ -5082,9 +5032,6 @@ describe('AppShell', () => {
     store.onboardingAiRequest = { action: 'open-model', stepId: 'ai-model-option', sequence: 1 }
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-onboarding-id="ai-model-option"]').exists()).toBe(true)
-    await wrapper.find('[data-onboarding-id="ai-model-option"]').trigger('click')
-    expect(store.config.modelName).toBe('aiopsterm-local-agent')
-    await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
     const lockedModelRow = wrapper.findAll('.ai-model-popup .select-list button.locked-model-option').find((button) => button.text().includes('gpt-5-pro'))
     expect(lockedModelRow).toBeTruthy()
     expect(lockedModelRow!.attributes('disabled')).toBeDefined()
@@ -5092,44 +5039,50 @@ describe('AppShell', () => {
     expect(lockedModelRow!.find('.locked-model-icon').exists()).toBe(true)
     expect(lockedModelRow!.text()).toContain('VIP')
     await lockedModelRow!.trigger('click')
-    expect(store.config.modelName).toBe('aiopsterm-local-agent')
+    expect(store.config.modelName).not.toBe('gpt-5-pro')
 
     const modelSearchInput = wrapper.find('.ai-model-popup header input')
     expect(modelSearchInput.exists()).toBe(true)
-    await modelSearchInput.setValue('aiopsterm-local')
-    expect(wrapper.find('.ai-model-popup .select-list').text()).toContain('aiopsterm-local-agent')
-    expect(wrapper.find('.ai-model-popup .select-list').text()).not.toContain('gpt-5')
+    await modelSearchInput.setValue('qwen')
+    await wrapper.vm.$nextTick()
+    const qwenFilteredRows = wrapper.findAll('.ai-model-popup button').map((button) => button.text())
+    expect(qwenFilteredRows.some((text) => text.includes('qwen2.5-coder'))).toBe(true)
+    expect(qwenFilteredRows.some((text) => text.includes('gpt-5'))).toBe(false)
     await modelSearchInput.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(store.config.modelName).toBe('aiopsterm-local-agent')
-    expect(store.config.modelProvider).toBe('local')
+    expect(store.config.modelName).toBe('qwen2.5-coder')
+    expect(store.config.modelProvider).toBe('ollama')
     expect(wrapper.find('.ai-model-popup').exists()).toBe(false)
 
     await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
+    await wrapper.vm.$nextTick()
     expect((wrapper.find('.ai-model-popup header input').element as HTMLInputElement).value).toBe('')
     await wrapper.find('.ai-model-popup header input').setValue('pro')
+    await wrapper.vm.$nextTick()
     const filteredLockedModelRow = wrapper.findAll('.ai-model-popup .select-list button.locked-model-option').find((button) => button.text().includes('gpt-5-pro'))
     expect(filteredLockedModelRow).toBeTruthy()
     expect(filteredLockedModelRow!.attributes('disabled')).toBeDefined()
     await wrapper.find('.ai-model-popup header input').trigger('keydown', { key: 'Enter' })
-    expect(store.config.modelName).toBe('aiopsterm-local-agent')
+    expect(store.config.modelName).toBe('qwen2.5-coder')
     expect(wrapper.find('.ai-model-popup').exists()).toBe(true)
     await wrapper.find('.ai-model-popup header input').setValue('missing-model')
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.ai-model-popup .select-list').text()).toContain('没有匹配的模型')
     await wrapper.find('.ai-model-popup header input').trigger('keydown', { key: 'Escape' })
     expect(wrapper.find('.ai-model-popup').exists()).toBe(false)
 
     await wrapper.find('[data-onboarding-id="ai-model-select"]').trigger('click')
-    const localModelRowAfterSearch = wrapper.findAll('.ai-model-popup .select-list button:not(.locked-model-option)').find((button) => button.text().includes('aiopsterm-local-agent'))
-    expect(localModelRowAfterSearch).toBeTruthy()
+    await wrapper.vm.$nextTick()
+    const qwenModelRowAfterSearch = wrapper.findAll('.ai-model-popup .select-list button:not(.locked-model-option)').find((button) => button.text().includes('qwen2.5-coder'))
+    expect(qwenModelRowAfterSearch).toBeTruthy()
     expect((wrapper.find('.ai-model-popup header input').element as HTMLInputElement).value).toBe('')
-    await localModelRowAfterSearch!.trigger('click')
+    await qwenModelRowAfterSearch!.trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(store.config.modelName).toBe('aiopsterm-local-agent')
-    expect(store.config.modelProvider).toBe('local')
-    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).toContain('aiopsterm-local-agent')
+    expect(store.config.modelName).toBe('qwen2.5-coder')
+    expect(store.config.modelProvider).toBe('ollama')
+    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).toContain('qwen2.5-coder')
 
     store.onboardingAiRequest = { action: 'open-context-main', stepId: 'ai-context-hosts', sequence: 2 }
     await wrapper.vm.$nextTick()
@@ -6622,13 +6575,14 @@ describe('AppShell', () => {
     expect(store.activePanel.output).not.toContain('whoami')
     expect(wrapper.find('.command-line input').exists()).toBe(false)
 
+    await enableCatalogModelOptions(store)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-command-dialog').exists()).toBe(true)
     await flushPromises()
     await wrapper.vm.$nextTick()
     expect(window.aiops.listAiModels).toHaveBeenCalled()
-    expect(wrapper.find('.terminal-command-dialog select').text()).toContain('aiopsterm-local-agent')
+    expect(wrapper.find('.terminal-command-dialog select').text()).toContain('qwen2.5-coder')
     expect(wrapper.find('.terminal-command-dialog select').text()).not.toContain('gpt-5-Thinking')
     await wrapper.find('.terminal-command-dialog textarea').setValue('检查磁盘空间')
     vi.mocked(window.aiops.generateTerminalCommand).mockClear()
@@ -6640,7 +6594,7 @@ describe('AppShell', () => {
       expect.objectContaining({
         panelId: store.activePanelId,
         instruction: '检查磁盘空间',
-        modelName: 'aiopsterm-local-agent'
+        modelName: 'qwen2.5-coder'
       })
     )
     expect(store.terminalCommandGenerationRecords[0]).toEqual(expect.objectContaining({ instruction: '检查磁盘空间', command: 'df -h' }))
@@ -8574,9 +8528,12 @@ describe('AppShell', () => {
     await workspace.find('.kb-editor-image-controls button[title="重置"]').trigger('click')
     expect(workspace.find('.kb-editor-image-controls').text()).toContain('100%')
 
+    await enableCatalogModelOptions(store)
     const aiPanel = mount(AiPanel, {
       global: { plugins: [pinia] }
     })
+    await flushPromises()
+    await aiPanel.vm.$nextTick()
     const createDataTransferMock = () => {
       const data = new Map<string, string>()
       return {
@@ -12472,6 +12429,24 @@ describe('AppShell', () => {
     const openAiCard = workspace.findAll('.provider-card').find((card) => card.text().includes('OpenAI Compatible & Responses'))!
     expect(openAiCard.text()).toContain('Preview:')
     expect(openAiCard.text()).toContain('/responses')
+    const openAiInputs = openAiCard.findAll('.settings-input')
+    const openAiApiKeyInput = openAiInputs[1]
+    expect((openAiApiKeyInput.element as HTMLInputElement).type).toBe('password')
+    await openAiApiKeyInput.setValue('sk-visible-test')
+    const openAiSecretToggle = openAiCard.find('[data-testid="provider-secret-toggle-openai-apiKey"]')
+    expect(openAiSecretToggle.exists()).toBe(true)
+    await openAiSecretToggle.trigger('click')
+    expect((openAiApiKeyInput.element as HTMLInputElement).type).toBe('text')
+    expect((openAiApiKeyInput.element as HTMLInputElement).value).toBe('sk-visible-test')
+    await openAiSecretToggle.trigger('click')
+    expect((openAiApiKeyInput.element as HTMLInputElement).type).toBe('password')
+    await openAiInputs[0].setValue('https://ark.example.test/api/coding/v3#')
+    await workspace.vm.$nextTick()
+    expect(openAiCard.text()).toContain('Preview: https://ark.example.test/api/coding/v3')
+    expect(openAiCard.text()).not.toContain('api/coding/v3/chat/completions')
+    await openAiInputs[0].setValue('https://api.openai.com')
+    await openAiApiKeyInput.setValue('')
+    await workspace.vm.$nextTick()
     vi.mocked(window.aiops.checkModelProvider).mockClear()
     let resolveProviderCheck: (value: any) => void = () => undefined
     vi.mocked(window.aiops.checkModelProvider).mockImplementationOnce(

@@ -11,9 +11,7 @@ import type {
   ModelSettingsUserConfig
 } from '@shared/preload'
 
-const defaultSettingsModelOptions: ModelOptionUserConfig[] = [
-  { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' }
-]
+const defaultSettingsModelOptions: ModelOptionUserConfig[] = []
 
 const lockedCatalogModels: AiModelCatalog['lockedChatModels'] = [
   { id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' },
@@ -58,7 +56,6 @@ const normalizeSettingsOptions = (value: unknown): ModelOptionUserConfig[] => {
     seen.add(option.name)
     options.push(option)
   }
-  if (!seen.has('aiopsterm-local-agent')) options.unshift({ ...defaultSettingsModelOptions[0] })
   return options
 }
 
@@ -131,8 +128,8 @@ const normalizeOpenAiEndpoint = (baseUrl: string, apiFormat: ModelProviderUserCo
   let normalized = baseUrl
   try {
     const parsed = new URL(baseUrl)
-    const hasV1 = parsed.pathname.split('/').filter(Boolean).includes('v1')
-    if (!hasV1) {
+    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
+    if (!hasVersionSegment) {
       parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
       normalized = parsed.toString().replace(/\/$/, '')
     }
@@ -166,14 +163,19 @@ const normalizeOpenAiBaseUrl = (baseUrl: string) => {
   if (baseUrl.endsWith('#')) return baseUrl.slice(0, -1)
   try {
     const parsed = new URL(baseUrl)
-    const hasV1 = parsed.pathname.split('/').filter(Boolean).includes('v1')
-    if (!hasV1) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
+    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
+    if (!hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
     parsed.search = ''
     parsed.hash = ''
     return parsed.toString().replace(/\/$/, '')
   } catch {
     return baseUrl
   }
+}
+
+const normalizeOpenAiOperationEndpoint = (baseUrl: string, path: string) => {
+  const normalized = normalizeOpenAiBaseUrl(baseUrl)
+  return baseUrl.endsWith('#') ? normalized : appendEndpointPath(normalized, path)
 }
 
 const validateUrl = (value: string, field: string): string | null => {
@@ -199,7 +201,7 @@ const missingSecretMessage = (provider: ModelProviderCheckKey, config: ModelProv
 const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
   const baseUrl = normalizeText(config.baseUrl)
   if (provider === 'openai') return normalizeOpenAiEndpoint(baseUrl || defaultEndpoints.openai, config.apiFormat)
-  if (provider === 'litellm') return appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || defaultEndpoints.litellm), 'chat/completions')
+  if (provider === 'litellm') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.litellm, 'chat/completions')
   if (provider === 'bedrock') {
     const region = normalizeText(config.awsRegion) || 'us-east-1'
     const baseEndpoint =
@@ -208,7 +210,7 @@ const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserC
         : `https://bedrock-runtime.${region}.amazonaws.com`
     return appendEndpointPath(baseEndpoint, `model/${encodeURIComponent(normalizeText(config.modelId))}/invoke`)
   }
-  if (provider === 'deepseek') return appendEndpointPath(normalizeOpenAiBaseUrl(baseUrl || defaultEndpoints.deepseek), 'chat/completions')
+  if (provider === 'deepseek') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.deepseek, 'chat/completions')
   if (provider === 'anthropic') return appendEndpointPath(baseUrl || defaultEndpoints.anthropic, 'v1/messages')
   if (provider === 'ollama') return appendEndpointPath(baseUrl || defaultEndpoints.ollama, 'api/tags')
   return baseUrl || defaultEndpoints[provider]

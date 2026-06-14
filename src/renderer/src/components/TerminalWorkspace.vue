@@ -1332,7 +1332,7 @@ const getSuggestionContext = (panelId: string, mode: TerminalCommandSuggestionCo
     mode,
     ...(panel?.sshSession?.host ? { host: panel.sshSession.host } : { host: 'local' }),
     shell: panel?.sessionId ? (panel.sshSession ? 'ssh' : 'local-shell') : 'bash',
-    modelName: workspace.terminalCommandModelOptions[0] || workspace.config.modelName
+    modelName: workspace.terminalCommandModelOptions[0] || ''
   }
 }
 
@@ -1681,7 +1681,7 @@ const openCommandDialog = async (panelId = workspace.activePanelId) => {
   workspace.activePanelId = panelId
   commandDialog.visible = true
   commandDialog.panelId = panelId
-  commandDialog.modelName = commandDialog.modelName || workspace.terminalCommandModelOptions[0] || workspace.config.modelName
+  commandDialog.modelName = commandDialog.modelName || workspace.terminalCommandModelOptions[0] || ''
   commandDialog.error = ''
   termMenu.visible = false
   menu.visible = false
@@ -2239,7 +2239,7 @@ watch(
   () => workspace.terminalCommandModelOptions.join('|'),
   (models) => {
     if (!commandDialog.modelName || !models.split('|').includes(commandDialog.modelName)) {
-      commandDialog.modelName = workspace.terminalCommandModelOptions[0] || workspace.config.modelName
+      commandDialog.modelName = workspace.terminalCommandModelOptions[0] || ''
     }
   },
   { immediate: true }
