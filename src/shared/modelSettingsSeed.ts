@@ -6,7 +6,7 @@ const developmentSeedModelOptions: ModelOptionUserConfig[] = [
   { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
   { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
   { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
-  { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
+  { name: 'custom-maintenance', displayName: 'Maintenance Gateway', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
 ]
 
 const cloneModelOptions = (options: ModelOptionUserConfig[]) => options.map((option) => ({ ...option }))

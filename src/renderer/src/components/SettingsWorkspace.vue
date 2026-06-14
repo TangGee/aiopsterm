@@ -198,6 +198,31 @@ const modelProviderCards: Array<{ provider: SettingsModelProviderKey; title: str
   { provider: 'anthropic', title: 'Anthropic' },
   { provider: 'ollama', title: 'Ollama' }
 ]
+
+const modelProviderLabels: Record<string, string> = {
+  default: 'Built-in',
+  litellm: 'LiteLLM',
+  openai: 'OpenAI Compatible',
+  bedrock: 'Amazon Bedrock',
+  deepseek: 'DeepSeek',
+  anthropic: 'Anthropic',
+  ollama: 'Ollama'
+}
+
+const providerConfigSummary = (model: { name: string; apiProvider?: string; type?: string; locked?: boolean; displayName?: string }) => {
+  const provider = model.apiProvider || (model.locked ? 'default' : 'openai')
+  const providerState = workspace.modelProviders[provider as SettingsModelProviderKey]
+  const parts = [modelProviderLabels[provider] || provider]
+  if (providerState?.baseUrl) parts.push(providerState.baseUrl)
+  if (provider === 'openai' && providerState?.apiFormat) {
+    parts.push(providerState.apiFormat === 'responses' ? 'Responses' : 'Chat Completions')
+  }
+  if (model.locked) parts.push('Locked')
+  else if (model.type === 'custom') parts.push('Custom')
+  return parts.filter(Boolean).join(' · ')
+}
+
+const displayModelLabel = (model: { name: string; displayName?: string }) => model.displayName || model.name.replace(/-Thinking$/, '')
 const awsRegionOptions = [
   'us-east-1',
   'us-east-2',
@@ -750,11 +775,32 @@ const TerminalSettings = defineComponent({
 const ModelSettings = defineComponent({
   name: 'ModelSettings',
   setup() {
+    const modelNameDrafts = ref<Record<string, string>>({})
     const handleModelOptionChange = async (event: Event, name: string) => {
       const input = event.target as HTMLInputElement
       const saved = await workspace.updateModelOption(name, input.checked)
       if (!saved) {
         input.checked = Boolean(workspace.settingModelOptions.find((model) => model.name === name)?.checked)
+      }
+    }
+    const getModelNameDraft = (name: string, fallback: string) => {
+      if (!(name in modelNameDrafts.value)) {
+        modelNameDrafts.value = { ...modelNameDrafts.value, [name]: fallback }
+      }
+      return modelNameDrafts.value[name]
+    }
+    const handleModelDisplayNameChange = (name: string, value: string) => {
+      modelNameDrafts.value = { ...modelNameDrafts.value, [name]: value }
+    }
+    const handleModelDisplayNameBlur = async (name: string) => {
+      const model = workspace.settingModelOptions.find((item) => item.name === name)
+      if (!model || model.locked || model.type !== 'custom') return
+      const draft = (modelNameDrafts.value[name] || '').trim()
+      const current = (model.displayName || '').trim()
+      if (draft === current || (!draft && !current)) return
+      const saved = await workspace.renameModelOption(name, draft)
+      if (!saved) {
+        modelNameDrafts.value = { ...modelNameDrafts.value, [name]: current }
       }
     }
     const handleAddModelSwitchChange = async (event: Event) => {
@@ -769,21 +815,51 @@ const ModelSettings = defineComponent({
           'div',
           { class: 'settings-section-card model-names-card' },
           workspace.settingModelOptions.map((model) =>
-            h('label', { class: ['model-check-row', { locked: model.locked }] }, [
-              h('input', {
-                type: 'checkbox',
-                checked: model.checked,
-                disabled: model.locked,
-                onChange: (event: Event) => handleModelOptionChange(event, model.name)
-              }),
-              model.locked ? h(LockKeyhole) : null,
-              h('span', model.name.replace(/-Thinking$/, '')),
-              model.name.endsWith('-Thinking') ? h(Brain, { class: 'thinking-icon' }) : null,
+            h('div', { class: ['model-check-row', { locked: model.locked }] }, [
+              h('label', { class: 'model-check-control', title: model.locked ? '锁定模型不可关闭' : model.checked ? '停用模型' : '启用模型' }, [
+                h('input', {
+                  type: 'checkbox',
+                  checked: model.checked,
+                  disabled: model.locked,
+                  onChange: (event: Event) => handleModelOptionChange(event, model.name)
+                })
+              ]),
+              h('div', { class: 'model-row-main' }, [
+                h('div', { class: 'model-row-title' }, [
+                  model.locked ? h(LockKeyhole) : null,
+                  model.name.endsWith('-Thinking') ? h(Brain, { class: 'thinking-icon' }) : null,
+                  h('strong', { title: displayModelLabel(model) }, displayModelLabel(model))
+                ]),
+                h('code', { class: 'model-row-id', title: model.name }, model.name),
+                model.type === 'custom' && !model.locked
+                  ? h('label', { class: 'model-alias-field' }, [
+                      h('span', '管理名称'),
+                      h('input', {
+                        class: 'settings-input model-alias-input',
+                        value: getModelNameDraft(model.name, model.displayName || ''),
+                        placeholder: model.name,
+                        onInput: (event: Event) => handleModelDisplayNameChange(model.name, (event.target as HTMLInputElement).value),
+                        onBlur: () => void handleModelDisplayNameBlur(model.name),
+                        onKeydown: (event: KeyboardEvent) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            ;(event.target as HTMLInputElement).blur()
+                          }
+                        }
+                      })
+                    ])
+                  : null
+              ]),
+              h('div', { class: 'model-row-meta' }, [
+                h('span', { class: ['model-provider-pill', model.apiProvider || 'default'] }, modelProviderLabels[model.apiProvider || 'default'] || model.apiProvider || 'Provider'),
+                h('small', { title: providerConfigSummary(model) }, providerConfigSummary(model))
+              ]),
               model.checked && model.type === 'custom' && !model.locked
                 ? h(
                     'button',
                     {
-                      title: '移除',
+                      class: 'model-row-remove',
+                      title: '移除模型配置',
                       onClick: (event: Event) => {
                         event.preventDefault()
                         void workspace.removeModelOption(model.name)
@@ -791,7 +867,7 @@ const ModelSettings = defineComponent({
                     },
                     [h(X)]
                   )
-                : null
+                : h('span', { class: 'model-row-action-spacer' })
             ])
           )
         ),

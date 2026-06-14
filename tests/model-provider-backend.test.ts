@@ -89,7 +89,7 @@ describe('model provider backend boundary', () => {
         { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
         { name: 'gpt-5-Thinking', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
         { name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' },
-        { name: 'ops-model', locked: false, checked: true, type: 'custom', apiProvider: 'openai' },
+        { name: 'ops-model', displayName: 'Production Ark', locked: false, checked: true, type: 'custom', apiProvider: 'openai' },
         { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom', apiProvider: 'ollama' },
         { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
       ]
@@ -118,6 +118,16 @@ describe('model provider backend boundary', () => {
       ])
     )
     expect(secondCatalog.chatModels[0].label).toBe('aiopsterm-local-agent')
+    expect(secondCatalog.chatModels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'ops-model',
+          label: 'Production Ark',
+          displayName: 'Production Ark',
+          detail: 'OpenAI Compatible · Model ID: ops-model'
+        })
+      ])
+    )
     expect(secondCatalog.settingsModels.some((model: { name: string }) => model.name === 'mutated-model')).toBe(false)
   })
 

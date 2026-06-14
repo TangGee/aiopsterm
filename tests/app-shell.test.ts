@@ -229,7 +229,7 @@ const enableCatalogModelOptions = async (store: ReturnType<typeof useWorkspaceSt
     options: [
       ...(modelSettings.options || []).filter((option) => option.name !== 'gpt-5-Thinking' && option.name !== 'qwen2.5-coder'),
       { name: 'gpt-5-Thinking', locked: false, checked: true, type: 'standard' as const, apiProvider: 'default' },
-      { name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom' as const, apiProvider: 'ollama' }
+      { name: 'qwen2.5-coder', displayName: 'Ollama Coder', locked: false, checked: true, type: 'custom' as const, apiProvider: 'ollama' }
     ]
   }
   store.config = { ...store.config, modelSettings: nextSettings }
@@ -5082,7 +5082,8 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(store.config.modelName).toBe('qwen2.5-coder')
     expect(store.config.modelProvider).toBe('ollama')
-    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).toContain('qwen2.5-coder')
+    expect(wrapper.find('[data-onboarding-id="ai-model-select"]').text()).toContain('Ollama Coder')
+    expect(qwenModelRowAfterSearch!.text()).toContain('qwen2.5-coder')
 
     store.onboardingAiRequest = { action: 'open-context-main', stepId: 'ai-context-hosts', sequence: 2 }
     await wrapper.vm.$nextTick()
@@ -12581,6 +12582,43 @@ describe('AppShell', () => {
     })
     await workspace.findAll('.security-config-toolbar .settings-button').find((button) => button.text() === 'Close')!.trigger('click')
     expect(store.securityConfigEditorOpen).toBe(false)
+  })
+
+  it('renders readable model management rows with provider identity and editable display names', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    await enableCatalogModelOptions(store)
+    store.setActiveSettingsSection('models')
+    vi.mocked(window.aiops.saveConfig).mockClear()
+    await workspace.vm.$nextTick()
+
+    expect(workspace.find('.model-names-card').exists()).toBe(true)
+    expect(workspace.text()).toContain('Ollama Coder')
+    expect(workspace.text()).toContain('qwen2.5-coder')
+    expect(workspace.text()).toContain('Ollama')
+    expect(workspace.text()).toContain('管理名称')
+    const aliasInput = workspace.findAll('.model-alias-input').find((input) => (input.element as HTMLInputElement).value === 'Ollama Coder')!
+    expect(aliasInput.exists()).toBe(true)
+
+    await aliasInput.setValue('Volcano Ark Code')
+    await aliasInput.trigger('blur')
+    await flushPromises()
+
+    expect(store.settingModelOptions.find((model) => model.name === 'qwen2.5-coder')?.displayName).toBe('Volcano Ark Code')
+    expect(workspace.text()).toContain('Volcano Ark Code')
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelSettings: expect.objectContaining({
+          options: expect.arrayContaining([expect.objectContaining({ name: 'qwen2.5-coder', displayName: 'Volcano Ark Code' })])
+        })
+      })
+    )
+
+    workspace.unmount()
   })
 
   it('matches External reference-style onboarding guide and spotlight progress', async () => {

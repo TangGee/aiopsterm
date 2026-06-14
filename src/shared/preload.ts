@@ -1182,6 +1182,7 @@ export type AiModelCatalogOption = {
   id: string
   label: string
   detail: string
+  displayName?: string
   checked?: boolean
   locked?: boolean
   tier?: string
@@ -1197,6 +1198,7 @@ export type AiModelCatalog = {
 
 export type ModelOptionUserConfig = {
   name: string
+  displayName?: string
   locked: boolean
   checked: boolean
   type?: 'standard' | 'custom'

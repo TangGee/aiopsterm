@@ -29,16 +29,27 @@ const normalizeText = (value: unknown) => String(value || '').trim()
 const modelOptionTypes = new Set(['standard', 'custom'])
 const modelProviderKeys = new Set(['default', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama'])
 
+const providerLabels: Record<ModelProviderCheckKey, string> = {
+  litellm: 'LiteLLM',
+  openai: 'OpenAI Compatible',
+  bedrock: 'Amazon Bedrock',
+  deepseek: 'DeepSeek',
+  anthropic: 'Anthropic',
+  ollama: 'Ollama'
+}
+
 const normalizeModelOption = (value: unknown): ModelOptionUserConfig | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   const name = normalizeText(record.name)
   if (!name) return null
+  const displayName = normalizeText(record.displayName)
   const locked = typeof record.locked === 'boolean' ? record.locked : false
   const type = modelOptionTypes.has(String(record.type)) ? (record.type as ModelOptionUserConfig['type']) : locked ? 'standard' : 'custom'
   const apiProvider = normalizeText(record.apiProvider) || (locked ? 'default' : 'openai')
   return {
     name,
+    displayName: displayName && displayName !== name ? displayName : undefined,
     locked,
     checked: typeof record.checked === 'boolean' ? record.checked : true,
     type,
@@ -71,7 +82,7 @@ const configuredProviderModelIds = (settings?: ModelSettingsUserConfig) => {
 const detailForModelOption = (option: ModelOptionUserConfig) => {
   if (option.name === 'aiopsterm-local-agent') return 'Local aiopsterm backend model'
   if (option.name.endsWith('-Thinking')) return 'Extended Thinking model'
-  if (option.type === 'custom') return `${option.apiProvider || 'custom'} configured model`
+  if (option.type === 'custom') return `${providerLabels[(option.apiProvider || 'openai') as ModelProviderCheckKey] || option.apiProvider || 'Custom'} · Model ID: ${option.name}`
   return option.locked ? 'Subscription model' : 'Configured model'
 }
 
@@ -87,8 +98,9 @@ const buildModelCatalog = (input: AiModelCatalogInput = {}): AiModelCatalog => {
     })
     .map((model) => ({
       id: model.name,
-      label: model.name,
+      label: model.displayName || model.name,
       detail: detailForModelOption(model),
+      displayName: model.displayName,
       checked: model.checked,
       locked: model.locked,
       type: model.type,
@@ -102,15 +114,6 @@ const buildModelCatalog = (input: AiModelCatalogInput = {}): AiModelCatalog => {
 }
 
 export const listAiModels = async (input: AiModelCatalogInput = {}): Promise<AiModelCatalog> => cloneModelCatalog(buildModelCatalog(input))
-
-const providerLabels: Record<ModelProviderCheckKey, string> = {
-  litellm: 'LiteLLM',
-  openai: 'OpenAI Compatible',
-  bedrock: 'Amazon Bedrock',
-  deepseek: 'DeepSeek',
-  anthropic: 'Anthropic',
-  ollama: 'Ollama'
-}
 
 const defaultEndpoints: Record<ModelProviderCheckKey, string> = {
   litellm: 'http://localhost:4000',

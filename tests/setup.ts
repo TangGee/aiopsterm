@@ -2561,8 +2561,9 @@ const cloneAiModelCatalog = (input?: { modelSettings?: typeof defaultModelSettin
     })
     .map((model: any) => ({
       id: model.name,
-      label: model.name,
-      detail: model.name === 'aiopsterm-local-agent' ? 'Local aiopsterm development model' : `${model.apiProvider || 'custom'} configured model`,
+      label: model.displayName || model.name,
+      detail: model.name === 'aiopsterm-local-agent' ? 'Local aiopsterm development model' : `${model.apiProvider || 'custom'} configured model · Model ID: ${model.name}`,
+      displayName: model.displayName,
       checked: model.checked,
       locked: model.locked,
       type: model.type,

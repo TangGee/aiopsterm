@@ -540,6 +540,7 @@ export type ModelProviderSettings = {
 
 type SettingsModelOption = {
   name: string
+  displayName?: string
   locked: boolean
   checked: boolean
   type?: 'standard' | 'custom'
@@ -1194,19 +1195,22 @@ const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUse
       return
     }
     seenNames.add(name)
+    const displayName = typeof item.displayName === 'string' ? item.displayName.trim() : ''
     const locked = Boolean(item.locked)
     const type = stringFromOptions(item.type, modelOptionTypes, locked ? 'standard' : 'custom')
     const option: ModelOptionUserConfig = {
       name,
+      displayName: displayName && displayName !== name ? displayName : undefined,
       locked,
       checked: item.checked !== undefined ? Boolean(item.checked) : true,
       type,
       apiProvider: typeof item.apiProvider === 'string' && item.apiProvider.trim() ? item.apiProvider.trim() : 'default'
     }
     options.push(option)
-    const allowedKeys = new Set(['name', 'locked', 'checked', 'type', 'apiProvider'])
+    const allowedKeys = new Set(['name', 'displayName', 'locked', 'checked', 'type', 'apiProvider'])
     if (
       item.name !== option.name ||
+      item.displayName !== option.displayName ||
       item.locked !== option.locked ||
       item.checked !== option.checked ||
       item.type !== option.type ||
@@ -1228,7 +1232,8 @@ const isVisibleModelSettingsOption = (model: ModelOptionUserConfig | SettingsMod
 const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
   if (!isRecord(source)) return null
   const id = typeof source.id === 'string' ? source.id.trim() : ''
-  const label = typeof source.label === 'string' && source.label.trim() ? source.label.trim() : id
+  const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : ''
+  const label = typeof source.label === 'string' && source.label.trim() ? source.label.trim() : displayName || id
   if (!id || !label || isLegacyLocalModelName(id)) return null
   if (typeof source.apiProvider === 'string' && isLegacyLocalModelProvider(source.apiProvider)) return null
   const locked = Boolean(source.locked)
@@ -1236,6 +1241,7 @@ const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
     id,
     label,
     detail: typeof source.detail === 'string' ? source.detail.trim() : '',
+    displayName: displayName && displayName !== id ? displayName : undefined,
     checked: source.checked !== undefined ? Boolean(source.checked) : true,
     locked,
     tier: typeof source.tier === 'string' ? source.tier.trim() : undefined,
@@ -2052,6 +2058,7 @@ const modelOptionsSnapshotsMatch = (left: ModelOptionUserConfig[], right: ModelO
     return (
       Boolean(other) &&
       item.name === other.name &&
+      item.displayName === other.displayName &&
       item.locked === other.locked &&
       item.checked === other.checked &&
       item.type === other.type &&
@@ -4619,6 +4626,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         .filter(isVisibleModelSettingsOption)
         .map((model) => ({
           name: model.name,
+          displayName: model.displayName,
           locked: model.locked,
           checked: model.checked,
           type: model.type,
@@ -5467,6 +5475,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     options: settingModelOptions.value.filter(isVisibleModelSettingsOption).map((option) => ({
       name: option.name,
+      displayName: option.displayName,
       locked: Boolean(option.locked),
       checked: Boolean(option.checked),
       type: option.type || (option.locked ? 'standard' : 'custom'),
@@ -5493,6 +5502,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               ...option,
               checked: true,
               type: 'custom',
+              displayName: option.displayName,
               apiProvider
             }
           : option
@@ -5502,6 +5512,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         ...nextSettings.options,
         {
           name: modelName,
+          displayName: undefined,
           locked: false,
           checked: true,
           type: 'custom',
@@ -5516,6 +5527,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     addModelSwitch.value = settings.addModelSwitch
     settingModelOptions.value = settings.options.filter(isVisibleModelSettingsOption).map((option) => ({
       name: option.name,
+      displayName: option.displayName,
       locked: option.locked,
       checked: option.checked,
       type: option.type,
@@ -6660,6 +6672,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!model || model.locked || model.type !== 'custom') return false
     const nextSettings = getPersistedModelSettingsSnapshot()
     nextSettings.options = getModelSettingsSnapshot().options.filter((item) => item.name !== name || item.locked)
+    return persistModelSettings(nextSettings)
+  }
+
+  const renameModelOption = async (name: string, displayName: string) => {
+    const model = settingModelOptions.value.find((item) => item.name === name)
+    if (!model || model.locked || model.type !== 'custom') return false
+    const nextDisplayName = displayName.trim()
+    const nextSettings = getPersistedModelSettingsSnapshot()
+    nextSettings.options = getModelSettingsSnapshot().options.map((item) =>
+      item.name === name
+        ? {
+            ...item,
+            displayName: nextDisplayName && nextDisplayName !== name ? nextDisplayName : undefined
+          }
+        : item
+    )
     return persistModelSettings(nextSettings)
   }
 
@@ -13675,6 +13703,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectAiModel,
     updateModelOption,
     removeModelOption,
+    renameModelOption,
     toggleAddModelSwitch,
     updateModelProviderConfig,
     checkModelProvider,

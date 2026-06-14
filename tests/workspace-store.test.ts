@@ -10099,6 +10099,16 @@ describe('workspace store', () => {
         })
       )
 
+      await expect(store.renameModelOption('custom-maintenance', 'Maintenance Ark')).resolves.toBe(true)
+      expect(store.settingModelOptions.find((model) => model.name === 'custom-maintenance')?.displayName).toBe('Maintenance Ark')
+      expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelSettings: expect.objectContaining({
+            options: expect.arrayContaining([expect.objectContaining({ name: 'custom-maintenance', displayName: 'Maintenance Ark' })])
+          })
+        })
+      )
+
       await expect(store.removeModelOption('custom-maintenance')).resolves.toBe(true)
       expect(customModelExists()).toBe(false)
 

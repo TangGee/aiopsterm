@@ -1058,7 +1058,7 @@
                 v-if="isThinkingModelName(workspace.config.modelName)"
                 class="thinking-icon"
               />
-              <span>{{ displayModelName(workspace.config.modelName) }}</span>
+              <span>{{ selectedModelLabel }}</span>
             </span>
             <ChevronDown />
           </button>
@@ -1088,11 +1088,11 @@
                 @click="selectModel(model.id)"
               >
                 <Brain
-                  v-if="isThinkingModelName(model.label)"
+                  v-if="isThinkingModelName(model.id)"
                   class="thinking-icon"
                 />
                 <Bot v-else />
-                <span>{{ displayModelName(model.label) }}</span>
+                <span>{{ displayModelName(model) }}</span>
                 <em>{{ model.detail }}</em>
                 <Check v-if="workspace.config.modelName === model.id" />
               </button>
@@ -1970,13 +1970,19 @@ const DROPDOWN_ROW_CHROME_PX = 52
 const LOCK_ROW_ICON_EXTRA_PX = 22
 const VIP_TAG_ROW_EXTRA_PX = 36
 
-const displayModelName = (modelName: string) => modelName.replace(/-Thinking$/, '')
+const stripThinkingSuffix = (modelName: string) => modelName.replace(/-Thinking$/, '')
+const displayModelName = (model: { id?: string; label?: string; displayName?: string } | string) =>
+  typeof model === 'string' ? stripThinkingSuffix(model) : model.displayName || stripThinkingSuffix(model.label || model.id || '')
 const isThinkingModelName = (modelName: string) => modelName.endsWith('-Thinking')
 const lockedModelTooltip = (tier: string) => `模型已锁定，升级 ${tier} 后可用`
-const matchesModelQuery = (model: { id: string; label: string; detail?: string; tier?: string }) => {
+const selectedModelLabel = computed(() => {
+  const model = workspace.aiModelOptions.find((option) => option.id === workspace.config.modelName)
+  return model ? displayModelName(model) : displayModelName(workspace.config.modelName)
+})
+const matchesModelQuery = (model: { id: string; label: string; detail?: string; tier?: string; displayName?: string }) => {
   const keyword = modelQuery.value.trim().toLowerCase()
   if (!keyword) return true
-  return `${model.id} ${model.label} ${displayModelName(model.label)} ${model.detail || ''} ${model.tier || ''}`.toLowerCase().includes(keyword)
+  return `${model.id} ${model.label} ${displayModelName(model)} ${model.detail || ''} ${model.tier || ''}`.toLowerCase().includes(keyword)
 }
 const filteredModelOptions = computed(() => workspace.aiModelOptions.filter(matchesModelQuery))
 const filteredLockedModelOptions = computed(() => workspace.lockedAiModelOptions.filter(matchesModelQuery))
@@ -2006,8 +2012,8 @@ const modeDropdownWidthPx = computed(() => {
 
 const modelDropdownWidthPx = computed(() => {
   const availableMaxWidth = workspace.aiModelOptions.reduce((max, model) => {
-    const thinkingExtra = isThinkingModelName(model.label) ? THINKING_ICON_SELECT_EXTRA_PX : 0
-    const width = Math.ceil(measureUiTextWidthPx(displayModelName(model.label))) + DROPDOWN_ROW_CHROME_PX + thinkingExtra
+    const thinkingExtra = isThinkingModelName(model.id) ? THINKING_ICON_SELECT_EXTRA_PX : 0
+    const width = Math.ceil(measureUiTextWidthPx(displayModelName(model))) + DROPDOWN_ROW_CHROME_PX + thinkingExtra
     return Math.max(max, width)
   }, 0)
   const lockedMaxWidth = workspace.lockedAiModelOptions.reduce((max, model) => {
