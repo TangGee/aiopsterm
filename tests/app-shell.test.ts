@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { readFileSync } from 'fs'
 
 type MockSelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } }
 type MockXtermInstance = {
@@ -271,6 +272,8 @@ const createTestDataTransfer = () => {
     }
   }
 }
+
+const baseStyles = () => readFileSync('src/renderer/src/styles/base.less', 'utf-8')
 
 const findMenuButton = (wrapper: VueWrapper<any>, menuSelector: string, label: string) => {
   const button = wrapper.find(menuSelector).findAll('button').find((item) => item.text().includes(label))
@@ -3936,6 +3939,8 @@ describe('AppShell', () => {
     expect(commandMessage!.find('[data-testid="ai-message-command-line-count"]').text()).toContain('1 line')
     expect(commandMessage!.find('[data-testid="ai-message-command-reject"]').exists()).toBe(true)
     expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(false)
+    expect(baseStyles()).toContain('.message-command-actions {\n  display: grid;')
+    expect(baseStyles()).toContain('grid-template-columns: minmax(70px, 0.75fr) minmax(122px, 1.35fr) minmax(74px, 0.8fr);')
     await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已复制')
@@ -4973,6 +4978,10 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toBeUndefined()
     expect(wrapper.find('.chat-input > .chat-editable + .input-controls-row').exists()).toBe(true)
+    const styles = baseStyles()
+    expect(styles).toContain('grid-template-columns: minmax(74px, 88px) minmax(122px, 1fr) auto;')
+    expect(styles).toContain('min-height: 78px;')
+    expect(styles).not.toContain('grid-column: 1 / -1;\n    justify-content: flex-end;')
     await wrapper.find('[data-onboarding-id="ai-mode-select"]').trigger('click')
     expect(wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').exists()).toBe(true)
     expect(wrapper.find('.ai-mode-popup').attributes('style')).toContain('min-width:')

@@ -8933,11 +8933,12 @@ code {
 }
 
 .message-command-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(70px, 0.75fr) minmax(122px, 1.35fr) minmax(74px, 0.8fr);
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .message-command-actions button {
@@ -8949,9 +8950,12 @@ code {
   border-radius: 6px;
   color: var(--text);
   background: var(--surface-3);
-  padding: 0 10px;
+  padding: 0 8px;
   cursor: pointer;
   font-size: 12px;
+  justify-content: center;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .message-command-actions button svg {
@@ -8996,6 +9000,8 @@ code {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 8px;
   background: var(--surface-2);
@@ -9008,7 +9014,7 @@ code {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .message-command-title {
@@ -9064,6 +9070,7 @@ code {
 .message-command-host,
 .message-command-badge {
   min-width: 0;
+  max-width: 152px;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--muted);
@@ -9082,8 +9089,11 @@ code {
 }
 
 .message-command-code {
+  min-width: 0;
+  max-width: 100%;
   max-height: 180px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   margin: 0;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -9092,8 +9102,8 @@ code {
   color: var(--text);
   font-size: 12px;
   line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
+  word-break: normal;
 }
 
 .message-command-code code {
@@ -9322,7 +9332,7 @@ code {
 .chat-editable {
   min-width: 0;
   width: 100%;
-  min-height: 52px;
+  min-height: 78px;
   max-height: 160px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -9537,7 +9547,7 @@ code {
 
 .input-controls-row {
   display: grid;
-  grid-template-columns: minmax(74px, 92px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(74px, 88px) minmax(122px, 1fr) auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -9566,7 +9576,7 @@ code {
 }
 
 .model-control-wrap {
-  max-width: min(100%, 190px);
+  max-width: none;
 }
 
 .ai-control-select span {
@@ -9629,6 +9639,7 @@ code {
   justify-content: flex-end;
   gap: 4px;
   margin-left: auto;
+  flex-wrap: nowrap;
 }
 
 .input-action-buttons-container button {
@@ -9661,16 +9672,30 @@ code {
 
 @media (max-width: 420px) {
   .input-controls-row {
-    grid-template-columns: minmax(74px, 86px) minmax(0, 1fr);
+    grid-template-columns: minmax(72px, 82px) minmax(112px, 1fr) auto;
   }
 
   .input-action-buttons-container {
-    grid-column: 1 / -1;
     justify-content: flex-end;
   }
 
   .model-control-wrap {
     max-width: 100%;
+  }
+
+  .message-command-actions {
+    grid-template-columns: minmax(62px, 0.72fr) minmax(112px, 1.42fr) minmax(62px, 0.72fr);
+    gap: 6px;
+  }
+
+  .message-command-actions button {
+    gap: 4px;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .message-command-host {
+    max-width: 118px;
   }
 }
 
