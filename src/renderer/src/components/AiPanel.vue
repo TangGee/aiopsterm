@@ -384,11 +384,78 @@
           </template>
         </div>
         <p
-          v-else-if="!isCommandSuggestionMessage(message)"
-          :data-testid="message.role === 'user' ? 'ai-user-message-content' : undefined"
+          v-else-if="message.role === 'user'"
+          data-testid="ai-user-message-content"
         >
           {{ message.text }}
         </p>
+        <div
+          v-else-if="!isCommandSuggestionMessage(message) && message.say === 'command_output'"
+          class="ai-command-output-renderer"
+          data-testid="ai-command-output-renderer"
+        >
+          <div class="ai-rendered-block-header">
+            <span class="ai-rendered-block-title">
+              <Code2 />
+              <strong>OUTPUT</strong>
+            </span>
+            <span class="ai-rendered-block-spacer"></span>
+            <span class="ai-rendered-block-lines">{{ formatLineCount(commandOutputLineCount(message.text)) }}</span>
+            <button
+              type="button"
+              class="ai-rendered-copy-button"
+              title="复制输出"
+              data-testid="ai-command-output-copy"
+              @click.stop="copyRenderedTextToClipboard(normalizedCommandOutputText(message.text), '输出')"
+            >
+              <Copy />
+            </button>
+          </div>
+          <pre
+            class="ai-command-output-body"
+            data-testid="ai-command-output-text"
+          ><code>{{ normalizedCommandOutputText(message.text) }}</code></pre>
+        </div>
+        <div
+          v-else-if="!isCommandSuggestionMessage(message)"
+          class="ai-rendered-message"
+          data-testid="ai-markdown-message"
+        >
+          <template
+            v-for="(part, index) in renderedMarkdownParts(message.text)"
+            :key="`${part.type}-${index}`"
+          >
+            <div
+              v-if="part.type === 'html'"
+              class="ai-markdown-content"
+              v-html="part.html"
+            ></div>
+            <div
+              v-else
+              class="ai-rendered-code-block"
+              data-testid="ai-markdown-code-block"
+            >
+              <div class="ai-rendered-block-header">
+                <span class="ai-rendered-block-title">
+                  <Code2 />
+                  <strong>{{ part.language || 'text' }}</strong>
+                </span>
+                <span class="ai-rendered-block-spacer"></span>
+                <span class="ai-rendered-block-lines">{{ formatLineCount(part.lineCount) }}</span>
+                <button
+                  type="button"
+                  class="ai-rendered-copy-button"
+                  title="复制代码"
+                  data-testid="ai-markdown-code-copy"
+                  @click.stop="copyRenderedTextToClipboard(part.code, '代码')"
+                >
+                  <Copy />
+                </button>
+              </div>
+              <pre class="ai-rendered-code-body"><code class="hljs" v-html="part.html"></code></pre>
+            </div>
+          </template>
+        </div>
         <em v-if="message.state === 'streaming'">streaming</em>
         <em v-else-if="message.state === 'cancelled'">cancelled</em>
         <em v-else-if="message.state === 'error'">error</em>
@@ -1137,6 +1204,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component, type ComponentPublicInstance } from 'vue'
+import { marked } from 'marked'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
 import {
   Bot,
   Brain,
@@ -1404,6 +1474,235 @@ const plainTextForPart = (part: AiContentPart) => {
 
 const messagePlainText = (message: { text: string; contentParts?: AiContentPart[] }) =>
   message.contentParts?.length ? message.contentParts.map(plainTextForPart).join('') : message.text
+
+type RenderedMarkdownPart =
+  | {
+      type: 'html'
+      html: string
+    }
+  | {
+      type: 'code'
+      language: string
+      code: string
+      html: string
+      lineCount: number
+    }
+
+const markdownFencePattern = /```([^\n`]*)\n([\s\S]*?)```/g
+const removedMarkdownTags = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'svg', 'math', 'img', 'form', 'input'])
+const allowedMarkdownTags = new Set([
+  'a',
+  'blockquote',
+  'br',
+  'code',
+  'del',
+  'em',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  's',
+  'span',
+  'strong',
+  'sub',
+  'sup',
+  'table',
+  'tbody',
+  'td',
+  'th',
+  'thead',
+  'tr',
+  'ul'
+])
+const markdownTagAttributes: Record<string, Set<string>> = {
+  a: new Set(['href', 'title']),
+  code: new Set(['class']),
+  span: new Set(['class', 'style']),
+  td: new Set(['style']),
+  th: new Set(['style'])
+}
+const allowedTableAlignments = new Set(['left', 'right', 'center'])
+const markdownClassPattern = /^(hljs|hljs-[a-z0-9_-]+|language-[a-z0-9_-]+)$/i
+const renderedMarkdownCache = new Map<string, RenderedMarkdownPart[]>()
+const renderedMarkdownCacheLimit = 80
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const normalizeCodeLanguage = (value: string) => {
+  const raw = value.trim().replace(/^\{?\.?/, '').replace(/\}?$/, '')
+  const language = raw.split(/\s+/)[0]?.toLowerCase() || ''
+  if (language === 'sh' || language === 'shell' || language === 'zsh') return 'bash'
+  if (language === 'plaintext' || language === 'plain') return 'text'
+  return language
+}
+
+const countLines = (value: string) => (value ? value.replace(/\r\n/g, '\n').split('\n').length : 0)
+
+const formatLineCount = (count: number) => `${Math.max(1, count)} line${Math.max(1, count) === 1 ? '' : 's'}`
+
+const isSafeMarkdownHref = (value: string) => /^(https?:|mailto:|#)/i.test(value.trim())
+
+const sanitizeStyle = (value: string) => {
+  const declarations = value
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const safeDeclarations = declarations.filter((entry) => {
+    const [property, rawValue] = entry.split(':').map((part) => part.trim().toLowerCase())
+    return property === 'text-align' && allowedTableAlignments.has(rawValue)
+  })
+  return safeDeclarations.join('; ')
+}
+
+const sanitizeClassValue = (value: string) =>
+  value
+    .split(/\s+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => markdownClassPattern.test(entry))
+    .join(' ')
+
+const sanitizeMarkdownElement = (element: Element) => {
+  const tag = element.tagName.toLowerCase()
+  if (removedMarkdownTags.has(tag)) {
+    element.remove()
+    return
+  }
+  if (!allowedMarkdownTags.has(tag)) {
+    element.replaceWith(...Array.from(element.childNodes))
+    return
+  }
+
+  const allowedAttrs = markdownTagAttributes[tag] || new Set<string>()
+  for (const attr of Array.from(element.attributes)) {
+    const name = attr.name.toLowerCase()
+    const value = attr.value
+    if (name.startsWith('on') || !allowedAttrs.has(name)) {
+      element.removeAttribute(attr.name)
+      continue
+    }
+    if (name === 'href') {
+      if (!isSafeMarkdownHref(value)) {
+        element.removeAttribute(attr.name)
+      }
+    } else if (name === 'style') {
+      const cleanStyle = sanitizeStyle(value)
+      if (cleanStyle) element.setAttribute('style', cleanStyle)
+      else element.removeAttribute(attr.name)
+    } else if (name === 'class') {
+      const cleanClass = sanitizeClassValue(value)
+      if (cleanClass) element.setAttribute('class', cleanClass)
+      else element.removeAttribute(attr.name)
+    }
+  }
+
+  if (tag === 'a') {
+    const href = element.getAttribute('href')
+    if (href && isSafeMarkdownHref(href)) {
+      element.setAttribute('target', '_blank')
+      element.setAttribute('rel', 'noreferrer')
+    }
+  }
+}
+
+const sanitizeMarkdownHtml = (html: string) => {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  for (const element of Array.from(doc.body.querySelectorAll('*'))) {
+    sanitizeMarkdownElement(element)
+  }
+  return doc.body.innerHTML
+}
+
+const renderMarkdownHtml = (text: string) => {
+  if (!text.trim()) return ''
+  const html = marked.parse(text, { async: false, gfm: true, breaks: false }) as string
+  return sanitizeMarkdownHtml(html)
+}
+
+const highlightCodeHtml = (code: string, language: string) => {
+  const normalizedLanguage = normalizeCodeLanguage(language)
+  if (!code) return ''
+  try {
+    if (normalizedLanguage && normalizedLanguage !== 'text' && hljs.getLanguage(normalizedLanguage)) {
+      return sanitizeMarkdownHtml(hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true }).value)
+    }
+    if (!normalizedLanguage) {
+      return sanitizeMarkdownHtml(hljs.highlightAuto(code).value)
+    }
+  } catch {
+    return escapeHtml(code)
+  }
+  return escapeHtml(code)
+}
+
+const setRenderedMarkdownCache = (key: string, parts: RenderedMarkdownPart[]) => {
+  if (renderedMarkdownCache.size >= renderedMarkdownCacheLimit) {
+    const firstKey = renderedMarkdownCache.keys().next().value
+    if (firstKey) renderedMarkdownCache.delete(firstKey)
+  }
+  renderedMarkdownCache.set(key, parts)
+}
+
+const renderedMarkdownParts = (text: string): RenderedMarkdownPart[] => {
+  const cached = renderedMarkdownCache.get(text)
+  if (cached) return cached
+  const parts: RenderedMarkdownPart[] = []
+  let lastIndex = 0
+  markdownFencePattern.lastIndex = 0
+  for (const match of text.matchAll(markdownFencePattern)) {
+    const matchIndex = match.index ?? 0
+    const markdownText = text.slice(lastIndex, matchIndex)
+    const html = renderMarkdownHtml(markdownText)
+    if (html) parts.push({ type: 'html', html })
+    const language = normalizeCodeLanguage(match[1] || '')
+    const code = (match[2] || '').replace(/\n$/, '')
+    parts.push({
+      type: 'code',
+      language,
+      code,
+      html: highlightCodeHtml(code, language),
+      lineCount: countLines(code)
+    })
+    lastIndex = matchIndex + match[0].length
+  }
+
+  const tailHtml = renderMarkdownHtml(text.slice(lastIndex))
+  if (tailHtml) parts.push({ type: 'html', html: tailHtml })
+  if (!parts.length && text) parts.push({ type: 'html', html: sanitizeMarkdownHtml(`<p>${escapeHtml(text)}</p>`) })
+  setRenderedMarkdownCache(text, parts)
+  return parts
+}
+
+const normalizedCommandOutputText = (text: string) => {
+  const trimmed = text.trim()
+  const fenced = trimmed.match(/^```[^\n`]*\n([\s\S]*?)\n?```$/)
+  if (fenced) return fenced[1].replace(/\n$/, '')
+  return text
+}
+
+const commandOutputLineCount = (text: string) => countLines(normalizedCommandOutputText(text))
+
+const copyRenderedTextToClipboard = async (text: string, label: string) => {
+  if (!text) {
+    showChatExportNotice(`${label}为空，无法复制。`)
+    return
+  }
+  const copied = await copyTextToClipboard(text)
+  showChatExportNotice(copied ? `${label}已复制。` : '复制失败。')
+}
 
 const chatExportHosts = (message: Pick<ChatMessage, 'hosts'>): AiChatHistoryHostContext[] | undefined => {
   const hosts = message.hosts

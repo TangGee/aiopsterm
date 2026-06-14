@@ -3918,6 +3918,47 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.chatMessages.find((message) => message.id === 'search-assistant')?.feedback).toBe('down')
 
+    store.chatMessages.push(
+      {
+        id: 'markdown-assistant',
+        role: 'assistant',
+        text:
+          '当前按 CPU 使用率排序，负载最高的进程是：\n\n```text\nPID: 53263\n用户: root\n进程: systemd\n```\n\n**结论**：当前系统没有明显高负载进程。\n<script>alert(1)</script>\n[危险链接](javascript:alert(1))',
+        state: 'done'
+      },
+      {
+        id: 'rendered-command-output',
+        role: 'assistant',
+        text: '```text\nroot@tlinux:~# ps -eo pid,pcpu,comm\n53263 1.9 systemd\n```',
+        say: 'command_output',
+        state: 'done'
+      }
+    )
+    await wrapper.vm.$nextTick()
+    const markdownMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('当前按 CPU 使用率排序'))!
+    expect(markdownMessage.find('[data-testid="ai-markdown-message"]').exists()).toBe(true)
+    expect(markdownMessage.find('[data-testid="ai-markdown-code-block"]').exists()).toBe(true)
+    expect(markdownMessage.text()).toContain('PID: 53263')
+    expect(markdownMessage.text()).toContain('结论')
+    expect(markdownMessage.text()).not.toContain('```text')
+    expect(markdownMessage.html()).not.toContain('<script')
+    expect(markdownMessage.html()).not.toContain('javascript:alert')
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await markdownMessage.find('[data-testid="ai-markdown-code-copy"]').trigger('click')
+    await flushPromises()
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('PID: 53263\n用户: root\n进程: systemd')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('代码已复制')
+
+    const commandOutputMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('root@tlinux:~# ps -eo pid,pcpu,comm'))!
+    expect(commandOutputMessage.find('[data-testid="ai-command-output-renderer"]').exists()).toBe(true)
+    expect(commandOutputMessage.find('[data-testid="ai-command-output-text"]').text()).toContain('53263 1.9 systemd')
+    expect(commandOutputMessage.text()).toContain('OUTPUT')
+    expect(commandOutputMessage.text()).not.toContain('```text')
+    await commandOutputMessage.find('[data-testid="ai-command-output-copy"]').trigger('click')
+    await flushPromises()
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('root@tlinux:~# ps -eo pid,pcpu,comm\n53263 1.9 systemd')
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('输出已复制')
+
     await assistantMessage!.find('[data-testid="ai-message-to-knowledge"]').trigger('click')
     await flushPromises()
     expect(store.activePanel.kind).toBe('knowledge')
