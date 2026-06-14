@@ -609,9 +609,37 @@
       <div
         v-if="workspace.chatMessages.length === 0"
         class="ai-empty-chat"
+        :class="{ 'no-model': showNoAvailableModelPrompt }"
       >
-        <Bot />
-        <span>{{ workspace.config.modelName }}</span>
+        <template v-if="showNoAvailableModelPrompt">
+          <Bot />
+          <strong>没有可用的模型</strong>
+          <p>{{ workspace.billingSettings.skippedLogin ? '请登录使用提供的内置模型或配置可用模型' : '请配置可用模型' }}</p>
+          <div class="ai-empty-actions">
+            <button
+              v-if="workspace.billingSettings.skippedLogin"
+              type="button"
+              class="primary"
+              data-testid="ai-no-model-login"
+              @click.stop="openModelLogin"
+            >
+              登录
+            </button>
+            <button
+              type="button"
+              class="primary"
+              data-testid="ai-no-model-configure"
+              data-onboarding-id="ai-model-settings-button"
+              @click.stop="openModelSettings"
+            >
+              配置模型
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <Bot />
+          <span>{{ workspace.config.modelName }}</span>
+        </template>
       </div>
     </div>
 
@@ -776,6 +804,7 @@
     </span>
 
     <form
+      v-if="!showNoAvailableModelPrompt"
       class="chat-input"
       :class="{ 'drop-active': dropActive }"
       data-onboarding-id="ai-input"
@@ -1951,6 +1980,11 @@ const matchesModelQuery = (model: { id: string; label: string; detail?: string; 
 }
 const filteredModelOptions = computed(() => workspace.aiModelOptions.filter(matchesModelQuery))
 const filteredLockedModelOptions = computed(() => workspace.lockedAiModelOptions.filter(matchesModelQuery))
+const hasAvailableModels = computed(() => workspace.aiModelOptions.some((model) => !model.locked))
+const modelCatalogReady = computed(() =>
+  workspace.aiModelOptions.length > 0 || workspace.lockedAiModelOptions.length > 0 || workspace.settingModelOptions.length > 0
+)
+const showNoAvailableModelPrompt = computed(() => modelCatalogReady.value && !hasAvailableModels.value)
 
 const measureUiTextWidthPx = (text: string) => {
   if (!text) return 0
@@ -3542,6 +3576,10 @@ const handleSend = async () => {
     await workspace.cancelStreamingAiChatResponse()
     return
   }
+  if (showNoAvailableModelPrompt.value) {
+    showInputPlaceholderNotice('请先配置可用模型。')
+    return
+  }
   const contentParts = extractEditableContentParts()
   const sent = await workspace.sendChat(draft.value, contentParts)
   if (!sent) return
@@ -3587,6 +3625,17 @@ const selectChatMode = (mode: AiChatMode) => {
 const selectModel = async (modelId: string) => {
   const saved = await workspace.selectAiModel(modelId)
   if (saved) closeModelMenu()
+}
+
+const openModelSettings = () => {
+  closePopups()
+  workspace.setActiveModule('settings')
+  workspace.setActiveSettingsSection('models')
+}
+
+const openModelLogin = () => {
+  closePopups()
+  void workspace.openUserLogin()
 }
 
 const handleModelKeydown = async (event: KeyboardEvent) => {

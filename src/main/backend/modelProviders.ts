@@ -78,11 +78,16 @@ const detailForModelOption = (option: ModelOptionUserConfig) => {
   return option.locked ? 'Subscription model' : 'Configured model'
 }
 
-const buildModelCatalog = (settings?: ModelSettingsUserConfig): AiModelCatalog => {
+const buildModelCatalog = (input: AiModelCatalogInput = {}): AiModelCatalog => {
+  const settings = input.modelSettings
   const settingsModels = normalizeSettingsOptions(settings?.options)
   const configuredModelIds = configuredProviderModelIds(settings)
   const chatModels = settingsModels
-    .filter((model) => model.checked && !model.locked && (model.apiProvider === 'default' || configuredModelIds.has(model.name)))
+    .filter((model) => {
+      if (!model.checked || model.locked) return false
+      if (model.name === 'aiopsterm-local-agent') return input.localChatBackendAvailable === true
+      return model.apiProvider === 'default' || configuredModelIds.has(model.name)
+    })
     .map((model) => ({
       id: model.name,
       label: model.name,
@@ -99,7 +104,7 @@ const buildModelCatalog = (settings?: ModelSettingsUserConfig): AiModelCatalog =
   }
 }
 
-export const listAiModels = async (input: AiModelCatalogInput = {}): Promise<AiModelCatalog> => cloneModelCatalog(buildModelCatalog(input.modelSettings))
+export const listAiModels = async (input: AiModelCatalogInput = {}): Promise<AiModelCatalog> => cloneModelCatalog(buildModelCatalog(input))
 
 const providerLabels: Record<ModelProviderCheckKey, string> = {
   litellm: 'LiteLLM',

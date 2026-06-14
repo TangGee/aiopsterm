@@ -6,7 +6,7 @@ let checkModelProvider: (input: {
   config: Record<string, unknown>
   timeoutMs?: number
 }) => Promise<any>
-let listAiModels: (input?: { modelSettings?: any }) => Promise<any>
+let listAiModels: (input?: { modelSettings?: any; localChatBackendAvailable?: boolean }) => Promise<any>
 
 type RequestRecord = {
   method: string
@@ -94,11 +94,11 @@ describe('model provider backend boundary', () => {
         { name: 'custom-maintenance', locked: false, checked: false, type: 'custom', apiProvider: 'openai' }
       ]
     }
-    const firstCatalog = await listAiModels({ modelSettings })
+    const firstCatalog = await listAiModels({ modelSettings, localChatBackendAvailable: true })
     firstCatalog.chatModels[0].label = 'mutated'
     firstCatalog.settingsModels.push({ name: 'mutated-model', locked: false, checked: true })
 
-    const secondCatalog = await listAiModels({ modelSettings })
+    const secondCatalog = await listAiModels({ modelSettings, localChatBackendAvailable: true })
 
     expect(secondCatalog.chatModels.map((model: { id: string }) => model.id)).toEqual([
       'aiopsterm-local-agent',
@@ -121,15 +121,24 @@ describe('model provider backend boundary', () => {
     expect(secondCatalog.settingsModels.some((model: { name: string }) => model.name === 'mutated-model')).toBe(false)
   })
 
-  it('does not expose unsaved provider model rows from the default catalog', async () => {
+  it('does not expose unavailable local or unsaved provider model rows from the default catalog', async () => {
     const catalog = await listAiModels()
 
-    expect(catalog.chatModels.map((model: { id: string }) => model.id)).toEqual(['aiopsterm-local-agent'])
+    expect(catalog.chatModels).toEqual([])
     expect(catalog.settingsModels).toEqual([
       expect.objectContaining({ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard' })
     ])
+    expect(catalog.settingsModels.some((model: { name: string }) => model.name === 'aiopsterm-local-agent')).toBe(true)
+    expect(catalog.chatModels.some((model: { id: string }) => model.id === 'aiopsterm-local-agent')).toBe(false)
     expect(catalog.chatModels.some((model: { id: string }) => model.id === 'ops-model')).toBe(false)
     expect(catalog.chatModels.some((model: { id: string }) => model.id === 'qwen2.5-coder')).toBe(false)
+  })
+
+  it('exposes the local placeholder model only when the local chat backend is explicitly available', async () => {
+    const catalog = await listAiModels({ localChatBackendAvailable: true })
+
+    expect(catalog.chatModels.map((model: { id: string }) => model.id)).toEqual(['aiopsterm-local-agent'])
+    expect(catalog.chatModels[0]).toEqual(expect.objectContaining({ label: 'aiopsterm-local-agent', apiProvider: 'default' }))
   })
 
   it('validates OpenAI-compatible configuration against the live Responses endpoint', async () => {

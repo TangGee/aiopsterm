@@ -3578,7 +3578,8 @@ const registerIpc = () => {
   ipcMain.handle('terminal:command:generate', (_event, input: TerminalCommandGenerationInput) => generateTerminalCommand(input))
   ipcMain.handle('models:list', (_event, input?: AiModelCatalogInput) =>
     listAiModels({
-      modelSettings: input?.modelSettings || getConfig().modelSettings
+      modelSettings: input?.modelSettings || getConfig().modelSettings,
+      localChatBackendAvailable: shouldUseAiChatBackendDouble()
     })
   )
   ipcMain.handle('models:check-provider', (_event, input: ModelProviderCheckInput) => checkModelProvider(input))

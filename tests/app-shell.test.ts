@@ -5010,6 +5010,44 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('shows a configure-model prompt when the AI catalog has no available chat models', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    vi.mocked(window.aiops.listAiModels).mockResolvedValueOnce({
+      chatModels: [],
+      lockedChatModels: [{ id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP' }],
+      settingsModels: [{ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' }]
+    })
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    await flushPromises()
+    await waitForMockCall(vi.mocked(window.aiops.listAiModels), 'listAiModels')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.ai-empty-chat.no-model').exists()).toBe(true)
+    expect(wrapper.text()).toContain('没有可用的模型')
+    expect(wrapper.text()).toContain('配置可用模型')
+    expect(wrapper.find('[data-testid="ai-no-model-login"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ai-model-select"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="ai-no-model-login"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.openUserLogin).toHaveBeenCalled()
+
+    await wrapper.find('[data-testid="ai-no-model-configure"]').trigger('click')
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('models')
+
+    wrapper.unmount()
+  })
+
   it('opens External reference-style context and command popups in the AI panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

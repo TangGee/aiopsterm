@@ -8303,6 +8303,56 @@ code {
   white-space: nowrap;
 }
 
+.ai-empty-chat.no-model {
+  gap: 10px;
+  padding: 18px;
+  color: var(--text);
+}
+
+.ai-empty-chat.no-model svg {
+  width: 30px;
+  height: 30px;
+}
+
+.ai-empty-chat.no-model strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-empty-chat.no-model p {
+  max-width: min(260px, 82%);
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.ai-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-empty-actions button {
+  height: 28px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ai-empty-actions button:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.ai-empty-actions button.primary {
+  background: var(--accent);
+  color: white;
+}
+
 .ai-header-actions,
 .ai-chat-search-bar,
 .ai-chat-search-input-wrap,

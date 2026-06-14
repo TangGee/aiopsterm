@@ -1218,6 +1218,7 @@ export type ModelSettingsUserConfig = {
 
 export type AiModelCatalogInput = {
   modelSettings?: ModelSettingsUserConfig
+  localChatBackendAvailable?: boolean
 }
 
 export type ShortcutUserConfig = {

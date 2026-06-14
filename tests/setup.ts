@@ -2548,15 +2548,20 @@ const defaultLockedAiModels = [
   { id: 'ops-large-context', label: 'ops-large-context', detail: 'Large context model', locked: true, checked: true, tier: 'VIP', type: 'standard', apiProvider: 'default' }
 ]
 
-const cloneAiModelCatalog = (input?: { modelSettings?: typeof defaultModelSettings }) => {
+const cloneAiModelCatalog = (input?: { modelSettings?: typeof defaultModelSettings; localChatBackendAvailable?: boolean }) => {
   const settings = input?.modelSettings || defaultModelSettings
+  const localChatBackendAvailable = input?.localChatBackendAvailable ?? true
   const configuredModelIds = new Set(Object.values(settings.providers || {}).map((provider: any) => String(provider?.modelId || '').trim()).filter(Boolean))
   const settingsModels = (settings.options || defaultModelSettings.options).map((model: any) => ({ ...model }))
   if (!settingsModels.some((model: any) => model.name === 'aiopsterm-local-agent')) {
     settingsModels.unshift({ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' })
   }
   const chatModels = settingsModels
-    .filter((model: any) => model.checked && !model.locked && (model.apiProvider === 'default' || configuredModelIds.has(model.name)))
+    .filter((model: any) => {
+      if (!model.checked || model.locked) return false
+      if (model.name === 'aiopsterm-local-agent') return localChatBackendAvailable === true
+      return model.apiProvider === 'default' || configuredModelIds.has(model.name)
+    })
     .map((model: any) => ({
       id: model.name,
       label: model.name,
@@ -7472,7 +7477,7 @@ Object.defineProperty(window, 'aiops', {
         cleanedAt: '刚刚'
       }
     })),
-    listAiModels: vi.fn(async (input?: { modelSettings?: typeof defaultModelSettings }) => cloneAiModelCatalog(input)),
+    listAiModels: vi.fn(async (input?: { modelSettings?: typeof defaultModelSettings; localChatBackendAvailable?: boolean }) => cloneAiModelCatalog(input)),
     checkModelProvider: vi.fn(
       async (input: {
         provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
