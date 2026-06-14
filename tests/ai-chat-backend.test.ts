@@ -320,6 +320,67 @@ describe('ai chat backend response boundary', () => {
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: '检查生产磁盘' })
   })
 
+  it('retries timed-out AI chat provider requests up to five times before surfacing failure', async () => {
+    let attempts = 0
+    const fetchMock = vi.fn(async () => {
+      attempts += 1
+      if (attempts <= 5) {
+        throw Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: '第六次 provider 请求成功。'
+                }
+              }
+            ]
+          })
+      }
+    }) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      timeoutMs: 500,
+      getConfig: () =>
+        ({
+          modelName: 'ops-chat',
+          modelProvider: 'openai-compatible',
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-chat', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-chat',
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      prompt: '检查生产磁盘',
+      model: 'ops-chat'
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        provider: 'openai',
+        model: 'ops-chat',
+        text: '第六次 provider 请求成功。'
+      }
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+  })
+
   it('preserves versioned OpenAI-compatible provider base URLs', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

@@ -1071,7 +1071,8 @@ async function generateProviderAiChatResponse(
     fetch: runtimeConfig.fetch,
     timeoutMs: runtimeConfig.timeoutMs || 30_000,
     errorCodePrefix: 'AI_CHAT_PROVIDER',
-    signal: control.controller.signal
+    signal: control.controller.signal,
+    maxRetries: 5
   })
   if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(input, control, modelName, startedAt)
   if (!response.ok) {

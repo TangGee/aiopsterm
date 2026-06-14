@@ -328,72 +328,83 @@ const parseProviderError = (body: string, fallback: string) => {
 
 export async function fetchProviderText(
   request: AiProviderTextRequest,
-  options: { fetch?: typeof fetch; timeoutMs?: number; errorCodePrefix?: string; signal?: AbortSignal } = {}
+  options: { fetch?: typeof fetch; timeoutMs?: number; errorCodePrefix?: string; signal?: AbortSignal; maxRetries?: number } = {}
 ): Promise<AiProviderTextFetchResult> {
   const fetchImpl = options.fetch || fetch
   const timeoutMs = Math.max(500, Math.min(120_000, Math.round(options.timeoutMs || 30_000)))
   const errorCodePrefix = normalizeText(options.errorCodePrefix) || 'AI_PROVIDER'
-  const controller = new AbortController()
-  let abortedByTimeout = false
-  const abortFromCaller = () => controller.abort()
-  if (options.signal?.aborted) {
-    return {
-      ok: false,
-      errorCode: `${errorCodePrefix}_CANCELLED`,
-      errorMessage: 'Provider request was cancelled'
+  const maxRetries = Math.max(0, Math.min(5, Math.round(options.maxRetries || 0)))
+  const maxAttempts = maxRetries + 1
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController()
+    let abortedByTimeout = false
+    const abortFromCaller = () => controller.abort()
+    if (options.signal?.aborted) {
+      return {
+        ok: false,
+        errorCode: `${errorCodePrefix}_CANCELLED`,
+        errorMessage: 'Provider request was cancelled'
+      }
+    }
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true })
+    const timeout = setTimeout(() => {
+      abortedByTimeout = true
+      controller.abort()
+    }, timeoutMs)
+    try {
+      const response = await fetchImpl(request.endpoint, {
+        method: 'POST',
+        headers: request.headers,
+        body: request.body,
+        signal: controller.signal
+      })
+      const body =
+        typeof response.text === 'function'
+          ? await response.text().catch(() => '')
+          : typeof response.json === 'function'
+            ? jsonStringify(await response.json().catch(() => null))
+            : ''
+      if (!response.ok) {
+        return {
+          ok: false,
+          errorCode: `${errorCodePrefix}_ERROR`,
+          errorMessage: parseProviderError(body, `Provider returned HTTP ${response.status || 'error'}`)
+        }
+      }
+      const payload = parseResponsePayload(body)
+      const text = typeof payload === 'string' ? normalizeText(payload) : normalizeText(request.parseText(payload))
+      if (!text) {
+        return {
+          ok: false,
+          errorCode: `${errorCodePrefix}_EMPTY`,
+          errorMessage: 'Provider returned an empty response'
+        }
+      }
+      return { ok: true, text }
+    } catch (error) {
+      const wasCancelled = error instanceof Error && error.name === 'AbortError' && options.signal?.aborted && !abortedByTimeout
+      const wasTimeout = error instanceof Error && error.name === 'AbortError' && !wasCancelled
+      if (wasTimeout && attempt <= maxRetries) continue
+      return {
+        ok: false,
+        errorCode: wasCancelled ? `${errorCodePrefix}_CANCELLED` : wasTimeout ? `${errorCodePrefix}_TIMEOUT` : `${errorCodePrefix}_ERROR`,
+        errorMessage:
+          wasCancelled
+            ? 'Provider request was cancelled'
+            : wasTimeout
+              ? `Provider request timed out after ${timeoutMs}ms`
+              : error instanceof Error
+                ? error.message
+                : String(error)
+      }
+    } finally {
+      options.signal?.removeEventListener('abort', abortFromCaller)
+      clearTimeout(timeout)
     }
   }
-  options.signal?.addEventListener('abort', abortFromCaller, { once: true })
-  const timeout = setTimeout(() => {
-    abortedByTimeout = true
-    controller.abort()
-  }, timeoutMs)
-  try {
-    const response = await fetchImpl(request.endpoint, {
-      method: 'POST',
-      headers: request.headers,
-      body: request.body,
-      signal: controller.signal
-    })
-    const body =
-      typeof response.text === 'function'
-        ? await response.text().catch(() => '')
-        : typeof response.json === 'function'
-          ? jsonStringify(await response.json().catch(() => null))
-          : ''
-    if (!response.ok) {
-      return {
-        ok: false,
-        errorCode: `${errorCodePrefix}_ERROR`,
-        errorMessage: parseProviderError(body, `Provider returned HTTP ${response.status || 'error'}`)
-      }
-    }
-    const payload = parseResponsePayload(body)
-    const text = typeof payload === 'string' ? normalizeText(payload) : normalizeText(request.parseText(payload))
-    if (!text) {
-      return {
-        ok: false,
-        errorCode: `${errorCodePrefix}_EMPTY`,
-        errorMessage: 'Provider returned an empty response'
-      }
-    }
-    return { ok: true, text }
-  } catch (error) {
-    const wasCancelled = error instanceof Error && error.name === 'AbortError' && options.signal?.aborted && !abortedByTimeout
-    return {
-      ok: false,
-      errorCode: wasCancelled ? `${errorCodePrefix}_CANCELLED` : error instanceof Error && error.name === 'AbortError' ? `${errorCodePrefix}_TIMEOUT` : `${errorCodePrefix}_ERROR`,
-      errorMessage:
-        wasCancelled
-          ? 'Provider request was cancelled'
-          : error instanceof Error && error.name === 'AbortError'
-          ? `Provider request timed out after ${timeoutMs}ms`
-          : error instanceof Error
-            ? error.message
-            : String(error)
-    }
-  } finally {
-    options.signal?.removeEventListener('abort', abortFromCaller)
-    clearTimeout(timeout)
+  return {
+    ok: false,
+    errorCode: `${errorCodePrefix}_TIMEOUT`,
+    errorMessage: `Provider request timed out after ${timeoutMs}ms`
   }
 }
