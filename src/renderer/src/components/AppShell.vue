@@ -89,12 +89,12 @@
         class="terminal-mfa-dialog"
         role="dialog"
         aria-modal="true"
-        :aria-label="t('terminal.mfaTitle')"
+        :aria-label="terminalAuthTitle"
       >
         <header>
           <div>
-            <span>{{ t('terminal.mfaRequired') }}</span>
-            <strong>{{ t('terminal.mfaTitle') }}</strong>
+            <span>{{ terminalAuthRequired }}</span>
+            <strong>{{ terminalAuthTitle }}</strong>
           </div>
           <button
             type="button"
@@ -105,20 +105,20 @@
           </button>
         </header>
         <p>
-          {{ tf('terminal.mfaDescription', { target: terminalMfaTarget }) }}
+          {{ terminalAuthDescription }}
         </p>
         <form @submit.prevent="submitTerminalMfa">
           <label
             v-for="(prompt, index) in terminalMfaPrompts"
             :key="`${terminalMfaDialog.request.id}-${index}`"
           >
-            <span>{{ prompt.prompt || t('terminal.mfaPromptFallback') }}</span>
+            <span>{{ prompt.prompt || terminalAuthPromptFallback }}</span>
             <input
               v-model="terminalMfaDialog.responses[index]"
               :ref="(element) => setTerminalMfaInputRef(element, index)"
               :type="prompt.echo ? 'text' : 'password'"
               autocomplete="one-time-code"
-              :aria-label="prompt.prompt || t('terminal.mfaPromptFallback')"
+              :aria-label="prompt.prompt || terminalAuthPromptFallback"
               :disabled="terminalMfaDialog.submitting"
               data-testid="terminal-mfa-input"
             />
@@ -131,11 +131,6 @@
             {{ terminalMfaDialog.error }}
           </p>
           <footer>
-            <span>
-              {{ tf('terminal.mfaAttempts', { attempt: terminalMfaDialog.request.attempts, max: terminalMfaDialog.request.maxAttempts }) }}
-              ·
-              {{ tf('terminal.mfaRemaining', { seconds: terminalMfaRemainingSeconds }) }}
-            </span>
             <button
               type="button"
               :disabled="terminalMfaDialog.submitting"
@@ -190,7 +185,6 @@ type TerminalMfaDialogState = {
   responses: string[]
   submitting: boolean
   error: string
-  remainingMs: number
 }
 
 const draggingSide = ref<ResizeSide | null>(null)
@@ -203,15 +197,13 @@ let resizeQuickClosed = false
 let stopDeepLink: (() => void) | undefined
 let stopKeyboardInteractiveRequest: (() => void) | undefined
 let stopKeyboardInteractiveResult: (() => void) | undefined
-let terminalMfaTimer: number | null = null
 const terminalMfaInputRefs = ref<HTMLInputElement[]>([])
 const terminalMfaDialog = ref<TerminalMfaDialogState>({
   open: false,
   request: null,
   responses: [],
   submitting: false,
-  error: '',
-  remainingMs: 0
+  error: ''
 })
 
 const showAgentsLeftPane = computed(() => workspace.mode === 'agents' && workspace.agentsLeftOpen)
@@ -232,9 +224,15 @@ const terminalMfaTarget = computed(() => {
 })
 const terminalMfaPrompts = computed<TerminalMfaPrompt[]>(() => {
   const prompts = terminalMfaDialog.value.request?.prompts || []
-  return prompts.length ? prompts : [{ prompt: t('terminal.mfaPromptFallback'), echo: false }]
+  return prompts.length ? prompts : [{ prompt: terminalAuthPromptFallback.value, echo: false }]
 })
-const terminalMfaRemainingSeconds = computed(() => Math.max(0, Math.ceil(terminalMfaDialog.value.remainingMs / 1000)))
+const isTerminalPasswordPrompt = computed(() => terminalMfaDialog.value.request?.purpose === 'password')
+const terminalAuthTitle = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordTitle' : 'terminal.mfaTitle'))
+const terminalAuthRequired = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordRequired' : 'terminal.mfaRequired'))
+const terminalAuthPromptFallback = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordPromptFallback' : 'terminal.mfaPromptFallback'))
+const terminalAuthDescription = computed(() =>
+  tf(isTerminalPasswordPrompt.value ? 'terminal.passwordDescription' : 'terminal.mfaDescription', { target: terminalMfaTarget.value })
+)
 
 const tf = (key: I18nKey, values: Record<string, string | number>) => {
   let text = t(key)
@@ -252,57 +250,31 @@ const setDraftWidth = (side: ResizeSide, width: number | null) => {
   if (side === 'agents-left') draftAgentsLeftWidth.value = width
 }
 
-const clearTerminalMfaTimer = () => {
-  if (terminalMfaTimer !== null) {
-    window.clearInterval(terminalMfaTimer)
-    terminalMfaTimer = null
-  }
-}
-
 const setTerminalMfaInputRef = (element: unknown, index: number) => {
   if (element instanceof HTMLInputElement) terminalMfaInputRefs.value[index] = element
 }
 
 const resetTerminalMfaDialog = () => {
-  clearTerminalMfaTimer()
   terminalMfaInputRefs.value = []
   terminalMfaDialog.value = {
     open: false,
     request: null,
     responses: [],
     submitting: false,
-    error: '',
-    remainingMs: 0
+    error: ''
   }
-}
-
-const startTerminalMfaTimer = (timeoutMs: number) => {
-  clearTerminalMfaTimer()
-  const endAt = Date.now() + Math.max(1000, Number(timeoutMs) || 180000)
-  terminalMfaDialog.value.remainingMs = Math.max(0, endAt - Date.now())
-  terminalMfaTimer = window.setInterval(() => {
-    terminalMfaDialog.value.remainingMs = Math.max(0, endAt - Date.now())
-    if (terminalMfaDialog.value.remainingMs <= 0) {
-      terminalMfaDialog.value.error = t('terminal.mfaTimeout')
-      terminalMfaDialog.value.submitting = true
-      clearTerminalMfaTimer()
-    }
-  }, 1000)
 }
 
 const handleTerminalMfaRequest = (request: TerminalKeyboardInteractiveRequest) => {
   const promptCount = request.prompts.length || 1
-  clearTerminalMfaTimer()
   terminalMfaInputRefs.value = []
   terminalMfaDialog.value = {
     open: true,
     request,
     responses: Array.from({ length: promptCount }, () => ''),
     submitting: false,
-    error: '',
-    remainingMs: request.timeoutMs
+    error: ''
   }
-  startTerminalMfaTimer(request.timeoutMs)
   void nextTick(() => terminalMfaInputRefs.value[0]?.focus())
 }
 
@@ -453,7 +425,6 @@ onUnmounted(() => {
   stopDeepLink?.()
   stopKeyboardInteractiveRequest?.()
   stopKeyboardInteractiveResult?.()
-  clearTerminalMfaTimer()
   window.removeEventListener('mousemove', handleResizeMove)
   window.removeEventListener('mouseup', endResize)
   document.body.classList.remove('layout-resizing')

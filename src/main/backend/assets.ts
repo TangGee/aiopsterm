@@ -752,7 +752,7 @@ const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAssetRecord
   const id = input.id || existing?.id || `asset-${randomUUID()}`
   const name = input.name.trim()
   const host = input.host.trim()
-  const group = (input.group || input.group_name || existing?.group || 'Hosts').trim()
+  const group = (input.group || input.group_name || existing?.group || '未分组').trim() || '未分组'
   const tags = Array.isArray(input.tags) ? input.tags.filter(Boolean) : existing?.tags || []
   return {
     id,
@@ -844,7 +844,10 @@ const keychainToSshAgentOption = (keychain: AiopsKeychainRecord): SshAgentKeycha
 const shouldIncludeAssetGroup = (asset: AiopsAssetRecord, input: AiopsAssetGroupListInput = {}) =>
   !asset.isLocalShell && (!input.assetTypes?.length || input.assetTypes.includes(asset.asset_type))
 
-const assetGroupName = (asset: AiopsAssetRecord) => (asset.group || asset.group_name || 'Hosts').trim() || 'Hosts'
+const assetGroupName = (asset: AiopsAssetRecord) => {
+  const group = (asset.group || asset.group_name || '未分组').trim()
+  return !group || group === 'Hosts' ? '未分组' : group
+}
 
 const listAssetGroupsFromAssets = (assets: AiopsAssetRecord[], input: AiopsAssetGroupListInput = {}): AiopsAssetGroupRecord[] => {
   const groupCounts = new Map<string, number>()

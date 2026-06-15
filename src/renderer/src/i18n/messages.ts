@@ -173,9 +173,11 @@ export type I18nKey =
   | 'terminal.mfaTitle'
   | 'terminal.mfaDescription'
   | 'terminal.mfaPromptFallback'
-  | 'terminal.mfaRemaining'
-  | 'terminal.mfaAttempts'
   | 'terminal.mfaRequired'
+  | 'terminal.passwordTitle'
+  | 'terminal.passwordDescription'
+  | 'terminal.passwordPromptFallback'
+  | 'terminal.passwordRequired'
   | 'terminal.mfaSubmit'
   | 'terminal.mfaSubmitting'
   | 'terminal.mfaEmpty'
@@ -342,9 +344,11 @@ const zhCN: LocaleMessages = {
   'terminal.mfaTitle': 'SSH 二次认证',
   'terminal.mfaDescription': '远程主机 {target} 需要动态密码或验证码。输入后将继续当前 SSH 登录。',
   'terminal.mfaPromptFallback': '验证码或动态密码',
-  'terminal.mfaRemaining': '剩余 {seconds}s',
-  'terminal.mfaAttempts': '第 {attempt}/{max} 次',
   'terminal.mfaRequired': '需要二次认证',
+  'terminal.passwordTitle': 'SSH 密码认证',
+  'terminal.passwordDescription': '远程主机 {target} 没有保存密码。输入密码后仅用于本次 SSH 登录，不会自动保存。',
+  'terminal.passwordPromptFallback': 'SSH 密码',
+  'terminal.passwordRequired': '需要 SSH 密码',
   'terminal.mfaSubmit': '提交认证',
   'terminal.mfaSubmitting': '提交中',
   'terminal.mfaEmpty': '请输入认证信息。',
@@ -510,9 +514,11 @@ const enUS: LocaleMessages = {
   'terminal.mfaTitle': 'SSH two-factor authentication',
   'terminal.mfaDescription': 'Remote host {target} requires a dynamic password or verification code. Submit it to continue the SSH login.',
   'terminal.mfaPromptFallback': 'Verification code or dynamic password',
-  'terminal.mfaRemaining': '{seconds}s remaining',
-  'terminal.mfaAttempts': 'Attempt {attempt}/{max}',
   'terminal.mfaRequired': 'Two-factor authentication required',
+  'terminal.passwordTitle': 'SSH password authentication',
+  'terminal.passwordDescription': 'Remote host {target} has no saved password. The password is used only for this SSH login and is not saved automatically.',
+  'terminal.passwordPromptFallback': 'SSH password',
+  'terminal.passwordRequired': 'SSH password required',
   'terminal.mfaSubmit': 'Submit verification',
   'terminal.mfaSubmitting': 'Submitting',
   'terminal.mfaEmpty': 'Enter the verification response.',

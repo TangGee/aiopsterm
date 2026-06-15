@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
@@ -30,6 +30,14 @@ const mustContain = [
 const missingConfig = mustContain.filter((text) => !builderConfig.includes(text))
 if (missingConfig.length) {
   throw new Error(`electron-builder.yml is missing required packaging settings:\n${missingConfig.join('\n')}`)
+}
+
+const iconSizes = [16, 32, 48, 64, 128, 256, 512]
+const missingIcons = iconSizes
+  .map((size) => resolve('resources/icons', `${size}x${size}.png`))
+  .filter((file) => !existsSync(file) || !statSync(file).isFile() || statSync(file).size <= 0)
+if (missingIcons.length) {
+  throw new Error(`Missing required Linux app icons:\n${missingIcons.join('\n')}`)
 }
 
 console.log('package-config-audit-ok')

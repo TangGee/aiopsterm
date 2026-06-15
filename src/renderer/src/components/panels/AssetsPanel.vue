@@ -1546,7 +1546,7 @@ const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?:
 
 const normalizeDirectAssetGroupName = (name?: string) => {
   const trimmed = String(name || '').trim()
-  return !trimmed || trimmed === '未分组' || trimmed === 'Hosts' ? '主机' : trimmed
+  return !trimmed || trimmed === 'Hosts' ? '未分组' : trimmed
 }
 const directGroupKey = (name: string) => `group-${name}`
 const flattenAssetGroups = (groups: AssetGroup[]): AssetGroup[] => groups.flatMap((group) => [group, ...flattenAssetGroups(group.childGroups)])
@@ -1577,7 +1577,6 @@ const assetGroups = computed<AssetGroup[]>(() => {
   const folderByName = new Map(directAssetFolders.value.map((folder) => [folder.name, folder]))
   const groupNames = Array.from(
     new Set([
-      '主机',
       ...directAssetFolders.value.map((folder) => folder.name),
       ...assetGroupOptions.value.map((group) => normalizeDirectAssetGroupName(group.name)),
       ...assets.value.map((asset) => normalizeDirectAssetGroupName(asset.group || asset.group_name))
@@ -1645,7 +1644,7 @@ const sshProxyOptions = computed(() =>
 const configuredSshProxyNames = computed(() => new Set(sshProxyOptions.value.map((proxy) => proxy.name)))
 const exportableAssets = computed(() => assets.value.filter((asset) => asset.asset_type !== 'organization'))
 const exportAssetGroups = computed<AssetGroup[]>(() => {
-  const groupNames = Array.from(new Set(exportableAssets.value.map((asset) => asset.group || asset.group_name || 'Hosts')))
+  const groupNames = Array.from(new Set(exportableAssets.value.map((asset) => normalizeDirectAssetGroupName(asset.group || asset.group_name))))
   return groupNames.map((group) => ({
     key: `export-group-${group}`,
     title: group,
@@ -1662,7 +1661,7 @@ const managedSourceAssets = computed(() => {
   if (!managedOrganization.value) return nonOrganizationAssets
   return nonOrganizationAssets.filter((asset) => asset.organizationId === managedOrganization.value?.uuid || asset.group_name === managedOrganization.value?.group_name || asset.tags.includes('synced'))
 })
-const collectManagedAssetFallbackGroup = (asset: AssetRecord) => asset.group || asset.group_name || '主机'
+const collectManagedAssetFallbackGroup = (asset: AssetRecord) => normalizeDirectAssetGroupName(asset.group || asset.group_name)
 const pruneGroupForOrganization = (group: AssetGroup, organizationId: string): AssetGroup | null => {
   const children = group.children.filter((asset) => asset.organizationId === organizationId)
   const childGroups = group.childGroups.map((child) => pruneGroupForOrganization(child, organizationId)).filter((child): child is AssetGroup => Boolean(child))
@@ -1800,7 +1799,7 @@ const resetAssetConnectionTest = () => {
   assetTestOk.value = false
 }
 
-const resetForm = (groupName = '主机') => {
+const resetForm = (groupName = '') => {
   assetSecretRequestId += 1
   assetFormError.value = ''
   resetAssetConnectionTest()
@@ -1834,7 +1833,7 @@ const groupNameFromKey = (groupKey = '') => groupKey.replace(/^group-/, '')
 const openNewPanel = (groupKey = '') => {
   activeAssetView.value = 'assetConfig'
   editMode.value = false
-  resetForm(groupKey ? groupNameFromKey(groupKey) : '主机')
+  resetForm(groupKey ? groupNameFromKey(groupKey) : '')
   editorOpen.value = true
   closeAssetContextMenus()
 }

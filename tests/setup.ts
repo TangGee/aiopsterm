@@ -4530,7 +4530,8 @@ const listAssetGroupsMock = (input?: { assetTypes?: TestAssetRecord['asset_type'
   assetStoreMock
     .filter((asset) => !asset.isLocalShell && (!input?.assetTypes?.length || input.assetTypes.includes(asset.asset_type)))
     .forEach((asset) => {
-      const name = String(asset.group || asset.group_name || 'Hosts').trim() || 'Hosts'
+      const group = String(asset.group || asset.group_name || '未分组').trim()
+      const name = !group || group === 'Hosts' ? '未分组' : group
       groups.set(name, (groups.get(name) || 0) + 1)
     })
   return [...groups.entries()]
@@ -4991,7 +4992,7 @@ const normalizeAssetInputMock = (input: TestAssetInput, existing?: TestAssetReco
   const id = input.id || existing?.id || `asset-test-${assetStoreMock.length + 1}`
   const name = String(input.name || existing?.name || input.host || 'asset').trim()
   const host = String(input.host || existing?.host || '127.0.0.1').trim()
-  const group = String(input.group || input.group_name || existing?.group || 'Hosts').trim()
+  const group = String(input.group || input.group_name || existing?.group || '未分组').trim() || '未分组'
   return {
     id,
     uuid: existing?.uuid || input.uuid || id,

@@ -173,7 +173,10 @@ const shouldIncludeAssetForGroupMutation = (
   input: Pick<AiopsAssetGroupRenameInput | AiopsAssetGroupDeleteInput, 'assetTypes'>
 ) => !asset.isLocalShell && (!input.assetTypes?.length || input.assetTypes.includes(asset.asset_type))
 
-const assetGroupName = (asset: AiopsAssetRecord) => text(asset.group || asset.group_name) || 'Hosts'
+const assetGroupName = (asset: AiopsAssetRecord) => {
+  const group = text(asset.group || asset.group_name)
+  return !group || group === 'Hosts' ? '未分组' : group
+}
 
 export const isAiopsAssetGroupRenameSnapshot = (value: unknown, input: AiopsAssetGroupRenameInput): value is AiopsAssetSnapshot => {
   if (!isAiopsAssetSnapshot(value)) return false

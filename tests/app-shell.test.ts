@@ -616,19 +616,23 @@ describe('AppShell', () => {
       port: 7992,
       username: 'root',
       title: 'dynamic-bastion',
+      purpose: 'keyboard-interactive',
       name: 'Dynamic password',
       instructions: 'Enter OTP',
       prompts: [{ prompt: 'Verification code:', echo: false }],
       attempts: 1,
-      maxAttempts: 5,
+      maxAttempts: 1,
       timeoutMs: 180000
     }
     ;(globalThis as any).__emitTerminalKeyboardInteractiveRequestMock(request)
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').text()).toContain('root@113.133.183.5:7992')
-    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').text()).toContain('Verification code:')
+    const dialogText = wrapper.find('[data-testid="terminal-mfa-dialog"]').text()
+    expect(dialogText).toContain('root@113.133.183.5:7992')
+    expect(dialogText).toContain('Verification code:')
+    expect(dialogText).not.toContain('第 1/1 次')
+    expect(dialogText).not.toContain('剩余')
     await wrapper.find('.terminal-mfa-backdrop').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(true)
@@ -641,6 +645,51 @@ describe('AppShell', () => {
     expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('ssh-mfa-ui-1', ['654321'])
 
     ;(globalThis as any).__emitTerminalKeyboardInteractiveResultMock({ id: 'ssh-mfa-ui-1', status: 'success', attempts: 1 })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('uses the SSH auth dialog for missing saved passwords without persisting them', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await flushPromises()
+
+    const request: TerminalKeyboardInteractiveRequest = {
+      id: 'ssh-password-ui-1',
+      connectionId: 'ssh-test-session',
+      host: '10.71.0.11',
+      port: 22,
+      username: 'root',
+      title: 'test_hhhh',
+      purpose: 'password',
+      prompts: [{ prompt: 'SSH password for root@10.71.0.11:22:', echo: false }],
+      attempts: 1,
+      maxAttempts: 1,
+      timeoutMs: 180000
+    }
+    ;(globalThis as any).__emitTerminalKeyboardInteractiveRequestMock(request)
+    await wrapper.vm.$nextTick()
+
+    const dialog = wrapper.find('[data-testid="terminal-mfa-dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('SSH 密码认证')
+    expect(dialog.text()).toContain('仅用于本次 SSH 登录')
+    expect(dialog.text()).toContain('SSH password for root@10.71.0.11:22:')
+    await wrapper.find('[data-testid="terminal-mfa-input"]').setValue('typed-password')
+    await wrapper.find('.terminal-mfa-dialog form').trigger('submit')
+    expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('ssh-password-ui-1', ['typed-password'])
+
+    ;(globalThis as any).__emitTerminalKeyboardInteractiveResultMock({ id: 'ssh-password-ui-1', status: 'success', attempts: 1, final: true })
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(false)
 
@@ -1095,7 +1144,7 @@ describe('AppShell', () => {
     await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
     await assets.find('.asset-search-input input').setValue('')
     expect(assets.text()).toContain('prod-bastion')
-    expect(assets.findAll('.asset-tree-group-row').some((row) => row.text().includes('主机'))).toBe(true)
+    expect(assets.findAll('.asset-tree-group-row').some((row) => row.text().includes('主机'))).toBe(false)
 
     await assets.find('.asset-host-tree').trigger('contextmenu', { clientX: 140, clientY: 180 })
     expect(assets.find('.asset-context-menu').text()).toContain('新建目录')
@@ -2605,7 +2654,7 @@ describe('AppShell', () => {
     }
     const menuButton = (label: string) => findMenuButton(wrapper, '.workspace-node-menu', label)
 
-    expect(groupRow('主机').text()).toContain('(0)')
+    expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('主机'))).toBe(false)
     expect(groupRow('生产').text()).toContain('(2)')
 
     await groupRow('生产').trigger('contextmenu', { clientX: 180, clientY: 160 })
@@ -2709,7 +2758,7 @@ describe('AppShell', () => {
     await wrapper.findAll('.workspace-host-form input').at(4)!.setValue('22')
     await wrapper.find('.workspace-host-form').trigger('submit')
     await flushPromises()
-    expect(window.aiops.saveAsset).toHaveBeenCalledWith(expect.objectContaining({ name: 'root-default-host', group: '主机', group_name: '主机' }))
+    expect(window.aiops.saveAsset).toHaveBeenCalledWith(expect.objectContaining({ name: 'root-default-host', group: '未分组', group_name: '未分组' }))
     expect(wrapper.text()).toContain('root-default-host')
 
     vi.mocked(window.aiops.createTerminal).mockClear()
@@ -3305,9 +3354,9 @@ describe('AppShell', () => {
       vi.mocked(window.aiops.deleteAssetGroup).mockClear()
       await wrapper.find('.files-folder-confirm footer .danger').trigger('click')
       await flushPromises()
-      expect(window.aiops.deleteAssetGroup).toHaveBeenCalledWith({ name: '生产归档', fallbackName: '主机', assetTypes: ['person', 'switch'] })
+      expect(window.aiops.deleteAssetGroup).toHaveBeenCalledWith({ name: '生产归档', fallbackName: '未分组', assetTypes: ['person', 'switch'] })
       expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产归档'))).toBe(false)
-      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('主机'))).toBe(true)
+      expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('未分组'))).toBe(true)
 
       await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
@@ -3440,7 +3489,7 @@ describe('AppShell', () => {
       await filesPanel.find('.files-folder-confirm footer .danger').trigger('click')
       await flushPromises()
       expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBeUndefined()
-      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('主机')
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.group).toBe('未分组')
       expect(filesPanel.text()).not.toContain('临时归档')
       expect(filesPanel.text()).toContain('prod-bastion')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('contextmenu')

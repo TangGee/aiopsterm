@@ -114,6 +114,7 @@ export type TerminalKeyboardInteractiveRequest = {
   host: string
   port: number
   username: string
+  purpose?: 'password' | 'keyboard-interactive'
   title?: string
   name?: string
   instructions?: string

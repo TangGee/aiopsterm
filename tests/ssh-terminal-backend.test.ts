@@ -49,6 +49,8 @@ const createSshRuntime = (options: { failConnect?: Error; failShell?: Error; man
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
   const channels: MockSshChannel[] = []
+  const forwardChannels: MockSshChannel[] = []
+  const forwardOutCalls: Array<{ srcIP: string; srcPort: number; dstIP: string; dstPort: number }> = []
   const shellOptions: Array<Record<string, unknown>> = []
 
   class MockSshClient extends EventEmitter {
@@ -72,6 +74,15 @@ const createSshRuntime = (options: { failConnect?: Error; failShell?: Error; man
       })
     }
 
+    forwardOut(srcIP: string, srcPort: number, dstIP: string, dstPort: number, callback: (error: Error | undefined, stream: MockSshChannel) => void) {
+      forwardOutCalls.push({ srcIP, srcPort, dstIP, dstPort })
+      const channel = new MockSshChannel()
+      forwardChannels.push(channel)
+      queueMicrotask(() => {
+        callback(undefined, channel)
+      })
+    }
+
     end() {
       this.endCalls += 1
       this.emit('end')
@@ -90,6 +101,8 @@ const createSshRuntime = (options: { failConnect?: Error; failShell?: Error; man
     clients,
     connectConfigs,
     channels,
+    forwardChannels,
+    forwardOutCalls,
     shellOptions
   }
 }
@@ -332,7 +345,8 @@ describe('ssh terminal backend runtime', () => {
         instructions: 'Enter current token',
         prompts: [{ prompt: 'One-time password:', echo: false }],
         attempts: 1,
-        maxAttempts: 5,
+        maxAttempts: 1,
+        purpose: 'keyboard-interactive',
         timeoutMs: 180000
       })
     ])
@@ -347,6 +361,157 @@ describe('ssh terminal backend runtime', () => {
     await waitForMicrotasks(3)
     expect(results).toEqual([expect.objectContaining({ id: 'ssh-mfa-1-keyboard-1', status: 'success', attempts: 1 })])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
+  })
+
+  it('prompts once for missing password credentials before connecting password-auth hosts', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const events = createRecorder()
+    const requests: TerminalKeyboardInteractiveRequest[] = []
+    const results: TerminalKeyboardInteractiveResult[] = []
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () =>
+        ({
+          id: 'asset-password-empty',
+          name: 'test_hhhh',
+          title: 'test_hhhh',
+          host: '10.71.0.11',
+          username: 'root',
+          port: 22,
+          asset_type: 'person',
+          auth_type: 'password'
+        }) as never,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const result = backend.createSshTerminalSession('ssh-password-prompt-1', { kind: 'ssh', assetId: 'asset-password-empty' }, {
+      ...createSink(events),
+      keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
+        requests.push(request)
+        return ['typed-password']
+      },
+      keyboardInteractiveResult: (payload: TerminalKeyboardInteractiveResult) => results.push(payload)
+    })
+    await waitForMicrotasks(6)
+
+    expect(result.session).toBeTruthy()
+    expect(requests).toEqual([
+      expect.objectContaining({
+        id: 'ssh-password-prompt-1-password',
+        host: '10.71.0.11',
+        port: 22,
+        username: 'root',
+        purpose: 'password',
+        prompts: [{ prompt: 'SSH password for root@10.71.0.11:22:', echo: false }],
+        attempts: 1,
+        maxAttempts: 1
+      })
+    ])
+    expect(results).toEqual([expect.objectContaining({ id: 'ssh-password-prompt-1-password', status: 'success', attempts: 1, final: true })])
+    expect(ssh.connectConfigs[0]).toEqual(
+      expect.objectContaining({
+        host: '10.71.0.11',
+        username: 'root',
+        password: 'typed-password',
+        tryKeyboard: true
+      })
+    )
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
+  })
+
+  it('forwards jump-host keyboard-interactive authentication before connecting the target through the tunnel', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ manualReady: true })
+    const events = createRecorder()
+    const requests: TerminalKeyboardInteractiveRequest[] = []
+    const results: TerminalKeyboardInteractiveResult[] = []
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: (assetId: string) => {
+        if (assetId === 'asset-target') {
+          return {
+            id: 'asset-target',
+            name: 'target-a',
+            title: 'target-a',
+            host: '10.80.0.20',
+            username: 'deploy',
+            port: 22,
+            asset_type: 'person',
+            auth_type: 'password',
+            jumpHostId: 'asset-jump'
+          } as never
+        }
+        if (assetId === 'asset-jump') {
+          return {
+            id: 'asset-jump',
+            name: 'jump-b',
+            title: 'jump-b',
+            host: '10.80.0.10',
+            username: 'ops',
+            port: 2222,
+            asset_type: 'person',
+            auth_type: 'password'
+          } as never
+        }
+        return null
+      },
+      getAssetSecret: (assetId: string) => (assetId === 'asset-target' ? { password: 'target-password' } : { password: 'jump-password' }),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    backend.createSshTerminalSession('ssh-jump-mfa-1', { kind: 'ssh', assetId: 'asset-target' }, {
+      ...createSink(events),
+      keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
+        requests.push(request)
+        return ['987654']
+      },
+      keyboardInteractiveResult: (payload: TerminalKeyboardInteractiveResult) => results.push(payload)
+    })
+    await waitForMicrotasks(3)
+
+    expect(ssh.connectConfigs).toHaveLength(1)
+    expect(ssh.connectConfigs[0]).toEqual(expect.objectContaining({ host: '10.80.0.10', port: 2222, username: 'ops', password: 'jump-password' }))
+
+    const jumpResponses = await emitKeyboardInteractive(ssh.clients[1], [{ prompt: 'OTP:', echo: false }], {
+      name: 'Jump OTP',
+      instructions: 'Enter jump host OTP'
+    })
+    expect(jumpResponses).toEqual(['987654'])
+    expect(requests).toEqual([
+      expect.objectContaining({
+        id: 'ssh-jump-mfa-1-jump-keyboard-1',
+        host: '10.80.0.10',
+        port: 2222,
+        username: 'ops',
+        purpose: 'keyboard-interactive',
+        prompts: [{ prompt: 'OTP:', echo: false }],
+        attempts: 1,
+        maxAttempts: 1
+      })
+    ])
+
+    ssh.clients[1].emit('ready')
+    await waitForMicrotasks(4)
+    expect(ssh.forwardOutCalls).toEqual([{ srcIP: '127.0.0.1', srcPort: 0, dstIP: '10.80.0.20', dstPort: 22 }])
+    expect(ssh.connectConfigs[1]).toEqual(
+      expect.objectContaining({
+        username: 'deploy',
+        password: 'target-password',
+        sock: ssh.forwardChannels[0],
+        tryKeyboard: true
+      })
+    )
+    expect(ssh.connectConfigs[1]).not.toHaveProperty('host')
+    expect(ssh.connectConfigs[1]).not.toHaveProperty('port')
+
+    ssh.clients[0].emit('ready')
+    await waitForMicrotasks(3)
+    expect(results).toEqual([expect.objectContaining({ id: 'ssh-jump-mfa-1-jump-keyboard-1', status: 'success', attempts: 1 })])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connecting', 'connected', 'shell-ready'])
   })
 
   it('fails closed when ssh2 runtime is unavailable or target fields are invalid', async () => {
