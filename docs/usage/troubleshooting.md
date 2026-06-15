@@ -28,8 +28,8 @@ SSH and jump-host lifecycle logs include structured routing and authentication m
 - `targetHost`, `targetPort`, `targetUsername`: the final SSH target.
 - `jumpHost`, `jumpPort`, `jumpUsername`: the jump host used to reach the target.
 - `sshAuthMethods`: enabled auth method names only, such as `password`, `privateKey`, `agent`, and `keyboard-interactive`.
-- `remoteHop`: for relay-shell connections, `relay` means the nested shell is still on the jump host and `target` means the target endpoint probe completed.
-- `expectedHost`, `actualHost`, `actualUsername`, `endpointConfidence`: non-secret endpoint probe metadata used to confirm whether the terminal is currently on the jump host or the target.
+- `remoteHop`: for relay-shell connections, `relay` means the nested shell is still on the jump host and `target` means the target prompt has been inferred.
+- `expectedHost`, `actualHost`, `actualUsername`, `endpointConfidence`: non-secret endpoint metadata used to infer whether the terminal is currently on the jump host or the target.
 
 For a jump-host failure, read entries in this order:
 
@@ -40,7 +40,7 @@ For a jump-host failure, read entries in this order:
 
 If the log reaches step 3 and direct TCP forwarding is rejected, aiopsterm now falls back to `relay-shell` mode when a PTY runtime is available. In this mode aiopsterm starts local OpenSSH to the jump host first, waits until the interactive relay shell appears, then writes the nested `ssh <target>` command into that PTY, matching manual relay workflows such as `/home/tlinux/bin/1ssh`. Authentication prompts, host-key confirmations, and dynamic-password prompts from local OpenSSH are left in the terminal stream; aiopsterm does not write the nested target command while the latest relay output still looks like an authentication prompt.
 
-Relay-shell startup emits hidden marker probes before the relay and target interactive shells. The marker output is removed from terminal data, while lifecycle logs record `remoteHop`, `expectedHost`, `actualHost`, `actualUsername`, and `endpointConfidence`. The lifecycle message `Relay shell accepted; starting nested SSH ...` means aiopsterm has seen the relay shell and has written the nested target command; a later `remoteHop: "target"` / `stage: "shell-ready"` confirms the final target shell probe completed. If a configured target is an IP address, `expectedHost` remains that IP and `actualHost` may be the remote hostname returned by `hostname`; treat `endpointConfidence: "confirmed"` plus `remoteHop: "target"` as confirmation that the nested target shell started.
+Relay-shell startup is compatible with restricted jump shells: aiopsterm does not run relay-side helper commands such as `printf`, `export`, `hostname`, `pwd`, or `stty`. After the relay prompt appears, aiopsterm writes only the nested `ssh <target>` command into the PTY and hides that echoed command from terminal output when the PTY echoes it back. The lifecycle message `SSH relay shell connected; starting nested SSH ...` means aiopsterm has seen the relay prompt and has written the nested target command. A later `remoteHop: "target"` / `stage: "shell-ready"` with `endpointConfidence: "inferred"` means the target prompt was inferred from terminal output. If a configured target is an IP address, `expectedHost` remains that IP and `actualHost` may be the remote hostname shown in the prompt; use `remoteHop: "target"` plus the visible terminal prompt to confirm the nested target shell started.
 
 Because relay-shell mode uses local OpenSSH in a PTY, password, dynamic-password, and host-key prompts are shown in the terminal stream instead of the global aiopsterm authentication dialog. This allows existing jump-host SSH config and target-side passwordless login to work, but saved aiopsterm target passwords are not injected into the local OpenSSH command.
 

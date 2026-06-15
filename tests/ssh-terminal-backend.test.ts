@@ -796,27 +796,25 @@ describe('ssh terminal backend runtime', () => {
     expect(pty.processes[0].writes).toEqual([])
     pty.processes[0].emitData('ops@relay:~$ ')
     expect(pty.processes[0].writes).toHaveLength(1)
-    expect(pty.processes[0].writes[0]).toContain("ssh -tt -p 22 -- 'root@target.internal'")
-    expect(pty.processes[0].writes[0]).not.toContain('queued-before-relay')
+    const command = pty.processes[0].writes[0]
+    expect(command).toBe("ssh -tt -p 22 -- 'root@target.internal'\n")
+    expect(command).not.toContain('queued-before-relay')
+    expect(command).not.toContain('__AIO_CTX')
+    expect(command).not.toContain('printf')
+    expect(command).not.toContain('export')
+    expect(command).not.toContain('stty')
     result.session?.write('uptime\n')
     result.session?.resize(120, 36)
-    expect(pty.processes[0].writes).toEqual([pty.processes[0].writes[0], 'uptime\n'])
+    expect(pty.processes[0].writes).toEqual([command, 'uptime\n'])
     expect(pty.processes[0].resizes).toEqual([{ cols: 120, rows: 36 }])
 
-    const command = pty.processes[0].writes[0]
-    const relayToken = command.match(/__AIO_CTX_BEGIN_([A-Za-z0-9_-]+_relay)__/)
-    const targetToken = command.match(/__AIO_CTX_BEGIN_([A-Za-z0-9_-]+_target)__/)
-    expect(relayToken?.[1]).toBeTruthy()
-    expect(targetToken?.[1]).toBeTruthy()
-    pty.processes[0].emitData('relay banner\n')
-    pty.processes[0].emitData(`__AIO_CTX_BEGIN_${relayToken![1]}__\nhop=relay\nexpected=relay.example\nuser=ops\nhost=relay.example\npwd=/home/ops\n`)
-    pty.processes[0].emitData(`__AIO_CTX_END_${relayToken![1]}__target login banner\n`)
-    pty.processes[0].emitData(`__AIO_CTX_BEGIN_${targetToken![1]}__\nhop=target\nexpected=target.internal\nuser=root\nhost=target.internal\npwd=/root\n__AIO_CTX_END_${targetToken![1]}__`)
-    pty.processes[0].emitData('root@target:~# ')
+    pty.processes[0].emitData(command)
+    pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
     expect(pty.processes[0].writes).toEqual([command, 'uptime\n', 'queued-before-relay\n'])
 
-    expect(events.data.map((chunk) => chunk.toString()).join('')).toBe("Please input user's password: ops@relay:~$ relay banner\ntarget login banner\nroot@target:~# ")
+    expect(events.data.map((chunk) => chunk.toString()).join('')).toBe("Please input user's password: ops@relay:~$ target login banner\n[root@target.internal ~]# ")
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('__AIO_CTX_')
+    expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain(command.trim())
     expect(events.lifecycle).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -836,9 +834,7 @@ describe('ssh terminal backend runtime', () => {
           authScope: 'jump',
           remoteHop: 'relay',
           expectedHost: 'relay.example',
-          actualHost: 'relay.example',
-          actualUsername: 'ops',
-          endpointConfidence: 'confirmed'
+          endpointConfidence: 'inferred'
         }),
         expect.objectContaining({
           stage: 'shell-ready',
@@ -848,7 +844,7 @@ describe('ssh terminal backend runtime', () => {
           expectedHost: 'target.internal',
           actualHost: 'target.internal',
           actualUsername: 'root',
-          endpointConfidence: 'confirmed'
+          endpointConfidence: 'inferred'
         })
       ])
     )

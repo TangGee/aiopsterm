@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto'
 import { statSync } from 'fs'
 import type { ClientChannel, ConnectConfig } from 'ssh2'
 import type {
@@ -330,26 +329,11 @@ const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
 const sshDestination = (target: Pick<SshTerminalTarget, 'username' | 'host'>) => `${target.username}@${target.host}`
 
-const relayMarkerLine = (token: string, boundary: 'BEGIN' | 'END') => `__AIO_CTX_${boundary}_${token}__`
-
-const relayProbeCommand = (token: string, hop: 'relay' | 'target', expectedHost: string) => {
-  const begin = shellSingleQuote(`${relayMarkerLine(token, 'BEGIN')}\\n`)
-  const end = shellSingleQuote(`${relayMarkerLine(token, 'END')}\\n`)
-  return [
-    `printf ${begin}`,
-    `printf ${shellSingleQuote(`hop=${hop}\\n`)}`,
-    `printf ${shellSingleQuote('expected=%s\\n')} ${shellSingleQuote(expectedHost)}`,
-    `printf ${shellSingleQuote('user=%s\\n')} "$(id -un 2>/dev/null || whoami 2>/dev/null || printf unknown)"`,
-    `printf ${shellSingleQuote('host=%s\\n')} "$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf unknown)"`,
-    `printf ${shellSingleQuote('pwd=%s\\n')} "$PWD"`,
-    `printf ${end}`
-  ].join('; ')
-}
-
 const relayShellAuthPromptPattern =
   /(password|passphrase|verification code|verify code|one-time|otp|token|duo|keyboard-interactive|are you sure you want to continue connecting|yes\/no|input.*password)/i
 
-const relayShellReadyPattern = /(last login|[$#>]\s*$|[^\s]+@[^\s]+[: ].*[$#>]\s*$)/i
+const relayShellReadyPattern = /([$#>]\s*$|[^\s]+@[^\s]+[: ].*[$#>]\s*$)/i
+const bracketPromptPattern = /^\[?([A-Za-z0-9_.-]+)@([A-Za-z0-9_.-]+)(?:[^\n]*)[#$>]\s*$/
 
 const stripTerminalControl = (value: string) =>
   value
@@ -368,6 +352,45 @@ const shouldBootstrapRelayShell = (value: string) => {
   if (tail && relayShellReadyPattern.test(tail)) return true
   if (tail && relayShellAuthPromptPattern.test(tail)) return false
   return relayShellReadyPattern.test(text)
+}
+
+const parsePromptEndpoint = (value: string) => {
+  const text = stripTerminalControl(value).trimEnd()
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const match = lines[index].match(bracketPromptPattern)
+    if (match) return { actualUsername: match[1], actualHost: match[2] }
+  }
+  return null
+}
+
+const hostLooksRelated = (actualHost: string, expectedHost: string) => {
+  const actual = actualHost.toLowerCase()
+  const expected = expectedHost.toLowerCase()
+  return actual === expected || actual.startsWith(`${expected}.`) || expected.startsWith(`${actual}.`)
+}
+
+const inferRelayTargetReady = (value: string, jumpTarget: SshTerminalTarget, target: SshTerminalTarget) => {
+  const text = stripTerminalControl(value).trimEnd()
+  if (!text.trim()) return null
+  const tail = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1)
+  if (tail && relayShellAuthPromptPattern.test(tail)) return null
+  const endpoint = parsePromptEndpoint(text)
+  if (!endpoint) return null
+  const isRelayPrompt = endpoint.actualUsername === jumpTarget.username && hostLooksRelated(endpoint.actualHost, jumpTarget.host)
+  if (isRelayPrompt) return null
+  const hostMatches = hostLooksRelated(endpoint.actualHost, target.host)
+  const userMatches = endpoint.actualUsername === target.username
+  const promptLooksReady = tail ? relayShellReadyPattern.test(tail) : false
+  if (hostMatches || (userMatches && endpoint.actualUsername !== jumpTarget.username) || promptLooksReady) return endpoint
+  return null
 }
 
 const createHiddenTextFilter = (onData: (chunk: string) => void) => {
@@ -425,104 +448,7 @@ const createHiddenTextFilter = (onData: (chunk: string) => void) => {
   return { addHiddenText, handle, flush }
 }
 
-const relayShellCommand = (sessionToken: string, jumpTarget: SshTerminalTarget, target: SshTerminalTarget) => {
-  const targetToken = `${sessionToken}_target`
-  const relayToken = `${sessionToken}_relay`
-  const targetCommand = [
-    relayProbeCommand(targetToken, 'target', target.host),
-    'export AIOPSTERM_HOP=target',
-    `export AIOPSTERM_TARGET_HOST=${shellSingleQuote(target.host)}`,
-    `export AIOPSTERM_EXPECTED_HOST=${shellSingleQuote(target.host)}`,
-    `export AIOPSTERM_SESSION_ID=${shellSingleQuote(sessionToken)}`,
-    'exec "${SHELL:-/bin/sh}"'
-  ].join('; ')
-  const nestedSsh = ['ssh', '-tt', '-p', String(target.port), '--', shellSingleQuote(sshDestination(target)), shellSingleQuote(targetCommand)].join(' ')
-  return {
-    sessionToken,
-    relayToken,
-    targetToken,
-    bootstrapCommand: [
-      relayProbeCommand(relayToken, 'relay', jumpTarget.host),
-      'export AIOPSTERM_HOP=relay',
-      `export AIOPSTERM_RELAY_HOST=${shellSingleQuote(jumpTarget.host)}`,
-      `export AIOPSTERM_SESSION_ID=${shellSingleQuote(sessionToken)}`,
-      nestedSsh,
-      'stty echo 2>/dev/null || true'
-    ].join('; ')
-  }
-}
-
-const parseRelayProbe = (value: string) => {
-  const record: Record<string, string> = {}
-  for (const rawLine of value.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line) continue
-    const index = line.indexOf('=')
-    if (index <= 0) continue
-    record[line.slice(0, index)] = line.slice(index + 1)
-  }
-  return record
-}
-
-const createRelayProbeFilter = (
-  tokens: Set<string>,
-  onProbe: (probe: Record<string, string>) => void,
-  onData: (chunk: string) => void
-) => {
-  let buffer = ''
-  const beginPattern = /__AIO_CTX_BEGIN_([A-Za-z0-9_-]+)__/g
-  const beginLiteral = '__AIO_CTX_BEGIN_'
-  const maxPartialMarkerLength = 96
-  const safeEmitIndex = (value: string) => {
-    for (let index = Math.max(0, value.length - maxPartialMarkerLength); index < value.length; index += 1) {
-      const suffix = value.slice(index)
-      if (beginLiteral.startsWith(suffix)) return index
-      if (suffix.startsWith(beginLiteral) && /^[A-Za-z0-9_-]*$/.test(suffix.slice(beginLiteral.length))) return index
-    }
-    return value.length
-  }
-  const handle = (chunk: string | Buffer) => {
-    buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-    for (;;) {
-      beginPattern.lastIndex = 0
-      const begin = beginPattern.exec(buffer)
-      if (!begin) {
-        const emitIndex = safeEmitIndex(buffer)
-        if (emitIndex > 0) {
-          const emit = buffer.slice(0, emitIndex)
-          buffer = buffer.slice(emitIndex)
-          if (emit) onData(emit)
-        }
-        return
-      }
-      if (begin.index > 0) {
-        const emit = buffer.slice(0, begin.index)
-        buffer = buffer.slice(begin.index)
-        if (emit) onData(emit)
-        continue
-      }
-      const token = begin[1]
-      if (!tokens.has(token)) {
-        const emit = buffer.slice(0, begin[0].length)
-        buffer = buffer.slice(begin[0].length)
-        if (emit) onData(emit)
-        continue
-      }
-      const endMarker = relayMarkerLine(token, 'END')
-      const endIndex = buffer.indexOf(endMarker)
-      if (endIndex < 0) return
-      const beginMarker = begin[0]
-      const body = buffer.slice(beginMarker.length, endIndex)
-      buffer = buffer.slice(endIndex + endMarker.length)
-      onProbe(parseRelayProbe(body))
-    }
-  }
-  const flush = () => {
-    if (buffer) onData(buffer)
-    buffer = ''
-  }
-  return { handle, flush }
-}
+const relayShellCommand = (target: SshTerminalTarget) => ['ssh', '-tt', '-p', String(target.port), '--', shellSingleQuote(sshDestination(target))].join(' ')
 
 const createBackendDoubleSession = (
   id: string,
@@ -1084,8 +1010,7 @@ export const createSshTerminalSession = (
     cleanupJumpTransport()
     cleanupProxyTransport()
 
-    const sessionToken = randomUUID().replace(/-/g, '')
-    const relayShell = relayShellCommand(sessionToken, jumpTarget, target)
+    const relayShell = relayShellCommand(target)
     const lifecycleFields = relayShellLifecycleFields(jumpTarget)
     let remoteHop: TerminalLifecycleEvent['remoteHop'] = 'unknown'
     let endpointConfidence: TerminalLifecycleEvent['endpointConfidence'] = 'unknown'
@@ -1103,8 +1028,7 @@ export const createSshTerminalSession = (
 
     const relayDelayedWrites = pendingWrites.splice(0)
     let ptyProcess: SshTerminalPtyProcess | null = null
-    let filter: ReturnType<typeof createRelayProbeFilter> | null = null
-    const hiddenTextFilter = createHiddenTextFilter((chunk) => filter?.handle(chunk))
+    const hiddenTextFilter = createHiddenTextFilter((chunk) => sink.data(chunk))
     const writeRelayPty = (data: string) => {
       ptyProcess?.write(data)
     }
@@ -1113,62 +1037,52 @@ export const createSshTerminalSession = (
         writeRelayPty(String(relayDelayedWrites.shift() || ''))
       }
     }
-    filter = createRelayProbeFilter(
-      new Set([relayShell.relayToken, relayShell.targetToken]),
-      (probe) => {
-        const hop = probe.hop === 'target' ? 'target' : probe.hop === 'relay' ? 'relay' : null
-        if (!hop) return
-        remoteHop = hop
-        endpointConfidence = 'confirmed'
-        const expectedHost = hop === 'target' ? target.host : hop === 'relay' ? jumpTarget.host : cleanText(probe.expected)
-        lifecycle = sendLifecycle(id, sink, {
-          ...lifecycleBase,
-          ...lifecycleFields,
-          stage: hop === 'target' ? 'shell-ready' : 'connected',
-          authScope: hop === 'target' ? 'target' : 'jump',
-          remoteHop,
-          expectedHost,
-          actualHost: cleanText(probe.host),
-          actualUsername: cleanText(probe.user),
-          endpointConfidence,
-          message:
-            hop === 'target'
-              ? `SSH target shell ready via relay ${terminalAuthLabel(target)}`
-              : hop === 'relay'
-                ? `SSH relay shell connected ${terminalAuthLabel(jumpTarget)}`
-                : 'SSH relay shell endpoint probe completed.'
-        })
-        if (hop === 'target') {
-          flushRelayDelayedWrites()
-        }
-      },
-      (chunk) => sink.data(chunk)
-    )
 
     const relayEnv = {
       ...getEnv(),
-      AIOPSTERM_SESSION_ID: sessionToken,
       AIOPSTERM_TRANSPORT: 'relay-shell',
       AIOPSTERM_RELAY_HOST: jumpTarget.host,
       AIOPSTERM_TARGET_HOST: target.host
     }
     let bootstrapSent = false
     let bootstrapProbeBuffer = ''
+    let targetProbeBuffer = ''
+    let targetReadyLogged = false
+    const markTargetReady = (endpoint: { actualUsername: string; actualHost: string }) => {
+      if (targetReadyLogged || closed) return
+      targetReadyLogged = true
+      remoteHop = 'target'
+      endpointConfidence = 'inferred'
+      lifecycle = sendLifecycle(id, sink, {
+        ...lifecycleBase,
+        ...lifecycleFields,
+        stage: 'shell-ready',
+        authScope: 'target',
+        remoteHop,
+        expectedHost: target.host,
+        actualHost: cleanText(endpoint.actualHost),
+        actualUsername: cleanText(endpoint.actualUsername),
+        endpointConfidence,
+        message: `SSH target shell inferred via relay ${terminalAuthLabel(target)}`
+      })
+      flushRelayDelayedWrites()
+    }
     const sendBootstrap = () => {
       if (bootstrapSent || closed) return
       bootstrapSent = true
       remoteHop = 'relay'
       endpointConfidence = 'inferred'
-      const bootstrapInput = `${relayShell.bootstrapCommand}\n`
+      const bootstrapInput = `${relayShell}\n`
       hiddenTextFilter.addHiddenText(bootstrapInput)
       lifecycle = sendLifecycle(id, sink, {
         ...lifecycleBase,
         ...lifecycleFields,
-        stage: 'connecting',
-        authScope: 'target',
-        remoteHop: 'relay',
-        endpointConfidence: 'inferred',
-        message: `Relay shell accepted; starting nested SSH ${terminalAuthLabel(target)}`
+        stage: 'connected',
+        authScope: 'jump',
+        remoteHop,
+        expectedHost: jumpTarget.host,
+        endpointConfidence,
+        message: `SSH relay shell connected; starting nested SSH ${terminalAuthLabel(target)}`
       })
       writeRelayPty(bootstrapInput)
     }
@@ -1206,12 +1120,15 @@ export const createSshTerminalSession = (
       if (!bootstrapSent) {
         bootstrapProbeBuffer = `${bootstrapProbeBuffer}${chunk}`.slice(-4096)
         if (shouldBootstrapRelayShell(bootstrapProbeBuffer)) sendBootstrap()
+      } else if (!targetReadyLogged) {
+        targetProbeBuffer = `${targetProbeBuffer}${chunk}`.slice(-8192)
+        const endpoint = inferRelayTargetReady(targetProbeBuffer, jumpTarget, target)
+        if (endpoint) markTargetReady(endpoint)
       }
       hiddenTextFilter.handle(chunk)
     })
     relayProcess.onExit((event) => {
       hiddenTextFilter.flush()
-      filter?.flush()
       if (relayPty === relayProcess) relayPty = null
       if (stream?.close) stream = null
       finish(Number.isFinite(event.exitCode) ? event.exitCode : null, 'process', {
