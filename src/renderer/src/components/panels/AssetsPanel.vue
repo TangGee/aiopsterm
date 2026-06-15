@@ -225,7 +225,7 @@
               <strong>{{ editMode ? '编辑主机' : '新建主机' }}</strong>
               <button
                 title="关闭"
-                @click="editorOpen = false"
+                @click="closeAssetEditor"
               >
                 <X />
               </button>
@@ -273,10 +273,23 @@
             </label>
             <label v-if="form.auth_type === 'password'">
               <span>密码</span>
-              <input
-                v-model="form.password"
-                type="password"
-              />
+              <div class="asset-secret-field">
+                <input
+                  v-model="form.password"
+                  :type="assetPasswordVisible ? 'text' : 'password'"
+                  :placeholder="editMode ? '未保存密码时留空' : ''"
+                  autocomplete="new-password"
+                />
+                <button
+                  type="button"
+                  class="asset-secret-toggle"
+                  :title="assetPasswordVisible ? '隐藏密码' : '显示密码'"
+                  @click="assetPasswordVisible = !assetPasswordVisible"
+                >
+                  <EyeOff v-if="assetPasswordVisible" />
+                  <Eye v-else />
+                </button>
+              </div>
             </label>
             <label v-else>
               <span class="asset-field-heading">
@@ -1206,6 +1219,8 @@ import {
   Copy,
   Database,
   Download,
+  Eye,
+  EyeOff,
   Folder,
   Import,
   KeyRound,
@@ -1278,6 +1293,8 @@ const selectedRows = ref<string[]>([])
 const assetTestLoading = ref(false)
 const assetTestMessage = ref('')
 const assetTestOk = ref(false)
+const assetPasswordVisible = ref(false)
+let assetSecretRequestId = 0
 type AssetRecord = AiopsAssetRecord & {
   password?: string
   needProxy?: boolean
@@ -1784,8 +1801,10 @@ const resetAssetConnectionTest = () => {
 }
 
 const resetForm = (groupName = '主机') => {
+  assetSecretRequestId += 1
   assetFormError.value = ''
   resetAssetConnectionTest()
+  assetPasswordVisible.value = false
   Object.assign(form, {
     id: '',
     title: '',
@@ -1822,6 +1841,12 @@ const openNewPanel = (groupKey = '') => {
 
 const openNewPanelFromContext = (groupKey = '') => {
   openNewPanel(groupKey)
+}
+
+const closeAssetEditor = () => {
+  assetSecretRequestId += 1
+  editorOpen.value = false
+  assetPasswordVisible.value = false
 }
 
 const saveAssetFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
@@ -1996,15 +2021,30 @@ const openJumpHostCreateFromHostForm = () => {
   editorOpen.value = true
 }
 
+const loadAssetEditablePassword = async (requestId: number, assetId: string) => {
+  const bridge = window.aiops?.getAssetEditableSecret
+  if (typeof bridge !== 'function') return
+  try {
+    const result = await bridge(assetId)
+    if (requestId !== assetSecretRequestId || form.id !== assetId || !editorOpen.value || !editMode.value) return
+    if (!result?.ok) return
+    form.password = result.data?.password || ''
+  } catch {
+    if (requestId === assetSecretRequestId && form.id === assetId) form.password = ''
+  }
+}
+
 const editAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset) return
+  const secretRequestId = ++assetSecretRequestId
   closeAssetContextMenus()
   activeAssetView.value = 'assetConfig'
   editMode.value = true
   assetFormError.value = ''
   resetAssetConnectionTest()
+  assetPasswordVisible.value = false
   Object.assign(form, {
     id: asset.id,
     title: asset.title,
@@ -2022,17 +2062,20 @@ const editAsset = (assetId: string | null) => {
     switchBrand: asset.asset_type === 'switch' ? 'cisco' : 'cisco'
   })
   editorOpen.value = true
+  if (asset.auth_type === 'password') void loadAssetEditablePassword(secretRequestId, asset.id)
 }
 
 const cloneAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset) return
+  assetSecretRequestId += 1
   closeAssetContextMenus()
   activeAssetView.value = 'assetConfig'
   editMode.value = false
   assetFormError.value = ''
   resetAssetConnectionTest()
+  assetPasswordVisible.value = false
   Object.assign(form, {
     id: '',
     title: `${asset.title}_Clone`,
@@ -2375,7 +2418,8 @@ const submitForm = async () => {
     const saved = await saveAssetRecord(draft.asset)
     selectedAssetId.value = saved.id
     importNotice.value = `${editMode.value ? '已保存' : '已创建'} ${draft.title}。`
-    editorOpen.value = false
+    closeAssetEditor()
+    editMode.value = false
     if (workspace.onboardingActiveTour === 'addAndConnectHost') {
       workspace.jumpOnboardingStep('connect-asset')
     }

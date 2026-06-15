@@ -2715,6 +2715,43 @@ em {
   gap: 6px;
 }
 
+.asset-secret-field {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 6px;
+}
+
+.files-folder-form .asset-secret-field input,
+.asset-form-panel .asset-secret-field input {
+  width: 100%;
+  min-width: 0;
+}
+
+.asset-secret-toggle {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.asset-secret-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.asset-secret-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
 .provider-secret-toggle {
   width: 32px;
   height: 32px;

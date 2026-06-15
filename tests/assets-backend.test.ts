@@ -269,6 +269,54 @@ describe('assets backend boundary', () => {
     expect(backend.listAssets().assets.some((asset: { id: string }) => asset.id === saved.data?.id)).toBe(true)
   })
 
+  it('keeps saved host passwords behind the editable-secret backend boundary', async () => {
+    const backend = await loadBackend()
+    const saved = backend.saveAsset({
+      name: 'secret-owned-host',
+      title: 'secret-owned-host',
+      host: '10.77.1.7',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['manual'],
+      password: 'backend-secret'
+    })
+
+    expect(saved.ok).toBe(true)
+    expect(saved.data).toEqual(expect.objectContaining({ hasPassword: true }))
+    expect(saved.data).toEqual(expect.not.objectContaining({ password: 'backend-secret' }))
+
+    const snapshotAsset = backend.listAssets().assets.find((asset: { id: string }) => asset.id === saved.data?.id)
+    expect(snapshotAsset).toEqual(expect.objectContaining({ hasPassword: true }))
+    expect(snapshotAsset).toEqual(expect.not.objectContaining({ password: 'backend-secret' }))
+
+    const secret = backend.getAssetEditableSecret(saved.data!.id)
+    expect(secret).toEqual({ ok: true, data: { assetId: saved.data!.id, password: 'backend-secret' } })
+
+    const edited = backend.saveAsset({
+      id: saved.data!.id,
+      name: 'secret-owned-host-edited',
+      title: 'secret-owned-host-edited',
+      host: '10.77.1.7',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['manual'],
+      password: ''
+    })
+    expect(edited.ok).toBe(true)
+    expect(backend.getAssetEditableSecret(saved.data!.id)).toEqual({ ok: true, data: { assetId: saved.data!.id, password: 'backend-secret' } })
+
+    expect(backend.getAssetEditableSecret('local-127-1').ok).toBe(false)
+    expect(backend.getAssetEditableSecret('missing-asset').ok).toBe(false)
+  })
+
   it('normalizes optional asset username behind the backend boundary', async () => {
     const backend = await loadBackend()
     const saved = backend.saveAsset({

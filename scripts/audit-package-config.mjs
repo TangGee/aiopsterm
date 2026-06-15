@@ -20,6 +20,9 @@ const mustContain = [
   '- zip',
   'artifactName: ${name}-${version}-linux-${arch}.${ext}',
   'artifactName: ${name}-${version}-macos-${arch}.${ext}',
+  'extraResources:',
+  'from: resources/icons',
+  'to: icons',
   'schemes:',
   '- aiopsterm'
 ]

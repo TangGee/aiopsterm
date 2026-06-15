@@ -3691,6 +3691,10 @@ type TestAssetInput = Partial<TestAssetRecord> & {
   privateKey?: string
 }
 
+type TestAssetSecret = {
+  password?: string
+}
+
 type TestAssetFolder = {
   uuid: string
   name: string
@@ -4354,7 +4358,14 @@ const defaultAssets: TestAssetRecord[] = [
   }
 ]
 
+const defaultAssetSecrets: Record<string, TestAssetSecret> = {
+  'asset-4': {
+    password: 'legacy-password'
+  }
+}
+
 const cloneAsset = (asset: TestAssetRecord): TestAssetRecord => ({ ...asset, tags: [...asset.tags] })
+const cloneAssetSecret = (secret: TestAssetSecret): TestAssetSecret => ({ ...secret })
 const cloneAssetFolder = (folder: TestAssetFolder): TestAssetFolder => ({ ...folder })
 const cloneKeychain = (keychain: TestKeychainRecord): TestKeychainRecord => ({ ...keychain })
 const cloneQuickCommands = () => ({
@@ -4539,6 +4550,7 @@ const keychainToSshAgentOptionMock = (keychain: TestKeychainRecord): SshAgentKey
 const hasOwn = (source: object, key: string) => Object.prototype.hasOwnProperty.call(source, key)
 
 let assetStoreMock = defaultAssets.map(cloneAsset)
+let assetSecretStoreMock: Record<string, TestAssetSecret> = Object.fromEntries(Object.entries(defaultAssetSecrets).map(([id, secret]) => [id, cloneAssetSecret(secret)]))
 let assetFolderStoreMock = defaultAssetFolders.map(cloneAssetFolder)
 let assetFolderSequenceMock = 1
 let keychainStoreMock = defaultKeychains.map(cloneKeychain)
@@ -4788,6 +4800,7 @@ let fileSessionCatalogMock: TestFileSessionCatalog = {
 
 const resetAssetStoreMock = () => {
   assetStoreMock = defaultAssets.map(cloneAsset)
+  assetSecretStoreMock = Object.fromEntries(Object.entries(defaultAssetSecrets).map(([id, secret]) => [id, cloneAssetSecret(secret)]))
   assetFolderStoreMock = defaultAssetFolders.map(cloneAssetFolder)
   assetFolderSequenceMock = 1
   keychainStoreMock = defaultKeychains.map(cloneKeychain)
@@ -5036,6 +5049,19 @@ const assetSnapshotMock = () => ({
   assets: assetStoreMock.map(cloneAsset),
   folders: assetFolderStoreMock.map(cloneAssetFolder)
 })
+
+const syncAssetSecretMock = (asset: TestAssetRecord, input: TestAssetInput) => {
+  const existingSecret = assetSecretStoreMock[asset.id] || {}
+  const nextSecret: TestAssetSecret = { ...existingSecret }
+  if (typeof input.password === 'string' && input.password.trim()) {
+    nextSecret.password = input.password
+  }
+  if (nextSecret.password) {
+    assetSecretStoreMock[asset.id] = nextSecret
+  } else {
+    delete assetSecretStoreMock[asset.id]
+  }
+}
 
 const refreshOrganizationAssetsMock = (input?: { organizationId?: string }) => {
   const organizations = assetStoreMock.filter(
@@ -6595,8 +6621,24 @@ Object.defineProperty(window, 'aiops', {
       }
       const index = assetStoreMock.findIndex((asset) => asset.id === input.id)
       const asset = normalizeAssetInputMock(input, index >= 0 ? assetStoreMock[index] : undefined)
+      syncAssetSecretMock(asset, input)
       assetStoreMock = index >= 0 ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
       return { ok: true, data: cloneAsset(asset) }
+    }),
+    getAssetEditableSecret: vi.fn(async (id: string) => {
+      const assetId = String(id || '').trim()
+      const asset = assetStoreMock.find((item) => item.id === assetId)
+      if (!asset || asset.isLocalShell) {
+        return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: '资产不存在或不可编辑' }
+      }
+      const secret = assetSecretStoreMock[assetId] || {}
+      return {
+        ok: true,
+        data: {
+          assetId,
+          ...(secret.password ? { password: secret.password } : {})
+        }
+      }
     }),
     testAssetConnection: vi.fn(async (input: { assetId?: string; asset?: TestAssetInput }) => {
       const existing = input.assetId ? assetStoreMock.find((asset) => asset.id === input.assetId) : undefined
@@ -6627,6 +6669,7 @@ Object.defineProperty(window, 'aiops', {
         return { ok: false, errorCode: 'ASSET_BACKEND_ERROR', errorMessage: '本地连接是系统资产，不能编辑或删除' }
       }
       assetStoreMock = assetStoreMock.filter((asset) => asset.id !== id)
+      delete assetSecretStoreMock[id]
       return { ok: true, data: { id } }
     }),
     refreshOrganizationAssets: vi.fn(async (input?: { organizationId?: string }) => refreshOrganizationAssetsMock(input)),
@@ -6665,7 +6708,9 @@ Object.defineProperty(window, 'aiops', {
             skipped += 1
             return
           }
-          const asset = normalizeAssetInputMock(assetImportInputMock(draft, existing), existing)
+          const importDraftInput = assetImportInputMock(draft, existing)
+          const asset = normalizeAssetInputMock(importDraftInput, existing)
+          syncAssetSecretMock(asset, importDraftInput)
           assetStoreMock = existing ? assetStoreMock.map((item) => (item.id === asset.id ? asset : item)) : [...assetStoreMock, asset]
           imported += 1
           if (existing) updated += 1

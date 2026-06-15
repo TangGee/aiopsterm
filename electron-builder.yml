@@ -27,6 +27,9 @@ files:
   - '!node_modules/**/changelog.md'
   - '!node_modules/**/.DS_Store'
   - '!node_modules/**/Thumbs.db'
+extraResources:
+  - from: resources/icons
+    to: icons
 asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs

@@ -265,6 +265,11 @@ export type AiopsAssetConnectionTestInfo = {
 
 export type AiopsAssetConnectionTestResult = AiopsMutationResult<AiopsAssetConnectionTestInfo>
 
+export type AiopsAssetEditableSecret = {
+  assetId: string
+  password?: string
+}
+
 export type AiopsKeychainType = 'rsa' | 'ed25519' | 'ecdsa'
 
 export type AiopsKeychainRecord = {
@@ -3073,6 +3078,7 @@ export type AiopsPreloadApi = {
   renameAssetGroup: (input: AiopsAssetGroupRenameInput) => Promise<AiopsMutationResult<AiopsAssetSnapshot>>
   deleteAssetGroup: (input: AiopsAssetGroupDeleteInput) => Promise<AiopsMutationResult<AiopsAssetSnapshot>>
   saveAsset: (asset: AiopsAssetInput) => Promise<AiopsMutationResult<AiopsAssetRecord>>
+  getAssetEditableSecret: (id: string) => Promise<AiopsMutationResult<AiopsAssetEditableSecret>>
   testAssetConnection: (input: AiopsAssetConnectionTestInput) => Promise<AiopsAssetConnectionTestResult>
   deleteAsset: (id: string) => Promise<AiopsMutationResult<{ id: string }>>
   refreshOrganizationAssets: (input?: AiopsOrganizationAssetRefreshInput) => Promise<AiopsOrganizationAssetRefreshResult>

@@ -1788,6 +1788,42 @@ describe('AppShell', () => {
     expect(assets.text()).toContain('proxy-unit')
   })
 
+  it('loads saved host passwords for Assets edits and supports explicit reveal toggles', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+
+    await openAssetTreeCreateHost(assets)
+    const createSecretInput = assets.find('.asset-form-panel .asset-secret-field input')
+    expect(createSecretInput.exists()).toBe(true)
+    expect((createSecretInput.element as HTMLInputElement).value).toBe('')
+    expect((createSecretInput.element as HTMLInputElement).type).toBe('password')
+    await assets.find('.asset-form-panel .asset-secret-toggle').trigger('click')
+    expect((createSecretInput.element as HTMLInputElement).type).toBe('text')
+    await assets.find('.asset-form-panel header button[title="关闭"]').trigger('click')
+    await flushPromises()
+
+    vi.mocked(window.aiops.getAssetEditableSecret).mockClear()
+    await assets.findAll('.host-card').find((card) => card.text().includes('legacy-node'))!.trigger('contextmenu', {
+      clientX: 220,
+      clientY: 180
+    })
+    await assets.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.getAssetEditableSecret).toHaveBeenCalledWith('asset-4')
+    const editSecretInput = assets.find('.asset-form-panel .asset-secret-field input')
+    expect((editSecretInput.element as HTMLInputElement).value).toBe('legacy-password')
+    expect((editSecretInput.element as HTMLInputElement).type).toBe('password')
+    await assets.find('.asset-form-panel .asset-secret-toggle').trigger('click')
+    expect((editSecretInput.element as HTMLInputElement).type).toBe('text')
+  })
+
   it('routes Database connection drafts through backend-confirmed SSH proxy configs', async () => {
     const releaseProxy = {
       name: 'release-proxy',
@@ -1897,6 +1933,37 @@ describe('AppShell', () => {
 
     expect(wrapper.text()).not.toContain('本地连接')
     expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
+  })
+
+  it('loads saved host passwords for Workspace edits and keeps them auditable before save', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.find('.workspace-search input').setValue('legacy-node')
+    await flushPromises()
+
+    vi.mocked(window.aiops.getAssetEditableSecret).mockClear()
+    await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('legacy-node'))!.trigger('contextmenu', {
+      clientX: 260,
+      clientY: 180
+    })
+    await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.getAssetEditableSecret).toHaveBeenCalledWith('asset-4')
+    const secretInput = wrapper.find('.workspace-host-form .asset-secret-field input')
+    expect((secretInput.element as HTMLInputElement).value).toBe('legacy-password')
+    expect((secretInput.element as HTMLInputElement).type).toBe('password')
+    await wrapper.find('.workspace-host-form .asset-secret-toggle').trigger('click')
+    expect((secretInput.element as HTMLInputElement).type).toBe('text')
+
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await wrapper.find('.workspace-host-form').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ id: 'asset-4', password: 'legacy-password' }))
   })
 
   it('does not fabricate Assets export success when the backend export bridge is unavailable, fails, or is canceled', async () => {

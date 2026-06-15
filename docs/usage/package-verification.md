@@ -6,7 +6,7 @@ Before packaging changes are merged, run the package configuration audit:
 npm run audit:package-config
 ```
 
-`audit:package-config` verifies that the package scripts expose `build:linux`, `build:deb`, `build:mac`, and `build:mac:dir`, that electron-builder keeps the External reference reference tree excluded, that Linux targets include AppImage and deb, that macOS targets include dmg and zip, that artifact names are explicit, and that the `aiopsterm://` protocol remains registered.
+`audit:package-config` verifies that the package scripts expose `build:linux`, `build:deb`, `build:mac`, and `build:mac:dir`, that electron-builder keeps the External reference reference tree excluded, that Linux targets include AppImage and deb, that macOS targets include dmg and zip, that artifact names are explicit, that `resources/icons` is copied into packaged resources for runtime window icons, and that the `aiopsterm://` protocol remains registered.
 
 After building the full Linux package set with `npm run build:linux`, run the package-level checks:
 
@@ -22,6 +22,7 @@ npm run audit:linux-package
 - the expected AppImage, deb, `app.asar`, and `app.asar.unpacked` files exist for the current package version
 - packaged `node-pty` still includes `build/Release/pty.node`, runtime JS, package metadata, and license
 - packaged `node-pty` no longer includes build-only directories such as `bin`, `scripts`, `src`, `deps`, `prebuilds`, or test files
+- the self-owned app icon PNG set is present for Linux desktop metadata and runtime window icon loading
 - the deb desktop file registers `MimeType=x-scheme-handler/aiopsterm;`
 - the deb desktop file keeps `%U` URL argument handling in its `Exec` line
 

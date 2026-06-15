@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, type IpcMain
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { randomUUID } from 'crypto'
-import { watch } from 'fs'
+import { existsSync, watch } from 'fs'
 import type { FSWatcher } from 'fs'
 import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'fs/promises'
 import Store from 'electron-store'
@@ -17,6 +17,7 @@ import {
   deleteKeychain,
   exportAssets,
   getAsset,
+  getAssetEditableSecret,
   getAssetSecret,
   getKeychain,
   getKeychainSecret,
@@ -1071,6 +1072,7 @@ app.on('open-url', (event, url) => {
 })
 
 const createWindow = () => {
+  const appIcon = resolveAppIconPath()
   mainWindow = new BrowserWindow({
     width: 1344,
     height: 756,
@@ -1079,6 +1081,7 @@ const createWindow = () => {
     title: 'aiopsterm',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     backgroundColor: '#0f1117',
+    ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -1105,6 +1108,17 @@ const createWindow = () => {
   mainWindow.on('unmaximize', () => {
     mainWindow?.webContents.send('window:unmaximized')
   })
+}
+
+const resolveAppIconPath = () => {
+  if (process.platform === 'darwin') return ''
+  const candidates = [
+    join(process.resourcesPath || '', 'icons', '256x256.png'),
+    join(process.resourcesPath || '', 'resources', 'icons', '256x256.png'),
+    join(__dirname, '../../resources/icons/256x256.png'),
+    resolve('resources/icons/256x256.png')
+  ]
+  return candidates.find((candidate) => candidate && existsSync(candidate)) || ''
 }
 
 const getDefaultShell = () => {
@@ -3055,6 +3069,7 @@ const registerIpc = () => {
   ipcMain.handle('assets:groups:rename', (_event, input: AiopsAssetGroupRenameInput) => renameAssetGroup(input))
   ipcMain.handle('assets:groups:delete', (_event, input: AiopsAssetGroupDeleteInput) => deleteAssetGroup(input))
   ipcMain.handle('assets:save', (_event, asset: AiopsAssetInput) => saveAsset(asset))
+  ipcMain.handle('assets:editable-secret:get', (_event, id: string) => getAssetEditableSecret(id))
   ipcMain.handle('assets:test-connection', (_event, input) => testAssetConnection(input))
   ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
   ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))

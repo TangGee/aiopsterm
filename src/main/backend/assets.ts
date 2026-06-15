@@ -13,6 +13,7 @@ import type {
   AiopsAssetExportInput,
   AiopsAssetExportPayload,
   AiopsAssetExportResult,
+  AiopsAssetEditableSecret,
   AiopsAssetImportConfirmInput,
   AiopsAssetImportConfirmResult,
   AiopsAssetImportPreviewInput,
@@ -1495,6 +1496,18 @@ export const listAssets = (): AiopsAssetSnapshot => getStore().list()
 export const listAssetGroups = (input: AiopsAssetGroupListInput = {}): AiopsAssetGroupRecord[] => listAssetGroupsFromAssets(getStore().list().assets, input)
 export const getAsset = (id: string): AiopsAssetRecord | null => getStore().getAsset(id)
 export const getAssetSecret = (id: string): AssetSecret => getStore().getSecret(id)
+export const getAssetEditableSecret = (id: string): AiopsMutationResult<AiopsAssetEditableSecret> =>
+  asResult(() => {
+    const assetId = text(id)
+    if (!assetId) throw new Error('资产 id 不能为空')
+    const asset = getStore().getAsset(assetId)
+    if (!asset || asset.isLocalShell) throw new Error('资产不存在或不可编辑')
+    const secret = getStore().getSecret(assetId)
+    return {
+      assetId,
+      ...(typeof secret.password === 'string' && secret.password ? { password: secret.password } : {})
+    }
+  })
 export const getKeychainSecret = (id: string): AssetSecret => getStore().getKeychainSecret(id)
 export const saveAsset = (input: AiopsAssetInput): AiopsMutationResult<AiopsAssetRecord> =>
   asResult(() => {

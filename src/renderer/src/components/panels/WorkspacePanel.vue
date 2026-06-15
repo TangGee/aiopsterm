@@ -489,11 +489,23 @@
           </label>
           <label v-if="hostForm.authType === 'password'">
             <span>密码</span>
-            <input
-              v-model="hostForm.password"
-              type="password"
-              placeholder="留空则保留已保存密码"
-            />
+            <div class="asset-secret-field">
+              <input
+                v-model="hostForm.password"
+                :type="hostPasswordVisible ? 'text' : 'password'"
+                :placeholder="hostModal.mode === 'create' ? '' : '未保存密码时留空'"
+                autocomplete="new-password"
+              />
+              <button
+                type="button"
+                class="asset-secret-toggle"
+                :title="hostPasswordVisible ? '隐藏密码' : '显示密码'"
+                @click="hostPasswordVisible = !hostPasswordVisible"
+              >
+                <EyeOff v-if="hostPasswordVisible" />
+                <Eye v-else />
+              </button>
+            </div>
           </label>
           <label v-if="hostForm.authType === 'keyBased'">
             <span class="workspace-field-heading">
@@ -883,10 +895,22 @@
           </label>
           <label v-if="hostJumpForm.authType === 'password'">
             <span>密码</span>
-            <input
-              v-model="hostJumpForm.password"
-              type="password"
-            />
+            <div class="asset-secret-field">
+              <input
+                v-model="hostJumpForm.password"
+                :type="hostJumpPasswordVisible ? 'text' : 'password'"
+                autocomplete="new-password"
+              />
+              <button
+                type="button"
+                class="asset-secret-toggle"
+                :title="hostJumpPasswordVisible ? '隐藏密码' : '显示密码'"
+                @click="hostJumpPasswordVisible = !hostJumpPasswordVisible"
+              >
+                <EyeOff v-if="hostJumpPasswordVisible" />
+                <Eye v-else />
+              </button>
+            </div>
           </label>
           <label v-else>
             <span>KeyChain</span>
@@ -1148,6 +1172,8 @@ import {
   ChevronRight,
   Copy,
   Database,
+  Eye,
+  EyeOff,
   Folder,
   FolderInput,
   FolderMinus,
@@ -1279,6 +1305,9 @@ const hostFormError = ref('')
 const hostTestLoading = ref(false)
 const hostTestMessage = ref('')
 const hostTestOk = ref(false)
+const hostPasswordVisible = ref(false)
+const hostJumpPasswordVisible = ref(false)
+let hostSecretRequestId = 0
 const hostChildModal = ref<'' | 'proxy' | 'key' | 'jumpHost'>('')
 const hostChildFormError = ref('')
 const hostKeyForm = reactive({
@@ -2023,6 +2052,7 @@ const openCreateFolderFromMoveModal = () => {
 }
 
 const openCreateHost = (targetGroup?: WorkspaceGroup | null) => {
+  hostSecretRequestId += 1
   hostModal.visible = true
   hostModal.mode = 'create'
   hostModal.assetId = ''
@@ -2036,6 +2066,7 @@ const openCreateHost = (targetGroup?: WorkspaceGroup | null) => {
   hostForm.authType = 'password'
   hostForm.comment = ''
   hostForm.password = ''
+  hostPasswordVisible.value = false
   hostForm.keychainId = ''
   hostForm.proxyName = ''
   hostForm.jumpHostId = ''
@@ -2065,10 +2096,12 @@ const closeDeleteGroupModal = () => {
 }
 
 const closeHostModal = () => {
+  hostSecretRequestId += 1
   hostModal.visible = false
   hostModal.assetId = ''
   hostModal.targetGroupKey = ''
   hostForm.password = ''
+  hostPasswordVisible.value = false
   hostForm.keychainId = ''
   hostForm.proxyName = ''
   hostForm.jumpHostId = ''
@@ -2771,7 +2804,21 @@ const confirmDeleteGroup = () => {
   closeDeleteGroupModal()
 }
 
+const loadHostEditablePassword = async (requestId: number, assetId: string) => {
+  const bridge = window.aiops?.getAssetEditableSecret
+  if (typeof bridge !== 'function') return
+  try {
+    const result = await bridge(assetId)
+    if (requestId !== hostSecretRequestId || hostModal.assetId !== assetId || !hostModal.visible || hostModal.mode === 'create') return
+    if (!result?.ok) return
+    hostForm.password = result.data?.password || ''
+  } catch {
+    if (requestId === hostSecretRequestId && hostModal.assetId === assetId) hostForm.password = ''
+  }
+}
+
 const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
+  const secretRequestId = ++hostSecretRequestId
   hostModal.visible = true
   hostModal.mode = mode
   hostModal.assetId = mode === 'create' ? '' : asset?.id || ''
@@ -2785,12 +2832,14 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostForm.authType = asset?.auth_type || (activeWorkspace.value === 'bastion' ? 'keyBased' : 'password')
   hostForm.comment = asset?.comment || ''
   hostForm.password = ''
+  hostPasswordVisible.value = false
   hostForm.keychainId = asset?.keychainId || ''
   hostForm.proxyName = asset?.proxyName || ''
   hostForm.jumpHostId = asset?.jumpHostId || ''
   hostFormError.value = ''
   resetHostConnectionTest()
   closeContextMenu()
+  if (mode === 'edit' && asset?.id && hostForm.authType === 'password') void loadHostEditablePassword(secretRequestId, asset.id)
 }
 
 const closeHostChildModal = () => {
@@ -2828,6 +2877,7 @@ const openJumpHostCreateFromHostForm = () => {
     keychainId: '',
     comment: '跳板机'
   })
+  hostJumpPasswordVisible.value = false
 }
 
 const editContextAsset = () => {
