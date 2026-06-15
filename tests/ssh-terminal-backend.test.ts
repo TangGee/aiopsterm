@@ -776,8 +776,7 @@ describe('ssh terminal backend runtime', () => {
     expect(pty.spawnCalls).toHaveLength(1)
     const spawn = pty.spawnCalls[0]
     expect(spawn.shell).toBe('ssh')
-    expect(spawn.args.slice(0, 4)).toEqual(['-tt', '-p', '2222', 'ops@relay.example'])
-    expect(spawn.args[4]).toContain("ssh -tt -p 22 -- 'root@target.internal'")
+    expect(spawn.args).toEqual(['-tt', '-p', '2222', 'ops@relay.example'])
     expect(spawn.options).toEqual(
       expect.objectContaining({
         name: 'xterm-256color',
@@ -792,13 +791,19 @@ describe('ssh terminal backend runtime', () => {
         })
       })
     )
-    expect(pty.processes[0].writes).toEqual(['queued-before-relay\n'])
+    expect(pty.processes[0].writes).toEqual([])
+    pty.processes[0].emitData("Please input user's password: ")
+    expect(pty.processes[0].writes).toEqual([])
+    pty.processes[0].emitData('ops@relay:~$ ')
+    expect(pty.processes[0].writes).toHaveLength(1)
+    expect(pty.processes[0].writes[0]).toContain("ssh -tt -p 22 -- 'root@target.internal'")
+    expect(pty.processes[0].writes[0]).not.toContain('queued-before-relay')
     result.session?.write('uptime\n')
     result.session?.resize(120, 36)
-    expect(pty.processes[0].writes).toEqual(['queued-before-relay\n', 'uptime\n'])
+    expect(pty.processes[0].writes).toEqual([pty.processes[0].writes[0], 'uptime\n'])
     expect(pty.processes[0].resizes).toEqual([{ cols: 120, rows: 36 }])
 
-    const command = spawn.args[4]
+    const command = pty.processes[0].writes[0]
     const relayToken = command.match(/__AIO_CTX_BEGIN_([A-Za-z0-9_-]+_relay)__/)
     const targetToken = command.match(/__AIO_CTX_BEGIN_([A-Za-z0-9_-]+_target)__/)
     expect(relayToken?.[1]).toBeTruthy()
@@ -808,8 +813,9 @@ describe('ssh terminal backend runtime', () => {
     pty.processes[0].emitData(`__AIO_CTX_END_${relayToken![1]}__target login banner\n`)
     pty.processes[0].emitData(`__AIO_CTX_BEGIN_${targetToken![1]}__\nhop=target\nexpected=target.internal\nuser=root\nhost=target.internal\npwd=/root\n__AIO_CTX_END_${targetToken![1]}__`)
     pty.processes[0].emitData('root@target:~# ')
+    expect(pty.processes[0].writes).toEqual([command, 'uptime\n', 'queued-before-relay\n'])
 
-    expect(events.data.map((chunk) => chunk.toString()).join('')).toBe('relay banner\ntarget login banner\nroot@target:~# ')
+    expect(events.data.map((chunk) => chunk.toString()).join('')).toBe("Please input user's password: ops@relay:~$ relay banner\ntarget login banner\nroot@target:~# ")
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('__AIO_CTX_')
     expect(events.lifecycle).toEqual(
       expect.arrayContaining([
