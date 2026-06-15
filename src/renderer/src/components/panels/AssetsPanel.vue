@@ -2021,16 +2021,18 @@ const openJumpHostCreateFromHostForm = () => {
   editorOpen.value = true
 }
 
-const loadAssetEditablePassword = async (requestId: number, assetId: string) => {
+const loadAssetEditablePassword = async (requestId: number, assetId: string, mode: 'edit' | 'clone' = 'edit') => {
   const bridge = window.aiops?.getAssetEditableSecret
   if (typeof bridge !== 'function') return
   try {
     const result = await bridge(assetId)
-    if (requestId !== assetSecretRequestId || form.id !== assetId || !editorOpen.value || !editMode.value) return
+    const stillEditingSource = mode === 'edit' && form.id === assetId && editMode.value
+    const stillCloningSource = mode === 'clone' && !form.id && !editMode.value
+    if (requestId !== assetSecretRequestId || !editorOpen.value || (!stillEditingSource && !stillCloningSource)) return
     if (!result?.ok) return
     form.password = result.data?.password || ''
   } catch {
-    if (requestId === assetSecretRequestId && form.id === assetId) form.password = ''
+    if (requestId === assetSecretRequestId && ((mode === 'edit' && form.id === assetId) || (mode === 'clone' && !form.id))) form.password = ''
   }
 }
 
@@ -2069,7 +2071,7 @@ const cloneAsset = (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
   if (!asset) return
-  assetSecretRequestId += 1
+  const secretRequestId = ++assetSecretRequestId
   closeAssetContextMenus()
   activeAssetView.value = 'assetConfig'
   editMode.value = false
@@ -2093,6 +2095,7 @@ const cloneAsset = (assetId: string | null) => {
     switchBrand: 'cisco'
   })
   editorOpen.value = true
+  if (asset.auth_type === 'password') void loadAssetEditablePassword(secretRequestId, asset.id, 'clone')
 }
 
 const removeAsset = (assetId: string | null) => {

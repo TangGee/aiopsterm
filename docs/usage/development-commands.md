@@ -67,7 +67,7 @@ Build and then start the latest Electron preview window:
 npm run build:start
 ```
 
-The script runs `npm run build`, then starts `electron-vite preview --skipBuild --noSandbox`. Use `npm run build:start -- --restart` when an old aiopsterm preview window is still open and should be stopped before launching the new build. Use `npm run build:start -- --skip-build` to reopen the latest existing build without rebuilding.
+The script runs `npm run build`, stops any existing aiopsterm preview process, then starts `electron-vite preview --skipBuild --noSandbox`. This avoids the Electron single-instance lock making a second preview appear to flash and exit. Use `npm run build:start -- --skip-build` to reopen the latest existing build without rebuilding. Use `scripts/build-and-start.sh --no-restart` only when you want the script to detect an existing preview and exit without replacing it.
 
 Rebuild native Electron modules explicitly:
 

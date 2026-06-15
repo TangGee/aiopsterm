@@ -2839,7 +2839,7 @@ const openHostEditor = (mode: HostModalMode, asset?: WorkspaceAsset) => {
   hostFormError.value = ''
   resetHostConnectionTest()
   closeContextMenu()
-  if (mode === 'edit' && asset?.id && hostForm.authType === 'password') void loadHostEditablePassword(secretRequestId, asset.id)
+  if ((mode === 'edit' || mode === 'clone') && asset?.id && hostForm.authType === 'password') void loadHostEditablePassword(secretRequestId, asset.id)
 }
 
 const closeHostChildModal = () => {

@@ -1824,6 +1824,41 @@ describe('AppShell', () => {
     expect((editSecretInput.element as HTMLInputElement).type).toBe('text')
   })
 
+  it('copies saved passwords when cloning hosts from Assets', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+
+    vi.mocked(window.aiops.getAssetEditableSecret).mockClear()
+    await assets.findAll('.host-card').find((card) => card.text().includes('legacy-node'))!.trigger('contextmenu', {
+      clientX: 220,
+      clientY: 180
+    })
+    await assets.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('克隆'))!.trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.getAssetEditableSecret).toHaveBeenCalledWith('asset-4')
+    const clonedSecretInput = assets.find('.asset-form-panel .asset-secret-field input')
+    expect((clonedSecretInput.element as HTMLInputElement).value).toBe('legacy-password')
+    expect((assets.findAll('.asset-form-panel input').at(0)!.element as HTMLInputElement).value).toBe('legacy-node_Clone')
+
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await assets.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        title: 'legacy-node_Clone',
+        password: 'legacy-password'
+      })
+    )
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
+  })
+
   it('routes Database connection drafts through backend-confirmed SSH proxy configs', async () => {
     const releaseProxy = {
       name: 'release-proxy',
@@ -1964,6 +1999,41 @@ describe('AppShell', () => {
     await wrapper.find('.workspace-host-form').trigger('submit')
     await flushPromises()
     expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ id: 'asset-4', password: 'legacy-password' }))
+  })
+
+  it('copies saved passwords when cloning hosts from Workspace', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.find('.workspace-search input').setValue('legacy-node')
+    await flushPromises()
+
+    vi.mocked(window.aiops.getAssetEditableSecret).mockClear()
+    await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('legacy-node'))!.trigger('contextmenu', {
+      clientX: 260,
+      clientY: 180
+    })
+    await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('克隆'))!.trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.getAssetEditableSecret).toHaveBeenCalledWith('asset-4')
+    const clonedSecretInput = wrapper.find('.workspace-host-form .asset-secret-field input')
+    expect((clonedSecretInput.element as HTMLInputElement).value).toBe('legacy-password')
+    expect((wrapper.findAll('.workspace-host-form input').at(0)!.element as HTMLInputElement).value).toBe('legacy-node_Clone')
+
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await wrapper.find('.workspace-host-form').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        title: 'legacy-node_Clone',
+        password: 'legacy-password'
+      })
+    )
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
   })
 
   it('does not fabricate Assets export success when the backend export bridge is unavailable, fails, or is canceled', async () => {
