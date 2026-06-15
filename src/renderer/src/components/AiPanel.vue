@@ -670,10 +670,11 @@
               type="button"
               class="message-command-icon-button"
               :title="t('ai.commandReviewTitle')"
+              :aria-label="t('ai.commandReviewTitle')"
               data-testid="ai-message-command-review"
               @click.stop="openCommandAuditDialog(message)"
             >
-              <Pencil />
+              <Maximize2 />
             </button>
             <button
               type="button"
@@ -686,18 +687,6 @@
             </button>
           </div>
           <div class="message-command-code-shell">
-            <div class="message-command-code-toolbar">
-              <button
-                type="button"
-                class="message-command-review-button"
-                :title="t('ai.commandReviewTitle')"
-                data-testid="ai-message-command-review-large"
-                @click.stop="openCommandAuditDialog(message)"
-              >
-                <Maximize2 />
-                <span>{{ t('ai.commandReviewOpen') }}</span>
-              </button>
-            </div>
             <pre
               class="message-command-code"
               data-testid="ai-message-command-text"
@@ -726,27 +715,33 @@
               type="button"
               class="secondary danger"
               data-testid="ai-message-command-reject"
+              :title="t('ai.commandReject')"
+              :aria-label="t('ai.commandReject')"
               :disabled="isCommandTerminalActionDisabled(message)"
               @click.stop="rejectMessageCommand(message)"
             >
               <X />
-              <span>拒绝</span>
+              <span>{{ t('ai.commandReject') }}</span>
             </button>
             <button
               v-if="isReadOnlyCommandMessage(message)"
               type="button"
               class="secondary success"
               data-testid="ai-message-command-auto-run"
+              :title="t('ai.commandAutoRun')"
+              :aria-label="t('ai.commandAutoRun')"
               :disabled="isCommandTerminalActionDisabled(message)"
               @click.stop="void runMessageCommand(message, { autoReadOnly: true })"
             >
               <CheckCircle />
-              <span>查询类自动执行</span>
+              <span>{{ t('ai.commandAutoRun') }}</span>
             </button>
             <button
               type="button"
               class="primary"
               data-testid="ai-message-command-run"
+              :title="message.commandExecutionStatus === 'running' ? t('ai.commandRunning') : t('ai.commandRun')"
+              :aria-label="message.commandExecutionStatus === 'running' ? t('ai.commandRunning') : t('ai.commandRun')"
               :disabled="isCommandTerminalActionDisabled(message)"
               @click.stop="void runMessageCommand(message)"
             >
@@ -755,7 +750,7 @@
                 class="spinning"
               />
               <Play v-else />
-              <span>{{ message.commandExecutionStatus === 'running' ? '执行中' : '执行' }}</span>
+              <span>{{ message.commandExecutionStatus === 'running' ? t('ai.commandRunning') : t('ai.commandRun') }}</span>
             </button>
           </div>
         </div>

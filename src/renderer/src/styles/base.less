@@ -9349,12 +9349,14 @@ code {
 }
 
 .message-command-actions {
-  display: grid;
-  grid-template-columns: minmax(70px, 0.75fr) minmax(122px, 1.35fr) minmax(74px, 0.8fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 7px;
   margin-top: 10px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .message-command-actions button {
@@ -9370,19 +9372,34 @@ code {
   cursor: pointer;
   font-size: 12px;
   justify-content: center;
-  min-width: 0;
+  min-width: 58px;
+  max-width: 100%;
+  flex: 1 1 76px;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .message-command-actions button svg {
   width: 14px;
   height: 14px;
+  flex: 0 0 14px;
+}
+
+.message-command-actions button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .message-command-actions button.primary {
+  flex-grow: 0.85;
   color: var(--surface);
   border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
   background: var(--accent);
+}
+
+.message-command-actions button.secondary.success {
+  flex: 1.4 1 128px;
 }
 
 .message-command-actions button.secondary:hover {
@@ -9515,40 +9532,6 @@ code {
 
 .message-command-code-shell {
   min-width: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.message-command-code-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.message-command-review-button {
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
-  border-radius: 6px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
-  padding: 0 8px;
-  cursor: pointer;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.message-command-review-button:hover {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface-3));
-}
-
-.message-command-review-button svg {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
 }
 
 .message-command-code {
@@ -10447,14 +10430,19 @@ code {
   }
 
   .message-command-actions {
-    grid-template-columns: minmax(62px, 0.72fr) minmax(112px, 1.42fr) minmax(62px, 0.72fr);
     gap: 6px;
   }
 
   .message-command-actions button {
+    min-width: 54px;
+    flex-basis: 68px;
     gap: 4px;
     padding: 0 6px;
     font-size: 11px;
+  }
+
+  .message-command-actions button.secondary.success {
+    flex-basis: 112px;
   }
 
   .message-command-host {

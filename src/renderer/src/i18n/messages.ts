@@ -166,6 +166,10 @@ export type I18nKey =
   | 'ai.commandReviewCopy'
   | 'ai.commandReviewSave'
   | 'ai.commandReviewRun'
+  | 'ai.commandReject'
+  | 'ai.commandAutoRun'
+  | 'ai.commandRun'
+  | 'ai.commandRunning'
   | 'terminal.mfaTitle'
   | 'terminal.mfaDescription'
   | 'terminal.mfaPromptFallback'
@@ -331,6 +335,10 @@ const zhCN: LocaleMessages = {
   'ai.commandReviewCopy': '复制命令',
   'ai.commandReviewSave': '保存修改',
   'ai.commandReviewRun': '保存并执行',
+  'ai.commandReject': '拒绝',
+  'ai.commandAutoRun': '查询类自动执行',
+  'ai.commandRun': '执行',
+  'ai.commandRunning': '执行中',
   'terminal.mfaTitle': 'SSH 二次认证',
   'terminal.mfaDescription': '远程主机 {target} 需要动态密码或验证码。输入后将继续当前 SSH 登录。',
   'terminal.mfaPromptFallback': '验证码或动态密码',
@@ -495,6 +503,10 @@ const enUS: LocaleMessages = {
   'ai.commandReviewCopy': 'Copy command',
   'ai.commandReviewSave': 'Save changes',
   'ai.commandReviewRun': 'Save and run',
+  'ai.commandReject': 'Reject',
+  'ai.commandAutoRun': 'Auto-run read-only query',
+  'ai.commandRun': 'Run',
+  'ai.commandRunning': 'Running',
   'terminal.mfaTitle': 'SSH two-factor authentication',
   'terminal.mfaDescription': 'Remote host {target} requires a dynamic password or verification code. Submit it to continue the SSH login.',
   'terminal.mfaPromptFallback': 'Verification code or dynamic password',
