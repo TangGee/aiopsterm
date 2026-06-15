@@ -156,7 +156,6 @@
     <div
       v-if="moveModal.visible"
       class="files-folder-modal-backdrop"
-      @click.self="closeMoveModal"
     >
       <section class="files-folder-modal">
         <header>
@@ -196,7 +195,6 @@
     <div
       v-if="createFolderModal.visible"
       class="files-folder-modal-backdrop"
-      @click.self="closeCreateFolderModal"
     >
       <section class="files-folder-modal">
         <header>
@@ -254,7 +252,6 @@
     <div
       v-if="editFolderModal.visible"
       class="files-folder-modal-backdrop"
-      @click.self="closeEditFolderModal"
     >
       <section class="files-folder-modal">
         <header>
@@ -312,7 +309,6 @@
     <div
       v-if="deleteFolderModal.visible && deleteFolderInfo"
       class="files-folder-modal-backdrop"
-      @click.self="closeDeleteFolderModal"
     >
       <section class="files-folder-modal files-folder-confirm">
         <header>

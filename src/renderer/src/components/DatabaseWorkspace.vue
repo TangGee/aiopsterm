@@ -1781,7 +1781,6 @@
     <div
       v-if="connectionModalOpen"
       class="db-modal-overlay"
-      @click.self="closeConnectionModal"
     >
       <form
         class="db-connection-modal"
@@ -2013,7 +2012,6 @@
     <div
       v-if="createDatabaseModal.open"
       class="db-modal-overlay"
-      @click.self="closeCreateDatabaseModal"
     >
       <form
         class="db-create-modal"
@@ -2076,7 +2074,6 @@
     <div
       v-if="chartModal.open"
       class="db-modal-overlay"
-      @click.self="closeChartModal"
     >
       <section class="db-chart-modal">
         <header>
@@ -2130,7 +2127,6 @@
     <div
       v-if="commentModal.open"
       class="db-modal-overlay"
-      @click.self="closeCommentModal"
     >
       <section class="db-comment-modal">
         <header>
@@ -2183,7 +2179,6 @@
     <div
       v-if="ddlModal.open"
       class="db-modal-overlay"
-      @click.self="ddlModal.open = false"
     >
       <section class="db-ddl-modal">
         <header>
@@ -2223,7 +2218,6 @@
     <div
       v-if="dangerConfirm.open"
       class="db-modal-overlay"
-      @click.self="cancelDangerousTableAction"
     >
       <section class="db-danger-confirm">
         <header>
@@ -2269,7 +2263,6 @@
     <div
       v-if="operationConfirm.open"
       class="db-modal-overlay"
-      @click.self="cancelOperationConfirm"
     >
       <section class="db-operation-confirm">
         <header>

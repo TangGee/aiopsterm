@@ -350,7 +350,6 @@
     <div
       v-if="moveDialog.visible && moveDialog.entry"
       class="file-modal"
-      @click.self="closeMoveDialog"
     >
       <div class="file-modal-card">
         <header>
@@ -445,7 +444,6 @@
     <div
       v-if="conflictDialog.visible && moveDialog.entry"
       class="file-modal"
-      @click.self="handleConflictAction('cancel')"
     >
       <div class="file-modal-card small">
         <header>

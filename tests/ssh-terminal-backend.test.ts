@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { TerminalLifecycleEvent } from '../src/shared/preload'
+import type { TerminalKeyboardInteractivePrompt, TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult, TerminalLifecycleEvent } from '../src/shared/preload'
 
 type RecordedEvents = {
   lifecycle: TerminalLifecycleEvent[]
@@ -45,7 +45,7 @@ class MockSshChannel extends PassThrough {
   }
 }
 
-const createSshRuntime = (options: { failConnect?: Error; failShell?: Error } = {}) => {
+const createSshRuntime = (options: { failConnect?: Error; failShell?: Error; manualReady?: boolean } = {}) => {
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
   const channels: MockSshChannel[] = []
@@ -56,6 +56,7 @@ const createSshRuntime = (options: { failConnect?: Error; failShell?: Error } = 
 
     connect(config: Record<string, unknown>) {
       connectConfigs.push(config)
+      if (options.manualReady) return
       queueMicrotask(() => {
         if (options.failConnect) this.emit('error', options.failConnect)
         else this.emit('ready')
@@ -125,6 +126,22 @@ const createSink = (events: RecordedEvents) => ({
   exit: (event: TerminalLifecycleEvent, code?: number | null) => events.exit.push({ event, code }),
   closed: (id: string) => events.closed.push(id)
 })
+
+const emitKeyboardInteractive = (
+  client: EventEmitter,
+  prompts: TerminalKeyboardInteractivePrompt[] = [{ prompt: 'Verification code:', echo: false }],
+  extra: { name?: string; instructions?: string } = {}
+) =>
+  new Promise<string[]>((resolve) => {
+    client.emit(
+      'keyboard-interactive',
+      extra.name || 'keyboard-interactive',
+      extra.instructions || 'Enter MFA code',
+      '',
+      prompts,
+      (responses: string[]) => resolve(responses)
+    )
+  })
 
 describe('ssh terminal backend runtime', () => {
   beforeEach(async () => {
@@ -259,6 +276,77 @@ describe('ssh terminal backend runtime', () => {
     )
     expect(ssh.connectConfigs[0]).not.toHaveProperty('host')
     expect(ssh.connectConfigs[0]).not.toHaveProperty('port')
+  })
+
+  it('bridges ssh keyboard-interactive authentication through the terminal sink', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ manualReady: true })
+    const events = createRecorder()
+    const requests: TerminalKeyboardInteractiveRequest[] = []
+    const results: TerminalKeyboardInteractiveResult[] = []
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const result = backend.createSshTerminalSession(
+      'ssh-mfa-1',
+      { kind: 'ssh', ssh: { host: '113.133.183.5', username: 'root', port: 7992, password: 'secret' } },
+      {
+        ...createSink(events),
+        keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
+          requests.push(request)
+          return ['654321']
+        },
+        keyboardInteractiveResult: (payload: TerminalKeyboardInteractiveResult) => results.push(payload)
+      }
+    )
+    await waitForMicrotasks(3)
+
+    expect(result.session).toBeTruthy()
+    expect(ssh.connectConfigs[0]).toEqual(
+      expect.objectContaining({
+        host: '113.133.183.5',
+        port: 7992,
+        username: 'root',
+        tryKeyboard: true
+      })
+    )
+
+    const responses = await emitKeyboardInteractive(ssh.clients[0], [{ prompt: 'One-time password:', echo: false }], {
+      name: 'Dynamic password',
+      instructions: 'Enter current token'
+    })
+    expect(responses).toEqual(['654321'])
+    expect(requests).toEqual([
+      expect.objectContaining({
+        id: 'ssh-mfa-1-keyboard-1',
+        connectionId: 'ssh-ssh-mfa-1',
+        host: '113.133.183.5',
+        port: 7992,
+        username: 'root',
+        name: 'Dynamic password',
+        instructions: 'Enter current token',
+        prompts: [{ prompt: 'One-time password:', echo: false }],
+        attempts: 1,
+        maxAttempts: 5,
+        timeoutMs: 180000
+      })
+    ])
+    expect(events.lifecycle.at(-1)).toEqual(
+      expect.objectContaining({
+        stage: 'connecting',
+        message: 'Two-factor authentication required for root@113.133.183.5:7992'
+      })
+    )
+
+    ssh.clients[0].emit('ready')
+    await waitForMicrotasks(3)
+    expect(results).toEqual([expect.objectContaining({ id: 'ssh-mfa-1-keyboard-1', status: 'success', attempts: 1 })])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
   })
 
   it('fails closed when ssh2 runtime is unavailable or target fields are invalid', async () => {

@@ -211,7 +211,7 @@ import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue
 import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
-import type { FileSessionInfo, KeywordHighlightUserConfig } from '@shared/preload'
+import type { FileSessionInfo, KeywordHighlightUserConfig, TerminalKeyboardInteractiveRequest } from '@shared/preload'
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
 
@@ -565,6 +565,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetSkillsStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
     ;(globalThis as any).__resetConfigStoreMock?.()
+    ;(globalThis as any).__resetTerminalKeyboardInteractiveMock?.()
   })
 
   afterEach(() => {
@@ -593,6 +594,57 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('与AI对话')
     expect(wrapper.text()).toContain('切换布局')
     expect(wrapper.text()).not.toContain('local shell')
+  })
+
+  it('keeps the SSH keyboard-interactive dialog open on backdrop clicks and submits responses', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await flushPromises()
+
+    const request: TerminalKeyboardInteractiveRequest = {
+      id: 'ssh-mfa-ui-1',
+      connectionId: 'ssh-test-session',
+      host: '113.133.183.5',
+      port: 7992,
+      username: 'root',
+      title: 'dynamic-bastion',
+      name: 'Dynamic password',
+      instructions: 'Enter OTP',
+      prompts: [{ prompt: 'Verification code:', echo: false }],
+      attempts: 1,
+      maxAttempts: 5,
+      timeoutMs: 180000
+    }
+    ;(globalThis as any).__emitTerminalKeyboardInteractiveRequestMock(request)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').text()).toContain('root@113.133.183.5:7992')
+    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').text()).toContain('Verification code:')
+    await wrapper.find('.terminal-mfa-backdrop').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(true)
+
+    await wrapper.find('.terminal-mfa-dialog form').trigger('submit')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="terminal-mfa-error"]').text()).toContain('请输入认证信息')
+    await wrapper.find('[data-testid="terminal-mfa-input"]').setValue('654321')
+    await wrapper.find('.terminal-mfa-dialog form').trigger('submit')
+    expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('ssh-mfa-ui-1', ['654321'])
+
+    ;(globalThis as any).__emitTerminalKeyboardInteractiveResultMock({ id: 'ssh-mfa-ui-1', status: 'success', attempts: 1 })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(false)
+
+    wrapper.unmount()
   })
 
   it('switches core shell and AI labels through the External reference locale set', async () => {
@@ -2431,6 +2483,9 @@ describe('AppShell', () => {
     await menuButton('新建主机').trigger('click')
     await flushPromises()
     expect(wrapper.find('.workspace-host-modal').exists()).toBe(true)
+    await wrapper.find('.files-folder-modal-backdrop').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.workspace-host-modal').exists()).toBe(true)
     expect((wrapper.findAll('.workspace-host-form input').at(2)!.element as HTMLInputElement).value).toBe('root')
     expect(wrapper.find('.workspace-host-form').text()).not.toContain('分组')
     await wrapper.findAll('.workspace-host-form input').at(0)!.setValue('jump-source-host')
@@ -2525,6 +2580,13 @@ describe('AppShell', () => {
     await flushPromises()
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', title: 'tree-linked-host' }))
     expect(store.workspacePreferences.recentAssetIds?.[0]).toMatch(/^asset-test-/)
+
+    await wrapper.findAll('.workspace-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+    await flushPromises()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await hostRow('jumpserver-org').trigger('dblclick')
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-5', title: 'jumpserver-org' }))
 
     wrapper.unmount()
   })
@@ -4136,6 +4198,9 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.writeTerminal).mockClear()
     vi.mocked(window.aiops.updateChatConversation).mockClear()
     await commandMessage!.find('[data-testid="ai-message-command-review"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-command-audit-dialog"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ai-command-audit-dialog"]').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="ai-command-audit-dialog"]').exists()).toBe(true)
     expect((wrapper.find('[data-testid="ai-command-audit-input"]').element as HTMLTextAreaElement).value).toBe('uptime')

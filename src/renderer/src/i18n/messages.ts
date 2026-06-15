@@ -31,6 +31,7 @@ export type I18nKey =
   | 'common.save'
   | 'common.search'
   | 'common.settings'
+  | 'common.submit'
   | 'common.system'
   | 'module.workspace'
   | 'module.assets'
@@ -165,6 +166,19 @@ export type I18nKey =
   | 'ai.commandReviewCopy'
   | 'ai.commandReviewSave'
   | 'ai.commandReviewRun'
+  | 'terminal.mfaTitle'
+  | 'terminal.mfaDescription'
+  | 'terminal.mfaPromptFallback'
+  | 'terminal.mfaRemaining'
+  | 'terminal.mfaAttempts'
+  | 'terminal.mfaRequired'
+  | 'terminal.mfaSubmit'
+  | 'terminal.mfaSubmitting'
+  | 'terminal.mfaEmpty'
+  | 'terminal.mfaFailed'
+  | 'terminal.mfaCanceled'
+  | 'terminal.mfaTimeout'
+  | 'terminal.mfaSuccess'
 
 export type LocaleMessages = Record<I18nKey, string>
 
@@ -182,6 +196,7 @@ const zhCN: LocaleMessages = {
   'common.save': '保存',
   'common.search': '搜索',
   'common.settings': '设置',
+  'common.submit': '提交',
   'common.system': '系统',
   'module.workspace': '工作区',
   'module.assets': '资产',
@@ -315,7 +330,20 @@ const zhCN: LocaleMessages = {
   'ai.commandReviewOpen': '审计编辑',
   'ai.commandReviewCopy': '复制命令',
   'ai.commandReviewSave': '保存修改',
-  'ai.commandReviewRun': '保存并执行'
+  'ai.commandReviewRun': '保存并执行',
+  'terminal.mfaTitle': 'SSH 二次认证',
+  'terminal.mfaDescription': '远程主机 {target} 需要动态密码或验证码。输入后将继续当前 SSH 登录。',
+  'terminal.mfaPromptFallback': '验证码或动态密码',
+  'terminal.mfaRemaining': '剩余 {seconds}s',
+  'terminal.mfaAttempts': '第 {attempt}/{max} 次',
+  'terminal.mfaRequired': '需要二次认证',
+  'terminal.mfaSubmit': '提交认证',
+  'terminal.mfaSubmitting': '提交中',
+  'terminal.mfaEmpty': '请输入认证信息。',
+  'terminal.mfaFailed': '认证失败，请重新输入。',
+  'terminal.mfaCanceled': '已取消二次认证。',
+  'terminal.mfaTimeout': '二次认证超时，请重新连接。',
+  'terminal.mfaSuccess': '二次认证通过。'
 }
 
 const enUS: LocaleMessages = {
@@ -332,6 +360,7 @@ const enUS: LocaleMessages = {
   'common.save': 'Save',
   'common.search': 'Search',
   'common.settings': 'Settings',
+  'common.submit': 'Submit',
   'common.system': 'System',
   'module.workspace': 'Workspace',
   'module.assets': 'Assets',
@@ -465,7 +494,20 @@ const enUS: LocaleMessages = {
   'ai.commandReviewOpen': 'Review edit',
   'ai.commandReviewCopy': 'Copy command',
   'ai.commandReviewSave': 'Save changes',
-  'ai.commandReviewRun': 'Save and run'
+  'ai.commandReviewRun': 'Save and run',
+  'terminal.mfaTitle': 'SSH two-factor authentication',
+  'terminal.mfaDescription': 'Remote host {target} requires a dynamic password or verification code. Submit it to continue the SSH login.',
+  'terminal.mfaPromptFallback': 'Verification code or dynamic password',
+  'terminal.mfaRemaining': '{seconds}s remaining',
+  'terminal.mfaAttempts': 'Attempt {attempt}/{max}',
+  'terminal.mfaRequired': 'Two-factor authentication required',
+  'terminal.mfaSubmit': 'Submit verification',
+  'terminal.mfaSubmitting': 'Submitting',
+  'terminal.mfaEmpty': 'Enter the verification response.',
+  'terminal.mfaFailed': 'Verification failed. Please try again.',
+  'terminal.mfaCanceled': 'Two-factor authentication canceled.',
+  'terminal.mfaTimeout': 'Two-factor authentication timed out. Reconnect and try again.',
+  'terminal.mfaSuccess': 'Two-factor authentication passed.'
 }
 
 const zhTW: LocaleMessages = {

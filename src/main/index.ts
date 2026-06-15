@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, type IpcMainEvent } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { randomUUID } from 'crypto'
@@ -372,6 +372,8 @@ import type {
   TerminalCommandGenerationInput,
   TerminalCommandSuggestionContext,
   TerminalCreateOptions,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent,
   ChatImageAttachmentPrepareInput,
   ChatImageAttachmentClipboardInput,
@@ -596,6 +598,72 @@ const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buff
   })
   owner.webContents.send('terminal:data', terminalDataPayload(id, chunk))
 }
+
+const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item ?? '')).slice(0, 8)
+}
+
+const sendTerminalKeyboardInteractiveResult = (owner: BrowserWindow, result: TerminalKeyboardInteractiveResult) => {
+  logRuntimeEvent(result.status === 'success' ? 'info' : 'warn', 'terminal.keyboard-interactive.result', {
+    id: result.id,
+    status: result.status,
+    attempts: result.attempts,
+    final: result.final,
+    errorMessage: result.errorMessage
+  })
+  owner.webContents.send('terminal:keyboard-interactive:result', result)
+}
+
+const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: TerminalKeyboardInteractiveRequest) =>
+  new Promise<string[]>((resolve, reject) => {
+    let settled = false
+    const responseChannel = `terminal:keyboard-interactive:response:${request.id}`
+    const cancelChannel = `terminal:keyboard-interactive:cancel:${request.id}`
+    const cleanup = () => {
+      ipcMain.off(responseChannel, handleResponse)
+      ipcMain.off(cancelChannel, handleCancel)
+      clearTimeout(timer)
+    }
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    const handleResponse = (event: IpcMainEvent, responses: unknown) => {
+      if (event.sender !== owner.webContents) return
+      settle(() => resolve(sanitizeKeyboardInteractiveResponses(responses)))
+    }
+    const handleCancel = (event: IpcMainEvent) => {
+      if (event.sender !== owner.webContents) return
+      settle(() => reject(new Error('Two-factor authentication canceled by user.')))
+    }
+    const timer = setTimeout(() => {
+      sendTerminalKeyboardInteractiveResult(owner, {
+        id: request.id,
+        status: 'timeout',
+        attempts: request.attempts,
+        final: true,
+        errorMessage: 'Two-factor authentication timed out.'
+      })
+      settle(() => reject(new Error('Two-factor authentication timed out.')))
+    }, request.timeoutMs)
+
+    ipcMain.on(responseChannel, handleResponse)
+    ipcMain.on(cancelChannel, handleCancel)
+    logRuntimeEvent('info', 'terminal.keyboard-interactive.request', {
+      id: request.id,
+      connectionId: request.connectionId,
+      host: request.host,
+      port: request.port,
+      username: request.username,
+      prompts: request.prompts.length,
+      attempts: request.attempts,
+      maxAttempts: request.maxAttempts
+    })
+    owner.webContents.send('terminal:keyboard-interactive:request', request)
+  })
 
 const terminalBinaryPayload = (payload: unknown): Buffer => {
   if (payload instanceof ArrayBuffer) return Buffer.from(payload)
@@ -2573,6 +2641,8 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
       sendTerminalExit(owner, event, code ?? event.code ?? null)
     },
     data: (chunk) => sendTerminalData(owner, id, chunk),
+    keyboardInteractive: (request) => requestTerminalKeyboardInteractive(owner, request),
+    keyboardInteractiveResult: (result) => sendTerminalKeyboardInteractiveResult(owner, result),
     closed: () => {
       sessions.delete(id)
       logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'ssh' })

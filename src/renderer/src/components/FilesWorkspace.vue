@@ -120,7 +120,6 @@
     <div
       v-if="closeConfirm.visible && closeConfirm.editorKey"
       class="file-modal"
-      @click.self="closeConfirm.visible = false"
     >
       <div class="file-modal-card small">
         <header>

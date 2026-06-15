@@ -80,11 +80,87 @@
         <OnboardingSpotlight />
       </template>
     </main>
+    <div
+      v-if="terminalMfaDialog.open && terminalMfaDialog.request"
+      class="terminal-mfa-backdrop"
+      data-testid="terminal-mfa-dialog"
+    >
+      <section
+        class="terminal-mfa-dialog"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('terminal.mfaTitle')"
+      >
+        <header>
+          <div>
+            <span>{{ t('terminal.mfaRequired') }}</span>
+            <strong>{{ t('terminal.mfaTitle') }}</strong>
+          </div>
+          <button
+            type="button"
+            :title="t('common.close')"
+            @click="cancelTerminalMfa"
+          >
+            <X />
+          </button>
+        </header>
+        <p>
+          {{ tf('terminal.mfaDescription', { target: terminalMfaTarget }) }}
+        </p>
+        <form @submit.prevent="submitTerminalMfa">
+          <label
+            v-for="(prompt, index) in terminalMfaPrompts"
+            :key="`${terminalMfaDialog.request.id}-${index}`"
+          >
+            <span>{{ prompt.prompt || t('terminal.mfaPromptFallback') }}</span>
+            <input
+              v-model="terminalMfaDialog.responses[index]"
+              :ref="(element) => setTerminalMfaInputRef(element, index)"
+              :type="prompt.echo ? 'text' : 'password'"
+              autocomplete="one-time-code"
+              :aria-label="prompt.prompt || t('terminal.mfaPromptFallback')"
+              :disabled="terminalMfaDialog.submitting"
+              data-testid="terminal-mfa-input"
+            />
+          </label>
+          <p
+            v-if="terminalMfaDialog.error"
+            class="terminal-mfa-error"
+            data-testid="terminal-mfa-error"
+          >
+            {{ terminalMfaDialog.error }}
+          </p>
+          <footer>
+            <span>
+              {{ tf('terminal.mfaAttempts', { attempt: terminalMfaDialog.request.attempts, max: terminalMfaDialog.request.maxAttempts }) }}
+              ·
+              {{ tf('terminal.mfaRemaining', { seconds: terminalMfaRemainingSeconds }) }}
+            </span>
+            <button
+              type="button"
+              :disabled="terminalMfaDialog.submitting"
+              @click="cancelTerminalMfa"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              type="submit"
+              class="primary"
+              :disabled="terminalMfaDialog.submitting"
+              data-testid="terminal-mfa-submit"
+            >
+              {{ terminalMfaDialog.submitting ? t('terminal.mfaSubmitting') : t('terminal.mfaSubmit') }}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
 import ModulePanel from '@/components/ModulePanel.vue'
@@ -100,12 +176,22 @@ import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
-import { applyDocumentLocale, useI18n } from '@/i18n'
+import { applyDocumentLocale, useI18n, type I18nKey } from '@/i18n'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
+import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 type ResizeSide = 'left' | 'right' | 'agents-left'
+type TerminalMfaPrompt = TerminalKeyboardInteractiveRequest['prompts'][number]
+type TerminalMfaDialogState = {
+  open: boolean
+  request: TerminalKeyboardInteractiveRequest | null
+  responses: string[]
+  submitting: boolean
+  error: string
+  remainingMs: number
+}
 
 const draggingSide = ref<ResizeSide | null>(null)
 const draftLeftPanelWidth = ref<number | null>(null)
@@ -115,6 +201,18 @@ let resizeStartX = 0
 let resizeStartWidth = 0
 let resizeQuickClosed = false
 let stopDeepLink: (() => void) | undefined
+let stopKeyboardInteractiveRequest: (() => void) | undefined
+let stopKeyboardInteractiveResult: (() => void) | undefined
+let terminalMfaTimer: number | null = null
+const terminalMfaInputRefs = ref<HTMLInputElement[]>([])
+const terminalMfaDialog = ref<TerminalMfaDialogState>({
+  open: false,
+  request: null,
+  responses: [],
+  submitting: false,
+  error: '',
+  remainingMs: 0
+})
 
 const showAgentsLeftPane = computed(() => workspace.mode === 'agents' && workspace.agentsLeftOpen)
 const showTerminalLeftPane = computed(
@@ -128,6 +226,23 @@ const hasRightPane = computed(() => showTerminalRightPane.value)
 const displayLeftPanelWidth = computed(() => draftLeftPanelWidth.value ?? workspace.leftPanelWidth)
 const displayRightPanelWidth = computed(() => draftRightPanelWidth.value ?? workspace.rightPanelWidth)
 const displayAgentsLeftWidth = computed(() => draftAgentsLeftWidth.value ?? workspace.agentsLeftWidth)
+const terminalMfaTarget = computed(() => {
+  const request = terminalMfaDialog.value.request
+  return request ? `${request.username}@${request.host}:${request.port}` : ''
+})
+const terminalMfaPrompts = computed<TerminalMfaPrompt[]>(() => {
+  const prompts = terminalMfaDialog.value.request?.prompts || []
+  return prompts.length ? prompts : [{ prompt: t('terminal.mfaPromptFallback'), echo: false }]
+})
+const terminalMfaRemainingSeconds = computed(() => Math.max(0, Math.ceil(terminalMfaDialog.value.remainingMs / 1000)))
+
+const tf = (key: I18nKey, values: Record<string, string | number>) => {
+  let text = t(key)
+  Object.entries(values).forEach(([name, value]) => {
+    text = text.replaceAll(`{${name}}`, String(value))
+  })
+  return text
+}
 
 const clampLayoutWidth = (width: number) => Math.min(layoutWidthLimits.max, Math.max(layoutWidthLimits.min, Math.round(width)))
 
@@ -135,6 +250,97 @@ const setDraftWidth = (side: ResizeSide, width: number | null) => {
   if (side === 'left') draftLeftPanelWidth.value = width
   if (side === 'right') draftRightPanelWidth.value = width
   if (side === 'agents-left') draftAgentsLeftWidth.value = width
+}
+
+const clearTerminalMfaTimer = () => {
+  if (terminalMfaTimer !== null) {
+    window.clearInterval(terminalMfaTimer)
+    terminalMfaTimer = null
+  }
+}
+
+const setTerminalMfaInputRef = (element: unknown, index: number) => {
+  if (element instanceof HTMLInputElement) terminalMfaInputRefs.value[index] = element
+}
+
+const resetTerminalMfaDialog = () => {
+  clearTerminalMfaTimer()
+  terminalMfaInputRefs.value = []
+  terminalMfaDialog.value = {
+    open: false,
+    request: null,
+    responses: [],
+    submitting: false,
+    error: '',
+    remainingMs: 0
+  }
+}
+
+const startTerminalMfaTimer = (timeoutMs: number) => {
+  clearTerminalMfaTimer()
+  const endAt = Date.now() + Math.max(1000, Number(timeoutMs) || 180000)
+  terminalMfaDialog.value.remainingMs = Math.max(0, endAt - Date.now())
+  terminalMfaTimer = window.setInterval(() => {
+    terminalMfaDialog.value.remainingMs = Math.max(0, endAt - Date.now())
+    if (terminalMfaDialog.value.remainingMs <= 0) {
+      terminalMfaDialog.value.error = t('terminal.mfaTimeout')
+      terminalMfaDialog.value.submitting = true
+      clearTerminalMfaTimer()
+    }
+  }, 1000)
+}
+
+const handleTerminalMfaRequest = (request: TerminalKeyboardInteractiveRequest) => {
+  const promptCount = request.prompts.length || 1
+  clearTerminalMfaTimer()
+  terminalMfaInputRefs.value = []
+  terminalMfaDialog.value = {
+    open: true,
+    request,
+    responses: Array.from({ length: promptCount }, () => ''),
+    submitting: false,
+    error: '',
+    remainingMs: request.timeoutMs
+  }
+  startTerminalMfaTimer(request.timeoutMs)
+  void nextTick(() => terminalMfaInputRefs.value[0]?.focus())
+}
+
+const submitTerminalMfa = () => {
+  const request = terminalMfaDialog.value.request
+  if (!request || terminalMfaDialog.value.submitting) return
+  const responses = terminalMfaPrompts.value.map((_prompt, index) => terminalMfaDialog.value.responses[index] || '')
+  if (responses.some((value) => !value.trim())) {
+    terminalMfaDialog.value.error = t('terminal.mfaEmpty')
+    return
+  }
+  terminalMfaDialog.value.submitting = true
+  terminalMfaDialog.value.error = ''
+  window.aiops?.respondTerminalKeyboardInteractive?.(request.id, responses)
+}
+
+const cancelTerminalMfa = () => {
+  const request = terminalMfaDialog.value.request
+  if (request) {
+    window.aiops?.cancelTerminalKeyboardInteractive?.(request.id)
+  }
+  resetTerminalMfaDialog()
+}
+
+const handleTerminalMfaResult = (result: TerminalKeyboardInteractiveResult) => {
+  const request = terminalMfaDialog.value.request
+  if (!request || result.id !== request.id) return
+  if (result.status === 'success') {
+    resetTerminalMfaDialog()
+    return
+  }
+  if (result.status === 'failed' && !result.final) {
+    terminalMfaDialog.value.submitting = false
+    terminalMfaDialog.value.error = result.errorMessage || t('terminal.mfaFailed')
+    terminalMfaInputRefs.value[0]?.focus()
+    return
+  }
+  resetTerminalMfaDialog()
 }
 
 const getCurrentWidth = (side: ResizeSide) => {
@@ -238,11 +444,16 @@ onMounted(() => {
   stopDeepLink = window.aiops?.onDeepLink?.((payload) => {
     applyDeepLinkPayload(payload)
   })
+  stopKeyboardInteractiveRequest = window.aiops?.onTerminalKeyboardInteractiveRequest?.(handleTerminalMfaRequest)
+  stopKeyboardInteractiveResult = window.aiops?.onTerminalKeyboardInteractiveResult?.(handleTerminalMfaResult)
   void consumePendingDeepLinks()
 })
 
 onUnmounted(() => {
   stopDeepLink?.()
+  stopKeyboardInteractiveRequest?.()
+  stopKeyboardInteractiveResult?.()
+  clearTerminalMfaTimer()
   window.removeEventListener('mousemove', handleResizeMove)
   window.removeEventListener('mouseup', endResize)
   document.body.classList.remove('layout-resizing')

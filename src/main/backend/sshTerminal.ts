@@ -1,5 +1,15 @@
 import type { ClientChannel, ConnectConfig } from 'ssh2'
-import type { AiopsAssetRecord, SshProxyConfig, TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent, UserConfig } from '@shared/preload'
+import type {
+  AiopsAssetRecord,
+  SshProxyConfig,
+  TerminalCreateOptions,
+  TerminalDisconnectReason,
+  TerminalKeyboardInteractivePrompt,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResult,
+  TerminalLifecycleEvent,
+  UserConfig
+} from '@shared/preload'
 import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
@@ -53,6 +63,16 @@ type SshTerminalClient = {
   on(event: 'ready', listener: () => void): SshTerminalClient
   on(event: 'error', listener: (error: Error) => void): SshTerminalClient
   on(event: 'close' | 'end', listener: () => void): SshTerminalClient
+  on(
+    event: 'keyboard-interactive',
+    listener: (
+      name: string,
+      instructions: string,
+      instructionsLang: string,
+      prompts: TerminalKeyboardInteractivePrompt[],
+      finish: (responses: string[]) => void
+    ) => void
+  ): SshTerminalClient
   connect(config: ConnectConfig): unknown
   shell(options: Record<string, unknown>, callback: (error: Error | undefined, stream: SshTerminalChannel) => void): unknown
   end(): unknown
@@ -84,6 +104,8 @@ type SshTerminalEventSink = {
   lifecycle: (event: TerminalLifecycleEvent) => void
   exit: (event: TerminalLifecycleEvent, code?: number | null) => void
   data: (chunk: string | Buffer) => void
+  keyboardInteractive?: (request: TerminalKeyboardInteractiveRequest) => Promise<string[]>
+  keyboardInteractiveResult?: (result: TerminalKeyboardInteractiveResult) => void
   closed?: (id: string) => void
 }
 
@@ -216,6 +238,18 @@ const failBeforeSession = (
 const isValidTarget = (target: SshTerminalTarget) =>
   Boolean(target.host && target.username && Number.isInteger(target.port) && target.port >= 1 && target.port <= 65535)
 
+const keyboardInteractiveTimeoutMs = () => 180000
+
+const maxKeyboardInteractiveAttempts = () => 5
+
+const normalizeKeyboardInteractivePrompts = (prompts: TerminalKeyboardInteractivePrompt[] = []): TerminalKeyboardInteractivePrompt[] =>
+  prompts
+    .map((prompt) => ({
+      prompt: cleanText(prompt?.prompt) || 'Verification code:',
+      echo: prompt?.echo === true
+    }))
+    .filter((prompt) => prompt.prompt)
+
 const createBackendDoubleSession = (
   id: string,
   target: SshTerminalTarget,
@@ -290,6 +324,8 @@ export const createSshTerminalSession = (
   let cols = options.cols || 100
   let rows = options.rows || 30
   const pendingWrites: Array<string | Buffer> = []
+  let keyboardInteractiveAttempts = 0
+  let activeKeyboardInteractiveRequestId = ''
 
   let lifecycle = sendLifecycle(id, sink, {
     ...lifecycleBase,
@@ -374,8 +410,71 @@ export const createSshTerminalSession = (
   }
 
   client
+    .on('keyboard-interactive', (name, instructions, _instructionsLang, prompts, finishKeyboardInteractive) => {
+      const requestId = `${id}-keyboard-${keyboardInteractiveAttempts + 1}`
+      const maxAttempts = maxKeyboardInteractiveAttempts()
+      if (keyboardInteractiveAttempts >= maxAttempts) {
+        sink.keyboardInteractiveResult?.({
+          id: requestId,
+          status: 'failed',
+          attempts: keyboardInteractiveAttempts,
+          final: true,
+          errorMessage: 'Maximum two-factor authentication attempts reached.'
+        })
+        finishKeyboardInteractive([])
+        return
+      }
+      keyboardInteractiveAttempts += 1
+      activeKeyboardInteractiveRequestId = requestId
+      const request: TerminalKeyboardInteractiveRequest = {
+        id: requestId,
+        connectionId: `ssh-${id}`,
+        host: target.host,
+        port: target.port,
+        username: target.username,
+        ...(target.title ? { title: target.title } : {}),
+        ...(cleanText(name) ? { name: cleanText(name) } : {}),
+        ...(cleanText(instructions) ? { instructions: cleanText(instructions) } : {}),
+        prompts: normalizeKeyboardInteractivePrompts(prompts),
+        attempts: keyboardInteractiveAttempts,
+        maxAttempts,
+        timeoutMs: keyboardInteractiveTimeoutMs()
+      }
+      lifecycle = sendLifecycle(id, sink, {
+        ...lifecycleBase,
+        stage: 'connecting',
+        message: `Two-factor authentication required for ${target.username}@${target.host}:${target.port}`
+      })
+      void (async () => {
+        try {
+          if (!sink.keyboardInteractive) throw new Error('Two-factor authentication prompt service is unavailable.')
+          const responses = await sink.keyboardInteractive(request)
+          finishKeyboardInteractive(Array.isArray(responses) ? responses.map((value) => String(value || '')) : [])
+        } catch (error) {
+          const isTimeout = error instanceof Error && /timed out|timeout/i.test(error.message)
+          const isCancel = error instanceof Error && /cancel/i.test(error.message)
+          activeKeyboardInteractiveRequestId = ''
+          sink.keyboardInteractiveResult?.({
+            id: requestId,
+            status: isTimeout ? 'timeout' : isCancel ? 'canceled' : 'failed',
+            attempts: keyboardInteractiveAttempts,
+            final: true,
+            errorMessage: error instanceof Error ? error.message : 'Two-factor authentication failed.'
+          })
+          finishKeyboardInteractive([])
+        }
+      })()
+    })
     .on('ready', () => {
       if (closed) return
+      if (activeKeyboardInteractiveRequestId) {
+        sink.keyboardInteractiveResult?.({
+          id: activeKeyboardInteractiveRequestId,
+          status: 'success',
+          attempts: keyboardInteractiveAttempts
+        })
+        activeKeyboardInteractiveRequestId = ''
+      }
       lifecycle = sendLifecycle(id, sink, {
         ...lifecycleBase,
         stage: 'connected',
@@ -401,6 +500,16 @@ export const createSshTerminalSession = (
       })
     })
     .on('error', (error) => {
+      if (activeKeyboardInteractiveRequestId) {
+        sink.keyboardInteractiveResult?.({
+          id: activeKeyboardInteractiveRequestId,
+          status: 'failed',
+          attempts: keyboardInteractiveAttempts,
+          final: true,
+          errorMessage: error instanceof Error ? error.message : 'SSH authentication failed.'
+        })
+        activeKeyboardInteractiveRequestId = ''
+      }
       fail(error, 'SSH connection failed.', 1)
     })
     .on('close', () => finish(null, 'unknown'))
@@ -410,6 +519,7 @@ export const createSshTerminalSession = (
     host: target.host,
     port: target.port,
     username: target.username,
+    tryKeyboard: Boolean(sink.keyboardInteractive),
     readyTimeout: runtimeConfig.readyTimeoutMs || 20000,
     keepaliveInterval: runtimeConfig.keepaliveIntervalMs || 10000
   }

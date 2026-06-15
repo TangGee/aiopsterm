@@ -25,7 +25,9 @@ import type {
   AiTodoItem,
   AiTodoSnapshotResult,
   McpServerUserConfig,
-  SshAgentKeychainOption
+  SshAgentKeychainOption,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResult
 } from '@shared/preload'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { buildChatExportMarkdown, sanitizeChatExportFileName } from '@shared/chatExport'
@@ -53,9 +55,24 @@ type TestAppUpdateProgressEvent = {
 }
 
 const appUpdateProgressListeners = new Set<(event: TestAppUpdateProgressEvent) => void>()
+const terminalKeyboardInteractiveRequestListeners = new Set<(event: TerminalKeyboardInteractiveRequest) => void>()
+const terminalKeyboardInteractiveResultListeners = new Set<(event: TerminalKeyboardInteractiveResult) => void>()
 
 const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
   appUpdateProgressListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__emitTerminalKeyboardInteractiveRequestMock = (event: TerminalKeyboardInteractiveRequest) => {
+  terminalKeyboardInteractiveRequestListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__emitTerminalKeyboardInteractiveResultMock = (event: TerminalKeyboardInteractiveResult) => {
+  terminalKeyboardInteractiveResultListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__resetTerminalKeyboardInteractiveMock = () => {
+  terminalKeyboardInteractiveRequestListeners.clear()
+  terminalKeyboardInteractiveResultListeners.clear()
 }
 
 const defaultQuickCommands = {
@@ -7072,6 +7089,13 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: { id }
     })),
+    respondTerminalKeyboardInteractive: vi.fn((id: string, responses: string[]) => {
+      void id
+      void responses
+    }),
+    cancelTerminalKeyboardInteractive: vi.fn((id: string) => {
+      void id
+    }),
     pickZmodemUploadFiles: vi.fn(async () => ({ ok: true, data: { files: [] as any[], canceled: true } })),
     pickZmodemSavePath: vi.fn(async (name: string) => ({ ok: true, data: { filePath: `/tmp/${name || 'zmodem-download'}` } })),
     openZmodemStream: vi.fn(async (savePath: string) => ({ ok: true, data: { streamId: 'zmodem-stream-test', filePath: savePath } })),
@@ -8809,6 +8833,18 @@ Object.defineProperty(window, 'aiops', {
     listFileTransferTasks: vi.fn(async () => fileTransferTasksMock.map((task) => ({ ...task, children: task.children?.map((child: any) => ({ ...child })) }))),
     onTerminalData: vi.fn(() => () => undefined),
     onTerminalLifecycle: vi.fn(() => () => undefined),
-    onTerminalExit: vi.fn(() => () => undefined)
+    onTerminalExit: vi.fn(() => () => undefined),
+    onTerminalKeyboardInteractiveRequest: vi.fn((listener: (event: TerminalKeyboardInteractiveRequest) => void) => {
+      terminalKeyboardInteractiveRequestListeners.add(listener)
+      return () => {
+        terminalKeyboardInteractiveRequestListeners.delete(listener)
+      }
+    }),
+    onTerminalKeyboardInteractiveResult: vi.fn((listener: (event: TerminalKeyboardInteractiveResult) => void) => {
+      terminalKeyboardInteractiveResultListeners.add(listener)
+      return () => {
+        terminalKeyboardInteractiveResultListeners.delete(listener)
+      }
+    })
   }
 })

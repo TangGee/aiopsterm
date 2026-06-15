@@ -302,7 +302,6 @@
     <div
       v-if="folderModal.visible"
       class="files-folder-modal-backdrop"
-      @click.self="closeFolderModal"
     >
       <section class="files-folder-modal workspace-folder-modal">
         <header>
@@ -360,7 +359,6 @@
     <div
       v-if="moveModal.visible"
       class="files-folder-modal-backdrop"
-      @click.self="closeMoveModal"
     >
       <section class="files-folder-modal workspace-folder-modal">
         <header>
@@ -400,7 +398,6 @@
     <div
       v-if="deleteGroupModal.visible && deleteGroupInfo"
       class="files-folder-modal-backdrop"
-      @click.self="closeDeleteGroupModal"
     >
       <section class="files-folder-modal files-folder-confirm workspace-folder-modal">
         <header>
@@ -439,7 +436,6 @@
     <div
       v-if="hostModal.visible"
       class="files-folder-modal-backdrop"
-      @click.self="closeHostModal"
     >
       <section class="files-folder-modal workspace-host-modal">
         <header>
@@ -665,7 +661,6 @@
     <div
       v-if="hostChildModal === 'proxy'"
       class="files-folder-modal-backdrop workspace-child-modal-backdrop"
-      @click.self="closeHostChildModal"
     >
       <section class="files-folder-modal workspace-child-modal workspace-proxy-child-modal asset-proxy-form-modal">
         <header>
@@ -768,7 +763,6 @@
     <div
       v-if="hostChildModal === 'key'"
       class="files-folder-modal-backdrop workspace-child-modal-backdrop"
-      @click.self="closeHostChildModal"
     >
       <section class="files-folder-modal workspace-child-modal workspace-key-child-modal key-form-panel">
         <header>
@@ -850,7 +844,6 @@
     <div
       v-if="hostChildModal === 'jumpHost'"
       class="files-folder-modal-backdrop workspace-child-modal-backdrop"
-      @click.self="closeHostChildModal"
     >
       <section class="files-folder-modal workspace-host-modal workspace-jump-child-modal">
         <header>
@@ -954,7 +947,6 @@
     <div
       v-if="tunnelModal.visible && tunnelAsset"
       class="files-folder-modal-backdrop"
-      @click.self="closeTunnelModal"
     >
       <section class="files-folder-modal workspace-tunnel-modal">
         <header>
@@ -1041,7 +1033,6 @@
     <div
       v-if="deleteAssetModal.visible && deleteAssetInfo"
       class="files-folder-modal-backdrop"
-      @click.self="closeDeleteAssetModal"
     >
       <section class="files-folder-modal files-folder-confirm workspace-folder-modal">
         <header>
@@ -1077,7 +1068,6 @@
     <div
       v-if="managementModal.visible && managedOrganization"
       class="files-folder-modal-backdrop"
-      @click.self="closeManagementModal"
     >
       <section class="files-folder-modal workspace-management-modal">
         <header>
@@ -1520,7 +1510,7 @@ const canMoveContextAsset = computed(
   () => activeWorkspace.value === 'bastion' && !!contextAsset.value && !contextAsset.value.isLocalShell && contextAsset.value.asset_type !== 'organization' && !contextAsset.value.folderUuid
 )
 const canRemoveContextAssetFromFolder = computed(() => activeWorkspace.value === 'bastion' && !!contextAsset.value?.folderUuid && !contextAsset.value.isLocalShell)
-const canConnectContextAsset = computed(() => !!contextAsset.value && contextAsset.value.asset_type !== 'organization')
+const canConnectContextAsset = computed(() => !!contextAsset.value)
 const canCreateChildInContextGroup = computed(() => !!contextGroup.value && (contextGroup.value.type === 'direct-group' || contextGroup.value.type === 'custom-folder'))
 const canCreateHostInContextGroup = computed(() => !!contextGroup.value && contextGroup.value.type !== 'system')
 const tunnelAsset = computed(() => findEditableAsset(tunnelModal.assetId))
@@ -2283,8 +2273,7 @@ const selectAsset = (assetId: string) => {
 const connectAsset = async (assetId: string) => {
   selectedAssetId.value = assetId
   const asset = allAssets.value.find((item) => item.id === assetId)
-  if (!asset || asset.asset_type === 'organization') {
-    if (asset?.asset_type === 'organization') notice.value = `${asset.name} 是堡垒机资源，请使用刷新资产或管理资产。`
+  if (!asset) {
     return
   }
   const previousActivePanelId = workspace.activePanelId

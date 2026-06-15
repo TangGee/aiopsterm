@@ -103,6 +103,34 @@ export type TerminalExitEvent = {
   errorMessage?: string
 }
 
+export type TerminalKeyboardInteractivePrompt = {
+  prompt: string
+  echo: boolean
+}
+
+export type TerminalKeyboardInteractiveRequest = {
+  id: string
+  connectionId: string
+  host: string
+  port: number
+  username: string
+  title?: string
+  name?: string
+  instructions?: string
+  prompts: TerminalKeyboardInteractivePrompt[]
+  attempts: number
+  maxAttempts: number
+  timeoutMs: number
+}
+
+export type TerminalKeyboardInteractiveResult = {
+  id: string
+  status: 'success' | 'failed' | 'canceled' | 'timeout'
+  attempts?: number
+  final?: boolean
+  errorMessage?: string
+}
+
 export type AiopsAssetType = 'person' | 'organization' | 'switch'
 
 export type AiopsAssetAuthType = 'password' | 'keyBased'
@@ -3076,6 +3104,8 @@ export type AiopsPreloadApi = {
   writeTerminalBinary: (id: string, data: number[] | Uint8Array | ArrayBuffer) => Promise<TerminalBinaryWriteResult>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
+  respondTerminalKeyboardInteractive: (id: string, responses: string[]) => void
+  cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>
   pickZmodemSavePath: (name: string) => Promise<ZmodemSavePathPickResult>
   openZmodemStream: (savePath: string) => Promise<ZmodemStreamOpenResult>
@@ -3170,6 +3200,8 @@ export type AiopsPreloadApi = {
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
   onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
+  onTerminalKeyboardInteractiveRequest: (listener: (event: TerminalKeyboardInteractiveRequest) => void) => () => void
+  onTerminalKeyboardInteractiveResult: (listener: (event: TerminalKeyboardInteractiveResult) => void) => () => void
   onKubernetesTerminalData: (listener: (event: KubernetesTerminalDataEvent) => void) => () => void
   onKubernetesTerminalExit: (listener: (event: KubernetesTerminalExitEvent) => void) => () => void
 }

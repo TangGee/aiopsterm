@@ -174,10 +174,7 @@
             class="asset-context-menu"
             :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
           >
-            <button
-              v-if="contextAsset?.asset_type !== 'organization'"
-              @click="connectAsset(assetContextMenuId)"
-            >
+            <button @click="connectAsset(assetContextMenuId)">
               <PlugZap />
               连接
             </button>
@@ -218,7 +215,6 @@
       <div
         v-if="editorOpen"
         class="asset-host-modal file-modal"
-        @click.self="editorOpen = false"
       >
         <aside
           class="asset-form-panel asset-host-form-modal"
@@ -792,7 +788,6 @@
         <div
           v-if="keyEditorOpen"
           class="asset-host-modal file-modal"
-          @click.self="keyEditorOpen = false"
         >
           <aside class="asset-form-panel key-form-panel asset-host-form-modal">
             <header>
@@ -870,7 +865,6 @@
     <div
       v-if="workspace.sshProxyAddModalOpen"
       class="asset-host-modal file-modal"
-      @click.self="closeProxyModal"
     >
       <aside class="asset-form-panel asset-host-form-modal asset-proxy-form-modal">
         <header>
@@ -968,7 +962,6 @@
     <div
       v-if="importHelpOpen"
       class="asset-host-modal file-modal"
-      @click.self="importHelpOpen = false"
     >
       <aside class="asset-form-panel asset-host-form-modal asset-import-help-modal">
         <header>
@@ -1157,7 +1150,6 @@
     <div
       v-if="assetFolderModal.visible"
       class="file-modal"
-      @click.self="closeAssetFolderModal"
     >
       <div class="file-modal-card asset-folder-modal">
         <header>
@@ -2106,7 +2098,7 @@ const toggleManagedVisibleSelection = (checked: boolean) => {
 const connectAsset = async (assetId: string | null) => {
   if (!assetId) return
   const asset = assets.value.find((item) => item.id === assetId)
-  if (!asset || asset.asset_type === 'organization') {
+  if (!asset) {
     closeAssetContextMenus()
     return
   }

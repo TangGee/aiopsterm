@@ -1293,7 +1293,6 @@
       v-if="commandAuditDialog.open && activeCommandAuditMessage"
       class="ai-command-audit-backdrop"
       data-testid="ai-command-audit-dialog"
-      @click.stop="closeCommandAuditDialog"
       @keydown.esc.prevent="closeCommandAuditDialog"
     >
       <section

@@ -6,6 +6,8 @@ import type {
   TerminalCreateOptions,
   TerminalDataEvent,
   TerminalExitEvent,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent,
   TerminalSessionInfo,
   KnowledgeBaseTransferProgress,
@@ -216,6 +218,8 @@ const api: AiopsPreloadApi = {
   writeTerminalBinary: (id: string, data) => ipcRenderer.invoke('terminal:write-binary', id, data),
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.invoke('terminal:kill', id),
+  respondTerminalKeyboardInteractive: (id: string, responses: string[]) => ipcRenderer.send(`terminal:keyboard-interactive:response:${id}`, responses),
+  cancelTerminalKeyboardInteractive: (id: string) => ipcRenderer.send(`terminal:keyboard-interactive:cancel:${id}`),
   pickZmodemUploadFiles: () => ipcRenderer.invoke('zmodem:pick-upload-files'),
   pickZmodemSavePath: (name: string) => ipcRenderer.invoke('zmodem:pick-save-path', name),
   openZmodemStream: (savePath: string) => ipcRenderer.invoke('zmodem:open-stream', savePath),
@@ -325,6 +329,16 @@ const api: AiopsPreloadApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalExitEvent) => listener(payload)
     ipcRenderer.on('terminal:exit', wrapped)
     return () => ipcRenderer.off('terminal:exit', wrapped)
+  },
+  onTerminalKeyboardInteractiveRequest: (listener: (event: TerminalKeyboardInteractiveRequest) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalKeyboardInteractiveRequest) => listener(payload)
+    ipcRenderer.on('terminal:keyboard-interactive:request', wrapped)
+    return () => ipcRenderer.off('terminal:keyboard-interactive:request', wrapped)
+  },
+  onTerminalKeyboardInteractiveResult: (listener: (event: TerminalKeyboardInteractiveResult) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalKeyboardInteractiveResult) => listener(payload)
+    ipcRenderer.on('terminal:keyboard-interactive:result', wrapped)
+    return () => ipcRenderer.off('terminal:keyboard-interactive:result', wrapped)
   },
   onKubernetesTerminalData: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
