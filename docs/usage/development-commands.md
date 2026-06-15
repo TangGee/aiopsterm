@@ -75,13 +75,13 @@ Rebuild native Electron modules explicitly:
 npm run rebuild:native
 ```
 
-Regenerate self-owned app icon PNGs from the local generator:
+Regenerate self-owned app icon PNGs from the local GPT-generated source image:
 
 ```bash
 npm run generate:icons
 ```
 
-The Linux runtime window icon is resolved from the same self-owned icon set. During development the main process loads `resources/icons/256x256.png`; packaged builds copy `resources/icons` into Electron resources so Linux windows can load `icons/256x256.png` at runtime.
+The source bitmap lives at `resources/app-icon-source.png`. `generate:icons` reads that self-owned PNG and writes the Linux runtime/package sizes under `resources/icons`. During development the main process loads `resources/icons/256x256.png`; packaged builds copy `resources/icons` into Electron resources so Linux windows can load `icons/256x256.png` at runtime.
 
 Build Linux packages:
 
@@ -107,7 +107,7 @@ For a macOS unpacked directory build during package debugging:
 npm run build:mac:dir
 ```
 
-`build:linux` and `build:deb` first regenerate the self-owned app icon PNGs, then run `rebuild:native` with an explicit Electron headers URL, then run electron-builder with automatic rebuild disabled. Linux packaging uses the self-owned PNG icon set under `resources/icons`, copies those PNGs into packaged resources for runtime window icons, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide a local Electron headers cache.
+`build:linux` and `build:deb` first regenerate the self-owned app icon PNGs from `resources/app-icon-source.png`, then run `rebuild:native` with an explicit Electron headers URL, then run electron-builder with automatic rebuild disabled. Linux packaging uses the self-owned PNG icon set under `resources/icons`, copies those PNGs into packaged resources for runtime window icons, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide a local Electron headers cache.
 
 `build:mac` uses the same self-owned build output and electron-builder config, with `dmg` and `zip` targets matching the External reference-style desktop package split. Run it on macOS because macOS targets require the platform signing and packaging toolchain; Linux development machines should use `audit:package-config` to verify the macOS target configuration without attempting to produce a macOS package.
 

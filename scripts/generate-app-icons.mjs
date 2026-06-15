@@ -1,9 +1,12 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { deflateSync } from 'node:zlib'
+import { deflateSync, inflateSync } from 'node:zlib'
 
+const sourceFile = resolve('resources/app-icon-source.png')
 const outputDir = resolve('resources/icons')
 const sizes = [16, 32, 48, 64, 128, 256, 512]
+
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 const crcTable = new Uint32Array(256)
 for (let i = 0; i < 256; i += 1) {
@@ -31,111 +34,155 @@ const chunk = (type, data) => {
   return Buffer.concat([length, typeBuffer, data, crc])
 }
 
-const clamp = (value) => Math.max(0, Math.min(255, Math.round(value)))
-const mix = (a, b, t) => a + (b - a) * t
-const smoothstep = (edge0, edge1, value) => {
-  const x = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)))
-  return x * x * (3 - 2 * x)
+const paethPredictor = (left, above, upperLeft) => {
+  const p = left + above - upperLeft
+  const pa = Math.abs(p - left)
+  const pb = Math.abs(p - above)
+  const pc = Math.abs(p - upperLeft)
+  if (pa <= pb && pa <= pc) return left
+  if (pb <= pc) return above
+  return upperLeft
 }
 
-const distanceToSegment = (px, py, ax, ay, bx, by) => {
-  const dx = bx - ax
-  const dy = by - ay
-  const lengthSq = dx * dx + dy * dy
-  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSq))
-  const x = ax + t * dx
-  const y = ay + t * dy
-  return Math.hypot(px - x, py - y)
-}
-
-const roundedRectAlpha = (x, y, size, inset, radius) => {
-  const left = inset
-  const top = inset
-  const right = size - inset
-  const bottom = size - inset
-  const cx = Math.max(left + radius, Math.min(x, right - radius))
-  const cy = Math.max(top + radius, Math.min(y, bottom - radius))
-  const dist = Math.hypot(x - cx, y - cy) - radius
-  return 1 - smoothstep(-1, 1.4, dist)
-}
-
-const iconPixel = (x, y, size) => {
-  const bgAlpha = roundedRectAlpha(x, y, size, 0, size * 0.22)
-  if (bgAlpha <= 0) return [0, 0, 0, 0]
-
-  const gx = x / Math.max(1, size - 1)
-  const gy = y / Math.max(1, size - 1)
-  const bgT = Math.min(1, Math.max(0, (gx * 0.55 + gy * 0.75)))
-  const c1 = [15, 23, 42]
-  const c2 = [21, 94, 117]
-  const c3 = [17, 24, 39]
-  const bg = bgT < 0.5 ? c1.map((v, i) => mix(v, c2[i], bgT * 2)) : c2.map((v, i) => mix(v, c3[i], (bgT - 0.5) * 2))
-
-  const borderAlpha = Math.max(
-    0,
-    roundedRectAlpha(x, y, size, size * 0.1, size * 0.16) - roundedRectAlpha(x, y, size, size * 0.13, size * 0.13)
-  )
-  let r = bg[0]
-  let g = bg[1]
-  let b = bg[2]
-  if (borderAlpha > 0) {
-    r = mix(r, 224, borderAlpha * 0.25)
-    g = mix(g, 242, borderAlpha * 0.25)
-    b = mix(b, 254, borderAlpha * 0.25)
+const readPngRgba = (file) => {
+  const fileBuffer = readFileSync(file)
+  if (!fileBuffer.subarray(0, pngSignature.length).equals(pngSignature)) {
+    throw new Error(`${file} is not a PNG file.`)
   }
 
-  const stroke = size * 0.07
-  const d1 = distanceToSegment(x, y, size * 0.28, size * 0.34, size * 0.43, size * 0.5)
-  const d2 = distanceToSegment(x, y, size * 0.43, size * 0.5, size * 0.28, size * 0.66)
-  const promptAlpha = 1 - smoothstep(stroke * 0.7, stroke * 1.2, Math.min(d1, d2))
-  if (promptAlpha > 0) {
-    const t = (x + y) / (size * 2)
-    const beam = t < 0.55 ? [125, 211, 252].map((v, i) => mix(v, [52, 211, 153][i], t / 0.55)) : [52, 211, 153].map((v, i) => mix(v, [250, 204, 21][i], (t - 0.55) / 0.45))
-    r = mix(r, beam[0], promptAlpha)
-    g = mix(g, beam[1], promptAlpha)
-    b = mix(b, beam[2], promptAlpha)
-  }
+  let width = 0
+  let height = 0
+  let bitDepth = 0
+  let colorType = 0
+  let interlace = 0
+  const idatChunks = []
+  let offset = pngSignature.length
 
-  const lineAlpha = 1 - smoothstep(stroke * 0.65, stroke * 1.05, distanceToSegment(x, y, size * 0.5, size * 0.66, size * 0.73, size * 0.66))
-  if (lineAlpha > 0) {
-    r = mix(r, 229, lineAlpha)
-    g = mix(g, 231, lineAlpha)
-    b = mix(b, 235, lineAlpha)
-  }
+  while (offset < fileBuffer.length) {
+    const length = fileBuffer.readUInt32BE(offset)
+    const type = fileBuffer.subarray(offset + 4, offset + 8).toString('ascii')
+    const data = fileBuffer.subarray(offset + 8, offset + 8 + length)
+    offset += 12 + length
 
-  const orbitDistance = distanceToSegment(x, y, size * 0.49, size * 0.44, size * 0.63, size * 0.31)
-  const orbitAlpha = Math.max(0, 1 - smoothstep(stroke * 0.28, stroke * 0.58, orbitDistance)) * smoothstep(size * 0.22, size * 0.45, x)
-  if (orbitAlpha > 0) {
-    r = mix(r, 125, orbitAlpha * 0.9)
-    g = mix(g, 211, orbitAlpha * 0.9)
-    b = mix(b, 252, orbitAlpha * 0.9)
-  }
-
-  const dot = Math.hypot(x - size * 0.72, y - size * 0.31)
-  const dotAlpha = 1 - smoothstep(size * 0.04, size * 0.065, dot)
-  if (dotAlpha > 0) {
-    r = mix(r, 250, dotAlpha)
-    g = mix(g, 204, dotAlpha)
-    b = mix(b, 21, dotAlpha)
-  }
-
-  return [clamp(r), clamp(g), clamp(b), clamp(255 * bgAlpha)]
-}
-
-const png = (size) => {
-  const raw = Buffer.alloc((size * 4 + 1) * size)
-  let offset = 0
-  for (let y = 0; y < size; y += 1) {
-    raw[offset] = 0
-    offset += 1
-    for (let x = 0; x < size; x += 1) {
-      const pixel = iconPixel(x + 0.5, y + 0.5, size)
-      raw[offset] = pixel[0]
-      raw[offset + 1] = pixel[1]
-      raw[offset + 2] = pixel[2]
-      raw[offset + 3] = pixel[3]
-      offset += 4
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0)
+      height = data.readUInt32BE(4)
+      bitDepth = data[8]
+      colorType = data[9]
+      interlace = data[12]
+    } else if (type === 'IDAT') {
+      idatChunks.push(data)
+    } else if (type === 'IEND') {
+      break
     }
+  }
+
+  if (bitDepth !== 8 || interlace !== 0 || (colorType !== 2 && colorType !== 6)) {
+    throw new Error(`${file} must be an 8-bit non-interlaced RGB or RGBA PNG.`)
+  }
+
+  const bytesPerPixel = colorType === 6 ? 4 : 3
+  const stride = width * bytesPerPixel
+  const inflated = inflateSync(Buffer.concat(idatChunks))
+  const rgba = Buffer.alloc(width * height * 4)
+  let inputOffset = 0
+  let outputOffset = 0
+  const previous = Buffer.alloc(stride)
+  const current = Buffer.alloc(stride)
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[inputOffset]
+    inputOffset += 1
+    inflated.copy(current, 0, inputOffset, inputOffset + stride)
+    inputOffset += stride
+
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= bytesPerPixel ? current[x - bytesPerPixel] : 0
+      const above = previous[x] || 0
+      const upperLeft = x >= bytesPerPixel ? previous[x - bytesPerPixel] || 0 : 0
+      if (filter === 1) {
+        current[x] = (current[x] + left) & 0xff
+      } else if (filter === 2) {
+        current[x] = (current[x] + above) & 0xff
+      } else if (filter === 3) {
+        current[x] = (current[x] + Math.floor((left + above) / 2)) & 0xff
+      } else if (filter === 4) {
+        current[x] = (current[x] + paethPredictor(left, above, upperLeft)) & 0xff
+      } else if (filter !== 0) {
+        throw new Error(`${file} contains unsupported PNG filter ${filter}.`)
+      }
+    }
+
+    for (let x = 0; x < width; x += 1) {
+      const pixelOffset = x * bytesPerPixel
+      rgba[outputOffset] = current[pixelOffset]
+      rgba[outputOffset + 1] = current[pixelOffset + 1]
+      rgba[outputOffset + 2] = current[pixelOffset + 2]
+      rgba[outputOffset + 3] = colorType === 6 ? current[pixelOffset + 3] : 255
+      outputOffset += 4
+    }
+
+    current.copy(previous)
+  }
+
+  return { width, height, rgba }
+}
+
+const sampleBilinear = (source, x, y) => {
+  const left = Math.max(0, Math.min(source.width - 1, Math.floor(x)))
+  const top = Math.max(0, Math.min(source.height - 1, Math.floor(y)))
+  const right = Math.max(0, Math.min(source.width - 1, left + 1))
+  const bottom = Math.max(0, Math.min(source.height - 1, top + 1))
+  const tx = x - left
+  const ty = y - top
+  const out = [0, 0, 0, 0]
+
+  for (let channel = 0; channel < 4; channel += 1) {
+    const topLeft = source.rgba[(top * source.width + left) * 4 + channel]
+    const topRight = source.rgba[(top * source.width + right) * 4 + channel]
+    const bottomLeft = source.rgba[(bottom * source.width + left) * 4 + channel]
+    const bottomRight = source.rgba[(bottom * source.width + right) * 4 + channel]
+    const topMix = topLeft + (topRight - topLeft) * tx
+    const bottomMix = bottomLeft + (bottomRight - bottomLeft) * tx
+    out[channel] = Math.round(topMix + (bottomMix - topMix) * ty)
+  }
+
+  return out
+}
+
+const resizeSquare = (source, size) => {
+  const output = Buffer.alloc(size * size * 4)
+  const cropSize = Math.min(source.width, source.height)
+  const cropX = (source.width - cropSize) / 2
+  const cropY = (source.height - cropSize) / 2
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const sourceX = cropX + ((x + 0.5) * cropSize) / size - 0.5
+      const sourceY = cropY + ((y + 0.5) * cropSize) / size - 0.5
+      const [r, g, b, a] = sampleBilinear(source, sourceX, sourceY)
+      const offset = (y * size + x) * 4
+      output[offset] = r
+      output[offset + 1] = g
+      output[offset + 2] = b
+      output[offset + 3] = a
+    }
+  }
+
+  return output
+}
+
+const writePng = (size, rgba) => {
+  const raw = Buffer.alloc((size * 4 + 1) * size)
+  let inputOffset = 0
+  let outputOffset = 0
+
+  for (let y = 0; y < size; y += 1) {
+    raw[outputOffset] = 0
+    outputOffset += 1
+    rgba.copy(raw, outputOffset, inputOffset, inputOffset + size * 4)
+    inputOffset += size * 4
+    outputOffset += size * 4
   }
 
   const header = Buffer.alloc(13)
@@ -148,17 +195,19 @@ const png = (size) => {
   header[12] = 0
 
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngSignature,
     chunk('IHDR', header),
     chunk('IDAT', deflateSync(raw, { level: 9 })),
     chunk('IEND', Buffer.alloc(0))
   ])
 }
 
+const source = readPngRgba(sourceFile)
+
 mkdirSync(outputDir, { recursive: true })
 for (const size of sizes) {
   const file = resolve(outputDir, `${size}x${size}.png`)
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, png(size))
+  writeFileSync(file, writePng(size, resizeSquare(source, size)))
   console.log(`wrote ${file}`)
 }
