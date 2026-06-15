@@ -633,6 +633,7 @@ describe('AppShell', () => {
     expect(dialogText).toContain('Verification code:')
     expect(dialogText).not.toContain('第 1/1 次')
     expect(dialogText).not.toContain('剩余')
+    expect(wrapper.find('[data-testid="terminal-password-remember"]').exists()).toBe(false)
     await wrapper.find('.terminal-mfa-backdrop').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(true)
@@ -651,7 +652,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('uses the SSH auth dialog for missing saved passwords without persisting them', async () => {
+  it('uses the SSH auth dialog for missing saved passwords and can remember the typed password', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(AppShell, {
@@ -672,6 +673,8 @@ describe('AppShell', () => {
       username: 'root',
       title: 'test_hhhh',
       purpose: 'password',
+      assetId: 'asset-password-empty',
+      canRememberPassword: true,
       prompts: [{ prompt: 'SSH password for root@10.71.0.11:22:', echo: false }],
       attempts: 1,
       maxAttempts: 1,
@@ -683,15 +686,63 @@ describe('AppShell', () => {
     const dialog = wrapper.find('[data-testid="terminal-mfa-dialog"]')
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('SSH 密码认证')
-    expect(dialog.text()).toContain('仅用于本次 SSH 登录')
+    expect(dialog.text()).toContain('勾选后会在连接成功时更新该主机密码')
     expect(dialog.text()).toContain('SSH password for root@10.71.0.11:22:')
     await wrapper.find('[data-testid="terminal-mfa-input"]').setValue('typed-password')
+    await wrapper.find('[data-testid="terminal-password-remember"]').setValue(true)
     await wrapper.find('.terminal-mfa-dialog form').trigger('submit')
-    expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('ssh-password-ui-1', ['typed-password'])
+    expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('ssh-password-ui-1', {
+      responses: ['typed-password'],
+      rememberPassword: true
+    })
 
     ;(globalThis as any).__emitTerminalKeyboardInteractiveResultMock({ id: 'ssh-password-ui-1', status: 'success', attempts: 1, final: true })
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('shows the SSH password retry prompt when a saved password is rejected', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await flushPromises()
+
+    const request: TerminalKeyboardInteractiveRequest = {
+      id: 'ssh-password-ui-retry-1',
+      connectionId: 'ssh-test-session',
+      host: '10.71.0.11',
+      port: 22,
+      username: 'root',
+      title: 'test_hhhh',
+      purpose: 'password',
+      assetId: 'asset-password-retry',
+      canRememberPassword: true,
+      prompts: [{ prompt: 'SSH password for root@10.71.0.11:22:', echo: false }],
+      attempts: 2,
+      maxAttempts: 2,
+      timeoutMs: 180000
+    }
+    ;(globalThis as any).__emitTerminalKeyboardInteractiveRequestMock(request)
+    await wrapper.vm.$nextTick()
+
+    const dialog = wrapper.find('[data-testid="terminal-mfa-dialog"]')
+    expect(dialog.text()).toContain('拒绝了已保存的密码')
+    expect(dialog.text()).toContain('记住密码并更新该主机')
+    await wrapper.find('[data-testid="terminal-mfa-input"]').setValue('new-password')
+    await wrapper.find('.terminal-mfa-dialog form').trigger('submit')
+    expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('ssh-password-ui-retry-1', {
+      responses: ['new-password'],
+      rememberPassword: false
+    })
 
     wrapper.unmount()
   })

@@ -9650,6 +9650,12 @@ code {
   gap: 6px;
 }
 
+.terminal-mfa-dialog label.terminal-mfa-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .terminal-mfa-dialog label span {
   color: var(--muted);
   font-size: 11px;
@@ -9668,6 +9674,19 @@ code {
   padding: 0 10px;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
+}
+
+.terminal-mfa-dialog .terminal-mfa-remember input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.terminal-mfa-dialog .terminal-mfa-remember span {
+  text-transform: none;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .terminal-mfa-dialog input:focus {

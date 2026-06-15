@@ -6,6 +6,7 @@ import type {
   TerminalDisconnectReason,
   TerminalKeyboardInteractivePrompt,
   TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResponse,
   TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent,
   UserConfig
@@ -100,6 +101,7 @@ type SshTerminalRuntimeConfig = {
   getKeychainSecret?: (id: string) => AssetSecret
   ssh2Runtime?: SshTerminalSsh2Runtime | null
   createSshProxySocketForAsset?: typeof createSshProxySocketForAsset
+  rememberAssetPassword?: (assetId: string, password: string) => void | Promise<void>
   useBackendDouble?: boolean
   readyTimeoutMs?: number
   keepaliveIntervalMs?: number
@@ -109,7 +111,7 @@ type SshTerminalEventSink = {
   lifecycle: (event: TerminalLifecycleEvent) => void
   exit: (event: TerminalLifecycleEvent, code?: number | null) => void
   data: (chunk: string | Buffer) => void
-  keyboardInteractive?: (request: TerminalKeyboardInteractiveRequest) => Promise<string[]>
+  keyboardInteractive?: (request: TerminalKeyboardInteractiveRequest) => Promise<string[] | TerminalKeyboardInteractiveResponse>
   keyboardInteractiveResult?: (result: TerminalKeyboardInteractiveResult) => void
   closed?: (id: string) => void
 }
@@ -137,6 +139,7 @@ export const configureSshTerminalBackendRuntime = (config: SshTerminalRuntimeCon
   runtimeConfig.getKeychainSecret = config.getKeychainSecret
   runtimeConfig.ssh2Runtime = config.ssh2Runtime
   runtimeConfig.createSshProxySocketForAsset = config.createSshProxySocketForAsset
+  runtimeConfig.rememberAssetPassword = config.rememberAssetPassword
   runtimeConfig.useBackendDouble = config.useBackendDouble
   runtimeConfig.readyTimeoutMs = config.readyTimeoutMs
   runtimeConfig.keepaliveIntervalMs = config.keepaliveIntervalMs
@@ -331,7 +334,7 @@ export const createSshTerminalSession = (
     )
   }
 
-  const client = new ssh2.Client()
+  let client = new ssh2.Client()
   let stream: SshTerminalChannel | null = null
   let proxySocket: SshProxySocket | null = null
   let closed = false
@@ -339,9 +342,12 @@ export const createSshTerminalSession = (
   let rows = options.rows || 30
   const pendingWrites: Array<string | Buffer> = []
   const keyboardInteractiveStates = new Map<string, { attempts: number; activeRequestId: string }>()
+  const pendingRememberPasswords = new Map<string, { assetId: string; password: string }>()
   let hasConfiguredAgentAuth = false
+  let targetPasswordRetryUsed = false
   let jumpClient: SshTerminalClient | null = null
   let jumpStream: SshTerminalChannel | null = null
+  const staleTargetClients = new Set<SshTerminalClient>()
 
   let lifecycle = sendLifecycle(id, sink, {
     ...lifecycleBase,
@@ -487,6 +493,37 @@ export const createSshTerminalSession = (
     state.activeRequestId = ''
   }
 
+  const normalizeKeyboardResponse = (value: string[] | TerminalKeyboardInteractiveResponse): TerminalKeyboardInteractiveResponse => {
+    if (Array.isArray(value)) {
+      return { responses: value.map((item) => String(item || '')).slice(0, 8) }
+    }
+    if (typeof value === 'object' && value) {
+      return {
+        responses: Array.isArray(value.responses) ? value.responses.map((item) => String(item || '')).slice(0, 8) : [],
+        ...(value.rememberPassword === true ? { rememberPassword: true } : {})
+      }
+    }
+    return { responses: [] }
+  }
+
+  const rememberableAssetId = (authTarget: SshTerminalTarget) => cleanText(authTarget.asset?.id)
+
+  const rememberPasswordWhenReady = (scope: string, authTarget: SshTerminalTarget, password: string, rememberPassword?: boolean) => {
+    const assetId = rememberableAssetId(authTarget)
+    if (rememberPassword && assetId && password) {
+      pendingRememberPasswords.set(scope, { assetId, password })
+      return
+    }
+    pendingRememberPasswords.delete(scope)
+  }
+
+  const commitRememberedPassword = (scope: string) => {
+    const pending = pendingRememberPasswords.get(scope)
+    if (!pending) return
+    pendingRememberPasswords.delete(scope)
+    void runtimeConfig.rememberAssetPassword?.(pending.assetId, pending.password)
+  }
+
   const attachKeyboardInteractive = (authClient: SshTerminalClient, authTarget: SshTerminalTarget, scope: string) => {
     authClient.on('keyboard-interactive', (name, instructions, _instructionsLang, prompts, finishKeyboardInteractive) => {
       const state = keyboardState(scope)
@@ -528,8 +565,8 @@ export const createSshTerminalSession = (
       void (async () => {
         try {
           if (!sink.keyboardInteractive) throw new Error('Two-factor authentication prompt service is unavailable.')
-          const responses = await sink.keyboardInteractive(request)
-          finishKeyboardInteractive(Array.isArray(responses) ? responses.map((value) => String(value || '')) : [])
+          const response = normalizeKeyboardResponse(await sink.keyboardInteractive(request))
+          finishKeyboardInteractive(response.responses)
         } catch (error) {
           const isTimeout = error instanceof Error && /timed out|timeout/i.test(error.message)
           const isCancel = error instanceof Error && /cancel/i.test(error.message)
@@ -547,8 +584,14 @@ export const createSshTerminalSession = (
     })
   }
 
-  const requestMissingPassword = async (authTarget: SshTerminalTarget, scope: string) => {
-    const requestId = scope === 'target' ? `${id}-password` : `${id}-${scope}-password`
+  const passwordRequestId = (scope: string, attempt: number) => {
+    const suffix = attempt <= 1 ? 'password' : 'password-retry'
+    return scope === 'target' ? `${id}-${suffix}` : `${id}-${scope}-${suffix}`
+  }
+
+  const requestPassword = async (authTarget: SshTerminalTarget, scope: string, input: { attempt?: number; rejected?: boolean } = {}) => {
+    const attempt = Math.max(1, Math.trunc(Number(input.attempt || 1)))
+    const requestId = passwordRequestId(scope, attempt)
     if (!sink.keyboardInteractive) {
       throw new Error(`SSH password is required for ${terminalAuthLabel(authTarget)}.`)
     }
@@ -564,27 +607,31 @@ export const createSshTerminalSession = (
       port: authTarget.port,
       username: authTarget.username,
       purpose: 'password',
+      ...(rememberableAssetId(authTarget) ? { assetId: rememberableAssetId(authTarget), canRememberPassword: true } : {}),
       ...(authTarget.title ? { title: authTarget.title } : {}),
       name: 'SSH password',
-      instructions: 'Enter the SSH password to continue this connection.',
+      instructions: input.rejected
+        ? 'The saved SSH password was rejected. Enter a new password to retry this connection.'
+        : 'Enter the SSH password to continue this connection.',
       prompts: createPasswordPrompt(authTarget),
-      attempts: 1,
-      maxAttempts: 1,
+      attempts: attempt,
+      maxAttempts: input.rejected ? 2 : 1,
       timeoutMs: keyboardInteractiveTimeoutMs()
     }
     try {
-      const responses = await sink.keyboardInteractive(request)
-      const password = String(responses[0] || '')
+      const response = normalizeKeyboardResponse(await sink.keyboardInteractive(request))
+      const password = String(response.responses[0] || '')
       if (!password) throw new Error(`SSH password is required for ${terminalAuthLabel(authTarget)}.`)
       authTarget.password = password
-      sink.keyboardInteractiveResult?.({ id: requestId, status: 'success', attempts: 1, final: true })
+      rememberPasswordWhenReady(scope, authTarget, password, response.rememberPassword)
+      sink.keyboardInteractiveResult?.({ id: requestId, status: 'success', attempts: attempt, final: true })
     } catch (error) {
       const isTimeout = error instanceof Error && /timed out|timeout/i.test(error.message)
       const isCancel = error instanceof Error && /cancel/i.test(error.message)
       sink.keyboardInteractiveResult?.({
         id: requestId,
         status: isTimeout ? 'timeout' : isCancel ? 'canceled' : 'failed',
-        attempts: 1,
+        attempts: attempt,
         final: true,
         errorMessage: error instanceof Error ? error.message : 'SSH password prompt failed.'
       })
@@ -600,7 +647,7 @@ export const createSshTerminalSession = (
   }
 
   const ensurePasswordIfNeeded = async (authTarget: SshTerminalTarget, scope: string) => {
-    if (shouldPromptForPassword(authTarget)) await requestMissingPassword(authTarget, scope)
+    if (shouldPromptForPassword(authTarget)) await requestPassword(authTarget, scope)
   }
 
   const createConnectConfig = (authTarget: SshTerminalTarget) => {
@@ -683,6 +730,7 @@ export const createSshTerminalSession = (
             return
           }
           sendActiveKeyboardResult('jump', { status: 'success' })
+          commitRememberedPassword('jump')
           if (typeof jump.forwardOut !== 'function') {
             rejectOnce(new Error('SSH jump host runtime does not support forwardOut.'))
             return
@@ -714,79 +762,125 @@ export const createSshTerminalSession = (
     })
   }
 
-  attachKeyboardInteractive(client, target, 'target')
-
-  client
-    .on('ready', () => {
-      if (closed) return
-      sendActiveKeyboardResult('target', { status: 'success' })
-      lifecycle = sendLifecycle(id, sink, {
-        ...lifecycleBase,
-        stage: 'connected',
-        message: `SSH connected ${target.username}@${target.host}:${target.port}`
-      })
-      client.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
-        if (error) {
-          fail(error, 'SSH shell failed.', 1)
-          return
-        }
-        stream = channel
+  const openTargetTransportAndConnect = async (authClient: SshTerminalClient) => {
+    const { connectConfig, hasAgentAuth } = createConnectConfig(target)
+    hasConfiguredAgentAuth = hasAgentAuth
+    const jumpTarget = resolveJumpHostTarget()
+    if (jumpTarget) {
+      const tunnel = await openJumpHostTunnel(jumpTarget)
+      connectConfig.sock = tunnel as ConnectConfig['sock']
+      delete connectConfig.host
+      delete connectConfig.port
+    } else {
+      const proxy = await getProxySocketForAsset()(target.asset, getRuntimeConfig().sshProxyConfigs, target.host, target.port)
+      if (proxy) {
         lifecycle = sendLifecycle(id, sink, {
           ...lifecycleBase,
-          stage: 'shell-ready',
-          message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
+          stage: 'proxy-opening',
+          proxyName: proxy.config.name,
+          message: `Opening SSH proxy ${proxy.config.name}`
         })
-        while (pendingWrites.length) {
-          stream.write(pendingWrites.shift() || '')
-        }
-        channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
-        channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
-        channel.on('close', () => finish(0, 'process'))
-      })
+        proxySocket = proxy.socket
+        connectConfig.sock = proxy.socket
+        delete connectConfig.host
+        delete connectConfig.port
+      }
+    }
+    if (closed) {
+      cleanupTransports()
+      return
+    }
+    authClient.connect(connectConfig)
+  }
+
+  const retryTargetPassword = async (failedClient: SshTerminalClient, diagnosticEvent: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>>) => {
+    if (targetPasswordRetryUsed || closed || diagnosticEvent.errorCode !== 'SSH_AUTH_PASSWORD_REJECTED' || !sink.keyboardInteractive) return false
+    targetPasswordRetryUsed = true
+    staleTargetClients.add(failedClient)
+    sendLifecycle(id, sink, {
+      ...lifecycleBase,
+      stage: 'connecting',
+      errorCode: diagnosticEvent.errorCode,
+      errorMessage: diagnosticEvent.errorMessage,
+      message: `SSH password rejected for ${terminalAuthLabel(target)}`
     })
-    .on('error', (error) => {
-      const diagnosticEvent = sshConnectionErrorEvent(error)
-      sendActiveKeyboardResult('target', {
-        status: 'failed',
-        final: true,
-        errorMessage: diagnosticEvent.errorMessage || (error instanceof Error ? error.message : 'SSH authentication failed.')
-      })
+    cleanupTransports()
+    try {
+      await requestPassword(target, 'target', { attempt: 2, rejected: true })
+      if (closed) return true
+      try {
+        failedClient.end()
+      } catch {}
+      client = new ssh2.Client()
+      attachTargetClient(client)
+      await openTargetTransportAndConnect(client)
+      return true
+    } catch (error) {
       fail(error, 'SSH connection failed.', 1, diagnosticEvent)
-    })
-    .on('close', () => finish(null, 'unknown'))
-    .on('end', () => finish(null, 'unknown'))
+      return true
+    }
+  }
+
+  const attachTargetClient = (authClient: SshTerminalClient) => {
+    attachKeyboardInteractive(authClient, target, 'target')
+
+    authClient
+      .on('ready', () => {
+        if (closed) return
+        sendActiveKeyboardResult('target', { status: 'success' })
+        commitRememberedPassword('target')
+        lifecycle = sendLifecycle(id, sink, {
+          ...lifecycleBase,
+          stage: 'connected',
+          message: `SSH connected ${target.username}@${target.host}:${target.port}`
+        })
+        authClient.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
+          if (error) {
+            fail(error, 'SSH shell failed.', 1)
+            return
+          }
+          stream = channel
+          lifecycle = sendLifecycle(id, sink, {
+            ...lifecycleBase,
+            stage: 'shell-ready',
+            message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
+          })
+          while (pendingWrites.length) {
+            stream.write(pendingWrites.shift() || '')
+          }
+          channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
+          channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
+          channel.on('close', () => finish(0, 'process'))
+        })
+      })
+      .on('error', (error) => {
+        const diagnosticEvent = sshConnectionErrorEvent(error)
+        sendActiveKeyboardResult('target', {
+          status: 'failed',
+          final: true,
+          errorMessage: diagnosticEvent.errorMessage || (error instanceof Error ? error.message : 'SSH authentication failed.')
+        })
+        void (async () => {
+          if (await retryTargetPassword(authClient, diagnosticEvent)) return
+          fail(error, 'SSH connection failed.', 1, diagnosticEvent)
+        })()
+      })
+      .on('close', () => {
+        if (staleTargetClients.has(authClient) || authClient !== client) return
+        finish(null, 'unknown')
+      })
+      .on('end', () => {
+        if (staleTargetClients.has(authClient) || authClient !== client) return
+        finish(null, 'unknown')
+      })
+  }
+
+  attachTargetClient(client)
 
   void (async () => {
     try {
       await ensurePasswordIfNeeded(target, 'target')
-      const { connectConfig, hasAgentAuth } = createConnectConfig(target)
-      hasConfiguredAgentAuth = hasAgentAuth
-      const jumpTarget = resolveJumpHostTarget()
-      if (jumpTarget) {
-        const tunnel = await openJumpHostTunnel(jumpTarget)
-        connectConfig.sock = tunnel as ConnectConfig['sock']
-        delete connectConfig.host
-        delete connectConfig.port
-      } else {
-        const proxy = await getProxySocketForAsset()(target.asset, getRuntimeConfig().sshProxyConfigs, target.host, target.port)
-        if (proxy) {
-          lifecycle = sendLifecycle(id, sink, {
-            ...lifecycleBase,
-            stage: 'proxy-opening',
-            proxyName: proxy.config.name,
-            message: `Opening SSH proxy ${proxy.config.name}`
-          })
-          proxySocket = proxy.socket
-          connectConfig.sock = proxy.socket
-          delete connectConfig.host
-          delete connectConfig.port
-        }
-      }
-      if (closed) {
-        cleanupTransports()
-        return
-      }
-      client.connect(connectConfig)
+      await openTargetTransportAndConnect(client)
     } catch (error) {
       fail(error, 'SSH connection preparation failed.', 1)
     }

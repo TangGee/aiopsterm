@@ -176,8 +176,10 @@ export type I18nKey =
   | 'terminal.mfaRequired'
   | 'terminal.passwordTitle'
   | 'terminal.passwordDescription'
+  | 'terminal.passwordRejectedDescription'
   | 'terminal.passwordPromptFallback'
   | 'terminal.passwordRequired'
+  | 'terminal.passwordRemember'
   | 'terminal.mfaSubmit'
   | 'terminal.mfaSubmitting'
   | 'terminal.mfaEmpty'
@@ -346,9 +348,11 @@ const zhCN: LocaleMessages = {
   'terminal.mfaPromptFallback': '验证码或动态密码',
   'terminal.mfaRequired': '需要二次认证',
   'terminal.passwordTitle': 'SSH 密码认证',
-  'terminal.passwordDescription': '远程主机 {target} 没有保存密码。输入密码后仅用于本次 SSH 登录，不会自动保存。',
+  'terminal.passwordDescription': '远程主机 {target} 需要输入 SSH 密码。默认仅用于本次登录；勾选后会在连接成功时更新该主机密码。',
+  'terminal.passwordRejectedDescription': '远程主机 {target} 拒绝了已保存的密码。请输入新密码重试；勾选后会在连接成功时更新该主机密码。',
   'terminal.passwordPromptFallback': 'SSH 密码',
   'terminal.passwordRequired': '需要 SSH 密码',
+  'terminal.passwordRemember': '记住密码并更新该主机',
   'terminal.mfaSubmit': '提交认证',
   'terminal.mfaSubmitting': '提交中',
   'terminal.mfaEmpty': '请输入认证信息。',
@@ -516,9 +520,11 @@ const enUS: LocaleMessages = {
   'terminal.mfaPromptFallback': 'Verification code or dynamic password',
   'terminal.mfaRequired': 'Two-factor authentication required',
   'terminal.passwordTitle': 'SSH password authentication',
-  'terminal.passwordDescription': 'Remote host {target} has no saved password. The password is used only for this SSH login and is not saved automatically.',
+  'terminal.passwordDescription': 'Remote host {target} requires an SSH password. It is used only for this login by default; remember it to update this host after a successful connection.',
+  'terminal.passwordRejectedDescription': 'Remote host {target} rejected the saved password. Enter a new password to retry; remember it to update this host after a successful connection.',
   'terminal.passwordPromptFallback': 'SSH password',
   'terminal.passwordRequired': 'SSH password required',
+  'terminal.passwordRemember': 'Remember password for this host',
   'terminal.mfaSubmit': 'Submit verification',
   'terminal.mfaSubmitting': 'Submitting',
   'terminal.mfaEmpty': 'Enter the verification response.',

@@ -45,7 +45,7 @@ class MockSshChannel extends PassThrough {
   }
 }
 
-const createSshRuntime = (options: { failConnect?: Error; failShell?: Error; manualReady?: boolean } = {}) => {
+const createSshRuntime = (options: { failConnect?: Error | Array<Error | null | undefined>; failShell?: Error; manualReady?: boolean } = {}) => {
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
   const channels: MockSshChannel[] = []
@@ -60,7 +60,8 @@ const createSshRuntime = (options: { failConnect?: Error; failShell?: Error; man
       connectConfigs.push(config)
       if (options.manualReady) return
       queueMicrotask(() => {
-        if (options.failConnect) this.emit('error', options.failConnect)
+        const failConnect = Array.isArray(options.failConnect) ? options.failConnect.shift() : options.failConnect
+        if (failConnect) this.emit('error', failConnect)
         else this.emit('ready')
       })
     }
@@ -369,6 +370,7 @@ describe('ssh terminal backend runtime', () => {
     const events = createRecorder()
     const requests: TerminalKeyboardInteractiveRequest[] = []
     const results: TerminalKeyboardInteractiveResult[] = []
+    const rememberedPasswords: Array<{ assetId: string; password: string }> = []
     backend.configureSshTerminalBackendRuntime({
       ssh2Runtime: asRuntime(ssh.runtime),
       getAsset: () =>
@@ -384,14 +386,17 @@ describe('ssh terminal backend runtime', () => {
         }) as never,
       getAssetSecret: () => ({}),
       getKeychainSecret: () => ({}),
-      getConfig: () => runtimeConfig()
+      getConfig: () => runtimeConfig(),
+      rememberAssetPassword: (assetId: string, password: string) => {
+        rememberedPasswords.push({ assetId, password })
+      }
     })
 
     const result = backend.createSshTerminalSession('ssh-password-prompt-1', { kind: 'ssh', assetId: 'asset-password-empty' }, {
       ...createSink(events),
       keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
         requests.push(request)
-        return ['typed-password']
+        return { responses: ['typed-password'], rememberPassword: true }
       },
       keyboardInteractiveResult: (payload: TerminalKeyboardInteractiveResult) => results.push(payload)
     })
@@ -405,6 +410,8 @@ describe('ssh terminal backend runtime', () => {
         port: 22,
         username: 'root',
         purpose: 'password',
+        assetId: 'asset-password-empty',
+        canRememberPassword: true,
         prompts: [{ prompt: 'SSH password for root@10.71.0.11:22:', echo: false }],
         attempts: 1,
         maxAttempts: 1
@@ -420,6 +427,67 @@ describe('ssh terminal backend runtime', () => {
       })
     )
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(rememberedPasswords).toEqual([{ assetId: 'asset-password-empty', password: 'typed-password' }])
+  })
+
+  it('prompts for a replacement password after a saved password is rejected before exiting', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({
+      failConnect: [Object.assign(new Error('All configured authentication methods failed'), { level: 'client-authentication' }), null]
+    })
+    const events = createRecorder()
+    const requests: TerminalKeyboardInteractiveRequest[] = []
+    const results: TerminalKeyboardInteractiveResult[] = []
+    const rememberedPasswords: Array<{ assetId: string; password: string }> = []
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () =>
+        ({
+          id: 'asset-bad-password',
+          name: 'bad-password-host',
+          title: 'bad-password-host',
+          host: '10.71.0.12',
+          username: 'root',
+          port: 22,
+          asset_type: 'person',
+          auth_type: 'password'
+        }) as never,
+      getAssetSecret: () => ({ password: 'wrong-password' }),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      rememberAssetPassword: (assetId: string, password: string) => {
+        rememberedPasswords.push({ assetId, password })
+      }
+    })
+
+    backend.createSshTerminalSession('ssh-password-retry-1', { kind: 'ssh', assetId: 'asset-bad-password' }, {
+      ...createSink(events),
+      keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
+        requests.push(request)
+        return { responses: ['correct-password'], rememberPassword: true }
+      },
+      keyboardInteractiveResult: (payload: TerminalKeyboardInteractiveResult) => results.push(payload)
+    })
+    await waitForMicrotasks(12)
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        id: 'ssh-password-retry-1-password-retry',
+        purpose: 'password',
+        assetId: 'asset-bad-password',
+        canRememberPassword: true,
+        attempts: 2,
+        maxAttempts: 2
+      })
+    ])
+    expect(results).toContainEqual(expect.objectContaining({ id: 'ssh-password-retry-1-password-retry', status: 'success', final: true }))
+    expect(ssh.connectConfigs).toEqual([
+      expect.objectContaining({ password: 'wrong-password' }),
+      expect.objectContaining({ password: 'correct-password' })
+    ])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(events.exit).toEqual([])
+    expect(rememberedPasswords).toEqual([{ assetId: 'asset-bad-password', password: 'correct-password' }])
   })
 
   it('forwards jump-host keyboard-interactive authentication before connecting the target through the tunnel', async () => {

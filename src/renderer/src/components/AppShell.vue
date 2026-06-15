@@ -123,6 +123,18 @@
               data-testid="terminal-mfa-input"
             />
           </label>
+          <label
+            v-if="showTerminalPasswordRemember"
+            class="terminal-mfa-remember"
+          >
+            <input
+              v-model="terminalMfaDialog.rememberPassword"
+              type="checkbox"
+              :disabled="terminalMfaDialog.submitting"
+              data-testid="terminal-password-remember"
+            />
+            <span>{{ t('terminal.passwordRemember') }}</span>
+          </label>
           <p
             v-if="terminalMfaDialog.error"
             class="terminal-mfa-error"
@@ -183,6 +195,7 @@ type TerminalMfaDialogState = {
   open: boolean
   request: TerminalKeyboardInteractiveRequest | null
   responses: string[]
+  rememberPassword: boolean
   submitting: boolean
   error: string
 }
@@ -202,6 +215,7 @@ const terminalMfaDialog = ref<TerminalMfaDialogState>({
   open: false,
   request: null,
   responses: [],
+  rememberPassword: false,
   submitting: false,
   error: ''
 })
@@ -227,12 +241,21 @@ const terminalMfaPrompts = computed<TerminalMfaPrompt[]>(() => {
   return prompts.length ? prompts : [{ prompt: terminalAuthPromptFallback.value, echo: false }]
 })
 const isTerminalPasswordPrompt = computed(() => terminalMfaDialog.value.request?.purpose === 'password')
+const showTerminalPasswordRemember = computed(
+  () => isTerminalPasswordPrompt.value && terminalMfaDialog.value.request?.canRememberPassword === true
+)
+const isTerminalPasswordRetry = computed(() => isTerminalPasswordPrompt.value && Number(terminalMfaDialog.value.request?.attempts || 1) > 1)
 const terminalAuthTitle = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordTitle' : 'terminal.mfaTitle'))
 const terminalAuthRequired = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordRequired' : 'terminal.mfaRequired'))
 const terminalAuthPromptFallback = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordPromptFallback' : 'terminal.mfaPromptFallback'))
-const terminalAuthDescription = computed(() =>
-  tf(isTerminalPasswordPrompt.value ? 'terminal.passwordDescription' : 'terminal.mfaDescription', { target: terminalMfaTarget.value })
-)
+const terminalAuthDescription = computed(() => {
+  const key = isTerminalPasswordPrompt.value
+    ? isTerminalPasswordRetry.value
+      ? 'terminal.passwordRejectedDescription'
+      : 'terminal.passwordDescription'
+    : 'terminal.mfaDescription'
+  return tf(key, { target: terminalMfaTarget.value })
+})
 
 const tf = (key: I18nKey, values: Record<string, string | number>) => {
   let text = t(key)
@@ -260,6 +283,7 @@ const resetTerminalMfaDialog = () => {
     open: false,
     request: null,
     responses: [],
+    rememberPassword: false,
     submitting: false,
     error: ''
   }
@@ -272,6 +296,7 @@ const handleTerminalMfaRequest = (request: TerminalKeyboardInteractiveRequest) =
     open: true,
     request,
     responses: Array.from({ length: promptCount }, () => ''),
+    rememberPassword: false,
     submitting: false,
     error: ''
   }
@@ -288,7 +313,15 @@ const submitTerminalMfa = () => {
   }
   terminalMfaDialog.value.submitting = true
   terminalMfaDialog.value.error = ''
-  window.aiops?.respondTerminalKeyboardInteractive?.(request.id, responses)
+  window.aiops?.respondTerminalKeyboardInteractive?.(
+    request.id,
+    isTerminalPasswordPrompt.value
+      ? {
+          responses,
+          rememberPassword: terminalMfaDialog.value.rememberPassword
+        }
+      : responses
+  )
 }
 
 const cancelTerminalMfa = () => {

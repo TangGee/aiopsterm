@@ -108,6 +108,11 @@ export type TerminalKeyboardInteractivePrompt = {
   echo: boolean
 }
 
+export type TerminalKeyboardInteractiveResponse = {
+  responses: string[]
+  rememberPassword?: boolean
+}
+
 export type TerminalKeyboardInteractiveRequest = {
   id: string
   connectionId: string
@@ -115,6 +120,8 @@ export type TerminalKeyboardInteractiveRequest = {
   port: number
   username: string
   purpose?: 'password' | 'keyboard-interactive'
+  assetId?: string
+  canRememberPassword?: boolean
   title?: string
   name?: string
   instructions?: string
@@ -3111,7 +3118,7 @@ export type AiopsPreloadApi = {
   writeTerminalBinary: (id: string, data: number[] | Uint8Array | ArrayBuffer) => Promise<TerminalBinaryWriteResult>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
-  respondTerminalKeyboardInteractive: (id: string, responses: string[]) => void
+  respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void
   cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>
   pickZmodemSavePath: (name: string) => Promise<ZmodemSavePathPickResult>

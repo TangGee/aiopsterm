@@ -373,6 +373,7 @@ import type {
   TerminalCommandGenerationInput,
   TerminalCommandSuggestionContext,
   TerminalCreateOptions,
+  TerminalKeyboardInteractiveResponse,
   TerminalKeyboardInteractiveRequest,
   TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent,
@@ -605,6 +606,48 @@ const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
   return value.map((item) => String(item ?? '')).slice(0, 8)
 }
 
+const sanitizeKeyboardInteractiveResponse = (value: unknown): TerminalKeyboardInteractiveResponse => {
+  if (Array.isArray(value)) return { responses: sanitizeKeyboardInteractiveResponses(value) }
+  if (typeof value === 'object' && value) {
+    const record = value as Record<string, unknown>
+    return {
+      responses: sanitizeKeyboardInteractiveResponses(record.responses),
+      ...(record.rememberPassword === true ? { rememberPassword: true } : {})
+    }
+  }
+  return { responses: [] }
+}
+
+const rememberTerminalPassword = (assetId: string, password: string) => {
+  if (!password) return
+  const asset = getAsset(assetId)
+  if (!asset || asset.isLocalShell) return
+  const result = saveAsset({
+    ...asset,
+    id: asset.id,
+    name: asset.name,
+    title: asset.title,
+    host: asset.host,
+    ip: asset.ip,
+    group: asset.group,
+    group_name: asset.group_name,
+    username: asset.username,
+    port: asset.port,
+    asset_type: asset.asset_type,
+    auth_type: asset.auth_type,
+    password
+  })
+  logRuntimeEvent(result.ok ? 'info' : 'warn', 'terminal.password.remember', {
+    assetId,
+    host: asset.host,
+    port: asset.port,
+    username: asset.username,
+    ok: result.ok,
+    errorCode: result.errorCode,
+    errorMessage: result.errorMessage
+  })
+}
+
 const sendTerminalKeyboardInteractiveResult = (owner: BrowserWindow, result: TerminalKeyboardInteractiveResult) => {
   logRuntimeEvent(result.status === 'success' ? 'info' : 'warn', 'terminal.keyboard-interactive.result', {
     id: result.id,
@@ -617,7 +660,7 @@ const sendTerminalKeyboardInteractiveResult = (owner: BrowserWindow, result: Ter
 }
 
 const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: TerminalKeyboardInteractiveRequest) =>
-  new Promise<string[]>((resolve, reject) => {
+  new Promise<TerminalKeyboardInteractiveResponse>((resolve, reject) => {
     let settled = false
     const responseChannel = `terminal:keyboard-interactive:response:${request.id}`
     const cancelChannel = `terminal:keyboard-interactive:cancel:${request.id}`
@@ -632,9 +675,9 @@ const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: Termi
       cleanup()
       callback()
     }
-    const handleResponse = (event: IpcMainEvent, responses: unknown) => {
+    const handleResponse = (event: IpcMainEvent, payload: unknown) => {
       if (event.sender !== owner.webContents) return
-      settle(() => resolve(sanitizeKeyboardInteractiveResponses(responses)))
+      settle(() => resolve(sanitizeKeyboardInteractiveResponse(payload)))
     }
     const handleCancel = (event: IpcMainEvent) => {
       if (event.sender !== owner.webContents) return
@@ -1253,6 +1296,7 @@ configureSshTerminalBackendRuntime({
   getAsset,
   getAssetSecret,
   getKeychainSecret,
+  rememberAssetPassword: rememberTerminalPassword,
   useBackendDouble: shouldUseSshTerminalBackendDouble()
 })
 configureExtensionBackendRuntime({
