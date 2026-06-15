@@ -408,6 +408,8 @@ describe('ssh terminal backend runtime', () => {
         tryKeyboard: true
       })
     )
+    expect(result.cwd).toBe('/root')
+    expect(events.lifecycle[0]).toEqual(expect.objectContaining({ cwd: '/root' }))
 
     const responses = await emitKeyboardInteractive(ssh.clients[0], [{ prompt: 'One-time password:', echo: false }], {
       name: 'Dynamic password',

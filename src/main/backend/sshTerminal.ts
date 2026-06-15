@@ -245,7 +245,8 @@ export const resolveSshTerminalTarget = (options: TerminalCreateOptions): SshTer
 }
 
 const createLifecycleBase = (id: string, target: SshTerminalTarget) => {
-  const cwd = target.username ? `/home/${target.username}` : '~'
+  const username = cleanText(target.username)
+  const cwd = username ? (username === 'root' ? '/root' : `/home/${username}`) : '~'
   return {
     cwd,
     lifecycleBase: {
