@@ -6677,6 +6677,9 @@ describe('AppShell', () => {
     expect(mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]).toContain('\x1b[1;38;5;')
 
     const firstHost = wrapper.find('.xterm-host')
+    const styles = baseStyles()
+    expect(styles).toContain('.xterm-host {\n  min-height: 0;\n  min-width: 0;\n  overflow: hidden;\n  display: grid;\n  box-sizing: border-box;\n}')
+    expect(styles).toContain('padding: 10px 10px 16px;')
     Object.defineProperty(firstHost.element, 'clientHeight', { configurable: true, value: 360 })
     const xterm = mockXtermInstances.at(-1)!
     xterm.rows = 20
@@ -6685,8 +6688,13 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     const aiButton = wrapper.find('.terminal-chat-ai-button')
     expect(aiButton.exists()).toBe(true)
-    expect(aiButton.attributes('style')).toContain('top: 54px')
+    expect(aiButton.attributes('style')).toContain('top: 60px')
     expect(aiButton.attributes('style')).toContain('right: 26px')
+    xterm.emitSelection('bottom prompt', { start: { x: 0, y: 19 }, end: { x: 13, y: 19 } })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-chat-ai-button').attributes('style')).toContain('top: 294px')
+    xterm.emitSelection('systemctl status nginx', { start: { x: 0, y: 5 }, end: { x: 22, y: 5 } })
+    await wrapper.vm.$nextTick()
     await aiButton.trigger('click')
     expect(store.rightPanelOpen).toBe(true)
     expect(store.chatMessages.at(-2)?.text).toContain('Terminal output:')

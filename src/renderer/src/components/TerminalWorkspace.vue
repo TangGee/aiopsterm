@@ -539,6 +539,11 @@ const commandDialog = reactive({
 type TerminalSuggestion = TerminalCommandSuggestion
 
 const terminalSuggestionSources = new Set<TerminalSuggestion['source']>(['base', 'history', 'ai'])
+const terminalContentPaddingTop = 10
+const terminalContentPaddingBottom = 16
+const terminalAiButtonHeight = 32
+const terminalFloatingGap = 8
+const terminalBottomSafePx = 16
 const malformedTerminalSuggestionMessage = '终端命令建议服务返回数据无效'
 const failedTerminalSuggestionMessage = '终端命令建议加载失败'
 const unavailableTerminalSuggestionMessage = '终端命令建议服务不可用'
@@ -1042,8 +1047,18 @@ const getSelectionVisibleRow = (view: { terminal: XtermTerminal }, panelId: stri
   const visibleSelectionRow = Math.max(visibleStart, Math.min(startY, visibleEnd))
   const terminalElement = terminalElements.get(panelId)
   const hostHeight = terminalElement?.clientHeight || terminalElement?.getBoundingClientRect().height || view.terminal.rows * 18
-  const cellHeight = Math.max(12, hostHeight / Math.max(view.terminal.rows, 1))
-  return Math.max(0, visibleSelectionRow - viewportY - 2) * cellHeight
+  const contentHeight = Math.max(0, hostHeight - terminalContentPaddingTop - terminalContentPaddingBottom)
+  const cellHeight = Math.max(12, (contentHeight || hostHeight) / Math.max(view.terminal.rows, 1))
+  const hostTop = terminalElement?.offsetTop || 0
+  const contentTop = hostTop + terminalContentPaddingTop
+  const rowIndex = Math.max(0, visibleSelectionRow - viewportY)
+  const preferredTop = contentTop + Math.max(0, rowIndex - 2) * cellHeight
+  const bottomSafe = Math.max(terminalBottomSafePx, cellHeight * 2)
+  const minTop = hostTop + terminalFloatingGap
+  const maxTop = hostTop + Math.max(minTop, hostHeight - terminalAiButtonHeight - bottomSafe)
+  const aboveSelectionTop = contentTop + rowIndex * cellHeight - terminalAiButtonHeight - terminalFloatingGap
+  const top = preferredTop > maxTop ? aboveSelectionTop : preferredTop
+  return Math.round(Math.max(minTop, Math.min(top, maxTop)))
 }
 
 const updateSelectionButtonPosition = (panelId: string) => {
