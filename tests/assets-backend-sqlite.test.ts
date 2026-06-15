@@ -133,6 +133,24 @@ describe('assets sqlite backend seed boundary', () => {
         })
       )
       expect(await readFile(credentialKeyPath)).toHaveLength(32)
+
+      const clearedAsset = backend.saveAsset({
+        id: savedAsset.data!.id,
+        name: 'encrypted-secret-host',
+        title: 'encrypted-secret-host',
+        host: '10.77.1.7',
+        username: 'ops',
+        port: 22,
+        asset_type: 'person',
+        auth_type: 'password',
+        group: '测试',
+        group_name: '测试',
+        tags: ['manual'],
+        password: ''
+      })
+      expect(clearedAsset.ok).toBe(true)
+      expect(clearedAsset.data).toEqual(expect.objectContaining({ hasPassword: false }))
+      expect(backend.getAssetSecret(savedAsset.data!.id)).toEqual({})
     })
   })
 

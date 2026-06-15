@@ -613,7 +613,7 @@ const resolveAssetConnectionTarget = (input: AiopsAssetConnectionTestInput = {})
   const savedSecret = existing?.id ? getStore().getSecret(existing.id) : {}
   const keychainSecret = keychainId ? getStore().getKeychainSecret(keychainId) : {}
   if (authType === 'password') {
-    const password = text(draft?.password) || text(savedSecret.password)
+    const password = draft && hasOwn(draft, 'password') ? text(draft.password) : text(savedSecret.password)
     if (!password) throw new AssetConnectionTestError('ASSET_SSH_AUTH_REQUIRED', 'SSH 密码不能为空')
     return {
       assetId: existing?.id || assetId || undefined,
@@ -754,6 +754,8 @@ const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAssetRecord
   const host = input.host.trim()
   const group = (input.group || input.group_name || existing?.group || '未分组').trim() || '未分组'
   const tags = Array.isArray(input.tags) ? input.tags.filter(Boolean) : existing?.tags || []
+  const hasPassword = hasOwn(input, 'password') ? Boolean(input.password) : Boolean(existing?.hasPassword)
+  const hasPrivateKey = hasOwn(input, 'privateKey') ? Boolean(input.privateKey) : Boolean(existing?.hasPrivateKey)
   return {
     id,
     uuid: existing?.uuid || id,
@@ -779,9 +781,26 @@ const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAssetRecord
     proxyName: hasOwn(input, 'proxyName') ? input.proxyName : existing?.proxyName,
     keychainId: hasOwn(input, 'keychainId') ? input.keychainId : existing?.keychainId,
     jumpHostId: hasOwn(input, 'jumpHostId') ? input.jumpHostId : existing?.jumpHostId,
-    hasPassword: Boolean(input.password || existing?.hasPassword),
-    hasPrivateKey: Boolean(input.privateKey || existing?.hasPrivateKey)
+    hasPassword,
+    hasPrivateKey
   }
+}
+
+const mergeAssetSecretInput = (existingSecret: AssetSecret, input: AiopsAssetInput): AssetSecret => {
+  const secret: AssetSecret = { ...existingSecret }
+  if (hasOwn(input, 'password')) {
+    if (input.password) secret.password = input.password
+    else delete secret.password
+  }
+  if (hasOwn(input, 'privateKey')) {
+    if (input.privateKey) secret.privateKey = input.privateKey
+    else delete secret.privateKey
+  }
+  if (hasOwn(input, 'passphrase')) {
+    if (input.passphrase) secret.passphrase = input.passphrase
+    else delete secret.passphrase
+  }
+  return secret
 }
 
 const detectKeyType = (privateKey = '', publicKey = ''): AiopsKeychainType => {
@@ -1002,12 +1021,7 @@ class FallbackAssetStore {
     const asset = normalizeAssetInput(input, index >= 0 ? assets[index] : undefined)
     const nextAssets = index >= 0 ? assets.map((item) => (item.id === asset.id ? asset : item)) : [...assets, asset]
     const secrets = { ...(this.store.get('secrets') || {}) }
-    const secret = {
-      ...decryptAssetSecret(secrets[asset.id]),
-      ...(input.password ? { password: input.password } : {}),
-      ...(input.privateKey ? { privateKey: input.privateKey } : {}),
-      ...(input.passphrase ? { passphrase: input.passphrase } : {})
-    }
+    const secret = mergeAssetSecretInput(decryptAssetSecret(secrets[asset.id]), input)
     secrets[asset.id] = encryptAssetSecretForStorage(secret)
     this.store.set('assets', nextAssets)
     this.store.set('secrets', secrets)
@@ -1229,12 +1243,7 @@ class SqliteAssetStore {
     const existingAsset = existingRow ? (JSON.parse(existingRow.data) as AiopsAssetRecord) : undefined
     const existingSecret = existingRow ? decryptAssetSecret(JSON.parse(existingRow.secret || '{}') as AssetSecret) : {}
     const asset = normalizeAssetInput(input, existingAsset)
-    const secret = {
-      ...existingSecret,
-      ...(input.password ? { password: input.password } : {}),
-      ...(input.privateKey ? { privateKey: input.privateKey } : {}),
-      ...(input.passphrase ? { passphrase: input.passphrase } : {})
-    }
+    const secret = mergeAssetSecretInput(existingSecret, input)
     this.db
       .prepare('INSERT INTO assets (id, data, secret) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, secret = excluded.secret')
       .run(asset.id, JSON.stringify(asset), JSON.stringify(encryptAssetSecretForStorage(secret)))

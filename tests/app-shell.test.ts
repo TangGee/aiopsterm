@@ -1924,6 +1924,34 @@ describe('AppShell', () => {
     expect((editSecretInput.element as HTMLInputElement).type).toBe('text')
   })
 
+  it('clears saved host passwords from Assets edits when the password field is emptied', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const assets = mount(AssetsPanel, {
+      props: { query: '' },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await assets.findAll('.asset-management-item').find((button) => button.text().includes('主机管理'))!.trigger('click')
+
+    await assets.findAll('.host-card').find((card) => card.text().includes('legacy-node'))!.trigger('contextmenu', {
+      clientX: 220,
+      clientY: 180
+    })
+    await assets.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
+    await flushPromises()
+
+    const editSecretInput = assets.find('.asset-form-panel .asset-secret-field input')
+    expect((editSecretInput.element as HTMLInputElement).value).toBe('legacy-password')
+    await editSecretInput.setValue('')
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await assets.find('[data-onboarding-id="asset-form-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ id: 'asset-4', password: '' }))
+    await expect(window.aiops.getAssetEditableSecret('asset-4')).resolves.toEqual({ ok: true, data: { assetId: 'asset-4' } })
+  })
+
   it('copies saved passwords when cloning hosts from Assets', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -2099,6 +2127,34 @@ describe('AppShell', () => {
     await wrapper.find('.workspace-host-form').trigger('submit')
     await flushPromises()
     expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ id: 'asset-4', password: 'legacy-password' }))
+  })
+
+  it('clears saved host passwords from Workspace edits when the password field is emptied', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(WorkspacePanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.find('.workspace-search input').setValue('legacy-node')
+    await flushPromises()
+
+    await wrapper.findAll('.workspace-host-row').find((row) => row.text().includes('legacy-node'))!.trigger('contextmenu', {
+      clientX: 260,
+      clientY: 180
+    })
+    await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
+    await flushPromises()
+
+    const secretInput = wrapper.find('.workspace-host-form .asset-secret-field input')
+    expect((secretInput.element as HTMLInputElement).value).toBe('legacy-password')
+    await secretInput.setValue('')
+    vi.mocked(window.aiops.saveAsset).mockClear()
+    await wrapper.find('.workspace-host-form').trigger('submit')
+    await flushPromises()
+
+    expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ id: 'asset-4', password: '' }))
+    await expect(window.aiops.getAssetEditableSecret('asset-4')).resolves.toEqual({ ok: true, data: { assetId: 'asset-4' } })
   })
 
   it('copies saved passwords when cloning hosts from Workspace', async () => {

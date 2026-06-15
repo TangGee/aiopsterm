@@ -311,7 +311,8 @@ describe('assets backend boundary', () => {
       password: ''
     })
     expect(edited.ok).toBe(true)
-    expect(backend.getAssetEditableSecret(saved.data!.id)).toEqual({ ok: true, data: { assetId: saved.data!.id, password: 'backend-secret' } })
+    expect(edited.data).toEqual(expect.objectContaining({ hasPassword: false }))
+    expect(backend.getAssetEditableSecret(saved.data!.id)).toEqual({ ok: true, data: { assetId: saved.data!.id } })
 
     expect(backend.getAssetEditableSecret('local-127-1').ok).toBe(false)
     expect(backend.getAssetEditableSecret('missing-asset').ok).toBe(false)
@@ -473,7 +474,7 @@ describe('assets backend boundary', () => {
     expect(ssh.clients.at(-1)?.ended).toBe(true)
   })
 
-  it('tests edit drafts with blank secrets by reusing the saved backend secret', async () => {
+  it('treats blank edit draft passwords as an explicit cleared host password', async () => {
     const backend = await loadBackend()
     const ssh = createSshRuntime()
     backend.configureAssetConnectionRuntime({ ssh2Runtime: ssh.runtime })
@@ -509,15 +510,12 @@ describe('assets backend boundary', () => {
       }
     })
 
-    expect(tested.ok).toBe(true)
-    expect(ssh.connectConfigs.at(-1)).toEqual(
-      expect.objectContaining({
-        host: '10.71.0.10',
-        port: 2200,
-        username: 'root',
-        password: 'saved-password'
-      })
-    )
+    expect(tested).toEqual({
+      ok: false,
+      errorCode: 'ASSET_SSH_AUTH_REQUIRED',
+      errorMessage: 'SSH 密码不能为空'
+    })
+    expect(ssh.connectConfigs).toEqual([])
   })
 
   it('fails connection tests closed when credentials or ssh runtime are missing', async () => {

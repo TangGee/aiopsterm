@@ -277,7 +277,7 @@
                 <input
                   v-model="form.password"
                   :type="assetPasswordVisible ? 'text' : 'password'"
-                  :placeholder="editMode ? '未保存密码时留空' : ''"
+                  :placeholder="editMode ? '清空将删除已保存密码' : ''"
                   autocomplete="new-password"
                 />
                 <button
@@ -2269,7 +2269,7 @@ const buildAssetFormInput = (): { asset: AiopsAssetInput; title: string } | null
       jumpHostId: form.jumpHostId || undefined,
       needProxy: Boolean(selectedProxy),
       proxyName: selectedProxy ? selectedProxyName : '',
-      ...(form.password.trim() ? { password: form.password } : {})
+      ...(form.auth_type === 'password' ? { password: form.password } : {})
     }
   }
 }

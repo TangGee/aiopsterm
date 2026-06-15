@@ -493,7 +493,7 @@
               <input
                 v-model="hostForm.password"
                 :type="hostPasswordVisible ? 'text' : 'password'"
-                :placeholder="hostModal.mode === 'create' ? '' : '未保存密码时留空'"
+                :placeholder="hostModal.mode === 'create' ? '' : '清空将删除已保存密码'"
                 autocomplete="new-password"
               />
               <button
@@ -1866,7 +1866,7 @@ const saveHostJumpHostForm = async () => {
     status: 'online',
     tags: ['jump-host'],
     keychainId: hostJumpForm.authType === 'keyBased' && hostJumpForm.keychainId ? hostJumpForm.keychainId : undefined,
-    ...(hostJumpForm.password.trim() ? { password: hostJumpForm.password } : {})
+    ...(hostJumpForm.authType === 'password' ? { password: hostJumpForm.password } : {})
   }
   try {
     const saved = await saveAssetRecord(input)
@@ -2910,7 +2910,6 @@ const buildHostInput = (id: string | undefined, port: number, sourceAsset?: Work
   const proxyName = String(hostForm.proxyName || '').trim()
   const keychainId = String(hostForm.keychainId || '').trim()
   const jumpHostId = String(hostForm.jumpHostId || '').trim()
-  const password = String(hostForm.password || '').trim()
   const targetPatch = targetGroup ? groupTargetPatch(targetGroup, sourceAsset) : {}
   return {
     ...(id ? { id } : {}),
@@ -2942,7 +2941,7 @@ const buildHostInput = (id: string | undefined, port: number, sourceAsset?: Work
     keychainId: hostForm.authType === 'keyBased' && keychainId ? keychainId : undefined,
     jumpHostId: jumpHostId || undefined,
     ...(targetPatch.group ? { group: targetPatch.group, group_name: targetPatch.group_name || targetPatch.group } : {}),
-    ...(password ? { password: hostForm.password } : {})
+    ...(hostForm.authType === 'password' ? { password: hostForm.password } : {})
   }
 }
 

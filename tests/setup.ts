@@ -5018,8 +5018,8 @@ const normalizeAssetInputMock = (input: TestAssetInput, existing?: TestAssetReco
     proxyName: hasOwn(input, 'proxyName') ? input.proxyName : existing?.proxyName,
     keychainId: hasOwn(input, 'keychainId') ? input.keychainId : existing?.keychainId,
     jumpHostId: hasOwn(input, 'jumpHostId') ? input.jumpHostId : existing?.jumpHostId,
-    hasPassword: Boolean(input.password || input.hasPassword || existing?.hasPassword),
-    hasPrivateKey: Boolean(input.privateKey || input.keychainId || input.hasPrivateKey || existing?.hasPrivateKey)
+    hasPassword: hasOwn(input, 'password') ? Boolean(input.password) : Boolean(input.hasPassword || existing?.hasPassword),
+    hasPrivateKey: hasOwn(input, 'privateKey') ? Boolean(input.privateKey) : Boolean(input.keychainId || input.hasPrivateKey || existing?.hasPrivateKey)
   }
 }
 
@@ -5054,8 +5054,9 @@ const assetSnapshotMock = () => ({
 const syncAssetSecretMock = (asset: TestAssetRecord, input: TestAssetInput) => {
   const existingSecret = assetSecretStoreMock[asset.id] || {}
   const nextSecret: TestAssetSecret = { ...existingSecret }
-  if (typeof input.password === 'string' && input.password.trim()) {
-    nextSecret.password = input.password
+  if (hasOwn(input, 'password')) {
+    if (typeof input.password === 'string' && input.password) nextSecret.password = input.password
+    else delete nextSecret.password
   }
   if (nextSecret.password) {
     assetSecretStoreMock[asset.id] = nextSecret
