@@ -28,7 +28,8 @@
     "smoke:packaged": "xvfb-run -a node scripts/smoke-packaged-app.mjs",
     "audit:linux-package": "node scripts/audit-linux-package.mjs",
     "audit:package-config": "node scripts/audit-package-config.mjs",
-    "audit:client-mocks": "node scripts/audit-client-mocks.mjs"
+    "audit:client-mocks": "node scripts/audit-client-mocks.mjs",
+    "build:start": "scripts/build-and-start.sh"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",

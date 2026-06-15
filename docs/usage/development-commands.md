@@ -61,6 +61,14 @@ Build the Electron renderer and main process:
 npm run build
 ```
 
+Build and then start the latest Electron preview window:
+
+```bash
+npm run build:start
+```
+
+The script runs `npm run build`, then starts `electron-vite preview --skipBuild --noSandbox`. Use `npm run build:start -- --restart` when an old aiopsterm preview window is still open and should be stopped before launching the new build. Use `npm run build:start -- --skip-build` to reopen the latest existing build without rebuilding.
+
 Rebuild native Electron modules explicitly:
 
 ```bash
