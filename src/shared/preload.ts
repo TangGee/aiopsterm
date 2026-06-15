@@ -91,8 +91,13 @@ export type TerminalLifecycleEvent = {
   jumpUsername?: string
   authScope?: 'target' | 'jump'
   authPurpose?: 'password' | 'keyboard-interactive'
-  sshTransport?: 'direct' | 'proxy' | 'jump'
+  sshTransport?: 'direct' | 'proxy' | 'jump' | 'relay-shell'
   sshAuthMethods?: string
+  remoteHop?: 'relay' | 'target' | 'unknown'
+  expectedHost?: string
+  actualHost?: string
+  actualUsername?: string
+  endpointConfidence?: 'confirmed' | 'inferred' | 'unknown'
   connectionId?: string
   proxyName?: string
   message?: string

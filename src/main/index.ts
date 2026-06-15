@@ -2685,6 +2685,11 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         authPurpose: event.authPurpose,
         sshTransport: event.sshTransport,
         sshAuthMethods: event.sshAuthMethods,
+        remoteHop: event.remoteHop,
+        expectedHost: event.expectedHost,
+        actualHost: event.actualHost,
+        actualUsername: event.actualUsername,
+        endpointConfidence: event.endpointConfidence,
         proxyName: event.proxyName
       })
       sendWindowEvent(owner, 'terminal:lifecycle', event)

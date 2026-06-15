@@ -3906,8 +3906,13 @@ const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedK
     isOptionalNonEmptyText(value, 'jumpUsername') &&
     isOptionalField(value, 'authScope', (field) => field === 'target' || field === 'jump') &&
     isOptionalField(value, 'authPurpose', (field) => field === 'password' || field === 'keyboard-interactive') &&
-    isOptionalField(value, 'sshTransport', (field) => field === 'direct' || field === 'proxy' || field === 'jump') &&
+    isOptionalField(value, 'sshTransport', (field) => field === 'direct' || field === 'proxy' || field === 'jump' || field === 'relay-shell') &&
     isOptionalNonEmptyText(value, 'sshAuthMethods') &&
+    isOptionalField(value, 'remoteHop', (field) => field === 'relay' || field === 'target' || field === 'unknown') &&
+    isOptionalNonEmptyText(value, 'expectedHost') &&
+    isOptionalNonEmptyText(value, 'actualHost') &&
+    isOptionalNonEmptyText(value, 'actualUsername') &&
+    isOptionalField(value, 'endpointConfidence', (field) => field === 'confirmed' || field === 'inferred' || field === 'unknown') &&
     isOptionalNonEmptyText(value, 'connectionId') &&
     isOptionalNonEmptyText(value, 'proxyName') &&
     isOptionalNonEmptyText(value, 'message') &&

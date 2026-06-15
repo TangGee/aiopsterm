@@ -22,6 +22,42 @@ class MockProxySocket extends PassThrough {
   }
 }
 
+class MockPtyProcess {
+  writes: string[] = []
+  resizes: Array<{ cols: number; rows: number }> = []
+  killed = false
+  private dataListeners: Array<(data: string) => void> = []
+  private exitListeners: Array<(event: { exitCode: number }) => void> = []
+
+  write(data: string) {
+    this.writes.push(data)
+  }
+
+  resize(cols: number, rows: number) {
+    this.resizes.push({ cols, rows })
+  }
+
+  kill() {
+    this.killed = true
+  }
+
+  onData(callback: (data: string) => void) {
+    this.dataListeners.push(callback)
+  }
+
+  onExit(callback: (event: { exitCode: number }) => void) {
+    this.exitListeners.push(callback)
+  }
+
+  emitData(data: string) {
+    this.dataListeners.forEach((listener) => listener(data))
+  }
+
+  emitExit(exitCode: number) {
+    this.exitListeners.forEach((listener) => listener({ exitCode }))
+  }
+}
+
 class MockSshChannel extends PassThrough {
   stderr = new PassThrough()
   writes: Array<string | Buffer> = []
@@ -45,7 +81,26 @@ class MockSshChannel extends PassThrough {
   }
 }
 
-const createSshRuntime = (options: { failConnect?: Error | Array<Error | null | undefined>; failShell?: Error; manualReady?: boolean } = {}) => {
+const createPtyRuntime = () => {
+  const processes: MockPtyProcess[] = []
+  const spawnCalls: Array<{ shell: string; args: string[]; options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv } }> = []
+  return {
+    runtime: {
+      spawn(shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }) {
+        const process = new MockPtyProcess()
+        processes.push(process)
+        spawnCalls.push({ shell, args, options })
+        return process
+      }
+    },
+    processes,
+    spawnCalls
+  }
+}
+
+const createSshRuntime = (
+  options: { failConnect?: Error | Array<Error | null | undefined>; failShell?: Error; failForwardOut?: Error; manualReady?: boolean } = {}
+) => {
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
   const channels: MockSshChannel[] = []
@@ -80,7 +135,7 @@ const createSshRuntime = (options: { failConnect?: Error | Array<Error | null | 
       const channel = new MockSshChannel()
       forwardChannels.push(channel)
       queueMicrotask(() => {
-        callback(undefined, channel)
+        callback(options.failForwardOut, channel)
       })
     }
 
@@ -389,9 +444,9 @@ describe('ssh terminal backend runtime', () => {
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
   })
 
-  it('prompts once for missing password credentials before connecting password-auth hosts', async () => {
+  it('waits for real authentication failure before prompting for a missing password', async () => {
     const backend = await loadSshTerminalBackend()
-    const ssh = createSshRuntime()
+    const ssh = createSshRuntime({ manualReady: true })
     const events = createRecorder()
     const requests: TerminalKeyboardInteractiveRequest[] = []
     const results: TerminalKeyboardInteractiveResult[] = []
@@ -412,6 +467,7 @@ describe('ssh terminal backend runtime', () => {
       getAssetSecret: () => ({}),
       getKeychainSecret: () => ({}),
       getConfig: () => runtimeConfig(),
+      getEnv: () => ({}),
       rememberAssetPassword: (assetId: string, password: string) => {
         rememberedPasswords.push({ assetId, password })
       }
@@ -425,7 +481,21 @@ describe('ssh terminal backend runtime', () => {
       },
       keyboardInteractiveResult: (payload: TerminalKeyboardInteractiveResult) => results.push(payload)
     })
+    await waitForMicrotasks(3)
+    expect(requests).toEqual([])
+    expect(ssh.connectConfigs[0]).toEqual(
+      expect.objectContaining({
+        host: '10.71.0.11',
+        username: 'root',
+        tryKeyboard: true
+      })
+    )
+    expect(ssh.connectConfigs[0]).not.toHaveProperty('password')
+
+    ssh.clients[0].emit('error', Object.assign(new Error('All configured authentication methods failed'), { level: 'client-authentication' }))
     await waitForMicrotasks(6)
+    ssh.clients[1].emit('ready')
+    await waitForMicrotasks(3)
 
     expect(result.session).toBeTruthy()
     expect(requests).toEqual([
@@ -444,7 +514,8 @@ describe('ssh terminal backend runtime', () => {
       })
     ])
     expect(results).toEqual([expect.objectContaining({ id: 'ssh-password-prompt-1-password', authScope: 'target', status: 'success', attempts: 1, final: true })])
-    expect(ssh.connectConfigs[0]).toEqual(
+    expect(ssh.connectConfigs).toHaveLength(2)
+    expect(ssh.connectConfigs[1]).toEqual(
       expect.objectContaining({
         host: '10.71.0.11',
         username: 'root',
@@ -452,9 +523,11 @@ describe('ssh terminal backend runtime', () => {
         tryKeyboard: true
       })
     )
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
-    expect(events.lifecycle[1]).toEqual(expect.objectContaining({ authScope: 'target', authPurpose: 'password' }))
-    expect(events.lifecycle[2]).toEqual(expect.objectContaining({ authScope: 'target', sshTransport: 'direct', sshAuthMethods: 'password,keyboard-interactive' }))
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle[1]).toEqual(expect.objectContaining({ authScope: 'target', sshTransport: 'direct', sshAuthMethods: 'keyboard-interactive' }))
+    expect(events.lifecycle[2]).toEqual(expect.objectContaining({ errorCode: 'SSH_AUTH_PASSWORD_REJECTED' }))
+    expect(events.lifecycle[3]).toEqual(expect.objectContaining({ authScope: 'target', authPurpose: 'password' }))
+    expect(events.lifecycle[4]).toEqual(expect.objectContaining({ authScope: 'target', sshTransport: 'direct', sshAuthMethods: 'password,keyboard-interactive' }))
     expect(JSON.stringify(events.lifecycle)).not.toContain('typed-password')
     expect(rememberedPasswords).toEqual([{ assetId: 'asset-password-empty', password: 'typed-password' }])
   })
@@ -642,6 +715,140 @@ describe('ssh terminal backend runtime', () => {
     )
     expect(JSON.stringify(events.lifecycle)).not.toContain('jump-password')
     expect(JSON.stringify(events.lifecycle)).not.toContain('target-password')
+  })
+
+  it('falls back to a relay shell when jump-host TCP forwarding is rejected', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({
+      manualReady: true,
+      failForwardOut: new Error('(SSH) Channel open failure: open failed')
+    })
+    const pty = createPtyRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      loadPty: () => pty.runtime,
+      getEnv: () => ({ PATH: '/usr/bin' }),
+      getAsset: (assetId: string) => {
+        if (assetId === 'asset-relay-target') {
+          return {
+            id: 'asset-relay-target',
+            name: 'target-relay-a',
+            title: 'target-relay-a',
+            host: 'target.internal',
+            username: 'root',
+            port: 22,
+            asset_type: 'person',
+            auth_type: 'keyBased',
+            jumpHostId: 'asset-relay'
+          } as never
+        }
+        if (assetId === 'asset-relay') {
+          return {
+            id: 'asset-relay',
+            name: 'relay-b',
+            title: 'relay-b',
+            host: 'relay.example',
+            username: 'ops',
+            port: 2222,
+            asset_type: 'person',
+            auth_type: 'password'
+          } as never
+        }
+        return null
+      },
+      getAssetSecret: (assetId: string) => (assetId === 'asset-relay' ? { password: 'relay-password' } : {}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const result = backend.createSshTerminalSession('ssh-relay-shell-1', { kind: 'ssh', assetId: 'asset-relay-target', cols: 144, rows: 48 }, createSink(events))
+    result.session?.write('queued-before-relay\n')
+    await waitForMicrotasks(2)
+    expect(pty.spawnCalls).toEqual([])
+
+    ssh.clients[1].emit('ready')
+    await waitForMicrotasks(4)
+
+    expect(ssh.forwardOutCalls).toEqual([{ srcIP: '127.0.0.1', srcPort: 0, dstIP: 'target.internal', dstPort: 22 }])
+    expect(pty.spawnCalls).toHaveLength(1)
+    const spawn = pty.spawnCalls[0]
+    expect(spawn.shell).toBe('ssh')
+    expect(spawn.args.slice(0, 4)).toEqual(['-tt', '-p', '2222', 'ops@relay.example'])
+    expect(spawn.args[4]).toContain("ssh -tt -p 22 -- 'root@target.internal'")
+    expect(spawn.options).toEqual(
+      expect.objectContaining({
+        name: 'xterm-256color',
+        cols: 144,
+        rows: 48,
+        cwd: '/home/root',
+        env: expect.objectContaining({
+          PATH: '/usr/bin',
+          AIOPSTERM_TRANSPORT: 'relay-shell',
+          AIOPSTERM_RELAY_HOST: 'relay.example',
+          AIOPSTERM_TARGET_HOST: 'target.internal'
+        })
+      })
+    )
+    expect(pty.processes[0].writes).toEqual(['queued-before-relay\n'])
+    result.session?.write('uptime\n')
+    result.session?.resize(120, 36)
+    expect(pty.processes[0].writes).toEqual(['queued-before-relay\n', 'uptime\n'])
+    expect(pty.processes[0].resizes).toEqual([{ cols: 120, rows: 36 }])
+
+    const command = spawn.args[4]
+    const relayToken = command.match(/__AIO_CTX_BEGIN_([A-Za-z0-9_-]+_relay)__/)
+    const targetToken = command.match(/__AIO_CTX_BEGIN_([A-Za-z0-9_-]+_target)__/)
+    expect(relayToken?.[1]).toBeTruthy()
+    expect(targetToken?.[1]).toBeTruthy()
+    pty.processes[0].emitData('relay banner\n')
+    pty.processes[0].emitData(`__AIO_CTX_BEGIN_${relayToken![1]}__\nhop=relay\nexpected=relay.example\nuser=ops\nhost=relay.example\npwd=/home/ops\n`)
+    pty.processes[0].emitData(`__AIO_CTX_END_${relayToken![1]}__target login banner\n`)
+    pty.processes[0].emitData(`__AIO_CTX_BEGIN_${targetToken![1]}__\nhop=target\nexpected=target.internal\nuser=root\nhost=target.internal\npwd=/root\n__AIO_CTX_END_${targetToken![1]}__`)
+    pty.processes[0].emitData('root@target:~# ')
+
+    expect(events.data.map((chunk) => chunk.toString()).join('')).toBe('relay banner\ntarget login banner\nroot@target:~# ')
+    expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('__AIO_CTX_')
+    expect(events.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: 'proxy-opening',
+          sshTransport: 'relay-shell',
+          authScope: 'jump',
+          remoteHop: 'unknown',
+          endpointConfidence: 'unknown',
+          errorCode: 'SSH_JUMP_FORWARD_FAILED',
+          errorMessage: 'SSH jump host forward failed: (SSH) Channel open failure: open failed',
+          jumpHost: 'relay.example',
+          targetHost: 'target.internal'
+        }),
+        expect.objectContaining({
+          stage: 'connected',
+          sshTransport: 'relay-shell',
+          authScope: 'jump',
+          remoteHop: 'relay',
+          expectedHost: 'relay.example',
+          actualHost: 'relay.example',
+          actualUsername: 'ops',
+          endpointConfidence: 'confirmed'
+        }),
+        expect.objectContaining({
+          stage: 'shell-ready',
+          sshTransport: 'relay-shell',
+          authScope: 'target',
+          remoteHop: 'target',
+          expectedHost: 'target.internal',
+          actualHost: 'target.internal',
+          actualUsername: 'root',
+          endpointConfidence: 'confirmed'
+        })
+      ])
+    )
+
+    pty.processes[0].emitExit(0)
+    expect(events.lifecycle.at(-1)).toEqual(expect.objectContaining({ stage: 'closed', sshTransport: 'relay-shell', remoteHop: 'target' }))
+    expect(events.closed).toEqual(['ssh-relay-shell-1'])
+    expect(result.session).toBeTruthy()
   })
 
   it('fails closed when ssh2 runtime is unavailable or target fields are invalid', async () => {

@@ -101,7 +101,17 @@ const cleanTerminalAuthPurpose = (value: unknown): TerminalLifecycleEvent['authP
 
 const cleanTerminalSshTransport = (value: unknown): TerminalLifecycleEvent['sshTransport'] | undefined => {
   const text = cleanOptional(value)
-  return text === 'direct' || text === 'proxy' || text === 'jump' ? text : undefined
+  return text === 'direct' || text === 'proxy' || text === 'jump' || text === 'relay-shell' ? text : undefined
+}
+
+const cleanTerminalRemoteHop = (value: unknown): TerminalLifecycleEvent['remoteHop'] | undefined => {
+  const text = cleanOptional(value)
+  return text === 'relay' || text === 'target' || text === 'unknown' ? text : undefined
+}
+
+const cleanTerminalEndpointConfidence = (value: unknown): TerminalLifecycleEvent['endpointConfidence'] | undefined => {
+  const text = cleanOptional(value)
+  return text === 'confirmed' || text === 'inferred' || text === 'unknown' ? text : undefined
 }
 
 export const diagnoseSshConnectionError = (error: unknown, context: SshConnectionErrorContext = {}): SshConnectionErrorDiagnosis => {
@@ -192,6 +202,8 @@ export const createTerminalLifecycleEvent = (
   const authScope = cleanTerminalAuthScope(event.authScope)
   const authPurpose = cleanTerminalAuthPurpose(event.authPurpose)
   const sshTransport = cleanTerminalSshTransport(event.sshTransport)
+  const remoteHop = cleanTerminalRemoteHop(event.remoteHop)
+  const endpointConfidence = cleanTerminalEndpointConfidence(event.endpointConfidence)
   return {
     id: sessionId,
     kind: event.kind,
@@ -212,6 +224,11 @@ export const createTerminalLifecycleEvent = (
     ...(authPurpose ? { authPurpose } : {}),
     ...(sshTransport ? { sshTransport } : {}),
     ...(cleanOptional(event.sshAuthMethods) ? { sshAuthMethods: cleanOptional(event.sshAuthMethods) } : {}),
+    ...(remoteHop ? { remoteHop } : {}),
+    ...(cleanOptional(event.expectedHost) ? { expectedHost: cleanOptional(event.expectedHost) } : {}),
+    ...(cleanOptional(event.actualHost) ? { actualHost: cleanOptional(event.actualHost) } : {}),
+    ...(cleanOptional(event.actualUsername) ? { actualUsername: cleanOptional(event.actualUsername) } : {}),
+    ...(endpointConfidence ? { endpointConfidence } : {}),
     ...(cleanOptional(event.connectionId) ? { connectionId: cleanOptional(event.connectionId) } : {}),
     ...(cleanOptional(event.proxyName) ? { proxyName: cleanOptional(event.proxyName) } : {}),
     ...(cleanOptional(event.message) ? { message: cleanOptional(event.message) } : {}),

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type { ClientChannel, ConnectConfig } from 'ssh2'
 import type {
   AiopsAssetRecord,
@@ -86,6 +87,31 @@ type SshTerminalClient = {
 
 type SshAuthScope = 'target' | 'jump'
 
+class SshJumpForwardError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SshJumpForwardError'
+  }
+}
+
+type SshTerminalPtyProcess = {
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  kill(): void
+  onData(callback: (data: string) => void): void
+  onExit(callback: (event: { exitCode: number }) => void): void
+}
+
+type SshTerminalPtyRuntime = {
+  spawn(shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }): SshTerminalPtyProcess
+}
+
+type SshTerminalWritable = {
+  write(data: string | Buffer): unknown
+  close?: () => unknown
+  setWindow?: (...args: number[]) => void
+}
+
 type SshTerminalSsh2Runtime = {
   Client: new () => SshTerminalClient
 }
@@ -104,6 +130,8 @@ type SshTerminalRuntimeConfig = {
   ssh2Runtime?: SshTerminalSsh2Runtime | null
   createSshProxySocketForAsset?: typeof createSshProxySocketForAsset
   rememberAssetPassword?: (assetId: string, password: string) => void | Promise<void>
+  loadPty?: () => SshTerminalPtyRuntime | null
+  getEnv?: () => NodeJS.ProcessEnv
   useBackendDouble?: boolean
   readyTimeoutMs?: number
   keepaliveIntervalMs?: number
@@ -142,6 +170,8 @@ export const configureSshTerminalBackendRuntime = (config: SshTerminalRuntimeCon
   runtimeConfig.ssh2Runtime = config.ssh2Runtime
   runtimeConfig.createSshProxySocketForAsset = config.createSshProxySocketForAsset
   runtimeConfig.rememberAssetPassword = config.rememberAssetPassword
+  runtimeConfig.loadPty = config.loadPty
+  runtimeConfig.getEnv = config.getEnv
   runtimeConfig.useBackendDouble = config.useBackendDouble
   runtimeConfig.readyTimeoutMs = config.readyTimeoutMs
   runtimeConfig.keepaliveIntervalMs = config.keepaliveIntervalMs
@@ -158,6 +188,17 @@ const getSsh2Runtime = (): SshTerminalSsh2Runtime | null =>
   runtimeConfig.ssh2Runtime === undefined ? (loadSsh2() as SshTerminalSsh2Runtime | null) : runtimeConfig.ssh2Runtime
 
 const getProxySocketForAsset = () => runtimeConfig.createSshProxySocketForAsset || createSshProxySocketForAsset
+
+const getPtyRuntime = (): SshTerminalPtyRuntime | null => {
+  if (runtimeConfig.loadPty) return runtimeConfig.loadPty()
+  try {
+    return require('node-pty') as SshTerminalPtyRuntime
+  } catch {
+    return null
+  }
+}
+
+const getEnv = () => runtimeConfig.getEnv?.() || process.env
 
 const resolveAsset = (assetId: string) => runtimeConfig.getAsset?.(assetId) || null
 
@@ -269,6 +310,124 @@ const createPasswordPrompt = (target: SshTerminalTarget): TerminalKeyboardIntera
   }
 ]
 
+const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+
+const sshDestination = (target: Pick<SshTerminalTarget, 'username' | 'host'>) => `${target.username}@${target.host}`
+
+const relayMarkerLine = (token: string, boundary: 'BEGIN' | 'END') => `__AIO_CTX_${boundary}_${token}__`
+
+const relayProbeCommand = (token: string, hop: 'relay' | 'target', expectedHost: string) => {
+  const begin = shellSingleQuote(`${relayMarkerLine(token, 'BEGIN')}\n`)
+  const end = shellSingleQuote(`${relayMarkerLine(token, 'END')}\n`)
+  return [
+    `printf ${begin}`,
+    `printf ${shellSingleQuote(`hop=${hop}\n`)}`,
+    `printf ${shellSingleQuote('expected=%s\n')} ${shellSingleQuote(expectedHost)}`,
+    `printf ${shellSingleQuote('user=%s\n')} "$(id -un 2>/dev/null || whoami 2>/dev/null || printf unknown)"`,
+    `printf ${shellSingleQuote('host=%s\n')} "$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf unknown)"`,
+    `printf ${shellSingleQuote('pwd=%s\n')} "$PWD"`,
+    `printf ${end}`
+  ].join('; ')
+}
+
+const relayShellCommand = (sessionToken: string, jumpTarget: SshTerminalTarget, target: SshTerminalTarget) => {
+  const targetToken = `${sessionToken}_target`
+  const relayToken = `${sessionToken}_relay`
+  const targetCommand = [
+    relayProbeCommand(targetToken, 'target', target.host),
+    'export AIOPSTERM_HOP=target',
+    `export AIOPSTERM_TARGET_HOST=${shellSingleQuote(target.host)}`,
+    `export AIOPSTERM_EXPECTED_HOST=${shellSingleQuote(target.host)}`,
+    `export AIOPSTERM_SESSION_ID=${shellSingleQuote(sessionToken)}`,
+    'exec "${SHELL:-/bin/sh}"'
+  ].join('; ')
+  const nestedSsh = ['ssh', '-tt', '-p', String(target.port), '--', shellSingleQuote(sshDestination(target)), shellSingleQuote(targetCommand)].join(' ')
+  return {
+    sessionToken,
+    relayToken,
+    targetToken,
+    command: [
+      relayProbeCommand(relayToken, 'relay', jumpTarget.host),
+      'export AIOPSTERM_HOP=relay',
+      `export AIOPSTERM_RELAY_HOST=${shellSingleQuote(jumpTarget.host)}`,
+      `export AIOPSTERM_SESSION_ID=${shellSingleQuote(sessionToken)}`,
+      nestedSsh
+    ].join('; ')
+  }
+}
+
+const parseRelayProbe = (value: string) => {
+  const record: Record<string, string> = {}
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const index = line.indexOf('=')
+    if (index <= 0) continue
+    record[line.slice(0, index)] = line.slice(index + 1)
+  }
+  return record
+}
+
+const createRelayProbeFilter = (
+  tokens: Set<string>,
+  onProbe: (probe: Record<string, string>) => void,
+  onData: (chunk: string) => void
+) => {
+  let buffer = ''
+  const beginPattern = /__AIO_CTX_BEGIN_([A-Za-z0-9_-]+)__/g
+  const beginLiteral = '__AIO_CTX_BEGIN_'
+  const maxPartialMarkerLength = 96
+  const safeEmitIndex = (value: string) => {
+    for (let index = Math.max(0, value.length - maxPartialMarkerLength); index < value.length; index += 1) {
+      const suffix = value.slice(index)
+      if (beginLiteral.startsWith(suffix)) return index
+      if (suffix.startsWith(beginLiteral) && /^[A-Za-z0-9_-]*$/.test(suffix.slice(beginLiteral.length))) return index
+    }
+    return value.length
+  }
+  const handle = (chunk: string | Buffer) => {
+    buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    for (;;) {
+      beginPattern.lastIndex = 0
+      const begin = beginPattern.exec(buffer)
+      if (!begin) {
+        const emitIndex = safeEmitIndex(buffer)
+        if (emitIndex > 0) {
+          const emit = buffer.slice(0, emitIndex)
+          buffer = buffer.slice(emitIndex)
+          if (emit) onData(emit)
+        }
+        return
+      }
+      if (begin.index > 0) {
+        const emit = buffer.slice(0, begin.index)
+        buffer = buffer.slice(begin.index)
+        if (emit) onData(emit)
+        continue
+      }
+      const token = begin[1]
+      if (!tokens.has(token)) {
+        const emit = buffer.slice(0, begin[0].length)
+        buffer = buffer.slice(begin[0].length)
+        if (emit) onData(emit)
+        continue
+      }
+      const endMarker = relayMarkerLine(token, 'END')
+      const endIndex = buffer.indexOf(endMarker)
+      if (endIndex < 0) return
+      const beginMarker = begin[0]
+      const body = buffer.slice(beginMarker.length, endIndex)
+      buffer = buffer.slice(endIndex + endMarker.length)
+      onProbe(parseRelayProbe(body))
+    }
+  }
+  const flush = () => {
+    if (buffer) onData(buffer)
+    buffer = ''
+  }
+  return { handle, flush }
+}
+
 const createBackendDoubleSession = (
   id: string,
   target: SshTerminalTarget,
@@ -337,8 +496,9 @@ export const createSshTerminalSession = (
   }
 
   let client = new ssh2.Client()
-  let stream: SshTerminalChannel | null = null
+  let stream: SshTerminalWritable | null = null
   let proxySocket: SshProxySocket | null = null
+  let relayPty: SshTerminalPtyProcess | null = null
   let closed = false
   let cols = options.cols || 100
   let rows = options.rows || 30
@@ -375,9 +535,19 @@ export const createSshTerminalSession = (
     proxySocket = null
   }
 
+  const cleanupRelayShell = () => {
+    const activePty = relayPty
+    relayPty = null
+    if (activePty) stream = null
+    try {
+      activePty?.kill()
+    } catch {}
+  }
+
   const cleanupTransports = () => {
     cleanupJumpTransport()
     cleanupProxyTransport()
+    cleanupRelayShell()
   }
 
   const finish = (
@@ -459,9 +629,7 @@ export const createSshTerminalSession = (
     resize(nextCols: number, nextRows: number) {
       cols = nextCols
       rows = nextRows
-      if (stream && typeof (stream as unknown as { setWindow?: (...args: number[]) => void }).setWindow === 'function') {
-        ;(stream as unknown as { setWindow: (...args: number[]) => void }).setWindow(rows, cols, 0, 0)
-      }
+      stream?.setWindow?.(rows, cols, 0, 0)
     },
     kill(reason: TerminalDisconnectReason = 'manual') {
       finish(0, reason)
@@ -651,17 +819,6 @@ export const createSshTerminalSession = (
     }
   }
 
-  const shouldPromptForPassword = (authTarget: SshTerminalTarget) => {
-    if (authTarget.password || authTarget.privateKey) return false
-    const authType = cleanText(authTarget.asset?.auth_type).toLowerCase()
-    if (authType === 'keybased') return false
-    return authType === 'password' || !process.env.SSH_AUTH_SOCK
-  }
-
-  const ensurePasswordIfNeeded = async (authTarget: SshTerminalTarget, scope: SshAuthScope) => {
-    if (shouldPromptForPassword(authTarget)) await requestPassword(authTarget, scope)
-  }
-
   const authMethodsLabel = (connectConfig: ConnectConfig, hasAgentAuth: boolean) => {
     const methods = [
       connectConfig.password ? 'password' : '',
@@ -689,8 +846,9 @@ export const createSshTerminalSession = (
       overrideExistingAgent: false
     })
     let hasAgentAuth = Boolean(configuredAgentAuth)
-    if (!configuredAgentAuth && !authTarget.password && !authTarget.privateKey && process.env.SSH_AUTH_SOCK) {
-      connectConfig.agent = process.env.SSH_AUTH_SOCK
+    const env = getEnv()
+    if (!configuredAgentAuth && !authTarget.password && !authTarget.privateKey && env.SSH_AUTH_SOCK) {
+      connectConfig.agent = env.SSH_AUTH_SOCK
       hasAgentAuth = true
     }
     return { connectConfig, hasAgentAuth }
@@ -707,7 +865,6 @@ export const createSshTerminalSession = (
   }
 
   const openJumpHostTunnel = async (jumpTarget: SshTerminalTarget): Promise<SshTerminalChannel> => {
-    await ensurePasswordIfNeeded(jumpTarget, 'jump')
     const jump = new ssh2.Client()
     attachKeyboardInteractive(jump, jumpTarget, 'jump')
     const { connectConfig, hasAgentAuth } = createConnectConfig(jumpTarget)
@@ -768,7 +925,7 @@ export const createSshTerminalSession = (
           sendActiveKeyboardResult('jump', { status: 'success' })
           commitRememberedPassword('jump')
           if (typeof jump.forwardOut !== 'function') {
-            rejectOnce(new Error('SSH jump host runtime does not support forwardOut.'))
+            rejectOnce(new SshJumpForwardError('SSH jump host runtime does not support forwardOut.'))
             return
           }
           lifecycle = sendLifecycle(id, sink, {
@@ -786,7 +943,7 @@ export const createSshTerminalSession = (
           })
           jump.forwardOut('127.0.0.1', 0, target.host, target.port, (error, channel) => {
             if (error) {
-              rejectOnce(new Error(`SSH jump host forward failed: ${error.message}`))
+              rejectOnce(new SshJumpForwardError(`SSH jump host forward failed: ${error.message}`))
               return
             }
             if (settled) {
@@ -811,14 +968,143 @@ export const createSshTerminalSession = (
     })
   }
 
+  const relayShellLifecycleFields = (jumpTarget: SshTerminalTarget) => ({
+    sshTransport: 'relay-shell' as const,
+    jumpHost: jumpTarget.host,
+    jumpPort: jumpTarget.port,
+    jumpUsername: jumpTarget.username,
+    targetHost: target.host,
+    targetPort: target.port,
+    targetUsername: target.username
+  })
+
+  const openRelayShellFallback = (jumpTarget: SshTerminalTarget, fallbackReason: unknown) => {
+    if (closed) return
+    const ptyRuntime = getPtyRuntime()
+    const fallbackMessage = fallbackReason instanceof Error ? fallbackReason.message : String(fallbackReason || 'SSH jump host forward failed.')
+    if (!ptyRuntime) {
+      throw new Error(`SSH jump TCP forwarding failed and relay shell runtime is unavailable. ${fallbackMessage}`)
+    }
+    cleanupJumpTransport()
+    cleanupProxyTransport()
+
+    const sessionToken = randomUUID().replace(/-/g, '')
+    const relayShell = relayShellCommand(sessionToken, jumpTarget, target)
+    const lifecycleFields = relayShellLifecycleFields(jumpTarget)
+    let remoteHop: TerminalLifecycleEvent['remoteHop'] = 'unknown'
+    let endpointConfidence: TerminalLifecycleEvent['endpointConfidence'] = 'unknown'
+    lifecycle = sendLifecycle(id, sink, {
+      ...lifecycleBase,
+      ...lifecycleFields,
+      stage: 'proxy-opening',
+      authScope: 'jump',
+      remoteHop,
+      endpointConfidence,
+      errorCode: 'SSH_JUMP_FORWARD_FAILED',
+      errorMessage: fallbackMessage,
+      message: 'SSH jump TCP forwarding failed; starting relay shell fallback.'
+    })
+
+    const filter = createRelayProbeFilter(
+      new Set([relayShell.relayToken, relayShell.targetToken]),
+      (probe) => {
+        const hop = probe.hop === 'target' ? 'target' : probe.hop === 'relay' ? 'relay' : 'unknown'
+        remoteHop = hop
+        endpointConfidence = hop === 'unknown' ? 'unknown' : 'confirmed'
+        const expectedHost = hop === 'target' ? target.host : hop === 'relay' ? jumpTarget.host : cleanText(probe.expected)
+        lifecycle = sendLifecycle(id, sink, {
+          ...lifecycleBase,
+          ...lifecycleFields,
+          stage: hop === 'target' ? 'shell-ready' : 'connected',
+          authScope: hop === 'target' ? 'target' : 'jump',
+          remoteHop,
+          expectedHost,
+          actualHost: cleanText(probe.host),
+          actualUsername: cleanText(probe.user),
+          endpointConfidence,
+          message:
+            hop === 'target'
+              ? `SSH target shell ready via relay ${terminalAuthLabel(target)}`
+              : hop === 'relay'
+                ? `SSH relay shell connected ${terminalAuthLabel(jumpTarget)}`
+                : 'SSH relay shell endpoint probe completed.'
+        })
+      },
+      (chunk) => sink.data(chunk)
+    )
+
+    const relayEnv = {
+      ...getEnv(),
+      AIOPSTERM_SESSION_ID: sessionToken,
+      AIOPSTERM_TRANSPORT: 'relay-shell',
+      AIOPSTERM_RELAY_HOST: jumpTarget.host,
+      AIOPSTERM_TARGET_HOST: target.host
+    }
+    const args = ['-tt', '-p', String(jumpTarget.port), sshDestination(jumpTarget), relayShell.command]
+    const ptyProcess = ptyRuntime.spawn('ssh', args, {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd,
+      env: relayEnv
+    })
+    relayPty = ptyProcess
+    stream = {
+      write(data: string | Buffer) {
+        ptyProcess.write(typeof data === 'string' ? data : data.toString('utf8'))
+      },
+      setWindow(nextRows: number, nextCols: number) {
+        ptyProcess.resize(nextCols, nextRows)
+      },
+      close() {
+        ptyProcess.kill()
+      }
+    }
+    lifecycle = sendLifecycle(id, sink, {
+      ...lifecycleBase,
+      ...lifecycleFields,
+      stage: 'connecting',
+      authScope: 'jump',
+      remoteHop,
+      endpointConfidence,
+      message: `Opening SSH relay shell ${terminalAuthLabel(jumpTarget)}`
+    })
+    while (pendingWrites.length) {
+      stream.write(pendingWrites.shift() || '')
+    }
+    ptyProcess.onData((chunk) => filter.handle(chunk))
+    ptyProcess.onExit((event) => {
+      filter.flush()
+      if (relayPty === ptyProcess) relayPty = null
+      if (stream?.close) stream = null
+      finish(Number.isFinite(event.exitCode) ? event.exitCode : null, 'process', {
+        ...lifecycleFields,
+        remoteHop,
+        endpointConfidence,
+        message: 'SSH relay shell exited.'
+      })
+    })
+  }
+
   const openTargetTransportAndConnect = async (authClient: SshTerminalClient) => {
     const jumpTarget = resolveJumpHostTarget()
     let tunnel: SshTerminalChannel | null = null
     if (jumpTarget) {
-      tunnel = await openJumpHostTunnel(jumpTarget)
+      try {
+        tunnel = await openJumpHostTunnel(jumpTarget)
+      } catch (error) {
+        if (error instanceof SshJumpForwardError) {
+          staleTargetClients.add(authClient)
+          try {
+            authClient.end()
+          } catch {}
+          openRelayShellFallback(jumpTarget, error)
+          return
+        }
+        throw error
+      }
     }
 
-    await ensurePasswordIfNeeded(target, 'target')
     const { connectConfig, hasAgentAuth } = createConnectConfig(target)
     hasConfiguredAgentAuth = hasAgentAuth
 
@@ -872,7 +1158,17 @@ export const createSshTerminalSession = (
   }
 
   const retryTargetPassword = async (failedClient: SshTerminalClient, diagnosticEvent: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>>) => {
-    if (targetPasswordRetryUsed || closed || diagnosticEvent.errorCode !== 'SSH_AUTH_PASSWORD_REJECTED' || !sink.keyboardInteractive) return false
+    if (targetPasswordRetryUsed || closed || !sink.keyboardInteractive) return false
+    const authType = cleanText(target.asset?.auth_type).toLowerCase()
+    const canRetryRejectedPassword = Boolean(target.password) && diagnosticEvent.errorCode === 'SSH_AUTH_PASSWORD_REJECTED'
+    const canPromptMissingPassword =
+      !target.password &&
+      !target.privateKey &&
+      authType !== 'keybased' &&
+      (diagnosticEvent.errorCode === 'SSH_AUTH_PASSWORD_REJECTED' ||
+        diagnosticEvent.errorCode === 'SSH_AUTH_FAILED' ||
+        diagnosticEvent.errorCode === 'SSH_AUTH_METHOD_UNAVAILABLE')
+    if (!canRetryRejectedPassword && !canPromptMissingPassword) return false
     targetPasswordRetryUsed = true
     staleTargetClients.add(failedClient)
     sendLifecycle(id, sink, {
@@ -880,11 +1176,14 @@ export const createSshTerminalSession = (
       stage: 'connecting',
       errorCode: diagnosticEvent.errorCode,
       errorMessage: diagnosticEvent.errorMessage,
-      message: `SSH password rejected for ${terminalAuthLabel(target)}`
+      message: canRetryRejectedPassword ? `SSH password rejected for ${terminalAuthLabel(target)}` : `SSH password required for ${terminalAuthLabel(target)}`
     })
     cleanupTransports()
     try {
-      await requestPassword(target, 'target', { attempt: 2, rejected: true })
+      await requestPassword(target, 'target', {
+        attempt: canRetryRejectedPassword ? 2 : 1,
+        rejected: canRetryRejectedPassword
+      })
       if (closed) return true
       try {
         failedClient.end()
