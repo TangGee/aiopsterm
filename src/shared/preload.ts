@@ -83,6 +83,16 @@ export type TerminalLifecycleEvent = {
   host?: string
   port?: number
   username?: string
+  targetHost?: string
+  targetPort?: number
+  targetUsername?: string
+  jumpHost?: string
+  jumpPort?: number
+  jumpUsername?: string
+  authScope?: 'target' | 'jump'
+  authPurpose?: 'password' | 'keyboard-interactive'
+  sshTransport?: 'direct' | 'proxy' | 'jump'
+  sshAuthMethods?: string
   connectionId?: string
   proxyName?: string
   message?: string
@@ -120,6 +130,7 @@ export type TerminalKeyboardInteractiveRequest = {
   port: number
   username: string
   purpose?: 'password' | 'keyboard-interactive'
+  authScope?: 'target' | 'jump'
   assetId?: string
   canRememberPassword?: boolean
   title?: string
@@ -134,6 +145,7 @@ export type TerminalKeyboardInteractiveRequest = {
 export type TerminalKeyboardInteractiveResult = {
   id: string
   status: 'success' | 'failed' | 'canceled' | 'timeout'
+  authScope?: 'target' | 'jump'
   attempts?: number
   final?: boolean
   errorMessage?: string

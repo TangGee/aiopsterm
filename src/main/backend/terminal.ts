@@ -89,6 +89,21 @@ const sshAuthMethodsFromPermissionDenied = (message: string) => {
 
 const normalizeSshAuthType = (value: unknown) => cleanOptional(value)?.toLowerCase() || ''
 
+const cleanTerminalAuthScope = (value: unknown): TerminalLifecycleEvent['authScope'] | undefined => {
+  const text = cleanOptional(value)
+  return text === 'target' || text === 'jump' ? text : undefined
+}
+
+const cleanTerminalAuthPurpose = (value: unknown): TerminalLifecycleEvent['authPurpose'] | undefined => {
+  const text = cleanOptional(value)
+  return text === 'password' || text === 'keyboard-interactive' ? text : undefined
+}
+
+const cleanTerminalSshTransport = (value: unknown): TerminalLifecycleEvent['sshTransport'] | undefined => {
+  const text = cleanOptional(value)
+  return text === 'direct' || text === 'proxy' || text === 'jump' ? text : undefined
+}
+
 export const diagnoseSshConnectionError = (error: unknown, context: SshConnectionErrorContext = {}): SshConnectionErrorDiagnosis => {
   const record = typeof error === 'object' && error ? (error as Record<string, unknown>) : {}
   const rawMessage = terminalErrorMessage(error)
@@ -174,6 +189,9 @@ export const createTerminalLifecycleEvent = (
   const sessionId = cleanOptional(id) || ''
   const errorCode = cleanTerminalErrorCode(event.errorCode)
   const reason = cleanOptional(event.reason) as TerminalDisconnectReason | undefined
+  const authScope = cleanTerminalAuthScope(event.authScope)
+  const authPurpose = cleanTerminalAuthPurpose(event.authPurpose)
+  const sshTransport = cleanTerminalSshTransport(event.sshTransport)
   return {
     id: sessionId,
     kind: event.kind,
@@ -184,6 +202,16 @@ export const createTerminalLifecycleEvent = (
     ...(cleanOptional(event.host) ? { host: cleanOptional(event.host) } : {}),
     ...(Number.isFinite(event.port) ? { port: Math.max(1, Math.min(65535, Math.round(Number(event.port)))) } : {}),
     ...(cleanOptional(event.username) ? { username: cleanOptional(event.username) } : {}),
+    ...(cleanOptional(event.targetHost) ? { targetHost: cleanOptional(event.targetHost) } : {}),
+    ...(Number.isFinite(event.targetPort) ? { targetPort: Math.max(1, Math.min(65535, Math.round(Number(event.targetPort)))) } : {}),
+    ...(cleanOptional(event.targetUsername) ? { targetUsername: cleanOptional(event.targetUsername) } : {}),
+    ...(cleanOptional(event.jumpHost) ? { jumpHost: cleanOptional(event.jumpHost) } : {}),
+    ...(Number.isFinite(event.jumpPort) ? { jumpPort: Math.max(1, Math.min(65535, Math.round(Number(event.jumpPort)))) } : {}),
+    ...(cleanOptional(event.jumpUsername) ? { jumpUsername: cleanOptional(event.jumpUsername) } : {}),
+    ...(authScope ? { authScope } : {}),
+    ...(authPurpose ? { authPurpose } : {}),
+    ...(sshTransport ? { sshTransport } : {}),
+    ...(cleanOptional(event.sshAuthMethods) ? { sshAuthMethods: cleanOptional(event.sshAuthMethods) } : {}),
     ...(cleanOptional(event.connectionId) ? { connectionId: cleanOptional(event.connectionId) } : {}),
     ...(cleanOptional(event.proxyName) ? { proxyName: cleanOptional(event.proxyName) } : {}),
     ...(cleanOptional(event.message) ? { message: cleanOptional(event.message) } : {}),

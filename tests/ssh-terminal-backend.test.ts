@@ -219,7 +219,18 @@ describe('ssh terminal backend runtime', () => {
     expect(ssh.shellOptions).toEqual([expect.objectContaining({ term: 'xterm-256color', cols: 132, rows: 44 })])
     expect(ssh.channels[0].writes).toEqual(['uptime\n'])
     expect(ssh.channels[0].windows).toContainEqual({ rows: 48, cols: 140, height: 0, width: 0 })
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle[1]).toEqual(
+      expect.objectContaining({
+        authScope: 'target',
+        sshTransport: 'direct',
+        targetHost: '10.71.0.8',
+        targetPort: 2222,
+        targetUsername: 'deploy',
+        sshAuthMethods: 'password'
+      })
+    )
+    expect(JSON.stringify(events.lifecycle)).not.toContain('secret')
     expect(events.data.map((chunk) => chunk.toString())).toEqual(['remote output\n', 'remote error\n'])
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('[aiopsterm]')
   })
@@ -277,8 +288,21 @@ describe('ssh terminal backend runtime', () => {
         targetPort: 2200
       })
     ])
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connected', 'shell-ready'])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connecting', 'connected', 'shell-ready'])
     expect(events.lifecycle[1]).toEqual(expect.objectContaining({ proxyName: 'release-proxy' }))
+    expect(events.lifecycle[2]).toEqual(
+      expect.objectContaining({
+        authScope: 'target',
+        sshTransport: 'proxy',
+        targetHost: '10.72.0.9',
+        targetPort: 2200,
+        targetUsername: 'ops',
+        sshAuthMethods: 'password,privateKey'
+      })
+    )
+    expect(JSON.stringify(events.lifecycle)).not.toContain('saved-password')
+    expect(JSON.stringify(events.lifecycle)).not.toContain('BEGIN OPENSSH')
+    expect(JSON.stringify(events.lifecycle)).not.toContain('phrase')
     expect(ssh.connectConfigs[0]).toEqual(
       expect.objectContaining({
         username: 'ops',
@@ -348,6 +372,7 @@ describe('ssh terminal backend runtime', () => {
         attempts: 1,
         maxAttempts: 1,
         purpose: 'keyboard-interactive',
+        authScope: 'target',
         timeoutMs: 180000
       })
     ])
@@ -360,8 +385,8 @@ describe('ssh terminal backend runtime', () => {
 
     ssh.clients[0].emit('ready')
     await waitForMicrotasks(3)
-    expect(results).toEqual([expect.objectContaining({ id: 'ssh-mfa-1-keyboard-1', status: 'success', attempts: 1 })])
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(results).toEqual([expect.objectContaining({ id: 'ssh-mfa-1-keyboard-1', authScope: 'target', status: 'success', attempts: 1 })])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
   })
 
   it('prompts once for missing password credentials before connecting password-auth hosts', async () => {
@@ -410,6 +435,7 @@ describe('ssh terminal backend runtime', () => {
         port: 22,
         username: 'root',
         purpose: 'password',
+        authScope: 'target',
         assetId: 'asset-password-empty',
         canRememberPassword: true,
         prompts: [{ prompt: 'SSH password for root@10.71.0.11:22:', echo: false }],
@@ -417,7 +443,7 @@ describe('ssh terminal backend runtime', () => {
         maxAttempts: 1
       })
     ])
-    expect(results).toEqual([expect.objectContaining({ id: 'ssh-password-prompt-1-password', status: 'success', attempts: 1, final: true })])
+    expect(results).toEqual([expect.objectContaining({ id: 'ssh-password-prompt-1-password', authScope: 'target', status: 'success', attempts: 1, final: true })])
     expect(ssh.connectConfigs[0]).toEqual(
       expect.objectContaining({
         host: '10.71.0.11',
@@ -426,7 +452,10 @@ describe('ssh terminal backend runtime', () => {
         tryKeyboard: true
       })
     )
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle[1]).toEqual(expect.objectContaining({ authScope: 'target', authPurpose: 'password' }))
+    expect(events.lifecycle[2]).toEqual(expect.objectContaining({ authScope: 'target', sshTransport: 'direct', sshAuthMethods: 'password,keyboard-interactive' }))
+    expect(JSON.stringify(events.lifecycle)).not.toContain('typed-password')
     expect(rememberedPasswords).toEqual([{ assetId: 'asset-password-empty', password: 'typed-password' }])
   })
 
@@ -474,18 +503,19 @@ describe('ssh terminal backend runtime', () => {
       expect.objectContaining({
         id: 'ssh-password-retry-1-password-retry',
         purpose: 'password',
+        authScope: 'target',
         assetId: 'asset-bad-password',
         canRememberPassword: true,
         attempts: 2,
         maxAttempts: 2
       })
     ])
-    expect(results).toContainEqual(expect.objectContaining({ id: 'ssh-password-retry-1-password-retry', status: 'success', final: true }))
+    expect(results).toContainEqual(expect.objectContaining({ id: 'ssh-password-retry-1-password-retry', authScope: 'target', status: 'success', final: true }))
     expect(ssh.connectConfigs).toEqual([
       expect.objectContaining({ password: 'wrong-password' }),
       expect.objectContaining({ password: 'correct-password' })
     ])
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connecting', 'connecting', 'connecting', 'connected', 'shell-ready'])
     expect(events.exit).toEqual([])
     expect(rememberedPasswords).toEqual([{ assetId: 'asset-bad-password', password: 'correct-password' }])
   })
@@ -556,6 +586,7 @@ describe('ssh terminal backend runtime', () => {
         port: 2222,
         username: 'ops',
         purpose: 'keyboard-interactive',
+        authScope: 'jump',
         prompts: [{ prompt: 'OTP:', echo: false }],
         attempts: 1,
         maxAttempts: 1
@@ -578,8 +609,39 @@ describe('ssh terminal backend runtime', () => {
 
     ssh.clients[0].emit('ready')
     await waitForMicrotasks(3)
-    expect(results).toEqual([expect.objectContaining({ id: 'ssh-jump-mfa-1-jump-keyboard-1', status: 'success', attempts: 1 })])
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connecting', 'connected', 'shell-ready'])
+    expect(results).toEqual([expect.objectContaining({ id: 'ssh-jump-mfa-1-jump-keyboard-1', authScope: 'jump', status: 'success', attempts: 1 })])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connecting', 'proxy-opening', 'connecting', 'connected', 'shell-ready'])
+    expect(events.lifecycle[1]).toEqual(
+      expect.objectContaining({
+        authScope: 'jump',
+        sshTransport: 'jump',
+        jumpHost: '10.80.0.10',
+        jumpPort: 2222,
+        jumpUsername: 'ops',
+        targetHost: '10.80.0.20',
+        targetPort: 22,
+        targetUsername: 'deploy',
+        sshAuthMethods: 'password,keyboard-interactive'
+      })
+    )
+    expect(events.lifecycle[3]).toEqual(
+      expect.objectContaining({
+        authScope: 'jump',
+        sshTransport: 'jump',
+        message: 'Opening SSH jump tunnel to deploy@10.80.0.20:22'
+      })
+    )
+    expect(events.lifecycle[4]).toEqual(
+      expect.objectContaining({
+        authScope: 'target',
+        sshTransport: 'jump',
+        jumpHost: '10.80.0.10',
+        targetHost: '10.80.0.20',
+        sshAuthMethods: 'password,keyboard-interactive'
+      })
+    )
+    expect(JSON.stringify(events.lifecycle)).not.toContain('jump-password')
+    expect(JSON.stringify(events.lifecycle)).not.toContain('target-password')
   })
 
   it('fails closed when ssh2 runtime is unavailable or target fields are invalid', async () => {
@@ -643,9 +705,9 @@ describe('ssh terminal backend runtime', () => {
       createSink(shellEvents)
     )
     await waitForMicrotasks(4)
-    expect(shellEvents.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connected', 'error'])
-    expect(shellEvents.lifecycle[2]).toEqual(expect.objectContaining({ message: 'SSH shell failed.', errorMessage: 'shell denied' }))
-    expect(shellEvents.exit).toEqual([{ event: shellEvents.lifecycle[2], code: 1 }])
+    expect(shellEvents.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'error'])
+    expect(shellEvents.lifecycle[3]).toEqual(expect.objectContaining({ message: 'SSH shell failed.', errorMessage: 'shell denied' }))
+    expect(shellEvents.exit).toEqual([{ event: shellEvents.lifecycle[3], code: 1 }])
     expect(shellEvents.data).toEqual([])
 
     const connectFailureSsh = createSshRuntime({ failConnect: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
@@ -666,6 +728,12 @@ describe('ssh terminal backend runtime', () => {
     expect(connectEvents.lifecycle).toEqual([
       expect.objectContaining({ stage: 'connecting' }),
       expect.objectContaining({
+        stage: 'connecting',
+        authScope: 'target',
+        sshTransport: 'direct',
+        targetHost: '10.71.0.8'
+      }),
+      expect.objectContaining({
         stage: 'error',
         message: 'SSH connection failed.',
         reason: 'network',
@@ -674,7 +742,7 @@ describe('ssh terminal backend runtime', () => {
         errorMessage: 'read ECONNRESET'
       })
     ])
-    expect(connectEvents.exit).toEqual([{ event: connectEvents.lifecycle[1], code: 1 }])
+    expect(connectEvents.exit).toEqual([{ event: connectEvents.lifecycle[2], code: 1 }])
     expect(connectEvents.data).toEqual([])
   })
 
@@ -702,6 +770,13 @@ describe('ssh terminal backend runtime', () => {
     expect(events.lifecycle).toEqual([
       expect.objectContaining({ stage: 'connecting' }),
       expect.objectContaining({
+        stage: 'connecting',
+        authScope: 'target',
+        sshTransport: 'direct',
+        sshAuthMethods: 'password',
+        targetHost: '10.71.0.8'
+      }),
+      expect.objectContaining({
         stage: 'error',
         message: 'SSH connection failed.',
         reason: 'error',
@@ -710,8 +785,8 @@ describe('ssh terminal backend runtime', () => {
         errorMessage: expect.stringContaining('服务器未开放密码登录')
       })
     ])
-    expect(events.lifecycle[1].errorMessage).toContain('PasswordAuthentication')
-    expect(events.exit).toEqual([{ event: events.lifecycle[1], code: 1 }])
+    expect(events.lifecycle[2].errorMessage).toContain('PasswordAuthentication')
+    expect(events.exit).toEqual([{ event: events.lifecycle[2], code: 1 }])
     expect(events.data).toEqual([])
   })
 
@@ -746,7 +821,7 @@ describe('ssh terminal backend runtime', () => {
     await waitForMicrotasks(4)
     result.session?.kill('manual')
 
-    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connected', 'shell-ready', 'closed'])
+    expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connecting', 'connected', 'shell-ready', 'closed'])
     expect(events.lifecycle.at(-1)).toEqual(expect.objectContaining({ reason: 'manual', message: 'Terminal closed by user.' }))
     expect(events.exit.at(-1)).toEqual({ event: events.lifecycle.at(-1), code: 0 })
     expect(events.closed).toEqual(['ssh-kill-1'])

@@ -3898,6 +3898,16 @@ const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedK
     isOptionalNonEmptyText(value, 'host') &&
     isOptionalField(value, 'port', isTerminalPort) &&
     isOptionalNonEmptyText(value, 'username') &&
+    isOptionalNonEmptyText(value, 'targetHost') &&
+    isOptionalField(value, 'targetPort', isTerminalPort) &&
+    isOptionalNonEmptyText(value, 'targetUsername') &&
+    isOptionalNonEmptyText(value, 'jumpHost') &&
+    isOptionalField(value, 'jumpPort', isTerminalPort) &&
+    isOptionalNonEmptyText(value, 'jumpUsername') &&
+    isOptionalField(value, 'authScope', (field) => field === 'target' || field === 'jump') &&
+    isOptionalField(value, 'authPurpose', (field) => field === 'password' || field === 'keyboard-interactive') &&
+    isOptionalField(value, 'sshTransport', (field) => field === 'direct' || field === 'proxy' || field === 'jump') &&
+    isOptionalNonEmptyText(value, 'sshAuthMethods') &&
     isOptionalNonEmptyText(value, 'connectionId') &&
     isOptionalNonEmptyText(value, 'proxyName') &&
     isOptionalNonEmptyText(value, 'message') &&

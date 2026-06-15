@@ -653,6 +653,7 @@ const sendTerminalKeyboardInteractiveResult = (owner: BrowserWindow, result: Ter
   logRuntimeEvent(result.status === 'success' ? 'info' : 'warn', 'terminal.keyboard-interactive.result', {
     id: result.id,
     status: result.status,
+    authScope: result.authScope,
     attempts: result.attempts,
     final: result.final,
     errorMessage: result.errorMessage
@@ -703,6 +704,14 @@ const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: Termi
       host: request.host,
       port: request.port,
       username: request.username,
+      purpose: request.purpose,
+      authScope: request.authScope,
+      assetId: request.assetId,
+      title: request.title,
+      name: request.name,
+      hasInstructions: Boolean(request.instructions),
+      canRememberPassword: request.canRememberPassword,
+      promptLabels: request.prompts.map((prompt) => prompt.prompt.slice(0, 120)),
       prompts: request.prompts.length,
       attempts: request.attempts,
       maxAttempts: request.maxAttempts
@@ -2662,9 +2671,21 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         reason: event.reason,
         errorCode: event.errorCode,
         errorMessage: event.errorMessage,
+        message: event.message,
         host: event.host,
         port: event.port,
-        username: event.username
+        username: event.username,
+        targetHost: event.targetHost,
+        targetPort: event.targetPort,
+        targetUsername: event.targetUsername,
+        jumpHost: event.jumpHost,
+        jumpPort: event.jumpPort,
+        jumpUsername: event.jumpUsername,
+        authScope: event.authScope,
+        authPurpose: event.authPurpose,
+        sshTransport: event.sshTransport,
+        sshAuthMethods: event.sshAuthMethods,
+        proxyName: event.proxyName
       })
       sendWindowEvent(owner, 'terminal:lifecycle', event)
     },
