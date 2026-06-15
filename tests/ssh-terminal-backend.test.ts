@@ -728,7 +728,7 @@ describe('ssh terminal backend runtime', () => {
     backend.configureSshTerminalBackendRuntime({
       ssh2Runtime: asRuntime(ssh.runtime),
       loadPty: () => pty.runtime,
-      getEnv: () => ({ PATH: '/usr/bin' }),
+      getEnv: () => ({ PATH: '/usr/bin', HOME: '/tmp' }),
       getAsset: (assetId: string) => {
         if (assetId === 'asset-relay-target') {
           return {
@@ -781,7 +781,7 @@ describe('ssh terminal backend runtime', () => {
         name: 'xterm-256color',
         cols: 144,
         rows: 48,
-        cwd: '/home/root',
+        cwd: '/tmp',
         env: expect.objectContaining({
           PATH: '/usr/bin',
           AIOPSTERM_TRANSPORT: 'relay-shell',

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { statSync } from 'fs'
 import type { ClientChannel, ConnectConfig } from 'ssh2'
 import type {
   AiopsAssetRecord,
@@ -199,6 +200,20 @@ const getPtyRuntime = (): SshTerminalPtyRuntime | null => {
 }
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
+
+const getLocalSshSpawnCwd = () => {
+  const env = getEnv()
+  const candidates = [cleanText(env.HOME), cleanText(env.USERPROFILE), cleanText(env.PWD)]
+  try {
+    candidates.push(process.cwd())
+  } catch {}
+  for (const candidate of candidates) {
+    try {
+      if (candidate && statSync(candidate).isDirectory()) return candidate
+    } catch {}
+  }
+  return '.'
+}
 
 const resolveAsset = (assetId: string) => runtimeConfig.getAsset?.(assetId) || null
 
@@ -1045,7 +1060,7 @@ export const createSshTerminalSession = (
       name: 'xterm-256color',
       cols,
       rows,
-      cwd,
+      cwd: getLocalSshSpawnCwd(),
       env: relayEnv
     })
     relayPty = ptyProcess
