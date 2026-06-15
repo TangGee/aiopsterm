@@ -62,6 +62,7 @@ import { configureRuntimeLog, logRuntimeEvent, writeRuntimeLog } from './backend
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
+import { broadcastWindowEvent, sendWebContentsEvent, sendWindowEvent } from '@shared/windowEvents'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import {
   shouldRunMcpDiscovery,
@@ -578,7 +579,7 @@ let skillsWatchers: FSWatcher[] = []
 let skillsWatcherDebounce: NodeJS.Timeout | null = null
 
 const sendTerminalExit = (owner: BrowserWindow, lifecycle: TerminalLifecycleEvent, code = lifecycle.code ?? null) => {
-  owner.webContents.send('terminal:exit', {
+  sendWindowEvent(owner, 'terminal:exit', {
     id: lifecycle.id,
     code,
     kind: lifecycle.kind,
@@ -598,7 +599,7 @@ const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buff
     id,
     bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
   })
-  owner.webContents.send('terminal:data', terminalDataPayload(id, chunk))
+  sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, chunk))
 }
 
 const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -656,7 +657,7 @@ const sendTerminalKeyboardInteractiveResult = (owner: BrowserWindow, result: Ter
     final: result.final,
     errorMessage: result.errorMessage
   })
-  owner.webContents.send('terminal:keyboard-interactive:result', result)
+  sendWindowEvent(owner, 'terminal:keyboard-interactive:result', result)
 }
 
 const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: TerminalKeyboardInteractiveRequest) =>
@@ -706,7 +707,7 @@ const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: Termi
       attempts: request.attempts,
       maxAttempts: request.maxAttempts
     })
-    owner.webContents.send('terminal:keyboard-interactive:request', request)
+    sendWindowEvent(owner, 'terminal:keyboard-interactive:request', request)
   })
 
 const terminalBinaryPayload = (payload: unknown): Buffer => {
@@ -1040,7 +1041,7 @@ const focusWindow = (targetWindow = mainWindow || BrowserWindow.getAllWindows()[
 const dispatchDeepLinkToRenderer = (payload: AiopstermDeepLinkPayload) => {
   const targetWindow = focusWindow()
   if (!targetWindow) return false
-  targetWindow.webContents.send('app:deep-link', payload)
+  sendWindowEvent(targetWindow, 'app:deep-link', payload)
   return true
 }
 
@@ -1146,10 +1147,10 @@ const createWindow = () => {
   }
 
   mainWindow.on('maximize', () => {
-    mainWindow?.webContents.send('window:maximized')
+    sendWindowEvent(mainWindow, 'window:maximized')
   })
   mainWindow.on('unmaximize', () => {
-    mainWindow?.webContents.send('window:unmaximized')
+    sendWindowEvent(mainWindow, 'window:unmaximized')
   })
 }
 
@@ -1310,9 +1311,7 @@ configureKubernetesBackendRuntime({
 })
 setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => {
   const channel = 'data' in event ? 'kubernetes:terminal:data' : 'kubernetes:terminal:exit'
-  BrowserWindow.getAllWindows().forEach((window) => {
-    window.webContents.send(channel, event)
-  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), channel, event)
 })
 configureUserAccountBackendRuntime({
   stateFilePath: join(app.getPath('userData'), 'user-account.json'),
@@ -1860,9 +1859,7 @@ const collectKnowledgeImportTasks = async (srcDir: string, destDir: string): Pro
 }
 
 const sendKnowledgeProgress = (window: BrowserWindow | null, payload: KnowledgeBaseTransferProgress) => {
-  if (window && !window.isDestroyed()) {
-    window.webContents.send('kb:transfer-progress', payload)
-  }
+  sendWindowEvent(window, 'kb:transfer-progress', payload)
 }
 
 const parseSkillFile = async (filePath: string): Promise<SkillUserConfig | null> => {
@@ -1957,11 +1954,7 @@ const loadSkillsFromDisk = async (): Promise<SkillUserConfig[]> => {
 }
 
 const broadcastSkillsUpdate = (skills: SkillUserConfig[]) => {
-  BrowserWindow.getAllWindows().forEach((window) => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('skills:update', skills)
-    }
-  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'skills:update', skills)
 }
 
 const syncSkillsConfigFromDisk = async () => {
@@ -2585,11 +2578,7 @@ const handleAiMcpResourceAccessAction = async (
 }
 
 const broadcastMcpConfigChanged = (content: string) => {
-  BrowserWindow.getAllWindows().forEach((window) => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('mcp-config:changed', content)
-    }
-  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'mcp-config:changed', content)
 }
 
 const syncKeywordHighlightConfigFromContent = (content: string) => {
@@ -2603,11 +2592,7 @@ const syncKeywordHighlightConfigFromContent = (content: string) => {
 }
 
 const broadcastKeywordHighlightConfigChanged = (content: string) => {
-  BrowserWindow.getAllWindows().forEach((window) => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('keyword-highlight-config:changed', content)
-    }
-  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'keyword-highlight-config:changed', content)
 }
 
 const syncSecurityConfigFromContent = (content: string) => {
@@ -2622,11 +2607,7 @@ const syncSecurityConfigFromContent = (content: string) => {
 }
 
 const broadcastSecurityConfigChanged = (content: string) => {
-  BrowserWindow.getAllWindows().forEach((window) => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('security-config:changed', content)
-    }
-  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'security-config:changed', content)
 }
 
 const startSecurityConfigWatcher = async () => {
@@ -2685,7 +2666,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         port: event.port,
         username: event.username
       })
-      owner.webContents.send('terminal:lifecycle', event)
+      sendWindowEvent(owner, 'terminal:lifecycle', event)
     },
     exit: (event, code) => {
       logRuntimeEvent('info', 'terminal.exit', {
@@ -2713,7 +2694,7 @@ const registerIpc = () => {
   ipcMain.handle('app:shell', () => getDefaultShell())
   ipcMain.handle('app:check-update', () => checkAppUpdate(app.getVersion()))
   ipcMain.handle('app:download-update', (event, version: string) => {
-    const emit = (progress: AppUpdateProgressEvent) => event.sender.send('app:update-progress', progress)
+    const emit = (progress: AppUpdateProgressEvent) => sendWebContentsEvent(event.sender, 'app:update-progress', progress)
     return downloadAppUpdate({ version }, emit, { cacheDir: join(app.getPath('userData'), 'updates') })
   })
   ipcMain.handle('app:install-update', (_event, version?: string) => installAppUpdate({ version }))
@@ -3569,7 +3550,7 @@ const registerIpc = () => {
           errorCode: event.errorCode,
           errorMessage: event.errorMessage
         })
-        owner.webContents.send('terminal:lifecycle', event)
+        sendWindowEvent(owner, 'terminal:lifecycle', event)
       },
       exit: (event, code) => {
         logRuntimeEvent('info', 'terminal.exit', {
@@ -3714,20 +3695,20 @@ const registerIpc = () => {
   ipcMain.handle('models:check-provider', (_event, input: ModelProviderCheckInput) => checkModelProvider(input))
   ipcMain.handle('extensions:list', () => listExtensionPlugins())
   ipcMain.handle('extensions:install-plugin', (event, input: ExtensionPluginOperationInput) => {
-    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
     return installExtensionPlugin(input, emit)
   })
   ipcMain.handle('extensions:update-plugin', (event, input: ExtensionPluginOperationInput) => {
-    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
     return updateExtensionPlugin(input, emit)
   })
   ipcMain.handle('extensions:install-package', (event, input: ExtensionPackageInstallInput) => {
-    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
     return installExtensionPackage(input, emit)
   })
   ipcMain.handle('extensions:download-package', (_event, input: ExtensionPackageDownloadInput) => downloadExtensionPackage(input))
   ipcMain.handle('extensions:install-plugin-from-url', (event, input: ExtensionPluginUrlInstallInput) => {
-    const emit = (progress: ExtensionInstallProgress) => event.sender.send('extensions:install-progress', progress)
+    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
     return installExtensionPluginFromUrl(input, emit)
   })
   ipcMain.handle('extensions:uninstall-plugin', (_event, input: ExtensionPluginOperationInput) => uninstallExtensionPlugin(input))
