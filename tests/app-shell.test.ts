@@ -612,8 +612,8 @@ describe('AppShell', () => {
     const request: TerminalKeyboardInteractiveRequest = {
       id: 'ssh-mfa-ui-1',
       connectionId: 'ssh-test-session',
-      host: '113.133.183.5',
-      port: 7992,
+      host: '203.0.113.10',
+      port: 2222,
       username: 'root',
       title: 'dynamic-bastion',
       purpose: 'keyboard-interactive',
@@ -629,7 +629,7 @@ describe('AppShell', () => {
 
     expect(wrapper.find('[data-testid="terminal-mfa-dialog"]').exists()).toBe(true)
     const dialogText = wrapper.find('[data-testid="terminal-mfa-dialog"]').text()
-    expect(dialogText).toContain('root@113.133.183.5:7992')
+    expect(dialogText).toContain('root@203.0.113.10:2222')
     expect(dialogText).toContain('Verification code:')
     expect(dialogText).not.toContain('第 1/1 次')
     expect(dialogText).not.toContain('剩余')

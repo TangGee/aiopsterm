@@ -104,6 +104,11 @@ const cleanTerminalSshTransport = (value: unknown): TerminalLifecycleEvent['sshT
   return text === 'direct' || text === 'proxy' || text === 'jump' || text === 'relay-shell' ? text : undefined
 }
 
+const cleanTerminalConnectionReuse = (value: unknown): TerminalLifecycleEvent['connectionReuse'] | undefined => {
+  const text = cleanOptional(value)
+  return text === 'created' || text === 'reused' ? text : undefined
+}
+
 const cleanTerminalRemoteHop = (value: unknown): TerminalLifecycleEvent['remoteHop'] | undefined => {
   const text = cleanOptional(value)
   return text === 'relay' || text === 'target' || text === 'unknown' ? text : undefined
@@ -202,6 +207,7 @@ export const createTerminalLifecycleEvent = (
   const authScope = cleanTerminalAuthScope(event.authScope)
   const authPurpose = cleanTerminalAuthPurpose(event.authPurpose)
   const sshTransport = cleanTerminalSshTransport(event.sshTransport)
+  const connectionReuse = cleanTerminalConnectionReuse(event.connectionReuse)
   const remoteHop = cleanTerminalRemoteHop(event.remoteHop)
   const endpointConfidence = cleanTerminalEndpointConfidence(event.endpointConfidence)
   return {
@@ -224,6 +230,7 @@ export const createTerminalLifecycleEvent = (
     ...(authPurpose ? { authPurpose } : {}),
     ...(sshTransport ? { sshTransport } : {}),
     ...(cleanOptional(event.sshAuthMethods) ? { sshAuthMethods: cleanOptional(event.sshAuthMethods) } : {}),
+    ...(connectionReuse ? { connectionReuse } : {}),
     ...(remoteHop ? { remoteHop } : {}),
     ...(cleanOptional(event.expectedHost) ? { expectedHost: cleanOptional(event.expectedHost) } : {}),
     ...(cleanOptional(event.actualHost) ? { actualHost: cleanOptional(event.actualHost) } : {}),

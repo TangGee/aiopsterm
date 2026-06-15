@@ -93,6 +93,7 @@ export type TerminalLifecycleEvent = {
   authPurpose?: 'password' | 'keyboard-interactive'
   sshTransport?: 'direct' | 'proxy' | 'jump' | 'relay-shell'
   sshAuthMethods?: string
+  connectionReuse?: 'created' | 'reused'
   remoteHop?: 'relay' | 'target' | 'unknown'
   expectedHost?: string
   actualHost?: string

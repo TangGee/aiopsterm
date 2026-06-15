@@ -290,6 +290,63 @@ describe('ssh terminal backend runtime', () => {
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('[aiopsterm]')
   })
 
+  it('reuses direct SSH clients for repeated sessions to the same target', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const firstEvents = createRecorder()
+    const secondEvents = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      getEnv: () => ({ SSH_AUTH_SOCK: '' })
+    })
+
+    const first = backend.createSshTerminalSession(
+      'ssh-reuse-direct-1',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' }, cols: 100, rows: 30 },
+      createSink(firstEvents)
+    )
+    await waitForMicrotasks(4)
+    const second = backend.createSshTerminalSession(
+      'ssh-reuse-direct-2',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' }, cols: 120, rows: 36 },
+      createSink(secondEvents)
+    )
+    await waitForMicrotasks(4)
+
+    expect(first.session).toBeTruthy()
+    expect(second.session).toBeTruthy()
+    expect(ssh.clients).toHaveLength(1)
+    expect(ssh.connectConfigs).toHaveLength(1)
+    expect(ssh.shellOptions).toEqual([
+      expect.objectContaining({ cols: 100, rows: 30 }),
+      expect.objectContaining({ cols: 120, rows: 36 })
+    ])
+    expect(firstEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connected', sshTransport: 'direct', connectionReuse: 'created' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'direct', connectionReuse: 'created' })
+      ])
+    )
+    expect(secondEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connecting', sshTransport: 'direct', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'connected', sshTransport: 'direct', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'direct', connectionReuse: 'reused' })
+      ])
+    )
+
+    second.session?.kill()
+    await waitForMicrotasks(1)
+    expect(ssh.clients[0].endCalls).toBe(0)
+    first.session?.kill()
+    await waitForMicrotasks(1)
+    expect(ssh.clients[0].endCalls).toBe(0)
+  })
+
   it('resolves asset secrets, keychain secrets, and proxy sockets before connecting', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime()
@@ -371,6 +428,66 @@ describe('ssh terminal backend runtime', () => {
     expect(ssh.connectConfigs[0]).not.toHaveProperty('port')
   })
 
+  it('reuses proxy-backed SSH target clients after the first proxy connection', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const proxySockets = [new MockProxySocket(), new MockProxySocket()]
+    const proxyCalls: Array<Record<string, unknown>> = []
+    const firstEvents = createRecorder()
+    const secondEvents = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () =>
+        ({
+          id: 'asset-proxy-reuse',
+          name: 'proxy-reuse-host',
+          title: 'proxy-reuse-host',
+          host: '10.72.0.10',
+          username: 'ops',
+          port: 2200,
+          asset_type: 'person',
+          auth_type: 'password',
+          needProxy: true,
+          proxyName: 'release-proxy'
+        }) as never,
+      getAssetSecret: () => ({ password: 'saved-password' }),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig([{ name: 'release-proxy', type: 'SOCKS5', host: '127.0.0.1', port: 1080, enableProxyIdentity: false }]),
+      createSshProxySocketForAsset: async (asset: unknown, configs: unknown, targetHost: unknown, targetPort: unknown) => {
+        proxyCalls.push({ asset, configs, targetHost, targetPort })
+        return {
+          config: { name: 'release-proxy', type: 'SOCKS5', host: '127.0.0.1', port: 1080, enableProxyIdentity: false },
+          socket: proxySockets.shift() || new MockProxySocket()
+        } as never
+      }
+    })
+
+    const first = backend.createSshTerminalSession('ssh-reuse-proxy-1', { kind: 'ssh', assetId: 'asset-proxy-reuse' }, createSink(firstEvents))
+    await waitForMicrotasks(4)
+    const second = backend.createSshTerminalSession('ssh-reuse-proxy-2', { kind: 'ssh', assetId: 'asset-proxy-reuse' }, createSink(secondEvents))
+    await waitForMicrotasks(4)
+
+    expect(first.session).toBeTruthy()
+    expect(second.session).toBeTruthy()
+    expect(proxyCalls).toHaveLength(1)
+    expect(ssh.clients).toHaveLength(1)
+    expect(ssh.connectConfigs).toHaveLength(1)
+    expect(ssh.shellOptions).toHaveLength(2)
+    expect(firstEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connecting', sshTransport: 'proxy', connectionReuse: 'created' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'proxy', connectionReuse: 'created' })
+      ])
+    )
+    expect(secondEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connecting', sshTransport: 'proxy', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'connected', sshTransport: 'proxy', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'proxy', connectionReuse: 'reused' })
+      ])
+    )
+  })
+
   it('bridges ssh keyboard-interactive authentication through the terminal sink', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime({ manualReady: true })
@@ -387,7 +504,7 @@ describe('ssh terminal backend runtime', () => {
 
     const result = backend.createSshTerminalSession(
       'ssh-mfa-1',
-      { kind: 'ssh', ssh: { host: '113.133.183.5', username: 'root', port: 7992, password: 'secret' } },
+      { kind: 'ssh', ssh: { host: '203.0.113.10', username: 'root', port: 2222, password: 'secret' } },
       {
         ...createSink(events),
         keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
@@ -402,8 +519,8 @@ describe('ssh terminal backend runtime', () => {
     expect(result.session).toBeTruthy()
     expect(ssh.connectConfigs[0]).toEqual(
       expect.objectContaining({
-        host: '113.133.183.5',
-        port: 7992,
+        host: '203.0.113.10',
+        port: 2222,
         username: 'root',
         tryKeyboard: true
       })
@@ -420,8 +537,8 @@ describe('ssh terminal backend runtime', () => {
       expect.objectContaining({
         id: 'ssh-mfa-1-keyboard-1',
         connectionId: 'ssh-ssh-mfa-1',
-        host: '113.133.183.5',
-        port: 7992,
+        host: '203.0.113.10',
+        port: 2222,
         username: 'root',
         name: 'Dynamic password',
         instructions: 'Enter current token',
@@ -436,7 +553,7 @@ describe('ssh terminal backend runtime', () => {
     expect(events.lifecycle.at(-1)).toEqual(
       expect.objectContaining({
         stage: 'connecting',
-        message: 'Two-factor authentication required for root@113.133.183.5:7992'
+        message: 'Two-factor authentication required for root@203.0.113.10:2222'
       })
     )
 
@@ -649,7 +766,7 @@ describe('ssh terminal backend runtime', () => {
     expect(ssh.connectConfigs).toHaveLength(1)
     expect(ssh.connectConfigs[0]).toEqual(expect.objectContaining({ host: '10.80.0.10', port: 2222, username: 'ops', password: 'jump-password' }))
 
-    const jumpResponses = await emitKeyboardInteractive(ssh.clients[1], [{ prompt: 'OTP:', echo: false }], {
+    const jumpResponses = await emitKeyboardInteractive(ssh.clients[0], [{ prompt: 'OTP:', echo: false }], {
       name: 'Jump OTP',
       instructions: 'Enter jump host OTP'
     })
@@ -668,7 +785,7 @@ describe('ssh terminal backend runtime', () => {
       })
     ])
 
-    ssh.clients[1].emit('ready')
+    ssh.clients[0].emit('ready')
     await waitForMicrotasks(4)
     expect(ssh.forwardOutCalls).toEqual([{ srcIP: '127.0.0.1', srcPort: 0, dstIP: '10.80.0.20', dstPort: 22 }])
     expect(ssh.connectConfigs[1]).toEqual(
@@ -682,7 +799,7 @@ describe('ssh terminal backend runtime', () => {
     expect(ssh.connectConfigs[1]).not.toHaveProperty('host')
     expect(ssh.connectConfigs[1]).not.toHaveProperty('port')
 
-    ssh.clients[0].emit('ready')
+    ssh.clients[1].emit('ready')
     await waitForMicrotasks(3)
     expect(results).toEqual([expect.objectContaining({ id: 'ssh-jump-mfa-1-jump-keyboard-1', authScope: 'jump', status: 'success', attempts: 1 })])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'proxy-opening', 'connecting', 'proxy-opening', 'connecting', 'connected', 'shell-ready'])
@@ -719,6 +836,77 @@ describe('ssh terminal backend runtime', () => {
     expect(JSON.stringify(events.lifecycle)).not.toContain('target-password')
   })
 
+  it('reuses jump and target SSH clients for repeated jump-host sessions', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const firstEvents = createRecorder()
+    const secondEvents = createRecorder()
+    const assets = (assetId: string) => {
+      if (assetId === 'asset-target') {
+        return {
+          id: 'asset-target',
+          name: 'target-a',
+          title: 'target-a',
+          host: '10.80.0.20',
+          username: 'deploy',
+          port: 22,
+          asset_type: 'person',
+          auth_type: 'password',
+          jumpHostId: 'asset-jump'
+        } as never
+      }
+      if (assetId === 'asset-jump') {
+        return {
+          id: 'asset-jump',
+          name: 'jump-b',
+          title: 'jump-b',
+          host: '10.80.0.10',
+          username: 'ops',
+          port: 2222,
+          asset_type: 'person',
+          auth_type: 'password'
+        } as never
+      }
+      return null
+    }
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: assets,
+      getAssetSecret: (assetId: string) => (assetId === 'asset-target' ? { password: 'target-password' } : { password: 'jump-password' }),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      getEnv: () => ({ SSH_AUTH_SOCK: '' })
+    })
+
+    const first = backend.createSshTerminalSession('ssh-reuse-jump-1', { kind: 'ssh', assetId: 'asset-target' }, createSink(firstEvents))
+    await waitForMicrotasks(8)
+    const second = backend.createSshTerminalSession('ssh-reuse-jump-2', { kind: 'ssh', assetId: 'asset-target' }, createSink(secondEvents))
+    await waitForMicrotasks(4)
+
+    expect(first.session).toBeTruthy()
+    expect(second.session).toBeTruthy()
+    expect(ssh.clients).toHaveLength(2)
+    expect(ssh.connectConfigs).toHaveLength(2)
+    expect(ssh.forwardOutCalls).toHaveLength(1)
+    expect(ssh.shellOptions).toHaveLength(2)
+    expect(firstEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'proxy-opening', authScope: 'jump', sshTransport: 'jump', connectionReuse: 'created' }),
+        expect.objectContaining({ stage: 'connecting', authScope: 'target', sshTransport: 'jump', connectionReuse: 'created' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'jump', connectionReuse: 'created' })
+      ])
+    )
+    expect(secondEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connecting', authScope: 'target', sshTransport: 'jump', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'connected', sshTransport: 'jump', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'jump', connectionReuse: 'reused' })
+      ])
+    )
+    expect(JSON.stringify(secondEvents.lifecycle)).not.toContain('jump-password')
+    expect(JSON.stringify(secondEvents.lifecycle)).not.toContain('target-password')
+  })
+
   it('falls back to a relay shell when jump-host TCP forwarding is rejected', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime({
@@ -731,6 +919,7 @@ describe('ssh terminal backend runtime', () => {
       ssh2Runtime: asRuntime(ssh.runtime),
       loadPty: () => pty.runtime,
       getEnv: () => ({ PATH: '/usr/bin', HOME: '/tmp' }),
+      getSshControlDir: () => '/tmp/aiopsterm-ssh-control-vitest-created',
       getAsset: (assetId: string) => {
         if (assetId === 'asset-relay-target') {
           return {
@@ -769,14 +958,29 @@ describe('ssh terminal backend runtime', () => {
     await waitForMicrotasks(2)
     expect(pty.spawnCalls).toEqual([])
 
-    ssh.clients[1].emit('ready')
+    ssh.clients[0].emit('ready')
     await waitForMicrotasks(4)
 
     expect(ssh.forwardOutCalls).toEqual([{ srcIP: '127.0.0.1', srcPort: 0, dstIP: 'target.internal', dstPort: 22 }])
     expect(pty.spawnCalls).toHaveLength(1)
     const spawn = pty.spawnCalls[0]
     expect(spawn.shell).toBe('ssh')
-    expect(spawn.args).toEqual(['-tt', '-p', '2222', 'ops@relay.example'])
+    expect(spawn.args).toEqual(
+      expect.arrayContaining([
+        '-F',
+        '/dev/null',
+        'ControlMaster=auto',
+        'ControlPersist=yes',
+        'ServerAliveInterval=60',
+        'HostKeyAlgorithms=+ssh-rsa',
+        'PubkeyAcceptedAlgorithms=+ssh-rsa',
+        '-tt',
+        '-p',
+        '2222',
+        'ops@relay.example'
+      ])
+    )
+    expect(spawn.args).toContainEqual(expect.stringMatching(/^ControlPath=\/tmp\/aiopsterm-ssh-control-vitest-created\/cm-[a-f0-9]{24}$/))
     expect(spawn.options).toEqual(
       expect.objectContaining({
         name: 'xterm-256color',
@@ -825,6 +1029,7 @@ describe('ssh terminal backend runtime', () => {
           endpointConfidence: 'unknown',
           errorCode: 'SSH_JUMP_FORWARD_FAILED',
           errorMessage: 'SSH jump host forward failed: (SSH) Channel open failure: open failed',
+          connectionReuse: 'created',
           jumpHost: 'relay.example',
           targetHost: 'target.internal'
         }),
@@ -832,6 +1037,7 @@ describe('ssh terminal backend runtime', () => {
           stage: 'connected',
           sshTransport: 'relay-shell',
           authScope: 'jump',
+          connectionReuse: 'created',
           remoteHop: 'relay',
           expectedHost: 'relay.example',
           endpointConfidence: 'inferred'
@@ -1037,6 +1243,10 @@ describe('ssh terminal backend runtime', () => {
     expect(events.exit.at(-1)).toEqual({ event: events.lifecycle.at(-1), code: 0 })
     expect(events.closed).toEqual(['ssh-kill-1'])
     expect(ssh.channels[0].closeCalls).toBe(1)
+    expect(proxySocket.destroyedFlag).toBe(false)
+    expect(ssh.clients[0].endCalls).toBe(0)
+
+    backend.configureSshTerminalBackendRuntime()
     expect(proxySocket.destroyedFlag).toBe(true)
     expect(ssh.clients[0].endCalls).toBe(1)
   })

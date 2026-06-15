@@ -3908,6 +3908,7 @@ const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedK
     isOptionalField(value, 'authPurpose', (field) => field === 'password' || field === 'keyboard-interactive') &&
     isOptionalField(value, 'sshTransport', (field) => field === 'direct' || field === 'proxy' || field === 'jump' || field === 'relay-shell') &&
     isOptionalNonEmptyText(value, 'sshAuthMethods') &&
+    isOptionalField(value, 'connectionReuse', (field) => field === 'created' || field === 'reused') &&
     isOptionalField(value, 'remoteHop', (field) => field === 'relay' || field === 'target' || field === 'unknown') &&
     isOptionalNonEmptyText(value, 'expectedHost') &&
     isOptionalNonEmptyText(value, 'actualHost') &&

@@ -1307,6 +1307,7 @@ configureSshTerminalBackendRuntime({
   getAssetSecret,
   getKeychainSecret,
   rememberAssetPassword: rememberTerminalPassword,
+  getSshControlDir: () => join(app.getPath('userData'), 'ssh-control'),
   useBackendDouble: shouldUseSshTerminalBackendDouble()
 })
 configureExtensionBackendRuntime({
@@ -2685,6 +2686,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
         authPurpose: event.authPurpose,
         sshTransport: event.sshTransport,
         sshAuthMethods: event.sshAuthMethods,
+        connectionReuse: event.connectionReuse,
         remoteHop: event.remoteHop,
         expectedHost: event.expectedHost,
         actualHost: event.actualHost,

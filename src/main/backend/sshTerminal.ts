@@ -1,4 +1,7 @@
-import { statSync } from 'fs'
+import { createHash } from 'crypto'
+import { mkdirSync, statSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import type { ClientChannel, ConnectConfig } from 'ssh2'
 import type {
   AiopsAssetRecord,
@@ -14,7 +17,7 @@ import type {
 } from '@shared/preload'
 import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
-import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
+import { createSshProxySocketForAsset, resolveSshProxyConfigForAsset, type SshProxySocket } from './sshProxy'
 import { loadSsh2 } from './ssh2Runtime'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent, diagnoseSshConnectionError, type SshTerminalConnectionTarget } from './terminal'
 
@@ -132,6 +135,7 @@ type SshTerminalRuntimeConfig = {
   rememberAssetPassword?: (assetId: string, password: string) => void | Promise<void>
   loadPty?: () => SshTerminalPtyRuntime | null
   getEnv?: () => NodeJS.ProcessEnv
+  getSshControlDir?: () => string
   useBackendDouble?: boolean
   readyTimeoutMs?: number
   keepaliveIntervalMs?: number
@@ -156,6 +160,18 @@ export type SshTerminalCreateResult = {
 
 const runtimeConfig: SshTerminalRuntimeConfig = {}
 
+type PooledSshClient = {
+  key: string
+  client: SshTerminalClient
+  createdAt: number
+  lastUsedAt: number
+  dispose?: () => void
+}
+
+const pooledTargetClients = new Map<string, PooledSshClient>()
+const pooledJumpClients = new Map<string, PooledSshClient>()
+const jumpForwardUnsupportedKeys = new Set<string>()
+
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
 const textSecret = (value: unknown): string | undefined => {
@@ -172,9 +188,11 @@ export const configureSshTerminalBackendRuntime = (config: SshTerminalRuntimeCon
   runtimeConfig.rememberAssetPassword = config.rememberAssetPassword
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.getEnv = config.getEnv
+  runtimeConfig.getSshControlDir = config.getSshControlDir
   runtimeConfig.useBackendDouble = config.useBackendDouble
   runtimeConfig.readyTimeoutMs = config.readyTimeoutMs
   runtimeConfig.keepaliveIntervalMs = config.keepaliveIntervalMs
+  clearSshConnectionPools()
 }
 
 const getRuntimeConfig = () =>
@@ -199,6 +217,171 @@ const getPtyRuntime = (): SshTerminalPtyRuntime | null => {
 }
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
+
+const clearPool = (pool: Map<string, PooledSshClient>) => {
+  for (const entry of pool.values()) {
+    try {
+      entry.client.end()
+    } catch {}
+    try {
+      entry.dispose?.()
+    } catch {}
+  }
+  pool.clear()
+}
+
+const clearSshConnectionPools = () => {
+  clearPool(pooledTargetClients)
+  clearPool(pooledJumpClients)
+  jumpForwardUnsupportedKeys.clear()
+}
+
+const shortHash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 24)
+
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+const secretFingerprint = (value: unknown) => {
+  const text = typeof value === 'string' ? value : ''
+  return text ? shortHash(text) : ''
+}
+
+const authPoolIdentity = (target: SshTerminalTarget) => {
+  const env = getEnv()
+  const config = getRuntimeConfig()
+  const sshAgentKeys = Array.isArray(config.sshAgentKeys)
+    ? config.sshAgentKeys
+        .map((item) => (typeof item === 'object' && item ? cleanText((item as Record<string, unknown>).id || (item as Record<string, unknown>).key) : ''))
+        .filter(Boolean)
+        .sort()
+    : []
+  return {
+    assetId: cleanText(target.asset?.id),
+    authType: cleanText(target.asset?.auth_type),
+    keychainId: cleanText(target.asset?.keychainId),
+    password: secretFingerprint(target.password),
+    privateKey: secretFingerprint(target.privateKey),
+    passphrase: secretFingerprint(target.passphrase),
+    agentEnabled: config.terminal?.sshAgentsStatus === true,
+    sshAgentKeys,
+    envAgent: cleanText(env.SSH_AUTH_SOCK)
+  }
+}
+
+const targetEndpointIdentity = (target: Pick<SshTerminalTarget, 'host' | 'port' | 'username'>) => ({
+  host: cleanText(target.host).toLowerCase(),
+  port: Number(target.port || 22),
+  username: cleanText(target.username)
+})
+
+const proxyPoolIdentity = (proxy: SshProxyConfig | undefined | null) =>
+  proxy
+    ? {
+        name: cleanText(proxy.name),
+        type: cleanText(proxy.type),
+        host: cleanText(proxy.host).toLowerCase(),
+        port: Number(proxy.port || 0),
+        enableProxyIdentity: proxy.enableProxyIdentity === true,
+        username: cleanText(proxy.username),
+        password: secretFingerprint(proxy.password)
+      }
+    : null
+
+const targetPoolKey = (transport: 'direct' | 'proxy' | 'jump', authTarget: SshTerminalTarget, context: { proxy?: SshProxyConfig | null; jump?: SshTerminalTarget | null }) =>
+  shortHash(
+    stableJson({
+      kind: 'target',
+      transport,
+      target: targetEndpointIdentity(authTarget),
+      auth: authPoolIdentity(authTarget),
+      proxy: proxyPoolIdentity(context.proxy),
+      jump: context.jump
+        ? {
+            endpoint: targetEndpointIdentity(context.jump),
+            auth: authPoolIdentity(context.jump)
+          }
+        : null
+    })
+  )
+
+const jumpPoolKey = (jumpTarget: SshTerminalTarget) =>
+  shortHash(
+    stableJson({
+      kind: 'jump',
+      endpoint: targetEndpointIdentity(jumpTarget),
+      auth: authPoolIdentity(jumpTarget)
+    })
+  )
+
+const removePooledClient = (pool: Map<string, PooledSshClient>, key: string, client?: SshTerminalClient) => {
+  const entry = pool.get(key)
+  if (!entry || (client && entry.client !== client)) return
+  pool.delete(key)
+  try {
+    entry.dispose?.()
+  } catch {}
+}
+
+const rememberPooledClient = (pool: Map<string, PooledSshClient>, key: string, client: SshTerminalClient, dispose?: () => void) => {
+  const now = Date.now()
+  const existing = pool.get(key)
+  if (existing?.client === client) {
+    existing.lastUsedAt = now
+    if (dispose && !existing.dispose) existing.dispose = dispose
+    return existing
+  }
+  if (existing) {
+    try {
+      existing.client.end()
+    } catch {}
+    try {
+      existing.dispose?.()
+    } catch {}
+  }
+  const entry = { key, client, createdAt: now, lastUsedAt: now, dispose }
+  pool.set(key, entry)
+  client.on('close', () => removePooledClient(pool, key, client))
+  client.on('end', () => removePooledClient(pool, key, client))
+  client.on('error', () => removePooledClient(pool, key, client))
+  return entry
+}
+
+const getPooledClient = (pool: Map<string, PooledSshClient>, key: string) => {
+  const entry = pool.get(key)
+  if (!entry) return null
+  entry.lastUsedAt = Date.now()
+  return entry.client
+}
+
+const isPooledClient = (pool: Map<string, PooledSshClient>, key: string, client: SshTerminalClient) => pool.get(key)?.client === client
+
+const getSshControlDir = () => {
+  const configured = cleanText(runtimeConfig.getSshControlDir?.())
+  const base = configured || join(tmpdir(), `aiopsterm-ssh-${typeof process.getuid === 'function' ? process.getuid() : 'user'}`)
+  try {
+    mkdirSync(base, { recursive: true, mode: 0o700 })
+  } catch {}
+  return base
+}
+
+const relayControlPath = (jumpTarget: SshTerminalTarget) => join(getSshControlDir(), `cm-${jumpPoolKey(jumpTarget)}`)
+
+const pathExists = (path: string) => {
+  try {
+    statSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const getLocalSshSpawnCwd = () => {
   const env = getEnv()
@@ -328,6 +511,27 @@ const createPasswordPrompt = (target: SshTerminalTarget): TerminalKeyboardIntera
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
 const sshDestination = (target: Pick<SshTerminalTarget, 'username' | 'host'>) => `${target.username}@${target.host}`
+
+const relayShellSshArgs = (jumpTarget: SshTerminalTarget) => [
+  '-F',
+  '/dev/null',
+  '-o',
+  'ControlMaster=auto',
+  '-o',
+  'ControlPersist=yes',
+  '-o',
+  `ControlPath=${relayControlPath(jumpTarget)}`,
+  '-o',
+  'ServerAliveInterval=60',
+  '-o',
+  'HostKeyAlgorithms=+ssh-rsa',
+  '-o',
+  'PubkeyAcceptedAlgorithms=+ssh-rsa',
+  '-tt',
+  '-p',
+  String(jumpTarget.port),
+  sshDestination(jumpTarget)
+]
 
 const relayShellAuthPromptPattern =
   /(password|passphrase|verification code|verify code|one-time|otp|token|duo|keyboard-interactive|are you sure you want to continue connecting|yes\/no|input.*password)/i
@@ -517,7 +721,7 @@ export const createSshTerminalSession = (
     )
   }
 
-  let client = new ssh2.Client()
+  let client: SshTerminalClient | null = null
   let stream: SshTerminalWritable | null = null
   let proxySocket: SshProxySocket | null = null
   let relayPty: SshTerminalPtyProcess | null = null
@@ -530,7 +734,14 @@ export const createSshTerminalSession = (
   let hasConfiguredAgentAuth = false
   let targetPasswordRetryUsed = false
   let jumpClient: SshTerminalClient | null = null
+  let jumpClientIsPooled = false
   let jumpStream: SshTerminalChannel | null = null
+  let targetClientIsPooled = false
+  let targetClientPoolable = false
+  let targetClientPoolKey = ''
+  let targetConnectionReuse: TerminalLifecycleEvent['connectionReuse'] = 'created'
+  let targetConnectionTransport: TerminalLifecycleEvent['sshTransport'] = 'direct'
+  let targetConnectionJump: SshTerminalTarget | null = null
   const staleTargetClients = new Set<SshTerminalClient>()
 
   let lifecycle = sendLifecycle(id, sink, {
@@ -543,11 +754,14 @@ export const createSshTerminalSession = (
     try {
       jumpStream?.close?.()
     } catch {}
-    try {
-      jumpClient?.end()
-    } catch {}
+    if (!jumpClientIsPooled) {
+      try {
+        jumpClient?.end()
+      } catch {}
+    }
     jumpStream = null
     jumpClient = null
+    jumpClientIsPooled = false
   }
 
   const cleanupProxyTransport = () => {
@@ -658,9 +872,11 @@ export const createSshTerminalSession = (
       try {
         if (stream?.close) stream.close()
       } catch {}
-      try {
-        client.end()
-      } catch {}
+      if (!targetClientIsPooled) {
+        try {
+          client?.end()
+        } catch {}
+      }
     }
   }
 
@@ -851,6 +1067,68 @@ export const createSshTerminalSession = (
     return methods.length ? methods.join(',') : 'none'
   }
 
+  const openShellOnClient = (authClient: SshTerminalClient) => {
+    if (closed) return
+    sendActiveKeyboardResult('target', { status: 'success' })
+    commitRememberedPassword('target')
+    if (targetClientPoolable) {
+      const disposeProxySocket = targetConnectionTransport === 'proxy' && proxySocket ? proxySocket : null
+      rememberPooledClient(pooledTargetClients, targetClientPoolKey, authClient, disposeProxySocket ? () => disposeProxySocket.destroy() : undefined)
+      if (targetConnectionTransport === 'jump') jumpStream = null
+      if (targetConnectionTransport === 'proxy') proxySocket = null
+    }
+    lifecycle = sendLifecycle(id, sink, {
+      ...lifecycleBase,
+      stage: 'connected',
+      sshTransport: targetConnectionTransport,
+      connectionReuse: targetConnectionReuse,
+      ...(targetConnectionJump
+        ? {
+            jumpHost: targetConnectionJump.host,
+            jumpPort: targetConnectionJump.port,
+            jumpUsername: targetConnectionJump.username
+          }
+        : {}),
+      targetHost: target.host,
+      targetPort: target.port,
+      targetUsername: target.username,
+      message:
+        targetConnectionReuse === 'reused'
+          ? `SSH connection reused ${target.username}@${target.host}:${target.port}`
+          : `SSH connected ${target.username}@${target.host}:${target.port}`
+    })
+    authClient.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
+      if (error) {
+        fail(error, 'SSH shell failed.', 1)
+        return
+      }
+      stream = channel
+      lifecycle = sendLifecycle(id, sink, {
+        ...lifecycleBase,
+        stage: 'shell-ready',
+        sshTransport: targetConnectionTransport,
+        connectionReuse: targetConnectionReuse,
+        ...(targetConnectionJump
+          ? {
+              jumpHost: targetConnectionJump.host,
+              jumpPort: targetConnectionJump.port,
+              jumpUsername: targetConnectionJump.username
+            }
+          : {}),
+        targetHost: target.host,
+        targetPort: target.port,
+        targetUsername: target.username,
+        message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
+      })
+      while (pendingWrites.length) {
+        stream.write(pendingWrites.shift() || '')
+      }
+      channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
+      channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
+      channel.on('close', () => finish(0, 'process'))
+    })
+  }
+
   const createConnectConfig = (authTarget: SshTerminalTarget) => {
     const connectConfig: ConnectConfig = {
       host: authTarget.host,
@@ -887,6 +1165,51 @@ export const createSshTerminalSession = (
   }
 
   const openJumpHostTunnel = async (jumpTarget: SshTerminalTarget): Promise<SshTerminalChannel> => {
+    const poolKey = jumpPoolKey(jumpTarget)
+    if (jumpForwardUnsupportedKeys.has(poolKey)) {
+      throw new SshJumpForwardError('SSH jump host TCP forwarding is disabled for this relay in the current app session.')
+    }
+    const pooledJump = getPooledClient(pooledJumpClients, poolKey)
+    if (pooledJump) {
+      jumpClient = pooledJump
+      jumpClientIsPooled = true
+      lifecycle = sendLifecycle(id, sink, {
+        ...lifecycleBase,
+        stage: 'proxy-opening',
+        authScope: 'jump',
+        sshTransport: 'jump',
+        connectionReuse: 'reused',
+        jumpHost: jumpTarget.host,
+        jumpPort: jumpTarget.port,
+        jumpUsername: jumpTarget.username,
+        targetHost: target.host,
+        targetPort: target.port,
+        targetUsername: target.username,
+        message: `Reusing SSH jump host ${terminalAuthLabel(jumpTarget)}`
+      })
+      return new Promise<SshTerminalChannel>((resolve, reject) => {
+        if (typeof pooledJump.forwardOut !== 'function') {
+          jumpForwardUnsupportedKeys.add(poolKey)
+          removePooledClient(pooledJumpClients, poolKey, pooledJump)
+          reject(new SshJumpForwardError('SSH jump host runtime does not support forwardOut.'))
+          return
+        }
+        pooledJump.forwardOut('127.0.0.1', 0, target.host, target.port, (error, channel) => {
+          if (error) {
+            jumpForwardUnsupportedKeys.add(poolKey)
+            removePooledClient(pooledJumpClients, poolKey, pooledJump)
+            try {
+              pooledJump.end()
+            } catch {}
+            reject(new SshJumpForwardError(`SSH jump host forward failed: ${error.message}`))
+            return
+          }
+          jumpStream = channel
+          resolve(channel)
+        })
+      })
+    }
+
     const jump = new ssh2.Client()
     attachKeyboardInteractive(jump, jumpTarget, 'jump')
     const { connectConfig, hasAgentAuth } = createConnectConfig(jumpTarget)
@@ -913,6 +1236,7 @@ export const createSshTerminalSession = (
       stage: 'proxy-opening',
       authScope: 'jump',
       sshTransport: 'jump',
+      connectionReuse: 'created',
       jumpHost: jumpTarget.host,
       jumpPort: jumpTarget.port,
       jumpUsername: jumpTarget.username,
@@ -947,6 +1271,7 @@ export const createSshTerminalSession = (
           sendActiveKeyboardResult('jump', { status: 'success' })
           commitRememberedPassword('jump')
           if (typeof jump.forwardOut !== 'function') {
+            jumpForwardUnsupportedKeys.add(poolKey)
             rejectOnce(new SshJumpForwardError('SSH jump host runtime does not support forwardOut.'))
             return
           }
@@ -955,6 +1280,7 @@ export const createSshTerminalSession = (
             stage: 'proxy-opening',
             authScope: 'jump',
             sshTransport: 'jump',
+            connectionReuse: 'created',
             jumpHost: jumpTarget.host,
             jumpPort: jumpTarget.port,
             jumpUsername: jumpTarget.username,
@@ -965,6 +1291,7 @@ export const createSshTerminalSession = (
           })
           jump.forwardOut('127.0.0.1', 0, target.host, target.port, (error, channel) => {
             if (error) {
+              jumpForwardUnsupportedKeys.add(poolKey)
               rejectOnce(new SshJumpForwardError(`SSH jump host forward failed: ${error.message}`))
               return
             }
@@ -975,7 +1302,9 @@ export const createSshTerminalSession = (
               return
             }
             settled = true
+            rememberPooledClient(pooledJumpClients, poolKey, jump)
             jumpClient = jump
+            jumpClientIsPooled = true
             jumpStream = channel
             resolve(channel)
           })
@@ -1019,6 +1348,7 @@ export const createSshTerminalSession = (
       ...lifecycleFields,
       stage: 'proxy-opening',
       authScope: 'jump',
+      connectionReuse: 'created',
       remoteHop,
       endpointConfidence,
       errorCode: 'SSH_JUMP_FORWARD_FAILED',
@@ -1048,6 +1378,7 @@ export const createSshTerminalSession = (
     let bootstrapProbeBuffer = ''
     let targetProbeBuffer = ''
     let targetReadyLogged = false
+    let relayConnectionReuse: TerminalLifecycleEvent['connectionReuse'] = 'created'
     const markTargetReady = (endpoint: { actualUsername: string; actualHost: string }) => {
       if (targetReadyLogged || closed) return
       targetReadyLogged = true
@@ -1079,6 +1410,7 @@ export const createSshTerminalSession = (
         ...lifecycleFields,
         stage: 'connected',
         authScope: 'jump',
+        connectionReuse: relayConnectionReuse,
         remoteHop,
         expectedHost: jumpTarget.host,
         endpointConfidence,
@@ -1086,7 +1418,9 @@ export const createSshTerminalSession = (
       })
       writeRelayPty(bootstrapInput)
     }
-    const args = ['-tt', '-p', String(jumpTarget.port), sshDestination(jumpTarget)]
+    const relayMasterPath = relayControlPath(jumpTarget)
+    relayConnectionReuse = pathExists(relayMasterPath) ? 'reused' : 'created'
+    const args = relayShellSshArgs(jumpTarget)
     const relayProcess = ptyRuntime.spawn('ssh', args, {
       name: 'xterm-256color',
       cols,
@@ -1112,9 +1446,10 @@ export const createSshTerminalSession = (
       ...lifecycleFields,
       stage: 'connecting',
       authScope: 'jump',
+      connectionReuse: relayConnectionReuse,
       remoteHop,
       endpointConfidence,
-      message: `Opening SSH relay shell ${terminalAuthLabel(jumpTarget)}`
+      message: `Opening reusable SSH relay shell ${terminalAuthLabel(jumpTarget)}`
     })
     relayProcess.onData((chunk) => {
       if (!bootstrapSent) {
@@ -1140,18 +1475,79 @@ export const createSshTerminalSession = (
     })
   }
 
-  const openTargetTransportAndConnect = async (authClient: SshTerminalClient) => {
+  const openTargetTransportAndConnect = async (authClient?: SshTerminalClient | null) => {
     const jumpTarget = resolveJumpHostTarget()
     let tunnel: SshTerminalChannel | null = null
+    let proxyConfigForPool: SshProxyConfig | null = null
+    if (!jumpTarget) {
+      proxyConfigForPool = resolveSshProxyConfigForAsset(target.asset, getRuntimeConfig().sshProxyConfigs)
+      if (proxyConfigForPool) {
+        targetConnectionTransport = 'proxy'
+        targetClientPoolable = true
+        targetClientPoolKey = targetPoolKey('proxy', target, { proxy: proxyConfigForPool })
+        const pooledTarget = getPooledClient(pooledTargetClients, targetClientPoolKey)
+        if (pooledTarget) {
+          targetConnectionReuse = 'reused'
+          targetClientIsPooled = true
+          if (authClient && authClient !== pooledTarget) staleTargetClients.add(authClient)
+          client = pooledTarget
+          lifecycle = sendLifecycle(id, sink, {
+            ...lifecycleBase,
+            stage: 'connecting',
+            authScope: 'target',
+            sshTransport: 'proxy',
+            connectionReuse: 'reused',
+            proxyName: proxyConfigForPool.name,
+            targetHost: target.host,
+            targetPort: target.port,
+            targetUsername: target.username,
+            message: `Reusing SSH target connection ${terminalAuthLabel(target)}`
+          })
+          openShellOnClient(pooledTarget)
+          return
+        }
+      }
+    }
+    if (jumpTarget) {
+      targetConnectionJump = jumpTarget
+      targetConnectionTransport = 'jump'
+      targetClientPoolable = true
+      targetClientPoolKey = targetPoolKey('jump', target, { jump: jumpTarget })
+      const pooledTarget = getPooledClient(pooledTargetClients, targetClientPoolKey)
+      if (pooledTarget) {
+        targetConnectionReuse = 'reused'
+        targetClientIsPooled = true
+        if (authClient && authClient !== pooledTarget) staleTargetClients.add(authClient)
+        client = pooledTarget
+        lifecycle = sendLifecycle(id, sink, {
+          ...lifecycleBase,
+          stage: 'connecting',
+          authScope: 'target',
+          sshTransport: 'jump',
+          connectionReuse: 'reused',
+          jumpHost: jumpTarget.host,
+          jumpPort: jumpTarget.port,
+          jumpUsername: jumpTarget.username,
+          targetHost: target.host,
+          targetPort: target.port,
+          targetUsername: target.username,
+          message: `Reusing SSH target connection ${terminalAuthLabel(target)}`
+        })
+        openShellOnClient(pooledTarget)
+        return
+      }
+    }
     if (jumpTarget) {
       try {
         tunnel = await openJumpHostTunnel(jumpTarget)
       } catch (error) {
         if (error instanceof SshJumpForwardError) {
-          staleTargetClients.add(authClient)
-          try {
-            authClient.end()
-          } catch {}
+          if (authClient) {
+            staleTargetClients.add(authClient)
+            try {
+              authClient.end()
+            } catch {}
+          }
           openRelayShellFallback(jumpTarget, error)
           return
         }
@@ -1161,14 +1557,18 @@ export const createSshTerminalSession = (
 
     const { connectConfig, hasAgentAuth } = createConnectConfig(target)
     hasConfiguredAgentAuth = hasAgentAuth
+    targetConnectionJump = jumpTarget
+    targetConnectionTransport = jumpTarget ? 'jump' : 'direct'
 
     if (jumpTarget) {
       connectConfig.sock = tunnel as ConnectConfig['sock']
       delete connectConfig.host
       delete connectConfig.port
     } else {
-      const proxy = await getProxySocketForAsset()(target.asset, getRuntimeConfig().sshProxyConfigs, target.host, target.port)
-      if (proxy) {
+      if (proxyConfigForPool) {
+        const proxy = await getProxySocketForAsset()(target.asset, getRuntimeConfig().sshProxyConfigs, target.host, target.port)
+        if (!proxy) throw new Error(`SSH proxy config "${proxyConfigForPool.name}" did not create a socket.`)
+        proxyConfigForPool = proxy.config
         lifecycle = sendLifecycle(id, sink, {
           ...lifecycleBase,
           stage: 'proxy-opening',
@@ -1184,8 +1584,37 @@ export const createSshTerminalSession = (
         connectConfig.sock = proxy.socket
         delete connectConfig.host
         delete connectConfig.port
+        targetConnectionTransport = 'proxy'
       }
     }
+    targetClientPoolable = true
+    targetClientPoolKey = targetClientPoolable ? targetPoolKey(jumpTarget ? 'jump' : proxyConfigForPool ? 'proxy' : 'direct', target, { proxy: proxyConfigForPool, jump: jumpTarget }) : ''
+    if (targetClientPoolable) {
+      const pooledTarget = getPooledClient(pooledTargetClients, targetClientPoolKey)
+      if (pooledTarget) {
+        targetConnectionReuse = 'reused'
+        targetClientIsPooled = true
+        if (authClient && authClient !== pooledTarget) staleTargetClients.add(authClient)
+        client = pooledTarget
+        cleanupJumpTransport()
+        cleanupProxyTransport()
+        lifecycle = sendLifecycle(id, sink, {
+          ...lifecycleBase,
+          stage: 'connecting',
+          authScope: 'target',
+          sshTransport: targetConnectionTransport,
+          connectionReuse: 'reused',
+          targetHost: target.host,
+          targetPort: target.port,
+          targetUsername: target.username,
+          message: `Reusing SSH target connection ${terminalAuthLabel(target)}`
+        })
+        openShellOnClient(pooledTarget)
+        return
+      }
+    }
+    targetConnectionReuse = 'created'
+    targetClientIsPooled = targetClientPoolable
     if (closed) {
       cleanupTransports()
       return
@@ -1195,6 +1624,7 @@ export const createSshTerminalSession = (
       stage: 'connecting',
       authScope: 'target',
       sshTransport: jumpTarget ? 'jump' : connectConfig.sock ? 'proxy' : 'direct',
+      connectionReuse: 'created',
       ...(jumpTarget
         ? {
             jumpHost: jumpTarget.host,
@@ -1208,7 +1638,9 @@ export const createSshTerminalSession = (
       sshAuthMethods: authMethodsLabel(connectConfig, hasAgentAuth),
       message: `Connecting SSH target ${terminalAuthLabel(target)}`
     })
-    authClient.connect(connectConfig)
+    const activeClient = authClient || createTargetClient()
+    client = activeClient
+    activeClient.connect(connectConfig)
   }
 
   const retryTargetPassword = async (failedClient: SshTerminalClient, diagnosticEvent: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>>) => {
@@ -1242,9 +1674,9 @@ export const createSshTerminalSession = (
       try {
         failedClient.end()
       } catch {}
-      client = new ssh2.Client()
-      attachTargetClient(client)
-      await openTargetTransportAndConnect(client)
+      const nextClient = createTargetClient()
+      client = nextClient
+      await openTargetTransportAndConnect(nextClient)
       return true
     } catch (error) {
       fail(error, 'SSH connection failed.', 1, diagnosticEvent)
@@ -1257,34 +1689,11 @@ export const createSshTerminalSession = (
 
     authClient
       .on('ready', () => {
-        if (closed) return
-        sendActiveKeyboardResult('target', { status: 'success' })
-        commitRememberedPassword('target')
-        lifecycle = sendLifecycle(id, sink, {
-          ...lifecycleBase,
-          stage: 'connected',
-          message: `SSH connected ${target.username}@${target.host}:${target.port}`
-        })
-        authClient.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
-          if (error) {
-            fail(error, 'SSH shell failed.', 1)
-            return
-          }
-          stream = channel
-          lifecycle = sendLifecycle(id, sink, {
-            ...lifecycleBase,
-            stage: 'shell-ready',
-            message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
-          })
-          while (pendingWrites.length) {
-            stream.write(pendingWrites.shift() || '')
-          }
-          channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
-          channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
-          channel.on('close', () => finish(0, 'process'))
-        })
+        openShellOnClient(authClient)
       })
       .on('error', (error) => {
+        if (targetClientPoolable) removePooledClient(pooledTargetClients, targetClientPoolKey, authClient)
+        if (targetClientIsPooled && authClient === client && stream) return
         const diagnosticEvent = sshConnectionErrorEvent(error)
         sendActiveKeyboardResult('target', {
           status: 'failed',
@@ -1297,20 +1706,28 @@ export const createSshTerminalSession = (
         })()
       })
       .on('close', () => {
+        if (targetClientPoolable) removePooledClient(pooledTargetClients, targetClientPoolKey, authClient)
+        if (targetClientIsPooled && authClient === client && (stream || isPooledClient(pooledTargetClients, targetClientPoolKey, authClient))) return
         if (staleTargetClients.has(authClient) || authClient !== client) return
         finish(null, 'unknown')
       })
       .on('end', () => {
+        if (targetClientPoolable) removePooledClient(pooledTargetClients, targetClientPoolKey, authClient)
+        if (targetClientIsPooled && authClient === client && (stream || isPooledClient(pooledTargetClients, targetClientPoolKey, authClient))) return
         if (staleTargetClients.has(authClient) || authClient !== client) return
         finish(null, 'unknown')
       })
   }
 
-  attachTargetClient(client)
+  const createTargetClient = () => {
+    const authClient = new ssh2.Client()
+    attachTargetClient(authClient)
+    return authClient
+  }
 
   void (async () => {
     try {
-      await openTargetTransportAndConnect(client)
+      await openTargetTransportAndConnect()
     } catch (error) {
       fail(error, 'SSH connection preparation failed.', 1)
     }
