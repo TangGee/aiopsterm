@@ -685,10 +685,24 @@
               <Copy />
             </button>
           </div>
-          <pre
-            class="message-command-code"
-            data-testid="ai-message-command-text"
-          ><code>{{ commandTextForMessage(message) }}</code></pre>
+          <div class="message-command-code-shell">
+            <div class="message-command-code-toolbar">
+              <button
+                type="button"
+                class="message-command-review-button"
+                :title="t('ai.commandReviewTitle')"
+                data-testid="ai-message-command-review-large"
+                @click.stop="openCommandAuditDialog(message)"
+              >
+                <Maximize2 />
+                <span>{{ t('ai.commandReviewOpen') }}</span>
+              </button>
+            </div>
+            <pre
+              class="message-command-code"
+              data-testid="ai-message-command-text"
+            ><code>{{ commandTextForMessage(message) }}</code></pre>
+          </div>
           <div
             v-if="message.commandExecutionMessage || message.executedCommand || message.action === 'rejected'"
             class="message-command-status"
@@ -1377,6 +1391,7 @@ import {
   FolderGit2,
   Image,
   LockKeyhole,
+  Maximize2,
   Mic,
   MinusSquare,
   Play,
@@ -1988,7 +2003,7 @@ const isReadOnlyCommandMessage = (message: CommandSuggestionMessage) => message.
 const isCommandTerminalActionDisabled = (message: CommandSuggestionMessage) =>
   message.commandExecutionStatus === 'running' || message.commandExecutionStatus === 'succeeded' || message.action === 'rejected'
 
-const canEditCommandMessage = (message: CommandSuggestionMessage | null) => Boolean(message && !isCommandTerminalActionDisabled(message))
+const canEditCommandMessage = (message: CommandSuggestionMessage | null) => Boolean(message && message.commandExecutionStatus !== 'running')
 
 const canEditActiveCommandAudit = computed(() => canEditCommandMessage(activeCommandAuditMessage.value))
 
@@ -2074,7 +2089,11 @@ const applyCommandTextToMessage = (message: CommandSuggestionMessage, command: s
   } else {
     message.text = trimmed
   }
-  if (message.commandExecutionStatus && message.commandExecutionStatus !== 'running') {
+  const wasRejected = message.action === 'rejected'
+  if (wasRejected) {
+    message.action = undefined
+  }
+  if ((message.commandExecutionStatus && message.commandExecutionStatus !== 'running') || wasRejected) {
     message.commandExecutionStatus = undefined
     message.commandExecutionMessage = undefined
     message.executedCommand = undefined

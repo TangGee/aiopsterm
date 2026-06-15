@@ -9476,6 +9476,44 @@ code {
   background: color-mix(in srgb, var(--warn) 10%, transparent);
 }
 
+.message-command-code-shell {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.message-command-code-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.message-command-review-button {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 6px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.message-command-review-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-3));
+}
+
+.message-command-review-button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
 .message-command-code {
   min-width: 0;
   max-width: 100%;
@@ -9511,10 +9549,11 @@ code {
 }
 
 .ai-command-audit-dialog {
-  width: min(860px, calc(100vw - 48px));
-  max-height: min(720px, calc(100vh - 48px));
+  width: min(1120px, calc(100vw - 36px));
+  height: min(860px, calc(100vh - 36px));
+  max-height: calc(100vh - 36px);
   display: grid;
-  grid-template-rows: auto auto minmax(320px, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: 8px;
@@ -9608,6 +9647,7 @@ code {
 .ai-command-audit-dialog label {
   min-height: 0;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -9621,8 +9661,8 @@ code {
 
 .ai-command-audit-dialog textarea {
   width: 100%;
-  min-height: 320px;
-  max-height: 520px;
+  min-height: 0;
+  height: 100%;
   resize: vertical;
   border: 1px solid var(--border);
   border-radius: 7px;

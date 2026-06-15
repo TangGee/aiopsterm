@@ -161,6 +161,7 @@ export type I18nKey =
   | 'ai.commandReview'
   | 'ai.commandReviewTitle'
   | 'ai.commandReviewDescription'
+  | 'ai.commandReviewOpen'
   | 'ai.commandReviewCopy'
   | 'ai.commandReviewSave'
   | 'ai.commandReviewRun'
@@ -311,6 +312,7 @@ const zhCN: LocaleMessages = {
   'ai.commandReview': '命令审计',
   'ai.commandReviewTitle': '审计并编辑命令',
   'ai.commandReviewDescription': '执行前检查 AI 生成的命令。保存后会更新当前命令卡，执行会写入当前活动终端。',
+  'ai.commandReviewOpen': '审计编辑',
   'ai.commandReviewCopy': '复制命令',
   'ai.commandReviewSave': '保存修改',
   'ai.commandReviewRun': '保存并执行'
@@ -460,6 +462,7 @@ const enUS: LocaleMessages = {
   'ai.commandReview': 'Command review',
   'ai.commandReviewTitle': 'Review and edit command',
   'ai.commandReviewDescription': 'Review the AI-generated command before execution. Saving updates the current command card; running writes it to the active terminal.',
+  'ai.commandReviewOpen': 'Review edit',
   'ai.commandReviewCopy': 'Copy command',
   'ai.commandReviewSave': 'Save changes',
   'ai.commandReviewRun': 'Save and run'
