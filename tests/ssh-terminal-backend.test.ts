@@ -445,6 +445,43 @@ describe('ssh terminal backend runtime', () => {
     expect(connectEvents.data).toEqual([])
   })
 
+  it('reports ssh authentication failures with actionable diagnostics', async () => {
+    const backend = await loadSshTerminalBackend()
+    const passwordDisabledSsh = createSshRuntime({
+      failConnect: Object.assign(new Error('Permission denied (publickey).'), { level: 'client-authentication' })
+    })
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(passwordDisabledSsh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    backend.createSshTerminalSession(
+      'ssh-password-disabled',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'root', port: 22, password: 'secret' } },
+      createSink(events)
+    )
+    await waitForMicrotasks(3)
+
+    expect(events.lifecycle).toEqual([
+      expect.objectContaining({ stage: 'connecting' }),
+      expect.objectContaining({
+        stage: 'error',
+        message: 'SSH connection failed.',
+        reason: 'error',
+        isNetworkDisconnect: false,
+        errorCode: 'SSH_AUTH_PASSWORD_DISABLED',
+        errorMessage: expect.stringContaining('服务器未开放密码登录')
+      })
+    ])
+    expect(events.lifecycle[1].errorMessage).toContain('PasswordAuthentication')
+    expect(events.exit).toEqual([{ event: events.lifecycle[1], code: 1 }])
+    expect(events.data).toEqual([])
+  })
+
   it('closes sessions, proxy sockets, and registry state from the backend kill path', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime()

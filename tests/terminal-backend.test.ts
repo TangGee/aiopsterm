@@ -7,6 +7,7 @@ let createTerminalErrorLifecycleEvent: (id: string, kind: any, error: unknown, e
 let createTerminalKillResult: (id: string, exists: boolean) => any
 let createTerminalLifecycleEvent: (id: string, event: any, at?: number) => any
 let createTerminalWriteResult: (id: string, data: string, exists: boolean) => any
+let diagnoseSshConnectionError: (error: unknown, context?: any) => any
 
 beforeAll(async () => {
   const modulePath = '../src/main/backend/terminal'
@@ -18,6 +19,7 @@ beforeAll(async () => {
   createTerminalKillResult = backend.createTerminalKillResult
   createTerminalLifecycleEvent = backend.createTerminalLifecycleEvent
   createTerminalWriteResult = backend.createTerminalWriteResult
+  diagnoseSshConnectionError = backend.diagnoseSshConnectionError
 })
 
 describe('terminal backend boundary', () => {
@@ -217,5 +219,88 @@ describe('terminal backend boundary', () => {
       errorCode: 'ECONNRESET',
       errorMessage: 'read ECONNRESET'
     })
+  })
+
+  it('diagnoses ssh authentication failures into actionable backend messages', () => {
+    const passwordDisabled = diagnoseSshConnectionError(Object.assign(new Error('Permission denied (publickey).'), { level: 'client-authentication' }), {
+      authType: 'password',
+      hasPassword: true,
+      username: 'root',
+      host: '10.8.0.6'
+    })
+    expect(passwordDisabled).toEqual(
+      expect.objectContaining({
+        errorCode: 'SSH_AUTH_PASSWORD_DISABLED',
+        reason: 'error',
+        isNetworkDisconnect: false
+      })
+    )
+    expect(passwordDisabled.errorMessage).toContain('服务器未开放密码登录')
+    expect(passwordDisabled.errorMessage).toContain('PasswordAuthentication')
+
+    const passwordRejected = diagnoseSshConnectionError(Object.assign(new Error('All configured authentication methods failed'), { level: 'client-authentication' }), {
+      authType: 'password',
+      hasPassword: true
+    })
+    expect(passwordRejected).toEqual(
+      expect.objectContaining({
+        errorCode: 'SSH_AUTH_PASSWORD_REJECTED',
+        reason: 'error',
+        isNetworkDisconnect: false
+      })
+    )
+    expect(passwordRejected.errorMessage).toContain('用户名或密码不正确')
+
+    const keyRejected = diagnoseSshConnectionError(Object.assign(new Error('Permission denied (publickey,password).'), { level: 'client-authentication' }), {
+      authType: 'keyBased',
+      hasPrivateKey: true
+    })
+    expect(keyRejected).toEqual(
+      expect.objectContaining({
+        errorCode: 'SSH_AUTH_KEY_REJECTED',
+        reason: 'error',
+        isNetworkDisconnect: false
+      })
+    )
+    expect(keyRejected.errorMessage).toContain('服务器拒绝当前密钥')
+  })
+
+  it('allows ssh diagnostics to override terminal error lifecycle metadata', () => {
+    const diagnostic = diagnoseSshConnectionError(Object.assign(new Error('Permission denied (publickey).'), { level: 'client-authentication' }), {
+      authType: 'password',
+      hasPassword: true
+    })
+
+    expect(
+      createTerminalErrorLifecycleEvent(
+        'terminal-auth-unit',
+        'ssh',
+        new Error('Permission denied (publickey).'),
+        {
+          shell: 'ssh',
+          host: '10.8.0.6',
+          username: 'root',
+          code: 1,
+          message: 'SSH connection failed.',
+          reason: diagnostic.reason,
+          isNetworkDisconnect: diagnostic.isNetworkDisconnect,
+          errorCode: diagnostic.errorCode,
+          errorMessage: diagnostic.errorMessage
+        },
+        1717200005000
+      )
+    ).toEqual(
+      expect.objectContaining({
+        id: 'terminal-auth-unit',
+        kind: 'ssh',
+        stage: 'error',
+        at: 1717200005000,
+        message: 'SSH connection failed.',
+        reason: 'error',
+        isNetworkDisconnect: false,
+        errorCode: 'SSH_AUTH_PASSWORD_DISABLED',
+        errorMessage: expect.stringContaining('服务器未开放密码登录')
+      })
+    )
   })
 })

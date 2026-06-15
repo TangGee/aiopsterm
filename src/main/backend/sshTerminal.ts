@@ -14,7 +14,7 @@ import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 import { loadSsh2 } from './ssh2Runtime'
-import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent, type SshTerminalConnectionTarget } from './terminal'
+import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent, diagnoseSshConnectionError, type SshTerminalConnectionTarget } from './terminal'
 
 type AssetSecret = {
   password?: string
@@ -204,7 +204,7 @@ const sendErrorLifecycle = (
   id: string,
   sink: SshTerminalEventSink,
   error: unknown,
-  event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>>
+  event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>>
 ) => {
   const payload = createTerminalErrorLifecycleEvent(id, 'ssh', error, event)
   sink.lifecycle(payload)
@@ -326,6 +326,7 @@ export const createSshTerminalSession = (
   const pendingWrites: Array<string | Buffer> = []
   let keyboardInteractiveAttempts = 0
   let activeKeyboardInteractiveRequestId = ''
+  let hasConfiguredAgentAuth = false
 
   let lifecycle = sendLifecycle(id, sink, {
     ...lifecycleBase,
@@ -365,7 +366,7 @@ export const createSshTerminalSession = (
     error: unknown,
     message: string,
     code = 1,
-    event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at' | 'reason' | 'isNetworkDisconnect' | 'errorCode' | 'errorMessage'>> = {}
+    event: Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>> = {}
   ) => {
     if (closed) return
     closed = true
@@ -377,6 +378,25 @@ export const createSshTerminalSession = (
       message
     })
     sink.exit(lifecycle, code)
+  }
+
+  const sshConnectionErrorEvent = (error: unknown): Partial<Omit<TerminalLifecycleEvent, 'id' | 'kind' | 'stage' | 'at'>> => {
+    const diagnosis = diagnoseSshConnectionError(error, {
+      authType: target.asset?.auth_type,
+      hasPassword: Boolean(target.password),
+      hasPrivateKey: Boolean(target.privateKey),
+      hasAgent: hasConfiguredAgentAuth,
+      tryKeyboard: Boolean(sink.keyboardInteractive),
+      username: target.username,
+      host: target.host,
+      port: target.port
+    })
+    return {
+      reason: diagnosis.reason,
+      isNetworkDisconnect: diagnosis.isNetworkDisconnect,
+      errorCode: diagnosis.errorCode,
+      errorMessage: diagnosis.errorMessage
+    }
   }
 
   const session: SshTerminalSession = {
@@ -500,17 +520,18 @@ export const createSshTerminalSession = (
       })
     })
     .on('error', (error) => {
+      const diagnosticEvent = sshConnectionErrorEvent(error)
       if (activeKeyboardInteractiveRequestId) {
         sink.keyboardInteractiveResult?.({
           id: activeKeyboardInteractiveRequestId,
           status: 'failed',
           attempts: keyboardInteractiveAttempts,
           final: true,
-          errorMessage: error instanceof Error ? error.message : 'SSH authentication failed.'
+          errorMessage: diagnosticEvent.errorMessage || (error instanceof Error ? error.message : 'SSH authentication failed.')
         })
         activeKeyboardInteractiveRequestId = ''
       }
-      fail(error, 'SSH connection failed.', 1)
+      fail(error, 'SSH connection failed.', 1, diagnosticEvent)
     })
     .on('close', () => finish(null, 'unknown'))
     .on('end', () => finish(null, 'unknown'))
@@ -530,7 +551,11 @@ export const createSshTerminalSession = (
     enableForward: true,
     overrideExistingAgent: false
   })
-  if (!configuredAgentAuth && !target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) connectConfig.agent = process.env.SSH_AUTH_SOCK
+  hasConfiguredAgentAuth = Boolean(configuredAgentAuth)
+  if (!configuredAgentAuth && !target.password && !target.privateKey && process.env.SSH_AUTH_SOCK) {
+    connectConfig.agent = process.env.SSH_AUTH_SOCK
+    hasConfiguredAgentAuth = true
+  }
 
   void (async () => {
     try {

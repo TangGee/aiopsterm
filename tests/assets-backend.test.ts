@@ -518,6 +518,45 @@ describe('assets backend boundary', () => {
     })
   })
 
+  it('returns actionable ssh authentication diagnostics from connection tests', async () => {
+    const backend = await loadBackend()
+    const ssh = createSshRuntime({
+      fail: Object.assign(new Error('Permission denied (publickey).'), { level: 'client-authentication' })
+    })
+    backend.configureAssetConnectionRuntime({ ssh2Runtime: ssh.runtime })
+
+    const result = await backend.testAssetConnection({
+      asset: {
+        name: 'password-disabled-host',
+        title: 'password-disabled-host',
+        host: '10.71.0.13',
+        username: 'root',
+        port: 22,
+        asset_type: 'person',
+        auth_type: 'password',
+        group: '测试',
+        group_name: '测试',
+        tags: ['manual'],
+        password: 'secret'
+      }
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'SSH_AUTH_PASSWORD_DISABLED',
+      errorMessage: expect.stringContaining('服务器未开放密码登录')
+    })
+    expect(result.errorMessage).toContain('PasswordAuthentication')
+    expect(ssh.connectConfigs.at(-1)).toEqual(
+      expect.objectContaining({
+        host: '10.71.0.13',
+        username: 'root',
+        password: 'secret'
+      })
+    )
+    expect(ssh.clients.at(-1)?.ended).toBe(true)
+  })
+
   it('refreshes organization assets and returns a backend-owned snapshot', async () => {
     const backend = await loadBackend()
     const refreshed = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })

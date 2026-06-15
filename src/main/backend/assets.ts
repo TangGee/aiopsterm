@@ -41,6 +41,7 @@ import { shouldUseAssetsSeedData } from '@shared/runtimeSwitches'
 import { createConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
+import { diagnoseSshConnectionError } from './terminal'
 
 type AssetSecret = {
   password?: string
@@ -1504,8 +1505,9 @@ export const testAssetConnection = async (input: AiopsAssetConnectionTestInput =
   const start = assetConnectionNow()
   let client: AssetSshTestClient | null = null
   let proxySocket: SshProxySocket | null = null
+  let target: ResolvedAssetConnectionTarget | null = null
   try {
-    const target = resolveAssetConnectionTarget(input)
+    target = resolveAssetConnectionTarget(input)
     const ssh2 = getAssetConnectionSsh2Runtime()
     if (!ssh2) {
       return {
@@ -1564,6 +1566,22 @@ export const testAssetConnection = async (input: AiopsAssetConnectionTestInput =
   } catch (error) {
     if (error instanceof AssetConnectionTestError) {
       return { ok: false, errorCode: error.errorCode, errorMessage: error.message }
+    }
+    if (target) {
+      const diagnosis = diagnoseSshConnectionError(error, {
+        authType: target.authType,
+        hasPassword: Boolean(target.password),
+        hasPrivateKey: Boolean(target.privateKey),
+        hasAgent: Boolean(target.agent),
+        username: target.username,
+        host: target.host,
+        port: target.port
+      })
+      return {
+        ok: false,
+        errorCode: diagnosis.errorCode,
+        errorMessage: diagnosis.errorMessage
+      }
     }
     return {
       ok: false,
