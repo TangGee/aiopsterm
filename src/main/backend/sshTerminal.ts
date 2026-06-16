@@ -219,7 +219,7 @@ const getPtyRuntime = (): SshTerminalPtyRuntime | null => {
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
 
 const clearPool = (pool: Map<string, PooledSshClient>) => {
-  for (const entry of pool.values()) {
+  for (const entry of new Set(pool.values())) {
     try {
       entry.client.end()
     } catch {}
@@ -312,6 +312,29 @@ const targetPoolKey = (transport: 'direct' | 'proxy' | 'jump', authTarget: SshTe
     })
   )
 
+const authenticatedTargetPoolKey = (
+  transport: 'direct' | 'proxy' | 'jump',
+  authTarget: SshTerminalTarget,
+  context: { proxy?: SshProxyConfig | null; jump?: SshTerminalTarget | null }
+) =>
+  shortHash(
+    stableJson({
+      kind: 'authenticated-target',
+      transport,
+      target: {
+        assetId: cleanText(authTarget.asset?.id),
+        endpoint: targetEndpointIdentity(authTarget)
+      },
+      proxy: proxyPoolIdentity(context.proxy),
+      jump: context.jump
+        ? {
+            assetId: cleanText(context.jump.asset?.id),
+            endpoint: targetEndpointIdentity(context.jump)
+          }
+        : null
+    })
+  )
+
 const jumpPoolKey = (jumpTarget: SshTerminalTarget) =>
   shortHash(
     stableJson({
@@ -330,6 +353,27 @@ const removePooledClient = (pool: Map<string, PooledSshClient>, key: string, cli
   } catch {}
 }
 
+const removePooledClientAliases = (pool: Map<string, PooledSshClient>, client: SshTerminalClient) => {
+  const removed = new Set<PooledSshClient>()
+  for (const [entryKey, entry] of pool) {
+    if (entry.client !== client) continue
+    pool.delete(entryKey)
+    removed.add(entry)
+  }
+  for (const entry of removed) {
+    try {
+      entry.dispose?.()
+    } catch {}
+  }
+}
+
+const findPooledClientEntry = (pool: Map<string, PooledSshClient>, client: SshTerminalClient) => {
+  for (const entry of pool.values()) {
+    if (entry.client === client) return entry
+  }
+  return null
+}
+
 const rememberPooledClient = (pool: Map<string, PooledSshClient>, key: string, client: SshTerminalClient, dispose?: () => void) => {
   const now = Date.now()
   const existing = pool.get(key)
@@ -342,16 +386,42 @@ const rememberPooledClient = (pool: Map<string, PooledSshClient>, key: string, c
     try {
       existing.client.end()
     } catch {}
-    try {
-      existing.dispose?.()
-    } catch {}
+    removePooledClientAliases(pool, existing.client)
+  }
+  const clientEntry = findPooledClientEntry(pool, client)
+  if (clientEntry) {
+    clientEntry.lastUsedAt = now
+    if (dispose && !clientEntry.dispose) clientEntry.dispose = dispose
+    pool.set(key, clientEntry)
+    return clientEntry
   }
   const entry = { key, client, createdAt: now, lastUsedAt: now, dispose }
   pool.set(key, entry)
-  client.on('close', () => removePooledClient(pool, key, client))
-  client.on('end', () => removePooledClient(pool, key, client))
-  client.on('error', () => removePooledClient(pool, key, client))
+  client.on('close', () => removePooledClientAliases(pool, client))
+  client.on('end', () => removePooledClientAliases(pool, client))
+  client.on('error', () => removePooledClientAliases(pool, client))
   return entry
+}
+
+const rememberPooledClientAliases = (pool: Map<string, PooledSshClient>, keys: string[], client: SshTerminalClient, dispose?: () => void) => {
+  const uniqueKeys = Array.from(new Set(keys.filter(Boolean)))
+  if (!uniqueKeys.length) throw new Error('At least one SSH connection pool key is required.')
+  const primary = rememberPooledClient(pool, uniqueKeys[0], client, dispose)
+  for (const key of uniqueKeys.slice(1)) {
+    const existing = pool.get(key)
+    if (existing?.client === client) {
+      existing.lastUsedAt = Date.now()
+      continue
+    }
+    if (existing) {
+      try {
+        existing.client.end()
+      } catch {}
+      removePooledClientAliases(pool, existing.client)
+    }
+    pool.set(key, primary)
+  }
+  return primary
 }
 
 const getPooledClient = (pool: Map<string, PooledSshClient>, key: string) => {
@@ -361,7 +431,17 @@ const getPooledClient = (pool: Map<string, PooledSshClient>, key: string) => {
   return entry.client
 }
 
+const getPooledClientByKeys = (pool: Map<string, PooledSshClient>, keys: string[]) => {
+  for (const key of keys) {
+    const client = getPooledClient(pool, key)
+    if (client) return client
+  }
+  return null
+}
+
 const isPooledClient = (pool: Map<string, PooledSshClient>, key: string, client: SshTerminalClient) => pool.get(key)?.client === client
+
+const isPooledClientByKeys = (pool: Map<string, PooledSshClient>, keys: string[], client: SshTerminalClient) => keys.some((key) => isPooledClient(pool, key, client))
 
 const getSshControlDir = () => {
   const configured = cleanText(runtimeConfig.getSshControlDir?.())
@@ -739,6 +819,7 @@ export const createSshTerminalSession = (
   let targetClientIsPooled = false
   let targetClientPoolable = false
   let targetClientPoolKey = ''
+  let targetClientAuthenticatedPoolKey = ''
   let targetConnectionReuse: TerminalLifecycleEvent['connectionReuse'] = 'created'
   let targetConnectionTransport: TerminalLifecycleEvent['sshTransport'] = 'direct'
   let targetConnectionJump: SshTerminalTarget | null = null
@@ -1073,7 +1154,12 @@ export const createSshTerminalSession = (
     commitRememberedPassword('target')
     if (targetClientPoolable) {
       const disposeProxySocket = targetConnectionTransport === 'proxy' && proxySocket ? proxySocket : null
-      rememberPooledClient(pooledTargetClients, targetClientPoolKey, authClient, disposeProxySocket ? () => disposeProxySocket.destroy() : undefined)
+      rememberPooledClientAliases(
+        pooledTargetClients,
+        [targetClientPoolKey, targetClientAuthenticatedPoolKey],
+        authClient,
+        disposeProxySocket ? () => disposeProxySocket.destroy() : undefined
+      )
       if (targetConnectionTransport === 'jump') jumpStream = null
       if (targetConnectionTransport === 'proxy') proxySocket = null
     }
@@ -1485,7 +1571,8 @@ export const createSshTerminalSession = (
         targetConnectionTransport = 'proxy'
         targetClientPoolable = true
         targetClientPoolKey = targetPoolKey('proxy', target, { proxy: proxyConfigForPool })
-        const pooledTarget = getPooledClient(pooledTargetClients, targetClientPoolKey)
+        targetClientAuthenticatedPoolKey = authenticatedTargetPoolKey('proxy', target, { proxy: proxyConfigForPool })
+        const pooledTarget = getPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey])
         if (pooledTarget) {
           targetConnectionReuse = 'reused'
           targetClientIsPooled = true
@@ -1513,7 +1600,8 @@ export const createSshTerminalSession = (
       targetConnectionTransport = 'jump'
       targetClientPoolable = true
       targetClientPoolKey = targetPoolKey('jump', target, { jump: jumpTarget })
-      const pooledTarget = getPooledClient(pooledTargetClients, targetClientPoolKey)
+      targetClientAuthenticatedPoolKey = authenticatedTargetPoolKey('jump', target, { jump: jumpTarget })
+      const pooledTarget = getPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey])
       if (pooledTarget) {
         targetConnectionReuse = 'reused'
         targetClientIsPooled = true
@@ -1588,9 +1676,11 @@ export const createSshTerminalSession = (
       }
     }
     targetClientPoolable = true
-    targetClientPoolKey = targetClientPoolable ? targetPoolKey(jumpTarget ? 'jump' : proxyConfigForPool ? 'proxy' : 'direct', target, { proxy: proxyConfigForPool, jump: jumpTarget }) : ''
+    const targetPoolTransport = jumpTarget ? 'jump' : proxyConfigForPool ? 'proxy' : 'direct'
+    targetClientPoolKey = targetClientPoolable ? targetPoolKey(targetPoolTransport, target, { proxy: proxyConfigForPool, jump: jumpTarget }) : ''
+    targetClientAuthenticatedPoolKey = targetClientPoolable ? authenticatedTargetPoolKey(targetPoolTransport, target, { proxy: proxyConfigForPool, jump: jumpTarget }) : ''
     if (targetClientPoolable) {
-      const pooledTarget = getPooledClient(pooledTargetClients, targetClientPoolKey)
+      const pooledTarget = getPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey])
       if (pooledTarget) {
         targetConnectionReuse = 'reused'
         targetClientIsPooled = true
@@ -1692,7 +1782,7 @@ export const createSshTerminalSession = (
         openShellOnClient(authClient)
       })
       .on('error', (error) => {
-        if (targetClientPoolable) removePooledClient(pooledTargetClients, targetClientPoolKey, authClient)
+        if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
         if (targetClientIsPooled && authClient === client && stream) return
         const diagnosticEvent = sshConnectionErrorEvent(error)
         sendActiveKeyboardResult('target', {
@@ -1706,14 +1796,24 @@ export const createSshTerminalSession = (
         })()
       })
       .on('close', () => {
-        if (targetClientPoolable) removePooledClient(pooledTargetClients, targetClientPoolKey, authClient)
-        if (targetClientIsPooled && authClient === client && (stream || isPooledClient(pooledTargetClients, targetClientPoolKey, authClient))) return
+        if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
+        if (
+          targetClientIsPooled &&
+          authClient === client &&
+          (stream || isPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey], authClient))
+        )
+          return
         if (staleTargetClients.has(authClient) || authClient !== client) return
         finish(null, 'unknown')
       })
       .on('end', () => {
-        if (targetClientPoolable) removePooledClient(pooledTargetClients, targetClientPoolKey, authClient)
-        if (targetClientIsPooled && authClient === client && (stream || isPooledClient(pooledTargetClients, targetClientPoolKey, authClient))) return
+        if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
+        if (
+          targetClientIsPooled &&
+          authClient === client &&
+          (stream || isPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey], authClient))
+        )
+          return
         if (staleTargetClients.has(authClient) || authClient !== client) return
         finish(null, 'unknown')
       })

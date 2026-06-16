@@ -651,6 +651,79 @@ describe('ssh terminal backend runtime', () => {
     expect(rememberedPasswords).toEqual([{ assetId: 'asset-password-empty', password: 'typed-password' }])
   })
 
+  it('reuses an authenticated direct SSH client when a typed password was not saved', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ manualReady: true })
+    const firstEvents = createRecorder()
+    const secondEvents = createRecorder()
+    const requests: TerminalKeyboardInteractiveRequest[] = []
+    const rememberedPasswords: Array<{ assetId: string; password: string }> = []
+    const asset = {
+      id: 'asset-password-unsaved',
+      name: 'unsaved-password-host',
+      title: 'unsaved-password-host',
+      host: '10.71.0.12',
+      username: 'root',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password'
+    }
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => asset as never,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      getEnv: () => ({}),
+      rememberAssetPassword: (assetId: string, password: string) => {
+        rememberedPasswords.push({ assetId, password })
+      }
+    })
+
+    const first = backend.createSshTerminalSession('ssh-password-unsaved-1', { kind: 'ssh', assetId: asset.id }, {
+      ...createSink(firstEvents),
+      keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
+        requests.push(request)
+        return { responses: ['typed-password'], rememberPassword: false }
+      }
+    })
+    await waitForMicrotasks(3)
+    ssh.clients[0].emit('error', Object.assign(new Error('All configured authentication methods failed'), { level: 'client-authentication' }))
+    await waitForMicrotasks(6)
+    ssh.clients[1].emit('ready')
+    await waitForMicrotasks(3)
+
+    expect(first.session).toBeTruthy()
+    expect(requests).toHaveLength(1)
+    expect(rememberedPasswords).toEqual([])
+    expect(ssh.connectConfigs).toHaveLength(2)
+    expect(ssh.shellOptions).toEqual([expect.objectContaining({ cols: 100, rows: 30 })])
+
+    const second = backend.createSshTerminalSession('ssh-password-unsaved-2', { kind: 'ssh', assetId: asset.id, cols: 120, rows: 36 }, {
+      ...createSink(secondEvents),
+      keyboardInteractive: async (request: TerminalKeyboardInteractiveRequest) => {
+        requests.push(request)
+        return { responses: ['should-not-be-requested'], rememberPassword: false }
+      }
+    })
+    await waitForMicrotasks(4)
+
+    expect(second.session).toBeTruthy()
+    expect(requests).toHaveLength(1)
+    expect(ssh.clients).toHaveLength(2)
+    expect(ssh.connectConfigs).toHaveLength(2)
+    expect(ssh.shellOptions).toEqual([expect.objectContaining({ cols: 100, rows: 30 }), expect.objectContaining({ cols: 120, rows: 36 })])
+    expect(secondEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connecting', sshTransport: 'direct', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'connected', sshTransport: 'direct', connectionReuse: 'reused' }),
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'direct', connectionReuse: 'reused' })
+      ])
+    )
+    expect(JSON.stringify(firstEvents.lifecycle)).not.toContain('typed-password')
+    expect(JSON.stringify(secondEvents.lifecycle)).not.toContain('typed-password')
+  })
+
   it('prompts for a replacement password after a saved password is rejected before exiting', async () => {
     const backend = await loadSshTerminalBackend()
     const ssh = createSshRuntime({
