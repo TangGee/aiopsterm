@@ -13029,6 +13029,91 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
       .join('')
 
+  const agentAutoRunCommandMessageIds = new Set<string>()
+
+  const isAgentReadOnlyCommandMessage = (message: ChatMessage) =>
+    message.role === 'assistant' &&
+    message.ask === 'command' &&
+    message.state === 'done' &&
+    message.action !== 'rejected' &&
+    !message.commandExecutionStatus &&
+    Boolean(message.commandExecution?.command.trim()) &&
+    message.commandExecution?.requiresApproval === false &&
+    message.commandExecution.interactive !== true
+
+  const autoRunAgentReadOnlyCommand = async (messageId: string) => {
+    const message = chatMessages.value.find((item) => item.id === messageId)
+    if (!message || !isAgentReadOnlyCommandMessage(message)) return
+    if (agentAutoRunCommandMessageIds.has(message.id)) return
+    agentAutoRunCommandMessageIds.add(message.id)
+    const command = message.commandExecution!.command.trim()
+    const terminalPanel = resolveActiveWritableTerminalPanel()
+    const outputStartLength = terminalPanel?.output.length ?? 0
+    const terminalPanelId = terminalPanel?.id || ''
+    message.commandExecutionStatus = 'running'
+    message.commandExecutionMessage = '查询类命令自动执行中...'
+    void updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+    const decision = await runActiveTerminalCommand(command, 'agent')
+    if (!decision) {
+      message.commandExecutionStatus = 'failed'
+      message.commandExecutionMessage = '终端会话不可用，请先打开本地 shell 或连接 SSH。'
+      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+      return
+    }
+    if (decision.status === 'needs-approval') {
+      message.commandExecutionStatus = 'pending'
+      message.commandExecutionMessage = '命令已送入终端安全确认。'
+      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+      return
+    }
+    if (decision.status === 'blocked') {
+      message.commandExecutionStatus = 'failed'
+      message.commandExecutionMessage = '命令被安全策略拦截。'
+      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+      return
+    }
+    if (decision.status === 'unavailable') {
+      message.commandExecutionStatus = 'failed'
+      message.commandExecutionMessage = decision.reason
+      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+      return
+    }
+    if (!terminalPanelId) {
+      message.commandExecutionStatus = 'failed'
+      message.commandExecutionMessage = '终端会话不可用，请先打开本地 shell 或连接 SSH。'
+      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+      return
+    }
+    message.executedCommand = command
+    message.commandExecutionStatus = 'running'
+    message.commandExecutionMessage = '查询类命令已发送，正在等待终端输出...'
+    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+    const loopResult = await continueAgentCommandLoop({
+      commandMessageId: message.id,
+      command,
+      commandExecution: {
+        ...message.commandExecution!,
+        command
+      },
+      terminalPanelId,
+      outputStartLength
+    })
+    if (loopResult.status === 'continued') {
+      message.commandExecutionStatus = 'succeeded'
+      message.commandExecutionMessage = `命令输出已回传 Agent：${command}`
+      message.executedCommand = command
+    } else {
+      message.commandExecutionStatus = 'failed'
+      message.commandExecutionMessage = loopResult.reason
+    }
+    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
+  }
+
+  const scheduleAgentReadOnlyAutoRun = (message: ChatMessage, input: AiChatResponseInput) => {
+    if (input.mode !== 'agent' || !aiPreferences.value.autoExecuteReadOnlyCommands || !isAgentReadOnlyCommandMessage(message)) return
+    void autoRunAgentReadOnlyCommand(message.id)
+  }
+
   const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
     const responseBridge = window.aiops?.generateAiChatResponse
     const failGeneration = (messageText: string) => {
@@ -13077,6 +13162,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (requestId && isAiContextUsageForRequest(data?.contextUsage, requestId, assistantMessageId)) {
       applyAiContextUsage(data.contextUsage)
     }
+    scheduleAgentReadOnlyAutoRun(message, input)
     void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
   }
@@ -13127,7 +13213,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const appendChatExchange = async (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[]) => {
+  const appendChatExchange = async (
+    text: string,
+    contentParts?: AiContentPart[],
+    overrideHosts?: AiContextOption[],
+    options: { mode?: NonNullable<AiChatResponseInput['mode']> } = {}
+  ) => {
     const safeContentParts = contentParts?.filter((part) => part.type !== 'text' || part.text.trim()) || []
     const hasStructuredParts = safeContentParts.some((part) => part.type !== 'text')
     const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
@@ -13136,6 +13227,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
     const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
     const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
+    const responseMode = options.mode || (mode.value === 'agents' ? 'agent' : 'command')
     const exchangeBridge = window.aiops?.createAiChatExchangeRequest
     if (typeof exchangeBridge !== 'function') {
       setTopNotice('AI 请求创建服务不可用')
@@ -13166,7 +13258,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             ? { id: selectedCommandId.value || undefined, label: commandDisplay }
             : null,
         model: config.value.modelName,
-        mode: mode.value === 'agents' ? 'agent' : 'command'
+        mode: responseMode
       })
     } catch (error) {
       setTopNotice(aiBridgeErrorMessage(error, 'AI 请求创建失败'))
@@ -13195,8 +13287,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const sendChat = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[]) => {
-    return appendChatExchange(text, contentParts, overrideHosts)
+  const sendChat = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[], options?: { mode?: NonNullable<AiChatResponseInput['mode']> }) => {
+    return appendChatExchange(text, contentParts, overrideHosts, options)
   }
 
   const resendUserMessageFromParts = async (messageId: string, contentParts: AiContentPart[], overrideHosts?: AiContextOption[]) => {

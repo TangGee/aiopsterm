@@ -1431,7 +1431,7 @@ import type {
 } from '@/stores/workspace'
 import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
 
-defineProps<{ agentMode?: boolean }>()
+const props = defineProps<{ agentMode?: boolean }>()
 
 const workspace = useWorkspaceStore()
 const { locale, t } = useI18n()
@@ -4269,7 +4269,9 @@ const handleSend = async () => {
     return
   }
   const contentParts = extractEditableContentParts()
-  const sent = await workspace.sendChat(draft.value, contentParts)
+  const sent = await workspace.sendChat(draft.value, contentParts, undefined, {
+    mode: chatMode.value === 'agent' || props.agentMode ? 'agent' : 'command'
+  })
   if (!sent) return
   imageInputParts.value = []
   fileInputParts.value = []

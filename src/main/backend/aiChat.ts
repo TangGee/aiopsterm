@@ -432,6 +432,8 @@ const createAiChatSystemPrompt = (input: AiChatResponseInput) => {
           '- Include <ip>, <command>, <requires_approval>, and <interactive> fields.',
           '- Use <requires_approval>false</requires_approval> only for read-only diagnostic/query commands.',
           '- Use <requires_approval>true</requires_approval> for destructive, state-changing, write, restart, install, delete, or uncertain commands.',
+          '- Put plain shell text directly inside <command>; do not wrap it in CDATA, Markdown, or another XML tag.',
+          '- If the command contains XML-sensitive characters, escape them as entities inside <command> (for example &amp;, &lt;, &gt;).',
           '- Do not wrap the command in Markdown when an <execute_command> block is suitable.'
         ].join('\n')
       : input.mode === 'agent'
@@ -441,6 +443,8 @@ const createAiChatSystemPrompt = (input: AiChatResponseInput) => {
             '- Include <ip>, <command>, <requires_approval>, and <interactive> fields.',
             '- Use <requires_approval>false</requires_approval> only for read-only diagnostic/query commands.',
             '- Use <requires_approval>true</requires_approval> for destructive, state-changing, write, restart, install, delete, or uncertain commands.',
+            '- Put plain shell text directly inside <command>; do not wrap it in CDATA, Markdown, or another XML tag.',
+            '- If the command contains XML-sensitive characters, escape them as entities inside <command> (for example &amp;, &lt;, &gt;).',
             '- After the conversation includes command_output from an approved command, analyze that output before deciding whether another <execute_command> block is needed.',
             '- If no more terminal step is needed, provide the final answer and do not request another command.',
             '- Do not claim that a command ran unless command_output is present in the conversation.'

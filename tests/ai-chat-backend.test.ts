@@ -554,7 +554,8 @@ describe('ai chat backend response boundary', () => {
       requestId: 'aichat-request-command',
       assistantMessageId: 'aichat-request-command-assistant',
       prompt: '检查负载',
-      model: 'ops-chat'
+      model: 'ops-chat',
+      mode: 'command'
     })
 
     expect(result.ok).toBe(true)
@@ -574,6 +575,10 @@ describe('ai chat backend response boundary', () => {
         }
       }
     })
+    const requestBody = JSON.parse(String((fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body || '{}')) as { messages: Array<{ role: string; content: string }> }
+    expect(requestBody.messages[0]?.role).toBe('system')
+    expect(requestBody.messages[0]?.content).toContain('Put plain shell text directly inside <command>; do not wrap it in CDATA')
+    expect(requestBody.messages[0]?.content).toContain('escape them as entities inside <command>')
   })
 
   it('sends agent command output back to the provider with the execute_command loop contract', async () => {
