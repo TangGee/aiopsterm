@@ -81,7 +81,13 @@ preview_pids() {
 
 cd "${APP_ROOT}"
 
-codex_bin="${AIOPSTERM_CODEX_BIN:-${APP_ROOT}/codex/codex-rs/target/release/codex}"
+codex_bin="$(
+  node --input-type=module -e "
+    import { join } from 'node:path';
+    import { codexBinaryName, codexBuildBinaryPath } from './scripts/codex-runtime-paths.mjs';
+    console.log(process.env.AIOPSTERM_CODEX_BIN || (process.env.AIOPSTERM_CODEX_PACKAGE_DIR ? join(process.env.AIOPSTERM_CODEX_PACKAGE_DIR, 'bin', codexBinaryName()) : codexBuildBinaryPath()));
+  "
+)"
 if ((skip_codex)); then
   echo "[aiopsterm] skipping Codex CLI build"
 else
@@ -90,7 +96,7 @@ fi
 
 if [[ ! -x "${codex_bin}" ]]; then
   echo "[aiopsterm] Codex CLI binary is missing: ${codex_bin}" >&2
-  echo "[aiopsterm] rerun without --skip-codex or set AIOPSTERM_CODEX_BIN to a valid Codex binary." >&2
+  echo "[aiopsterm] rerun without --skip-codex or set AIOPSTERM_CODEX_PACKAGE_DIR/AIOPSTERM_CODEX_BIN to a valid Codex runtime." >&2
   exit 1
 fi
 

@@ -1,7 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { existsSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
-import { join, resolve } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import type {
   CodexSessionCreateOptions,
   CodexSessionInfo,
@@ -38,6 +38,7 @@ type CodexRuntimeConfig = {
   writeFile?: typeof writeFile
   existsSync?: typeof existsSync
   binaryPath?: string
+  binaryHealthCheck?: false | ((binaryPath: string) => void)
   getBridgeSocketPath?: () => string
 }
 
@@ -96,6 +97,7 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.writeFile = config.writeFile
   runtimeConfig.existsSync = config.existsSync
   runtimeConfig.binaryPath = config.binaryPath
+  runtimeConfig.binaryHealthCheck = config.binaryHealthCheck
   runtimeConfig.getBridgeSocketPath = config.getBridgeSocketPath
   sessions.clear()
 }
@@ -106,26 +108,87 @@ const codexHomePath = () => {
   return join(userDataPath, 'codex-agent')
 }
 
+const codexBinaryName = () => (process.platform === 'win32' ? 'codex.exe' : 'codex')
+
+const codexTargetTriple = () => {
+  if (process.platform === 'linux' || process.platform === 'android') {
+    if (process.arch === 'x64') return 'x86_64-unknown-linux-musl'
+    if (process.arch === 'arm64') return 'aarch64-unknown-linux-musl'
+  }
+  if (process.platform === 'darwin') {
+    if (process.arch === 'x64') return 'x86_64-apple-darwin'
+    if (process.arch === 'arm64') return 'aarch64-apple-darwin'
+  }
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') return 'x86_64-pc-windows-msvc'
+    if (process.arch === 'arm64') return 'aarch64-pc-windows-msvc'
+  }
+  return ''
+}
+
 const candidateCodexBinaryPaths = () => {
   const configured = runtimeConfig.binaryPath || process.env.AIOPSTERM_CODEX_BIN
+  const configuredPackage = process.env.AIOPSTERM_CODEX_PACKAGE_DIR
   const appPath = runtimeConfig.getAppPath?.() || defaultAppPath()
   const resourcesPath = runtimeConfig.getResourcesPath?.() || defaultResourcesPath()
+  const binaryName = codexBinaryName()
+  const targetTriple = codexTargetTriple()
   return [
     configured,
-    join(appPath, 'codex', 'codex-rs', 'target', 'release', process.platform === 'win32' ? 'codex.exe' : 'codex'),
-    join(appPath, 'codex', 'codex-rs', 'target', 'debug', process.platform === 'win32' ? 'codex.exe' : 'codex'),
-    join(resourcesPath, 'codex', process.platform === 'win32' ? 'codex.exe' : 'codex'),
-    join(resourcesPath, 'app.asar.unpacked', 'codex', process.platform === 'win32' ? 'codex.exe' : 'codex')
+    configuredPackage ? join(configuredPackage, 'bin', binaryName) : '',
+    join(resourcesPath, 'codex', 'bin', binaryName),
+    join(resourcesPath, 'app.asar.unpacked', 'codex', 'bin', binaryName),
+    targetTriple ? join(appPath, 'codex', 'codex-rs', 'target', targetTriple, 'aiopsterm-codex-package', 'bin', binaryName) : '',
+    targetTriple ? join(appPath, 'codex', 'codex-rs', 'target', targetTriple, 'release', binaryName) : '',
+    targetTriple ? join(appPath, 'codex', 'codex-rs', 'target', targetTriple, 'debug', binaryName) : ''
   ]
     .filter((path): path is string => Boolean(path && String(path).trim()))
     .map((path) => resolve(path))
+}
+
+const codexPackageRootForBinary = (binaryPath: string) => {
+  const binDir = dirname(binaryPath)
+  const packageRoot = dirname(binDir)
+  if (basename(binDir) !== 'bin') return ''
+  return getExistsSync()(join(packageRoot, 'codex-package.json')) ? packageRoot : ''
+}
+
+const defaultCodexBinaryHealthCheck = (binaryPath: string) => {
+  try {
+    execFileSync(binaryPath, ['--version'], {
+      stdio: 'pipe',
+      timeout: 5000,
+      env: {
+        ...process.env,
+        CODEX_HOME: process.env.CODEX_HOME || ''
+      }
+    })
+  } catch (error) {
+    const record = error as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string }
+    const details = [record.stderr, record.stdout, record.message]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join('\n')
+    throw Object.assign(new Error(`Codex binary failed health check: ${details || binaryPath}`), {
+      code: 'CODEX_BINARY_UNUSABLE',
+      binaryPath
+    })
+  }
+}
+
+const checkCodexBinary = (binaryPath: string) => {
+  if (runtimeConfig.binaryHealthCheck === false) return
+  ;(runtimeConfig.binaryHealthCheck || defaultCodexBinaryHealthCheck)(binaryPath)
 }
 
 export const resolveCodexBinaryPath = () => {
   const exists = getExistsSync()
   const candidates = candidateCodexBinaryPaths()
   const found = candidates.find((path) => exists(path))
-  if (found) return found
+  if (found) {
+    checkCodexBinary(found)
+    return found
+  }
   const error = new Error(`Codex binary was not found. Checked: ${candidates.join(', ')}`)
   throw Object.assign(error, { code: 'CODEX_BINARY_NOT_FOUND', candidates })
 }
@@ -173,6 +236,7 @@ export const createCodexSession = async (
   sink: CodexEventSink
 ): Promise<CodexSessionInfo> => {
   const binaryPath = resolveCodexBinaryPath()
+  const codexPackageRoot = codexPackageRootForBinary(binaryPath)
   const codexHome = codexHomePath()
   const cwd = codexHome
   const cols = Math.max(20, Math.min(400, Math.round(Number(options.cols) || 100)))
@@ -183,6 +247,7 @@ export const createCodexSession = async (
     ...(runtimeConfig.getEnv?.() || {}),
     ...(codexProvider ? { [codexProvider.apiKeyEnv]: codexProvider.apiKey } : {}),
     AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
+    ...(codexPackageRoot ? { CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot } : {}),
     CODEX_HOME: codexHome,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor'

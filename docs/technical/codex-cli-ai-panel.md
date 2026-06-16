@@ -25,9 +25,12 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - The Codex process cwd is also fixed to `<app userData>/codex-agent`; renderer-provided cwd is ignored so local HOME or project paths are not accidentally model-visible as target state.
 - Codex CLI model access is derived from aiopsterm's OpenAI-compatible provider settings when that provider is configured for `Responses`. The generated Codex config writes `model`, `model_provider`, provider `base_url`, `env_key`, and `wire_api = "responses"`; the API key is injected only into the Codex child-process environment as `AIOPSTERM_CODEX_API_KEY` and is not written to `config.toml`.
 - aiopsterm's Base URL normalization is preserved for Codex. A trailing `#` still means "do not auto-add `/v1`"; full operation URLs ending in `/responses` or `/chat/completions` are reduced to the provider base URL before Codex appends its Responses operation path.
-- The default development binary is `codex/codex-rs/target/release/codex`.
-- Packaged builds copy only the built Codex CLI executable into `resources/codex/codex` (or the platform executable name), not the Codex source tree.
-- `AIOPSTERM_CODEX_BIN` can point at a different binary for local experiments.
+- The default development entrypoint is `codex/codex-rs/target/<triple>/aiopsterm-codex-package/bin/codex`, built from the locally modified `codex/` source tree.
+- Packaged builds copy the complete generated Codex package directory into `resources/codex/`. This includes `codex-package.json`, `bin/codex`, `codex-path/rg`, and platform resources such as Linux `codex-resources/bwrap`; it does not copy the Codex source tree.
+- `build:codex` uses Codex's own `scripts/build_codex_package.py` against the platform target triple. On Linux this matches Codex's upstream packaging strategy by building the musl target so the runtime does not depend on distribution OpenSSL 1.1 libraries.
+- `audit:codex-runtime` verifies that the generated package is complete, the entrypoint is executable, answers `codex --version`, has no unresolved Linux dynamic dependencies, and does not depend on `libssl.so.1.1` or `libcrypto.so.1.1`.
+- `AIOPSTERM_CODEX_PACKAGE_DIR` can point at a complete Codex package directory for packaging and startup. `AIOPSTERM_CODEX_BIN` can point at a package entrypoint for local experiments, but release packaging rejects a bare binary without package metadata.
+- Linux musl package builds need the same native toolchain Codex uses for releases: `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`. If CI provides prebuilt helpers, set `AIOPSTERM_CODEX_BWRAP_BIN` and/or `AIOPSTERM_CODEX_RG_BIN` so the package builder stages those files while still building the Codex entrypoint from the local modified `codex/` source. The package builder also downloads Codex-built V8 artifacts from the OpenAI Codex release cache unless `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH` are preconfigured.
 
 This keeps Codex persistence out of project `.codex` and the default user `~/.codex` directory.
 
@@ -112,7 +115,7 @@ Use:
 scripts/build-and-start.sh
 ```
 
-The script builds the Codex CLI binary when missing, builds aiopsterm, then starts Electron preview. Use `--skip-codex` only when `codex/codex-rs/target/release/codex` already exists or `AIOPSTERM_CODEX_BIN` is set. Package scripts run `npm run build:codex` before electron-builder, and the afterPack hook copies the resulting executable into packaged resources.
+The script builds the Codex package when missing, audits that runtime, builds aiopsterm, then starts Electron preview. Use `--skip-codex` only when the platform package entrypoint, such as `codex/codex-rs/target/x86_64-unknown-linux-musl/aiopsterm-codex-package/bin/codex`, already exists or `AIOPSTERM_CODEX_PACKAGE_DIR` / `AIOPSTERM_CODEX_BIN` is set. Package scripts run `npm run build:codex` before electron-builder, and the afterPack hook copies the resulting package directory into packaged resources.
 
 ## Verification
 

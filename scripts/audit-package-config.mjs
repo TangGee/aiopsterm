@@ -5,7 +5,7 @@ const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
 const builderConfig = readFileSync(resolve('electron-builder.yml'), 'utf8')
 
 const packageScripts = packageJson.scripts || {}
-const requiredScripts = ['build:codex', 'build:mac', 'build:mac:dir', 'build:deb', 'build:linux']
+const requiredScripts = ['build:codex', 'audit:codex-runtime', 'build:mac', 'build:mac:dir', 'build:deb', 'build:linux']
 const missingScripts = requiredScripts.filter((script) => typeof packageJson.scripts?.[script] !== 'string')
 if (missingScripts.length) {
   throw new Error(`Missing package scripts: ${missingScripts.join(', ')}`)
@@ -52,11 +52,20 @@ if (missingConfig.length) {
 const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const codexPackagingRequirements = [
-  { label: 'build-codex cargo build', source: codexBuildScript, text: 'cargo build --release -p codex-cli' },
+  { label: 'build-codex target triple', source: codexBuildScript, text: 'codexTargetTriple' },
+  { label: 'build-codex package builder', source: codexBuildScript, text: 'build_codex_package.py' },
+  { label: 'build-codex package output', source: codexBuildScript, text: '--package-dir "${package_dir}"' },
+  { label: 'build-codex release profile', source: codexBuildScript, text: '--cargo-profile release' },
   { label: 'build-codex env override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_BIN' },
-  { label: 'afterPack codex copy', source: afterPackScript, text: 'copyCodexCliBinary' },
-  { label: 'afterPack codex resources path', source: afterPackScript, text: "join(resourcesDir, 'codex')" },
-  { label: 'afterPack codex env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_BIN' }
+  { label: 'build-codex package env override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_PACKAGE_DIR' },
+  { label: 'build-codex bwrap override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_BWRAP_BIN' },
+  { label: 'build-codex rg override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_RG_BIN' },
+  { label: 'build-codex package output path', source: codexBuildScript, text: 'codexPackageDir' },
+  { label: 'afterPack codex package copy', source: afterPackScript, text: 'copyCodexCliPackage' },
+  { label: 'afterPack codex package path', source: afterPackScript, text: 'packagedCodexPackageDir' },
+  { label: 'afterPack codex env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_BIN' },
+  { label: 'afterPack codex package env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_PACKAGE_DIR' },
+  { label: 'afterPack codex platform output path', source: afterPackScript, text: 'codexPackageDir' }
 ]
 const missingCodexPackaging = codexPackagingRequirements.filter((item) => !item.source.includes(item.text)).map((item) => item.label)
 if (missingCodexPackaging.length) {

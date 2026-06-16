@@ -127,6 +127,13 @@ const createConfigWithModelProvider = (patch: Partial<UserConfig> = {}): UserCon
     ...patch
   }) as UserConfig
 
+const CODEX_PACKAGE_ROOT = '/repo/codex/codex-rs/target/x86_64-unknown-linux-musl/aiopsterm-codex-package'
+const CODEX_PACKAGE_BINARY = `${CODEX_PACKAGE_ROOT}/bin/codex`
+const codexPackageExists = (path: string) =>
+  path === CODEX_PACKAGE_BINARY ||
+  path === `${CODEX_PACKAGE_ROOT}/codex-package.json` ||
+  path === '/repo/resources/codex-aiopsterm-mcp.js'
+
 describe('Codex CLI backend runtime', () => {
   beforeEach(async () => {
     const backend = await loadBackend()
@@ -148,8 +155,9 @@ describe('Codex CLI backend runtime', () => {
       getConfig: () => createConfigWithModelProvider(),
       getEnv: () => ({ PATH: '/usr/bin', CODEX_HOME: '/should/not/reuse' }),
       getBridgeSocketPath: () => '/tmp/aiopsterm-user-data/codex-agent/bridge.sock',
-      binaryPath: '/repo/codex/codex-rs/target/release/codex',
-      existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex' || path === '/repo/resources/codex-aiopsterm-mcp.js',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
       mkdir: async (path: string) => {
         mkdirCalls.push(String(path))
         return undefined
@@ -190,7 +198,7 @@ describe('Codex CLI backend runtime', () => {
     expect(session).toEqual(
       expect.objectContaining({
         id: 'codex-test-1',
-        binaryPath: '/repo/codex/codex-rs/target/release/codex',
+        binaryPath: CODEX_PACKAGE_BINARY,
         cwd: '/tmp/aiopsterm-user-data/codex-agent',
         codexHome: '/tmp/aiopsterm-user-data/codex-agent',
         runtimeKind: 'pty'
@@ -249,7 +257,7 @@ describe('Codex CLI backend runtime', () => {
     expect(writeFileCalls[0].content).toContain('host: 10.0.0.8')
     expect(spawnCalls).toEqual([
       expect.objectContaining({
-        file: '/repo/codex/codex-rs/target/release/codex',
+        file: CODEX_PACKAGE_BINARY,
         args: [],
         options: expect.objectContaining({
           cwd: '/tmp/aiopsterm-user-data/codex-agent',
@@ -257,6 +265,7 @@ describe('Codex CLI backend runtime', () => {
           rows: 40,
           env: expect.objectContaining({
             CODEX_HOME: '/tmp/aiopsterm-user-data/codex-agent',
+            CODEX_MANAGED_PACKAGE_ROOT: CODEX_PACKAGE_ROOT,
             AIOPSTERM_CODEX_API_KEY: 'ark-secret-token',
             AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
             TERM: 'xterm-256color',
@@ -290,6 +299,27 @@ describe('Codex CLI backend runtime', () => {
     })
   })
 
+  it('reports an unusable Codex binary before spawning', async () => {
+    const backend = await loadBackend()
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: () => {
+        throw Object.assign(new Error('libssl.so.1.1: cannot open shared object file'), {
+          code: 'CODEX_BINARY_UNUSABLE'
+        })
+      },
+      existsSync: codexPackageExists,
+      loadPty: () => null
+    })
+
+    await expect(backend.createCodexSession('bad-codex', {}, createSink(createRecorder()))).rejects.toMatchObject({
+      code: 'CODEX_BINARY_UNUSABLE'
+    })
+  })
+
   it('falls back to subprocess when node-pty is unavailable', async () => {
     const backend = await loadBackend()
     const events = createRecorder()
@@ -299,8 +329,9 @@ describe('Codex CLI backend runtime', () => {
       getUserDataPath: () => '/tmp/aiopsterm-user-data',
       getAppPath: () => '/repo',
       getResourcesPath: () => '/resources',
-      binaryPath: '/repo/codex/codex-rs/target/release/codex',
-      existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
       mkdir: async () => undefined,
       writeFile: async () => undefined,
       loadPty: () => null,
@@ -344,9 +375,10 @@ describe('Codex CLI backend runtime', () => {
               }
             }
           }
-        }),
-      binaryPath: '/repo/codex/codex-rs/target/release/codex',
-      existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex',
+      }),
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
       mkdir: async () => undefined,
       writeFile: async (path: string, content: string) => {
         writeFileCalls.push({ path: String(path), content: String(content) })

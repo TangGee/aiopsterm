@@ -6,7 +6,11 @@ Before packaging changes are merged, run the package configuration audit:
 npm run audit:package-config
 ```
 
-`audit:package-config` verifies that the package scripts expose `build:codex`, `build:linux`, `build:deb`, `build:mac`, and `build:mac:dir`; that Linux/macOS package scripts build the bundled Codex CLI before electron-builder; that electron-builder keeps the External reference reference tree excluded; that Linux targets include AppImage and deb; that macOS targets include dmg and zip; that artifact names are explicit; that `resources/icons` and `resources/codex-aiopsterm-mcp.js` are copied into packaged resources; that the afterPack hook copies the single built Codex CLI binary into packaged resources; that the GPT-generated source PNG exists; that the required Linux PNG icon sizes are valid; and that the `aiopsterm://` protocol remains registered.
+`audit:package-config` verifies that the package scripts expose `build:codex`, `audit:codex-runtime`, `build:linux`, `build:deb`, `build:mac`, and `build:mac:dir`; that Linux/macOS package scripts build the bundled Codex package before electron-builder; that the Codex build uses the package builder from the locally modified `codex/` tree; that electron-builder keeps the External reference reference tree excluded; that Linux targets include AppImage and deb; that macOS targets include dmg and zip; that artifact names are explicit; that `resources/icons` and `resources/codex-aiopsterm-mcp.js` are copied into packaged resources; that the afterPack hook copies the complete generated Codex package into packaged resources; that the GPT-generated source PNG exists; that the required Linux PNG icon sizes are valid; and that the `aiopsterm://` protocol remains registered.
+
+`audit:codex-runtime` checks the generated Codex package before app packaging. It requires `codex-package.json`, the `bin/codex` entrypoint, bundled `rg`, and Linux `bwrap`; on Linux it also rejects unresolved dynamic dependencies and OpenSSL 1.1 dynamic links such as `libssl.so.1.1` / `libcrypto.so.1.1`.
+
+On Linux, the Codex musl package build requires the native release toolchain used by Codex: `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`. CI jobs may provide prebuilt helper binaries through `AIOPSTERM_CODEX_BWRAP_BIN` and `AIOPSTERM_CODEX_RG_BIN`, but the package entrypoint must still come from this repository's local modified `codex/` source unless `AIOPSTERM_CODEX_PACKAGE_DIR` is intentionally supplied. The Codex package builder downloads Codex-built V8 artifacts from OpenAI Codex releases by default; offline or restricted runners should preconfigure `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
 
 After building the full Linux package set with `npm run build:linux`, run the package-level checks:
 
@@ -20,7 +24,7 @@ npm run audit:linux-package
 `audit:linux-package` checks the Linux build output without launching the app. It verifies:
 
 - the expected AppImage, deb, `app.asar`, and `app.asar.unpacked` files exist for the current package version
-- the packaged Codex CLI binary exists at `resources/codex/codex` and is executable
+- the packaged Codex package exists at `resources/codex`, includes `codex-package.json`, `bin/codex`, `codex-path/rg`, and `codex-resources/bwrap`, and the entrypoint is executable, answers `codex --version`, and has no unresolved or OpenSSL 1.1 Linux dynamic dependencies
 - packaged `node-pty` still includes `build/Release/pty.node`, runtime JS, package metadata, and license
 - packaged `node-pty` no longer includes build-only directories such as `bin`, `scripts`, `src`, `deps`, `prebuilds`, or test files
 - the self-owned app icon PNG set generated from `resources/app-icon-source.png` is present for Linux desktop metadata and runtime window icon loading

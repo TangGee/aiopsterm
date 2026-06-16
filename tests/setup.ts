@@ -7149,7 +7149,7 @@ Object.defineProperty(window, 'aiops', {
     })),
     createCodexSession: vi.fn(async (options?: { cols?: number; rows?: number; cwd?: string }) => ({
       id: 'test-codex-session',
-      binaryPath: '/repo/codex/codex-rs/target/release/codex',
+      binaryPath: '/repo/codex/codex-rs/target/x86_64-unknown-linux-musl/aiopsterm-codex-package/bin/codex',
       cwd: options?.cwd || '/home/test',
       codexHome: '/tmp/aiopsterm-user-data/codex-agent',
       runtimeKind: 'pty' as const,
@@ -7157,7 +7157,7 @@ Object.defineProperty(window, 'aiops', {
         id: 'test-codex-session',
         stage: 'ready' as const,
         at: 1717200001000,
-        binaryPath: '/repo/codex/codex-rs/target/release/codex',
+        binaryPath: '/repo/codex/codex-rs/target/x86_64-unknown-linux-musl/aiopsterm-codex-package/bin/codex',
         cwd: options?.cwd || '/home/test',
         codexHome: '/tmp/aiopsterm-user-data/codex-agent',
         runtimeKind: 'pty' as const
