@@ -499,6 +499,12 @@ type AiCommandExecutionInput = {
   interactive: boolean
 }
 
+type InvalidAiCommandExecutionBlock = {
+  invalid: true
+  errorCode: string
+  errorMessage: string
+}
+
 const commandFenceLanguages = new Set(['', 'bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'terminal', 'cmd', 'powershell', 'ps1'])
 
 const readOnlyCommandExecutables = new Set([
@@ -707,9 +713,14 @@ const decodeMcpTagValue = (value: string) =>
     .replace(/&amp;/g, '&')
     .trim()
 
-const readMcpTag = (body: string, tagName: string) => {
+const readRawMcpTag = (body: string, tagName: string) => {
   const match = body.match(new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>`, 'i'))
-  return match ? decodeMcpTagValue(match[1]) : ''
+  return match ? match[1].trim() : ''
+}
+
+const readMcpTag = (body: string, tagName: string) => {
+  const raw = readRawMcpTag(body, tagName)
+  return raw ? decodeMcpTagValue(raw) : ''
 }
 
 const parseMcpToolUseBlock = (text: string): McpToolCallInput | null => {
@@ -736,11 +747,20 @@ const parseMcpToolUseBlock = (text: string): McpToolCallInput | null => {
 
 const parseBooleanTagValue = (value: string) => value.trim().toLowerCase() === 'true'
 
-const parseExecuteCommandBlock = (text: string): AiCommandExecutionInput | null => {
+const parseExecuteCommandBlock = (text: string): AiCommandExecutionInput | InvalidAiCommandExecutionBlock | null => {
   const block = text.match(/<execute_command>\s*([\s\S]*?)\s*<\/execute_command>/i)
   if (!block) return null
   const ip = readMcpTag(block[1], 'ip')
-  const command = readMcpTag(block[1], 'command')
+  const rawCommand = readRawMcpTag(block[1], 'command')
+  if (/<!\[CDATA\[/i.test(rawCommand)) {
+    return {
+      invalid: true,
+      errorCode: 'AI_COMMAND_CONTRACT_INVALID',
+      errorMessage:
+        'AI provider returned an invalid execute_command block: <command> must contain plain shell text and must not use CDATA.'
+    }
+  }
+  const command = rawCommand ? decodeMcpTagValue(rawCommand) : ''
   const requiresApprovalText = readMcpTag(block[1], 'requires_approval')
   const interactiveText = readMcpTag(block[1], 'interactive')
   if (!ip || !command || !requiresApprovalText || !interactiveText) return null
@@ -982,7 +1002,15 @@ const resolveCommandExecutionResponse = (
   startedAt: number,
   control: AiChatResponseControl
 ): AiChatResponseResult | null => {
-  const commandExecution = parseExecuteCommandBlock(text) || parseCommandModeSuggestion(input, text)
+  const parsedCommandBlock = parseExecuteCommandBlock(text)
+  if (parsedCommandBlock && 'invalid' in parsedCommandBlock) {
+    return {
+      ok: false,
+      errorCode: parsedCommandBlock.errorCode,
+      errorMessage: parsedCommandBlock.errorMessage
+    }
+  }
+  const commandExecution = parsedCommandBlock || parseCommandModeSuggestion(input, text)
   if (!commandExecution) return null
   const message = createCommandExecutionAskMessage(commandExecution, control)
   return {
