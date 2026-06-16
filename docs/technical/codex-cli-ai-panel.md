@@ -12,10 +12,19 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - Main IPC channels are `codex:create`, `codex:write`, `codex:resize`, and `codex:kill`.
 - Renderer events are streamed through `codex:data`, `codex:lifecycle`, and `codex:exit`.
 - The Codex process runs with `CODEX_HOME=<app userData>/codex-agent`.
+- aiopsterm writes `<app userData>/codex-agent/config.toml` before each Codex session starts.
 - The default development binary is `codex/codex-rs/target/release/codex`.
 - `AIOPSTERM_CODEX_BIN` can point at a different binary for local experiments.
 
 This keeps Codex persistence out of project `.codex` and the default user `~/.codex` directory.
+
+The generated Codex config also isolates the embedded agent from aiopsterm's implementation workspace:
+
+- `instructions` is replaced with an aiopsterm operations-agent prompt.
+- `developer_instructions` carries the selected workspace unit and terminal target context.
+- `include_environment_context`, `include_permissions_instructions`, `include_apps_instructions`, and `include_collaboration_mode_instructions` are disabled.
+- `project_doc_max_bytes = 0` prevents local `AGENTS.md` project docs from being injected.
+- `web_search = "disabled"` and local/browser/app/plugin/agent/image-generation features are disabled.
 
 ## Iteration Rules
 
@@ -30,14 +39,38 @@ Prefer adapter code in aiopsterm over modifying `codex/`. If `codex/` must chang
 
 ## Current Toolset Review
 
-This slice only embeds the upstream Codex CLI/TUI. It does not yet replace Codex shell tools with aiopsterm remote-host tools.
+Codex local command tools are disabled for the embedded aiopsterm mode. Host operations go through a required MCP server named `aiopsterm_remote`.
+
+Enabled tools:
+
+- `mcp__aiopsterm_remote__run_command`: writes a marker-wrapped command to the selected real aiopsterm terminal session and returns captured output plus exit code.
+- `mcp__aiopsterm_remote__target_context`: returns the selected terminal target context without running a command.
+
+Disabled or intentionally unavailable:
+
+- Codex shell/unified-exec/code-mode local execution.
+- Local project `AGENTS.md`, skills, apps, plugins, browser/computer-use, image generation, web search, and Codex multi-agent tools.
+- Default request-user-input tooling; aiopsterm should own any end-user prompting UX.
 
 Deferred toolset work:
 
-- Bind shell execution to the selected aiopsterm terminal or remote host.
-- Define remote host prompt context.
-- Add dangerous command approval rules for remote operations.
-- Audit Codex tool prompts before enabling remote execution.
+- Add richer command approval and risk classification for remote operations.
+- Add interactive command/session streaming semantics beyond marker-delimited non-interactive commands.
+- Evaluate whether future app-server integration should replace the PTY/TUI embedding while keeping the same aiopsterm MCP boundary.
+
+## Terminal Bridge
+
+`resources/codex-aiopsterm-mcp.js` is packaged as an extra resource and started by Codex as a stdio MCP server. It does not execute commands locally. It forwards `tools/call` requests to the Electron main-process Unix/pipe socket exposed by `src/main/backend/codexTerminalBridge.ts`.
+
+The bridge keeps a registry of active aiopsterm terminal sessions. `run_command` resolves the requested or currently selected terminal, writes:
+
+```text
+echo '<start marker>'; <command>; __aiopsterm_status=$?; echo '<end marker>':$__aiopsterm_status
+```
+
+and captures output from normal terminal data events until the end marker appears. The wrapper uses `echo` instead of `printf` because some relay shells are restricted and do not provide `printf`.
+
+The bridge is deliberately terminal-based for this slice. It lets Codex operate on hosts reached through aiopsterm's existing SSH, relay, and local terminal flows without giving Codex direct access to client-local shell tools.
 
 ## Build
 
@@ -54,7 +87,7 @@ The script builds the Codex CLI binary when missing, builds aiopsterm, then star
 Current slice verification:
 
 - `npm run typecheck`
-- `npx vitest run tests/codex-cli-backend.test.ts tests/local-terminal-backend.test.ts`
+- `npx vitest run tests/codex-cli-backend.test.ts tests/codex-terminal-bridge.test.ts tests/local-terminal-backend.test.ts`
 - `npx vitest run tests/app-shell.test.ts`
 - `npm run build`
 

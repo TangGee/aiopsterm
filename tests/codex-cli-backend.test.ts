@@ -107,6 +107,7 @@ describe('Codex CLI backend runtime', () => {
     const pty = new MockPtyProcess()
     const spawnCalls: Array<Record<string, unknown>> = []
     const mkdirCalls: Array<string> = []
+    const writeFileCalls: Array<{ path: string; content: string }> = []
 
     backend.configureCodexCliRuntime({
       getUserDataPath: () => '/tmp/aiopsterm-user-data',
@@ -114,11 +115,15 @@ describe('Codex CLI backend runtime', () => {
       getResourcesPath: () => '/resources',
       getDefaultCwd: () => '/home/ops',
       getEnv: () => ({ PATH: '/usr/bin', CODEX_HOME: '/should/not/reuse' }),
+      getBridgeSocketPath: () => '/tmp/aiopsterm-user-data/codex-agent/bridge.sock',
       binaryPath: '/repo/codex/codex-rs/target/release/codex',
-      existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex',
+      existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex' || path === '/repo/resources/codex-aiopsterm-mcp.js',
       mkdir: async (path: string) => {
         mkdirCalls.push(String(path))
         return undefined
+      },
+      writeFile: async (path: string, content: string) => {
+        writeFileCalls.push({ path: String(path), content: String(content) })
       },
       loadPty: () => ({
         spawn: (file: string, args: string[], options: Record<string, unknown>) => {
@@ -128,7 +133,22 @@ describe('Codex CLI backend runtime', () => {
       })
     })
 
-    const session = await backend.createCodexSession('codex-test-1', { cols: 120, rows: 40 }, createSink(events))
+    const session = await backend.createCodexSession(
+      'codex-test-1',
+      {
+        cols: 120,
+        rows: 40,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-1',
+          label: 'prod-web',
+          host: '10.0.0.8',
+          port: 22,
+          username: 'root'
+        }
+      },
+      createSink(events)
+    )
     const write = backend.writeCodexSession(session.id, 'hello\n')
     backend.resizeCodexSession(session.id, 132, 44)
     pty.emitData('codex tui\n')
@@ -144,6 +164,33 @@ describe('Codex CLI backend runtime', () => {
       })
     )
     expect(mkdirCalls).toEqual(['/tmp/aiopsterm-user-data/codex-agent'])
+    expect(writeFileCalls).toHaveLength(1)
+    expect(writeFileCalls[0]).toEqual(
+      expect.objectContaining({
+        path: '/tmp/aiopsterm-user-data/codex-agent/config.toml'
+      })
+    )
+    expect(writeFileCalls[0].content).toContain('include_environment_context = false')
+    expect(writeFileCalls[0].content).toContain('instructions = "You are aiopsterm Agent')
+    expect(writeFileCalls[0].content).toContain('project_doc_max_bytes = 0')
+    expect(writeFileCalls[0].content).toContain('web_search = "disabled"')
+    expect(writeFileCalls[0].content).toContain('check_for_update_on_startup = false')
+    expect(writeFileCalls[0].content).toContain('shell_tool = false')
+    expect(writeFileCalls[0].content).toContain('unified_exec = false')
+    expect(writeFileCalls[0].content).toContain('image_generation = false')
+    expect(writeFileCalls[0].content).toContain('browser_use = false')
+    expect(writeFileCalls[0].content).toContain('computer_use = false')
+    expect(writeFileCalls[0].content).toContain('[tools.experimental_request_user_input]')
+    expect(writeFileCalls[0].content).toContain('enabled = false')
+    expect(writeFileCalls[0].content).toContain('include_collaboration_mode_instructions = false')
+    expect(writeFileCalls[0].content).toContain('multi_agent = false')
+    expect(writeFileCalls[0].content).toContain('hooks = false')
+    expect(writeFileCalls[0].content).toContain('[skills]')
+    expect(writeFileCalls[0].content).toContain('include_instructions = false')
+    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote]')
+    expect(writeFileCalls[0].content).toContain('AIOPSTERM_CODEX_BRIDGE_SOCKET = "/tmp/aiopsterm-user-data/codex-agent/bridge.sock"')
+    expect(writeFileCalls[0].content).toContain('terminal_session_id: terminal-1')
+    expect(writeFileCalls[0].content).toContain('host: 10.0.0.8')
     expect(spawnCalls).toEqual([
       expect.objectContaining({
         file: '/repo/codex/codex-rs/target/release/codex',
@@ -198,6 +245,7 @@ describe('Codex CLI backend runtime', () => {
       binaryPath: '/repo/codex/codex-rs/target/release/codex',
       existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex',
       mkdir: async () => undefined,
+      writeFile: async () => undefined,
       loadPty: () => null,
       processRuntime: {
         spawn: () => child as never

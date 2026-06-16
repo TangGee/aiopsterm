@@ -41,6 +41,15 @@ import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
 import { configureAliasBackendRuntime, deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import { configureCodexCliRuntime, createCodexSession, killCodexSession, resizeCodexSession, writeCodexSession } from './backend/codexCli'
+import {
+  appendCodexTerminalBridgeData,
+  closeCodexTerminalBridgeServer,
+  ensureCodexTerminalBridgeServer,
+  getCodexTerminalBridgeSocketPath,
+  registerCodexTerminalBridgeSession,
+  setCodexTerminalBridgePreferredSession,
+  unregisterCodexTerminalBridgeSession
+} from './backend/codexTerminalBridge'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
@@ -407,6 +416,24 @@ type TerminalSession = {
   host?: string
 }
 
+const registerTerminalForCodexBridge = (session: TerminalSession, target?: CodexSessionCreateOptions['target']) => {
+  registerCodexTerminalBridgeSession({
+    id: session.id,
+    kind: session.kind,
+    host: session.host,
+    cwd: session.cwd,
+    window: session.window,
+    target,
+    write: (data) => {
+      if (session.kind === 'ssh') {
+        ;(session.process as SshTerminalSession).write(data)
+      } else {
+        ;(session.process as LocalTerminalSession).write(data)
+      }
+    }
+  })
+}
+
 type KnowledgeBaseEntry = {
   name: string
   relPath: string
@@ -601,6 +628,7 @@ const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buff
     id,
     bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
   })
+  appendCodexTerminalBridgeData(id, chunk)
   sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, chunk))
 }
 
@@ -1325,7 +1353,8 @@ configureCodexCliRuntime({
   getAppPath: () => app.getAppPath(),
   getResourcesPath: () => process.resourcesPath,
   getDefaultCwd: () => app.getPath('home'),
-  getEnv: () => process.env
+  getEnv: () => process.env,
+  getBridgeSocketPath: () => getCodexTerminalBridgeSocketPath()
 })
 configureSshTerminalBackendRuntime({
   getConfig,
@@ -2737,6 +2766,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
     keyboardInteractive: (request) => requestTerminalKeyboardInteractive(owner, request),
     keyboardInteractiveResult: (result) => sendTerminalKeyboardInteractiveResult(owner, result),
     closed: () => {
+      unregisterCodexTerminalBridgeSession(id)
       sessions.delete(id)
       logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'ssh' })
     }
@@ -3563,8 +3593,9 @@ const registerIpc = () => {
     })
     if (options.kind === 'ssh' || options.ssh || options.assetId) {
       const result = createSshTerminal(owner, id, options)
+      const connection = createSshTerminalConnectionInfo(id, result.connection, options)
       if (result.session) {
-        sessions.set(id, {
+        const terminalRecord: TerminalSession = {
           id,
           process: result.session,
           shell: result.shell,
@@ -3572,6 +3603,18 @@ const registerIpc = () => {
           window: owner,
           kind: 'ssh',
           host: result.connection.host
+        }
+        sessions.set(id, terminalRecord)
+        registerTerminalForCodexBridge(terminalRecord, {
+          kind: 'ssh',
+          sessionId: id,
+          label: connection.assetName || connection.title || `${connection.username}@${connection.host}`,
+          host: connection.host,
+          port: connection.port,
+          username: connection.username,
+          ...(connection.assetId ? { assetId: connection.assetId } : {}),
+          assetName: connection.assetName,
+          cwd: result.cwd
         })
         logRuntimeEvent('info', 'terminal.create.ready', {
           id,
@@ -3587,7 +3630,7 @@ const registerIpc = () => {
         shell: result.shell,
         cwd: result.cwd,
         kind: 'ssh' as const,
-        connection: createSshTerminalConnectionInfo(id, result.connection, options),
+        connection,
         lifecycle: result.lifecycle
       }
     }
@@ -3619,11 +3662,12 @@ const registerIpc = () => {
       },
       data: (chunk) => sendTerminalData(owner, id, chunk),
       closed: () => {
+        unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
       }
     })
-    sessions.set(id, {
+    const terminalRecord: TerminalSession = {
       id,
       process: result.session,
       shell: result.shell,
@@ -3631,6 +3675,13 @@ const registerIpc = () => {
       window: owner,
       kind: 'local',
       host: 'local'
+    }
+    sessions.set(id, terminalRecord)
+    registerTerminalForCodexBridge(terminalRecord, {
+      kind: 'local',
+      sessionId: id,
+      label: 'Local terminal',
+      cwd: result.cwd
     })
     logRuntimeEvent('info', 'terminal.create.ready', {
       id,
@@ -3725,9 +3776,14 @@ const registerIpc = () => {
       id,
       cols: options.cols,
       rows: options.rows,
-      hasCwd: Boolean(options.cwd)
+      hasCwd: Boolean(options.cwd),
+      targetSessionId: options.target?.sessionId,
+      targetKind: options.target?.kind,
+      targetLabel: options.target?.label
     })
     try {
+      await ensureCodexTerminalBridgeServer(app.getPath('userData'))
+      setCodexTerminalBridgePreferredSession(options.target?.sessionId)
       const session = await createCodexSession(id, options, {
         lifecycle: (lifecycle) => {
           logRuntimeEvent(lifecycle.stage === 'error' ? 'error' : 'info', 'codex.lifecycle', {
@@ -3962,6 +4018,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  closeCodexTerminalBridgeServer()
   sessions.forEach((session) => {
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).kill()
@@ -3976,6 +4033,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  closeCodexTerminalBridgeServer()
   securityConfigWatcher?.close()
   securityConfigWatcher = null
   keywordHighlightConfigWatcher?.close()

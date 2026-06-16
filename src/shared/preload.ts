@@ -51,6 +51,20 @@ export type CodexSessionCreateOptions = {
   cwd?: string
   cols?: number
   rows?: number
+  target?: CodexSessionTargetContext
+}
+
+export type CodexSessionTargetContext = {
+  panelId?: string
+  sessionId?: string
+  kind?: 'local' | 'ssh' | 'unknown'
+  label?: string
+  host?: string
+  port?: number
+  username?: string
+  assetId?: string
+  assetName?: string
+  cwd?: string
 }
 
 export type CodexSessionLifecycleStage = 'starting' | 'ready' | 'error' | 'closed'

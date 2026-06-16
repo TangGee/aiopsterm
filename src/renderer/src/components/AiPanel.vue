@@ -1497,7 +1497,15 @@ import type {
   ChatMessage,
   ConversationItem
 } from '@/stores/workspace'
-import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
+import type {
+  AiChatExportMessage,
+  AiChatHistoryHostContext,
+  AiCommandCatalogOption,
+  AiContextKind,
+  AiContextOption,
+  CodexSessionTargetContext,
+  VoiceTranscriptionInput
+} from '@shared/preload'
 import type { RuntimeLogLevel } from '@shared/preload'
 
 const props = defineProps<{ agentMode?: boolean }>()
@@ -1819,6 +1827,32 @@ const ensureCodexTerminal = () => {
   writeAiRuntimeLog('debug', 'renderer.codex-terminal.created')
 }
 
+const currentCodexTargetContext = (): CodexSessionTargetContext => {
+  const panel = workspace.activePanel
+  const ssh = panel?.sshSession
+  if (ssh) {
+    return {
+      kind: 'ssh',
+      panelId: panel.id,
+      ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
+      label: ssh.assetName || panel.title || `${ssh.username}@${ssh.host}`,
+      host: ssh.host,
+      port: ssh.port,
+      username: ssh.username,
+      ...(ssh.assetId ? { assetId: ssh.assetId } : {}),
+      assetName: ssh.assetName,
+      cwd: panel.cwd
+    }
+  }
+  return {
+    kind: panel?.sessionId ? 'local' : 'unknown',
+    panelId: panel?.id,
+    ...(panel?.sessionId ? { sessionId: panel.sessionId } : {}),
+    label: panel?.title || 'Selected terminal',
+    cwd: panel?.cwd
+  }
+}
+
 const startCodexSession = async () => {
   if (codexStartPromise) return codexStartPromise
   codexStartPromise = (async () => {
@@ -1836,7 +1870,8 @@ const startCodexSession = async () => {
     const cols = codexTerminal?.cols || 100
     const rows = codexTerminal?.rows || 30
     try {
-      const session = await window.aiops.createCodexSession({ cols, rows })
+      const target = currentCodexTargetContext()
+      const session = await window.aiops.createCodexSession({ cols, rows, target })
       codexSessionId.value = session.id
       codexStatus.value = session.lifecycle?.stage === 'ready' ? 'ready' : 'starting'
       subscribeCodexBridge()
@@ -1847,7 +1882,8 @@ const startCodexSession = async () => {
         runtimeKind: session.runtimeKind,
         binaryPath: session.binaryPath,
         codexHome: session.codexHome,
-        cwd: session.cwd
+        cwd: session.cwd,
+        target
       })
     } catch (error) {
       codexStatus.value = 'error'

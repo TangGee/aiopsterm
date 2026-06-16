@@ -30,6 +30,8 @@ files:
 extraResources:
   - from: resources/icons
     to: icons
+  - from: resources/codex-aiopsterm-mcp.js
+    to: codex-aiopsterm-mcp.js
 asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs
