@@ -22,6 +22,8 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - The Codex process runs with `CODEX_HOME=<app userData>/codex-agent`.
 - aiopsterm writes `<app userData>/codex-agent/config.toml` before each Codex session starts.
 - The Codex process cwd is also fixed to `<app userData>/codex-agent`; renderer-provided cwd is ignored so local HOME or project paths are not accidentally model-visible as target state.
+- Codex CLI model access is derived from aiopsterm's OpenAI-compatible provider settings when that provider is configured for `Responses`. The generated Codex config writes `model`, `model_provider`, provider `base_url`, `env_key`, and `wire_api = "responses"`; the API key is injected only into the Codex child-process environment as `AIOPSTERM_CODEX_API_KEY` and is not written to `config.toml`.
+- aiopsterm's Base URL normalization is preserved for Codex. A trailing `#` still means "do not auto-add `/v1`"; full operation URLs ending in `/responses` or `/chat/completions` are reduced to the provider base URL before Codex appends its Responses operation path.
 - The default development binary is `codex/codex-rs/target/release/codex`.
 - Packaged builds copy only the built Codex CLI executable into `resources/codex/codex` (or the platform executable name), not the Codex source tree.
 - `AIOPSTERM_CODEX_BIN` can point at a different binary for local experiments.

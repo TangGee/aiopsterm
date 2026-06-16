@@ -7,9 +7,10 @@ import type {
   CodexSessionInfo,
   CodexSessionLifecycleEvent,
   CodexSessionWriteResult,
-  CodexSessionKillResult
+  CodexSessionKillResult,
+  UserConfig
 } from '@shared/preload'
-import { buildAiopstermCodexConfigToml, codexBridgeScriptPath } from './codexConfig'
+import { buildAiopstermCodexConfigToml, codexBridgeScriptPath, resolveAiopstermCodexProviderConfig } from './codexConfig'
 
 export type CodexPtyProcess = {
   write(data: string): void
@@ -29,6 +30,7 @@ type CodexRuntimeConfig = {
   getUserDataPath?: () => string
   getAppPath?: () => string
   getResourcesPath?: () => string
+  getConfig?: () => UserConfig
   getEnv?: () => NodeJS.ProcessEnv
   loadPty?: () => CodexPtyRuntime | null
   processRuntime?: CodexProcessRuntime
@@ -86,6 +88,7 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.getUserDataPath = config.getUserDataPath
   runtimeConfig.getAppPath = config.getAppPath
   runtimeConfig.getResourcesPath = config.getResourcesPath
+  runtimeConfig.getConfig = config.getConfig
   runtimeConfig.getEnv = config.getEnv
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
@@ -150,13 +153,16 @@ const errorCode = (error: unknown) => {
   return String(record.code || record.errno || 'CODEX_SESSION_ERROR').toUpperCase()
 }
 
-const writeCodexConfig = async (codexHome: string, options: CodexSessionCreateOptions) => {
+const resolveCodexProviderConfig = () => resolveAiopstermCodexProviderConfig(runtimeConfig.getConfig?.())
+
+const writeCodexConfig = async (codexHome: string, options: CodexSessionCreateOptions, provider = resolveCodexProviderConfig()) => {
   const appPath = runtimeConfig.getAppPath?.() || defaultAppPath()
   const resourcesPath = runtimeConfig.getResourcesPath?.() || defaultResourcesPath()
   const config = buildAiopstermCodexConfigToml({
     bridgeScriptPath: codexBridgeScriptPath(appPath, resourcesPath),
     bridgeSocketPath: runtimeConfig.getBridgeSocketPath?.() || '',
-    target: options.target
+    target: options.target,
+    provider
   })
   await getWriteFile()(join(codexHome, 'config.toml'), `${config}\n`, 'utf-8')
 }
@@ -171,16 +177,18 @@ export const createCodexSession = async (
   const cwd = codexHome
   const cols = Math.max(20, Math.min(400, Math.round(Number(options.cols) || 100)))
   const rows = Math.max(8, Math.min(120, Math.round(Number(options.rows) || 30)))
+  const codexProvider = resolveCodexProviderConfig()
   const env = {
     ...defaultEnv(),
     ...(runtimeConfig.getEnv?.() || {}),
+    ...(codexProvider ? { [codexProvider.apiKeyEnv]: codexProvider.apiKey } : {}),
     CODEX_HOME: codexHome,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor'
   }
 
   await getMkdir()(codexHome, { recursive: true })
-  await writeCodexConfig(codexHome, options)
+  await writeCodexConfig(codexHome, options, codexProvider)
 
   const starting = createLifecycleEvent(id, {
     stage: 'starting',

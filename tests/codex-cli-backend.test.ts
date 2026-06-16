@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CodexSessionCreateOptions } from '@shared/preload'
+import type { CodexSessionCreateOptions, UserConfig } from '@shared/preload'
 
 type CodexLifecycleEvent = {
   id: string
@@ -98,6 +98,35 @@ const loadBackend = async () => {
   return import(modulePath)
 }
 
+const loadConfigBackend = async () => {
+  const modulePath = '../src/main/backend/codexConfig'
+  return import(modulePath)
+}
+
+const createConfigWithModelProvider = (patch: Partial<UserConfig> = {}): UserConfig =>
+  ({
+    modelProvider: 'openai-compatible',
+    modelName: 'ark-code-latest',
+    modelSettings: {
+      addModelSwitch: true,
+      providers: {
+        openai: {
+          baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3#',
+          apiKey: 'ark-secret-token',
+          modelId: 'ark-code-latest',
+          apiFormat: 'responses'
+        },
+        litellm: { baseUrl: '', apiKey: '', modelId: '' },
+        bedrock: { baseUrl: '', apiKey: '', modelId: '' },
+        deepseek: { baseUrl: '', apiKey: '', modelId: '' },
+        anthropic: { baseUrl: '', apiKey: '', modelId: '' },
+        ollama: { baseUrl: '', apiKey: '', modelId: '' }
+      },
+      options: [{ name: 'ark-code-latest', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }]
+    },
+    ...patch
+  }) as UserConfig
+
 describe('Codex CLI backend runtime', () => {
   beforeEach(async () => {
     const backend = await loadBackend()
@@ -116,6 +145,7 @@ describe('Codex CLI backend runtime', () => {
       getUserDataPath: () => '/tmp/aiopsterm-user-data',
       getAppPath: () => '/repo',
       getResourcesPath: () => '/resources',
+      getConfig: () => createConfigWithModelProvider(),
       getEnv: () => ({ PATH: '/usr/bin', CODEX_HOME: '/should/not/reuse' }),
       getBridgeSocketPath: () => '/tmp/aiopsterm-user-data/codex-agent/bridge.sock',
       binaryPath: '/repo/codex/codex-rs/target/release/codex',
@@ -174,6 +204,13 @@ describe('Codex CLI backend runtime', () => {
       })
     )
     expect(writeFileCalls[0].content).toContain('include_environment_context = false')
+    expect(writeFileCalls[0].content).toContain('model = "ark-code-latest"')
+    expect(writeFileCalls[0].content).toContain('model_provider = "aiopsterm_openai_responses"')
+    expect(writeFileCalls[0].content).toContain('[model_providers.aiopsterm_openai_responses]')
+    expect(writeFileCalls[0].content).toContain('base_url = "https://ark.cn-beijing.volces.com/api/coding/v3"')
+    expect(writeFileCalls[0].content).toContain('env_key = "AIOPSTERM_CODEX_API_KEY"')
+    expect(writeFileCalls[0].content).toContain('wire_api = "responses"')
+    expect(writeFileCalls[0].content).not.toContain('ark-secret-token')
     expect(writeFileCalls[0].content).toContain('instructions = "You are aiopsterm Agent')
     expect(writeFileCalls[0].content).toContain('project_doc_max_bytes = 0')
     expect(writeFileCalls[0].content).toContain('web_search = "disabled"')
@@ -220,6 +257,7 @@ describe('Codex CLI backend runtime', () => {
           rows: 40,
           env: expect.objectContaining({
             CODEX_HOME: '/tmp/aiopsterm-user-data/codex-agent',
+            AIOPSTERM_CODEX_API_KEY: 'ark-secret-token',
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor'
           })
@@ -281,5 +319,86 @@ describe('Codex CLI backend runtime', () => {
     expect(events.data.map((entry) => entry.chunk.toString())).toEqual(['stdout\n', 'stderr\n'])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['starting', 'ready', 'closed'])
     expect(events.exit).toEqual([expect.objectContaining({ code: 3 })])
+  })
+
+  it('does not configure Codex provider for non-Responses aiopsterm model settings', async () => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    const writeFileCalls: Array<{ path: string; content: string }> = []
+
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      getConfig: () =>
+        createConfigWithModelProvider({
+          modelSettings: {
+            ...createConfigWithModelProvider().modelSettings!,
+            providers: {
+              ...createConfigWithModelProvider().modelSettings!.providers,
+              openai: {
+                ...createConfigWithModelProvider().modelSettings!.providers.openai,
+                apiFormat: 'chat-completions'
+              }
+            }
+          }
+        }),
+      binaryPath: '/repo/codex/codex-rs/target/release/codex',
+      existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex',
+      mkdir: async () => undefined,
+      writeFile: async (path: string, content: string) => {
+        writeFileCalls.push({ path: String(path), content: String(content) })
+      },
+      loadPty: () => ({
+        spawn: (file: string, args: string[], options: Record<string, unknown>) => {
+          spawnCalls.push({ file, args, options })
+          return pty
+        }
+      })
+    })
+
+    await backend.createCodexSession('codex-chat-provider', {}, createSink(createRecorder()))
+
+    expect(writeFileCalls[0].content).not.toContain('model_provider = "aiopsterm_openai_responses"')
+    expect(writeFileCalls[0].content).not.toContain('[model_providers.aiopsterm_openai_responses]')
+    expect(spawnCalls[0].options).toEqual(
+      expect.objectContaining({
+        env: expect.not.objectContaining({
+          AIOPSTERM_CODEX_API_KEY: 'ark-secret-token'
+        })
+      })
+    )
+  })
+
+  it('normalizes Codex Responses base URLs from aiopsterm OpenAI-compatible settings', async () => {
+    const configBackend = await loadConfigBackend()
+
+    expect(configBackend.normalizeCodexResponsesBaseUrl('https://ark.cn-beijing.volces.com/api/coding/v3#')).toBe(
+      'https://ark.cn-beijing.volces.com/api/coding/v3'
+    )
+    expect(configBackend.normalizeCodexResponsesBaseUrl('https://gateway.local/api')).toBe('https://gateway.local/api/v1')
+    expect(configBackend.normalizeCodexResponsesBaseUrl('https://gateway.local/api/v1/responses')).toBe('https://gateway.local/api/v1')
+    expect(configBackend.normalizeCodexResponsesBaseUrl('https://gateway.local/api/v1/chat/completions')).toBe('https://gateway.local/api/v1')
+  })
+
+  it('uses configured OpenAI-compatible Responses provider as Codex fallback when the selected chat model is local', async () => {
+    const configBackend = await loadConfigBackend()
+    const provider = configBackend.resolveAiopstermCodexProviderConfig(
+      createConfigWithModelProvider({
+        modelProvider: 'local',
+        modelName: 'aiopsterm-local-agent'
+      })
+    )
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        providerId: 'aiopsterm_openai_responses',
+        model: 'ark-code-latest',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+        apiKeyEnv: 'AIOPSTERM_CODEX_API_KEY',
+        apiKey: 'ark-secret-token'
+      })
+    )
   })
 })

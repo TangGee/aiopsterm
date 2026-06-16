@@ -1353,6 +1353,7 @@ configureCodexCliRuntime({
   getUserDataPath: () => app.getPath('userData'),
   getAppPath: () => app.getAppPath(),
   getResourcesPath: () => process.resourcesPath,
+  getConfig,
   getEnv: () => process.env,
   getBridgeSocketPath: () => getCodexTerminalBridgeSocketPath()
 })
