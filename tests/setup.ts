@@ -7143,6 +7143,34 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: { id }
     })),
+    createCodexSession: vi.fn(async (options?: { cols?: number; rows?: number; cwd?: string }) => ({
+      id: 'test-codex-session',
+      binaryPath: '/repo/codex/codex-rs/target/release/codex',
+      cwd: options?.cwd || '/home/test',
+      codexHome: '/tmp/aiopsterm-user-data/codex-agent',
+      runtimeKind: 'pty' as const,
+      lifecycle: {
+        id: 'test-codex-session',
+        stage: 'ready' as const,
+        at: 1717200001000,
+        binaryPath: '/repo/codex/codex-rs/target/release/codex',
+        cwd: options?.cwd || '/home/test',
+        codexHome: '/tmp/aiopsterm-user-data/codex-agent',
+        runtimeKind: 'pty' as const
+      }
+    })),
+    writeCodexSession: vi.fn(async (id: string, data: string) => ({
+      ok: true,
+      data: {
+        id,
+        bytes: Buffer.byteLength(String(data || ''), 'utf8')
+      }
+    })),
+    resizeCodexSession: vi.fn(async () => undefined),
+    killCodexSession: vi.fn(async (id: string) => ({
+      ok: true,
+      data: { id }
+    })),
     respondTerminalKeyboardInteractive: vi.fn((id: string, responses: string[]) => {
       void id
       void responses
@@ -8892,6 +8920,9 @@ Object.defineProperty(window, 'aiops', {
     onTerminalData: vi.fn(() => () => undefined),
     onTerminalLifecycle: vi.fn(() => () => undefined),
     onTerminalExit: vi.fn(() => () => undefined),
+    onCodexSessionData: vi.fn(() => () => undefined),
+    onCodexSessionLifecycle: vi.fn(() => () => undefined),
+    onCodexSessionExit: vi.fn(() => () => undefined),
     onTerminalKeyboardInteractiveRequest: vi.fn((listener: (event: TerminalKeyboardInteractiveRequest) => void) => {
       terminalKeyboardInteractiveRequestListeners.add(listener)
       return () => {

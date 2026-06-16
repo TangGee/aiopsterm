@@ -219,6 +219,10 @@ const api: AiopsPreloadApi = {
   writeTerminalBinary: (id: string, data) => ipcRenderer.invoke('terminal:write-binary', id, data),
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.invoke('terminal:kill', id),
+  createCodexSession: (options) => ipcRenderer.invoke('codex:create', options),
+  writeCodexSession: (id: string, data: string) => ipcRenderer.invoke('codex:write', id, data),
+  resizeCodexSession: (id: string, cols: number, rows: number) => ipcRenderer.invoke('codex:resize', id, cols, rows),
+  killCodexSession: (id: string) => ipcRenderer.invoke('codex:kill', id),
   respondTerminalKeyboardInteractive: (id: string, response) => ipcRenderer.send(`terminal:keyboard-interactive:response:${id}`, response),
   cancelTerminalKeyboardInteractive: (id: string) => ipcRenderer.send(`terminal:keyboard-interactive:cancel:${id}`),
   pickZmodemUploadFiles: () => ipcRenderer.invoke('zmodem:pick-upload-files'),
@@ -330,6 +334,21 @@ const api: AiopsPreloadApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalExitEvent) => listener(payload)
     ipcRenderer.on('terminal:exit', wrapped)
     return () => ipcRenderer.off('terminal:exit', wrapped)
+  },
+  onCodexSessionData: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('codex:data', wrapped)
+    return () => ipcRenderer.off('codex:data', wrapped)
+  },
+  onCodexSessionLifecycle: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('codex:lifecycle', wrapped)
+    return () => ipcRenderer.off('codex:lifecycle', wrapped)
+  },
+  onCodexSessionExit: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('codex:exit', wrapped)
+    return () => ipcRenderer.off('codex:exit', wrapped)
   },
   onTerminalKeyboardInteractiveRequest: (listener: (event: TerminalKeyboardInteractiveRequest) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalKeyboardInteractiveRequest) => listener(payload)

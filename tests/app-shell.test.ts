@@ -247,7 +247,16 @@ const mountAiPanelWithModels = async (pinia: ReturnType<typeof createPinia>) => 
   })
   await flushPromises()
   await wrapper.vm.$nextTick()
+  await switchAiPanelToClassic(wrapper)
   return { wrapper, store }
+}
+
+const switchAiPanelToClassic = async (wrapper: VueWrapper<any>) => {
+  const classicModeButton = wrapper.find('[data-testid="ai-mode-classic"]')
+  if (!classicModeButton.exists() || classicModeButton.classes().includes('active')) return
+  await classicModeButton.trigger('click')
+  await flushPromises()
+  await wrapper.vm.$nextTick()
 }
 
 const waitForDatabaseSqlResult = async () => {
@@ -292,6 +301,8 @@ const findFilesSessionRow = (wrapper: VueWrapper<any>, label: string) => {
   if (!row) throw new Error(`Files session row not found: ${label}`)
   return row
 }
+
+const countFilesSessionRows = (wrapper: VueWrapper<any>, label: string) => wrapper.findAll('.files-tree-session').filter((item) => item.text().includes(label)).length
 
 const openAssetTreeCreateHost = async (wrapper: VueWrapper<any>) => {
   await wrapper.find('.asset-host-tree').trigger('contextmenu', { clientX: 160, clientY: 220 })
@@ -597,9 +608,37 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('堡垒机资源')
     expect(wrapper.text()).toContain('prod-bastion')
     expect(wrapper.find('.ai-header h2').text()).toBe('AI')
-    expect(wrapper.text()).toContain('与AI对话')
+    expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
+    expect(window.aiops.createCodexSession).toHaveBeenCalled()
     expect(wrapper.text()).toContain('切换布局')
     expect(wrapper.text()).not.toContain('local shell')
+  })
+
+  it('keeps Classic Chat available beside the Codex CLI AI panel mode', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await enableCatalogModelOptions(store)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
+    expect(window.aiops.createCodexSession).toHaveBeenCalled()
+
+    await wrapper.find('[data-testid="ai-mode-classic"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-mode-classic"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
   })
 
   it('keeps the SSH keyboard-interactive dialog open on backdrop clicks and submits responses', async () => {
@@ -790,6 +829,7 @@ describe('AppShell', () => {
     store.setActiveModule('workspace')
     await flushPromises()
     await wrapper.vm.$nextTick()
+    await switchAiPanelToClassic(wrapper)
     expect(wrapper.find('.ai-header h2').text()).toBe('AI')
     expect(wrapper.find('[data-testid="ai-new-chat"]').attributes('title')).toBe('New chat')
     expect(wrapper.find('[data-onboarding-id="ai-input-editable"]').attributes('data-placeholder')).toBe('Describe your operations goal')
@@ -3233,16 +3273,23 @@ describe('AppShell', () => {
     expect(filesPanel.find('.workspace-button').attributes('title')).toBe('显示 IP')
     expect(filesPanel.text()).toContain('prod-bastion')
 
+    if (store.workspacePreferences.expandedGroups.includes('group-预发')) {
+      await findFilesGroupRow(filesPanel, '预发').trigger('click')
+      await flushPromises()
+      expect(store.workspacePreferences.expandedGroups).not.toContain('group-预发')
+      expect(countFilesSessionRows(filesPanel, 'staging-api')).toBe(1)
+    }
+
     rejectNextPreferenceSave()
     await findFilesGroupRow(filesPanel, '预发').trigger('click')
     await flushPromises()
     expect(store.workspacePreferences.expandedGroups).not.toContain('group-预发')
-    expect(filesPanel.text()).not.toContain('staging-api')
+    expect(countFilesSessionRows(filesPanel, 'staging-api')).toBe(1)
 
     await findFilesGroupRow(filesPanel, '预发').trigger('click')
     await flushPromises()
     expect(store.workspacePreferences.expandedGroups).toContain('group-预发')
-    expect(filesPanel.text()).toContain('staging-api')
+    expect(countFilesSessionRows(filesPanel, 'staging-api')).toBe(2)
     filesPanel.unmount()
   })
 
@@ -4122,7 +4169,8 @@ describe('AppShell', () => {
 
     const styles = baseStyles()
     expect(styles).toContain('.ai-header {\n  justify-content: flex-start;\n  gap: 4px;\n  min-width: 0;\n}')
-    expect(styles).toContain('.ai-header-actions {\n  gap: 4px;\n  width: 54px;')
+    expect(styles).toContain('.ai-header-actions {\n  gap: 4px;\n  width: auto;')
+    expect(styles).toContain('.ai-panel-mode-tabs {\n  flex: 1 1 96px;')
     expect(styles).toContain('.ai-header-title {\n  flex: 0 0 48px;')
     expect(styles).toContain('.ai-conversation-tabs {\n  flex: 1 1 0;\n  width: 0;\n  min-width: 0;')
     expect(styles).toContain('.ai-conversation-tab {\n  min-width: 42px;')
@@ -5654,6 +5702,7 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
 
     await flushPromises()
+    await switchAiPanelToClassic(wrapper)
     await waitForMockCall(vi.mocked(window.aiops.listAiModels), 'listAiModels')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -5688,6 +5737,7 @@ describe('AppShell', () => {
     })
     await flushPromises()
     await wrapper.vm.$nextTick()
+    await switchAiPanelToClassic(wrapper)
 
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toBeUndefined()
@@ -9057,6 +9107,7 @@ describe('AppShell', () => {
     })
     await flushPromises()
     await aiPanel.vm.$nextTick()
+    await switchAiPanelToClassic(aiPanel)
     const createDataTransferMock = () => {
       const data = new Map<string, string>()
       return {

@@ -47,6 +47,59 @@ export type TerminalSessionInfo = {
   lifecycle?: TerminalLifecycleEvent
 }
 
+export type CodexSessionCreateOptions = {
+  cwd?: string
+  cols?: number
+  rows?: number
+}
+
+export type CodexSessionLifecycleStage = 'starting' | 'ready' | 'error' | 'closed'
+
+export type CodexSessionLifecycleEvent = {
+  id: string
+  stage: CodexSessionLifecycleStage
+  at: number
+  binaryPath?: string
+  codexHome?: string
+  cwd?: string
+  runtimeKind?: 'pty' | 'process'
+  code?: number | null
+  message?: string
+  errorCode?: string
+  errorMessage?: string
+}
+
+export type CodexSessionInfo = {
+  id: string
+  binaryPath: string
+  cwd: string
+  codexHome: string
+  runtimeKind: 'pty' | 'process'
+  lifecycle?: CodexSessionLifecycleEvent
+}
+
+export type CodexSessionDataEvent = {
+  id: string
+  data: string
+  raw?: number[]
+}
+
+export type CodexSessionExitEvent = {
+  id: string
+  code: number | null
+  errorCode?: string
+  errorMessage?: string
+}
+
+export type CodexSessionWriteResult = AiopsMutationResult<{
+  id: string
+  bytes: number
+}>
+
+export type CodexSessionKillResult = AiopsMutationResult<{
+  id: string
+}>
+
 export type TerminalWriteResult = AiopsMutationResult<{
   id: string
   bytes: number
@@ -3140,6 +3193,10 @@ export type AiopsPreloadApi = {
   writeTerminalBinary: (id: string, data: number[] | Uint8Array | ArrayBuffer) => Promise<TerminalBinaryWriteResult>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
+  createCodexSession: (options?: CodexSessionCreateOptions) => Promise<CodexSessionInfo>
+  writeCodexSession: (id: string, data: string) => Promise<CodexSessionWriteResult>
+  resizeCodexSession: (id: string, cols: number, rows: number) => Promise<void>
+  killCodexSession: (id: string) => Promise<CodexSessionKillResult>
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void
   cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>
@@ -3236,6 +3293,9 @@ export type AiopsPreloadApi = {
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
   onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
+  onCodexSessionData: (listener: (event: CodexSessionDataEvent) => void) => () => void
+  onCodexSessionLifecycle: (listener: (event: CodexSessionLifecycleEvent) => void) => () => void
+  onCodexSessionExit: (listener: (event: CodexSessionExitEvent) => void) => () => void
   onTerminalKeyboardInteractiveRequest: (listener: (event: TerminalKeyboardInteractiveRequest) => void) => () => void
   onTerminalKeyboardInteractiveResult: (listener: (event: TerminalKeyboardInteractiveResult) => void) => () => void
   onKubernetesTerminalData: (listener: (event: KubernetesTerminalDataEvent) => void) => () => void

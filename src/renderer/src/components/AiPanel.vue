@@ -12,7 +12,7 @@
           <h2>{{ agentMode ? t('common.agents') : t('common.ai') }}</h2>
         </div>
         <nav
-          v-if="visibleConversationTabs.length"
+          v-if="aiPanelMode === 'classic' && visibleConversationTabs.length"
           class="ai-conversation-tabs"
           role="tablist"
           :aria-label="t('ai.conversationTabs')"
@@ -51,8 +51,44 @@
             </button>
           </div>
         </nav>
+        <div
+          class="ai-panel-mode-tabs"
+          role="tablist"
+          :aria-label="t('ai.panelMode')"
+          data-testid="ai-panel-mode-tabs"
+        >
+          <button
+            type="button"
+            :class="{ active: aiPanelMode === 'codex' }"
+            :aria-selected="aiPanelMode === 'codex'"
+            data-testid="ai-mode-codex"
+            @click.stop="selectAiPanelMode('codex')"
+          >
+            {{ t('ai.codexCliMode') }}
+          </button>
+          <button
+            type="button"
+            :class="{ active: aiPanelMode === 'classic' }"
+            :aria-selected="aiPanelMode === 'classic'"
+            data-testid="ai-mode-classic"
+            @click.stop="selectAiPanelMode('classic')"
+          >
+            {{ t('ai.classicChatMode') }}
+          </button>
+        </div>
         <div class="ai-header-actions">
           <button
+            v-if="aiPanelMode === 'codex'"
+            type="button"
+            class="ai-header-icon-button"
+            :title="t('ai.codexRestart')"
+            data-testid="ai-codex-restart"
+            @click.stop="restartCodexSession"
+          >
+            <RefreshCw />
+          </button>
+          <button
+            v-if="aiPanelMode === 'classic'"
             type="button"
             class="ai-header-icon-button"
             :title="t('ai.newChat')"
@@ -62,6 +98,7 @@
             <Plus />
           </button>
           <div
+            v-if="aiPanelMode === 'classic'"
             class="ai-history-menu-wrap"
             @click.stop
           >
@@ -257,6 +294,34 @@
     </div>
 
     <div
+      v-show="aiPanelMode === 'codex'"
+      class="ai-codex-shell"
+      data-testid="ai-codex-shell"
+      @click.stop="focusCodexTerminal"
+    >
+      <div class="ai-codex-status">
+        <span
+          class="ai-codex-status-dot"
+          :class="codexStatus"
+        ></span>
+        <span>{{ codexStatusLabel }}</span>
+      </div>
+      <div
+        ref="codexTerminalRef"
+        class="xterm-host ai-codex-xterm"
+        data-testid="ai-codex-xterm"
+      ></div>
+      <div
+        v-if="codexError"
+        class="ai-codex-error"
+        data-testid="ai-codex-error"
+      >
+        {{ codexError }}
+      </div>
+    </div>
+
+    <div
+      v-show="aiPanelMode === 'classic'"
       ref="chatScrollRef"
       class="chat-scroll"
     >
@@ -875,7 +940,7 @@
     </div>
 
     <span
-      v-if="chatExportNotice"
+      v-if="aiPanelMode === 'classic' && chatExportNotice"
       class="ai-operation-notice"
       data-testid="ai-chat-export-notice"
     >
@@ -883,7 +948,7 @@
     </span>
 
     <form
-      v-if="!showNoAvailableModelPrompt"
+      v-if="aiPanelMode === 'classic' && !showNoAvailableModelPrompt"
       class="chat-input"
       :class="{ 'drop-active': dropActive }"
       data-onboarding-id="ai-input"
@@ -1362,9 +1427,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component, type ComponentPublicInstance } from 'vue'
+import { Terminal as XtermTerminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
+import '@xterm/xterm/css/xterm.css'
 import {
   Bot,
   Brain,
@@ -1430,11 +1498,13 @@ import type {
   ConversationItem
 } from '@/stores/workspace'
 import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption, VoiceTranscriptionInput } from '@shared/preload'
+import type { RuntimeLogLevel } from '@shared/preload'
 
 const props = defineProps<{ agentMode?: boolean }>()
 
 const workspace = useWorkspaceStore()
 const { locale, t } = useI18n()
+type AiPanelMode = 'codex' | 'classic'
 type AiChatMode = 'agent' | 'cmd'
 type AiContextCategoryView = {
   id: AiContextKind
@@ -1456,9 +1526,11 @@ const aiContextCategoryIcons: Record<AiContextKind, Component> = {
   chats: Search
 }
 const draft = ref('')
+const aiPanelMode = ref<AiPanelMode>('codex')
 const imageInputParts = ref<AiImageContentPart[]>([])
 const fileInputParts = ref<AiDocChipContentPart[]>([])
 const chatScrollRef = ref<HTMLElement | null>(null)
+const codexTerminalRef = ref<HTMLElement | null>(null)
 const editableRef = ref<HTMLElement | null>(null)
 const editEditableRef = ref<HTMLElement | null>(null)
 const chatSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -1519,6 +1591,19 @@ const commandAuditDialog = ref({
   messageId: '',
   draft: ''
 })
+const codexSessionId = ref('')
+const codexStatus = ref<'idle' | 'starting' | 'ready' | 'error' | 'closed'>('idle')
+const codexError = ref('')
+let codexTerminal: XtermTerminal | null = null
+let codexFit: FitAddon | null = null
+let codexResizeObserver: ResizeObserver | null = null
+let codexOffData: (() => void) | null = null
+let codexOffLifecycle: (() => void) | null = null
+let codexOffExit: (() => void) | null = null
+let codexStartPromise: Promise<void> | null = null
+let codexLastFitCols = 0
+let codexLastFitRows = 0
+let classicChatDataLoaded = false
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
 let chatExportNoticeTimer: number | undefined
@@ -1569,6 +1654,13 @@ const chatAttachmentFilters = [
 ]
 const maxHostContexts = 5
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
+const codexStatusLabel = computed(() => {
+  if (codexStatus.value === 'starting') return t('ai.codexStarting')
+  if (codexStatus.value === 'ready') return t('ai.codexReady')
+  if (codexStatus.value === 'error') return t('ai.codexError')
+  if (codexStatus.value === 'closed') return t('ai.codexClosed')
+  return t('ai.codexIdle')
+})
 const voiceButtonTitle = computed(() => {
   if (voiceRecording.value) return '停止语音录制'
   if (voiceTranscribing.value) return '语音转写中'
@@ -1617,6 +1709,188 @@ const groupedVisibleHistory = computed(() => {
     items: [...items].sort((first, second) => second.ts - first.ts)
   }))
 })
+
+const writeAiRuntimeLog = (level: RuntimeLogLevel, event: string, fields: Record<string, unknown> = {}) => {
+  void window.aiops?.writeRuntimeLog?.(level, event, fields)
+}
+
+const loadClassicChatData = () => {
+  if (classicChatDataLoaded) return
+  classicChatDataLoaded = true
+  void workspace.refreshAiModelCatalog({ replaceSettingsOptions: false })
+  void workspace.refreshAiContextCatalog({ hydrateSelection: false })
+  void workspace.refreshAiCommandCatalog()
+}
+
+const fitCodexTerminal = (options: { force?: boolean } = {}) => {
+  if (!codexTerminal || !codexFit || !codexTerminalRef.value?.isConnected) return
+  window.requestAnimationFrame(() => {
+    if (!codexTerminal || !codexFit || !codexTerminalRef.value?.isConnected) return
+    codexFit.fit()
+    if (!codexSessionId.value || !window.aiops?.resizeCodexSession) return
+    if (!options.force && codexTerminal.cols === codexLastFitCols && codexTerminal.rows === codexLastFitRows) return
+    codexLastFitCols = codexTerminal.cols
+    codexLastFitRows = codexTerminal.rows
+    void window.aiops.resizeCodexSession(codexSessionId.value, codexTerminal.cols, codexTerminal.rows)
+    writeAiRuntimeLog('debug', 'renderer.codex.fit-resize', {
+      sessionId: codexSessionId.value,
+      cols: codexTerminal.cols,
+      rows: codexTerminal.rows
+    })
+  })
+}
+
+const focusCodexTerminal = () => {
+  codexTerminal?.focus()
+}
+
+const disposeCodexSubscriptions = () => {
+  codexOffData?.()
+  codexOffLifecycle?.()
+  codexOffExit?.()
+  codexOffData = null
+  codexOffLifecycle = null
+  codexOffExit = null
+}
+
+const subscribeCodexBridge = () => {
+  if (!window.aiops || codexOffData || codexOffLifecycle || codexOffExit) return
+  codexOffData = window.aiops.onCodexSessionData?.((event) => {
+    if (event.id !== codexSessionId.value) return
+    codexTerminal?.write(event.data)
+  }) || null
+  codexOffLifecycle = window.aiops.onCodexSessionLifecycle?.((event) => {
+    if (event.id !== codexSessionId.value) return
+    if (event.stage === 'starting') codexStatus.value = 'starting'
+    if (event.stage === 'ready') {
+      codexStatus.value = 'ready'
+      codexError.value = ''
+      fitCodexTerminal({ force: true })
+    }
+    if (event.stage === 'error') {
+      codexStatus.value = 'error'
+      codexError.value = event.errorMessage || event.message || t('ai.codexError')
+    }
+    if (event.stage === 'closed') codexStatus.value = 'closed'
+  }) || null
+  codexOffExit = window.aiops.onCodexSessionExit?.((event) => {
+    if (event.id !== codexSessionId.value) return
+    codexStatus.value = event.errorCode ? 'error' : 'closed'
+    if (event.errorMessage) codexError.value = event.errorMessage
+  }) || null
+}
+
+const ensureCodexTerminal = () => {
+  const element = codexTerminalRef.value
+  if (!element || codexTerminal) return
+  codexTerminal = new XtermTerminal({
+    cursorBlink: workspace.terminalSettings.cursorBlink,
+    convertEol: true,
+    cursorStyle: workspace.terminalSettings.cursorStyle,
+    fontFamily: workspace.terminalSettings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+    fontSize: workspace.terminalSettings.fontSize || 12,
+    lineHeight: workspace.terminalSettings.lineHeight || 1,
+    scrollback: workspace.terminalSettings.scrollBack,
+    theme: {
+      background: '#090b10',
+      foreground: '#d7dae3',
+      cursor: '#8ccf7e',
+      selectionBackground: '#2d4059'
+    }
+  })
+  codexFit = new FitAddon()
+  codexTerminal.loadAddon(codexFit)
+  codexTerminal.open(element)
+  codexTerminal.onData((data) => {
+    if (!codexSessionId.value || !window.aiops?.writeCodexSession) return
+    void window.aiops.writeCodexSession(codexSessionId.value, data)
+  })
+  codexTerminal.onResize(({ cols, rows }) => {
+    if (!codexSessionId.value || !window.aiops?.resizeCodexSession) return
+    codexLastFitCols = cols
+    codexLastFitRows = rows
+    void window.aiops.resizeCodexSession(codexSessionId.value, cols, rows)
+  })
+  if (typeof ResizeObserver !== 'undefined') {
+    codexResizeObserver = new ResizeObserver(() => fitCodexTerminal())
+    codexResizeObserver.observe(element)
+  }
+  fitCodexTerminal({ force: true })
+  writeAiRuntimeLog('debug', 'renderer.codex-terminal.created')
+}
+
+const startCodexSession = async () => {
+  if (codexStartPromise) return codexStartPromise
+  codexStartPromise = (async () => {
+    await nextTick()
+    ensureCodexTerminal()
+    if (!window.aiops?.createCodexSession) {
+      codexStatus.value = 'error'
+      codexError.value = t('ai.codexBridgeMissing')
+      return
+    }
+    if (codexSessionId.value && codexStatus.value === 'ready') return
+    codexStatus.value = 'starting'
+    codexError.value = ''
+    fitCodexTerminal({ force: true })
+    const cols = codexTerminal?.cols || 100
+    const rows = codexTerminal?.rows || 30
+    try {
+      const session = await window.aiops.createCodexSession({ cols, rows })
+      codexSessionId.value = session.id
+      codexStatus.value = session.lifecycle?.stage === 'ready' ? 'ready' : 'starting'
+      subscribeCodexBridge()
+      fitCodexTerminal({ force: true })
+      focusCodexTerminal()
+      writeAiRuntimeLog('info', 'renderer.codex-session.started', {
+        sessionId: session.id,
+        runtimeKind: session.runtimeKind,
+        binaryPath: session.binaryPath,
+        codexHome: session.codexHome,
+        cwd: session.cwd
+      })
+    } catch (error) {
+      codexStatus.value = 'error'
+      codexError.value = error instanceof Error && error.message.trim() ? error.message : t('ai.codexStartFailed')
+      writeAiRuntimeLog('error', 'renderer.codex-session.start-failed', { message: codexError.value })
+    }
+  })().finally(() => {
+    codexStartPromise = null
+  })
+  return codexStartPromise
+}
+
+const stopCodexSession = async () => {
+  const sessionId = codexSessionId.value
+  if (!sessionId || !window.aiops?.killCodexSession) return
+  try {
+    await window.aiops.killCodexSession(sessionId)
+  } catch (error) {
+    writeAiRuntimeLog('warn', 'renderer.codex-session.kill-failed', {
+      sessionId,
+      message: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
+const restartCodexSession = async () => {
+  await stopCodexSession()
+  codexSessionId.value = ''
+  codexStatus.value = 'idle'
+  codexError.value = ''
+  codexTerminal?.clear()
+  await startCodexSession()
+}
+
+const selectAiPanelMode = (mode: AiPanelMode) => {
+  aiPanelMode.value = mode
+  closePopups()
+  if (mode === 'classic') {
+    loadClassicChatData()
+    return
+  }
+  void startCodexSession()
+}
 
 const closeModelMenu = () => {
   modelMenuOpen.value = false
@@ -4681,6 +4955,10 @@ const handleContextKeydown = (event: KeyboardEvent) => {
 }
 
 const handlePanelKeydown = (event: KeyboardEvent) => {
+  if (aiPanelMode.value === 'codex') {
+    if (event.key === 'Escape') closePopups()
+    return
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault()
     event.stopPropagation()
@@ -4850,12 +5128,18 @@ watch(
 )
 
 onMounted(() => {
-  void workspace.refreshAiModelCatalog({ replaceSettingsOptions: false })
-  void workspace.refreshAiContextCatalog({ hydrateSelection: false })
-  void workspace.refreshAiCommandCatalog()
+  if (aiPanelMode.value === 'classic') loadClassicChatData()
+  void startCodexSession()
 })
 
 onBeforeUnmount(() => {
+  void stopCodexSession()
+  disposeCodexSubscriptions()
+  codexResizeObserver?.disconnect()
+  codexResizeObserver = null
+  codexTerminal?.dispose()
+  codexTerminal = null
+  codexFit = null
   if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
   if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
   if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)

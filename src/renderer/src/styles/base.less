@@ -8569,10 +8569,43 @@ code {
 
 .ai-header-actions {
   gap: 4px;
-  width: 54px;
-  min-width: 54px;
-  flex: 0 0 54px;
+  width: auto;
+  min-width: 24px;
+  flex: 0 0 auto;
   justify-content: flex-end;
+}
+
+.ai-panel-mode-tabs {
+  flex: 1 1 96px;
+  min-width: 82px;
+  max-width: 180px;
+  height: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.ai-panel-mode-tabs button {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.ai-panel-mode-tabs button.active {
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .ai-header-title {
@@ -8699,6 +8732,64 @@ code {
 .ai-conversation-tab-close svg {
   width: 11px;
   height: 11px;
+}
+
+.ai-codex-shell {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.ai-codex-status {
+  min-width: 0;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-codex-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.ai-codex-status-dot.starting {
+  background: #d8a31a;
+}
+
+.ai-codex-status-dot.ready {
+  background: #52c41a;
+}
+
+.ai-codex-status-dot.error {
+  background: #ff4d4f;
+}
+
+.ai-codex-status-dot.closed {
+  background: #8c8c8c;
+}
+
+.ai-codex-xterm {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #090b10;
+}
+
+.ai-codex-error {
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, #ff4d4f 46%, var(--border));
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #ffccc7;
+  background: color-mix(in srgb, #ff4d4f 10%, transparent);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .ai-history-menu-wrap {

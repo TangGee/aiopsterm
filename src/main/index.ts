@@ -40,6 +40,7 @@ import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiT
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
 import { configureAliasBackendRuntime, deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
+import { configureCodexCliRuntime, createCodexSession, killCodexSession, resizeCodexSession, writeCodexSession } from './backend/codexCli'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
@@ -272,6 +273,7 @@ import type {
   AiMcpToolCallActionResult,
   AiChatResponseInput,
   AiModelCatalogInput,
+  CodexSessionCreateOptions,
   AppUpdateProgressEvent,
   AiChatConversationUpdateInput,
   AiopsAssetInput,
@@ -600,6 +602,23 @@ const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buff
     bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
   })
   sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, chunk))
+}
+
+const sendCodexExit = (owner: BrowserWindow, lifecycle: import('@shared/preload').CodexSessionLifecycleEvent, code = lifecycle.code ?? null) => {
+  sendWindowEvent(owner, 'codex:exit', {
+    id: lifecycle.id,
+    code,
+    errorCode: lifecycle.errorCode,
+    errorMessage: lifecycle.errorMessage
+  })
+}
+
+const sendCodexData = (owner: BrowserWindow, id: string, chunk: string | Buffer) => {
+  logRuntimeEvent('debug', 'codex.data', {
+    id,
+    bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
+  })
+  sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(id, chunk))
 }
 
 const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -1298,6 +1317,13 @@ configurePrivacyRuntime({
 configureSshTunnelBackendRuntime({ getConfig })
 configureLocalTerminalBackendRuntime({
   getDefaultShell,
+  getDefaultCwd: () => app.getPath('home'),
+  getEnv: () => process.env
+})
+configureCodexCliRuntime({
+  getUserDataPath: () => app.getPath('userData'),
+  getAppPath: () => app.getAppPath(),
+  getResourcesPath: () => process.resourcesPath,
   getDefaultCwd: () => app.getPath('home'),
   getEnv: () => process.env
 })
@@ -3686,6 +3712,93 @@ const registerIpc = () => {
       ;(session.process as LocalTerminalSession).kill('manual')
     }
     return createTerminalKillResult(id, true)
+  })
+
+  ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner) {
+      logRuntimeEvent('error', 'codex.create.no-owner')
+      throw new Error('No owner window for Codex session')
+    }
+    const id = randomUUID()
+    logRuntimeEvent('info', 'codex.create.request', {
+      id,
+      cols: options.cols,
+      rows: options.rows,
+      hasCwd: Boolean(options.cwd)
+    })
+    try {
+      const session = await createCodexSession(id, options, {
+        lifecycle: (lifecycle) => {
+          logRuntimeEvent(lifecycle.stage === 'error' ? 'error' : 'info', 'codex.lifecycle', {
+            id: lifecycle.id,
+            stage: lifecycle.stage,
+            binaryPath: lifecycle.binaryPath,
+            codexHome: lifecycle.codexHome,
+            cwd: lifecycle.cwd,
+            runtimeKind: lifecycle.runtimeKind,
+            code: lifecycle.code,
+            errorCode: lifecycle.errorCode,
+            errorMessage: lifecycle.errorMessage
+          })
+          sendWindowEvent(owner, 'codex:lifecycle', lifecycle)
+        },
+        exit: (lifecycle, code) => {
+          logRuntimeEvent('info', 'codex.exit', {
+            id: lifecycle.id,
+            code: code ?? lifecycle.code ?? null,
+            errorCode: lifecycle.errorCode,
+            errorMessage: lifecycle.errorMessage
+          })
+          sendCodexExit(owner, lifecycle, code ?? lifecycle.code ?? null)
+        },
+        data: (sessionId, chunk) => sendCodexData(owner, sessionId, chunk),
+        closed: (sessionId) => {
+          logRuntimeEvent('info', 'codex.session-removed', { id: sessionId })
+        }
+      })
+      logRuntimeEvent('info', 'codex.create.ready', {
+        id,
+        binaryPath: session.binaryPath,
+        codexHome: session.codexHome,
+        cwd: session.cwd,
+        runtimeKind: session.runtimeKind
+      })
+      return session
+    } catch (error) {
+      logRuntimeEvent('error', 'codex.create.failed', {
+        id,
+        error
+      })
+      throw error
+    }
+  })
+
+  ipcMain.handle('codex:write', (_event, id: string, data: string) => {
+    const bytes = Buffer.byteLength(String(data || ''), 'utf8')
+    logRuntimeEvent('debug', 'codex.write.request', { id, bytes })
+    const result = writeCodexSession(id, data)
+    logRuntimeEvent(result.ok ? 'debug' : 'warn', result.ok ? 'codex.write.accepted' : 'codex.write.rejected', {
+      id,
+      bytes,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage
+    })
+    return result
+  })
+
+  ipcMain.handle('codex:resize', (_event, id: string, cols: number, rows: number) => {
+    const resized = resizeCodexSession(id, cols, rows)
+    logRuntimeEvent(resized ? 'debug' : 'warn', resized ? 'codex.resize' : 'codex.resize.missing-session', { id, cols, rows })
+  })
+
+  ipcMain.handle('codex:kill', (_event, id: string) => {
+    logRuntimeEvent('info', 'codex.kill.request', { id })
+    const result = killCodexSession(id)
+    if (!result.ok) {
+      logRuntimeEvent('warn', 'codex.kill.rejected', { id, errorCode: result.errorCode, errorMessage: result.errorMessage })
+    }
+    return result
   })
 
   ipcMain.handle('zmodem:pick-upload-files', async (event) => {

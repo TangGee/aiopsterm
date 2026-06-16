@@ -100,6 +100,17 @@ export type I18nKey =
   | 'top.windowMaximize'
   | 'top.windowClose'
   | 'ai.newChat'
+  | 'ai.panelMode'
+  | 'ai.codexCliMode'
+  | 'ai.classicChatMode'
+  | 'ai.codexRestart'
+  | 'ai.codexIdle'
+  | 'ai.codexStarting'
+  | 'ai.codexReady'
+  | 'ai.codexError'
+  | 'ai.codexClosed'
+  | 'ai.codexBridgeMissing'
+  | 'ai.codexStartFailed'
   | 'ai.moreActions'
   | 'ai.history'
   | 'ai.conversationTabs'
@@ -273,6 +284,17 @@ const zhCN: LocaleMessages = {
   'top.windowMaximize': '最大化窗口',
   'top.windowClose': '退出应用',
   'ai.newChat': '新建会话',
+  'ai.panelMode': 'AI 面板模式',
+  'ai.codexCliMode': 'Codex CLI',
+  'ai.classicChatMode': 'Classic Chat',
+  'ai.codexRestart': '重启 Codex CLI',
+  'ai.codexIdle': 'Codex CLI 未启动',
+  'ai.codexStarting': '正在启动 Codex CLI',
+  'ai.codexReady': 'Codex CLI 已连接',
+  'ai.codexError': 'Codex CLI 异常',
+  'ai.codexClosed': 'Codex CLI 已退出',
+  'ai.codexBridgeMissing': 'Codex CLI 桥接服务不可用',
+  'ai.codexStartFailed': 'Codex CLI 启动失败',
   'ai.moreActions': '更多',
   'ai.history': '会话历史',
   'ai.conversationTabs': 'AI 会话标签',
@@ -445,6 +467,17 @@ const enUS: LocaleMessages = {
   'top.windowMaximize': 'Maximize window',
   'top.windowClose': 'Quit app',
   'ai.newChat': 'New chat',
+  'ai.panelMode': 'AI panel mode',
+  'ai.codexCliMode': 'Codex CLI',
+  'ai.classicChatMode': 'Classic Chat',
+  'ai.codexRestart': 'Restart Codex CLI',
+  'ai.codexIdle': 'Codex CLI is not running',
+  'ai.codexStarting': 'Starting Codex CLI',
+  'ai.codexReady': 'Codex CLI connected',
+  'ai.codexError': 'Codex CLI error',
+  'ai.codexClosed': 'Codex CLI exited',
+  'ai.codexBridgeMissing': 'Codex CLI bridge is unavailable',
+  'ai.codexStartFailed': 'Failed to start Codex CLI',
   'ai.moreActions': 'More',
   'ai.history': 'Chat history',
   'ai.conversationTabs': 'AI conversation tabs',

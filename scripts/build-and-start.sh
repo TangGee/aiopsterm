@@ -6,6 +6,7 @@ APP_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 
 restart=1
 skip_build=0
+skip_codex=0
 use_sandbox=0
 extra_args=()
 
@@ -19,6 +20,7 @@ Options:
   --restart     Stop existing aiopsterm preview processes before starting (default).
   --no-restart  Do not stop an existing preview; report it and exit instead.
   --skip-build  Start the latest existing build without rebuilding.
+  --skip-codex  Do not build the bundled Codex CLI binary.
   --sandbox     Start without passing electron-vite's --noSandbox flag.
   -h, --help    Show this help.
 
@@ -39,6 +41,9 @@ while (($#)); do
       ;;
     --skip-build)
       skip_build=1
+      ;;
+    --skip-codex)
+      skip_codex=1
       ;;
     --sandbox)
       use_sandbox=1
@@ -75,6 +80,33 @@ preview_pids() {
 }
 
 cd "${APP_ROOT}"
+
+codex_bin="${AIOPSTERM_CODEX_BIN:-${APP_ROOT}/codex/codex-rs/target/release/codex}"
+if [[ -n "${AIOPSTERM_CODEX_BIN:-}" ]]; then
+  if [[ ! -x "${codex_bin}" ]]; then
+    echo "[aiopsterm] AIOPSTERM_CODEX_BIN is not executable: ${codex_bin}" >&2
+    exit 1
+  fi
+  echo "[aiopsterm] using Codex CLI binary from AIOPSTERM_CODEX_BIN: ${codex_bin}"
+elif ((skip_codex)); then
+  echo "[aiopsterm] skipping Codex CLI build"
+elif [[ -d "${APP_ROOT}/codex/codex-rs" ]]; then
+  if [[ -x "${codex_bin}" ]]; then
+    echo "[aiopsterm] Codex CLI binary exists: ${codex_bin}"
+  else
+    echo "[aiopsterm] building Codex CLI binary"
+    (cd "${APP_ROOT}/codex/codex-rs" && cargo build --release -p codex-cli)
+  fi
+else
+  echo "[aiopsterm] Codex source directory is missing: ${APP_ROOT}/codex/codex-rs" >&2
+  exit 1
+fi
+
+if [[ ! -x "${codex_bin}" ]]; then
+  echo "[aiopsterm] Codex CLI binary is missing: ${codex_bin}" >&2
+  echo "[aiopsterm] rerun without --skip-codex or set AIOPSTERM_CODEX_BIN to a valid Codex binary." >&2
+  exit 1
+fi
 
 mapfile -t pids < <(preview_pids)
 if ((${#pids[@]})); then
