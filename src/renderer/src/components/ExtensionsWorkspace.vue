@@ -349,7 +349,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, ref, watch, type Component, type PropType } from 'vue'
+import { computed, defineComponent, h, onMounted, ref, watch, type Component, type PropType } from 'vue'
 import {
   Check,
   Cloud,
@@ -523,6 +523,10 @@ watch(
   },
   { immediate: true }
 )
+
+onMounted(() => {
+  if (workspace.extensionPlugins.length === 0) void workspace.refreshExtensionPlugins()
+})
 
 const PluginHeader = defineComponent({
   name: 'PluginHeader',

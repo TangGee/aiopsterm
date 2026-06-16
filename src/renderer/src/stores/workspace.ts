@@ -4196,6 +4196,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionSearchQuery = ref('')
   const extensionPlugins = ref<ExtensionPlugin[]>([])
   const selectedExtensionId = ref<string>('jumpserverSupport')
+  let extensionPluginsRefreshPromise: Promise<boolean> | null = null
   const extensionDetailTab = ref<'details' | 'features'>('details')
   const extensionNotice = ref('')
   const extensionInstallLoadingMap = ref<Record<string, boolean>>({})
@@ -5005,24 +5006,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     snippetGroups.value = normalizedQuickCommands.groups.map((group) => ({ ...group }))
     quickCommands.value = normalizedQuickCommands.snippets.map((snippet) => ({ ...snippet }))
     const {
-      normalized: savedKnowledgeBaseSnapshot
+      normalized: normalizedKnowledgeBase
     } = normalizeKnowledgeBaseConfig(savedConfig.knowledgeBase)
-    let normalizedKnowledgeBase = savedKnowledgeBaseSnapshot
-    const knowledgeBridge = getKnowledgeBridge()
-    if (knowledgeBridge) {
-      try {
-        await knowledgeBridge.kbEnsureRoot()
-        const bridgeKnowledgeTree = await loadKnowledgeTreeFromBridge('')
-        const bridgeKnowledgeBase: KnowledgeBaseUserConfig = {
-          tree: cloneKnowledgeNodes(bridgeKnowledgeTree),
-          usedBytes: knowledgeTreeSize(bridgeKnowledgeTree),
-          totalBytes: savedKnowledgeBaseSnapshot.totalBytes
-        }
-        normalizedKnowledgeBase = bridgeKnowledgeBase
-      } catch {
-        setTopNotice('知识库加载失败')
-      }
-    }
     knowledgeTree.value = cloneKnowledgeNodes(normalizedKnowledgeBase.tree)
     kbUsedBytes.value = normalizedKnowledgeBase.usedBytes
     kbTotalBytes.value = normalizedKnowledgeBase.totalBytes
@@ -5165,18 +5150,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     refreshShortcutRuntime()
     setupThemeBridge()
     await refreshUserAccount()
-    const secondaryStartupRefreshes: Array<Promise<unknown>> = [
-      refreshExtensionPlugins()
-    ]
     setupKnowledgeBridgeListeners()
-    secondaryStartupRefreshes.push(
-      refreshKnowledgeTree({ persist: false }),
-      refreshFileSessionCatalog(),
-      refreshFileTransferTasks(),
-      refreshKubernetesCatalog()
-    )
     await aiStartupRefresh
-    await Promise.all(secondaryStartupRefreshes)
     restoreSavedGeneralBaseSettings()
     applyDocumentLocale(resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
   }
@@ -10628,6 +10603,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ensureSelectedExtensionVisible()
       return false
     }
+    if (extensionPluginsRefreshPromise) return extensionPluginsRefreshPromise
+    extensionPluginsRefreshPromise = (async () => {
     try {
       const result = await listExtensionPluginsBridge()
       if (!result?.ok) {
@@ -10655,6 +10632,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ensureSelectedExtensionVisible()
       return false
     }
+    })().finally(() => {
+      extensionPluginsRefreshPromise = null
+    })
+    return extensionPluginsRefreshPromise
   }
 
   const installExtensionPlugin = async (pluginId: string) => {

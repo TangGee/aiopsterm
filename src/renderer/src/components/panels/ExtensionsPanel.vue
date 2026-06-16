@@ -142,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
+import { computed, onMounted, type Component } from 'vue'
 import { Cloud, CloudDownload, Crown, FileText, Layers, LoaderCircle, PackageOpen, Pencil, RefreshCw, Search, ShieldCheck, WandSparkles } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
@@ -185,6 +185,10 @@ const sourceText = (plugin: ExtensionPlugin) => {
   if (plugin.source === 'local') return 'Local'
   return 'Store'
 }
+
+onMounted(() => {
+  if (workspace.extensionPlugins.length === 0) void workspace.refreshExtensionPlugins()
+})
 
 const handleDragLeave = (event: DragEvent) => {
   if (event.currentTarget === event.target) {

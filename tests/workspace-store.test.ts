@@ -1012,13 +1012,18 @@ describe('workspace store', () => {
     })
   })
 
-  it('skips Classic Chat hydration during default Codex startup', async () => {
+  it('skips Classic Chat and secondary module hydration during default Codex startup', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.listChatConversations).mockClear()
     vi.mocked(window.aiops.listAiTodoSnapshot).mockClear()
     vi.mocked(window.aiops.listAiContextCatalog).mockClear()
     vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
     vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
+    vi.mocked(window.aiops.listFileTransferTasks!).mockClear()
+    vi.mocked(window.aiops.listExtensionPlugins!).mockClear()
+    vi.mocked(window.aiops.kbEnsureRoot!).mockClear()
+    vi.mocked(window.aiops.kbListDir!).mockClear()
+    vi.mocked(window.aiops.listKubernetesCatalog!).mockClear()
 
     await store.hydrateConfig()
 
@@ -1026,10 +1031,15 @@ describe('workspace store', () => {
     expect(window.aiops.listAiTodoSnapshot).not.toHaveBeenCalled()
     expect(window.aiops.listAiContextCatalog).not.toHaveBeenCalled()
     expect(window.aiops.listAiCommandCatalog).not.toHaveBeenCalled()
-    expect(window.aiops.listFileSessionCatalog).toHaveBeenCalled()
+    expect(window.aiops.listFileSessionCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.listFileTransferTasks).not.toHaveBeenCalled()
+    expect(window.aiops.listExtensionPlugins).not.toHaveBeenCalled()
+    expect(window.aiops.kbEnsureRoot).not.toHaveBeenCalled()
+    expect(window.aiops.kbListDir).not.toHaveBeenCalled()
+    expect(window.aiops.listKubernetesCatalog).not.toHaveBeenCalled()
   })
 
-  it('starts Classic Chat history hydration before slow secondary startup catalogs when Classic mode is persisted', async () => {
+  it('hydrates Classic Chat without loading secondary module catalogs when Classic mode is persisted', async () => {
     window.localStorage.setItem('aiopsterm.aiPanelMode', 'classic')
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.listChatConversations).mockClear()
@@ -1037,6 +1047,11 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.listAiContextCatalog).mockClear()
     vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
     vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
+    vi.mocked(window.aiops.listFileTransferTasks!).mockClear()
+    vi.mocked(window.aiops.listExtensionPlugins!).mockClear()
+    vi.mocked(window.aiops.kbEnsureRoot!).mockClear()
+    vi.mocked(window.aiops.kbListDir!).mockClear()
+    vi.mocked(window.aiops.listKubernetesCatalog!).mockClear()
 
     await store.hydrateConfig()
 
@@ -1044,10 +1059,12 @@ describe('workspace store', () => {
     expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
     expect(window.aiops.listAiContextCatalog).toHaveBeenCalled()
     expect(window.aiops.listAiCommandCatalog).toHaveBeenCalled()
-    expect(window.aiops.listFileSessionCatalog).toHaveBeenCalled()
-    expect(vi.mocked(window.aiops.listChatConversations).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(window.aiops.listFileSessionCatalog!).mock.invocationCallOrder[0]
-    )
+    expect(window.aiops.listFileSessionCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.listFileTransferTasks).not.toHaveBeenCalled()
+    expect(window.aiops.listExtensionPlugins).not.toHaveBeenCalled()
+    expect(window.aiops.kbEnsureRoot).not.toHaveBeenCalled()
+    expect(window.aiops.kbListDir).not.toHaveBeenCalled()
+    expect(window.aiops.listKubernetesCatalog).not.toHaveBeenCalled()
   })
 
   it('approves and rejects AI MCP resource access through the backend bridge', async () => {
@@ -3306,7 +3323,7 @@ describe('workspace store', () => {
     expectNoBusinessDataConfigWrites(['quickCommands', 'aliasCommands'])
   })
 
-  it('hydrates file transfer task snapshots from the backend boundary', async () => {
+  it('refreshes file transfer task snapshots from the backend boundary', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([
       {
@@ -3333,7 +3350,7 @@ describe('workspace store', () => {
       }
     ])
 
-    await store.hydrateConfig()
+    await expect(store.refreshFileTransferTasks()).resolves.toBe(true)
 
     expect(window.aiops.listFileTransferTasks).toHaveBeenCalled()
     expect(store.fileTransferTasks).toEqual([
@@ -7680,6 +7697,16 @@ describe('workspace store', () => {
     expect(window.aiops.deleteAliasCommand).toHaveBeenCalledWith({ id: hosts.id, alias: 'hostsfile' })
     expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile')).toBe(false)
     expectNoBusinessDataConfigWrites(['aliasCommands'])
+  })
+
+  it('deduplicates concurrent extension plugin catalog refreshes', async () => {
+    const store = useWorkspaceStore()
+
+    const results = await Promise.all([store.refreshExtensionPlugins(), store.refreshExtensionPlugins()])
+
+    expect(results).toEqual([true, true])
+    expect(window.aiops.listExtensionPlugins).toHaveBeenCalledTimes(1)
+    expect(store.extensionPlugins.length).toBeGreaterThan(0)
   })
 
   it('does not fabricate extension plugin writes when bridges are unavailable or fail', async () => {

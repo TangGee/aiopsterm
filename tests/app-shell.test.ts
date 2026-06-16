@@ -616,6 +616,57 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('local shell')
   })
 
+  it('hydrates secondary module catalogs only after entering their modules', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await waitForMockCall(vi.mocked(window.aiops.getConfig), 'getConfig')
+    await flushPromises()
+
+    vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
+    vi.mocked(window.aiops.kbEnsureRoot!).mockClear()
+    vi.mocked(window.aiops.kbListDir!).mockClear()
+    vi.mocked(window.aiops.listKubernetesCatalog!).mockClear()
+    vi.mocked(window.aiops.listExtensionPlugins!).mockClear()
+
+    expect(window.aiops.listFileSessionCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.kbEnsureRoot).not.toHaveBeenCalled()
+    expect(window.aiops.kbListDir).not.toHaveBeenCalled()
+    expect(window.aiops.listKubernetesCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.listExtensionPlugins).not.toHaveBeenCalled()
+
+    store.setActiveModule('files')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.listFileSessionCatalog).toHaveBeenCalled()
+
+    vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
+    store.setActiveModule('knowledge')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.kbEnsureRoot).toHaveBeenCalled()
+    expect(window.aiops.kbListDir).toHaveBeenCalledWith('')
+    expect(window.aiops.listFileSessionCatalog).not.toHaveBeenCalled()
+
+    store.setActiveModule('kubernetes')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.listKubernetesCatalog).toHaveBeenCalled()
+
+    store.setActiveModule('extensions')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.listExtensionPlugins).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps Classic Chat available beside the Codex CLI AI panel mode', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
