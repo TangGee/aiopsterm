@@ -31,13 +31,7 @@ type CodexBridgeResponse = {
   errorCode?: string
   errorMessage?: string
   target?: CodexSessionTargetContext
-  data?: {
-    commandId?: string
-    command?: string
-    output?: string
-    exitCode?: number | null
-    durationMs?: number
-  }
+  data?: Record<string, unknown>
 }
 
 export type CodexTerminalBridgeTargetUpdateResult = {
@@ -61,6 +55,14 @@ let preferredSessionId = ''
 let preferredSessionStrict = false
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const normalizeBoolean = (value: unknown, fallback = false) => (typeof value === 'boolean' ? value : fallback)
+
+const normalizeInteger = (value: unknown, fallback: number, min: number, max: number) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(numberValue)))
+}
 
 const normalizeTimeoutMs = (value: unknown) => {
   const timeout = Number(value)
@@ -211,6 +213,32 @@ const resolveTargetSession = (params: Record<string, unknown>): CodexTerminalBri
 
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
+const outputLines = (output: unknown) =>
+  String(output || '')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+
+const remoteBasePattern = (basePath: string, pattern: string) => {
+  if (pattern.startsWith('/')) return pattern
+  const cleanBase = basePath.replace(/\/+$/g, '') || '.'
+  if (cleanBase === '.') return `./${pattern}`
+  return `${cleanBase}/${pattern}`
+}
+
+const parseGrepMatches = (output: string) =>
+  outputLines(output)
+    .map((line) => {
+      const match = line.match(/^(.+):(\d+):(.*)$/)
+      if (!match) return null
+      return {
+        path: match[1],
+        line: Number(match[2]),
+        text: match[3]
+      }
+    })
+    .filter((match): match is { path: string; line: number; text: string } => Boolean(match))
+
 const buildWrappedCommand = (command: string, markerStart: string, markerEnd: string) => {
   return [
     'echo ',
@@ -286,6 +314,137 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
   }))
 }
 
+const runStructuredReadOnlyCommand = async (
+  params: Record<string, unknown>,
+  command: string,
+  transform: (responseData: Record<string, unknown>) => Record<string, unknown>,
+  options: { okExitCodes?: number[]; errorCode: string; errorMessage: string }
+): Promise<CodexBridgeResponse> => {
+  const response = await runTerminalCommand({
+    sessionId: params.sessionId,
+    timeoutMs: params.timeoutMs,
+    command
+  })
+  if (!response.ok) return response
+  const responseData = response.data || {}
+  const exitCode = typeof responseData.exitCode === 'number' ? responseData.exitCode : null
+  const okExitCodes = options.okExitCodes || [0]
+  if (exitCode !== null && !okExitCodes.includes(exitCode)) {
+    return {
+      ok: false,
+      errorCode: options.errorCode,
+      errorMessage: options.errorMessage,
+      target: response.target,
+      data: {
+        ...responseData,
+        ...transform(responseData)
+      }
+    }
+  }
+  return {
+    ok: true,
+    target: response.target,
+    data: {
+      ...responseData,
+      ...transform(responseData)
+    }
+  }
+}
+
+const readRemoteFile = async (params: Record<string, unknown>): Promise<CodexBridgeResponse> => {
+  const filePath = cleanText(params.path)
+  if (!filePath) return { ok: false, errorCode: 'FILE_PATH_REQUIRED', errorMessage: 'File path is required.' }
+  const offset = normalizeInteger(params.offset, 0, 0, 10_000_000)
+  const limit = normalizeInteger(params.limit, 200, 1, 1000)
+  const startLine = offset + 1
+  const endLine = offset + limit
+  const command = `LC_ALL=C sed -n ${shellQuote(`${startLine},${endLine}p`)} ${shellQuote(filePath)}`
+  return runStructuredReadOnlyCommand(
+    params,
+    command,
+    (data) => ({
+      path: filePath,
+      offset,
+      limit,
+      content: String(data.output || '')
+    }),
+    {
+      errorCode: 'READ_FILE_FAILED',
+      errorMessage: `Failed to read remote file: ${filePath}`
+    }
+  )
+}
+
+const globRemoteFiles = async (params: Record<string, unknown>): Promise<CodexBridgeResponse> => {
+  const pattern = cleanText(params.pattern)
+  if (!pattern) return { ok: false, errorCode: 'GLOB_PATTERN_REQUIRED', errorMessage: 'Glob pattern is required.' }
+  const basePath = cleanText(params.path) || '.'
+  const limit = normalizeInteger(params.limit, 200, 1, 2000)
+  const sort = cleanText(params.sort) === 'none' ? 'none' : 'path'
+  const hasPathPattern = pattern.includes('/') || pattern.includes('*') || pattern.includes('?') || pattern.includes('[')
+  const matchExpression = hasPathPattern ? `-path ${shellQuote(remoteBasePattern(basePath, pattern))}` : `-name ${shellQuote(pattern)}`
+  const sortPipe = sort === 'none' ? '' : ' | LC_ALL=C sort'
+  const command = `test -e ${shellQuote(basePath)} && LC_ALL=C find ${shellQuote(basePath)} ${matchExpression} -print${sortPipe} | head -n ${limit}`
+  return runStructuredReadOnlyCommand(
+    params,
+    command,
+    (data) => {
+      const entries = outputLines(data.output)
+      return {
+        pattern,
+        path: basePath,
+        limit,
+        sort,
+        entries,
+        count: entries.length
+      }
+    },
+    {
+      errorCode: 'GLOB_SEARCH_FAILED',
+      errorMessage: `Failed to search remote files for pattern: ${pattern}`
+    }
+  )
+}
+
+const grepRemoteFiles = async (params: Record<string, unknown>): Promise<CodexBridgeResponse> => {
+  const pattern = cleanText(params.pattern)
+  if (!pattern) return { ok: false, errorCode: 'GREP_PATTERN_REQUIRED', errorMessage: 'Search pattern is required.' }
+  const basePath = cleanText(params.path) || '.'
+  const include = cleanText(params.include)
+  const caseSensitive = normalizeBoolean(params.case_sensitive, false)
+  const contextLines = normalizeInteger(params.context_lines, 0, 0, 5)
+  const maxMatches = normalizeInteger(params.max_matches, 100, 1, 1000)
+  const flags = ['-R', '-n', '-I', '-E', '-m', String(maxMatches)]
+  if (!caseSensitive) flags.push('-i')
+  if (contextLines > 0) flags.push('-C', String(contextLines))
+  const includeArg = include ? `${shellQuote(`--include=${include}`)} ` : ''
+  const command = `test -e ${shellQuote(basePath)} || exit 2; LC_ALL=C grep ${flags.join(' ')} ${includeArg}-- ${shellQuote(pattern)} ${shellQuote(basePath)}`
+  return runStructuredReadOnlyCommand(
+    params,
+    command,
+    (data) => {
+      const output = String(data.output || '')
+      const matches = contextLines === 0 ? parseGrepMatches(output) : []
+      return {
+        pattern,
+        path: basePath,
+        ...(include ? { include } : {}),
+        caseSensitive,
+        contextLines,
+        maxMatches,
+        output,
+        matches,
+        count: matches.length || outputLines(output).length
+      }
+    },
+    {
+      okExitCodes: [0, 1],
+      errorCode: 'GREP_SEARCH_FAILED',
+      errorMessage: `Failed to search remote file contents for pattern: ${pattern}`
+    }
+  )
+}
+
 const targetContext = (params: Record<string, unknown>): CodexBridgeResponse => {
   const session = resolveTargetSession(params)
   if (!session) {
@@ -301,6 +460,9 @@ const targetContext = (params: Record<string, unknown>): CodexBridgeResponse => 
 const handleBridgeRequest = async (request: CodexTerminalBridgeRequest): Promise<CodexBridgeResponse> => {
   const params = request.params || {}
   if (request.method === 'run_command') return runTerminalCommand(params)
+  if (request.method === 'read_file') return readRemoteFile(params)
+  if (request.method === 'glob_search') return globRemoteFiles(params)
+  if (request.method === 'grep_search') return grepRemoteFiles(params)
   if (request.method === 'target_context') return targetContext(params)
   return {
     ok: false,

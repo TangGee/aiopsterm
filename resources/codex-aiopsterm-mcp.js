@@ -91,6 +91,107 @@ const targetContextSchema = {
   additionalProperties: false
 }
 
+const readFileSchema = {
+  type: 'object',
+  properties: {
+    path: {
+      type: 'string',
+      description: 'Remote file path to read from the selected aiopsterm terminal session.'
+    },
+    offset: {
+      type: 'number',
+      description: 'Zero-based line offset. Defaults to 0.'
+    },
+    limit: {
+      type: 'number',
+      description: 'Maximum number of lines to return. Defaults to 200 and is capped by aiopsterm.'
+    },
+    timeoutMs: {
+      type: 'number',
+      description: 'Optional timeout in milliseconds.'
+    },
+    sessionId: {
+      type: 'string',
+      description: 'Optional aiopsterm terminal session id. Omit to use the current selected terminal.'
+    }
+  },
+  required: ['path'],
+  additionalProperties: false
+}
+
+const globSearchSchema = {
+  type: 'object',
+  properties: {
+    pattern: {
+      type: 'string',
+      description: 'Remote glob pattern to match. Supports common shell-style wildcards such as *, ?, and character classes.'
+    },
+    path: {
+      type: 'string',
+      description: 'Remote base path. Defaults to the current remote working directory.'
+    },
+    limit: {
+      type: 'number',
+      description: 'Maximum number of paths to return. Defaults to 200 and is capped by aiopsterm.'
+    },
+    sort: {
+      type: 'string',
+      enum: ['path', 'none'],
+      description: 'Sort matched paths by path or leave remote traversal order.'
+    },
+    timeoutMs: {
+      type: 'number',
+      description: 'Optional timeout in milliseconds.'
+    },
+    sessionId: {
+      type: 'string',
+      description: 'Optional aiopsterm terminal session id. Omit to use the current selected terminal.'
+    }
+  },
+  required: ['pattern'],
+  additionalProperties: false
+}
+
+const grepSearchSchema = {
+  type: 'object',
+  properties: {
+    pattern: {
+      type: 'string',
+      description: 'Extended regular expression to search in remote files.'
+    },
+    path: {
+      type: 'string',
+      description: 'Remote base path. Defaults to the current remote working directory.'
+    },
+    include: {
+      type: 'string',
+      description: 'Optional filename glob filter, for example *.log or *.conf.'
+    },
+    case_sensitive: {
+      type: 'boolean',
+      description: 'Whether matching is case-sensitive. Defaults to false.'
+    },
+    context_lines: {
+      type: 'number',
+      description: 'Optional context lines around each match. Defaults to 0 and is capped by aiopsterm.'
+    },
+    max_matches: {
+      type: 'number',
+      description: 'Maximum output lines to return. Defaults to 100 and is capped by aiopsterm.'
+    },
+    timeoutMs: {
+      type: 'number',
+      description: 'Optional timeout in milliseconds.'
+    },
+    sessionId: {
+      type: 'string',
+      description: 'Optional aiopsterm terminal session id. Omit to use the current selected terminal.'
+    }
+  },
+  required: ['pattern'],
+  additionalProperties: false
+}
+
 const tools = [
   {
     name: 'run_command',
@@ -102,6 +203,45 @@ const tools = [
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
+      openWorldHint: true
+    }
+  },
+  {
+    name: 'read_file',
+    title: 'Read remote file through aiopsterm terminal',
+    description:
+      'Read a bounded line range from a file on the selected managed host through the current aiopsterm terminal session. This is read-only and never reads the local Codex client filesystem.',
+    inputSchema: readFileSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  {
+    name: 'glob_search',
+    title: 'Find remote files through aiopsterm terminal',
+    description:
+      'Find remote files matching a glob-like pattern on the selected managed host through the current aiopsterm terminal session. Prefer this over composing ad hoc find commands.',
+    inputSchema: globSearchSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  {
+    name: 'grep_search',
+    title: 'Search remote file contents through aiopsterm terminal',
+    description:
+      'Search remote file contents on the selected managed host through the current aiopsterm terminal session. Prefer this over composing ad hoc grep commands.',
+    inputSchema: grepSearchSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
       openWorldHint: true
     }
   },
@@ -145,7 +285,7 @@ const handleListTools = (id) => {
 const handleCallTool = async (id, params) => {
   const name = params?.name
   const args = params?.arguments || {}
-  if (name !== 'run_command' && name !== 'target_context') {
+  if (!tools.some((tool) => tool.name === name)) {
     result(id, {
       content: [textContent(`Unknown aiopsterm tool: ${name || ''}`)],
       isError: true

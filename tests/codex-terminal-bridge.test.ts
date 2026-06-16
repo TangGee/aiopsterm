@@ -416,6 +416,152 @@ describe('Codex terminal bridge runtime', () => {
     }
   })
 
+  it('runs structured read-only file and search tools through the selected terminal', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-files',
+        kind: 'ssh',
+        host: 'files.internal',
+        cwd: '/srv/app',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-files',
+          label: 'files.internal',
+          host: 'files.internal',
+          username: 'deploy',
+          cwd: '/srv/app'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-files')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const readPromise = socketRequest(socketPath, {
+        id: 'request-read-file',
+        method: 'read_file',
+        params: {
+          path: '/etc/nginx/nginx.conf',
+          offset: 1,
+          limit: 2,
+          timeoutMs: 5000
+        }
+      })
+      await waitFor(() => writes.length === 1)
+      expect(writes[0]).toContain("sed -n '2,3p' '/etc/nginx/nginx.conf'")
+      const readCommandId = writes[0].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-files',
+        [
+          `__AIOPSTERM_CODEX_START_${readCommandId}__\n`,
+          'user nginx;\n',
+          'worker_processes auto;\n',
+          `__AIOPSTERM_CODEX_END_${readCommandId}__:0\n`
+        ].join('')
+      )
+      const readResponse = await readPromise
+      expect(readResponse).toEqual(
+        expect.objectContaining({
+          id: 'request-read-file',
+          ok: true,
+          data: expect.objectContaining({
+            path: '/etc/nginx/nginx.conf',
+            offset: 1,
+            limit: 2,
+            content: 'user nginx;\nworker_processes auto;'
+          })
+        })
+      )
+
+      const globPromise = socketRequest(socketPath, {
+        id: 'request-glob-search',
+        method: 'glob_search',
+        params: {
+          path: '/srv/app',
+          pattern: '*.log',
+          limit: 5,
+          timeoutMs: 5000
+        }
+      })
+      await waitFor(() => writes.length === 2)
+      expect(writes[1]).toContain("find '/srv/app'")
+      expect(writes[1]).toContain("-path '/srv/app/*.log'")
+      const globCommandId = writes[1].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-files',
+        [
+          `__AIOPSTERM_CODEX_START_${globCommandId}__\n`,
+          '/srv/app/api.log\n',
+          '/srv/app/worker.log\n',
+          `__AIOPSTERM_CODEX_END_${globCommandId}__:0\n`
+        ].join('')
+      )
+      const globResponse = await globPromise
+      expect(globResponse).toEqual(
+        expect.objectContaining({
+          id: 'request-glob-search',
+          ok: true,
+          data: expect.objectContaining({
+            pattern: '*.log',
+            path: '/srv/app',
+            entries: ['/srv/app/api.log', '/srv/app/worker.log'],
+            count: 2
+          })
+        })
+      )
+
+      const grepPromise = socketRequest(socketPath, {
+        id: 'request-grep-search',
+        method: 'grep_search',
+        params: {
+          path: '/var/log',
+          include: '*.log',
+          pattern: 'error|warn',
+          case_sensitive: false,
+          max_matches: 10,
+          timeoutMs: 5000
+        }
+      })
+      await waitFor(() => writes.length === 3)
+      expect(writes[2]).toContain('grep -R -n -I -E -m 10 -i')
+      expect(writes[2]).toContain("'--include=*.log'")
+      expect(writes[2]).toContain("'error|warn' '/var/log'")
+      const grepCommandId = writes[2].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-files',
+        [
+          `__AIOPSTERM_CODEX_START_${grepCommandId}__\n`,
+          '/var/log/app.log:12:WARN disk high\n',
+          '/var/log/app.log:20:ERROR failed request\n',
+          `__AIOPSTERM_CODEX_END_${grepCommandId}__:0\n`
+        ].join('')
+      )
+      const grepResponse = await grepPromise
+      expect(grepResponse).toEqual(
+        expect.objectContaining({
+          id: 'request-grep-search',
+          ok: true,
+          data: expect.objectContaining({
+            pattern: 'error|warn',
+            path: '/var/log',
+            include: '*.log',
+            matches: [
+              { path: '/var/log/app.log', line: 12, text: 'WARN disk high' },
+              { path: '/var/log/app.log', line: 20, text: 'ERROR failed request' }
+            ],
+            count: 2
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('exposes the aiopsterm bridge as an MCP stdio server', async () => {
     const bridge = await loadBridge()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
@@ -443,8 +589,11 @@ describe('Codex terminal bridge runtime', () => {
       mcp = startMcpScript(socketPath)
 
       const listResponse = await mcp.request({ jsonrpc: '2.0', id: 0, method: 'tools/list' })
-      expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual(['run_command', 'target_context'])
+      expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual(['run_command', 'read_file', 'glob_search', 'grep_search', 'target_context'])
       const runCommandTool = listResponse.result?.tools?.find((tool) => tool.name === 'run_command')
+      const readFileTool = listResponse.result?.tools?.find((tool) => tool.name === 'read_file')
+      const globSearchTool = listResponse.result?.tools?.find((tool) => tool.name === 'glob_search')
+      const grepSearchTool = listResponse.result?.tools?.find((tool) => tool.name === 'grep_search')
       const targetContextTool = listResponse.result?.tools?.find((tool) => tool.name === 'target_context')
       expect(runCommandTool).toEqual(
         expect.objectContaining({
@@ -477,6 +626,19 @@ describe('Codex terminal bridge runtime', () => {
           })
         })
       )
+      ;[readFileTool, globSearchTool, grepSearchTool].forEach((tool) => {
+        expect(tool).toEqual(
+          expect.objectContaining({
+            description: expect.stringContaining('selected'),
+            annotations: expect.objectContaining({
+              readOnlyHint: true,
+              destructiveHint: false,
+              idempotentHint: true,
+              openWorldHint: true
+            })
+          })
+        )
+      })
 
       const callPromise = mcp.request({
         jsonrpc: '2.0',
