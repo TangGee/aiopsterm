@@ -47,6 +47,10 @@ const cloneMessage = (message: AiChatHistoryMessage): AiChatHistoryMessage => ({
 
 const cloneMessages = (messages: AiChatHistoryMessage[]) => messages.map(cloneMessage)
 
+export const chatHistoryRestoreMessageLimit = 200
+export const chatHistoryRestorePayloadByteLimit = 2 * 1024 * 1024
+export const chatHistoryTruncationMessageId = 'aiopsterm-history-truncated'
+
 const seedTime = 1780488000000
 
 const defaultChatHistoryStateFilePath = () => {
@@ -139,6 +143,76 @@ const stableValue = (value: unknown): unknown => {
 }
 
 const stableJson = (value: unknown) => JSON.stringify(stableValue(value))
+
+const utf8ByteLength = (value: string) => Buffer.byteLength(value, 'utf8')
+
+const messagePayloadBytes = (message: AiChatHistoryMessage) => utf8ByteLength(JSON.stringify(message))
+
+const createHistoryTruncationMessage = (omittedMessages: number, omittedBytes: number): AiChatHistoryMessage => ({
+  id: chatHistoryTruncationMessageId,
+  role: 'system',
+  text: `已隐藏较早的 ${omittedMessages} 条 AI 历史消息，约 ${Math.ceil(Math.max(0, omittedBytes) / 1024)} KiB。当前只加载最近的历史用于渲染，完整历史仍保存在本地。`,
+  say: 'context_truncated',
+  partial: true
+})
+
+const isHistoryTruncationMessage = (message: AiChatHistoryMessage) => message.id === chatHistoryTruncationMessageId && message.say === 'context_truncated'
+
+const hasHistoryTruncationMarker = (messages: AiChatHistoryMessage[]) => messages.some(isHistoryTruncationMessage)
+
+const buildRestoreMessages = (messages: AiChatHistoryMessage[]) => {
+  const normalizedMessages = cloneMessages(messages)
+  if (normalizedMessages.length <= chatHistoryRestoreMessageLimit) {
+    const bytes = normalizedMessages.reduce((total, message) => total + messagePayloadBytes(message), 0)
+    if (bytes <= chatHistoryRestorePayloadByteLimit) {
+      return {
+        messages: normalizedMessages,
+        totalMessages: normalizedMessages.length,
+        returnedMessages: normalizedMessages.length,
+        truncated: false
+      }
+    }
+  }
+
+  const selected: AiChatHistoryMessage[] = []
+  let selectedBytes = 0
+  for (let index = normalizedMessages.length - 1; index >= 0; index -= 1) {
+    if (selected.length >= chatHistoryRestoreMessageLimit) break
+    const message = normalizedMessages[index]
+    const bytes = messagePayloadBytes(message)
+    if (selected.length && selectedBytes + bytes > chatHistoryRestorePayloadByteLimit) break
+    selected.unshift(message)
+    selectedBytes += bytes
+  }
+  if (!selected.length && normalizedMessages.length) {
+    const latest = normalizedMessages.at(-1)!
+    selected.push(latest)
+    selectedBytes += messagePayloadBytes(latest)
+  }
+  const omittedMessages = Math.max(0, normalizedMessages.length - selected.length)
+  const totalBytes = normalizedMessages.reduce((total, message) => total + messagePayloadBytes(message), 0)
+  const omittedBytes = Math.max(0, totalBytes - selectedBytes)
+  const truncated = omittedMessages > 0
+  return {
+    messages: truncated ? [createHistoryTruncationMessage(omittedMessages, omittedBytes), ...selected] : selected,
+    totalMessages: normalizedMessages.length,
+    returnedMessages: selected.length,
+    truncated
+  }
+}
+
+const mergeTruncatedMessageSnapshot = (existingMessages: AiChatHistoryMessage[], messages: AiChatHistoryMessage[]) => {
+  if (!hasHistoryTruncationMarker(messages)) return messages
+  const visibleMessages = messages.filter((message) => !isHistoryTruncationMessage(message))
+  if (!visibleMessages.length) return existingMessages
+  const firstVisibleId = visibleMessages[0].id
+  const mergeIndex = existingMessages.findIndex((message) => message.id === firstVisibleId)
+  if (mergeIndex < 0) {
+    const existingIds = new Set(existingMessages.map((message) => message.id))
+    return [...existingMessages, ...visibleMessages.filter((message) => !existingIds.has(message.id))]
+  }
+  return [...existingMessages.slice(0, mergeIndex), ...visibleMessages]
+}
 
 const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
   if (!Array.isArray(messages)) return []
@@ -463,6 +537,7 @@ export const updateChatConversation = (input: AiChatConversationUpdateInput): Ai
   const conversation = state.conversations.find((item) => item.id === id)
   if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatConversationMutationResult
 
+  const existingMessages = state.messagesByConversationId[id] || []
   if (input.title !== undefined) {
     const title = normalizeText(input.title)
     if (!title) return errorResult('CHAT_HISTORY_TITLE_REQUIRED', 'Conversation title is required.') as AiChatConversationMutationResult
@@ -472,7 +547,7 @@ export const updateChatConversation = (input: AiChatConversationUpdateInput): Ai
   if (input.favorite !== undefined) conversation.favorite = Boolean(input.favorite)
   let savedMessages = false
   if (input.messages !== undefined) {
-    const messages = normalizeMessages(input.messages)
+    const messages = mergeTruncatedMessageSnapshot(existingMessages, normalizeMessages(input.messages))
     if (messages.length) {
       state.messagesByConversationId[id] = messages
       savedMessages = true
@@ -514,11 +589,15 @@ export const restoreChatConversation = (idInput: string): AiChatConversationRest
   if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatConversationRestoreResult
   state.selectedConversationId = id
   saveState(state)
+  const restoreMessages = buildRestoreMessages(state.messagesByConversationId[id] || [])
   return {
     ok: true,
     data: {
       conversation: cloneConversation(conversation),
-      messages: cloneMessages(state.messagesByConversationId[id] || [])
+      messages: restoreMessages.messages,
+      totalMessages: restoreMessages.totalMessages,
+      returnedMessages: restoreMessages.returnedMessages,
+      truncated: restoreMessages.truncated
     }
   }
 }

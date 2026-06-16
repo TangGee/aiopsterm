@@ -904,6 +904,9 @@ export type AiChatConversationDeleteResult = AiopsMutationResult<{
 export type AiChatConversationRestoreResult = AiopsMutationResult<{
   conversation: AiChatConversationRecord
   messages: AiChatHistoryMessage[]
+  totalMessages?: number
+  returnedMessages?: number
+  truncated?: boolean
 }>
 
 export type AiChatConversationUpdateInput = {

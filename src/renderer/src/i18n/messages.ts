@@ -133,6 +133,7 @@ export type I18nKey =
   | 'ai.historyFavorited'
   | 'ai.historyUnfavorited'
   | 'ai.historyFavoriteUpdateFailed'
+  | 'ai.historyRestoreTruncated'
   | 'ai.searchChat'
   | 'ai.exportChat'
   | 'ai.searchHistory'
@@ -317,6 +318,7 @@ const zhCN: LocaleMessages = {
   'ai.historyFavorited': '历史会话已收藏。',
   'ai.historyUnfavorited': '已取消历史收藏。',
   'ai.historyFavoriteUpdateFailed': '历史收藏更新失败。',
+  'ai.historyRestoreTruncated': '已加载最近 {count} 条历史消息，完整历史仍保存在本地。',
   'ai.searchChat': '搜索聊天',
   'ai.exportChat': '导出聊天',
   'ai.searchHistory': '搜索历史',
@@ -500,6 +502,7 @@ const enUS: LocaleMessages = {
   'ai.historyFavorited': 'Chat added to favorites.',
   'ai.historyUnfavorited': 'Chat removed from favorites.',
   'ai.historyFavoriteUpdateFailed': 'Failed to update favorite.',
+  'ai.historyRestoreTruncated': 'Loaded the latest {count} history messages. The full history is still stored locally.',
   'ai.searchChat': 'Search chat',
   'ai.exportChat': 'Export chat',
   'ai.searchHistory': 'Search history',

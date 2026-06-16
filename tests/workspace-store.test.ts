@@ -5331,6 +5331,46 @@ describe('workspace store', () => {
     expect(store.chatMessages).toEqual([])
   })
 
+  it('accepts bounded AI history restores and surfaces the truncation notice', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.restoreChatConversation).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        conversation: {
+          id: 'huge-history',
+          title: '超长历史',
+          summary: '只恢复最近窗口',
+          updatedAt: '刚刚',
+          ts: 1780488000001
+        },
+        messages: [
+          {
+            id: 'aiopsterm-history-truncated',
+            role: 'system',
+            text: '已隐藏较早的 300 条 AI 历史消息。',
+            say: 'context_truncated',
+            partial: true
+          },
+          {
+            id: 'huge-history-recent-user',
+            role: 'user',
+            text: '最近的问题'
+          }
+        ],
+        totalMessages: 301,
+        returnedMessages: 1,
+        truncated: true
+      }
+    } as any)
+
+    await expect(store.restoreConversation('huge-history')).resolves.toBe(true)
+
+    expect(store.selectedConversationId).toBe('huge-history')
+    expect(store.conversations.find((conversation) => conversation.id === 'huge-history')).toMatchObject({ title: '超长历史' })
+    expect(store.chatMessages.map((message) => message.id)).toEqual(['aiopsterm-history-truncated', 'huge-history-recent-user'])
+    expect(store.topNotice).toBe('已加载最近 1 条历史消息，完整历史仍保存在本地。')
+  })
+
   it('does not fabricate AI history title or favorite writes when the preload bridge is unavailable', async () => {
     const store = useWorkspaceStore()
     await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })

@@ -9,6 +9,8 @@ The selected AI panel mode is persisted in renderer storage. The default remains
 
 Classic Chat startup is now scheduled so visible AI data is restored early. During `hydrateConfig()`, chat history, AI todo state, context catalog, and command catalog begin loading immediately after base AI preferences are applied. Slower secondary catalogs such as files, Kubernetes, extensions, and knowledge base refresh in parallel later in startup instead of serially blocking AI history restore.
 
+Classic Chat restore also protects the renderer from oversized saved transcripts. `restoreChatConversation()` returns the newest bounded message window instead of sending an arbitrarily large conversation to the UI. When older rows are omitted, the backend prepends a `context_truncated` system marker, returns `totalMessages` / `returnedMessages` / `truncated` metadata, and keeps the full transcript in `userData/chat-history.json`. Later `updateChatConversation()` calls that include the truncation marker merge the visible window back into the existing full transcript instead of overwriting hidden older messages. This is a guardrail, not full pagination; long-term history paging/windowed rendering remains the next refinement if users need to browse the omitted rows directly.
+
 ## Runtime Boundary
 
 aiopsterm starts Codex through Electron main process IPC, not from renderer code.
@@ -104,6 +106,7 @@ The script builds the Codex CLI binary when missing, builds aiopsterm, then star
 Current slice verification:
 
 - `npm run typecheck`
+- `npx vitest run tests/chat-history-backend.test.ts tests/workspace-store.test.ts`
 - `npx vitest run tests/app-shell.test.ts tests/codex-cli-backend.test.ts tests/codex-terminal-bridge.test.ts`
 - `npx vitest run tests/package-config.test.ts`
 - `npm run audit:package-config`

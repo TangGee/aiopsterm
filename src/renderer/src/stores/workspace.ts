@@ -86,7 +86,8 @@ import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
 import { type SettingSectionKey } from '@/config/settings'
-import { applyDocumentLocale, isLocaleSetting, resolveLocale } from '@/i18n/runtime'
+import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
+import type { I18nKey } from '@/i18n/messages'
 import type {
   AppUpdateCheckResult,
   AppUpdateDownloadResult,
@@ -2601,6 +2602,7 @@ const aiProviderKeys = ['aiopsterm-local', 'litellm', 'openai', 'bedrock', 'deep
 const isOptionalString = (value: unknown) => value === undefined || typeof value === 'string'
 const isOptionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean'
 const isOptionalFiniteNumber = (value: unknown) => value === undefined || (typeof value === 'number' && Number.isFinite(value))
+const isOptionalNonNegativeFiniteNumber = (value: unknown) => value === undefined || isNonNegativeFiniteNumber(value)
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
 const isAiProviderKey = (value: unknown) => typeof value === 'string' && aiProviderKeys.includes(value)
 
@@ -2714,7 +2716,10 @@ const isAiChatConversationRestoreData = (source: unknown): source is AiChatConve
   isRecord(source) &&
   isAiChatConversationRecord(source.conversation) &&
   Array.isArray(source.messages) &&
-  source.messages.every(isAiChatHistoryMessage)
+  source.messages.every(isAiChatHistoryMessage) &&
+  isOptionalNonNegativeFiniteNumber(source.totalMessages) &&
+  isOptionalNonNegativeFiniteNumber(source.returnedMessages) &&
+  isOptionalBoolean(source.truncated)
 
 const isAiChatMessageMetadataData = (source: unknown): source is AiChatMessageMetadataData =>
   isRecord(source) &&
@@ -4344,6 +4349,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const trustedDevices = ref<AiopsTrustedDevice[]>([])
   const trustedDeviceModal = ref<{ open: boolean; id: number | null }>({ open: false, id: null })
   const settingsNotice = ref('')
+  const currentLocale = () => resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language])
+  const i18nText = (key: I18nKey, params: Record<string, string | number> = {}) =>
+    Object.entries(params).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), translateWithLocale(currentLocale(), key))
   const setSettingsNoticeText = (text: string) => {
     settingsNotice.value = text
     if (!text) return
@@ -4515,6 +4523,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       : [nextConversation, ...conversations.value]
     selectedConversationId.value = nextConversation.id
     chatMessages.value = data.messages.map(chatHistoryMessageToChatMessage)
+    if (data.truncated) {
+      setTopNotice(i18nText('ai.historyRestoreTruncated', { count: data.returnedMessages ?? data.messages.length }))
+    }
     clearAiContextUsage()
     return true
   }

@@ -12,6 +12,9 @@ type ChatHistoryBackend = {
   deleteChatConversation: (id: string) => any
   restoreChatConversation: (id: string) => any
   saveChatMessageMetadata: (input: any) => any
+  chatHistoryRestoreMessageLimit: number
+  chatHistoryRestorePayloadByteLimit: number
+  chatHistoryTruncationMessageId: string
 }
 
 let backend: ChatHistoryBackend
@@ -435,6 +438,91 @@ describe('AI chat history backend boundary', () => {
     persisted = JSON.parse(await readFile(stateFilePath, 'utf-8'))
     expect(persisted.conversations).toEqual([])
     expect(persisted.selectedConversationId).toBe('')
+  })
+
+  it('restores only a bounded history window and preserves hidden messages on later snapshot saves', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-window-' })
+    const created = expectOkData(backend.createChatConversation())
+    const messages = Array.from({ length: backend.chatHistoryRestoreMessageLimit + 8 }, (_, index) => ({
+      id: `history-large-${index + 1}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      text: `历史消息 ${index + 1}`
+    }))
+    expectOkData(
+      backend.updateChatConversation({
+        id: created.conversation.id,
+        summary: '超长历史',
+        messages
+      })
+    )
+
+    const restored = expectOkData(backend.restoreChatConversation(created.conversation.id))
+
+    expect(restored.truncated).toBe(true)
+    expect(restored.totalMessages).toBe(messages.length)
+    expect(restored.returnedMessages).toBe(backend.chatHistoryRestoreMessageLimit)
+    expect(restored.messages).toHaveLength(backend.chatHistoryRestoreMessageLimit + 1)
+    expect(restored.messages[0]).toMatchObject({
+      id: backend.chatHistoryTruncationMessageId,
+      role: 'system',
+      say: 'context_truncated',
+      partial: true
+    })
+    expect(restored.messages[1].id).toBe('history-large-9')
+    expect(restored.messages.at(-1).id).toBe(`history-large-${backend.chatHistoryRestoreMessageLimit + 8}`)
+
+    const visibleSnapshot = [
+      ...restored.messages,
+      {
+        id: 'history-new-user',
+        role: 'user',
+        text: '追加的新问题'
+      },
+      {
+        id: 'history-new-assistant',
+        role: 'assistant',
+        text: '追加的新回答',
+        state: 'done'
+      }
+    ]
+    expectOkData(
+      backend.updateChatConversation({
+        id: created.conversation.id,
+        summary: '追加后仍保留完整历史',
+        messages: visibleSnapshot
+      })
+    )
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
+      messagesByConversationId: Record<string, Array<{ id: string }>>
+    }
+    const persistedIds = persisted.messagesByConversationId[created.conversation.id].map((message) => message.id)
+    expect(persistedIds).toEqual([...messages.map((message) => message.id), 'history-new-user', 'history-new-assistant'])
+    expect(persistedIds).not.toContain(backend.chatHistoryTruncationMessageId)
+  })
+
+  it('uses payload bytes as a second restore boundary for very large messages', async () => {
+    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-byte-window-' })
+    const created = expectOkData(backend.createChatConversation())
+    const oversizedText = 'x'.repeat(Math.ceil(backend.chatHistoryRestorePayloadByteLimit / 2))
+    expectOkData(
+      backend.updateChatConversation({
+        id: created.conversation.id,
+        messages: [
+          { id: 'huge-1', role: 'user', text: oversizedText },
+          { id: 'huge-2', role: 'assistant', text: oversizedText },
+          { id: 'huge-3', role: 'user', text: oversizedText }
+        ]
+      })
+    )
+
+    const restored = expectOkData(backend.restoreChatConversation(created.conversation.id))
+
+    expect(restored.truncated).toBe(true)
+    expect(restored.totalMessages).toBe(3)
+    expect(restored.returnedMessages).toBeLessThan(3)
+    expect(restored.messages[0]).toMatchObject({ id: backend.chatHistoryTruncationMessageId })
+    expect(restored.messages.at(-1).id).toBe('huge-3')
   })
 
   it('normalizes malformed persisted state and falls back on corrupt files', async () => {
