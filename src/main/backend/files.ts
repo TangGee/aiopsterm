@@ -35,6 +35,7 @@ import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as S
 import { deleteAssetFolder, getAsset, getAssetSecret, getKeychainSecret, listAssets, saveAsset, saveAssetFolder } from './assets'
 import { loadSsh2 } from './ssh2Runtime'
 import { createConfiguredSshAgentAuth } from './sshAgent'
+import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 
 type BackendFileEntry = FileListEntry & { mode: string }
@@ -305,8 +306,8 @@ const createRemoteSftpConnection = async (target: RemoteSftpTarget, key: string)
     host: target.host,
     port: target.port,
     username: target.username,
-    readyTimeout: 15000,
-    keepaliveInterval: 10000
+    readyTimeout: defaultSshReadyTimeoutMs,
+    keepaliveInterval: defaultSshKeepaliveIntervalMs
   }
   if (target.password) connectConfig.password = target.password
   if (target.privateKey) connectConfig.privateKey = target.privateKey

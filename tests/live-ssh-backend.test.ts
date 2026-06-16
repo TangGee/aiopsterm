@@ -44,7 +44,7 @@ const parseHostAndPort = () => {
 const readLiveSshConfig = (): LiveSshConfig => {
   const { host, port } = parseHostAndPort()
   const username = String(process.env.AIOPSTERM_LIVE_SSH_USERNAME || 'root').trim()
-  const timeoutMs = Math.max(1000, Math.min(60000, Number(process.env.AIOPSTERM_LIVE_SSH_TIMEOUT_MS || 20000) || 20000))
+  const timeoutMs = Math.max(1000, Math.min(120000, Number(process.env.AIOPSTERM_LIVE_SSH_TIMEOUT_MS || 120000) || 120000))
   return {
     enabled: String(process.env.AIOPSTERM_LIVE_SSH_ENABLE || '').trim() === '1',
     host,

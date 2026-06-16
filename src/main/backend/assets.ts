@@ -41,6 +41,7 @@ import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetI
 import { shouldUseAssetsSeedData } from '@shared/runtimeSwitches'
 import { createConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'
+import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 import { diagnoseSshConnectionError } from './terminal'
 
@@ -537,9 +538,9 @@ export const configureAssetBackendRuntime = (config: AssetBackendRuntimeConfig =
 const assetConnectionNow = () => assetConnectionRuntime.now?.() ?? Date.now()
 
 const assetConnectionTimeoutMs = (input?: AiopsAssetConnectionTestInput) => {
-  const candidate = Number(input?.timeoutMs || assetConnectionRuntime.timeoutMs || 15000)
-  if (!Number.isFinite(candidate)) return 15000
-  return Math.max(1000, Math.min(60000, Math.trunc(candidate)))
+  const candidate = Number(input?.timeoutMs || assetConnectionRuntime.timeoutMs || defaultSshReadyTimeoutMs)
+  if (!Number.isFinite(candidate)) return defaultSshReadyTimeoutMs
+  return Math.max(1000, Math.min(defaultSshReadyTimeoutMs, Math.trunc(candidate)))
 }
 
 const getAssetConnectionSsh2Runtime = () =>
@@ -1548,7 +1549,7 @@ export const testAssetConnection = async (input: AiopsAssetConnectionTestInput =
       port: target.port,
       username: target.username,
       readyTimeout: timeoutMs,
-      keepaliveInterval: 10000
+      keepaliveInterval: defaultSshKeepaliveIntervalMs
     }
     if (target.password) connectConfig.password = target.password
     if (target.privateKey) connectConfig.privateKey = target.privateKey

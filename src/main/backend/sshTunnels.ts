@@ -14,6 +14,7 @@ import type {
 import { getAsset, getAssetSecret, getKeychainSecret, listAssets, saveAsset } from './assets'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'
+import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 
 type TunnelClient = Pick<Client, 'connect' | 'end' | 'forwardIn' | 'forwardOut' | 'unforwardIn' | 'on' | 'off' | 'once'>
@@ -43,7 +44,6 @@ const loopbackIpv4 = '127.0.0.1'
 const loopbackIpv6 = '::1'
 const defaultLocalForwardPort = 3306
 const defaultDynamicSocksPort = 1080
-const defaultConnectTimeoutMs = 20000
 const tunnelRuntimeConfig: SshTunnelBackendRuntimeConfig = {}
 
 export const configureSshTunnelBackendRuntime = (config: SshTunnelBackendRuntimeConfig = {}) => {
@@ -170,8 +170,8 @@ const buildConnectConfig = async (asset: AiopsAssetRecord, proxyTargetHost: stri
     host,
     port,
     username,
-    readyTimeout: defaultConnectTimeoutMs,
-    keepaliveInterval: 10000
+    readyTimeout: defaultSshReadyTimeoutMs,
+    keepaliveInterval: defaultSshKeepaliveIntervalMs
   }
   if (password) connectConfig.password = password
   if (privateKey) connectConfig.privateKey = privateKey

@@ -19,6 +19,7 @@ import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, resolveSshProxyConfigForAsset, type SshProxySocket } from './sshProxy'
 import { loadSsh2 } from './ssh2Runtime'
+import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent, diagnoseSshConnectionError, type SshTerminalConnectionTarget } from './terminal'
 
 type AssetSecret = {
@@ -1221,8 +1222,8 @@ export const createSshTerminalSession = (
       port: authTarget.port,
       username: authTarget.username,
       tryKeyboard: Boolean(sink.keyboardInteractive),
-      readyTimeout: runtimeConfig.readyTimeoutMs || 20000,
-      keepaliveInterval: runtimeConfig.keepaliveIntervalMs || 10000
+      readyTimeout: runtimeConfig.readyTimeoutMs || defaultSshReadyTimeoutMs,
+      keepaliveInterval: runtimeConfig.keepaliveIntervalMs || defaultSshKeepaliveIntervalMs
     }
     if (authTarget.password) connectConfig.password = authTarget.password
     if (authTarget.privateKey) connectConfig.privateKey = authTarget.privateKey

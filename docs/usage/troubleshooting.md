@@ -48,3 +48,5 @@ Relay-shell startup is compatible with restricted jump shells: aiopsterm does no
 Because relay-shell mode uses local OpenSSH in a PTY, password, dynamic-password, and host-key prompts are shown in the terminal stream instead of the global aiopsterm authentication dialog. This allows existing jump-host SSH config and target-side passwordless login to work, but saved aiopsterm target passwords are not injected into the local OpenSSH command.
 
 For direct or jump-tunnel ssh2 connections, aiopsterm no longer opens a password dialog before the first network authentication attempt when no password is saved. This avoids a fake prompt on hosts that may support SSH Agent, keychain, or target-side passwordless login. If the real SSH server rejects authentication and the asset can use password auth, aiopsterm then opens the password dialog and can remember the password after a successful retry.
+
+The app-owned ssh2 paths use a 120-second default SSH ready timeout for terminal sessions, SFTP file sessions, SSH tunnels, and host connection tests. This matches interactive jump-host and dynamic-password flows better than ssh2's 20-second library default.

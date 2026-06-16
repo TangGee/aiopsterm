@@ -267,7 +267,7 @@ describe('ssh terminal backend runtime', () => {
         port: 2222,
         username: 'deploy',
         password: 'secret',
-        readyTimeout: 20000,
+        readyTimeout: 120000,
         keepaliveInterval: 10000
       })
     ])
