@@ -609,6 +609,11 @@ export type AiContextOption = {
   kind: AiContextKind
   label: string
   detail?: string
+  host?: string
+  port?: number
+  username?: string
+  assetName?: string
+  isLocalShell?: boolean
   relPath?: string
   parentRelPath?: string
   contextType?: 'file' | 'dir' | 'doc' | 'image'

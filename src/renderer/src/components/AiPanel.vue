@@ -4,6 +4,10 @@
     :class="{ 'agent-mode': agentMode }"
     tabindex="-1"
     @click="closePopups()"
+    @dragenter.prevent="handleDragEnter"
+    @dragover.prevent="handleDragOver"
+    @dragleave="handleDragLeave"
+    @drop.prevent="handleDrop"
     @keydown="handlePanelKeydown"
   >
     <div class="ai-panel-top">
@@ -296,9 +300,116 @@
     <div
       v-show="aiPanelMode === 'codex'"
       class="ai-codex-shell"
+      :class="{ 'drop-active': dropActive }"
       data-testid="ai-codex-shell"
       @click.stop="focusCodexTerminal"
     >
+      <div
+        class="ai-codex-target-bar"
+        :class="{ bound: Boolean(codexBoundTarget), missing: !codexBoundTarget }"
+        data-testid="ai-codex-target-bar"
+        @click.stop
+      >
+        <template v-if="codexBoundTarget">
+          <div class="ai-codex-target-main">
+            <Server />
+            <div>
+              <strong>{{ codexBoundTargetLabel }}</strong>
+              <span>{{ codexBoundTargetDetail }}</span>
+            </div>
+          </div>
+          <div class="ai-codex-target-actions">
+            <button
+              type="button"
+              :title="t('ai.codexTargetLocate')"
+              data-testid="ai-codex-target-locate"
+              @click.stop="locateCodexBoundTarget"
+            >
+              <Focus />
+            </button>
+            <button
+              type="button"
+              :title="t('ai.codexTargetChange')"
+              data-testid="ai-codex-target-change"
+              @click.stop="toggleCodexTargetPicker"
+            >
+              <Search />
+            </button>
+            <button
+              type="button"
+              :title="t('ai.codexTargetUnbind')"
+              data-testid="ai-codex-target-unbind"
+              @click.stop="unbindCodexTarget"
+            >
+              <X />
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="ai-codex-target-main">
+            <Server />
+            <div>
+              <strong>{{ t('ai.codexTargetUnbound') }}</strong>
+              <span>{{ t('ai.codexTargetDropHint') }}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="ai-codex-bind-button"
+            data-testid="ai-codex-bind-open"
+            @click.stop="toggleCodexTargetPicker"
+          >
+            <Link2 />
+            <span>{{ t('ai.codexTargetBind') }}</span>
+          </button>
+        </template>
+        <div
+          v-if="codexTargetPickerOpen"
+          class="ai-codex-target-picker"
+          data-testid="ai-codex-target-picker"
+          @click.stop
+        >
+          <label>
+            <Search />
+            <input
+              v-model="codexTargetQuery"
+              type="search"
+              :placeholder="t('ai.codexTargetSearch')"
+              data-testid="ai-codex-target-search"
+              @keydown.esc.prevent="closeCodexTargetPicker"
+            />
+          </label>
+          <div class="ai-codex-target-list">
+            <button
+              v-if="currentPanelTarget"
+              type="button"
+              data-testid="ai-codex-bind-current"
+              @click.stop="bindCodexTarget(currentPanelTarget, { reason: 'bind-current' })"
+            >
+              <Monitor />
+              <span>{{ t('ai.codexTargetUseCurrent') }}</span>
+              <em>{{ currentPanelTarget.label }}</em>
+            </button>
+            <button
+              v-for="host in filteredCodexHostTargets"
+              :key="host.id"
+              type="button"
+              data-testid="ai-codex-bind-host"
+              @click.stop="bindHostContextToCodex(host)"
+            >
+              <Server />
+              <span>{{ host.assetName || host.detail || host.label }}</span>
+              <em>{{ host.host || host.label }}</em>
+            </button>
+            <div
+              v-if="!currentPanelTarget && !filteredCodexHostTargets.length"
+              class="ai-codex-target-empty"
+            >
+              {{ t('ai.noMatchingContext') }}
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="ai-codex-status">
         <span
           class="ai-codex-status-dot"
@@ -1449,6 +1560,8 @@ import {
   Copy,
   Download,
   Ellipsis,
+  Focus,
+  Link2,
   LoaderCircle,
   FileText,
   FolderGit2,
@@ -1456,6 +1569,7 @@ import {
   LockKeyhole,
   Maximize2,
   Mic,
+  Monitor,
   MinusSquare,
   Play,
   Pencil,
@@ -1497,7 +1611,8 @@ import type {
   AiSkillChipContentPart,
   AiSupportedImageType,
   ChatMessage,
-  ConversationItem
+  ConversationItem,
+  TerminalPanel
 } from '@/stores/workspace'
 import type {
   AiChatExportMessage,
@@ -1603,6 +1718,9 @@ const commandAuditDialog = ref({
 const codexSessionId = ref('')
 const codexStatus = ref<'idle' | 'starting' | 'ready' | 'error' | 'closed'>('idle')
 const codexError = ref('')
+const codexBoundTarget = ref<CodexSessionTargetContext | null>(null)
+const codexTargetPickerOpen = ref(false)
+const codexTargetQuery = ref('')
 let codexTerminal: XtermTerminal | null = null
 let codexFit: FitAddon | null = null
 let codexResizeObserver: ResizeObserver | null = null
@@ -1671,6 +1789,13 @@ const codexStatusLabel = computed(() => {
   if (codexStatus.value === 'closed') return t('ai.codexClosed')
   return t('ai.codexIdle')
 })
+const codexBoundTargetLabel = computed(() => codexBoundTarget.value?.assetName || codexBoundTarget.value?.label || t('ai.codexTargetUnbound'))
+const codexBoundTargetDetail = computed(() => {
+  const target = codexBoundTarget.value
+  if (!target) return t('ai.codexTargetDropHint')
+  const endpoint = target.host ? `${target.username ? `${target.username}@` : ''}${target.host}${target.port ? `:${target.port}` : ''}` : target.kind || ''
+  return [endpoint, target.cwd].filter(Boolean).join(' · ') || target.sessionId || ''
+})
 const voiceButtonTitle = computed(() => {
   if (voiceRecording.value) return '停止语音录制'
   if (voiceTranscribing.value) return '语音转写中'
@@ -1687,6 +1812,25 @@ const conversationTabTooltip = (conversation: ConversationItem) => {
   const summary = conversation.summary.trim()
   return summary && summary !== title ? `${title}\n${summary}` : title
 }
+const currentPanelTarget = computed(() => {
+  const target = currentCodexTargetContext()
+  return target.sessionId && target.kind !== 'unknown' ? target : null
+})
+const codexHostTargets = computed(() => {
+  const hosts = workspace.aiContextCatalog.categories.find((category) => category.id === 'hosts')?.options || []
+  const openedHosts = workspace.aiContextCatalog.openedHosts || []
+  const byId = new Map<string, AiContextOption>()
+  ;[...openedHosts, ...hosts].forEach((host) => {
+    if (host.kind === 'hosts' && !byId.has(host.id)) byId.set(host.id, { ...host })
+  })
+  return [...byId.values()]
+})
+const filteredCodexHostTargets = computed(() => {
+  const keyword = codexTargetQuery.value.trim().toLowerCase()
+  return codexHostTargets.value
+    .filter((host) => !keyword || `${host.label} ${host.detail || ''} ${host.host || ''} ${host.assetName || ''}`.toLowerCase().includes(keyword))
+    .slice(0, 20)
+})
 const ensureConversationTab = (id: string) => {
   if (!id || openConversationTabIds.value.includes(id) || !workspace.conversations.some((conversation) => conversation.id === id)) return
   openConversationTabIds.value = [...openConversationTabIds.value, id]
@@ -1864,8 +2008,7 @@ const ensureCodexTerminal = () => {
   writeAiRuntimeLog('debug', 'renderer.codex-terminal.created')
 }
 
-const currentCodexTargetContext = (): CodexSessionTargetContext => {
-  const panel = workspace.activePanel
+const codexTargetContextFromPanel = (panel?: TerminalPanel | null): CodexSessionTargetContext => {
   const ssh = panel?.sshSession
   if (ssh) {
     return {
@@ -1890,6 +2033,18 @@ const currentCodexTargetContext = (): CodexSessionTargetContext => {
   }
 }
 
+const currentCodexTargetContext = (): CodexSessionTargetContext => codexTargetContextFromPanel(workspace.activePanel)
+
+const currentBoundCodexTarget = () => {
+  const target = codexBoundTarget.value
+  if (!target?.sessionId) return null
+  const panel = workspace.panels.find((item) => item.id === target.panelId || item.sessionId === target.sessionId)
+  if (!panel?.sessionId || panel.status === 'closed' || panel.status === 'error') {
+    return target
+  }
+  return codexTargetContextFromPanel(panel)
+}
+
 const codexTargetSignature = (target: CodexSessionTargetContext) =>
   [
     target.panelId || '',
@@ -1907,7 +2062,8 @@ const codexTargetSignature = (target: CodexSessionTargetContext) =>
 const syncCodexTargetContext = async (options: { force?: boolean } = {}) => {
   if (!window.aiops?.setCodexSessionTarget) return
   if (!codexSessionId.value && !codexStartPromise) return
-  const target = currentCodexTargetContext()
+  const target = currentBoundCodexTarget()
+  if (!target) return
   const signature = codexTargetSignature(target)
   if (!options.force && signature === lastCodexTargetSignature) return
   lastCodexTargetSignature = signature
@@ -1930,8 +2086,113 @@ const syncCodexTargetContext = async (options: { force?: boolean } = {}) => {
   }
 }
 
+const formatCodexTargetEvent = (kind: 'bound' | 'changed' | 'unbound', target?: CodexSessionTargetContext | null, previous?: CodexSessionTargetContext | null) => {
+  if (kind === 'unbound') {
+    return '\n[aiopsterm target unbound]\nThis AI session no longer has a managed terminal bound. Do not run host tools until the user binds a terminal again.\n'
+  }
+  const currentLabel = target?.label || target?.assetName || target?.host || target?.sessionId || 'unknown'
+  const previousLabel = previous?.label || previous?.assetName || previous?.host || previous?.sessionId || ''
+  return [
+    '',
+    kind === 'changed' ? '[aiopsterm target changed]' : '[aiopsterm target bound]',
+    previousLabel ? `Previous target: ${previousLabel}` : '',
+    `Current target: ${currentLabel}`,
+    target?.host ? `Endpoint: ${target.username ? `${target.username}@` : ''}${target.host}${target.port ? `:${target.port}` : ''}` : '',
+    target?.cwd ? `CWD: ${target.cwd}` : '',
+    'Before host-specific actions, call target_context and verify hostname/whoami/pwd.',
+    ''
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+}
+
+const sendCodexTargetEvent = async (kind: 'bound' | 'changed' | 'unbound', target?: CodexSessionTargetContext | null, previous?: CodexSessionTargetContext | null) => {
+  if (!codexSessionId.value || !window.aiops?.writeCodexSession) return
+  await window.aiops.writeCodexSession(codexSessionId.value, formatCodexTargetEvent(kind, target, previous))
+}
+
+const bindCodexTarget = async (target: CodexSessionTargetContext | null, options: { reason?: string; start?: boolean } = {}) => {
+  if (!target?.sessionId || target.kind === 'unknown') {
+    codexError.value = t('ai.codexTargetMissing')
+    return false
+  }
+  const previous = codexBoundTarget.value
+  codexBoundTarget.value = { ...target }
+  codexError.value = ''
+  codexTargetPickerOpen.value = false
+  codexTargetQuery.value = ''
+  lastCodexTargetSignature = ''
+  writeAiRuntimeLog('info', 'renderer.codex-target.bound', {
+    reason: options.reason,
+    sessionId: target.sessionId,
+    panelId: target.panelId,
+    targetKind: target.kind,
+    targetLabel: target.label,
+    previousSessionId: previous?.sessionId
+  })
+  if (codexSessionId.value) {
+    await syncCodexTargetContext({ force: true })
+    await sendCodexTargetEvent(previous ? 'changed' : 'bound', target, previous)
+  } else if (options.start !== false && aiPanelMode.value === 'codex') {
+    await startCodexSession()
+  }
+  return true
+}
+
+const unbindCodexTarget = async () => {
+  const previous = codexBoundTarget.value
+  codexBoundTarget.value = null
+  lastCodexTargetSignature = ''
+  codexTargetPickerOpen.value = false
+  codexTargetQuery.value = ''
+  if (codexSessionId.value && window.aiops?.setCodexSessionTarget) {
+    await window.aiops.setCodexSessionTarget(undefined)
+    await sendCodexTargetEvent('unbound', null, previous)
+  }
+}
+
+const locateCodexBoundTarget = () => {
+  const target = codexBoundTarget.value
+  if (!target?.sessionId) return
+  const panel = workspace.activateTerminalPanel(target.panelId || target.sessionId)
+  if (!panel) {
+    codexError.value = t('ai.codexTargetClosed')
+    return
+  }
+  codexError.value = ''
+}
+
+const closeCodexTargetPicker = () => {
+  codexTargetPickerOpen.value = false
+  codexTargetQuery.value = ''
+}
+
+const toggleCodexTargetPicker = async () => {
+  codexTargetPickerOpen.value = !codexTargetPickerOpen.value
+  if (!codexTargetPickerOpen.value) {
+    codexTargetQuery.value = ''
+    return
+  }
+  await workspace.refreshAiContextCatalog({ hydrateSelection: false })
+}
+
+const bindHostContextToCodex = async (host: AiContextOption) => {
+  const panel = await workspace.openTerminalForAiHostContext(host)
+  if (!panel?.sessionId) {
+    codexError.value = t('ai.codexTargetOpenFailed')
+    return false
+  }
+  return bindCodexTarget(codexTargetContextFromPanel(panel), { reason: 'host-picker' })
+}
+
 const startCodexSession = async () => {
   if (aiPanelMode.value !== 'codex') return
+  const target = currentBoundCodexTarget()
+  if (!target) {
+    codexStatus.value = 'idle'
+    codexError.value = ''
+    return
+  }
   if (codexStartPromise) return codexStartPromise
   codexStartPromise = (async () => {
     await nextTick()
@@ -1951,12 +2212,12 @@ const startCodexSession = async () => {
     const cols = codexTerminal?.cols || 100
     const rows = codexTerminal?.rows || 30
     try {
-      const target = currentCodexTargetContext()
       const session = await window.aiops.createCodexSession({ cols, rows, target })
       codexSessionId.value = session.id
       codexStatus.value = session.lifecycle?.stage === 'ready' ? 'ready' : 'starting'
       subscribeCodexBridge()
       await syncCodexTargetContext({ force: true })
+      await sendCodexTargetEvent('bound', target)
       fitCodexTerminal({ force: true })
       focusCodexTerminal()
       writeAiRuntimeLog('info', 'renderer.codex-session.started', {
@@ -4597,7 +4858,18 @@ type AiopstermDragPayload = {
   contextType?: string
   relPath?: string
   name?: string
+  id?: string
+  kind?: AiContextKind
+  label?: string
+  detail?: string
+  host?: string
+  port?: number
+  username?: string
+  assetName?: string
+  isLocalShell?: boolean
 }
+
+const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
 
 const parseAiopstermDragPayload = (dataTransfer: DataTransfer | null): AiopstermDragPayload | null => {
   if (!dataTransfer) return null
@@ -4623,17 +4895,59 @@ const parseAiopstermDragPayload = (dataTransfer: DataTransfer | null): Aiopsterm
 const isKnowledgeDragPayload = (payload: AiopstermDragPayload | null) =>
   Boolean(payload?.relPath && (payload.contextType === 'doc' || payload.contextType === 'image'))
 
+const isHostDragPayload = (payload: AiopstermDragPayload | null): payload is AiopstermDragPayload & { id: string } =>
+  Boolean(payload?.id && (payload.kind === 'hosts' || payload.contextType === 'host'))
+
+const draggedTerminalPanelId = (dataTransfer: DataTransfer | null) => dataTransfer?.getData(terminalTabDragType) || ''
+
+const canAcceptAiPanelDrop = (event: DragEvent) => {
+  const terminalPanelId = draggedTerminalPanelId(event.dataTransfer)
+  const payload = parseAiopstermDragPayload(event.dataTransfer)
+  if (aiPanelMode.value === 'codex') return Boolean(terminalPanelId || isHostDragPayload(payload))
+  return isKnowledgeDragPayload(payload)
+}
+
 const handleDragEnter = (event: DragEvent) => {
-  if (isKnowledgeDragPayload(parseAiopstermDragPayload(event.dataTransfer))) {
+  if (canAcceptAiPanelDrop(event)) {
     dropActive.value = true
   }
 }
 
 const handleDragOver = (event: DragEvent) => {
-  const payload = parseAiopstermDragPayload(event.dataTransfer)
-  if (!isKnowledgeDragPayload(payload)) return
+  if (!canAcceptAiPanelDrop(event)) return
   dropActive.value = true
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  if (event.dataTransfer) event.dataTransfer.dropEffect = aiPanelMode.value === 'codex' ? 'move' : 'copy'
+}
+
+const handleClassicDrop = async (event: DragEvent) => {
+  const payload = parseAiopstermDragPayload(event.dataTransfer)
+  if (!isKnowledgeDragPayload(payload) || !payload?.relPath) return
+  await workspace.addKnowledgeFilesToChat([payload.relPath])
+  if (!draft.value.trim()) setDraft(`引用知识库：${payload.name || payload.relPath}`)
+  requestAnimationFrame(moveEditableCaretToEnd)
+  closePopups()
+}
+
+const handleCodexDrop = async (event: DragEvent) => {
+  const panelId = draggedTerminalPanelId(event.dataTransfer)
+  if (panelId) {
+    const panel = workspace.panels.find((item) => item.id === panelId)
+    if (panel?.sessionId) await bindCodexTarget(codexTargetContextFromPanel(panel), { reason: 'drop-terminal-tab' })
+    return
+  }
+  const payload = parseAiopstermDragPayload(event.dataTransfer)
+  if (!isHostDragPayload(payload)) return
+  await bindHostContextToCodex({
+    id: payload.id,
+    kind: 'hosts',
+    label: payload.label || payload.host || payload.name || payload.id,
+    detail: payload.detail || payload.name,
+    host: payload.host,
+    port: payload.port,
+    username: payload.username,
+    assetName: payload.assetName || payload.name,
+    isLocalShell: payload.isLocalShell
+  })
 }
 
 const handleDragLeave = (event: DragEvent) => {
@@ -4645,18 +4959,18 @@ const handleDragLeave = (event: DragEvent) => {
 }
 
 const handleDrop = async (event: DragEvent) => {
-  const payload = parseAiopstermDragPayload(event.dataTransfer)
   dropActive.value = false
-  if (!isKnowledgeDragPayload(payload) || !payload?.relPath) return
-  await workspace.addKnowledgeFilesToChat([payload.relPath])
-  if (!draft.value.trim()) setDraft(`引用知识库：${payload.name || payload.relPath}`)
-  requestAnimationFrame(moveEditableCaretToEnd)
-  closePopups()
+  if (aiPanelMode.value === 'codex') {
+    await handleCodexDrop(event)
+    return
+  }
+  await handleClassicDrop(event)
 }
 
 const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFocus?: boolean } = {}) => {
   closeContextPopup({ restoreFocus: options.restoreContextFocus })
   closeCommandPopup({ restoreFocus: options.restoreCommandFocus })
+  closeCodexTargetPicker()
   moreActionsMenuOpen.value = false
   modeMenuOpen.value = false
   closeModelMenu()
@@ -5194,7 +5508,7 @@ watch(
 )
 
 watch(
-  () => codexTargetSignature(currentCodexTargetContext()),
+  () => (codexBoundTarget.value ? codexTargetSignature(currentBoundCodexTarget() || codexBoundTarget.value) : ''),
   () => {
     if (aiPanelMode.value !== 'codex') return
     void syncCodexTargetContext()

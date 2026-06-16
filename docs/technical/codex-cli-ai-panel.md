@@ -96,7 +96,9 @@ echo '<start marker>'; <command>; __aiopsterm_status=$?; echo '<end marker>':$__
 
 and captures output from normal terminal data events until the end marker appears. The wrapper uses `echo` instead of `printf` because some relay shells are restricted and do not provide `printf`.
 
-The selected target is dynamic. The AI panel sends the active workspace terminal context through `codex:set-target` when Codex starts and whenever the active terminal panel changes. The bridge then uses strict selected-target mode: if the current panel has no live terminal session, MCP `run_command`/`target_context` return `NO_TERMINAL_SESSION` instead of falling back to an older SSH or local terminal. Runtime logs use `renderer.codex-target.*` and `codex.target.*` events to show which terminal session is selected and whether it is registered.
+The selected target is explicit per Codex AI session. A new Codex panel starts unbound and does not launch Codex until the user binds a real terminal target. The user can bind the current terminal, drag a terminal tab into the AI panel, or choose a host from the target picker; host picker binding opens a new terminal session first and then binds that session. The bridge uses strict selected-target mode: if the bound terminal is unavailable, MCP `run_command`/`target_context` return `NO_TERMINAL_SESSION` instead of falling back to an older SSH or local terminal. Runtime logs use `renderer.codex-target.*` and `codex.target.*` events to show which terminal session is bound and whether it is registered.
+
+Target changes are also written into the embedded Codex TUI as explicit `[aiopsterm target bound]`, `[aiopsterm target changed]`, or `[aiopsterm target unbound]` events. This keeps the model and the user aligned when the operational target changes and instructs the model to re-check `target_context` before making host-specific claims.
 
 The bridge is deliberately terminal-based for this slice. It lets Codex operate on hosts reached through aiopsterm's existing SSH, relay, and local terminal flows without giving Codex direct access to client-local shell tools.
 

@@ -12254,6 +12254,84 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return panel
   }
 
+  const activateTerminalPanel = (panelIdOrSessionId: string) => {
+    const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
+    if (!target || target.kind !== 'terminal') return null
+    activeModule.value = 'workspace'
+    activePanelId.value = target.id
+    return target
+  }
+
+  const openTerminalForAiHostContext = async (host: AiContextOption) => {
+    const previousActivePanelId = activePanelId.value
+    const panel = createPanel()
+    const panelId = panel.id
+    const label = host.assetName || host.detail || host.label || 'Terminal'
+    renamePanel(panelId, label)
+    replaceTerminalOutput(panelId, '')
+    const discardPendingPanel = () => discardPendingTerminalPanel(panelId, previousActivePanelId)
+    if (!window.aiops?.createTerminal) {
+      discardPendingPanel()
+      setTopNotice('终端启动服务不可用')
+      return null
+    }
+    if (host.isLocalShell || host.id === 'opened-local') {
+      try {
+        const session = await window.aiops.createTerminal({
+          kind: 'local',
+          title: label,
+          cols: 100,
+          rows: 30
+        })
+        const connected = applyLocalTerminalSession(panelId, session)
+        if (!connected) {
+          discardPendingPanel()
+          setTopNotice('本地终端启动失败')
+          return null
+        }
+        renamePanel(panelId, label)
+        activeModule.value = 'workspace'
+        activePanelId.value = panelId
+        return connected
+      } catch (error) {
+        discardPendingPanel()
+        setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+        return null
+      }
+    }
+    const asset = {
+      id: host.id,
+      name: host.assetName || host.detail || host.label,
+      title: host.assetName || host.detail || host.label,
+      host: host.host || host.label,
+      port: host.port,
+      username: host.username
+    }
+    registerSshSession(panelId, asset)
+    try {
+      const session = await window.aiops.createTerminal({
+        kind: 'ssh',
+        assetId: host.id,
+        title: label,
+        cols: 100,
+        rows: 30
+      })
+      const connected = applySshTerminalSession(panelId, session, asset)
+      if (!connected) {
+        discardPendingPanel()
+        setTopNotice('SSH 终端启动失败')
+        return null
+      }
+      activeModule.value = 'workspace'
+      activePanelId.value = panelId
+      return panels.value.find((item) => item.id === panelId) || null
+    } catch (error) {
+      discardPendingPanel()
+      setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')
+      return null
+    }
+  }
+
   const clearPanelSplitState = (panel: TerminalPanel) => {
     panel.split = undefined
     panel.splitSourceId = undefined
@@ -14218,6 +14296,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     hasSplitState,
     unsplitPanel,
     attachPanelToSplit,
+    activateTerminalPanel,
+    openTerminalForAiHostContext,
     registerSshSession,
     applySshTerminalSession,
     applyLocalTerminalSession,

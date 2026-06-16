@@ -621,7 +621,8 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-header h2').text()).toBe('AI')
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
-    expect(window.aiops.createCodexSession).toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
+    expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('切换布局')
     expect(wrapper.text()).not.toContain('local shell')
   })
@@ -697,11 +698,21 @@ describe('AppShell', () => {
 
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
-    expect(window.aiops.createCodexSession).toHaveBeenCalled()
+    expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(window.aiops.listChatConversations).not.toHaveBeenCalled()
     expect(window.aiops.listAiTodoSnapshot).not.toHaveBeenCalled()
     expect(window.aiops.listAiContextCatalog).not.toHaveBeenCalled()
     expect(window.aiops.listAiCommandCatalog).not.toHaveBeenCalled()
+
+    store.activePanel.sessionId = 'terminal-copy'
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(window.aiops.createCodexSession).toHaveBeenCalled()
 
     const codexTerminal = mockXtermInstances.at(-1)!
     codexTerminal.emitSelection('codex copied text')
@@ -762,14 +773,16 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(1)
+    expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(window.localStorage.getItem('aiopsterm.aiPanelMode')).toBe('codex')
   })
 
-  it('syncs the Codex CLI target when the active terminal panel changes', async () => {
+  it('binds Codex CLI to an explicit terminal target and does not follow active panel changes', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
+    const firstPanelId = store.activePanelId
     store.activePanel.sessionId = 'terminal-first'
     store.activePanel.cwd = '/root'
     store.registerSshSession(store.activePanelId, {
@@ -787,6 +800,13 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
     expect(window.aiops.createCodexSession).toHaveBeenCalledWith(
       expect.objectContaining({
         target: expect.objectContaining({
@@ -795,6 +815,7 @@ describe('AppShell', () => {
         })
       })
     )
+    expect(window.aiops.writeCodexSession).toHaveBeenCalledWith('test-codex-session', expect.stringContaining('[aiopsterm target bound]'))
 
     vi.mocked(window.aiops.setCodexSessionTarget).mockClear()
     const second = store.createPanel()
@@ -811,17 +832,51 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(window.aiops.setCodexSessionTarget).toHaveBeenCalledWith(
+    expect(window.aiops.setCodexSessionTarget).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('first-host')
+
+    await wrapper.find('[data-testid="ai-codex-target-locate"]').trigger('click')
+    expect(store.activePanelId).toBe(firstPanelId)
+  })
+
+  it('opens a new terminal when binding Codex CLI from the host picker', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.refreshAiContextCatalog({ hydrateSelection: false })
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    const hostButtons = wrapper.findAll('[data-testid="ai-codex-bind-host"]')
+    expect(hostButtons.length).toBeGreaterThan(1)
+    await hostButtons[1].trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
       expect.objectContaining({
-        panelId: second.id,
-        sessionId: 'terminal-second',
-        label: 'second-host',
-        host: '10.0.0.20',
-        port: 2222,
-        username: 'deploy',
-        cwd: '/srv/app'
+        kind: 'ssh',
+        assetId: expect.any(String)
       })
     )
+    expect(window.aiops.createCodexSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({
+          kind: 'ssh',
+          sessionId: expect.stringContaining('test-session-'),
+          host: expect.any(String)
+        })
+      })
+    )
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).not.toContain('未绑定终端')
   })
 
   it('keeps the SSH keyboard-interactive dialog open on backdrop clicks and submits responses', async () => {

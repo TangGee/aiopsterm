@@ -4631,14 +4631,18 @@ const skillsForAiContextMock = () =>
 
 const aiContextCatalogResultMock = () => {
   const hosts = [
-    { id: 'opened-local', kind: 'hosts' as const, label: '127.0.0.1', detail: 'local shell' },
+    { id: 'opened-local', kind: 'hosts' as const, label: '127.0.0.1', detail: 'local shell', host: '127.0.0.1', username: '', assetName: 'Local terminal', isLocalShell: true },
     ...sortAssetsForAiContextMock(assetStoreMock)
       .filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name))
       .map((asset) => ({
         id: asset.id,
         kind: 'hosts' as const,
         label: asset.host || asset.ip || asset.name,
-        detail: asset.name || asset.title || asset.group_name
+        detail: asset.name || asset.title || asset.group_name,
+        host: asset.host || asset.ip || asset.name,
+        port: Number(asset.port) || 22,
+        username: asset.username || 'root',
+        assetName: asset.name || asset.title || asset.host || asset.ip
       }))
   ]
   const chats = chatHistoryStateMock.conversations.map((conversation) => ({

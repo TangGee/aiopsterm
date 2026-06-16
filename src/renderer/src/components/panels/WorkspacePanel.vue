@@ -2423,8 +2423,23 @@ const handleAssetDragStart = (event: DragEvent, asset: WorkspaceAsset) => {
   dragState.kind = 'asset'
   dragState.assetId = asset.id
   dragState.groupKey = ''
+  const aiContextPayload = {
+    contextType: 'host',
+    id: asset.id,
+    kind: 'hosts',
+    label: asset.host || asset.ip || asset.name,
+    detail: asset.name || asset.title || asset.group_name,
+    host: asset.host || asset.ip || asset.name,
+    port: Number(asset.port) || 22,
+    username: asset.username || 'root',
+    assetName: asset.name || asset.title || asset.host || asset.ip,
+    isLocalShell: Boolean(asset.isLocalShell)
+  }
+  const serialized = JSON.stringify(aiContextPayload)
   event.dataTransfer.effectAllowed = 'move'
   event.dataTransfer.setData('application/x-aiopsterm-workspace-asset', asset.id)
+  event.dataTransfer.setData('application/x-aiopsterm-context', serialized)
+  event.dataTransfer.setData('text/html', `<span data-aiopsterm-context="${encodeURIComponent(serialized)}"></span>`)
   event.dataTransfer.setData('text/plain', asset.name)
 }
 

@@ -111,6 +111,17 @@ export type I18nKey =
   | 'ai.codexClosed'
   | 'ai.codexBridgeMissing'
   | 'ai.codexStartFailed'
+  | 'ai.codexTargetUnbound'
+  | 'ai.codexTargetDropHint'
+  | 'ai.codexTargetBind'
+  | 'ai.codexTargetLocate'
+  | 'ai.codexTargetChange'
+  | 'ai.codexTargetUnbind'
+  | 'ai.codexTargetSearch'
+  | 'ai.codexTargetUseCurrent'
+  | 'ai.codexTargetMissing'
+  | 'ai.codexTargetClosed'
+  | 'ai.codexTargetOpenFailed'
   | 'ai.moreActions'
   | 'ai.history'
   | 'ai.conversationTabs'
@@ -296,6 +307,17 @@ const zhCN: LocaleMessages = {
   'ai.codexClosed': 'Codex CLI 已退出',
   'ai.codexBridgeMissing': 'Codex CLI 桥接服务不可用',
   'ai.codexStartFailed': 'Codex CLI 启动失败',
+  'ai.codexTargetUnbound': '未绑定终端',
+  'ai.codexTargetDropHint': '拖拽主机或终端标签到这里，或搜索主机绑定',
+  'ai.codexTargetBind': '绑定主机/终端',
+  'ai.codexTargetLocate': '定位绑定终端',
+  'ai.codexTargetChange': '更换绑定目标',
+  'ai.codexTargetUnbind': '解除绑定',
+  'ai.codexTargetSearch': '搜索主机',
+  'ai.codexTargetUseCurrent': '绑定当前终端',
+  'ai.codexTargetMissing': '请先绑定一个已连接的终端。',
+  'ai.codexTargetClosed': '绑定终端已关闭，请重新绑定或重新连接。',
+  'ai.codexTargetOpenFailed': '主机终端打开失败，未完成绑定。',
   'ai.moreActions': '更多',
   'ai.history': '会话历史',
   'ai.conversationTabs': 'AI 会话标签',
@@ -480,6 +502,17 @@ const enUS: LocaleMessages = {
   'ai.codexClosed': 'Codex CLI exited',
   'ai.codexBridgeMissing': 'Codex CLI bridge is unavailable',
   'ai.codexStartFailed': 'Failed to start Codex CLI',
+  'ai.codexTargetUnbound': 'No terminal bound',
+  'ai.codexTargetDropHint': 'Drop a host or terminal tab here, or search for a host to bind',
+  'ai.codexTargetBind': 'Bind host/terminal',
+  'ai.codexTargetLocate': 'Locate bound terminal',
+  'ai.codexTargetChange': 'Change bound target',
+  'ai.codexTargetUnbind': 'Unbind target',
+  'ai.codexTargetSearch': 'Search hosts',
+  'ai.codexTargetUseCurrent': 'Bind current terminal',
+  'ai.codexTargetMissing': 'Bind a connected terminal first.',
+  'ai.codexTargetClosed': 'The bound terminal is closed. Rebind or reconnect it.',
+  'ai.codexTargetOpenFailed': 'Failed to open the host terminal, so it was not bound.',
   'ai.moreActions': 'More',
   'ai.history': 'Chat history',
   'ai.conversationTabs': 'AI conversation tabs',

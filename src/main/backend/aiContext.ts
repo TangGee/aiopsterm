@@ -32,14 +32,22 @@ const localHostContext = (): AiContextOption => ({
   id: 'opened-local',
   kind: 'hosts',
   label: '127.0.0.1',
-  detail: 'local shell'
+  detail: 'local shell',
+  host: '127.0.0.1',
+  username: '',
+  assetName: 'Local terminal',
+  isLocalShell: true
 })
 
 const assetToHostContext = (asset: AiopsAssetRecord): AiContextOption => ({
   id: asset.id,
   kind: 'hosts',
   label: asset.host || asset.ip || asset.name,
-  detail: asset.name || asset.title || asset.group_name
+  detail: asset.name || asset.title || asset.group_name,
+  host: asset.host || asset.ip || asset.name,
+  port: Number(asset.port) || 22,
+  username: asset.username || 'root',
+  assetName: asset.name || asset.title || asset.host || asset.ip
 })
 
 const sortAssetsForContext = (assets: AiopsAssetRecord[]) =>

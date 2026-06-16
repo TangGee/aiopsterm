@@ -8738,8 +8738,214 @@ code {
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.ai-codex-shell.drop-active .ai-codex-target-bar {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+
+.ai-codex-target-bar {
+  position: relative;
+  min-width: 0;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  padding: 7px;
+}
+
+.ai-codex-target-bar.missing {
+  border-style: dashed;
+}
+
+.ai-codex-target-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ai-codex-target-main > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.ai-codex-target-main > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ai-codex-target-main strong,
+.ai-codex-target-main span,
+.ai-codex-target-main em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-codex-target-main strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-codex-target-main span,
+.ai-codex-target-main em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.ai-codex-target-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-codex-target-actions button,
+.ai-codex-bind-button,
+.ai-codex-target-list button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.ai-codex-target-actions button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-codex-target-actions button svg,
+.ai-codex-bind-button svg,
+.ai-codex-target-picker label svg,
+.ai-codex-target-list button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ai-codex-target-actions button:hover,
+.ai-codex-bind-button:hover,
+.ai-codex-target-list button:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.ai-codex-bind-button {
+  height: 26px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ai-codex-target-picker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 32;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 8px;
+}
+
+.ai-codex-target-picker label {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  padding: 0 8px;
+}
+
+.ai-codex-target-picker input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ai-codex-target-list {
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.ai-codex-target-list button {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon detail";
+  align-items: center;
+  column-gap: 7px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.ai-codex-target-list button svg {
+  grid-area: icon;
+  color: var(--accent);
+}
+
+.ai-codex-target-list button span {
+  grid-area: label;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ai-codex-target-list button em {
+  grid-area: detail;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.ai-codex-target-empty {
+  padding: 12px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .ai-codex-status {
