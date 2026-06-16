@@ -97,6 +97,8 @@ The selected target is dynamic. The AI panel sends the active workspace terminal
 
 The bridge is deliberately terminal-based for this slice. It lets Codex operate on hosts reached through aiopsterm's existing SSH, relay, and local terminal flows without giving Codex direct access to client-local shell tools.
 
+The embedded Codex xterm owns its own clipboard affordance because it does not share the main workspace terminal context menu. Selecting text and right-clicking copies the selected Codex terminal text; `Ctrl+Shift+C` / `Cmd+Shift+C` also copy the xterm selection without forwarding that key event to the Codex process.
+
 ## Build
 
 Use:

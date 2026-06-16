@@ -310,6 +310,7 @@
         ref="codexTerminalRef"
         class="xterm-host ai-codex-xterm"
         data-testid="ai-codex-xterm"
+        @contextmenu.prevent.stop="copyCodexSelectionFromContextMenu"
       ></div>
       <div
         v-if="codexError"
@@ -1751,6 +1752,36 @@ const focusCodexTerminal = () => {
   codexTerminal?.focus()
 }
 
+const codexCopyShortcut = (event: KeyboardEvent) => {
+  const key = event.key.toLowerCase()
+  if (key !== 'c') return false
+  if (event.shiftKey && (event.ctrlKey || event.metaKey)) return true
+  return event.metaKey && !event.ctrlKey && !event.altKey
+}
+
+const copyCodexSelection = async (source: 'contextmenu' | 'keyboard') => {
+  const selectedText = codexTerminal?.getSelection() || ''
+  if (!selectedText) {
+    workspace.setTopNotice('请先选择 Codex 终端内容')
+    writeAiRuntimeLog('debug', 'renderer.codex.copy.empty', { source })
+    return false
+  }
+  const copied = await copyTextToClipboard(selectedText)
+  workspace.setTopNotice(copied ? 'Codex 终端内容已复制' : 'Codex 终端复制失败')
+  writeAiRuntimeLog(copied ? 'debug' : 'warn', copied ? 'renderer.codex.copy' : 'renderer.codex.copy.failed', {
+    source,
+    bytes: new TextEncoder().encode(selectedText).length
+  })
+  return copied
+}
+
+const copyCodexSelectionFromContextMenu = (event: MouseEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  focusCodexTerminal()
+  void copyCodexSelection('contextmenu')
+}
+
 const disposeCodexSubscriptions = () => {
   codexOffData?.()
   codexOffLifecycle?.()
@@ -1808,6 +1839,13 @@ const ensureCodexTerminal = () => {
   codexFit = new FitAddon()
   codexTerminal.loadAddon(codexFit)
   codexTerminal.open(element)
+  codexTerminal.attachCustomKeyEventHandler((event) => {
+    if (!codexCopyShortcut(event)) return true
+    event.preventDefault()
+    event.stopPropagation()
+    void copyCodexSelection('keyboard')
+    return false
+  })
   codexTerminal.onData((data) => {
     if (!codexSessionId.value || !window.aiops?.writeCodexSession) return
     void window.aiops.writeCodexSession(codexSessionId.value, data)

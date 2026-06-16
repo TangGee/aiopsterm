@@ -14,6 +14,7 @@ type MockXtermInstance = {
   selectionCallbacks: Array<() => void>
   resizeCallbacks: Array<(size: { cols: number; rows: number }) => void>
   dataCallbacks: Array<(data: string) => void>
+  customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined
   open: ReturnType<typeof vi.fn>
   loadAddon: ReturnType<typeof vi.fn>
   write: ReturnType<typeof vi.fn>
@@ -29,8 +30,10 @@ type MockXtermInstance = {
   onSelectionChange: (callback: () => void) => void
   onResize: (callback: (size: { cols: number; rows: number }) => void) => void
   onData: (callback: (data: string) => void) => { dispose: ReturnType<typeof vi.fn> }
+  attachCustomKeyEventHandler: (callback: (event: KeyboardEvent) => boolean) => void
   emitSelection: (text: string, position?: MockSelectionPosition) => void
   emitData: (data: string) => void
+  emitKeyEvent: (event: KeyboardEvent) => boolean
 }
 
 const { mockXtermInstances, monacoMocks } = vi.hoisted(() => ({
@@ -82,6 +85,7 @@ vi.mock('@xterm/xterm', () => ({
       selectionCallbacks: [],
       resizeCallbacks: [],
       dataCallbacks: [],
+      customKeyEventHandler: undefined,
       open: vi.fn(),
       loadAddon: vi.fn(),
       write: vi.fn(),
@@ -113,6 +117,9 @@ vi.mock('@xterm/xterm', () => ({
         this.dataCallbacks.push(callback)
         return { dispose: vi.fn() }
       },
+      attachCustomKeyEventHandler(callback: (event: KeyboardEvent) => boolean) {
+        this.customKeyEventHandler = callback
+      },
       emitSelection(text: string, position = { start: { x: 0, y: 4 }, end: { x: text.length, y: 4 } }) {
         this.selectedText = text
         this.selectionPosition = position
@@ -120,6 +127,9 @@ vi.mock('@xterm/xterm', () => ({
       },
       emitData(data: string) {
         this.dataCallbacks.forEach((callback) => callback(data))
+      },
+      emitKeyEvent(event: KeyboardEvent) {
+        return this.customKeyEventHandler ? this.customKeyEventHandler(event) : true
       }
     }
     mockXtermInstances.push(instance)
@@ -671,6 +681,7 @@ describe('AppShell', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
+    mockXtermInstances.length = 0
     await enableCatalogModelOptions(store)
     vi.mocked(window.aiops.listChatConversations).mockClear()
     vi.mocked(window.aiops.listAiTodoSnapshot).mockClear()
@@ -691,6 +702,30 @@ describe('AppShell', () => {
     expect(window.aiops.listAiTodoSnapshot).not.toHaveBeenCalled()
     expect(window.aiops.listAiContextCatalog).not.toHaveBeenCalled()
     expect(window.aiops.listAiCommandCatalog).not.toHaveBeenCalled()
+
+    const codexTerminal = mockXtermInstances.at(-1)!
+    codexTerminal.emitSelection('codex copied text')
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await wrapper.find('[data-testid="ai-codex-xterm"]').trigger('contextmenu')
+    await flushPromises()
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex copied text')
+    expect(store.topNotice).toBe('Codex 终端内容已复制')
+
+    codexTerminal.emitSelection('codex shortcut text')
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    const copyKeyEvent = new KeyboardEvent('keydown', {
+      key: 'c',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    })
+    const allowTerminalInput = codexTerminal.emitKeyEvent(copyKeyEvent)
+    await flushPromises()
+    expect(allowTerminalInput).toBe(false)
+    expect(copyKeyEvent.defaultPrevented).toBe(true)
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex shortcut text')
+    expect(window.aiops.writeCodexSession).not.toHaveBeenCalledWith(expect.any(String), 'codex shortcut text')
 
     await wrapper.find('[data-testid="ai-mode-classic"]').trigger('click')
     await flushPromises()
