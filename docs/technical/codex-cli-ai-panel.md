@@ -5,6 +5,8 @@ The right AI panel now has two modes:
 - `Codex CLI`: embeds the copied Codex CLI/TUI as a PTY-backed xterm session.
 - `Classic Chat`: keeps the existing aiopsterm chat and command-card UI for later reuse.
 
+The selected AI panel mode is persisted in renderer storage. The default remains `Codex CLI`, but when the user leaves the panel in `Classic Chat`, a later mount restores Classic Chat and does not start the Codex PTY in the background. Switching back to `Codex CLI` starts or resumes the embedded TUI on demand.
+
 ## Runtime Boundary
 
 aiopsterm starts Codex through Electron main process IPC, not from renderer code.
@@ -99,8 +101,7 @@ The script builds the Codex CLI binary when missing, builds aiopsterm, then star
 Current slice verification:
 
 - `npm run typecheck`
-- `npx vitest run tests/codex-cli-backend.test.ts tests/codex-terminal-bridge.test.ts tests/local-terminal-backend.test.ts`
-- `npx vitest run tests/app-shell.test.ts`
+- `npx vitest run tests/app-shell.test.ts tests/codex-cli-backend.test.ts tests/codex-terminal-bridge.test.ts`
 - `npm run build`
 
 Full `npm test` currently reaches 779 passing tests and 2 skipped tests, with 17 failures isolated to SQLite-backed tests because the local `better-sqlite3` native module was built for `NODE_MODULE_VERSION 125` while the Vitest Node runtime requires `NODE_MODULE_VERSION 115`. Rebuild the native dependency for the active Node runtime before using full-suite SQLite results as a regression signal.

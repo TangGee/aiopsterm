@@ -567,6 +567,7 @@ describe('AppShell', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    window.localStorage.removeItem('aiopsterm.aiPanelMode')
     restoreMockVoiceRecorder = installMockVoiceRecorder()
     ;(globalThis as any).__resetAssetStoreMock?.()
     ;(globalThis as any).__resetKubernetesCatalogMock?.()
@@ -639,6 +640,32 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-mode-classic"]').classes()).toContain('active')
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
+  })
+
+  it('does not start Codex in the background when the persisted AI panel mode is Classic Chat', async () => {
+    window.localStorage.setItem('aiopsterm.aiPanelMode', 'classic')
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await enableCatalogModelOptions(store)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-mode-classic"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
+    expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+
+    await wrapper.find('[data-testid="ai-mode-codex"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.getItem('aiopsterm.aiPanelMode')).toBe('codex')
   })
 
   it('syncs the Codex CLI target when the active terminal panel changes', async () => {

@@ -1533,8 +1533,24 @@ const aiContextCategoryIcons: Record<AiContextKind, Component> = {
   skills: Bot,
   chats: Search
 }
+const aiPanelModeStorageKey = 'aiopsterm.aiPanelMode'
+const readStoredAiPanelMode = (): AiPanelMode => {
+  try {
+    const value = window.localStorage?.getItem(aiPanelModeStorageKey)
+    return value === 'classic' || value === 'codex' ? value : 'codex'
+  } catch {
+    return 'codex'
+  }
+}
+const storeAiPanelMode = (mode: AiPanelMode) => {
+  try {
+    window.localStorage?.setItem(aiPanelModeStorageKey, mode)
+  } catch {
+    /* Storage can be unavailable in hardened browser contexts. */
+  }
+}
 const draft = ref('')
-const aiPanelMode = ref<AiPanelMode>('codex')
+const aiPanelMode = ref<AiPanelMode>(readStoredAiPanelMode())
 const imageInputParts = ref<AiImageContentPart[]>([])
 const fileInputParts = ref<AiDocChipContentPart[]>([])
 const chatScrollRef = ref<HTMLElement | null>(null)
@@ -1895,6 +1911,7 @@ const syncCodexTargetContext = async (options: { force?: boolean } = {}) => {
 }
 
 const startCodexSession = async () => {
+  if (aiPanelMode.value !== 'codex') return
   if (codexStartPromise) return codexStartPromise
   codexStartPromise = (async () => {
     await nextTick()
@@ -1965,7 +1982,12 @@ const restartCodexSession = async () => {
 }
 
 const selectAiPanelMode = (mode: AiPanelMode) => {
+  if (aiPanelMode.value === mode) {
+    if (mode === 'codex') void startCodexSession()
+    return
+  }
   aiPanelMode.value = mode
+  storeAiPanelMode(mode)
   closePopups()
   if (mode === 'classic') {
     loadClassicChatData()
@@ -5219,7 +5241,7 @@ watch(
 
 onMounted(() => {
   if (aiPanelMode.value === 'classic') loadClassicChatData()
-  void startCodexSession()
+  if (aiPanelMode.value === 'codex') void startCodexSession()
 })
 
 onBeforeUnmount(() => {
