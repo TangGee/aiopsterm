@@ -7159,6 +7159,14 @@ Object.defineProperty(window, 'aiops', {
         runtimeKind: 'pty' as const
       }
     })),
+    setCodexSessionTarget: vi.fn(async (target?: { sessionId?: string }) => ({
+      ok: true,
+      data: {
+        sessionId: target?.sessionId,
+        target,
+        registered: Boolean(target?.sessionId)
+      }
+    })),
     writeCodexSession: vi.fn(async (id: string, data: string) => ({
       ok: true,
       data: {

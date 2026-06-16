@@ -9,7 +9,7 @@ The right AI panel now has two modes:
 
 aiopsterm starts Codex through Electron main process IPC, not from renderer code.
 
-- Main IPC channels are `codex:create`, `codex:write`, `codex:resize`, and `codex:kill`.
+- Main IPC channels are `codex:create`, `codex:set-target`, `codex:write`, `codex:resize`, and `codex:kill`.
 - Renderer events are streamed through `codex:data`, `codex:lifecycle`, and `codex:exit`.
 - The Codex process runs with `CODEX_HOME=<app userData>/codex-agent`.
 - aiopsterm writes `<app userData>/codex-agent/config.toml` before each Codex session starts.
@@ -69,6 +69,8 @@ echo '<start marker>'; <command>; __aiopsterm_status=$?; echo '<end marker>':$__
 ```
 
 and captures output from normal terminal data events until the end marker appears. The wrapper uses `echo` instead of `printf` because some relay shells are restricted and do not provide `printf`.
+
+The selected target is dynamic. The AI panel sends the active workspace terminal context through `codex:set-target` when Codex starts and whenever the active terminal panel changes. The bridge then uses strict selected-target mode: if the current panel has no live terminal session, MCP `run_command`/`target_context` return `NO_TERMINAL_SESSION` instead of falling back to an older SSH or local terminal. Runtime logs use `renderer.codex-target.*` and `codex.target.*` events to show which terminal session is selected and whether it is registered.
 
 The bridge is deliberately terminal-based for this slice. It lets Codex operate on hosts reached through aiopsterm's existing SSH, relay, and local terminal flows without giving Codex direct access to client-local shell tools.
 

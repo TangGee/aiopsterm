@@ -40,6 +40,12 @@ type CodexBridgeResponse = {
   }
 }
 
+export type CodexTerminalBridgeTargetUpdateResult = {
+  sessionId?: string
+  target?: CodexSessionTargetContext
+  registered: boolean
+}
+
 type CodexTerminalBridgeRequest = {
   id?: string
   method?: string
@@ -52,6 +58,7 @@ const pendingCommands = new Map<string, PendingCommand>()
 let server: Server | null = null
 let socketPath = ''
 let preferredSessionId = ''
+let preferredSessionStrict = false
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -68,12 +75,40 @@ const bridgeSocketPathFor = (userDataPath: string) => {
 
 export const getCodexTerminalBridgeSocketPath = () => socketPath
 
-export const setCodexTerminalBridgePreferredSession = (sessionId?: string) => {
+export const setCodexTerminalBridgePreferredSession = (sessionId?: string, options: { strict?: boolean } = {}) => {
   preferredSessionId = cleanText(sessionId)
+  preferredSessionStrict = Boolean(options.strict)
 }
 
 export const registerCodexTerminalBridgeSession = (session: CodexTerminalBridgeSession) => {
   sessions.set(session.id, session)
+}
+
+export const updateCodexTerminalBridgeSessionTarget = (target?: CodexSessionTargetContext | null): CodexTerminalBridgeTargetUpdateResult => {
+  const sessionId = cleanText(target?.sessionId)
+  setCodexTerminalBridgePreferredSession(sessionId, { strict: true })
+  if (!sessionId) {
+    return {
+      registered: false,
+      ...(target ? { target } : {})
+    }
+  }
+  const session = sessions.get(sessionId)
+  if (!session) {
+    return {
+      sessionId,
+      registered: false,
+      ...(target ? { target } : {})
+    }
+  }
+  if (target) session.target = { ...(session.target || {}), ...target, sessionId }
+  if (target?.cwd) session.cwd = target.cwd
+  if (target?.host) session.host = target.host
+  return {
+    sessionId,
+    target: targetContextForSession(session),
+    registered: true
+  }
 }
 
 export const unregisterCodexTerminalBridgeSession = (id: string) => {
@@ -165,7 +200,11 @@ const targetContextForSession = (session: CodexTerminalBridgeSession): CodexSess
 const resolveTargetSession = (params: Record<string, unknown>): CodexTerminalBridgeSession | null => {
   const requestedSessionId = cleanText(params.sessionId)
   if (requestedSessionId) return sessions.get(requestedSessionId) || null
-  if (preferredSessionId && sessions.has(preferredSessionId)) return sessions.get(preferredSessionId) || null
+  if (preferredSessionId) {
+    const preferred = sessions.get(preferredSessionId) || null
+    if (preferred || preferredSessionStrict) return preferred
+  }
+  if (preferredSessionStrict) return null
   const candidates = [...sessions.values()].filter((session) => session.kind === 'ssh')
   return candidates[candidates.length - 1] || [...sessions.values()][0] || null
 }
@@ -335,6 +374,7 @@ export const closeCodexTerminalBridgeServer = () => {
   pendingCommands.clear()
   sessions.clear()
   preferredSessionId = ''
+  preferredSessionStrict = false
   server?.close()
   server = null
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })

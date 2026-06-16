@@ -641,6 +641,64 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
   })
 
+  it('syncs the Codex CLI target when the active terminal panel changes', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'terminal-first'
+    store.activePanel.cwd = '/root'
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-first',
+      name: 'first-host',
+      host: '10.0.0.10',
+      port: 22,
+      username: 'root'
+    })
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.createCodexSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({
+          sessionId: 'terminal-first',
+          host: '10.0.0.10'
+        })
+      })
+    )
+
+    vi.mocked(window.aiops.setCodexSessionTarget).mockClear()
+    const second = store.createPanel()
+    second.sessionId = 'terminal-second'
+    second.cwd = '/srv/app'
+    store.registerSshSession(second.id, {
+      id: 'asset-second',
+      name: 'second-host',
+      host: '10.0.0.20',
+      port: 2222,
+      username: 'deploy'
+    })
+    store.activePanelId = second.id
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.setCodexSessionTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        panelId: second.id,
+        sessionId: 'terminal-second',
+        label: 'second-host',
+        host: '10.0.0.20',
+        port: 2222,
+        username: 'deploy',
+        cwd: '/srv/app'
+      })
+    )
+  })
+
   it('keeps the SSH keyboard-interactive dialog open on backdrop clicks and submits responses', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

@@ -47,7 +47,7 @@ import {
   ensureCodexTerminalBridgeServer,
   getCodexTerminalBridgeSocketPath,
   registerCodexTerminalBridgeSession,
-  setCodexTerminalBridgePreferredSession,
+  updateCodexTerminalBridgeSessionTarget,
   unregisterCodexTerminalBridgeSession
 } from './backend/codexTerminalBridge'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
@@ -283,6 +283,7 @@ import type {
   AiChatResponseInput,
   AiModelCatalogInput,
   CodexSessionCreateOptions,
+  CodexSessionTargetContext,
   AppUpdateProgressEvent,
   AiChatConversationUpdateInput,
   AiopsAssetInput,
@@ -3783,7 +3784,14 @@ const registerIpc = () => {
     })
     try {
       await ensureCodexTerminalBridgeServer(app.getPath('userData'))
-      setCodexTerminalBridgePreferredSession(options.target?.sessionId)
+      const targetUpdate = updateCodexTerminalBridgeSessionTarget(options.target)
+      logRuntimeEvent(targetUpdate.registered ? 'info' : 'warn', targetUpdate.registered ? 'codex.target.initialized' : 'codex.target.initial-missing', {
+        id,
+        sessionId: targetUpdate.sessionId,
+        targetKind: targetUpdate.target?.kind || options.target?.kind,
+        targetLabel: targetUpdate.target?.label || options.target?.label,
+        registered: targetUpdate.registered
+      })
       const session = await createCodexSession(id, options, {
         lifecycle: (lifecycle) => {
           logRuntimeEvent(lifecycle.stage === 'error' ? 'error' : 'info', 'codex.lifecycle', {
@@ -3828,6 +3836,18 @@ const registerIpc = () => {
       })
       throw error
     }
+  })
+
+  ipcMain.handle('codex:set-target', (_event, target: CodexSessionTargetContext | null | undefined) => {
+    const targetContext = target && typeof target === 'object' && !Array.isArray(target) ? target : undefined
+    const result = updateCodexTerminalBridgeSessionTarget(targetContext)
+    logRuntimeEvent(result.registered ? 'debug' : 'warn', result.registered ? 'codex.target.updated' : 'codex.target.unavailable', {
+      sessionId: result.sessionId || targetContext?.sessionId,
+      targetKind: result.target?.kind || targetContext?.kind,
+      targetLabel: result.target?.label || targetContext?.label,
+      registered: result.registered
+    })
+    return { ok: true, data: result }
   })
 
   ipcMain.handle('codex:write', (_event, id: string, data: string) => {

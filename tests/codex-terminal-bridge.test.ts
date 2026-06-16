@@ -205,6 +205,172 @@ describe('Codex terminal bridge runtime', () => {
     }
   })
 
+  it('updates the selected terminal target after a Codex session has started', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const firstWrites: string[] = []
+    const secondWrites: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-old',
+        kind: 'ssh',
+        host: 'old.internal',
+        cwd: '/root',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-old',
+          label: 'old.internal',
+          host: 'old.internal',
+          username: 'root',
+          cwd: '/root'
+        },
+        write: (data: string | Buffer) => firstWrites.push(String(data))
+      })
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-new',
+        kind: 'ssh',
+        host: 'new.internal',
+        cwd: '/srv',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-new',
+          label: 'new.internal',
+          host: 'new.internal',
+          username: 'deploy',
+          cwd: '/srv'
+        },
+        write: (data: string | Buffer) => secondWrites.push(String(data))
+      })
+      expect(
+        bridge.updateCodexTerminalBridgeSessionTarget({
+          kind: 'ssh',
+          sessionId: 'terminal-old',
+          label: 'old.internal',
+          host: 'old.internal',
+          username: 'root',
+          cwd: '/root'
+        })
+      ).toEqual(expect.objectContaining({ registered: true, sessionId: 'terminal-old' }))
+      expect(
+        bridge.updateCodexTerminalBridgeSessionTarget({
+          kind: 'ssh',
+          sessionId: 'terminal-new',
+          label: 'selected-new',
+          host: 'new.internal',
+          username: 'deploy',
+          cwd: '/opt/app'
+        })
+      ).toEqual(
+        expect.objectContaining({
+          registered: true,
+          sessionId: 'terminal-new',
+          target: expect.objectContaining({ label: 'selected-new', cwd: '/opt/app' })
+        })
+      )
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const responsePromise = socketRequest(socketPath, {
+        id: 'request-switch-target',
+        method: 'run_command',
+        params: {
+          command: 'hostname',
+          commandId: 'cmd-switch-target',
+          timeoutMs: 5000
+        }
+      })
+      await waitFor(() => secondWrites.length === 1)
+      expect(firstWrites).toEqual([])
+      expect(secondWrites[0]).toContain('hostname')
+
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-new',
+        [
+          "__AIOPSTERM_CODEX_START_cmd-switch-target__\n",
+          'new.internal\n',
+          "__AIOPSTERM_CODEX_END_cmd-switch-target__:0\n"
+        ].join('')
+      )
+      const response = await responsePromise
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-switch-target',
+          ok: true,
+          target: expect.objectContaining({
+            sessionId: 'terminal-new',
+            label: 'selected-new',
+            host: 'new.internal',
+            cwd: '/opt/app'
+          }),
+          data: expect.objectContaining({
+            command: 'hostname',
+            output: 'new.internal',
+            exitCode: 0
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not fall back to another terminal when the selected Codex target has no live session', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-live',
+        kind: 'ssh',
+        host: 'live.internal',
+        cwd: '/root',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-live',
+          label: 'live.internal',
+          host: 'live.internal',
+          username: 'root',
+          cwd: '/root'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      expect(
+        bridge.updateCodexTerminalBridgeSessionTarget({
+          kind: 'unknown',
+          panelId: 'panel-welcome',
+          label: 'Welcome'
+        })
+      ).toEqual(expect.objectContaining({ registered: false }))
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const response = await socketRequest(socketPath, {
+        id: 'request-no-target',
+        method: 'run_command',
+        params: {
+          command: 'pwd',
+          commandId: 'cmd-no-target',
+          timeoutMs: 5000
+        }
+      })
+
+      expect(writes).toEqual([])
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-no-target',
+          ok: false,
+          errorCode: 'NO_TERMINAL_SESSION'
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('returns target context without running local commands', async () => {
     const bridge = await loadBridge()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))

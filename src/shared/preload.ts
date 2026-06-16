@@ -114,6 +114,12 @@ export type CodexSessionKillResult = AiopsMutationResult<{
   id: string
 }>
 
+export type CodexSessionTargetUpdateResult = AiopsMutationResult<{
+  sessionId?: string
+  target?: CodexSessionTargetContext
+  registered: boolean
+}>
+
 export type TerminalWriteResult = AiopsMutationResult<{
   id: string
   bytes: number
@@ -3208,6 +3214,7 @@ export type AiopsPreloadApi = {
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
   createCodexSession: (options?: CodexSessionCreateOptions) => Promise<CodexSessionInfo>
+  setCodexSessionTarget: (target?: CodexSessionTargetContext) => Promise<CodexSessionTargetUpdateResult>
   writeCodexSession: (id: string, data: string) => Promise<CodexSessionWriteResult>
   resizeCodexSession: (id: string, cols: number, rows: number) => Promise<void>
   killCodexSession: (id: string) => Promise<CodexSessionKillResult>

@@ -1611,6 +1611,7 @@ let codexOffExit: (() => void) | null = null
 let codexStartPromise: Promise<void> | null = null
 let codexLastFitCols = 0
 let codexLastFitRows = 0
+let lastCodexTargetSignature = ''
 let classicChatDataLoaded = false
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
@@ -1853,6 +1854,46 @@ const currentCodexTargetContext = (): CodexSessionTargetContext => {
   }
 }
 
+const codexTargetSignature = (target: CodexSessionTargetContext) =>
+  [
+    target.panelId || '',
+    target.sessionId || '',
+    target.kind || '',
+    target.label || '',
+    target.host || '',
+    target.port || '',
+    target.username || '',
+    target.assetId || '',
+    target.assetName || '',
+    target.cwd || ''
+  ].join('\u001f')
+
+const syncCodexTargetContext = async (options: { force?: boolean } = {}) => {
+  if (!window.aiops?.setCodexSessionTarget) return
+  if (!codexSessionId.value && !codexStartPromise) return
+  const target = currentCodexTargetContext()
+  const signature = codexTargetSignature(target)
+  if (!options.force && signature === lastCodexTargetSignature) return
+  lastCodexTargetSignature = signature
+  try {
+    const result = await window.aiops.setCodexSessionTarget(target)
+    writeAiRuntimeLog(result?.data?.registered ? 'debug' : 'warn', result?.data?.registered ? 'renderer.codex-target.updated' : 'renderer.codex-target.unavailable', {
+      sessionId: codexSessionId.value,
+      targetSessionId: target.sessionId,
+      targetKind: target.kind,
+      targetLabel: target.label,
+      registered: Boolean(result?.data?.registered)
+    })
+  } catch (error) {
+    lastCodexTargetSignature = ''
+    writeAiRuntimeLog('warn', 'renderer.codex-target.update-failed', {
+      sessionId: codexSessionId.value,
+      targetSessionId: target.sessionId,
+      message: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
 const startCodexSession = async () => {
   if (codexStartPromise) return codexStartPromise
   codexStartPromise = (async () => {
@@ -1863,7 +1904,10 @@ const startCodexSession = async () => {
       codexError.value = t('ai.codexBridgeMissing')
       return
     }
-    if (codexSessionId.value && codexStatus.value === 'ready') return
+    if (codexSessionId.value && codexStatus.value === 'ready') {
+      await syncCodexTargetContext({ force: true })
+      return
+    }
     codexStatus.value = 'starting'
     codexError.value = ''
     fitCodexTerminal({ force: true })
@@ -1875,6 +1919,7 @@ const startCodexSession = async () => {
       codexSessionId.value = session.id
       codexStatus.value = session.lifecycle?.stage === 'ready' ? 'ready' : 'starting'
       subscribeCodexBridge()
+      await syncCodexTargetContext({ force: true })
       fitCodexTerminal({ force: true })
       focusCodexTerminal()
       writeAiRuntimeLog('info', 'renderer.codex-session.started', {
@@ -1912,6 +1957,7 @@ const stopCodexSession = async () => {
 const restartCodexSession = async () => {
   await stopCodexSession()
   codexSessionId.value = ''
+  lastCodexTargetSignature = ''
   codexStatus.value = 'idle'
   codexError.value = ''
   codexTerminal?.clear()
@@ -5103,6 +5149,14 @@ watch(
     runChatSearch()
   },
   { immediate: true }
+)
+
+watch(
+  () => codexTargetSignature(currentCodexTargetContext()),
+  () => {
+    if (aiPanelMode.value !== 'codex') return
+    void syncCodexTargetContext()
+  }
 )
 
 watch(

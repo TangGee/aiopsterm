@@ -220,6 +220,7 @@ const api: AiopsPreloadApi = {
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.invoke('terminal:kill', id),
   createCodexSession: (options) => ipcRenderer.invoke('codex:create', options),
+  setCodexSessionTarget: (target) => ipcRenderer.invoke('codex:set-target', target),
   writeCodexSession: (id: string, data: string) => ipcRenderer.invoke('codex:write', id, data),
   resizeCodexSession: (id: string, cols: number, rows: number) => ipcRenderer.invoke('codex:resize', id, cols, rows),
   killCodexSession: (id: string) => ipcRenderer.invoke('codex:kill', id),
