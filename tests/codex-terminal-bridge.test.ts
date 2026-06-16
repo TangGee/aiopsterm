@@ -444,6 +444,39 @@ describe('Codex terminal bridge runtime', () => {
 
       const listResponse = await mcp.request({ jsonrpc: '2.0', id: 0, method: 'tools/list' })
       expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual(['run_command', 'target_context'])
+      const runCommandTool = listResponse.result?.tools?.find((tool) => tool.name === 'run_command')
+      const targetContextTool = listResponse.result?.tools?.find((tool) => tool.name === 'target_context')
+      expect(runCommandTool).toEqual(
+        expect.objectContaining({
+          description: expect.stringContaining('managed host'),
+          annotations: expect.objectContaining({
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true
+          }),
+          inputSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              command: expect.objectContaining({
+                description: expect.stringContaining('never runs in the local Codex client process')
+              }),
+              sessionId: expect.objectContaining({
+                description: expect.stringContaining('fails if the selected terminal is not connected')
+              })
+            })
+          })
+        })
+      )
+      expect(targetContextTool).toEqual(
+        expect.objectContaining({
+          annotations: expect.objectContaining({
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false
+          })
+        })
+      )
 
       const callPromise = mcp.request({
         jsonrpc: '2.0',

@@ -63,7 +63,8 @@ const runCommandSchema = {
   properties: {
     command: {
       type: 'string',
-      description: 'Shell command to run in the selected aiopsterm terminal session.'
+      description:
+        'Non-interactive shell command to run in the currently selected aiopsterm terminal session on the managed host. This never runs in the local Codex client process.'
     },
     timeoutMs: {
       type: 'number',
@@ -71,7 +72,8 @@ const runCommandSchema = {
     },
     sessionId: {
       type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to use the selected/current session.'
+      description:
+        'Optional aiopsterm terminal session id. Omit to use the current selected terminal. The call fails if the selected terminal is not connected.'
     }
   },
   required: ['command'],
@@ -83,7 +85,7 @@ const targetContextSchema = {
   properties: {
     sessionId: {
       type: 'string',
-      description: 'Optional aiopsterm terminal session id. Omit to inspect the selected/current session.'
+      description: 'Optional aiopsterm terminal session id. Omit to inspect the current selected terminal.'
     }
   },
   additionalProperties: false
@@ -94,10 +96,13 @@ const tools = [
     name: 'run_command',
     title: 'Run command in aiopsterm terminal',
     description:
-      'Run a command in the selected real aiopsterm terminal session. This is the only command tool that targets the managed host instead of the local Codex client process.',
+      'Run a bounded, non-interactive command in the selected real aiopsterm terminal session on the managed host. Use target_context first when the target is ambiguous. This is the only command tool that targets the managed host instead of the local Codex client process.',
     inputSchema: runCommandSchema,
     annotations: {
-      readOnlyHint: false
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true
     }
   },
   {
@@ -106,7 +111,10 @@ const tools = [
     description: 'Return the currently selected aiopsterm terminal target context.',
     inputSchema: targetContextSchema,
     annotations: {
-      readOnlyHint: true
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
     }
   }
 ]

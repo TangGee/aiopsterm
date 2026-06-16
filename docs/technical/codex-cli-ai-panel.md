@@ -43,8 +43,15 @@ Codex local command tools are disabled for the embedded aiopsterm mode. Host ope
 
 Enabled tools:
 
-- `mcp__aiopsterm_remote__run_command`: writes a marker-wrapped command to the selected real aiopsterm terminal session and returns captured output plus exit code.
-- `mcp__aiopsterm_remote__target_context`: returns the selected terminal target context without running a command.
+- `mcp__aiopsterm_remote__run_command`: writes a marker-wrapped, non-interactive command to the selected real aiopsterm terminal session and returns captured output plus exit code. Codex config sets this tool to `approval_mode = "prompt"` so remote execution stays approval-gated.
+- `mcp__aiopsterm_remote__target_context`: returns the selected terminal target context without running a command. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
+
+Prompt boundaries now explicitly require the embedded agent to:
+
+- Treat the local Codex process, cwd, filesystem, and project docs as client implementation details, not host state.
+- Call `target_context` before the first command when the target is ambiguous or may have changed.
+- Continue in analysis/Q&A mode when no live terminal is selected instead of fabricating output.
+- Prefer read-only diagnostics, require explicit confirmation for risky host changes, and stop without bypass suggestions when aiopsterm reports a security block.
 
 Disabled or intentionally unavailable:
 
@@ -54,8 +61,8 @@ Disabled or intentionally unavailable:
 
 Deferred toolset work:
 
-- Add richer command approval and risk classification for remote operations.
 - Add interactive command/session streaming semantics beyond marker-delimited non-interactive commands.
+- Add separate structured file/search tools for remote host inspection instead of asking the model to compose all search operations as shell commands.
 - Evaluate whether future app-server integration should replace the PTY/TUI embedding while keeping the same aiopsterm MCP boundary.
 
 ## Terminal Bridge
