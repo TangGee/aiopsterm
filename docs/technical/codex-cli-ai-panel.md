@@ -16,6 +16,7 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - The Codex process runs with `CODEX_HOME=<app userData>/codex-agent`.
 - aiopsterm writes `<app userData>/codex-agent/config.toml` before each Codex session starts.
 - The default development binary is `codex/codex-rs/target/release/codex`.
+- Packaged builds copy only the built Codex CLI executable into `resources/codex/codex` (or the platform executable name), not the Codex source tree.
 - `AIOPSTERM_CODEX_BIN` can point at a different binary for local experiments.
 
 This keeps Codex persistence out of project `.codex` and the default user `~/.codex` directory.
@@ -94,7 +95,7 @@ Use:
 scripts/build-and-start.sh
 ```
 
-The script builds the Codex CLI binary when missing, builds aiopsterm, then starts Electron preview. Use `--skip-codex` only when `codex/codex-rs/target/release/codex` already exists or `AIOPSTERM_CODEX_BIN` is set.
+The script builds the Codex CLI binary when missing, builds aiopsterm, then starts Electron preview. Use `--skip-codex` only when `codex/codex-rs/target/release/codex` already exists or `AIOPSTERM_CODEX_BIN` is set. Package scripts run `npm run build:codex` before electron-builder, and the afterPack hook copies the resulting executable into packaged resources.
 
 ## Verification
 
@@ -102,6 +103,8 @@ Current slice verification:
 
 - `npm run typecheck`
 - `npx vitest run tests/app-shell.test.ts tests/codex-cli-backend.test.ts tests/codex-terminal-bridge.test.ts`
+- `npx vitest run tests/package-config.test.ts`
+- `npm run audit:package-config`
 - `npm run build`
 
 Full `npm test` currently reaches 779 passing tests and 2 skipped tests, with 17 failures isolated to SQLite-backed tests because the local `better-sqlite3` native module was built for `NODE_MODULE_VERSION 125` while the Vitest Node runtime requires `NODE_MODULE_VERSION 115`. Rebuild the native dependency for the active Node runtime before using full-suite SQLite results as a regression signal.

@@ -82,24 +82,10 @@ preview_pids() {
 cd "${APP_ROOT}"
 
 codex_bin="${AIOPSTERM_CODEX_BIN:-${APP_ROOT}/codex/codex-rs/target/release/codex}"
-if [[ -n "${AIOPSTERM_CODEX_BIN:-}" ]]; then
-  if [[ ! -x "${codex_bin}" ]]; then
-    echo "[aiopsterm] AIOPSTERM_CODEX_BIN is not executable: ${codex_bin}" >&2
-    exit 1
-  fi
-  echo "[aiopsterm] using Codex CLI binary from AIOPSTERM_CODEX_BIN: ${codex_bin}"
-elif ((skip_codex)); then
+if ((skip_codex)); then
   echo "[aiopsterm] skipping Codex CLI build"
-elif [[ -d "${APP_ROOT}/codex/codex-rs" ]]; then
-  if [[ -x "${codex_bin}" ]]; then
-    echo "[aiopsterm] Codex CLI binary exists: ${codex_bin}"
-  else
-    echo "[aiopsterm] building Codex CLI binary"
-    (cd "${APP_ROOT}/codex/codex-rs" && cargo build --release -p codex-cli)
-  fi
 else
-  echo "[aiopsterm] Codex source directory is missing: ${APP_ROOT}/codex/codex-rs" >&2
-  exit 1
+  bash "${APP_ROOT}/scripts/build-codex-cli.sh"
 fi
 
 if [[ ! -x "${codex_bin}" ]]; then

@@ -4,10 +4,24 @@ import { resolve } from 'node:path'
 const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
 const builderConfig = readFileSync(resolve('electron-builder.yml'), 'utf8')
 
-const requiredScripts = ['build:mac', 'build:mac:dir', 'build:deb', 'build:linux']
+const packageScripts = packageJson.scripts || {}
+const requiredScripts = ['build:codex', 'build:mac', 'build:mac:dir', 'build:deb', 'build:linux']
 const missingScripts = requiredScripts.filter((script) => typeof packageJson.scripts?.[script] !== 'string')
 if (missingScripts.length) {
   throw new Error(`Missing package scripts: ${missingScripts.join(', ')}`)
+}
+
+const packageScriptRequirements = {
+  'build:linux': ['npm run build:codex', 'electron-builder --linux'],
+  'build:deb': ['npm run build:codex', 'electron-builder --linux deb'],
+  'build:mac': ['npm run build:codex', 'electron-builder --mac'],
+  'build:mac:dir': ['npm run build:codex', 'electron-builder --mac --dir']
+}
+const missingScriptRequirements = Object.entries(packageScriptRequirements).flatMap(([script, snippets]) =>
+  snippets.filter((snippet) => !packageScripts[script].includes(snippet)).map((snippet) => `${script}: ${snippet}`)
+)
+if (missingScriptRequirements.length) {
+  throw new Error(`Package scripts are missing required Codex/package steps:\n${missingScriptRequirements.join('\n')}`)
 }
 
 const mustContain = [
@@ -23,6 +37,9 @@ const mustContain = [
   'extraResources:',
   'from: resources/icons',
   'to: icons',
+  'from: resources/codex-aiopsterm-mcp.js',
+  'to: codex-aiopsterm-mcp.js',
+  'afterPack: scripts/prune-packaged-native-modules.mjs',
   'schemes:',
   '- aiopsterm'
 ]
@@ -30,6 +47,20 @@ const mustContain = [
 const missingConfig = mustContain.filter((text) => !builderConfig.includes(text))
 if (missingConfig.length) {
   throw new Error(`electron-builder.yml is missing required packaging settings:\n${missingConfig.join('\n')}`)
+}
+
+const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'utf8')
+const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
+const codexPackagingRequirements = [
+  { label: 'build-codex cargo build', source: codexBuildScript, text: 'cargo build --release -p codex-cli' },
+  { label: 'build-codex env override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_BIN' },
+  { label: 'afterPack codex copy', source: afterPackScript, text: 'copyCodexCliBinary' },
+  { label: 'afterPack codex resources path', source: afterPackScript, text: "join(resourcesDir, 'codex')" },
+  { label: 'afterPack codex env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_BIN' }
+]
+const missingCodexPackaging = codexPackagingRequirements.filter((item) => !item.source.includes(item.text)).map((item) => item.label)
+if (missingCodexPackaging.length) {
+  throw new Error(`Codex CLI packaging integration is incomplete:\n${missingCodexPackaging.join('\n')}`)
 }
 
 const iconSizes = [16, 32, 48, 64, 128, 256, 512]

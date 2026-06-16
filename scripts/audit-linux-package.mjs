@@ -10,12 +10,14 @@ const unpackedDir = join(distDir, 'linux-unpacked')
 const nodePtyRoot = join(unpackedDir, 'resources', 'app.asar.unpacked', 'node_modules', 'node-pty')
 const appAsar = join(unpackedDir, 'resources', 'app.asar')
 const appAsarUnpacked = join(unpackedDir, 'resources', 'app.asar.unpacked')
+const codexBinary = join(unpackedDir, 'resources', 'codex', 'codex')
 const appImage = join(distDir, `aiopsterm-${version}-linux-x86_64.AppImage`)
 const deb = join(distDir, `aiopsterm-${version}-linux-amd64.deb`)
 
 const requiredFiles = [
   appAsar,
   appAsarUnpacked,
+  codexBinary,
   appImage,
   deb,
   join(nodePtyRoot, 'LICENSE'),
@@ -49,6 +51,11 @@ if (missing.length) {
   throw new Error(`Missing required packaged files:\n${missing.join('\n')}`)
 }
 
+const codexMode = statSync(codexBinary).mode
+if ((codexMode & 0o111) === 0) {
+  throw new Error(`Packaged Codex CLI binary is not executable: ${codexBinary}`)
+}
+
 if (presentForbidden.length) {
   throw new Error(`Forbidden packaged node-pty files remain:\n${presentForbidden.join('\n')}`)
 }
@@ -78,5 +85,6 @@ const sizeLine = (label, file) => `${label}: ${Math.ceil(sizeOf(file) / 1024)} K
 console.log('linux-package-audit-ok')
 console.log(sizeLine('app.asar', appAsar))
 console.log(sizeLine('app.asar.unpacked', appAsarUnpacked))
+console.log(sizeLine('codex', codexBinary))
 console.log(sizeLine('AppImage', appImage))
 console.log(sizeLine('deb', deb))
