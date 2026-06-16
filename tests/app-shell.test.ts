@@ -5572,6 +5572,69 @@ describe('AppShell', () => {
     })
     expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('命令输出已回传 Agent：uptime')
 
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        text: '请求执行 Command 10.24.8.12: df -h。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: input.requestId,
+        assistantMessageId: input.assistantMessageId,
+        message: {
+          id: input.assistantMessageId,
+          role: 'assistant',
+          text: 'df -h',
+          state: 'done',
+          ask: 'command',
+          commandExecution: {
+            ip: '10.24.8.12',
+            command: 'df -h',
+            requiresApproval: false,
+            interactive: false
+          }
+        }
+      }
+    } as any))
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        text: '磁盘空间正常。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: input.requestId,
+        assistantMessageId: input.assistantMessageId
+      }
+    }))
+    vi.mocked(window.aiops.writeTerminal).mockImplementationOnce(async (id: string, data: string) => {
+      store.appendTerminalOutput(id, `${data}/dev/vda1 40G 20G 20G 50% /\n`)
+      return {
+        ok: true,
+        data: {
+          id,
+          bytes: new TextEncoder().encode(data).byteLength
+        }
+      }
+    })
+    input.element.replaceChildren(document.createTextNode('继续检查磁盘'))
+    range.selectNodeContents(input.element)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await waitForMockCallCount(vi.mocked(window.aiops.generateAiChatResponse), 3, 'generateAiChatResponse')
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'df -h\n')
+    await waitForMockCallCount(vi.mocked(window.aiops.generateAiChatResponse), 4, 'generateAiChatResponse')
+    expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'agent',
+      prompt: expect.stringContaining('Command output from the approved execute_command tool is available.')
+    })
+
     wrapper.unmount()
   })
 

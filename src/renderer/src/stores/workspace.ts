@@ -13030,6 +13030,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       .join('')
 
   const agentAutoRunCommandMessageIds = new Set<string>()
+  const agentReadOnlyAutoRunConversationIds = new Set<string>()
+  let agentReadOnlyAutoRunPendingWithoutConversation = false
 
   const isAgentReadOnlyCommandMessage = (message: ChatMessage) =>
     message.role === 'assistant' &&
@@ -13110,8 +13112,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const scheduleAgentReadOnlyAutoRun = (message: ChatMessage, input: AiChatResponseInput) => {
-    if (input.mode !== 'agent' || !aiPreferences.value.autoExecuteReadOnlyCommands || !isAgentReadOnlyCommandMessage(message)) return
+    const conversationId = selectedConversationId.value.trim()
+    if (conversationId && agentReadOnlyAutoRunPendingWithoutConversation) {
+      agentReadOnlyAutoRunConversationIds.add(conversationId)
+      agentReadOnlyAutoRunPendingWithoutConversation = false
+    }
+    const sessionAutoRunEnabled = conversationId ? agentReadOnlyAutoRunConversationIds.has(conversationId) : agentReadOnlyAutoRunPendingWithoutConversation
+    if (input.mode !== 'agent' || (!aiPreferences.value.autoExecuteReadOnlyCommands && !sessionAutoRunEnabled) || !isAgentReadOnlyCommandMessage(message)) return
     void autoRunAgentReadOnlyCommand(message.id)
+  }
+
+  const enableAgentReadOnlyAutoRunForCurrentConversation = () => {
+    const conversationId = selectedConversationId.value.trim()
+    if (!conversationId) {
+      agentReadOnlyAutoRunPendingWithoutConversation = true
+      return true
+    }
+    agentReadOnlyAutoRunConversationIds.add(conversationId)
+    agentReadOnlyAutoRunPendingWithoutConversation = false
+    return true
   }
 
   const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
@@ -14213,6 +14232,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     stageActiveTerminalCommand,
     runActiveTerminalCommand,
     continueAgentCommandLoop,
+    enableAgentReadOnlyAutoRunForCurrentConversation,
     appendActiveTerminalInput,
     generateTerminalCommand,
     injectGeneratedTerminalCommand,

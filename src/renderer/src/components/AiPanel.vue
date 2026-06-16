@@ -2150,6 +2150,11 @@ const rejectMessageCommand = (message: CommandSuggestionMessage) => {
   showChatExportNotice('命令已拒绝。')
 }
 
+const enableSessionReadOnlyAutoRun = (message: CommandSuggestionMessage, options: { autoReadOnly?: boolean }) => {
+  if (!options.autoReadOnly || chatMode.value !== 'agent' || !isReadOnlyCommandMessage(message)) return false
+  return workspace.enableAgentReadOnlyAutoRunForCurrentConversation()
+}
+
 const runMessageCommand = async (message: CommandSuggestionMessage, options: { autoReadOnly?: boolean } = {}) => {
   if (message.action === 'rejected') {
     showChatExportNotice('命令已拒绝，无法执行。')
@@ -2165,6 +2170,7 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
   const terminalPanel = workspace.activePanel.kind === 'knowledge' ? workspace.panels.find((panel) => panel.kind !== 'knowledge') : workspace.activePanel
   const outputStartLength = terminalPanel?.output.length ?? 0
   const terminalPanelId = terminalPanel?.id || ''
+  const sessionAutoRunEnabled = enableSessionReadOnlyAutoRun(message, options)
   setCommandExecutionState(message, 'running', options.autoReadOnly ? '查询类命令正在发送到当前终端...' : '正在发送到当前终端...')
   const decision = await workspace.runActiveTerminalCommand(command, 'agent')
   if (!decision) {
@@ -2222,7 +2228,7 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
   if (loopResult.status === 'continued') {
     setCommandExecutionState(message, 'succeeded', `命令输出已回传 Agent：${command}`, command)
     persistCommandExecutionState()
-    showChatExportNotice('命令输出已回传 Agent，正在继续分析。')
+    showChatExportNotice(sessionAutoRunEnabled ? '已开启本会话查询类自动执行，并继续分析。' : '命令输出已回传 Agent，正在继续分析。')
     return
   }
   showChatExportNotice(loopResult.reason)
