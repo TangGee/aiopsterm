@@ -4700,6 +4700,8 @@ type TestFileSessionInfo = {
   favorite?: boolean
   assetType?: 'local' | 'person' | 'organization' | 'custom_folder'
   folderUuid?: string
+  organizationId?: string
+  jumpHostId?: string
   comment?: string
   errorMsg?: string
 }
@@ -4737,6 +4739,7 @@ type TestFileSessionTerminalContext = {
     assetName?: string
     assetType?: string
     organizationId?: string
+    jumpHostId?: string
     authType?: string
     createdAt?: number
     forkFromConnectionId?: string
@@ -4861,6 +4864,8 @@ const assetFileSessionCatalogMock = (): TestFileSessionCatalog => {
         favorite: isUserChangedFileSessionFieldMock(existing, 'favorite') && typeof existing?.favorite === 'boolean' ? existing.favorite : Boolean(asset.favorite),
         assetType: isOrganization ? 'organization' : 'person',
         folderUuid: asset.folderUuid,
+        organizationId: isOrganization ? asset.uuid || asset.id : asset.organizationId,
+        jumpHostId: asset.jumpHostId,
         comment: isUserChangedFileSessionFieldMock(existing, 'comment') && existing?.comment ? existing.comment : asset.comment || undefined
       } as TestFileSessionInfo)
     })
@@ -4917,6 +4922,8 @@ const normalizeFileSessionMock = (session: TestFileSessionInfo): TestFileSession
       ? { assetType: session.assetType }
       : {}),
     ...(session.folderUuid ? { folderUuid: String(session.folderUuid) } : {}),
+    ...(session.organizationId ? { organizationId: String(session.organizationId) } : {}),
+    ...(session.jumpHostId ? { jumpHostId: String(session.jumpHostId) } : {}),
     ...(session.comment ? { comment: String(session.comment) } : {}),
     ...(session.errorMsg ? { errorMsg: String(session.errorMsg) } : {})
   }
@@ -8473,6 +8480,8 @@ Object.defineProperty(window, 'aiops', {
         status: 'active',
         favorite: false,
         assetType: rawAssetType.includes('organization') ? 'organization' : 'person',
+        organizationId: stringFromSftpPayloadMock(payload, ['organizationId', 'orgId', 'organizationUuid']) || undefined,
+        jumpHostId: stringFromSftpPayloadMock(payload, ['jumpHostId', 'jump_host_id']) || undefined,
         comment: stringFromSftpPayloadMock(payload, ['comment', 'description']) || undefined
       })
       if (!session) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }
@@ -8518,6 +8527,8 @@ Object.defineProperty(window, 'aiops', {
         favorite: typeof asset?.favorite === 'boolean' ? asset.favorite : false,
         assetType: terminalContextAssetTypeMock(asset?.asset_type || ssh.assetType),
         folderUuid: asset?.folderUuid,
+        organizationId: asset?.asset_type === 'organization' ? asset.uuid || asset.id : asset?.organizationId || terminalContextStringMock(ssh.organizationId) || undefined,
+        jumpHostId: asset?.jumpHostId || terminalContextStringMock(ssh.jumpHostId) || undefined,
         comment: asset?.comment || (terminalContextStringMock(context.panelTitle) ? `Opened from ${context.panelTitle}` : undefined)
       })
       if (!session) return { ok: false, errorCode: 'FILES_SESSION_INVALID', errorMessage: 'File session id, label, host, and rootPath are required.' }

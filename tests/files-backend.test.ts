@@ -969,6 +969,40 @@ describe('files backend content boundary', () => {
     }
   })
 
+  it('reports relay-shell jump-host sessions as unsupported for SFTP without opening ssh2', async () => {
+    const sessionId = saveSftpAsset({ jumpHostId: 'asset-1' })
+    const unsupported = {
+      ok: false,
+      errorCode: 'FILES_SFTP_JUMP_UNSUPPORTED',
+      errorMessage: '该主机通过跳板机/relay shell 登录，文件管理暂不支持 SFTP。请使用支持 SSH TCP 转发的跳板机，或在终端内使用 scp/rsync。'
+    }
+
+    await expect(listFiles('/srv', { kind: 'remote', sessionId, host: 'sftp.example.test' })).rejects.toThrow(unsupported.errorMessage)
+    await expect(readFileContent('/srv/note.txt', { kind: 'remote', sessionId })).resolves.toEqual(unsupported)
+    await expect(writeFileContent('/srv/new.txt', 'relay unsupported\n', { kind: 'remote', sessionId })).resolves.toEqual(unsupported)
+    await expect(mutateFileEntry({ kind: 'rename', oldPath: '/srv/note.txt', newPath: '/srv/note-2.txt' }, { kind: 'remote', sessionId })).resolves.toEqual(unsupported)
+    await expect(transferFileEntry({ kind: 'copy-remote', remotePath: '/srv/note.txt', targetPath: '/srv/note-copy.txt' }, { kind: 'remote', sessionId })).resolves.toEqual(
+      unsupported
+    )
+    expect(ssh2Mock.connectConfigs).toEqual([])
+    expect(sshProxyMock.calls).toEqual([])
+  })
+
+  it('reports file-only relay-shell sessions as unsupported for SFTP from session metadata', async () => {
+    const unsupported = {
+      ok: false,
+      errorCode: 'FILES_SFTP_JUMP_UNSUPPORTED',
+      errorMessage: '该主机通过跳板机/relay shell 登录，文件管理暂不支持 SFTP。请使用支持 SSH TCP 转发的跳板机，或在终端内使用 scp/rsync。'
+    }
+    const options = { kind: 'remote' as const, sessionId: 'relay-only-session', host: 'target.example.test', jumpHostId: 'relay-shell-host' }
+
+    await expect(listFiles('/srv', options)).rejects.toThrow(unsupported.errorMessage)
+    await expect(readFileContent('/srv/note.txt', options)).resolves.toEqual(unsupported)
+    await expect(writeFileContent('/srv/new.txt', 'relay unsupported\n', options)).resolves.toEqual(unsupported)
+    expect(ssh2Mock.connectConfigs).toEqual([])
+    expect(sshProxyMock.calls).toEqual([])
+  })
+
   it('lists, reads, and writes remote files through asset-backed SFTP credentials', async () => {
     const sessionId = saveSftpAsset()
 

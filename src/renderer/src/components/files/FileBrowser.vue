@@ -681,6 +681,12 @@ const setFileNotice = (message: string) => {
   }, 4500)
 }
 
+const cleanFileErrorMessage = (fileError: unknown, fallback: string) => {
+  const raw = fileError instanceof Error ? fileError.message : String(fileError || fallback)
+  const wrapped = raw.match(/^Error invoking remote method '[^']+': Error:\s*(.+)$/)
+  return (wrapped?.[1] || raw || fallback).trim()
+}
+
 const toggleSort = (key: typeof sortState.key) => {
   if (sortState.key === key) {
     sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'
@@ -695,6 +701,7 @@ const getListOptions = (overrides: Partial<FileListOptions> = {}): FileListOptio
   kind: props.session.kind,
   host: props.session.host,
   rootPath: props.session.rootPath,
+  jumpHostId: props.session.jumpHostId,
   ...overrides
 })
 
@@ -705,6 +712,7 @@ const getSessionListOptions = (session: FileSessionInfo | undefined, overrides: 
         kind: session.kind,
         host: session.host,
         rootPath: session.rootPath,
+        jumpHostId: session.jumpHostId,
         ...overrides
       }
     : getListOptions(overrides)
@@ -848,7 +856,7 @@ const loadEntries = async (path = currentPath.value, options: { preserveOnFailur
     if (!entries.value.some((entry) => entry.path === selectedPath.value)) selectedPath.value = ''
     return true
   } catch (fileError) {
-    error.value = fileError instanceof Error ? fileError.message : '读取文件失败'
+    error.value = cleanFileErrorMessage(fileError, '读取文件失败')
     if (options.preserveOnFailure === false) entries.value = []
     return false
   } finally {

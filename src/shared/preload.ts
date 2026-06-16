@@ -484,6 +484,8 @@ export type FileSessionInfo = {
   favorite?: boolean
   assetType?: 'local' | 'person' | 'organization' | 'custom_folder'
   folderUuid?: string
+  organizationId?: string
+  jumpHostId?: string
   comment?: string
   errorMsg?: string
 }
@@ -517,6 +519,7 @@ export type FileSessionTerminalContext = {
     authType?: string
     needProxy?: boolean
     proxyName?: string
+    jumpHostId?: string
     createdAt?: number
     forkFromConnectionId?: string
   }
@@ -1909,6 +1912,7 @@ export type FileListOptions = {
   fromHost?: string
   toHost?: string
   rootPath?: string
+  jumpHostId?: string
 }
 
 export type FileContentOptions = FileListOptions & {

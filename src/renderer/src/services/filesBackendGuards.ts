@@ -52,6 +52,8 @@ export const isFileSessionInfoData = (value: unknown): value is FileSessionInfo 
   (value.favorite === undefined || typeof value.favorite === 'boolean') &&
   (value.assetType === undefined || fileSessionAssetTypes.has(String(value.assetType))) &&
   isOptionalNonEmptyString(value.folderUuid) &&
+  isOptionalNonEmptyString(value.organizationId) &&
+  isOptionalNonEmptyString(value.jumpHostId) &&
   isOptionalString(value.comment) &&
   isOptionalString(value.errorMsg)
 

@@ -287,6 +287,12 @@ const findFilesGroupRow = (wrapper: VueWrapper<any>, label: string) => {
   return row
 }
 
+const findFilesSessionRow = (wrapper: VueWrapper<any>, label: string) => {
+  const row = wrapper.findAll('.files-tree-session').find((item) => item.text().includes(label))
+  if (!row) throw new Error(`Files session row not found: ${label}`)
+  return row
+}
+
 const openAssetTreeCreateHost = async (wrapper: VueWrapper<any>) => {
   await wrapper.find('.asset-host-tree').trigger('contextmenu', { clientX: 160, clientY: 220 })
   const button = wrapper.find('.asset-context-menu').findAll('button').find((item) => item.text().includes('新建主机'))
@@ -3228,14 +3234,14 @@ describe('AppShell', () => {
     expect(filesPanel.text()).toContain('prod-bastion')
 
     rejectNextPreferenceSave()
-    await findFilesGroupRow(filesPanel, '主机').trigger('click')
+    await findFilesGroupRow(filesPanel, '预发').trigger('click')
     await flushPromises()
-    expect(store.workspacePreferences.expandedGroups).not.toContain('files-hosts')
+    expect(store.workspacePreferences.expandedGroups).not.toContain('group-预发')
     expect(filesPanel.text()).not.toContain('staging-api')
 
-    await findFilesGroupRow(filesPanel, '主机').trigger('click')
+    await findFilesGroupRow(filesPanel, '预发').trigger('click')
     await flushPromises()
-    expect(store.workspacePreferences.expandedGroups).toContain('files-hosts')
+    expect(store.workspacePreferences.expandedGroups).toContain('group-预发')
     expect(filesPanel.text()).toContain('staging-api')
     filesPanel.unmount()
   })
@@ -3280,6 +3286,11 @@ describe('AppShell', () => {
       await flushPromises()
       expect(filesPanel.find('.workspace-button').attributes('title')).toBe('显示主机名')
       expect(filesPanel.text()).toContain('10.24.8.12')
+      expect(filesPanel.text()).toContain('生产')
+      expect(filesPanel.text()).toContain('预发')
+      expect(filesPanel.text()).toContain('数据库')
+      expect(filesPanel.text()).toContain('本地连接')
+      expect(filesPanel.text()).not.toContain('核心业务')
 
       await wrapper.findAll('.workspace-folder-row').find((row) => row.text().includes('最近连接'))!.trigger('click')
       await flushPromises()
@@ -3299,15 +3310,15 @@ describe('AppShell', () => {
       remounted.unmount()
 
       await filesPanel.vm.$nextTick()
-      expect(filesPanel.text()).not.toContain('10.24.12.44')
+      expect(filesPanel.text()).toContain('10.24.12.44')
       expect(filesPanel.text()).not.toContain('staging-api')
-      await findFilesGroupRow(filesPanel, '主机').trigger('click')
+      await findFilesGroupRow(filesPanel, '预发').trigger('click')
       await flushPromises()
-      expect(store.workspacePreferences.expandedGroups).toContain('files-hosts')
+      expect(store.workspacePreferences.expandedGroups).not.toContain('group-预发')
       expect(window.aiops.saveConfig).toHaveBeenCalledWith(
         expect.objectContaining({
           workspacePreferences: expect.objectContaining({
-            expandedGroups: expect.arrayContaining(['files-hosts'])
+            expandedGroups: expect.not.arrayContaining(['group-预发'])
           })
         })
       )
@@ -3465,9 +3476,11 @@ describe('AppShell', () => {
       expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('生产归档'))).toBe(false)
       expect(wrapper.findAll('.workspace-folder-row').some((row) => row.text().includes('未分组'))).toBe(true)
 
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('Local'))!.trigger('contextmenu')
+      await findFilesSessionRow(filesPanel, 'Local').trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu', {
+      await filesPanel.find('.files-search input').setValue('prod')
+      const prodRow = findFilesSessionRow(filesPanel, 'prod-bastion')
+      await prodRow.trigger('contextmenu', {
         clientX: 296,
         clientY: 196
       })
@@ -3475,7 +3488,7 @@ describe('AppShell', () => {
       expect(filesContextMenu.exists()).toBe(true)
       expect(filesContextMenu.text()).toContain('取消收藏')
       expect(filesContextMenu.text()).toContain('编辑备注')
-      expect(filesContextMenu.text()).toContain('从文件夹移除')
+      expect(filesContextMenu.text()).not.toContain('从文件夹移除')
       expect(filesContextMenu.text()).not.toContain('左侧打开')
       expect(filesPanel.find('.files-tree-session.selected').text()).toContain('prod-bastion')
       await filesContextMenu.findAll('button').find((button) => button.text().includes('编辑备注'))!.trigger('click')
@@ -3485,22 +3498,20 @@ describe('AppShell', () => {
       await filesPanel.find('.files-comment-edit input').trigger('keydown', { key: 'Escape' })
       expect(filesPanel.find('.files-comment-edit').exists()).toBe(false)
       expect(filesPanel.text()).toContain('(生产入口)')
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
+      await findFilesSessionRow(filesPanel, 'prod-bastion').trigger('contextmenu')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('编辑备注'))!.trigger('click')
       await filesPanel.find('.files-comment-edit input').setValue('新备注')
       await filesPanel.find('.files-comment-edit input').trigger('keydown', { key: 'Enter' })
       await flushPromises()
       expect(filesPanel.find('.files-comment-edit').exists()).toBe(false)
       expect(filesPanel.text()).toContain('(新备注)')
-      await findFilesGroupRow(filesPanel, '核心业务').trigger('click')
-      await flushPromises()
-      expect(filesPanel.text()).not.toContain('prod-bastion')
-      await filesPanel.find('.files-search input').setValue('prod')
+      expect(filesPanel.text()).toContain('prod-bastion')
+      expect(filesPanel.text()).not.toContain('核心业务')
       expect(filesPanel.text()).toContain('prod-bastion')
       expect(filesPanel.text()).not.toContain('Local')
       expect(filesPanel.find('.files-tree-session').exists()).toBe(true)
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
-      const prodFileSession = filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!
+      const prodFileSession = findFilesSessionRow(filesPanel, 'prod-bastion')
       const dragData = new Map<string, string>()
       await prodFileSession.trigger('dragstart', {
         dataTransfer: {
@@ -3528,26 +3539,17 @@ describe('AppShell', () => {
       expect(store.selectedLeftFileSessionId).toBeNull()
       await vi.advanceTimersByTimeAsync(1)
       expect(store.selectedLeftFileSessionId).toBe('asset-1')
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
-      await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
-      expect(filesPanel.find('.files-folder-modal').exists()).toBe(true)
-      expect(filesPanel.find('.files-folder-modal').text()).toContain('核心业务')
-      await filesPanel.findAll('.files-folder-option').find((button) => button.text().includes('临时排障'))!.trigger('click')
-      await flushPromises()
-      expect(filesPanel.find('.files-folder-modal').exists()).toBe(false)
-      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBe('custom-folder-b')
-      expect(filesPanel.text()).toContain('临时排障')
       const originalInnerWidth = window.innerWidth
       const originalInnerHeight = window.innerHeight
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 })
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: 220 })
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu', {
+      await findFilesSessionRow(filesPanel, 'prod-bastion').trigger('contextmenu', {
         clientX: 310,
         clientY: 210
       })
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(true)
       expect(filesPanel.find('.asset-context-menu').attributes('style')).toContain('left: 155px')
-      expect(filesPanel.find('.asset-context-menu').attributes('style')).toContain('top: 104px')
+      expect(filesPanel.find('.asset-context-menu').attributes('style')).toContain('top: 154px')
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
       await filesPanel.findAll('.files-source-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
@@ -3555,7 +3557,20 @@ describe('AppShell', () => {
       expect(filesPanel.find('.asset-context-menu').exists()).toBe(false)
       expect(filesPanel.find('.files-tree-session.selected').exists()).toBe(false)
       expect(filesPanel.text()).toContain('临时排障')
-      expect(filesPanel.text()).not.toContain('prod-bastion')
+      expect(filesPanel.text()).toContain('核心业务')
+      expect(filesPanel.text()).toContain('jumpserver-org')
+      expect(filesPanel.text()).not.toContain('Local')
+      expect(filesPanel.text()).not.toContain('staging-api')
+      expect(filesPanel.text()).toContain('prod-bastion')
+      await findFilesSessionRow(filesPanel, 'prod-bastion').trigger('contextmenu')
+      expect(filesPanel.find('.asset-context-menu').text()).toContain('移动到文件夹')
+      await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
+      expect(filesPanel.find('.files-folder-modal').exists()).toBe(true)
+      expect(filesPanel.find('.files-folder-modal').text()).toContain('核心业务')
+      await filesPanel.findAll('.files-folder-option').find((button) => button.text().includes('临时排障'))!.trigger('click')
+      await flushPromises()
+      expect(filesPanel.find('.files-folder-modal').exists()).toBe(false)
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBe('custom-folder-b')
       expect(filesPanel.text()).not.toContain('Local')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('临时排障'))!.trigger('click')
       await flushPromises()
@@ -3563,17 +3578,16 @@ describe('AppShell', () => {
       await filesPanel.findAll('.files-source-tabs button').find((button) => button.text().includes('直接连接'))!.trigger('click')
       expect(filesPanel.text()).toContain('Local')
       expect(filesPanel.text()).toContain('prod-bastion')
-      expect(filesPanel.text()).toContain('核心业务')
-      await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('核心业务'))!.trigger('click')
+      expect(filesPanel.text()).toContain('数据库')
+      await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('数据库'))!.trigger('click')
       await flushPromises()
       expect(filesPanel.text()).toContain('mysql-primary')
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('mysql-primary'))!.trigger('contextmenu')
-      expect(filesPanel.find('.asset-context-menu').text()).toContain('从文件夹移除')
-      await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('从文件夹移除'))!.trigger('click')
+      await findFilesSessionRow(filesPanel, 'mysql-primary').trigger('contextmenu')
+      expect(filesPanel.find('.asset-context-menu').text()).not.toContain('从文件夹移除')
+      expect(filesPanel.find('.asset-context-menu').text()).not.toContain('移动到文件夹')
+      await filesPanel.findAll('.files-source-tabs button').find((button) => button.text().includes('堡垒机资源'))!.trigger('click')
+      await findFilesGroupRow(filesPanel, '临时排障').trigger('click')
       await flushPromises()
-      expect(store.fileSessions.find((session) => session.id === 'asset-3')?.folderUuid).toBeUndefined()
-      expect(store.fileSessions.find((session) => session.id === 'asset-3')?.group).toBe('数据库')
-      expect(filesPanel.text()).toContain('主机')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('临时排障'))!.trigger('contextmenu')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('编辑文件夹')
       expect(filesPanel.find('.asset-context-menu').text()).toContain('删除文件夹')
@@ -3589,7 +3603,7 @@ describe('AppShell', () => {
       await flushPromises()
       expect(filesPanel.find('.files-folder-modal').exists()).toBe(false)
       expect(filesPanel.text()).toContain('临时归档')
-      expect(filesPanel.text()).toContain('prod-bastion')
+      expect(store.fileSessions.find((session) => session.id === 'asset-1')?.folderUuid).toBe('custom-folder-b')
       await filesPanel.findAll('.files-tree-group-row').find((row) => row.text().includes('临时归档'))!.trigger('contextmenu')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('删除文件夹'))!.trigger('click')
       expect(filesPanel.find('.files-folder-confirm').text()).toContain('文件夹内 1 个资产将移出文件夹')
@@ -3605,7 +3619,7 @@ describe('AppShell', () => {
       await filesPanel.find('.files-folder-confirm footer .danger').trigger('click')
       await flushPromises()
       expect(filesPanel.text()).not.toContain('核心业务')
-      await filesPanel.findAll('.files-tree-session').find((row) => row.text().includes('prod-bastion'))!.trigger('contextmenu')
+      await findFilesSessionRow(filesPanel, 'prod-bastion').trigger('contextmenu')
       await filesPanel.find('.asset-context-menu').findAll('button').find((button) => button.text().includes('移动到文件夹'))!.trigger('click')
       expect(filesPanel.find('.files-folder-modal').text()).toContain('暂无文件夹')
       await filesPanel.find('.files-folder-empty button').trigger('click')

@@ -454,6 +454,7 @@ export type TerminalSshSession = {
   assetName: string
   assetType?: string
   organizationId?: string
+  jumpHostId?: string
   authType?: string
   needProxy?: boolean
   proxyName?: string
@@ -4059,6 +4060,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       auth_type?: string
       needProxy?: boolean
       proxyName?: string
+      jumpHostId?: string
     }
   ) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
@@ -4074,7 +4076,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       organizationId: asset.group_name,
       authType: asset.auth_type,
       needProxy: Boolean(asset.needProxy),
-      proxyName: asset.proxyName || ''
+      proxyName: asset.proxyName || '',
+      jumpHostId: asset.jumpHostId
     }
     panel.kind = 'terminal'
     panel.sshSession = session
@@ -4096,6 +4099,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       auth_type?: string
       needProxy?: boolean
       proxyName?: string
+      jumpHostId?: string
     }
   ) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
@@ -4116,6 +4120,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       authType: connection.authType || asset?.auth_type || previous?.authType,
       needProxy: Boolean(connection.needProxy || asset?.needProxy || previous?.needProxy),
       proxyName: connection.proxyName || asset?.proxyName || previous?.proxyName || '',
+      jumpHostId: asset?.jumpHostId || previous?.jumpHostId,
       createdAt: connection.createdAt
     }
     panel.sessionId = terminalSession.id
@@ -9422,6 +9427,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               assetName: ssh.assetName,
               assetType: ssh.assetType,
               organizationId: ssh.organizationId,
+              jumpHostId: ssh.jumpHostId,
               authType: ssh.authType,
               needProxy: ssh.needProxy,
               proxyName: ssh.proxyName,
@@ -12425,6 +12431,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       assetName: sourceSession.assetName,
       assetType: sourceSession.assetType,
       organizationId: sourceSession.organizationId,
+      jumpHostId: sourceSession.jumpHostId,
       authType: sourceSession.authType,
       needProxy: sourceSession.needProxy,
       proxyName: sourceSession.proxyName,
@@ -12564,6 +12571,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         assetName: previous?.assetName || host,
         assetType: previous?.assetType,
         organizationId: previous?.organizationId,
+        jumpHostId: previous?.jumpHostId,
         authType: previous?.authType,
         needProxy: previous?.needProxy === true,
         proxyName: event.proxyName || previous?.proxyName || '',

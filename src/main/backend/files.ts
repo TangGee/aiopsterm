@@ -62,6 +62,7 @@ type RemoteSftpTarget = {
     proxyName?: string
   } | null
 }
+type FilesSftpUnsupportedCode = 'FILES_SFTP_UNAVAILABLE' | 'FILES_SFTP_JUMP_UNSUPPORTED'
 
 type RemoteSftpPooledConnection = {
   key: string
@@ -186,12 +187,24 @@ const assetIdCandidates = (sessionId?: string) => {
   return [...new Set([id, id.replace(/^folder_/, '')].filter(Boolean))]
 }
 
+class FilesSftpUnsupportedError extends Error {
+  constructor(
+    message: string,
+    readonly errorCode: FilesSftpUnsupportedCode
+  ) {
+    super(message)
+    this.name = 'FilesSftpUnsupportedError'
+  }
+}
+
 const resolveRemoteSftpTarget = (options: FileListOptions): RemoteSftpTarget | null => {
   if (options.kind !== 'remote') return null
+  if (textSecret(options.jumpHostId)) throw new FilesSftpUnsupportedError(sftpJumpHostUnsupportedMessage, 'FILES_SFTP_JUMP_UNSUPPORTED')
   const asset = assetIdCandidates(options.sessionId)
     .map((id) => getAsset(id))
     .find((item) => item && !item.isLocalShell)
   if (!asset) return null
+  if (asset.jumpHostId) throw new FilesSftpUnsupportedError(sftpJumpHostUnsupportedMessage, 'FILES_SFTP_JUMP_UNSUPPORTED')
 
   const secret = getAssetSecret(asset.id)
   const keychainSecret = asset.keychainId ? getKeychainSecret(asset.keychainId) : {}
@@ -224,10 +237,13 @@ const resolveRemoteSftpTarget = (options: FileListOptions): RemoteSftpTarget | n
 
 const sftpErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || 'SFTP operation failed'))
 const sftpUnavailableMessage = 'SFTP connection is unavailable for this file session.'
-const sftpUnavailableError = (errorCode = 'FILES_SFTP_UNAVAILABLE') => ({
+const sftpJumpHostUnsupportedMessage =
+  '该主机通过跳板机/relay shell 登录，文件管理暂不支持 SFTP。请使用支持 SSH TCP 转发的跳板机，或在终端内使用 scp/rsync。'
+const isFilesSftpUnsupportedError = (error: unknown): error is FilesSftpUnsupportedError => error instanceof FilesSftpUnsupportedError
+const sftpUnavailableError = (errorCode: FilesSftpUnsupportedCode = 'FILES_SFTP_UNAVAILABLE', errorMessage = sftpUnavailableMessage) => ({
   ok: false as const,
   errorCode,
-  errorMessage: sftpUnavailableMessage
+  errorMessage
 })
 
 const isNotFoundError = (error: unknown) => {
@@ -237,6 +253,7 @@ const isNotFoundError = (error: unknown) => {
 }
 
 const fileError = (error: unknown, errorCode: string) => {
+  if (isFilesSftpUnsupportedError(error)) return sftpUnavailableError(error.errorCode, error.message)
   const code = (error as { code?: unknown } | undefined)?.code
   if (isNotFoundError(error)) return { ok: false as const, errorCode: 'not_found', errorMessage: 'File entry not found' }
   if (code === 'EACCES' || code === 'EPERM' || sftpErrorMessage(error).toLowerCase().includes('permission')) {
@@ -950,6 +967,8 @@ const assetToFileSession = (asset: ReturnType<typeof listAssets>['assets'][numbe
     favorite: isUserChangedFileSessionField(existing, 'favorite') && typeof existing?.favorite === 'boolean' ? existing.favorite : Boolean(asset.favorite),
     assetType: isOrganization ? 'organization' : 'person',
     ...(asset.folderUuid ? { folderUuid: asset.folderUuid } : {}),
+    ...(isOrganization ? { organizationId: asset.uuid || asset.id } : asset.organizationId ? { organizationId: asset.organizationId } : {}),
+    ...(asset.jumpHostId ? { jumpHostId: asset.jumpHostId } : {}),
     ...(isUserChangedFileSessionField(existing, 'comment') && existing?.comment ? { comment: existing.comment } : asset.comment ? { comment: asset.comment } : {})
   }
 }
@@ -1553,6 +1572,8 @@ const normalizeSession = (session: FileSessionInfo): FileSessionInfo | null => {
       ? { assetType: session.assetType }
       : {}),
     ...(session.folderUuid ? { folderUuid: String(session.folderUuid) } : {}),
+    ...(session.organizationId ? { organizationId: String(session.organizationId) } : {}),
+    ...(session.jumpHostId ? { jumpHostId: String(session.jumpHostId) } : {}),
     ...(session.comment ? { comment: String(session.comment) } : {}),
     ...(session.errorMsg ? { errorMsg: String(session.errorMsg) } : {})
   }
@@ -1721,6 +1742,8 @@ export const saveFileSessionFromSftpPayload = async (payload: FileSessionSftpPay
     status: 'active',
     favorite: false,
     assetType: rawAssetType.includes('organization') ? 'organization' : 'person',
+    ...(payloadString(payload, ['organizationId', 'orgId', 'organizationUuid']) ? { organizationId: payloadString(payload, ['organizationId', 'orgId', 'organizationUuid']) } : {}),
+    ...(payloadString(payload, ['jumpHostId', 'jump_host_id']) ? { jumpHostId: payloadString(payload, ['jumpHostId', 'jump_host_id']) } : {}),
     ...(payloadString(payload, ['comment', 'description']) ? { comment: payloadString(payload, ['comment', 'description']) } : {})
   }
   return saveFileSession(session)
@@ -1766,6 +1789,12 @@ export const saveFileSessionFromTerminalContext = async (context: FileSessionTer
     favorite: typeof asset?.favorite === 'boolean' ? asset.favorite : false,
     assetType: terminalContextAssetType(asset?.asset_type || ssh.assetType),
     ...(asset?.folderUuid ? { folderUuid: asset.folderUuid } : {}),
+    ...(asset?.asset_type === 'organization'
+      ? { organizationId: asset.uuid || asset.id }
+      : asset?.organizationId || terminalContextString(ssh.organizationId)
+        ? { organizationId: asset?.organizationId || terminalContextString(ssh.organizationId) }
+        : {}),
+    ...(asset?.jumpHostId || terminalContextString(ssh.jumpHostId) ? { jumpHostId: asset?.jumpHostId || terminalContextString(ssh.jumpHostId) } : {}),
     ...(asset?.comment ? { comment: asset.comment } : terminalContextString(context.panelTitle) ? { comment: `Opened from ${context.panelTitle}` } : {})
   })
 }
@@ -1922,7 +1951,13 @@ export const listFiles = async (directory: string, options: FileListOptions = {}
   }
 
   const path = normalizeRemotePath(directory)
-  const sftpRows = await listRemoteFilesViaSftp(path, options)
+  let sftpRows: FileListEntry[] | null
+  try {
+    sftpRows = await listRemoteFilesViaSftp(path, options)
+  } catch (error) {
+    if (isFilesSftpUnsupportedError(error)) throw new Error(error.message)
+    throw error
+  }
   if (sftpRows) return sftpRows
   throw new Error(sftpUnavailableMessage)
 }
@@ -2005,7 +2040,13 @@ export const readFileContent = async (filePath: string, options: FileContentOpti
   }
 
   const path = normalizeRemotePath(filePath)
-  const sftpRead = await readRemoteFileViaSftp(path, options)
+  let sftpRead: FileReadContentResult | null
+  try {
+    sftpRead = await readRemoteFileViaSftp(path, options)
+  } catch (error) {
+    if (isFilesSftpUnsupportedError(error)) return sftpUnavailableError(error.errorCode, error.message)
+    throw error
+  }
   if (sftpRead) return sftpRead
   return sftpUnavailableError('FILES_SFTP_UNAVAILABLE')
 }
@@ -2045,7 +2086,13 @@ export const writeFileContent = async (filePath: string, content: string, option
     }
   }
 
-  const sftpWrite = await writeRemoteFileViaSftp(path, Buffer.from(text, 'utf-8'), options)
+  let sftpWrite: FileWriteContentResult | null
+  try {
+    sftpWrite = await writeRemoteFileViaSftp(path, Buffer.from(text, 'utf-8'), options)
+  } catch (error) {
+    if (isFilesSftpUnsupportedError(error)) return sftpUnavailableError(error.errorCode, error.message)
+    throw error
+  }
   if (sftpWrite) return sftpWrite
   return sftpUnavailableError('FILES_SFTP_UNAVAILABLE')
 }
@@ -2100,6 +2147,7 @@ const mutateLocalFileEntry = async (mutation: FileEntryMutation): Promise<FileEn
     const metadata = await stat(path)
     return { ok: true, data: { affected: 1, path, mode: mutation.mode, mtimeMs: metadata.mtimeMs } }
   } catch (error) {
+    if (isFilesSftpUnsupportedError(error)) return sftpUnavailableError(error.errorCode, error.message)
     const code = (error as NodeJS.ErrnoException).code
     if (code === 'ENOENT') return { ok: false, errorCode: 'not_found', errorMessage: 'File entry not found' }
     if (code === 'EACCES' || code === 'EPERM') return { ok: false, errorCode: 'permission', errorMessage: 'Permission denied' }
@@ -2109,7 +2157,13 @@ const mutateLocalFileEntry = async (mutation: FileEntryMutation): Promise<FileEn
 }
 
 export const mutateFileEntry = async (mutation: FileEntryMutation, options: FileListOptions = {}): Promise<FileEntryMutationResult> => {
-  const result = options.kind === 'remote' ? (await mutateRemoteFileEntryViaSftp(mutation, options)) || sftpUnavailableError('FILES_SFTP_UNAVAILABLE') : await mutateLocalFileEntry(mutation)
+  let result: FileEntryMutationResult
+  try {
+    result = options.kind === 'remote' ? (await mutateRemoteFileEntryViaSftp(mutation, options)) || sftpUnavailableError('FILES_SFTP_UNAVAILABLE') : await mutateLocalFileEntry(mutation)
+  } catch (error) {
+    if (isFilesSftpUnsupportedError(error)) return sftpUnavailableError(error.errorCode, error.message)
+    throw error
+  }
   if (!result.ok || !result.data?.path) return result
   const task = mutationTask(mutation, result.data.path, options)
   return task ? { ...result, data: { ...result.data, task } } : result
@@ -2530,6 +2584,7 @@ export const transferFileEntry = async (operation: FileTransferOperation, option
     if (sftpResult) return sftpResult
     return sftpUnavailableError('FILES_SFTP_UNAVAILABLE')
   } catch (error) {
+    if (isFilesSftpUnsupportedError(error)) return sftpUnavailableError(error.errorCode, error.message)
     const code = (error as NodeJS.ErrnoException).code
     if (code === 'ENOENT') return { ok: false, errorCode: 'not_found', errorMessage: 'File entry not found' }
     if (code === 'EACCES' || code === 'EPERM') return { ok: false, errorCode: 'permission', errorMessage: 'Permission denied' }

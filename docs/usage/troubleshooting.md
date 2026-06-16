@@ -50,3 +50,13 @@ Because relay-shell mode uses local OpenSSH in a PTY, password, dynamic-password
 For direct or jump-tunnel ssh2 connections, aiopsterm no longer opens a password dialog before the first network authentication attempt when no password is saved. This avoids a fake prompt on hosts that may support SSH Agent, keychain, or target-side passwordless login. If the real SSH server rejects authentication and the asset can use password auth, aiopsterm then opens the password dialog and can remember the password after a successful retry.
 
 The app-owned ssh2 paths use a 120-second default SSH ready timeout for terminal sessions, SFTP file sessions, SSH tunnels, and host connection tests. This matches interactive jump-host and dynamic-password flows better than ssh2's 20-second library default.
+
+## Files And SFTP
+
+The Files workspace lists remote directories through SFTP. A host opened through relay-shell or a configured jump-host path does not expose an SFTP channel to aiopsterm yet, so the file browser shows:
+
+```text
+该主机通过跳板机/relay shell 登录，文件管理暂不支持 SFTP。请使用支持 SSH TCP 转发的跳板机，或在终端内使用 scp/rsync。
+```
+
+This is an explicit unsupported state rather than a generic connection crash. For these hosts, keep using terminal commands such as `scp` or `rsync`, or configure a jump path that supports SSH TCP forwarding once Files/SFTP jump tunneling is implemented.

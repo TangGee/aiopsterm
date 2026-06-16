@@ -38,68 +38,64 @@
     </div>
 
     <div class="files-tree-list">
-      <div
-        v-for="group in visibleGroups"
-        :key="group.key"
-        class="files-tree-group"
+      <template
+        v-for="row in visibleTreeRows"
+        :key="row.key"
       >
         <button
+          v-if="row.kind === 'group'"
           class="files-tree-group-row"
-          :class="{ 'custom-folder': group.isCustomFolder }"
-          @click="toggleGroup(group.key)"
-          @contextmenu.prevent="openFolderContextMenu($event, group.key)"
+          :class="{ 'custom-folder': row.group.type === 'custom-folder' || row.group.type === 'direct-group' }"
+          :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
+          @click="toggleGroup(row.group.key)"
+          @contextmenu.prevent="openFolderContextMenu($event, row.group.key)"
         >
-          <ChevronDown v-if="isGroupExpanded(group.key)" />
+          <ChevronDown v-if="isGroupExpanded(row.group.key)" />
           <ChevronRight v-else />
-          <span>{{ group.name }}</span>
-          <small>({{ group.count }})</small>
+          <span>{{ row.group.name }}</span>
+          <small>({{ filesGroupSessionCount(row.group) }})</small>
         </button>
 
-        <div
-          v-if="isGroupExpanded(group.key)"
-          class="files-tree-children"
+        <button
+          v-else
+          class="files-tree-session"
+          draggable="true"
+          :class="{ selected: selectedId === row.session.id }"
+          :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
+          @click="handleSessionClick(row.session.id)"
+          @dblclick="openSession(row.session.id)"
+          @contextmenu.prevent="openContextMenu($event, row.session.id)"
+          @dragstart="onDragStart($event, row.session.id)"
         >
-          <button
-            v-for="session in group.sessions"
-            :key="session.id"
-            class="files-tree-session"
-            draggable="true"
-            :class="{ selected: selectedId === session.id }"
-            @click="handleSessionClick(session.id)"
-            @dblclick="openSession(session.id)"
-            @contextmenu.prevent="openContextMenu($event, session.id)"
-            @dragstart="onDragStart($event, session.id)"
+          <Folder />
+          <span>{{ displaySession(row.session) }}</span>
+          <span
+            v-if="commentSessionId === row.session.id"
+            class="files-comment-edit"
+            @click.stop
           >
-            <Folder />
-            <span>{{ displaySession(session) }}</span>
-            <span
-              v-if="commentSessionId === session.id"
-              class="files-comment-edit"
-              @click.stop
+            <input
+              v-model="editingComment"
+              placeholder="备注"
+              @keydown.enter.prevent="saveComment(row.session.id)"
+              @keydown.esc.prevent="cancelComment"
+            />
+            <button
+              type="button"
+              @click="saveComment(row.session.id)"
             >
-              <input
-                v-model="editingComment"
-                placeholder="备注"
-                @keydown.enter.prevent="saveComment(session.id)"
-                @keydown.esc.prevent="cancelComment"
-              />
-              <button
-                type="button"
-                @click="saveComment(session.id)"
-              >
-                <Check />
-              </button>
-              <button
-                type="button"
-                @click="cancelComment"
-              >
-                <X />
-              </button>
-            </span>
-            <em v-else-if="session.comment">({{ session.comment }})</em>
-          </button>
-        </div>
-      </div>
+              <Check />
+            </button>
+            <button
+              type="button"
+              @click="cancelComment"
+            >
+              <X />
+            </button>
+          </span>
+          <em v-else-if="row.session.comment">({{ row.session.comment }})</em>
+        </button>
+      </template>
     </div>
 
     <div
@@ -168,7 +164,7 @@
           </button>
         </header>
         <div
-          v-if="customFolders.length === 0"
+          v-if="currentFolders.length === 0"
           class="files-folder-empty"
         >
           <p>暂无文件夹</p>
@@ -180,7 +176,7 @@
         >
           <p>选择文件夹:</p>
           <button
-            v-for="folder in customFolders"
+            v-for="folder in currentFolders"
             :key="folder.uuid"
             class="files-folder-option"
             @click="moveAssetToFolder(folder.uuid)"
@@ -359,11 +355,20 @@ type ContextMenuTarget = 'session' | 'folder' | ''
 type FilesGroup = {
   name: string
   key: string
-  count: number
   sessions: FileSessionInfo[]
-  isCustomFolder?: boolean
+  childGroups: FilesGroup[]
+  originalCount: number
+  type: 'system' | 'direct-group' | 'organization' | 'custom-folder'
+  parentKey?: string
+  folderUuid?: string
+  organizationId?: string
+  groupName?: string
   description?: string
 }
+
+type FilesTreeRow =
+  | { key: string; kind: 'group'; group: FilesGroup; depth: number }
+  | { key: string; kind: 'session'; session: FileSessionInfo; depth: number; parentGroupKey: string }
 
 type ContextMenuOptions = {
   favorite: boolean
@@ -391,70 +396,189 @@ const folderFormError = ref('')
 const showIpMode = computed(() => workspace.workspacePreferences.showIpMode)
 const expandedGroups = computed(() => workspace.workspacePreferences.expandedGroups)
 let sessionClickTimer: number | null = null
-const customFolders = computed<CustomFolder[]>(() => workspace.fileSessionFolders.filter((folder) => folder.scope !== 'direct'))
+const recentSessionIds = computed(() => workspace.workspacePreferences.recentAssetIds || [])
+const customFolders = computed<CustomFolder[]>(() => workspace.fileSessionFolders)
+const directFolders = computed(() => customFolders.value.filter((folder) => folder.scope === 'direct'))
+const bastionFolders = computed(() => customFolders.value.filter((folder) => folder.scope !== 'direct'))
+const currentFolders = computed(() => (activeTab.value === 'direct' ? directFolders.value : bastionFolders.value))
 
-const filesGroupKeys: Record<string, string> = {
-  最近连接: 'recent_connections',
-  主机: 'files-hosts',
-  本地连接: 'local_connections'
+const ungroupedGroupName = '未分组'
+const normalizeDirectGroupName = (name?: string) => {
+  const trimmed = String(name || '').trim()
+  return !trimmed || trimmed === 'Hosts' ? ungroupedGroupName : trimmed
+}
+const sessionGroupName = (session: FileSessionInfo) => normalizeDirectGroupName(session.group)
+const directGroupKey = (name: string) => `group-${name}`
+
+const makeGroup = (input: Omit<FilesGroup, 'sessions' | 'childGroups'> & Partial<Pick<FilesGroup, 'sessions' | 'childGroups'>>): FilesGroup => ({
+  ...input,
+  sessions: input.sessions || [],
+  childGroups: input.childGroups || []
+})
+
+const localSessions = computed(() => workspace.fileSessions.filter((session) => session.kind === 'local'))
+const directSessions = computed(() => workspace.fileSessions.filter((session) => session.kind === 'remote' && session.assetType !== 'organization'))
+const organizationSessions = computed(() => workspace.fileSessions.filter((session) => session.kind === 'remote' && session.assetType === 'organization'))
+const bastionResourceSessions = computed(() =>
+  workspace.fileSessions.filter((session) => {
+    if (session.kind !== 'remote' || session.assetType === 'organization') return false
+    const folder = session.folderUuid ? customFolders.value.find((item) => item.uuid === session.folderUuid) : null
+    return Boolean(session.organizationId || (folder && folder.scope !== 'direct'))
+  })
+)
+
+const buildDirectGroups = (): FilesGroup[] => {
+  const foldersByName = new Map(directFolders.value.map((folder) => [folder.name, folder]))
+  const groupNames = [
+    ...new Set([...directFolders.value.map((folder) => folder.name), ...directSessions.value.map((session) => sessionGroupName(session))])
+  ].filter(Boolean)
+  const groupsByName = new Map<string, FilesGroup>()
+  groupNames.forEach((name) => {
+    const folder = foldersByName.get(name)
+    const parentFolder = folder?.parentUuid ? directFolders.value.find((item) => item.uuid === folder.parentUuid) : null
+    const sessions = directSessions.value.filter((session) => sessionGroupName(session) === name)
+    groupsByName.set(
+      name,
+      makeGroup({
+        key: directGroupKey(name),
+        name,
+        sessions,
+        originalCount: sessions.length,
+        type: 'direct-group',
+        groupName: name,
+        ...(folder ? { folderUuid: folder.uuid, description: folder.description } : {}),
+        ...(parentFolder ? { parentKey: directGroupKey(parentFolder.name) } : {})
+      })
+    )
+  })
+
+  const roots: FilesGroup[] = []
+  groupsByName.forEach((group) => {
+    const parent = group.parentKey ? [...groupsByName.values()].find((item) => item.key === group.parentKey) : null
+    if (parent && parent.key !== group.key) {
+      parent.childGroups.push(group)
+      return
+    }
+    roots.push(group)
+  })
+
+  const recentSessions = recentSessionIds.value.map((id) => directSessions.value.find((session) => session.id === id)).filter((session): session is FileSessionInfo => !!session)
+  const groups = [
+    makeGroup({
+      key: 'recent_connections',
+      name: '最近连接',
+      sessions: recentSessions,
+      originalCount: recentSessions.length,
+      type: 'system'
+    }),
+    ...roots,
+    makeGroup({
+      key: 'local_connections',
+      name: '本地连接',
+      sessions: localSessions.value,
+      originalCount: localSessions.value.length,
+      type: 'system'
+    })
+  ]
+  return groups.filter((group) => group.sessions.length > 0 || group.childGroups.length > 0 || group.type !== 'system')
 }
 
-const sourceSessions = computed(() => {
-  const sessions = workspace.fileSessions
-  if (activeTab.value === 'direct') return sessions
-  return sessions.filter((session) => session.kind === 'remote')
+const buildBastionGroups = (): FilesGroup[] => {
+  const folderGroupsByUuid = new Map(
+    bastionFolders.value.map((folder) => {
+      const sessions = bastionResourceSessions.value.filter((session) => session.folderUuid === folder.uuid)
+      return [
+        folder.uuid,
+        makeGroup({
+          key: folder.uuid,
+          name: folder.name,
+          sessions,
+          originalCount: sessions.length,
+          type: 'custom-folder' as const,
+          folderUuid: folder.uuid,
+          description: folder.description,
+          ...(folder.parentUuid ? { parentKey: folder.parentUuid } : {})
+        })
+      ] as const
+    })
+  )
+  const folderRoots: FilesGroup[] = []
+  folderGroupsByUuid.forEach((group) => {
+    const parent = group.parentKey ? folderGroupsByUuid.get(group.parentKey) : null
+    if (parent && parent.key !== group.key) parent.childGroups.push(group)
+    else folderRoots.push(group)
+  })
+
+  const organizationGroups = organizationSessions.value.map((organization) => {
+    const organizationId = organization.organizationId || organization.id
+    const sessions = [
+      organization,
+      ...bastionResourceSessions.value.filter((session) => !session.folderUuid && (!session.organizationId || session.organizationId === organizationId))
+    ]
+    return makeGroup({
+      key: organizationId,
+      name: organization.label,
+      sessions,
+      originalCount: sessions.length,
+      type: 'organization' as const,
+      organizationId
+    })
+  })
+  return [...organizationGroups, ...folderRoots]
+}
+
+const sourceGroups = computed(() => (activeTab.value === 'direct' ? buildDirectGroups() : buildBastionGroups()))
+
+const matchesSession = (session: FileSessionInfo, keyword: string) =>
+  !keyword ||
+  [session.label, session.host, session.username, session.group, session.comment]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(keyword))
+
+const filterGroupTree = (group: FilesGroup, keyword: string): FilesGroup | null => {
+  const groupMatches = !keyword || [group.name, group.description, group.folderUuid].filter(Boolean).some((value) => String(value).toLowerCase().includes(keyword))
+  const childGroups = group.childGroups.map((child) => filterGroupTree(child, keyword)).filter((child): child is FilesGroup => Boolean(child))
+  const sessions = groupMatches ? group.sessions : group.sessions.filter((session) => matchesSession(session, keyword))
+  if (!groupMatches && childGroups.length === 0 && sessions.length === 0) return null
+  return { ...group, sessions, childGroups }
+}
+
+const filteredGroups = computed(() => {
+  const keyword = query.value.trim().toLowerCase()
+  if (!keyword) return sourceGroups.value
+  return sourceGroups.value.map((group) => filterGroupTree(group, keyword)).filter((group): group is FilesGroup => Boolean(group))
 })
 
-const visibleGroups = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  const matchesSession = (session: FileSessionInfo) => {
-    if (!keyword) return true
-    return [session.label, session.host, session.group, session.comment].filter(Boolean).some((value) => String(value).toLowerCase().includes(keyword))
-  }
-  const matchesFolder = (folder: CustomFolder) => {
-    if (!keyword) return true
-    return [folder.name, folder.description].filter(Boolean).some((value) => String(value).toLowerCase().includes(keyword))
-  }
-  const map = new Map<string, FilesGroup>()
-  sourceSessions.value
-    .filter((session) => {
-      const folder = session.folderUuid ? customFolders.value.find((item) => item.uuid === session.folderUuid) : null
-      return !folder && matchesSession(session)
-    })
-    .forEach((session) => {
-      const groupName = session.group === '最近连接' || session.group === '本地连接' ? session.group : '主机'
-      const groupKey = filesGroupKeys[groupName] || `files-${groupName}`
-      const existing = map.get(groupKey)
-      if (existing) {
-        existing.sessions = [...existing.sessions, session]
-        existing.count += 1
-        return
-      }
-      map.set(groupKey, { name: groupName, key: groupKey, count: 1, sessions: [session] })
-    })
-  const folderGroups = customFolders.value
-    .map((folder) => {
-      const folderSessions = sourceSessions.value.filter((session) => session.folderUuid === folder.uuid)
-      const folderMatched = matchesFolder(folder)
-      const visibleSessions = folderMatched ? folderSessions : folderSessions.filter(matchesSession)
-      if (keyword && !folderMatched && visibleSessions.length === 0) return null
-      return {
-        name: folder.name,
-        key: folder.uuid,
-        description: folder.description,
-        count: folderSessions.length,
-        sessions: visibleSessions,
-        isCustomFolder: true
-      }
-    })
-    .filter(Boolean) as FilesGroup[]
-  return [...Array.from(map.values()), ...folderGroups]
-})
+const collectGroupSessions = (group: FilesGroup): FileSessionInfo[] => [...group.sessions, ...group.childGroups.flatMap(collectGroupSessions)]
+const filesGroupSessionCount = (group: FilesGroup) => collectGroupSessions(group).length
+const collectTreeRows = (groups: FilesGroup[], depth = 0): FilesTreeRow[] =>
+  groups.flatMap((group) => {
+    const rows: FilesTreeRow[] = [{ key: `files-group-${group.key}`, kind: 'group', group, depth }]
+    if (isGroupExpanded(group.key)) {
+      rows.push(...collectTreeRows(group.childGroups, depth + 1))
+      rows.push(...group.sessions.map((session) => ({ key: `files-session-${group.key}-${session.id}`, kind: 'session' as const, session, depth: depth + 1, parentGroupKey: group.key })))
+    }
+    return rows
+  })
+const visibleTreeRows = computed(() => collectTreeRows(filteredGroups.value))
+
+const flattenGroups = (group: FilesGroup): FilesGroup[] => [group, ...group.childGroups.flatMap(flattenGroups)]
+const groupByKey = (key: string) => sourceGroups.value.flatMap(flattenGroups).find((group) => group.key === key) || null
+const folderByGroup = (group: FilesGroup | null) => {
+  if (!group) return null
+  if (group.type === 'direct-group') return directFolders.value.find((folder) => folder.uuid === group.folderUuid || folder.name === group.groupName) || null
+  if (group.type === 'custom-folder') return bastionFolders.value.find((folder) => folder.uuid === group.folderUuid) || null
+  return null
+}
 
 const contextSession = computed(() => (contextMenu.target === 'session' ? workspace.fileSessions.find((item) => item.id === contextMenu.sessionId) || null : null))
-const contextFolder = computed(() => (contextMenu.target === 'folder' ? customFolders.value.find((item) => item.uuid === contextMenu.folderUuid) || null : null))
-const deleteFolderInfo = computed(() => customFolders.value.find((item) => item.uuid === deleteFolderModal.folderUuid) || null)
-const deleteFolderAssetCount = computed(() => workspace.fileSessions.filter((session) => session.folderUuid === deleteFolderModal.folderUuid).length)
+const contextGroup = computed(() => (contextMenu.target === 'folder' ? groupByKey(contextMenu.folderUuid) : null))
+const contextFolder = computed(() => folderByGroup(contextGroup.value))
+const deleteFolderInfo = computed(() => currentFolders.value.find((item) => item.uuid === deleteFolderModal.folderUuid) || null)
+const deleteFolderAssetCount = computed(() => {
+  const group = sourceGroups.value.flatMap(flattenGroups).find((item) => item.folderUuid === deleteFolderModal.folderUuid)
+  return group ? filesGroupSessionCount(group) : workspace.fileSessions.filter((session) => session.folderUuid === deleteFolderModal.folderUuid).length
+})
 
 const isOrganizationAsset = (session: FileSessionInfo | null) => session?.assetType === 'person' || session?.assetType === 'organization'
 
@@ -469,25 +593,26 @@ const emptyContextOptions: ContextMenuOptions = {
 
 const buildSessionContextOptions = (session: FileSessionInfo | null): ContextMenuOptions => {
   const sessionKey = session?.id || ''
+  const canManageFolders = activeTab.value === 'bastion'
   return {
     favorite: session?.favorite !== undefined,
     comment: isOrganizationAsset(session) && !sessionKey.startsWith('common_'),
-    move: isOrganizationAsset(session) && !sessionKey.startsWith('common_'),
-    remove: isOrganizationAsset(session) && !!session?.folderUuid,
+    move: canManageFolders && isOrganizationAsset(session) && session?.assetType !== 'organization' && !sessionKey.startsWith('common_'),
+    remove: canManageFolders && isOrganizationAsset(session) && !!session?.folderUuid,
     editFolder: false,
     deleteFolder: false
   }
 }
 
-const buildFolderContextOptions = (folder: CustomFolder | null): ContextMenuOptions => ({
+const buildFolderContextOptions = (folder: CustomFolder | null, group: FilesGroup | null = contextGroup.value): ContextMenuOptions => ({
   ...emptyContextOptions,
-  editFolder: !!folder,
-  deleteFolder: !!folder
+  editFolder: activeTab.value === 'bastion' && !!folder && group?.type === 'custom-folder',
+  deleteFolder: activeTab.value === 'bastion' && !!folder && group?.type === 'custom-folder'
 })
 
 const contextMenuOptions = computed(() => {
   if (contextMenu.target === 'session') return buildSessionContextOptions(contextSession.value)
-  if (contextMenu.target === 'folder') return buildFolderContextOptions(contextFolder.value)
+  if (contextMenu.target === 'folder') return buildFolderContextOptions(contextFolder.value, contextGroup.value)
   return emptyContextOptions
 })
 
@@ -525,6 +650,11 @@ const positionContextMenu = (event: MouseEvent, menuItemCount: number) => {
 const removeExpandedGroup = async (groupKey: string) => {
   if (!expandedGroups.value.includes(groupKey)) return true
   return workspace.updateWorkspacePreferences({ expandedGroups: expandedGroups.value.filter((item) => item !== groupKey) })
+}
+
+const replaceExpandedGroup = async (oldKey: string, newKey: string) => {
+  if (!expandedGroups.value.includes(oldKey)) return true
+  return workspace.updateWorkspacePreferences({ expandedGroups: expandedGroups.value.map((item) => (item === oldKey ? newKey : item)) })
 }
 
 const resetFolderForms = () => {
@@ -616,9 +746,10 @@ const buildSftpDragPayload = (session: FileSessionInfo) => ({
   host: session.host,
   port: session.kind === 'remote' ? 22 : undefined,
   username: session.kind === 'remote' ? session.username || 'root' : undefined,
-  organizationId: undefined,
+  organizationId: session.organizationId,
+  jumpHostId: session.jumpHostId,
   sshType: session.kind,
-  asset_type: session.kind === 'remote' ? 'person' : 'local',
+  asset_type: session.assetType || (session.kind === 'remote' ? 'person' : 'local'),
   proxyCommand: ''
 })
 
@@ -650,12 +781,13 @@ const openContextMenu = (event: MouseEvent, sessionId: string) => {
 }
 
 const openFolderContextMenu = (event: MouseEvent, groupKey: string) => {
-  const folder = customFolders.value.find((item) => item.uuid === groupKey)
+  const group = groupByKey(groupKey)
+  const folder = folderByGroup(group)
   if (!folder) return
   event.preventDefault()
   event.stopPropagation()
   clearSessionClickTimer()
-  const menuItemCount = countContextOptions(buildFolderContextOptions(folder))
+  const menuItemCount = countContextOptions(buildFolderContextOptions(folder, group))
   if (!menuItemCount) {
     closeContextMenu()
     return
@@ -665,7 +797,7 @@ const openFolderContextMenu = (event: MouseEvent, groupKey: string) => {
   contextMenu.visible = true
   contextMenu.target = 'folder'
   contextMenu.sessionId = ''
-  contextMenu.folderUuid = folder.uuid
+  contextMenu.folderUuid = group?.key || folder.uuid
 }
 
 const beginCommentEdit = () => {
@@ -693,7 +825,7 @@ const toggleContextFavorite = () => {
   const session = contextSession.value
   if (session && session.favorite !== undefined) {
     const nextFavorite = !session.favorite
-    void workspace.updateFileSession(session.id, { favorite: nextFavorite, group: nextFavorite ? '最近连接' : '主机' })
+    void workspace.updateFileSession(session.id, { favorite: nextFavorite })
   }
   contextMenu.visible = false
 }
@@ -714,7 +846,8 @@ const moveContextSession = () => {
 const moveAssetToFolder = async (folderUuid: string) => {
   const session = workspace.fileSessions.find((item) => item.id === moveModal.sessionId)
   if (!session) return
-  await workspace.updateFileSession(session.id, { folderUuid })
+  const folder = bastionFolders.value.find((item) => item.uuid === folderUuid)
+  await workspace.updateFileSession(session.id, { folderUuid, ...(folder && !session.organizationId ? { organizationId: organizationSessions.value[0]?.organizationId || organizationSessions.value[0]?.id } : {}) })
   closeMoveModal()
 }
 
@@ -741,7 +874,7 @@ const saveCreatedFolder = async () => {
   await workspace.saveFileSessionFolder({
     name,
     description: createFolderForm.description.trim(),
-    scope: 'bastion'
+    scope: activeTab.value === 'direct' ? 'direct' : 'bastion'
   })
   closeCreateFolderModal()
 }
@@ -763,7 +896,16 @@ const saveEditedFolder = async () => {
     folderFormError.value = '请输入文件夹名称'
     return
   }
-  await workspace.saveFileSessionFolder({ uuid: editFolderForm.uuid, name, description: editFolderForm.description.trim() })
+  const folder = currentFolders.value.find((item) => item.uuid === editFolderForm.uuid)
+  const previousKey = folder ? (folder.scope === 'direct' ? directGroupKey(folder.name) : folder.uuid) : editFolderForm.uuid
+  const saved = await workspace.saveFileSessionFolder({
+    ...(folder || {}),
+    uuid: editFolderForm.uuid,
+    name,
+    description: editFolderForm.description.trim(),
+    scope: folder?.scope || (activeTab.value === 'direct' ? 'direct' : 'bastion')
+  })
+  if (folder?.scope === 'direct' && saved) await replaceExpandedGroup(previousKey, directGroupKey(saved.name))
   closeEditFolderModal()
 }
 
@@ -778,8 +920,9 @@ const deleteContextFolder = () => {
 const confirmDeleteFolder = async () => {
   const folderUuid = deleteFolderModal.folderUuid
   if (!folderUuid) return
+  const group = sourceGroups.value.flatMap(flattenGroups).find((item) => item.folderUuid === folderUuid)
   await workspace.deleteFileSessionFolder(folderUuid)
-  await removeExpandedGroup(folderUuid)
+  await removeExpandedGroup(group?.key || folderUuid)
   closeDeleteFolderModal()
 }
 </script>
