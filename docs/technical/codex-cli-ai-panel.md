@@ -7,6 +7,8 @@ The right AI panel now has two modes:
 
 The selected AI panel mode is persisted in renderer storage. The default remains `Codex CLI`, but when the user leaves the panel in `Classic Chat`, a later mount restores Classic Chat and does not start the Codex PTY in the background. Switching back to `Codex CLI` starts or resumes the embedded TUI on demand.
 
+Classic Chat startup is now scheduled so visible AI data is restored early. During `hydrateConfig()`, chat history, AI todo state, context catalog, and command catalog begin loading immediately after base AI preferences are applied. Slower secondary catalogs such as files, Kubernetes, extensions, and knowledge base refresh in parallel later in startup instead of serially blocking AI history restore.
+
 ## Runtime Boundary
 
 aiopsterm starts Codex through Electron main process IPC, not from renderer code.

@@ -1011,6 +1011,20 @@ describe('workspace store', () => {
     })
   })
 
+  it('starts AI history hydration before slow secondary startup catalogs finish', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.listChatConversations).mockClear()
+    vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
+
+    await store.hydrateConfig()
+
+    expect(window.aiops.listChatConversations).toHaveBeenCalled()
+    expect(window.aiops.listFileSessionCatalog).toHaveBeenCalled()
+    expect(vi.mocked(window.aiops.listChatConversations).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(window.aiops.listFileSessionCatalog!).mock.invocationCallOrder[0]
+    )
+  })
+
   it('approves and rejects AI MCP resource access through the backend bridge', async () => {
     const store = useWorkspaceStore()
     await store.restoreConversation('conv-1')

@@ -4947,6 +4947,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...normalizedAiPreferences,
       proxy: { ...normalizedAiPreferences.proxy }
     }
+    const aiStartupRefresh = Promise.all([
+      loadChatConversationsFromBackend({ restoreIfEmpty: true }),
+      refreshAiTodoSnapshot(),
+      refreshAiContextCatalog({ hydrateSelection: false }),
+      refreshAiCommandCatalog()
+    ])
     const modelCatalog = await refreshAiModelCatalog({ replaceSettingsOptions: false })
     const modelCatalogSettingsOptions = modelCatalog?.settingsModels || []
     const modelSettingsSource =
@@ -5136,16 +5142,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     refreshShortcutRuntime()
     setupThemeBridge()
     await refreshUserAccount()
-    await refreshExtensionPlugins()
+    const secondaryStartupRefreshes: Array<Promise<unknown>> = [
+      refreshExtensionPlugins()
+    ]
     setupKnowledgeBridgeListeners()
-    await refreshKnowledgeTree({ persist: false })
-    await refreshFileSessionCatalog()
-    await refreshFileTransferTasks()
-    await refreshKubernetesCatalog()
-    await loadChatConversationsFromBackend({ restoreIfEmpty: true })
-    await refreshAiTodoSnapshot()
-    await refreshAiContextCatalog({ hydrateSelection: false })
-    await refreshAiCommandCatalog()
+    secondaryStartupRefreshes.push(
+      refreshKnowledgeTree({ persist: false }),
+      refreshFileSessionCatalog(),
+      refreshFileTransferTasks(),
+      refreshKubernetesCatalog()
+    )
+    await aiStartupRefresh
+    await Promise.all(secondaryStartupRefreshes)
     restoreSavedGeneralBaseSettings()
     applyDocumentLocale(resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
   }
