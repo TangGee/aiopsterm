@@ -182,6 +182,7 @@ export const createCodexSession = async (
     ...defaultEnv(),
     ...(runtimeConfig.getEnv?.() || {}),
     ...(codexProvider ? { [codexProvider.apiKeyEnv]: codexProvider.apiKey } : {}),
+    AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
     CODEX_HOME: codexHome,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor'

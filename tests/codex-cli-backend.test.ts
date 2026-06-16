@@ -258,6 +258,7 @@ describe('Codex CLI backend runtime', () => {
           env: expect.objectContaining({
             CODEX_HOME: '/tmp/aiopsterm-user-data/codex-agent',
             AIOPSTERM_CODEX_API_KEY: 'ark-secret-token',
+            AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor'
           })

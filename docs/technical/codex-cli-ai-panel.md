@@ -20,6 +20,7 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - Main IPC channels are `codex:create`, `codex:set-target`, `codex:write`, `codex:resize`, and `codex:kill`.
 - Renderer events are streamed through `codex:data`, `codex:lifecycle`, and `codex:exit`.
 - The Codex process runs with `CODEX_HOME=<app userData>/codex-agent`.
+- aiopsterm sets `AIOPSTERM_CODEX_FLAT_MCP_TOOLS=1` for the embedded Codex process. This enables the local Codex compatibility patch that exposes MCP tools to OpenAI-compatible Responses providers as flat function tools such as `mcp__aiopsterm_remote__target_context`, while execution still routes through the same MCP bridge and approval rules.
 - aiopsterm writes `<app userData>/codex-agent/config.toml` before each Codex session starts.
 - The Codex process cwd is also fixed to `<app userData>/codex-agent`; renderer-provided cwd is ignored so local HOME or project paths are not accidentally model-visible as target state.
 - Codex CLI model access is derived from aiopsterm's OpenAI-compatible provider settings when that provider is configured for `Responses`. The generated Codex config writes `model`, `model_provider`, provider `base_url`, `env_key`, and `wire_api = "responses"`; the API key is injected only into the Codex child-process environment as `AIOPSTERM_CODEX_API_KEY` and is not written to `config.toml`.
@@ -61,6 +62,8 @@ Enabled tools:
 - `mcp__aiopsterm_remote__glob_search`: runs a bounded remote file-name search through the selected terminal and returns structured path entries. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
 - `mcp__aiopsterm_remote__grep_search`: runs a bounded remote content search through the selected terminal and returns structured matches when no context lines are requested. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
 - `mcp__aiopsterm_remote__target_context`: returns the selected terminal target context without running a command. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
+
+Codex normally exposes MCP tools as Responses `namespace` tools. Some OpenAI-compatible Responses providers accept the request but do not reliably call namespace tools. The embedded aiopsterm process therefore enables the flat MCP compatibility path above: model-visible names are flat function tools, but raw MCP server/tool names are preserved internally for dispatch.
 
 Prompt boundaries now explicitly require the embedded agent to:
 
