@@ -1353,7 +1353,6 @@ configureCodexCliRuntime({
   getUserDataPath: () => app.getPath('userData'),
   getAppPath: () => app.getAppPath(),
   getResourcesPath: () => process.resourcesPath,
-  getDefaultCwd: () => app.getPath('home'),
   getEnv: () => process.env,
   getBridgeSocketPath: () => getCodexTerminalBridgeSocketPath()
 })
@@ -3777,7 +3776,6 @@ const registerIpc = () => {
       id,
       cols: options.cols,
       rows: options.rows,
-      hasCwd: Boolean(options.cwd),
       targetSessionId: options.target?.sessionId,
       targetKind: options.target?.kind,
       targetLabel: options.target?.label

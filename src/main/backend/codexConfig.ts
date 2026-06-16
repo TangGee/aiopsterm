@@ -72,6 +72,7 @@ export const buildAiopstermDeveloperInstructions = (target?: CodexSessionTargetC
     '',
     'Operational boundary:',
     '- The local Codex process runs inside the aiopsterm desktop client. Its local cwd, shell, filesystem, and AGENTS.md are client implementation details, not the managed target host.',
+    '- aiopsterm disables Codex environment-context injection for this embedded mode. If you need the target cwd, shell, current date/time, timezone, hostname, network state, or filesystem facts, obtain them from `target_context` and remote read-only commands in the selected terminal.',
     '- Do not use local shell or local filesystem tools to inspect or modify a managed host.',
     '- To inspect or change the selected managed host, use only the aiopsterm MCP tools. `target_context` reads the current selected terminal; `run_command` executes in that selected terminal; `read_file`, `glob_search`, and `grep_search` perform bounded read-only file inspection through that terminal.',
     '- The selected terminal can change while this Codex session is running. Call `target_context` before the first command in a task and whenever the target may be ambiguous.',

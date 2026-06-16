@@ -29,7 +29,6 @@ type CodexRuntimeConfig = {
   getUserDataPath?: () => string
   getAppPath?: () => string
   getResourcesPath?: () => string
-  getDefaultCwd?: () => string
   getEnv?: () => NodeJS.ProcessEnv
   loadPty?: () => CodexPtyRuntime | null
   processRuntime?: CodexProcessRuntime
@@ -76,7 +75,6 @@ const defaultLoadPty = (): CodexPtyRuntime | null => {
 
 const defaultAppPath = () => process.cwd()
 const defaultResourcesPath = () => process.resourcesPath || process.cwd()
-const defaultCwd = () => process.env.HOME || process.cwd()
 const defaultEnv = () => process.env
 const getExistsSync = () => runtimeConfig.existsSync || existsSync
 const getMkdir = () => runtimeConfig.mkdir || mkdir
@@ -88,7 +86,6 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.getUserDataPath = config.getUserDataPath
   runtimeConfig.getAppPath = config.getAppPath
   runtimeConfig.getResourcesPath = config.getResourcesPath
-  runtimeConfig.getDefaultCwd = config.getDefaultCwd
   runtimeConfig.getEnv = config.getEnv
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
@@ -171,7 +168,7 @@ export const createCodexSession = async (
 ): Promise<CodexSessionInfo> => {
   const binaryPath = resolveCodexBinaryPath()
   const codexHome = codexHomePath()
-  const cwd = options.cwd?.trim() || runtimeConfig.getDefaultCwd?.() || defaultCwd()
+  const cwd = codexHome
   const cols = Math.max(20, Math.min(400, Math.round(Number(options.cols) || 100)))
   const rows = Math.max(8, Math.min(120, Math.round(Number(options.rows) || 30)))
   const env = {

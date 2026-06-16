@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { CodexSessionCreateOptions } from '@shared/preload'
 
 type CodexLifecycleEvent = {
   id: string
@@ -15,6 +16,8 @@ type CodexLifecycleEvent = {
   errorMessage?: string
   message?: string
 }
+
+type CodexCreateOptionsForTest = CodexSessionCreateOptions & { cwd?: string }
 
 class MockPtyProcess {
   writes: string[] = []
@@ -113,7 +116,6 @@ describe('Codex CLI backend runtime', () => {
       getUserDataPath: () => '/tmp/aiopsterm-user-data',
       getAppPath: () => '/repo',
       getResourcesPath: () => '/resources',
-      getDefaultCwd: () => '/home/ops',
       getEnv: () => ({ PATH: '/usr/bin', CODEX_HOME: '/should/not/reuse' }),
       getBridgeSocketPath: () => '/tmp/aiopsterm-user-data/codex-agent/bridge.sock',
       binaryPath: '/repo/codex/codex-rs/target/release/codex',
@@ -136,6 +138,7 @@ describe('Codex CLI backend runtime', () => {
     const session = await backend.createCodexSession(
       'codex-test-1',
       {
+        cwd: '/tmp/forged-client-cwd',
         cols: 120,
         rows: 40,
         target: {
@@ -146,7 +149,7 @@ describe('Codex CLI backend runtime', () => {
           port: 22,
           username: 'root'
         }
-      },
+      } as CodexCreateOptionsForTest,
       createSink(events)
     )
     const write = backend.writeCodexSession(session.id, 'hello\n')
@@ -158,7 +161,7 @@ describe('Codex CLI backend runtime', () => {
       expect.objectContaining({
         id: 'codex-test-1',
         binaryPath: '/repo/codex/codex-rs/target/release/codex',
-        cwd: '/home/ops',
+        cwd: '/tmp/aiopsterm-user-data/codex-agent',
         codexHome: '/tmp/aiopsterm-user-data/codex-agent',
         runtimeKind: 'pty'
       })
@@ -200,6 +203,8 @@ describe('Codex CLI backend runtime', () => {
     expect(writeFileCalls[0].content).toContain('AIOPSTERM_CODEX_BRIDGE_SOCKET = "/tmp/aiopsterm-user-data/codex-agent/bridge.sock"')
     expect(writeFileCalls[0].content).toContain('protect data, minimize service disruption')
     expect(writeFileCalls[0].content).toContain('Call `target_context` before the first command')
+    expect(writeFileCalls[0].content).toContain('aiopsterm disables Codex environment-context injection')
+    expect(writeFileCalls[0].content).toContain('current date/time, timezone, hostname')
     expect(writeFileCalls[0].content).toContain('Never invent command output')
     expect(writeFileCalls[0].content).toContain('command_blocked')
     expect(writeFileCalls[0].content).toContain('Do not fabricate terminal output or host state')
@@ -210,7 +215,7 @@ describe('Codex CLI backend runtime', () => {
         file: '/repo/codex/codex-rs/target/release/codex',
         args: [],
         options: expect.objectContaining({
-          cwd: '/home/ops',
+          cwd: '/tmp/aiopsterm-user-data/codex-agent',
           cols: 120,
           rows: 40,
           env: expect.objectContaining({
@@ -255,7 +260,6 @@ describe('Codex CLI backend runtime', () => {
       getUserDataPath: () => '/tmp/aiopsterm-user-data',
       getAppPath: () => '/repo',
       getResourcesPath: () => '/resources',
-      getDefaultCwd: () => '/home/ops',
       binaryPath: '/repo/codex/codex-rs/target/release/codex',
       existsSync: (path: string) => path === '/repo/codex/codex-rs/target/release/codex',
       mkdir: async () => undefined,

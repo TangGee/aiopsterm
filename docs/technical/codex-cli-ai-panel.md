@@ -21,6 +21,7 @@ aiopsterm starts Codex through Electron main process IPC, not from renderer code
 - Renderer events are streamed through `codex:data`, `codex:lifecycle`, and `codex:exit`.
 - The Codex process runs with `CODEX_HOME=<app userData>/codex-agent`.
 - aiopsterm writes `<app userData>/codex-agent/config.toml` before each Codex session starts.
+- The Codex process cwd is also fixed to `<app userData>/codex-agent`; renderer-provided cwd is ignored so local HOME or project paths are not accidentally model-visible as target state.
 - The default development binary is `codex/codex-rs/target/release/codex`.
 - Packaged builds copy only the built Codex CLI executable into `resources/codex/codex` (or the platform executable name), not the Codex source tree.
 - `AIOPSTERM_CODEX_BIN` can point at a different binary for local experiments.
@@ -34,6 +35,7 @@ The generated Codex config also isolates the embedded agent from aiopsterm's imp
 - `include_environment_context`, `include_permissions_instructions`, `include_apps_instructions`, and `include_collaboration_mode_instructions` are disabled.
 - `project_doc_max_bytes = 0` prevents local `AGENTS.md` project docs from being injected.
 - `web_search = "disabled"` and local/browser/app/plugin/agent/image-generation features are disabled.
+- Because `<environment_context>` is disabled, the agent must use `target_context` plus remote commands for cwd, shell, current date/time, timezone, hostname, and filesystem facts.
 
 ## Iteration Rules
 

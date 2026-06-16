@@ -48,7 +48,6 @@ export type TerminalSessionInfo = {
 }
 
 export type CodexSessionCreateOptions = {
-  cwd?: string
   cols?: number
   rows?: number
   target?: CodexSessionTargetContext
