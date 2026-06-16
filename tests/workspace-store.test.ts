@@ -602,6 +602,7 @@ describe('workspace store', () => {
     expect(store.aboutSettings.newVersion).toBe('0.1.2')
     expect(store.topNotice).toBe('更新安装请求已提交')
 
+    await store.hydrateClassicChatData()
     store.toggleContext({ id: 'skill:incident-triage', kind: 'skills', label: 'incident-triage', detail: 'Collect symptoms' })
     expect(store.aiSkillContextOptions.some((option) => option.id === 'skill:incident-triage')).toBe(true)
     await store.sendChat('检查生产磁盘')
@@ -1011,14 +1012,38 @@ describe('workspace store', () => {
     })
   })
 
-  it('starts AI history hydration before slow secondary startup catalogs finish', async () => {
+  it('skips Classic Chat hydration during default Codex startup', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.listChatConversations).mockClear()
+    vi.mocked(window.aiops.listAiTodoSnapshot).mockClear()
+    vi.mocked(window.aiops.listAiContextCatalog).mockClear()
+    vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
+    vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
+
+    await store.hydrateConfig()
+
+    expect(window.aiops.listChatConversations).not.toHaveBeenCalled()
+    expect(window.aiops.listAiTodoSnapshot).not.toHaveBeenCalled()
+    expect(window.aiops.listAiContextCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.listAiCommandCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.listFileSessionCatalog).toHaveBeenCalled()
+  })
+
+  it('starts Classic Chat history hydration before slow secondary startup catalogs when Classic mode is persisted', async () => {
+    window.localStorage.setItem('aiopsterm.aiPanelMode', 'classic')
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.listChatConversations).mockClear()
+    vi.mocked(window.aiops.listAiTodoSnapshot).mockClear()
+    vi.mocked(window.aiops.listAiContextCatalog).mockClear()
+    vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
     vi.mocked(window.aiops.listFileSessionCatalog!).mockClear()
 
     await store.hydrateConfig()
 
     expect(window.aiops.listChatConversations).toHaveBeenCalled()
+    expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
+    expect(window.aiops.listAiContextCatalog).toHaveBeenCalled()
+    expect(window.aiops.listAiCommandCatalog).toHaveBeenCalled()
     expect(window.aiops.listFileSessionCatalog).toHaveBeenCalled()
     expect(vi.mocked(window.aiops.listChatConversations).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(window.aiops.listFileSessionCatalog!).mock.invocationCallOrder[0]

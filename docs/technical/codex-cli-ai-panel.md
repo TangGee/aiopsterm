@@ -7,7 +7,9 @@ The right AI panel now has two modes:
 
 The selected AI panel mode is persisted in renderer storage. The default remains `Codex CLI`, but when the user leaves the panel in `Classic Chat`, a later mount restores Classic Chat and does not start the Codex PTY in the background. Switching back to `Codex CLI` starts or resumes the embedded TUI on demand.
 
-Classic Chat startup is now scheduled so visible AI data is restored early. During `hydrateConfig()`, chat history, AI todo state, context catalog, and command catalog begin loading immediately after base AI preferences are applied. Slower secondary catalogs such as files, Kubernetes, extensions, and knowledge base refresh in parallel later in startup instead of serially blocking AI history restore.
+Classic Chat startup is now scheduled so visible AI data is restored early only when Classic Chat is the persisted panel mode. During `hydrateConfig()`, default Codex CLI mode skips Classic Chat history, AI todo state, context catalog, and command catalog loading so the embedded Codex terminal can start without waiting on chat-side catalogs. If the user persisted Classic Chat, or switches from Codex CLI to Classic Chat, `hydrateClassicChatData()` loads chat history, AI todo state, context catalog, and command catalog together. Slower secondary catalogs such as files, Kubernetes, extensions, and knowledge base still refresh in parallel later in startup instead of serially blocking AI history restore.
+
+Classic Chat's no-model state is independent from transcript emptiness. If the model catalog contains no available chat model, the panel shows the configure/login prompt even when a historical transcript has already been restored, so the user always sees the required setup action before trying to send.
 
 Classic Chat restore also protects the renderer from oversized saved transcripts. `restoreChatConversation()` returns the newest bounded message window instead of sending an arbitrarily large conversation to the UI. When older rows are omitted, the backend prepends a `context_truncated` system marker, returns `totalMessages` / `returnedMessages` / `truncated` metadata, and keeps the full transcript in `userData/chat-history.json`. Later `updateChatConversation()` calls that include the truncation marker merge the visible window back into the existing full transcript instead of overwriting hidden older messages. This is a guardrail, not full pagination; long-term history paging/windowed rendering remains the next refinement if users need to browse the omitted rows directly.
 
@@ -107,6 +109,7 @@ Current slice verification:
 
 - `npm run typecheck`
 - `npx vitest run tests/chat-history-backend.test.ts tests/workspace-store.test.ts`
+- `npx vitest run tests/app-shell.test.ts`
 - `npx vitest run tests/app-shell.test.ts tests/codex-cli-backend.test.ts tests/codex-terminal-bridge.test.ts`
 - `npx vitest run tests/package-config.test.ts`
 - `npm run audit:package-config`

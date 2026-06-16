@@ -86,6 +86,7 @@ import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
 import { type SettingSectionKey } from '@/config/settings'
+import { readStoredAiPanelMode } from '@/services/aiPanelModeRuntime'
 import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
 import type {
@@ -4637,6 +4638,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
+  let classicChatHydrationPromise: Promise<boolean> | null = null
+  const hydrateClassicChatData = async (options: { restoreIfEmpty?: boolean } = {}) => {
+    if (classicChatHydrationPromise) return classicChatHydrationPromise
+    classicChatHydrationPromise = Promise.all([
+      loadChatConversationsFromBackend({ restoreIfEmpty: options.restoreIfEmpty !== false }),
+      refreshAiTodoSnapshot(),
+      refreshAiContextCatalog({ hydrateSelection: false }),
+      refreshAiCommandCatalog()
+    ])
+      .then((results) => results.every(Boolean))
+      .finally(() => {
+        classicChatHydrationPromise = null
+      })
+    return classicChatHydrationPromise
+  }
+
   const updateCurrentConversationSnapshot = async (summary?: string, options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) => {
     if (!window.aiops?.updateChatConversation) {
       if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
@@ -4958,12 +4975,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...normalizedAiPreferences,
       proxy: { ...normalizedAiPreferences.proxy }
     }
-    const aiStartupRefresh = Promise.all([
-      loadChatConversationsFromBackend({ restoreIfEmpty: true }),
-      refreshAiTodoSnapshot(),
-      refreshAiContextCatalog({ hydrateSelection: false }),
-      refreshAiCommandCatalog()
-    ])
+    const aiStartupRefresh = readStoredAiPanelMode() === 'classic' ? hydrateClassicChatData({ restoreIfEmpty: true }) : Promise.resolve(true)
     const modelCatalog = await refreshAiModelCatalog({ replaceSettingsOptions: false })
     const modelCatalogSettingsOptions = modelCatalog?.settingsModels || []
     const modelSettingsSource =
@@ -13974,6 +13986,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     todoProgress,
     aiContextCatalog,
     hydrateConfig,
+    hydrateClassicChatData,
     loadChatConversationsFromBackend,
     syncCurrentConversationSnapshot,
     refreshAiTodoSnapshot,

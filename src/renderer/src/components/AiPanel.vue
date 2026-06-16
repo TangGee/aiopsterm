@@ -903,7 +903,7 @@
         </div>
       </article>
       <div
-        v-if="workspace.chatMessages.length === 0"
+        v-if="workspace.chatMessages.length === 0 || showNoAvailableModelPrompt"
         class="ai-empty-chat"
         :class="{ 'no-model': showNoAvailableModelPrompt }"
       >
@@ -1475,6 +1475,7 @@ import {
   Zap
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/aiPanelModeRuntime'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import {
   isAiChatExportData,
@@ -1512,7 +1513,6 @@ const props = defineProps<{ agentMode?: boolean }>()
 
 const workspace = useWorkspaceStore()
 const { locale, t } = useI18n()
-type AiPanelMode = 'codex' | 'classic'
 type AiChatMode = 'agent' | 'cmd'
 type AiContextCategoryView = {
   id: AiContextKind
@@ -1532,22 +1532,6 @@ const aiContextCategoryIcons: Record<AiContextKind, Component> = {
   images: Image,
   skills: Bot,
   chats: Search
-}
-const aiPanelModeStorageKey = 'aiopsterm.aiPanelMode'
-const readStoredAiPanelMode = (): AiPanelMode => {
-  try {
-    const value = window.localStorage?.getItem(aiPanelModeStorageKey)
-    return value === 'classic' || value === 'codex' ? value : 'codex'
-  } catch {
-    return 'codex'
-  }
-}
-const storeAiPanelMode = (mode: AiPanelMode) => {
-  try {
-    window.localStorage?.setItem(aiPanelModeStorageKey, mode)
-  } catch {
-    /* Storage can be unavailable in hardened browser contexts. */
-  }
 }
 const draft = ref('')
 const aiPanelMode = ref<AiPanelMode>(readStoredAiPanelMode())
@@ -1739,12 +1723,10 @@ const writeAiRuntimeLog = (level: RuntimeLogLevel, event: string, fields: Record
   void window.aiops?.writeRuntimeLog?.(level, event, fields)
 }
 
-const loadClassicChatData = () => {
+const loadClassicChatData = async () => {
   if (classicChatDataLoaded) return
   classicChatDataLoaded = true
-  void workspace.refreshAiModelCatalog({ replaceSettingsOptions: false })
-  void workspace.refreshAiContextCatalog({ hydrateSelection: false })
-  void workspace.refreshAiCommandCatalog()
+  await Promise.all([workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }), workspace.hydrateClassicChatData()])
 }
 
 const fitCodexTerminal = (options: { force?: boolean } = {}) => {
@@ -1981,7 +1963,7 @@ const restartCodexSession = async () => {
   await startCodexSession()
 }
 
-const selectAiPanelMode = (mode: AiPanelMode) => {
+const selectAiPanelMode = async (mode: AiPanelMode) => {
   if (aiPanelMode.value === mode) {
     if (mode === 'codex') void startCodexSession()
     return
@@ -1990,7 +1972,7 @@ const selectAiPanelMode = (mode: AiPanelMode) => {
   storeAiPanelMode(mode)
   closePopups()
   if (mode === 'classic') {
-    loadClassicChatData()
+    await loadClassicChatData()
     return
   }
   void startCodexSession()
@@ -5240,7 +5222,7 @@ watch(
 )
 
 onMounted(() => {
-  if (aiPanelMode.value === 'classic') loadClassicChatData()
+  if (aiPanelMode.value === 'classic') void loadClassicChatData()
   if (aiPanelMode.value === 'codex') void startCodexSession()
 })
 

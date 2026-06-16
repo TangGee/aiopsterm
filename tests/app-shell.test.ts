@@ -621,6 +621,10 @@ describe('AppShell', () => {
     setActivePinia(pinia)
     const store = useWorkspaceStore()
     await enableCatalogModelOptions(store)
+    vi.mocked(window.aiops.listChatConversations).mockClear()
+    vi.mocked(window.aiops.listAiTodoSnapshot).mockClear()
+    vi.mocked(window.aiops.listAiContextCatalog).mockClear()
+    vi.mocked(window.aiops.listAiCommandCatalog).mockClear()
     const wrapper = mount(AiPanel, {
       attachTo: document.body,
       props: { agentMode: true },
@@ -632,6 +636,10 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
     expect(window.aiops.createCodexSession).toHaveBeenCalled()
+    expect(window.aiops.listChatConversations).not.toHaveBeenCalled()
+    expect(window.aiops.listAiTodoSnapshot).not.toHaveBeenCalled()
+    expect(window.aiops.listAiContextCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.listAiCommandCatalog).not.toHaveBeenCalled()
 
     await wrapper.find('[data-testid="ai-mode-classic"]').trigger('click')
     await flushPromises()
@@ -640,6 +648,10 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-mode-classic"]').classes()).toContain('active')
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
+    expect(window.aiops.listChatConversations).toHaveBeenCalled()
+    expect(window.aiops.listAiTodoSnapshot).toHaveBeenCalled()
+    expect(window.aiops.listAiContextCatalog).toHaveBeenCalled()
+    expect(window.aiops.listAiCommandCatalog).toHaveBeenCalled()
   })
 
   it('does not start Codex in the background when the persisted AI panel mode is Classic Chat', async () => {
@@ -5779,12 +5791,15 @@ describe('AppShell', () => {
       lockedChatModels: [{ id: 'gpt-5-pro', label: 'gpt-5-pro', detail: 'Subscription model', locked: true, checked: true, tier: 'VIP' }],
       settingsModels: [{ name: 'aiopsterm-local-agent', locked: false, checked: true, type: 'standard', apiProvider: 'default' }]
     })
+    const store = useWorkspaceStore()
+    store.aiModelOptions = []
+    store.lockedAiModelOptions = []
+    store.settingModelOptions = []
     const wrapper = mount(AiPanel, {
       attachTo: document.body,
       props: { agentMode: true },
       global: { plugins: [pinia] }
     })
-    const store = useWorkspaceStore()
 
     await flushPromises()
     await switchAiPanelToClassic(wrapper)
@@ -6205,8 +6220,9 @@ describe('AppShell', () => {
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'doc')).toBe(true)
     expect(store.chatMessages.at(-2)?.contentParts?.some((part) => part.type === 'image')).toBe(true)
-    expect(wrapper.find('.message.user').text()).toContain('检查回滚窗口')
-    expect(wrapper.find('.message.user .message-image-part img').exists()).toBe(true)
+    const latestUserMessage = wrapper.findAll('.message.user').at(-1)!
+    expect(latestUserMessage.text()).toContain('检查回滚窗口')
+    expect(latestUserMessage.find('.message-image-part img').exists()).toBe(true)
 
     ;(globalThis as any).__setAiTodoSnapshotMock?.([
       { id: 'todo-1', content: '收集上下文', description: '已接收本次对话输入', status: 'completed' },
