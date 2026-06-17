@@ -1,8 +1,5 @@
 <template>
-  <section
-    class="settings-workspace"
-    :style="workspace.config.background.mode !== 'none' ? workspaceBackgroundStyle : undefined"
-  >
+  <section class="settings-workspace">
     <header class="settings-workspace-title">
       <h2>{{ t('common.settings') }}</h2>
       <button
@@ -169,6 +166,7 @@ import {
   settingsThemeOptions
 } from '@/config/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { backgroundImageCss } from '@/services/backgroundRuntime'
 import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
@@ -179,12 +177,15 @@ const { t } = useI18n()
 
 const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi']
 const terminalFonts = [
-  { value: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace', label: 'Menlo' },
-  { value: 'Monaco, "Courier New", Consolas, Courier, monospace', label: 'Monaco' },
-  { value: '"MesloLGS NF", "Courier New", Courier, monospace', label: 'Meslo Nerd Font' },
-  { value: 'Consolas, "Courier New", Courier, monospace', label: 'Consolas' },
-  { value: '"JetBrains Mono", "Courier New", Courier, monospace', label: 'JetBrains Mono' },
-  { value: '"Source Code Pro", "Courier New", Courier, monospace', label: 'Source Code Pro' }
+  { value: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace', label: 'DejaVu Sans Mono' },
+  { value: '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace', label: 'Liberation Mono' },
+  { value: '"Ubuntu Mono", "Ubuntu Sans Mono", "DejaVu Sans Mono", monospace', label: 'Ubuntu Mono' },
+  { value: '"Noto Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace', label: 'Noto Mono' },
+  { value: '"Nimbus Mono PS", "Courier 10 Pitch", "DejaVu Sans Mono", monospace', label: 'Nimbus Mono PS' },
+  { value: '"Courier 10 Pitch", "Nimbus Mono PS", "DejaVu Sans Mono", monospace', label: 'Courier 10 Pitch' },
+  { value: '"JetBrains Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace', label: 'JetBrains Mono (if installed)' },
+  { value: '"Source Code Pro", "DejaVu Sans Mono", "Noto Sans Mono", monospace', label: 'Source Code Pro (if installed)' },
+  { value: 'Menlo, Monaco, "Courier New", Consolas, "DejaVu Sans Mono", monospace', label: 'Menlo / Monaco (if installed)' }
 ]
 const cursorStyles = [
   { value: 'block' as const, label: '块状光标' },
@@ -294,22 +295,6 @@ const customBackgroundImage = computed(() =>
 )
 
 const hasSelectedBackgroundImage = computed(() => Boolean(workspace.config.background.image && workspace.config.background.mode !== 'none'))
-
-const backgroundImageCss = (image: string) => {
-  if (!image) return 'none'
-  if (/^(?:file|https?|data|blob):/i.test(image)) return `url("${image.replace(/"/g, '\\"')}")`
-  return `url("${image.replace(/"/g, '\\"')}")`
-}
-
-const workspaceBackgroundStyle = computed(() => {
-  const preset = settingsBackgroundPresets.find((item) => item.id === workspace.config.background.image)
-  const background = workspace.config.background.mode === 'custom' ? backgroundImageCss(workspace.config.background.image) : preset?.css || 'none'
-  return {
-    '--settings-bg-image': background,
-    '--settings-bg-opacity': `${workspace.config.background.opacity}`,
-    '--settings-bg-brightness': `${workspace.config.background.brightness}`
-  }
-})
 
 const GeneralSettings = defineComponent({
   name: 'GeneralSettings',
@@ -463,6 +448,7 @@ const GeneralSettings = defineComponent({
           ])
         ]),
         h('h3', t('settings.general.editor')),
+        h('p', { class: 'settings-description' }, t('settings.general.editorScope')),
         h('div', { class: 'settings-form-card' }, [
           numberRow(t('settings.general.fontSize'), workspace.editorSettings.fontSize, 8, 32, (value) => workspace.updateEditorSettings({ fontSize: value })),
           numberRow(t('settings.general.lineHeight'), workspace.editorSettings.lineHeight, 0, 48, (value) => workspace.updateEditorSettings({ lineHeight: value })),
@@ -503,6 +489,7 @@ const TerminalSettings = defineComponent({
     return () =>
       h('div', [
         h('h3', '终端设置'),
+        h('p', { class: 'settings-description' }, '终端类型主要影响 TERM 和程序能力探测，通常不会直接改变外观。字体只有系统已安装或能匹配到对应字体时才会明显变化。'),
         h('div', { class: 'settings-form-card' }, [
           selectRow('终端类型', workspace.terminalSettings.terminalType, terminalTypes.map((item) => ({ value: item, label: item })), (value) => workspace.updateTerminalSettings({ terminalType: value })),
           selectRow('字体', workspace.terminalSettings.fontFamily, terminalFonts, (value) => workspace.updateTerminalSettings({ fontFamily: value })),
@@ -537,10 +524,6 @@ const TerminalSettings = defineComponent({
                 h('button', { class: 'settings-button', onClick: () => workspace.openSshAgentConfig() }, '设置')
               ])
             : null,
-          h('div', { class: 'settings-form-row' }, [
-            h('label', '代理设置'),
-            h('button', { class: 'settings-button', onClick: () => workspace.openSshProxyConfig() }, '设置')
-          ]),
           h('div', { class: 'settings-form-row align-start' }, [
             h('label', '鼠标事件'),
             h('div', { class: 'mouse-event-settings' }, [
@@ -1087,7 +1070,6 @@ const ExtensionSettingsPage = defineComponent({
         h('h3', '扩展'),
         h('div', { class: 'settings-form-card' }, [
           switchRow('自动补全', workspace.extensionSettings.autoCompleteStatus, (checked) => workspace.updateExtensionSettings({ autoCompleteStatus: checked })),
-          switchRow('Visual Vim Editor', workspace.extensionSettings.quickVimStatus, (checked) => workspace.updateExtensionSettings({ quickVimStatus: checked })),
           switchRow('Alias', workspace.extensionSettings.aliasStatus, (checked) => workspace.updateExtensionSettings({ aliasStatus: checked })),
           switchRow('关键词高亮', workspace.extensionSettings.highlightStatus, (checked) => workspace.updateExtensionSettings({ highlightStatus: checked })),
           h('div', { class: 'settings-form-row' }, [

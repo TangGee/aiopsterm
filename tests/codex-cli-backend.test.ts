@@ -127,7 +127,7 @@ const createConfigWithModelProvider = (patch: Partial<UserConfig> = {}): UserCon
     ...patch
   }) as UserConfig
 
-const CODEX_PACKAGE_ROOT = '/repo/codex/codex-rs/target/x86_64-unknown-linux-musl/aiopsterm-codex-package'
+const CODEX_PACKAGE_ROOT = '/repo/codex/codex-rs/target/x86_64-unknown-linux-gnu/aiopsterm-codex-dev-package'
 const CODEX_PACKAGE_BINARY = `${CODEX_PACKAGE_ROOT}/bin/codex`
 const codexPackageExists = (path: string) =>
   path === CODEX_PACKAGE_BINARY ||
@@ -204,57 +204,62 @@ describe('Codex CLI backend runtime', () => {
         runtimeKind: 'pty'
       })
     )
-    expect(mkdirCalls).toEqual(['/tmp/aiopsterm-user-data/codex-agent'])
-    expect(writeFileCalls).toHaveLength(1)
-    expect(writeFileCalls[0]).toEqual(
+    expect(mkdirCalls).toEqual(['/tmp/aiopsterm-user-data/codex-agent', '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context'])
+    expect(writeFileCalls).toHaveLength(2)
+    expect(writeFileCalls[0]).toEqual({
+      path: '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context/codex-test-1.txt',
+      content: ''
+    })
+    expect(writeFileCalls[1]).toEqual(
       expect.objectContaining({
         path: '/tmp/aiopsterm-user-data/codex-agent/config.toml'
       })
     )
-    expect(writeFileCalls[0].content).toContain('include_environment_context = false')
-    expect(writeFileCalls[0].content).toContain('model = "ark-code-latest"')
-    expect(writeFileCalls[0].content).toContain('model_provider = "aiopsterm_openai_responses"')
-    expect(writeFileCalls[0].content).toContain('[model_providers.aiopsterm_openai_responses]')
-    expect(writeFileCalls[0].content).toContain('base_url = "https://ark.cn-beijing.volces.com/api/coding/v3"')
-    expect(writeFileCalls[0].content).toContain('env_key = "AIOPSTERM_CODEX_API_KEY"')
-    expect(writeFileCalls[0].content).toContain('wire_api = "responses"')
-    expect(writeFileCalls[0].content).not.toContain('ark-secret-token')
-    expect(writeFileCalls[0].content).toContain('instructions = "You are aiopsterm Agent')
-    expect(writeFileCalls[0].content).toContain('project_doc_max_bytes = 0')
-    expect(writeFileCalls[0].content).toContain('web_search = "disabled"')
-    expect(writeFileCalls[0].content).toContain('check_for_update_on_startup = false')
-    expect(writeFileCalls[0].content).toContain('shell_tool = false')
-    expect(writeFileCalls[0].content).toContain('unified_exec = false')
-    expect(writeFileCalls[0].content).toContain('image_generation = false')
-    expect(writeFileCalls[0].content).toContain('browser_use = false')
-    expect(writeFileCalls[0].content).toContain('computer_use = false')
-    expect(writeFileCalls[0].content).toContain('[tools.experimental_request_user_input]')
-    expect(writeFileCalls[0].content).toContain('enabled = false')
-    expect(writeFileCalls[0].content).toContain('include_collaboration_mode_instructions = false')
-    expect(writeFileCalls[0].content).toContain('multi_agent = false')
-    expect(writeFileCalls[0].content).toContain('hooks = false')
-    expect(writeFileCalls[0].content).toContain('[skills]')
-    expect(writeFileCalls[0].content).toContain('include_instructions = false')
-    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote]')
-    expect(writeFileCalls[0].content).toContain('default_tools_approval_mode = "prompt"')
-    expect(writeFileCalls[0].content).toContain('enabled_tools = ["run_command", "read_file", "glob_search", "grep_search", "target_context"]')
-    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote.tools.target_context]')
-    expect(writeFileCalls[0].content).toContain('approval_mode = "approve"')
-    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote.tools.read_file]')
-    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote.tools.glob_search]')
-    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote.tools.grep_search]')
-    expect(writeFileCalls[0].content).toContain('[mcp_servers.aiopsterm_remote.tools.run_command]')
-    expect(writeFileCalls[0].content).toContain('approval_mode = "prompt"')
-    expect(writeFileCalls[0].content).toContain('AIOPSTERM_CODEX_BRIDGE_SOCKET = "/tmp/aiopsterm-user-data/codex-agent/bridge.sock"')
-    expect(writeFileCalls[0].content).toContain('protect data, minimize service disruption')
-    expect(writeFileCalls[0].content).toContain('Call `target_context` before the first command')
-    expect(writeFileCalls[0].content).toContain('aiopsterm disables Codex environment-context injection')
-    expect(writeFileCalls[0].content).toContain('current date/time, timezone, hostname')
-    expect(writeFileCalls[0].content).toContain('Never invent command output')
-    expect(writeFileCalls[0].content).toContain('command_blocked')
-    expect(writeFileCalls[0].content).toContain('Do not fabricate terminal output or host state')
-    expect(writeFileCalls[0].content).toContain('terminal_session_id: terminal-1')
-    expect(writeFileCalls[0].content).toContain('host: 10.0.0.8')
+    const configToml = writeFileCalls[1].content
+    expect(configToml).toContain('include_environment_context = false')
+    expect(configToml).toContain('model = "ark-code-latest"')
+    expect(configToml).toContain('model_provider = "aiopsterm_openai_responses"')
+    expect(configToml).toContain('[model_providers.aiopsterm_openai_responses]')
+    expect(configToml).toContain('base_url = "https://ark.cn-beijing.volces.com/api/coding/v3"')
+    expect(configToml).toContain('env_key = "AIOPSTERM_CODEX_API_KEY"')
+    expect(configToml).toContain('wire_api = "responses"')
+    expect(configToml).not.toContain('ark-secret-token')
+    expect(configToml).toContain('instructions = "You are aiopsterm Agent')
+    expect(configToml).toContain('project_doc_max_bytes = 0')
+    expect(configToml).toContain('web_search = "disabled"')
+    expect(configToml).toContain('check_for_update_on_startup = false')
+    expect(configToml).toContain('shell_tool = false')
+    expect(configToml).toContain('unified_exec = false')
+    expect(configToml).toContain('image_generation = false')
+    expect(configToml).toContain('browser_use = false')
+    expect(configToml).toContain('computer_use = false')
+    expect(configToml).toContain('[tools.experimental_request_user_input]')
+    expect(configToml).toContain('enabled = false')
+    expect(configToml).toContain('include_collaboration_mode_instructions = false')
+    expect(configToml).toContain('multi_agent = false')
+    expect(configToml).toContain('hooks = false')
+    expect(configToml).toContain('[skills]')
+    expect(configToml).toContain('include_instructions = false')
+    expect(configToml).toContain('[mcp_servers.aiopsterm_remote]')
+    expect(configToml).toContain('default_tools_approval_mode = "prompt"')
+    expect(configToml).toContain('enabled_tools = ["run_command", "read_file", "glob_search", "grep_search", "target_context"]')
+    expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.target_context]')
+    expect(configToml).toContain('approval_mode = "approve"')
+    expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.read_file]')
+    expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.glob_search]')
+    expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.grep_search]')
+    expect(configToml).toContain('[mcp_servers.aiopsterm_remote.tools.run_command]')
+    expect(configToml).toContain('approval_mode = "prompt"')
+    expect(configToml).toContain('AIOPSTERM_CODEX_BRIDGE_SOCKET = "/tmp/aiopsterm-user-data/codex-agent/bridge.sock"')
+    expect(configToml).toContain('protect data, minimize service disruption')
+    expect(configToml).toContain('Call `target_context` before the first command')
+    expect(configToml).toContain('aiopsterm disables Codex environment-context injection')
+    expect(configToml).toContain('current date/time, timezone, hostname')
+    expect(configToml).toContain('Never invent command output')
+    expect(configToml).toContain('command_blocked')
+    expect(configToml).toContain('Do not fabricate terminal output or host state')
+    expect(configToml).toContain('terminal_session_id: terminal-1')
+    expect(configToml).toContain('host: 10.0.0.8')
     expect(spawnCalls).toEqual([
       expect.objectContaining({
         file: CODEX_PACKAGE_BINARY,
@@ -268,6 +273,7 @@ describe('Codex CLI backend runtime', () => {
             CODEX_MANAGED_PACKAGE_ROOT: CODEX_PACKAGE_ROOT,
             AIOPSTERM_CODEX_API_KEY: 'ark-secret-token',
             AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
+            AIOPSTERM_CODEX_PENDING_CONTEXT_FILE: '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context/codex-test-1.txt',
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor'
           })
@@ -282,6 +288,46 @@ describe('Codex CLI backend runtime', () => {
     expect(events.exit).toEqual([expect.objectContaining({ code: 0 })])
     expect(events.closed).toEqual(['codex-test-1'])
     expect(backend.__getCodexSessionCountForTests()).toBe(0)
+  })
+
+  it('stores pending Codex context per session and replaces prior content', async () => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const writeFileCalls: Array<{ path: string; content: string }> = []
+
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
+      mkdir: async () => undefined,
+      writeFile: async (path: string, content: string) => {
+        writeFileCalls.push({ path: String(path), content: String(content) })
+      },
+      loadPty: () => ({
+        spawn: () => pty
+      })
+    })
+
+    const session = await backend.createCodexSession('codex-pending-1', {}, createSink(createRecorder()))
+    const first = await backend.setCodexSessionPendingContext(session.id, '[aiopsterm target changed]\nCurrent target: first')
+    const second = await backend.setCodexSessionPendingContext(session.id, '[aiopsterm target changed]\nCurrent target: second')
+    const missing = await backend.setCodexSessionPendingContext('missing', 'unused')
+
+    expect(first).toEqual({ ok: true, data: { id: 'codex-pending-1', bytes: expect.any(Number), cleared: false } })
+    expect(second.ok).toBe(true)
+    expect(writeFileCalls.at(-1)).toEqual({
+      path: '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context/codex-pending-1.txt',
+      content: '[aiopsterm target changed]\nCurrent target: second'
+    })
+    expect(missing).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'CODEX_SESSION_NOT_FOUND'
+      })
+    )
   })
 
   it('reports missing binary before spawning', async () => {
@@ -393,8 +439,9 @@ describe('Codex CLI backend runtime', () => {
 
     await backend.createCodexSession('codex-chat-provider', {}, createSink(createRecorder()))
 
-    expect(writeFileCalls[0].content).not.toContain('model_provider = "aiopsterm_openai_responses"')
-    expect(writeFileCalls[0].content).not.toContain('[model_providers.aiopsterm_openai_responses]')
+    const configToml = writeFileCalls.at(-1)?.content || ''
+    expect(configToml).not.toContain('model_provider = "aiopsterm_openai_responses"')
+    expect(configToml).not.toContain('[model_providers.aiopsterm_openai_responses]')
     expect(spawnCalls[0].options).toEqual(
       expect.objectContaining({
         env: expect.not.objectContaining({

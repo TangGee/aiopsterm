@@ -50,6 +50,8 @@ if (missingConfig.length) {
 }
 
 const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'utf8')
+const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-package.sh'), 'utf8')
+const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const codexPackagingRequirements = [
   { label: 'build-codex target triple', source: codexBuildScript, text: 'codexTargetTriple' },
@@ -65,7 +67,14 @@ const codexPackagingRequirements = [
   { label: 'afterPack codex package path', source: afterPackScript, text: 'packagedCodexPackageDir' },
   { label: 'afterPack codex env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_BIN' },
   { label: 'afterPack codex package env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_PACKAGE_DIR' },
-  { label: 'afterPack codex platform output path', source: afterPackScript, text: 'codexPackageDir' }
+  { label: 'afterPack codex platform output path', source: afterPackScript, text: 'codexPackageDir' },
+  { label: 'dev-start codex package build', source: buildAndStartScript, text: 'build-codex-dev-package.sh' },
+  { label: 'dev-start codex package env', source: buildAndStartScript, text: 'AIOPSTERM_CODEX_PACKAGE_DIR' },
+  { label: 'dev-codex target triple', source: codexDevBuildScript, text: 'codexDevTargetTriple' },
+  { label: 'dev-codex corrupt cargo cleanup', source: codexDevBuildScript, text: 'aiopsterm_clean_corrupt_codex_cargo_profile' },
+  { label: 'dev-codex package builder', source: codexDevBuildScript, text: 'build_codex_package.py' },
+  { label: 'dev-codex v8 asset prep', source: codexDevBuildScript, text: 'prepare-codex-dev-assets.mjs' },
+  { label: 'dev-codex mirror override', source: readFileSync(resolve('scripts/prepare-codex-dev-assets.mjs'), 'utf8'), text: 'AIOPSTERM_GITHUB_MIRROR' }
 ]
 const missingCodexPackaging = codexPackagingRequirements.filter((item) => !item.source.includes(item.text)).map((item) => item.label)
 if (missingCodexPackaging.length) {

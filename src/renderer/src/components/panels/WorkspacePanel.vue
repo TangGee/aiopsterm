@@ -2327,7 +2327,8 @@ const connectAsset = async (assetId: string) => {
         kind: 'local',
         title: asset.name,
         cols: 100,
-        rows: 30
+        rows: 30,
+        terminalType: workspace.terminalSettings.terminalType
       })
       const panel = workspace.applyLocalTerminalSession(panelId, session)
       if (!panel) {
@@ -2355,7 +2356,8 @@ const connectAsset = async (assetId: string) => {
         assetId: asset.id,
         title: asset.name,
         cols: 100,
-        rows: 30
+        rows: 30,
+        terminalType: workspace.terminalSettings.terminalType
       })
       const connected = Boolean(workspace.applySshTerminalSession(panelId, session, asset))
       if (!connected) {

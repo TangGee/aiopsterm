@@ -80,6 +80,11 @@ const getCwd = (options: TerminalCreateOptions) => options.cwd || runtimeConfig.
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
 
+const getTerminalType = (options: TerminalCreateOptions) => {
+  const terminalType = typeof options.terminalType === 'string' ? options.terminalType.trim() : ''
+  return terminalType || 'xterm-256color'
+}
+
 const getPlatform = () => runtimeConfig.getPlatform?.() || process.platform
 
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
@@ -115,6 +120,8 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
   const terminalShell = getShell(options)
   const terminalArgs = localShellArgs(terminalShell)
   const cwd = getCwd(options)
+  const terminalType = getTerminalType(options)
+  const env = { ...getEnv(), TERM: terminalType }
   const lifecycleBase = {
     kind: 'local' as const,
     shell: terminalShell,
@@ -157,11 +164,11 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
   const ptyRuntime = getPtyRuntime()
   if (ptyRuntime) {
     const ptyProcess = ptyRuntime.spawn(terminalShell, terminalArgs, {
-      name: 'xterm-256color',
+      name: terminalType,
       cols: options.cols || 100,
       rows: options.rows || 30,
       cwd,
-      env: getEnv()
+      env
     })
     const session: LocalTerminalSession = {
       write(data: string | Buffer) {
@@ -195,7 +202,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
 
   const child = getProcessRuntime().spawn(terminalShell, terminalArgs, {
     cwd,
-    env: getEnv(),
+    env,
     shell: false
   }) as ChildProcessWithoutNullStreams
   const session: LocalTerminalSession = {

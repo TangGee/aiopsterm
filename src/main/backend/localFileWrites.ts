@@ -14,6 +14,7 @@ type CustomBackgroundRuntime = {
   backgroundDir: string
   maxBytes?: number
   allowedExtensions?: Set<string>
+  toUrl?: (filePath: string) => string
   copyFile?: (source: string, target: string) => Promise<void>
   now?: () => Date
 }
@@ -130,7 +131,7 @@ export const saveCustomBackgroundFile = async (srcAbsPath: string, runtime: Cust
   }
   return {
     filePath: finalPath,
-    url: pathToFileURL(finalPath).href,
+    url: runtime.toUrl ? runtime.toUrl(finalPath) : pathToFileURL(finalPath).href,
     name: finalName,
     size: targetMetadata.size,
     bytes: targetMetadata.size,

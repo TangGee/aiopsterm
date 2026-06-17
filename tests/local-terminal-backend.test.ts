@@ -30,7 +30,7 @@ type LocalTerminalBackend = {
   }) => void
   createLocalTerminalSession: (
     id: string,
-    options: { kind?: 'local'; shell?: string; cwd?: string; cols?: number; rows?: number },
+    options: { kind?: 'local'; shell?: string; cwd?: string; cols?: number; rows?: number; terminalType?: string },
     sink: ReturnType<typeof createSink>
   ) => {
     shell: string
@@ -156,7 +156,7 @@ describe('local terminal backend runtime', () => {
       })
     })
 
-    const result = backend.createLocalTerminalSession('local-pty-1', { kind: 'local', cols: 120, rows: 40 }, createSink(events))
+    const result = backend.createLocalTerminalSession('local-pty-1', { kind: 'local', cols: 120, rows: 40, terminalType: 'vt220' }, createSink(events))
     result.session.write('uptime\n')
     result.session.resize(132, 44)
     pty.emitData('shell output\n')
@@ -173,7 +173,13 @@ describe('local terminal backend runtime', () => {
       expect.objectContaining({
         shell: '/bin/bash',
         args: ['--login'],
-        options: expect.objectContaining({ cwd: '/home/ops', cols: 120, rows: 40 })
+        options: expect.objectContaining({
+          cwd: '/home/ops',
+          cols: 120,
+          rows: 40,
+          name: 'vt220',
+          env: expect.objectContaining({ PATH: '/usr/bin', TERM: 'vt220' })
+        })
       })
     ])
     expect(pty.writes).toEqual(['uptime\n'])
@@ -205,7 +211,7 @@ describe('local terminal backend runtime', () => {
       }
     })
 
-    const result = backend.createLocalTerminalSession('local-process-1', { kind: 'local' }, createSink(events))
+    const result = backend.createLocalTerminalSession('local-process-1', { kind: 'local', terminalType: 'ansi' }, createSink(events))
     result.session.write('date\n')
     expect(result.session.writeBinary(Buffer.from([0x00, 0xff]))).toBe(true)
     child.stdout.write('process stdout\n')
@@ -217,7 +223,11 @@ describe('local terminal backend runtime', () => {
       expect.objectContaining({
         shell: '/bin/sh',
         args: ['--login'],
-        options: expect.objectContaining({ cwd: '/tmp', shell: false })
+        options: expect.objectContaining({
+          cwd: '/tmp',
+          shell: false,
+          env: expect.objectContaining({ PATH: '/bin', TERM: 'ansi' })
+        })
       })
     ])
     expect(child.writes).toEqual(['date\n', Buffer.from([0x00, 0xff])])

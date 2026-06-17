@@ -1,5 +1,12 @@
 <template>
-  <div class="app-shell">
+  <div
+    class="app-shell"
+    :class="{
+      'has-app-background': workspace.config.background.mode !== 'none',
+      'watermark-enabled': workspace.config.watermark === 'open'
+    }"
+    :style="appBackgroundStyle"
+  >
     <TopBar />
     <main
       class="app-body"
@@ -183,6 +190,7 @@ import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
+import { backgroundStyleVars } from '@/services/backgroundRuntime'
 import { applyDocumentLocale, useI18n, type I18nKey } from '@/i18n'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/preload'
@@ -232,6 +240,7 @@ const hasRightPane = computed(() => showTerminalRightPane.value)
 const displayLeftPanelWidth = computed(() => draftLeftPanelWidth.value ?? workspace.leftPanelWidth)
 const displayRightPanelWidth = computed(() => draftRightPanelWidth.value ?? workspace.rightPanelWidth)
 const displayAgentsLeftWidth = computed(() => draftAgentsLeftWidth.value ?? workspace.agentsLeftWidth)
+const appBackgroundStyle = computed(() => backgroundStyleVars(workspace.config.background))
 const terminalMfaTarget = computed(() => {
   const request = terminalMfaDialog.value.request
   return request ? `${request.username}@${request.host}:${request.port}` : ''

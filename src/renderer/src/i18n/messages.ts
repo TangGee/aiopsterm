@@ -79,6 +79,7 @@ export type I18nKey =
   | 'settings.general.onboarding'
   | 'settings.general.openOnboarding'
   | 'settings.general.editor'
+  | 'settings.general.editorScope'
   | 'settings.general.fontSize'
   | 'settings.general.lineHeight'
   | 'settings.general.font'
@@ -275,6 +276,7 @@ const zhCN: LocaleMessages = {
   'settings.general.onboarding': '入门引导',
   'settings.general.openOnboarding': '打开入门引导',
   'settings.general.editor': '编辑器设置',
+  'settings.general.editorScope': '这些设置会应用到文件、知识库、SQL 和设置 JSON 等代码编辑器；终端字体请在“终端设置”中调整，AI 输入框不受影响。',
   'settings.general.fontSize': '字体大小',
   'settings.general.lineHeight': '行高',
   'settings.general.font': '字体',
@@ -470,6 +472,7 @@ const enUS: LocaleMessages = {
   'settings.general.onboarding': 'Onboarding',
   'settings.general.openOnboarding': 'Open onboarding',
   'settings.general.editor': 'Editor Settings',
+  'settings.general.editorScope': 'Applies to file, knowledge, SQL, and settings JSON code editors. Terminal fonts are controlled by Terminal Settings; the AI input is not affected.',
   'settings.general.fontSize': 'Font Size',
   'settings.general.lineHeight': 'Line Height',
   'settings.general.font': 'Font',
@@ -646,6 +649,7 @@ const zhTW: LocaleMessages = {
   'settings.general.onboarding': '入門導覽',
   'settings.general.openOnboarding': '開啟入門導覽',
   'settings.general.editor': '編輯器設定',
+  'settings.general.editorScope': '這些設定會套用到檔案、知識庫、SQL 和設定 JSON 等程式碼編輯器；終端字型請在「終端設定」中調整，AI 輸入框不受影響。',
   'ai.newChat': '新建對話',
   'ai.moreActions': '更多',
   'ai.history': '對話歷史',
@@ -713,6 +717,7 @@ const jaJP: LocaleMessages = {
   'settings.general.language': '言語',
   'settings.general.openOnboarding': 'オンボーディングを開く',
   'settings.general.editor': 'エディター設定',
+  'settings.general.editorScope': 'ファイル、ナレッジ、SQL、設定 JSON などのコードエディターに適用されます。ターミナルのフォントは「ターミナル設定」で調整します。AI 入力欄には影響しません。',
   'ai.newChat': '新しいチャット',
   'ai.moreActions': 'その他',
   'ai.history': 'チャット履歴',
@@ -775,6 +780,7 @@ const koKR: LocaleMessages = {
   'settings.general.language': '언어',
   'settings.general.openOnboarding': '온보딩 열기',
   'settings.general.editor': '편집기 설정',
+  'settings.general.editorScope': '파일, 지식 베이스, SQL, 설정 JSON 등의 코드 편집기에 적용됩니다. 터미널 글꼴은 터미널 설정에서 조정하며 AI 입력창에는 영향을 주지 않습니다.',
   'ai.newChat': '새 채팅',
   'ai.moreActions': '더보기',
   'ai.history': '채팅 기록',
@@ -837,6 +843,7 @@ const deDE: LocaleMessages = {
   'settings.general.language': 'Sprache',
   'settings.general.openOnboarding': 'Onboarding öffnen',
   'settings.general.editor': 'Editor-Einstellungen',
+  'settings.general.editorScope': 'Gilt für Datei-, Wissens-, SQL- und Einstellungen-JSON-Code-Editoren. Terminal-Schriften werden in den Terminal-Einstellungen gesteuert; die AI-Eingabe ist nicht betroffen.',
   'ai.newChat': 'Neuer Chat',
   'ai.moreActions': 'Mehr',
   'ai.history': 'Chatverlauf',
@@ -899,6 +906,7 @@ const frFR: LocaleMessages = {
   'settings.general.language': 'Langue',
   'settings.general.openOnboarding': 'Ouvrir l’accueil',
   'settings.general.editor': 'Paramètres de l’éditeur',
+  'settings.general.editorScope': 'S’applique aux éditeurs de code pour les fichiers, la base de connaissances, SQL et le JSON des paramètres. Les polices du terminal se règlent dans Paramètres du terminal ; la saisie IA n’est pas affectée.',
   'ai.newChat': 'Nouveau chat',
   'ai.moreActions': 'Plus',
   'ai.history': 'Historique',
@@ -961,6 +969,7 @@ const itIT: LocaleMessages = {
   'settings.general.language': 'Lingua',
   'settings.general.openOnboarding': 'Apri onboarding',
   'settings.general.editor': 'Impostazioni editor',
+  'settings.general.editorScope': 'Si applica agli editor di codice per file, conoscenza, SQL e JSON delle impostazioni. I caratteri del terminale si regolano nelle impostazioni terminale; l’input AI non è interessato.',
   'ai.newChat': 'Nuova chat',
   'ai.moreActions': 'Altro',
   'ai.history': 'Cronologia chat',
@@ -1023,6 +1032,7 @@ const ptPT: LocaleMessages = {
   'settings.general.language': 'Idioma',
   'settings.general.openOnboarding': 'Abrir integração',
   'settings.general.editor': 'Definições do editor',
+  'settings.general.editorScope': 'Aplica-se aos editores de código de ficheiros, conhecimento, SQL e JSON das definições. As fontes do terminal são controladas nas Definições do terminal; a entrada de IA não é afetada.',
   'ai.newChat': 'Nova conversa',
   'ai.moreActions': 'Mais',
   'ai.history': 'Histórico de conversas',
@@ -1085,6 +1095,7 @@ const ruRU: LocaleMessages = {
   'settings.general.language': 'Язык',
   'settings.general.openOnboarding': 'Открыть обучение',
   'settings.general.editor': 'Настройки редактора',
+  'settings.general.editorScope': 'Применяется к редакторам кода для файлов, базы знаний, SQL и JSON настроек. Шрифты терминала настраиваются в настройках терминала; поле ввода AI не затрагивается.',
   'ai.newChat': 'Новый чат',
   'ai.moreActions': 'Еще',
   'ai.history': 'История чата',
@@ -1151,6 +1162,7 @@ const arAR: LocaleMessages = {
   'settings.general.language': 'اللغة',
   'settings.general.openOnboarding': 'فتح الإرشاد',
   'settings.general.editor': 'إعدادات المحرر',
+  'settings.general.editorScope': 'ينطبق على محررات كود الملفات والمعرفة وSQL وJSON الإعدادات. تضبط خطوط الطرفية من إعدادات الطرفية؛ ولا يتأثر إدخال AI.',
   'ai.newChat': 'محادثة جديدة',
   'ai.moreActions': 'المزيد',
   'ai.history': 'سجل المحادثات',

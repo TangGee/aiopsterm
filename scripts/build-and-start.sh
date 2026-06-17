@@ -20,7 +20,7 @@ Options:
   --restart     Stop existing aiopsterm preview processes before starting (default).
   --no-restart  Do not stop an existing preview; report it and exit instead.
   --skip-build  Start the latest existing build without rebuilding.
-  --skip-codex  Do not build the bundled Codex CLI binary.
+  --skip-codex  Do not build the local Codex dev package.
   --sandbox     Start without passing electron-vite's --noSandbox flag.
   -h, --help    Show this help.
 
@@ -84,14 +84,22 @@ cd "${APP_ROOT}"
 codex_bin="$(
   node --input-type=module -e "
     import { join } from 'node:path';
-    import { codexBinaryName, codexBuildBinaryPath } from './scripts/codex-runtime-paths.mjs';
-    console.log(process.env.AIOPSTERM_CODEX_BIN || (process.env.AIOPSTERM_CODEX_PACKAGE_DIR ? join(process.env.AIOPSTERM_CODEX_PACKAGE_DIR, 'bin', codexBinaryName()) : codexBuildBinaryPath()));
+    import { codexBinaryName, codexDevBuildBinaryPath } from './scripts/codex-runtime-paths.mjs';
+    const packageDir = process.env.AIOPSTERM_CODEX_PACKAGE_DIR || process.env.AIOPSTERM_CODEX_DEV_PACKAGE_DIR;
+    console.log(process.env.AIOPSTERM_CODEX_BIN || (packageDir ? join(packageDir, 'bin', codexBinaryName()) : codexDevBuildBinaryPath()));
+  "
+)"
+codex_package_dir="$(
+  node --input-type=module -e "
+    import { dirname } from 'node:path';
+    import { codexDevBuildBinaryPath } from './scripts/codex-runtime-paths.mjs';
+    console.log(process.env.AIOPSTERM_CODEX_PACKAGE_DIR || process.env.AIOPSTERM_CODEX_DEV_PACKAGE_DIR || dirname(dirname(process.env.AIOPSTERM_CODEX_BIN || codexDevBuildBinaryPath())));
   "
 )"
 if ((skip_codex)); then
-  echo "[aiopsterm] skipping Codex CLI build"
+  echo "[aiopsterm] skipping Codex dev package build"
 else
-  bash "${APP_ROOT}/scripts/build-codex-cli.sh"
+  bash "${APP_ROOT}/scripts/build-codex-dev-package.sh"
 fi
 
 if [[ ! -x "${codex_bin}" ]]; then
@@ -99,6 +107,7 @@ if [[ ! -x "${codex_bin}" ]]; then
   echo "[aiopsterm] rerun without --skip-codex or set AIOPSTERM_CODEX_PACKAGE_DIR/AIOPSTERM_CODEX_BIN to a valid Codex runtime." >&2
   exit 1
 fi
+export AIOPSTERM_CODEX_PACKAGE_DIR="${codex_package_dir}"
 
 mapfile -t pids < <(preview_pids)
 if ((${#pids[@]})); then

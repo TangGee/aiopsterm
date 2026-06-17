@@ -262,8 +262,10 @@ const mountAiPanelWithModels = async (pinia: ReturnType<typeof createPinia>) => 
 }
 
 const switchAiPanelToClassic = async (wrapper: VueWrapper<any>) => {
+  if (wrapper.find('[data-testid="ai-panel-mode-open"]').text().includes('Classic Chat')) return
+  await wrapper.find('[data-testid="ai-panel-mode-open"]').trigger('click')
   const classicModeButton = wrapper.find('[data-testid="ai-mode-classic"]')
-  if (!classicModeButton.exists() || classicModeButton.classes().includes('active')) return
+  if (!classicModeButton.exists()) return
   await classicModeButton.trigger('click')
   await flushPromises()
   await wrapper.vm.$nextTick()
@@ -620,11 +622,62 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('prod-bastion')
     expect(wrapper.find('.ai-header h2').text()).toBe('AI')
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('切换布局')
     expect(wrapper.text()).not.toContain('local shell')
+  })
+
+  it('applies persisted background and watermark settings at the app shell level', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await flushPromises()
+    const store = useWorkspaceStore()
+    await expect(store.selectBackground('custom', 'file:///tmp/aiopsterm/backgrounds/settings-bg.png')).resolves.toBe(true)
+    await expect(store.updateBackgroundTuning({ opacity: 0.4, brightness: 0.7 })).resolves.toBe(true)
+    await expect(store.updateWatermark('open')).resolves.toBe(true)
+    await wrapper.vm.$nextTick()
+
+    const shell = wrapper.find('.app-shell')
+    expect(shell.classes()).toContain('has-app-background')
+    expect(shell.classes()).toContain('watermark-enabled')
+    expect(shell.attributes('style')).toContain('--app-bg-image: url(\"file:///tmp/aiopsterm/backgrounds/settings-bg.png\")')
+    expect(shell.attributes('style')).toContain('--app-bg-opacity: 0.4')
+    expect(shell.attributes('style')).toContain('--app-bg-brightness: 0.7')
+    const styles = baseStyles()
+    expect(styles).toContain('--workspace-bg: color-mix(in srgb, var(--bg) 6%, transparent);')
+    expect(styles).toContain('--glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);')
+    expect(styles).toContain('--readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);')
+    expect(styles).toContain('.side-rail {\n  width: 48px;\n  border-right: 1px solid var(--border);\n  background: var(--glass-surface);')
+    expect(styles).toContain('.terminal-tab {\n  height: 31px;')
+    expect(styles).toContain('background: var(--glass-surface);')
+    expect(styles).toContain('.app-shell.has-app-background .terminal-context-menu')
+    expect(styles).toContain('.app-shell.has-app-background .terminal-global-command')
+    expect(styles).toContain('.app-shell.has-app-background .chat-input')
+    expect(styles).toContain('.app-shell.has-app-background .select-popup')
+    expect(styles).toContain('.app-shell.has-app-background .message,')
+    expect(styles).toContain('.app-shell.has-app-background .db-status-bar')
+    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm.is-idle')
+    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm .xterm-viewport')
+    expect(styles).toContain('background: transparent !important;')
+    expect(styles).toContain('.ai-codex-xterm {\n  border: 1px solid var(--border);\n  border-radius: 7px;\n  background: #090b10;')
+  })
+
+  it('keeps the general settings background picker from forcing horizontal scrolling', () => {
+    const styles = baseStyles()
+    expect(styles).toContain('.settings-content-scroll {\n  min-width: 0;\n  min-height: 0;\n  overflow-x: hidden;\n  overflow-y: auto;\n}')
+    expect(styles).toContain('grid-template-columns: repeat(auto-fit, minmax(150px, 180px));')
+    expect(styles).toContain('.settings-bg-tile {\n  width: 100%;\n  min-width: 0;\n  max-width: 180px;')
+    expect(styles).not.toContain('grid-template-columns: repeat(3, 180px);')
   })
 
   it('hydrates secondary module catalogs only after entering their modules', async () => {
@@ -697,7 +750,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-mode-codex"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(window.aiops.listChatConversations).not.toHaveBeenCalled()
@@ -715,6 +768,21 @@ describe('AppShell', () => {
     expect(window.aiops.createCodexSession).toHaveBeenCalled()
 
     const codexTerminal = mockXtermInstances.at(-1)!
+    expect(codexTerminal.options.allowTransparency).toBe(true)
+    expect(codexTerminal.options.theme).toMatchObject({ background: 'rgba(9, 11, 16, 0)' })
+    expect(codexTerminal.options.termName).toBe('xterm-256color')
+    await expect(
+      store.updateTerminalSettings({
+        terminalType: 'linux',
+        fontFamily: 'Consolas, "Courier New", Courier, monospace',
+        fontSize: 16
+      })
+    ).resolves.toBe(true)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(codexTerminal.options.termName).toBe('linux')
+    expect(codexTerminal.options.fontFamily).toBe('Consolas, "Courier New", Courier, monospace')
+    expect(codexTerminal.options.fontSize).toBe(16)
     codexTerminal.emitSelection('codex copied text')
     vi.mocked(navigator.clipboard.writeText).mockClear()
     await wrapper.find('[data-testid="ai-codex-xterm"]').trigger('contextmenu')
@@ -738,11 +806,12 @@ describe('AppShell', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex shortcut text')
     expect(window.aiops.writeCodexSession).not.toHaveBeenCalledWith(expect.any(String), 'codex shortcut text')
 
+    await wrapper.find('[data-testid="ai-panel-mode-open"]').trigger('click')
     await wrapper.find('[data-testid="ai-mode-classic"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="ai-mode-classic"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Classic Chat')
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
     expect(window.aiops.listChatConversations).toHaveBeenCalled()
@@ -765,10 +834,11 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="ai-mode-classic"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Classic Chat')
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
 
+    await wrapper.find('[data-testid="ai-panel-mode-open"]').trigger('click')
     await wrapper.find('[data-testid="ai-mode-codex"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -815,7 +885,8 @@ describe('AppShell', () => {
         })
       })
     )
-    expect(window.aiops.writeCodexSession).toHaveBeenCalledWith('test-codex-session', expect.stringContaining('[aiopsterm target bound]'))
+    expect(window.aiops.writeCodexSession).not.toHaveBeenCalledWith('test-codex-session', expect.stringContaining('[aiopsterm target bound]'))
+    expect(window.aiops.setCodexSessionPendingContext).not.toHaveBeenCalledWith('test-codex-session', expect.stringContaining('[aiopsterm target bound]'))
 
     vi.mocked(window.aiops.setCodexSessionTarget).mockClear()
     const second = store.createPanel()
@@ -837,6 +908,108 @@ describe('AppShell', () => {
 
     await wrapper.find('[data-testid="ai-codex-target-locate"]').trigger('click')
     expect(store.activePanelId).toBe(firstPanelId)
+  })
+
+  it('keeps Codex target changes hidden and replaces pending target context before user input', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'terminal-first'
+    store.activePanel.cwd = '/root'
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-first',
+      name: 'first-host',
+      host: '10.0.0.10',
+      port: 22,
+      username: 'root'
+    })
+    const firstPanel = store.activePanel
+    const secondPanel = store.createPanel()
+    secondPanel.sessionId = 'terminal-second'
+    secondPanel.cwd = '/srv/app'
+    store.registerSshSession(secondPanel.id, {
+      id: 'asset-second',
+      name: 'second-host',
+      host: '10.0.0.20',
+      port: 2222,
+      username: 'deploy'
+    })
+    store.activePanelId = firstPanel.id
+
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    vi.mocked(window.aiops.setCodexSessionPendingContext).mockClear()
+    vi.mocked(window.aiops.writeCodexSession).mockClear()
+
+    store.activePanelId = secondPanel.id
+    await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    store.activePanelId = firstPanel.id
+    await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.writeCodexSession).not.toHaveBeenCalledWith(expect.any(String), expect.stringContaining('[aiopsterm target changed]'))
+    const pendingCalls = vi.mocked(window.aiops.setCodexSessionPendingContext).mock.calls
+    expect(pendingCalls.length).toBe(2)
+    expect(pendingCalls[0]?.[1]).toContain('Current target: second-host')
+    expect(pendingCalls.at(-1)?.[1]).toBe('')
+  })
+
+  it('opens multiple Codex conversation tabs from the Codex header', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'terminal-main'
+    store.activePanel.cwd = '/root'
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-main',
+      name: 'main-host',
+      host: '10.0.0.30',
+      port: 22,
+      username: 'root'
+    })
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-new"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('[data-testid="ai-codex-tab"]')).toHaveLength(2)
+    expect(wrapper.find('[data-testid="ai-codex-tabs"]').exists()).toBe(true)
+    expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(2)
   })
 
   it('opens a new terminal when binding Codex CLI from the host picker', async () => {
@@ -4408,7 +4581,7 @@ describe('AppShell', () => {
     const styles = baseStyles()
     expect(styles).toContain('.ai-header {\n  justify-content: flex-start;\n  gap: 4px;\n  min-width: 0;\n}')
     expect(styles).toContain('.ai-header-actions {\n  gap: 4px;\n  width: auto;')
-    expect(styles).toContain('.ai-panel-mode-tabs {\n  flex: 1 1 96px;')
+    expect(styles).toContain('.ai-panel-mode-menu {\n  position: relative;\n  flex: 0 0 112px;')
     expect(styles).toContain('.ai-header-title {\n  flex: 0 0 48px;')
     expect(styles).toContain('.ai-conversation-tabs {\n  flex: 1 1 0;\n  width: 0;\n  min-width: 0;')
     expect(styles).toContain('.ai-conversation-tab {\n  min-width: 42px;')
@@ -6669,6 +6842,62 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('applies terminal type and font settings to active views and new local sessions', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    store.appendTerminalOutput(store.activePanelId, 'settings terminal view\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    const activeTerminal = mockXtermInstances.at(-1)!
+    expect(activeTerminal.options.termName).toBe('xterm-256color')
+
+    const terminalFont = '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace'
+    await expect(
+      store.updateTerminalSettings({
+        terminalType: 'vt220',
+        fontFamily: terminalFont,
+        fontSize: 18,
+        lineHeight: 1.4
+      })
+    ).resolves.toBe(true)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(activeTerminal.options.termName).toBe('vt220')
+    expect(activeTerminal.options.fontFamily).toBe(terminalFont)
+    expect(activeTerminal.options.fontSize).toBe(18)
+    expect(activeTerminal.options.lineHeight).toBe(1.4)
+
+    store.createPanel()
+    store.appendTerminalOutput(store.activePanelId, 'new settings terminal view\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    const newPanelTerminal = mockXtermInstances.at(-1)!
+    expect(newPanelTerminal).not.toBe(activeTerminal)
+    expect(newPanelTerminal.options.termName).toBe('vt220')
+    expect(newPanelTerminal.options.fontFamily).toBe(terminalFont)
+    expect(newPanelTerminal.options.fontSize).toBe(18)
+    expect(newPanelTerminal.options.lineHeight).toBe(1.4)
+
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    await openLocalShellFromActiveTab(wrapper)
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'local',
+        terminalType: 'vt220'
+      })
+    )
+
+    wrapper.unmount()
+  })
+
   it('opens the default dashboard, keeps new terminals as tabs, and splits only from context menus', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -6696,6 +6925,37 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-dashboard').exists()).toBe(false)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(1)
     expect(wrapper.find('.terminal-grid').classes()).not.toContain('split')
+
+    await expect(store.updateTerminalSettings({ showCloseButton: false })).resolves.toBe(true)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-tab.active .terminal-tab-close').exists()).toBe(false)
+    await expect(store.updateTerminalSettings({ showCloseButton: true })).resolves.toBe(true)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-tab.active .terminal-tab-close').exists()).toBe(true)
+
+    const firstTerminal = mockXtermInstances.at(-1)!
+    const dispatchTerminalWheel = async (deltaY: number) => {
+      wrapper.find('.terminal-pane.active .xterm-host').element.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          deltaY
+        })
+      )
+      await wrapper.vm.$nextTick()
+    }
+    await expect(store.updateTerminalSettings({ pinchZoomStatus: false })).resolves.toBe(true)
+    await dispatchTerminalWheel(-120)
+    await waitForAnimationFrames(2)
+    expect(firstTerminal.options.fontSize).toBe(12)
+    await expect(store.updateTerminalSettings({ pinchZoomStatus: true })).resolves.toBe(true)
+    await dispatchTerminalWheel(-120)
+    await waitForAnimationFrames(2)
+    expect(firstTerminal.options.fontSize).toBe(13)
+    await dispatchTerminalWheel(120)
+    await waitForAnimationFrames(2)
+    expect(firstTerminal.options.fontSize).toBe(12)
 
     await wrapper.find('.terminal-tab.active .terminal-tab-close').trigger('click')
     await wrapper.vm.$nextTick()
@@ -7364,6 +7624,24 @@ describe('AppShell', () => {
       })
     )
     expect(store.activePanel.output).not.toContain('pwd')
+
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    terminalAfterReconnect.write.mockImplementationOnce(() => {
+      terminalAfterReconnect.emitData('\x1b[>0;276;0c')
+    })
+    store.replaceTerminalOutput('test-session-local', 'replayed terminal history\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    await flushPromises()
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith('test-session-local', '\x1b[>0;276;0c')
+    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
+      'debug',
+      'renderer.terminal-input.suppressed-replay-reply',
+      expect.objectContaining({
+        panelId: store.activePanelId,
+        bytes: 10
+      })
+    )
 
     vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({ ok: true, data: { id: 'wrong-session', bytes: 4 } })
     terminalAfterReconnect.emitData('date')
@@ -13044,13 +13322,15 @@ describe('AppShell', () => {
     await workspace.findAll('.settings-bg-tile.preset').at(0)!.trigger('click')
     await flushPromises()
     expect(store.config.background.mode).toBe('preset')
+    expect(store.config.background.opacity).toBe(0.68)
+    expect(store.config.background.brightness).toBe(0.92)
     await workspace.find('.settings-sliders input[type="range"]').setValue('0.5')
     await flushPromises()
     expect(store.config.background.opacity).toBe(0.5)
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/settings-custom-bg.webp'] })
     vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
       filePath: '/tmp/aiopsterm/backgrounds/settings-custom-bg.webp',
-      url: 'file:///tmp/aiopsterm/backgrounds/settings-custom-bg.webp',
+      url: 'aiopsterm-background://local/settings-custom-bg.webp',
       name: 'settings-custom-bg.webp',
       size: 256,
       bytes: 256,
@@ -13064,7 +13344,7 @@ describe('AppShell', () => {
     })
     expect(window.aiops.saveCustomBackground).toHaveBeenCalledWith('/tmp/settings-custom-bg.webp')
     expect(store.config.background.mode).toBe('custom')
-    expect(store.config.background.image).toBe('file:///tmp/aiopsterm/backgrounds/settings-custom-bg.webp')
+    expect(store.config.background.image).toBe('aiopsterm-background://local/settings-custom-bg.webp')
     const customPreview = workspace.find('.settings-bg-tile.custom-preview')
     expect(customPreview.exists()).toBe(true)
     expect(customPreview.attributes('style')).toContain('settings-custom-bg.webp')
@@ -13126,6 +13406,9 @@ describe('AppShell', () => {
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('终端'))!.trigger('click')
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('终端类型')
+    expect(workspace.text()).toContain('字体只有系统已安装或能匹配到对应字体时才会明显变化')
+    expect(workspace.text()).toContain('DejaVu Sans Mono')
+    expect(workspace.text()).toContain('Liberation Mono')
     expect(workspace.text()).toContain('ScrollBack')
     await workspace.findAll('.cursor-style-button').find((button) => button.attributes('title') === '竖线光标')!.trigger('click')
     expect(store.terminalSettings.cursorStyle).toBe('bar')
@@ -13171,38 +13454,7 @@ describe('AppShell', () => {
     )
     await workspace.find('.agent-config-modal footer .settings-button').trigger('click')
     expect(workspace.find('.agent-config-modal').exists()).toBe(false)
-    const proxyRow = workspace.findAll('.settings-form-row').find((row) => row.text().includes('代理设置'))!
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    await proxyRow.find('button').trigger('click')
-    expect(workspace.find('.proxy-config-modal').exists()).toBe(true)
-    expect(workspace.text()).toContain('暂无代理配置，请添加')
-    await workspace.find('.proxy-config-modal footer .primary').trigger('click')
-    expect(workspace.find('.proxy-config-add-modal').exists()).toBe(true)
-    const proxyInputs = workspace.findAll('.proxy-config-add-modal .settings-input')
-    await proxyInputs[0].setValue('release-proxy')
-    await workspace.find('.proxy-config-add-modal .settings-select').setValue('TCP')
-    await proxyInputs[1].setValue('10.0.0.8')
-    await proxyInputs[2].setValue('2222')
-    await workspace.find('.proxy-config-add-modal footer .primary').trigger('click')
-    expect(store.sshProxyConfigs.some((config) => config.name === 'release-proxy')).toBe(true)
-    expect(workspace.text()).toContain('release-proxy')
-    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sshProxyConfigs: [
-          {
-            name: 'release-proxy',
-            type: 'TCP',
-            host: '10.0.0.8',
-            port: 2222,
-            enableProxyIdentity: false,
-            username: '',
-            password: ''
-          }
-        ]
-      })
-    )
-    await workspace.find('.proxy-config-table .settings-link-button.danger').trigger('click')
-    expect(store.sshProxyConfigs).toEqual([])
+    expect(workspace.findAll('.settings-form-row').some((row) => row.text().includes('代理设置'))).toBe(false)
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('模型'))!.trigger('click')
     await workspace.vm.$nextTick()
@@ -13514,6 +13766,7 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
     store.setActiveSettingsSection('general')
+    await expect(store.selectBackground('none')).resolves.toBe(true)
     await workspace.vm.$nextTick()
     const savedConfig = {
       ...store.config,
@@ -13543,22 +13796,22 @@ describe('AppShell', () => {
     expect(store.config.background.image).toBe('mist-lake')
     await workspace.vm.$nextTick()
     const opacityInput = workspace.find('.settings-sliders input[type="range"]')
-    expect((opacityInput.element as HTMLInputElement).value).toBe('0.15')
+    expect((opacityInput.element as HTMLInputElement).value).toBe('0.68')
 
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
       ...store.config,
       background: { ...store.config.background }
     })
-    await opacityInput.setValue('0.5')
+    await opacityInput.setValue('0.65')
     await flushPromises()
     expect(store.settingsNotice).toBe('背景设置保存失败')
-    expect(store.config.background.opacity).toBe(0.15)
-    expect((opacityInput.element as HTMLInputElement).value).toBe('0.15')
+    expect(store.config.background.opacity).toBe(0.68)
+    expect((opacityInput.element as HTMLInputElement).value).toBe('0.68')
 
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/rejected-bg.webp'] })
     vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
       filePath: '/tmp/aiopsterm/backgrounds/rejected-bg.webp',
-      url: 'file:///tmp/aiopsterm/backgrounds/rejected-bg.webp',
+      url: 'aiopsterm-background://local/rejected-bg.webp',
       name: 'rejected-bg.webp',
       size: 256,
       bytes: 256,

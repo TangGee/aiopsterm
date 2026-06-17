@@ -5,6 +5,7 @@ export type TerminalCreateOptions = {
   shell?: string
   cols?: number
   rows?: number
+  terminalType?: string
   kind?: 'local' | 'ssh'
   assetId?: string
   title?: string
@@ -117,6 +118,12 @@ export type CodexSessionTargetUpdateResult = AiopsMutationResult<{
   sessionId?: string
   target?: CodexSessionTargetContext
   registered: boolean
+}>
+
+export type CodexSessionPendingContextResult = AiopsMutationResult<{
+  id: string
+  bytes: number
+  cleared: boolean
 }>
 
 export type TerminalWriteResult = AiopsMutationResult<{
@@ -3222,6 +3229,7 @@ export type AiopsPreloadApi = {
   killTerminal: (id: string) => Promise<TerminalKillResult>
   createCodexSession: (options?: CodexSessionCreateOptions) => Promise<CodexSessionInfo>
   setCodexSessionTarget: (target?: CodexSessionTargetContext) => Promise<CodexSessionTargetUpdateResult>
+  setCodexSessionPendingContext: (id: string, text?: string) => Promise<CodexSessionPendingContextResult>
   writeCodexSession: (id: string, data: string) => Promise<CodexSessionWriteResult>
   resizeCodexSession: (id: string, cols: number, rows: number) => Promise<void>
   killCodexSession: (id: string) => Promise<CodexSessionKillResult>

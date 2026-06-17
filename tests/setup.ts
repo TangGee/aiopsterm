@@ -3737,6 +3737,7 @@ type TestTerminalCreateOptions = {
   title?: string
   cols?: number
   rows?: number
+  terminalType?: string
   ssh?: {
     host: string
     port?: number
@@ -5328,13 +5329,13 @@ const createDefaultConfigMock = () => ({
   background: {
     mode: 'none',
     image: '',
-    opacity: 0.15,
-    brightness: 0.45,
+    opacity: 0.68,
+    brightness: 0.92,
     lastCustomImage: ''
   },
   terminal: {
     terminalType: 'xterm-256color',
-    fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+    fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
     fontSize: 12,
     scrollBack: 1000,
     cursorStyle: 'block',
@@ -6413,7 +6414,7 @@ Object.defineProperty(window, 'aiops', {
       const name = srcAbsPath.split(/[/\\]/).pop() || 'custom-bg.png'
       return {
         filePath: `/tmp/aiopsterm/backgrounds/${name}`,
-        url: `file:///tmp/aiopsterm/backgrounds/${name}`,
+        url: `aiopsterm-background://local/${encodeURIComponent(name)}`,
         name,
         size: 128,
         bytes: 128,
@@ -7169,6 +7170,14 @@ Object.defineProperty(window, 'aiops', {
         sessionId: target?.sessionId,
         target,
         registered: Boolean(target?.sessionId)
+      }
+    })),
+    setCodexSessionPendingContext: vi.fn(async (id: string, text?: string) => ({
+      ok: true,
+      data: {
+        id,
+        bytes: Buffer.byteLength(String(text || ''), 'utf8'),
+        cleared: !String(text || '').trim()
       }
     })),
     writeCodexSession: vi.fn(async (id: string, data: string) => ({

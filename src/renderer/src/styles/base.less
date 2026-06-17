@@ -17,6 +17,13 @@
   --editor-font-size: 14px;
   --editor-line-height: 20px;
   --editor-tab-size: 4;
+  --app-bg-image: none;
+  --app-bg-opacity: 0;
+  --app-bg-brightness: 1;
+  --workspace-bg: var(--bg);
+  --glass-surface: var(--surface);
+  --glass-surface-2: var(--surface-2);
+  --glass-surface-3: var(--surface-3);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -60,6 +67,7 @@ button {
 }
 
 .app-shell {
+  position: relative;
   width: 100%;
   height: 100%;
   display: grid;
@@ -67,9 +75,73 @@ button {
   background:
     linear-gradient(90deg, rgb(86 182 194 / 0.08), transparent 24%),
     var(--bg);
+  background-size:
+    auto,
+    auto;
+  background-position:
+    0 0,
+    0 0;
+  overflow: hidden;
+}
+
+.app-shell.has-app-background {
+  background:
+    linear-gradient(0deg, color-mix(in srgb, var(--bg) 22%, transparent), color-mix(in srgb, var(--bg) 22%, transparent)),
+    linear-gradient(90deg, rgb(86 182 194 / 0.08), transparent 24%),
+    var(--bg);
+  background-size:
+    auto,
+    auto,
+    auto;
+  background-position:
+    0 0,
+    0 0,
+    0 0;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 30px 0 0;
+  z-index: 0;
+  background: var(--app-bg-image);
+  background-size: cover;
+  background-position: center;
+  opacity: var(--app-bg-opacity);
+  filter: brightness(var(--app-bg-brightness));
+  pointer-events: none;
+}
+
+.app-shell::after {
+  content: "aiopsterm";
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+  z-index: 1;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--muted) 22%, transparent);
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0;
+  opacity: 0;
+}
+
+.app-shell.watermark-enabled::after {
+  opacity: 0.2;
+}
+
+.app-shell.has-app-background {
+  --workspace-bg: color-mix(in srgb, var(--bg) 6%, transparent);
+  --glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);
+  --glass-surface-2: color-mix(in srgb, var(--surface-2) 32%, transparent);
+  --glass-surface-3: color-mix(in srgb, var(--surface-3) 30%, transparent);
+  --readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);
+  --readable-surface-strong: color-mix(in srgb, var(--surface) 86%, transparent);
 }
 
 .top-bar {
+  position: relative;
+  z-index: 2;
   -webkit-app-region: drag;
   display: flex;
   align-items: center;
@@ -78,6 +150,11 @@ button {
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   padding: 0 8px;
   user-select: none;
+}
+
+.app-shell.has-app-background .top-bar {
+  background: color-mix(in srgb, var(--surface) 54%, transparent);
+  backdrop-filter: blur(14px);
 }
 
 .top-left,
@@ -451,6 +528,8 @@ svg {
 }
 
 .app-body {
+  position: relative;
+  z-index: 1;
   display: grid;
   min-height: 0;
   height: 100%;
@@ -483,7 +562,7 @@ svg {
 .side-rail {
   width: 48px;
   border-right: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--glass-surface);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -504,7 +583,7 @@ svg {
 }
 
 .rail-button.active {
-  background: color-mix(in srgb, var(--accent) 20%, var(--surface-2));
+  background: color-mix(in srgb, var(--accent) 20%, var(--glass-surface-2));
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
@@ -550,8 +629,9 @@ svg {
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--glass-surface);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
 }
 
 .user-menu-popover button {
@@ -570,17 +650,28 @@ svg {
 }
 
 .user-menu-popover button:hover {
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
 }
 
 .module-panel,
 .agents-sidebar,
 .ai-panel,
 .database-sidebar {
-  background: var(--surface);
+  background: var(--glass-surface);
   border-right: 1px solid var(--border);
   min-height: 0;
   overflow: hidden;
+}
+
+.app-shell.has-app-background .module-panel,
+.app-shell.has-app-background .agents-sidebar,
+.app-shell.has-app-background .ai-panel,
+.app-shell.has-app-background .database-sidebar {
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .layout-pane-right > .layout-resizer-right {
+  background: color-mix(in srgb, var(--surface) 14%, transparent);
 }
 
 .module-panel {
@@ -699,7 +790,7 @@ h2 {
   align-items: center;
   gap: 8px;
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   border-radius: 7px;
   padding: 0 8px;
   height: 32px;
@@ -743,7 +834,7 @@ h2 {
 .conversation-card,
 .database-card {
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   border-radius: 8px;
   padding: 10px;
 }
@@ -758,7 +849,7 @@ h2 {
 .path-bar button,
 .chip {
   border: 1px solid var(--border);
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
   color: var(--text);
   border-radius: 6px;
   height: 28px;
@@ -852,7 +943,7 @@ em {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .assets-workspace .assets-panel-native {
@@ -872,14 +963,14 @@ em {
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 7px 7px 0 0;
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   color: var(--muted);
   cursor: pointer;
 }
 
 .workspace-tabs button.active {
   color: var(--text);
-  background: var(--surface);
+  background: var(--glass-surface);
 }
 
 .workspace-manage,
@@ -903,7 +994,7 @@ em {
   gap: 6px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   color: var(--muted);
   padding: 0 8px;
 }
@@ -931,7 +1022,7 @@ em {
   height: 30px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -951,9 +1042,10 @@ em {
   min-width: 150px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--surface);
+  background: var(--glass-surface);
   box-shadow: var(--shadow);
   padding: 5px;
+  backdrop-filter: blur(16px);
 }
 
 .workspace-add-menu {
@@ -980,7 +1072,7 @@ em {
 
 .workspace-add-menu button:hover,
 .asset-context-menu button:hover {
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
 }
 
 .asset-context-menu button.delete {
@@ -1026,7 +1118,7 @@ em {
 .workspace-folder-row:hover,
 .workspace-host-row:hover,
 .workspace-host-row.selected {
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
 }
 
 .workspace-folder-row span,
@@ -1058,7 +1150,7 @@ em {
 
 .workspace-row-action:hover,
 .workspace-row-more:hover {
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   color: var(--text);
   opacity: 1;
 }
@@ -2064,19 +2156,9 @@ em {
   min-height: 0;
   display: grid;
   grid-template-rows: 36px minmax(0, 1fr);
-  background: var(--bg);
+  background: var(--workspace-bg);
   position: relative;
   overflow: hidden;
-}
-
-.settings-workspace::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--settings-bg-image);
-  opacity: var(--settings-bg-opacity, 0);
-  filter: brightness(var(--settings-bg-brightness, 1));
-  pointer-events: none;
 }
 
 .settings-workspace-title {
@@ -2173,11 +2255,12 @@ em {
 .settings-content-scroll {
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .settings-content-page {
-  width: min(980px, calc(100% - 36px));
+  width: min(980px, 100%);
   min-height: 100%;
   padding: 28px 32px 48px;
 }
@@ -2206,6 +2289,45 @@ em {
 .settings-form-card {
   display: grid;
   gap: 18px;
+}
+
+.app-shell.has-app-background .settings-workspace-title,
+.app-shell.has-app-background .settings-workspace-body,
+.app-shell.has-app-background .settings-side-panel,
+.app-shell.has-app-background .settings-form-card,
+.app-shell.has-app-background .settings-section-card {
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .settings-workspace-title {
+  background: var(--glass-surface);
+}
+
+.app-shell.has-app-background .settings-workspace-body {
+  background: color-mix(in srgb, var(--bg) 24%, transparent);
+}
+
+.app-shell.has-app-background .settings-side-panel {
+  background: color-mix(in srgb, var(--surface) 34%, transparent);
+}
+
+.app-shell.has-app-background .settings-form-card,
+.app-shell.has-app-background .settings-section-card {
+  background: color-mix(in srgb, var(--surface) 40%, transparent);
+}
+
+.app-shell.has-app-background .settings-nav-item:hover,
+.app-shell.has-app-background .settings-nav-item.active,
+.app-shell.has-app-background .settings-tab-close:hover {
+  background: var(--glass-surface-3);
+}
+
+.app-shell.has-app-background .settings-select,
+.app-shell.has-app-background .settings-input,
+.app-shell.has-app-background .settings-number,
+.app-shell.has-app-background .settings-bg-tile.default,
+.app-shell.has-app-background .settings-bg-tile.upload {
+  background: var(--readable-surface);
 }
 
 .settings-form-row {
@@ -2256,22 +2378,26 @@ em {
 }
 
 .settings-backgrounds {
+  min-width: 0;
   display: grid;
   gap: 16px;
 }
 
 .settings-bg-grid {
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(3, 180px);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 180px));
   gap: 12px 16px;
 }
 
 .settings-bg-grid.compact {
-  grid-template-columns: 180px 180px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 180px));
 }
 
 .settings-bg-tile {
-  width: 180px;
+  width: 100%;
+  min-width: 0;
+  max-width: 180px;
   height: 92px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -4465,7 +4591,7 @@ kbd {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: var(--bg);
+  background: var(--workspace-bg);
   position: relative;
   overflow: hidden;
 }
@@ -6532,7 +6658,7 @@ code {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   position: relative;
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .user-info-title {
@@ -7141,7 +7267,7 @@ code {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--workspace-bg);
   position: relative;
 }
 
@@ -7155,6 +7281,11 @@ code {
   min-width: 0;
 }
 
+.app-shell.has-app-background .terminal-tabs {
+  background: color-mix(in srgb, var(--surface) 14%, transparent);
+  backdrop-filter: blur(12px);
+}
+
 .terminal-tab {
   height: 31px;
   flex: 1 1 152px;
@@ -7163,7 +7294,7 @@ code {
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 7px 7px 0 0;
-  background: var(--surface);
+  background: var(--glass-surface);
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -7176,13 +7307,13 @@ code {
 
 .terminal-tab.active {
   color: var(--text);
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
 }
 
 .terminal-tab.drag-over,
 .terminal-tabs.drag-restore {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 9%, var(--glass-surface));
 }
 
 .terminal-tab-title {
@@ -7240,7 +7371,7 @@ code {
 }
 
 .terminal-tab-close:hover {
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
   color: var(--text);
 }
 
@@ -7300,6 +7431,17 @@ code {
 .tab-menu button:hover,
 .terminal-context-menu button:hover {
   background: var(--surface-3);
+}
+
+.app-shell.has-app-background .tab-menu,
+.app-shell.has-app-background .terminal-context-menu {
+  background: var(--glass-surface);
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .tab-menu button:hover,
+.app-shell.has-app-background .terminal-context-menu button:hover {
+  background: var(--glass-surface-3);
 }
 
 .terminal-context-menu i {
@@ -7364,6 +7506,15 @@ code {
   cursor: pointer;
 }
 
+.app-shell.has-app-background .terminal-global-command {
+  background: var(--glass-surface);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .terminal-global-command input {
+  background: var(--readable-surface);
+}
+
 .terminal-security-prompt {
   min-height: 48px;
   padding: 7px 10px;
@@ -7403,6 +7554,11 @@ code {
 .terminal-security-prompt small {
   color: var(--muted);
   font-size: 11px;
+}
+
+.app-shell.has-app-background .terminal-security-prompt {
+  background: color-mix(in srgb, var(--danger) 13%, var(--glass-surface));
+  backdrop-filter: blur(14px);
 }
 
 .terminal-zmodem-progress {
@@ -7467,6 +7623,15 @@ code {
 
 .terminal-zmodem-progress.error {
   background: color-mix(in srgb, var(--surface) 90%, var(--danger));
+}
+
+.app-shell.has-app-background .terminal-zmodem-progress {
+  background: color-mix(in srgb, var(--accent) 14%, var(--glass-surface));
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .terminal-zmodem-progress.error {
+  background: color-mix(in srgb, var(--danger) 18%, var(--glass-surface));
 }
 
 .terminal-grid {
@@ -7831,6 +7996,41 @@ code {
   background: #111620;
   border-bottom: 1px solid #202637;
   padding: 0 9px;
+}
+
+.app-shell.has-app-background .terminal-pane {
+  background: color-mix(in srgb, #090b10 94%, transparent);
+}
+
+.app-shell.has-app-background .terminal-pane.knowledge-pane {
+  background: var(--readable-surface-strong);
+}
+
+.app-shell.has-app-background .terminal-search-overlay,
+.app-shell.has-app-background .command-dialog-card,
+.app-shell.has-app-background .terminal-chat-ai-button,
+.app-shell.has-app-background .terminal-suggestions {
+  background: var(--readable-surface-strong);
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .terminal-search-overlay > div,
+.app-shell.has-app-background .command-dialog-card select,
+.app-shell.has-app-background .generated-command-row {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .pane-title {
+  background: color-mix(in srgb, #111620 78%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.app-shell.has-app-background .terminal-suggestions .terminal-suggestion-arrow,
+.app-shell.has-app-background .terminal-suggestions .suggestion-item.active,
+.app-shell.has-app-background .terminal-suggestions .suggestion-item:hover,
+.app-shell.has-app-background .command-dialog-close:hover,
+.app-shell.has-app-background .generated-command-row button {
+  background: var(--glass-surface-3);
 }
 
 .kb-editor-root {
@@ -8208,7 +8408,7 @@ code {
   background: var(--surface);
   color: var(--muted);
   box-shadow: var(--shadow);
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: var(--editor-font-family);
   pointer-events: none;
 }
 
@@ -8411,6 +8611,11 @@ code {
   box-shadow: var(--shadow);
 }
 
+.app-shell.has-app-background .command-line.floating {
+  background: color-mix(in srgb, #090b10 82%, transparent);
+  backdrop-filter: blur(14px);
+}
+
 .ai-panel {
   width: 100%;
   height: 100%;
@@ -8424,6 +8629,10 @@ code {
 
 .ai-panel.agent-mode {
   width: auto;
+}
+
+.app-shell.has-app-background .ai-panel {
+  background: color-mix(in srgb, var(--surface) 18%, transparent);
 }
 
 .context-strip,
@@ -8444,6 +8653,11 @@ code {
   color: var(--muted);
   border-radius: 999px;
   padding: 0 9px;
+}
+
+.app-shell.has-app-background .context-button,
+.app-shell.has-app-background .command-chip {
+  background: var(--glass-surface-2);
 }
 
 .context-button.active,
@@ -8575,37 +8789,119 @@ code {
   justify-content: flex-end;
 }
 
-.ai-panel-mode-tabs {
-  flex: 1 1 96px;
-  min-width: 82px;
-  max-width: 180px;
-  height: 24px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: stretch;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--surface-2);
+.ai-panel-mode-menu {
+  position: relative;
+  flex: 0 0 112px;
+  min-width: 88px;
 }
 
-.ai-panel-mode-tabs button {
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  padding: 0 5px;
-  background: transparent;
+.ai-panel-mode-trigger {
+  width: 100%;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--glass-surface-2);
   color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding: 0 6px;
   cursor: pointer;
 }
 
-.ai-panel-mode-tabs button.active {
-  background: var(--surface-3);
+.ai-panel-mode-trigger:hover {
   color: var(--text);
+  background: var(--glass-surface-3);
+}
+
+.ai-panel-mode-trigger svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.ai-panel-mode-trigger span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.ai-panel-mode-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 35;
+  width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--glass-surface);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  backdrop-filter: blur(16px);
+}
+
+.ai-panel-mode-dropdown button {
+  width: 100%;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-panel-mode-dropdown button:hover,
+.ai-panel-mode-dropdown button.active {
+  color: var(--text);
+  background: var(--glass-surface-3);
+}
+
+.ai-panel-mode-dropdown button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.ai-panel-mode-dropdown button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.app-shell.has-app-background .ai-panel-mode-trigger,
+.app-shell.has-app-background .ai-header-icon-button,
+.app-shell.has-app-background .ai-conversation-tab,
+.app-shell.has-app-background .ai-codex-target-actions button,
+.app-shell.has-app-background .ai-codex-bind-button,
+.app-shell.has-app-background .ai-codex-target-list button {
+  background: color-mix(in srgb, var(--surface-2) 26%, transparent);
+}
+
+.app-shell.has-app-background .ai-panel-mode-dropdown,
+.app-shell.has-app-background .ai-codex-target-picker {
+  background: color-mix(in srgb, var(--surface) 48%, transparent);
+}
+
+.app-shell.has-app-background .ai-panel-mode-trigger:hover,
+.app-shell.has-app-background .ai-header-icon-button:hover,
+.app-shell.has-app-background .ai-conversation-tab:hover,
+.app-shell.has-app-background .ai-conversation-tab:focus-visible,
+.app-shell.has-app-background .ai-panel-mode-dropdown button:hover,
+.app-shell.has-app-background .ai-panel-mode-dropdown button.active,
+.app-shell.has-app-background .ai-codex-target-actions button:hover,
+.app-shell.has-app-background .ai-codex-bind-button:hover,
+.app-shell.has-app-background .ai-codex-target-list button:hover {
+  background: color-mix(in srgb, var(--surface-3) 40%, transparent);
 }
 
 .ai-header-title {
@@ -8626,7 +8922,7 @@ code {
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--muted);
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -8640,7 +8936,7 @@ code {
 
 .ai-header-icon-button:hover {
   color: var(--text);
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
 }
 
 .ai-conversation-tabs {
@@ -8668,7 +8964,7 @@ code {
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--muted);
-  background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 58%, transparent);
   cursor: pointer;
   padding: 0 3px 0 7px;
 }
@@ -8676,14 +8972,14 @@ code {
 .ai-conversation-tab:hover,
 .ai-conversation-tab:focus-visible {
   color: var(--text);
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
   outline: 0;
 }
 
 .ai-conversation-tab.active {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  background: color-mix(in srgb, var(--accent) 12%, var(--glass-surface-2));
 }
 
 .ai-conversation-tab-title {
@@ -8744,7 +9040,7 @@ code {
 
 .ai-codex-shell.drop-active .ai-codex-target-bar {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  background: color-mix(in srgb, var(--accent) 12%, var(--glass-surface-2));
 }
 
 .ai-codex-target-bar {
@@ -8756,12 +9052,21 @@ code {
   gap: 8px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 54%, transparent);
   padding: 7px;
+  backdrop-filter: blur(12px);
 }
 
 .ai-codex-target-bar.missing {
   border-style: dashed;
+}
+
+.app-shell.has-app-background .ai-codex-target-bar {
+  background: color-mix(in srgb, var(--surface-2) 24%, transparent);
+}
+
+.app-shell.has-app-background .ai-codex-shell.drop-active .ai-codex-target-bar {
+  background: color-mix(in srgb, var(--accent) 10%, var(--glass-surface-2));
 }
 
 .ai-codex-target-main {
@@ -8820,7 +9125,7 @@ code {
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--muted);
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   cursor: pointer;
 }
 
@@ -8844,7 +9149,7 @@ code {
 .ai-codex-bind-button:hover,
 .ai-codex-target-list button:hover {
   color: var(--text);
-  background: var(--surface-3);
+  background: var(--glass-surface-3);
 }
 
 .ai-codex-bind-button {
@@ -8866,9 +9171,10 @@ code {
   z-index: 32;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--surface);
+  background: var(--glass-surface);
   box-shadow: var(--shadow);
   padding: 8px;
+  backdrop-filter: blur(16px);
 }
 
 .ai-codex-target-picker label {
@@ -8878,7 +9184,7 @@ code {
   gap: 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: var(--glass-surface-2);
   color: var(--muted);
   padding: 0 8px;
 }
@@ -8981,10 +9287,40 @@ code {
   background: #8c8c8c;
 }
 
+.ai-codex-xterm-stack {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+}
+
+.ai-codex-xterm-stack > .ai-codex-xterm {
+  grid-area: 1 / 1;
+}
+
 .ai-codex-xterm {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #090b10;
+}
+
+.app-shell.has-app-background .ai-codex-xterm {
+  background: color-mix(in srgb, #090b10 76%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.app-shell.has-app-background .ai-codex-xterm.is-idle {
+  background: color-mix(in srgb, #090b10 52%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.app-shell.has-app-background .ai-codex-xterm .xterm-viewport,
+.app-shell.has-app-background .ai-codex-xterm .xterm-screen {
+  background: transparent !important;
+}
+
+.app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-viewport,
+.app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-screen {
+  background: transparent !important;
 }
 
 .ai-codex-error {
@@ -9049,6 +9385,24 @@ code {
   font-size: 12px;
 }
 
+.app-shell.has-app-background .ai-more-actions-menu,
+.app-shell.has-app-background .ai-history-dropdown {
+  background: var(--readable-surface-strong);
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .ai-more-actions-menu button:hover,
+.app-shell.has-app-background .ai-history-item:hover,
+.app-shell.has-app-background .ai-history-item.active,
+.app-shell.has-app-background .ai-history-load-more:hover:not(:disabled),
+.app-shell.has-app-background .ai-history-search button:hover,
+.app-shell.has-app-background .ai-history-favorite-toggle:hover,
+.app-shell.has-app-background .ai-history-favorite-toggle.active,
+.app-shell.has-app-background .ai-history-actions button:hover,
+.app-shell.has-app-background .ai-history-actions button.active {
+  background: var(--glass-surface-3);
+}
+
 .ai-history-dropdown {
   position: absolute;
   top: calc(100% + 8px);
@@ -9087,6 +9441,12 @@ code {
   border-radius: 6px;
   background: var(--surface);
   padding: 0 6px;
+}
+
+.app-shell.has-app-background .ai-history-search,
+.app-shell.has-app-background .ai-history-favorite-toggle,
+.app-shell.has-app-background .ai-history-title-input {
+  background: var(--readable-surface);
 }
 
 .ai-history-search svg,
@@ -9337,6 +9697,19 @@ code {
   cursor: default;
 }
 
+.app-shell.has-app-background .ai-chat-search-bar {
+  background: var(--readable-surface-strong);
+}
+
+.app-shell.has-app-background .ai-chat-search-input-wrap {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .ai-chat-search-input-wrap button:hover,
+.app-shell.has-app-background .ai-chat-search-controls button:hover:not(:disabled) {
+  background: var(--glass-surface-3);
+}
+
 .ai-chat-search-highlight {
   border-radius: 3px;
   color: var(--text);
@@ -9358,6 +9731,27 @@ code {
 
 .message.user {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.app-shell.has-app-background .message,
+.app-shell.has-app-background .ai-rendered-code-block,
+.app-shell.has-app-background .ai-command-output-renderer,
+.app-shell.has-app-background .message-command-card,
+.app-shell.has-app-background .ai-mcp-tool-call,
+.app-shell.has-app-background .model-strip {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .ai-markdown-content code,
+.app-shell.has-app-background .ai-rendered-code-body,
+.app-shell.has-app-background .ai-command-output-body,
+.app-shell.has-app-background .message-command-code,
+.app-shell.has-app-background .ai-mcp-tool-call pre {
+  background: var(--readable-surface-strong);
+}
+
+.app-shell.has-app-background .ai-rendered-block-header {
+  background: var(--glass-surface-3);
 }
 
 .message-role {
@@ -9638,6 +10032,13 @@ code {
   background: var(--surface-3);
 }
 
+.app-shell.has-app-background .message-actions button:hover,
+.app-shell.has-app-background .message-actions button.active,
+.app-shell.has-app-background .message-command-help:hover,
+.app-shell.has-app-background .message-command-icon-button:hover {
+  background: var(--glass-surface-3);
+}
+
 .user-message-actions {
   justify-content: flex-end;
 }
@@ -9671,6 +10072,13 @@ code {
   flex: 1 1 76px;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.app-shell.has-app-background .message-command-actions button,
+.app-shell.has-app-background .message-command-host,
+.app-shell.has-app-background .message-command-badge,
+.app-shell.has-app-background .message-command-status {
+  background: var(--glass-surface-3);
 }
 
 .message-command-actions button svg {
@@ -10390,6 +10798,35 @@ code {
   color: var(--text);
   padding: 8px 9px;
   resize: none;
+}
+
+.app-shell.has-app-background .chat-input {
+  background: color-mix(in srgb, var(--surface-2) 30%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .chat-input textarea,
+.app-shell.has-app-background .chat-editable,
+.app-shell.has-app-background .ai-control-select,
+.app-shell.has-app-background .select-popup,
+.app-shell.has-app-background .select-popup input,
+.app-shell.has-app-background .context-trigger-tag,
+.app-shell.has-app-background .context-tag,
+.app-shell.has-app-background .mention-chip {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .select-popup {
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .select-list button:hover,
+.app-shell.has-app-background .select-list button.keyboard-selected,
+.app-shell.has-app-background .ai-control-select:hover,
+.app-shell.has-app-background .context-tag button:hover,
+.app-shell.has-app-background .mention-chip button:hover,
+.app-shell.has-app-background .host-batch-footer .batch-action-btn:hover {
+  background: var(--glass-surface-3);
 }
 
 .chat-editable {
@@ -11268,7 +11705,7 @@ code {
   min-width: 0;
   min-height: 0;
   padding: 14px;
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .agents-stage .ai-panel {
@@ -11283,7 +11720,7 @@ code {
   min-height: 0;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .database-sidebar {
@@ -11694,7 +12131,7 @@ th {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .plugin_detail_view,
@@ -12422,7 +12859,7 @@ th {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: var(--bg);
+  background: var(--workspace-bg);
   overflow: hidden;
 }
 
@@ -13404,7 +13841,7 @@ th {
   height: 100%;
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr) var(--db-ai-pane-width, 0px) auto;
-  background: var(--bg);
+  background: var(--workspace-bg);
   color: var(--text);
   overflow: hidden;
 }
@@ -13499,6 +13936,46 @@ th {
 .db-where-bar button:hover,
 .db-th-controls button:hover {
   background: var(--surface-3);
+}
+
+.app-shell.has-app-background .db-sidebar,
+.app-shell.has-app-background .db-sql-toolbar,
+.app-shell.has-app-background .db-toolbar,
+.app-shell.has-app-background .db-where-bar,
+.app-shell.has-app-background .db-result-tabs,
+.app-shell.has-app-background .db-status-bar,
+.app-shell.has-app-background .db-tab-menu,
+.app-shell.has-app-background .db-popup-menu,
+.app-shell.has-app-background .db-filter-popover {
+  background: var(--glass-surface);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .db-search,
+.app-shell.has-app-background .db-sql-toolbar select,
+.app-shell.has-app-background .db-toolbar input,
+.app-shell.has-app-background .db-toolbar select,
+.app-shell.has-app-background .db-filter-search,
+.app-shell.has-app-background .db-filter-list {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .db-sidebar-actions button:hover,
+.app-shell.has-app-background .db-sidebar-expand:hover,
+.app-shell.has-app-background .db-tree-row:hover,
+.app-shell.has-app-background .db-workspace-tab:hover,
+.app-shell.has-app-background .db-workspace-add-tab:hover,
+.app-shell.has-app-background .db-tab-overflow > button:hover,
+.app-shell.has-app-background .db-ai-pane button:hover:not(:disabled),
+.app-shell.has-app-background .db-sql-toolbar button:hover:not(:disabled),
+.app-shell.has-app-background .db-toolbar button:hover:not(:disabled),
+.app-shell.has-app-background .db-where-bar button:hover,
+.app-shell.has-app-background .db-th-controls button:hover,
+.app-shell.has-app-background .db-popup-menu button:hover:not(:disabled),
+.app-shell.has-app-background .db-filter-row:hover,
+.app-shell.has-app-background .db-filter-row button:hover,
+.app-shell.has-app-background .db-filter-footer button:hover {
+  background: var(--glass-surface-3);
 }
 
 .db-search {
@@ -13802,7 +14279,7 @@ th {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .db-overview-hero,
@@ -15793,7 +16270,7 @@ th {
   display: grid;
   align-content: start;
   gap: 10px;
-  background: var(--bg);
+  background: var(--workspace-bg);
 }
 
 .db-ai-pane-empty {

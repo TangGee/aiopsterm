@@ -241,7 +241,8 @@ describe('ssh terminal backend runtime', () => {
           password: 'secret'
         },
         cols: 120,
-        rows: 40
+        rows: 40,
+        terminalType: 'vt220'
       },
       createSink(events)
     )
@@ -271,7 +272,7 @@ describe('ssh terminal backend runtime', () => {
         keepaliveInterval: 10000
       })
     ])
-    expect(ssh.shellOptions).toEqual([expect.objectContaining({ term: 'xterm-256color', cols: 132, rows: 44 })])
+    expect(ssh.shellOptions).toEqual([expect.objectContaining({ term: 'vt220', cols: 132, rows: 44 })])
     expect(ssh.channels[0].writes).toEqual(['uptime\n'])
     expect(ssh.channels[0].windows).toContainEqual({ rows: 48, cols: 140, height: 0, width: 0 })
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['connecting', 'connecting', 'connected', 'shell-ready'])
@@ -1026,7 +1027,11 @@ describe('ssh terminal backend runtime', () => {
       getConfig: () => runtimeConfig()
     })
 
-    const result = backend.createSshTerminalSession('ssh-relay-shell-1', { kind: 'ssh', assetId: 'asset-relay-target', cols: 144, rows: 48 }, createSink(events))
+    const result = backend.createSshTerminalSession(
+      'ssh-relay-shell-1',
+      { kind: 'ssh', assetId: 'asset-relay-target', cols: 144, rows: 48, terminalType: 'linux' },
+      createSink(events)
+    )
     result.session?.write('queued-before-relay\n')
     await waitForMicrotasks(2)
     expect(pty.spawnCalls).toEqual([])
@@ -1056,12 +1061,13 @@ describe('ssh terminal backend runtime', () => {
     expect(spawn.args).toContainEqual(expect.stringMatching(/^ControlPath=\/tmp\/aiopsterm-ssh-control-vitest-created\/cm-[a-f0-9]{24}$/))
     expect(spawn.options).toEqual(
       expect.objectContaining({
-        name: 'xterm-256color',
+        name: 'linux',
         cols: 144,
         rows: 48,
         cwd: '/tmp',
         env: expect.objectContaining({
           PATH: '/usr/bin',
+          TERM: 'linux',
           AIOPSTERM_TRANSPORT: 'relay-shell',
           AIOPSTERM_RELAY_HOST: 'relay.example',
           AIOPSTERM_TARGET_HOST: 'target.internal'

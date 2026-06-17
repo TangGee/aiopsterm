@@ -6,6 +6,7 @@ import type {
   CodexSessionCreateOptions,
   CodexSessionInfo,
   CodexSessionLifecycleEvent,
+  CodexSessionPendingContextResult,
   CodexSessionWriteResult,
   CodexSessionKillResult,
   UserConfig
@@ -55,6 +56,7 @@ type CodexSessionRecord = {
   binaryPath: string
   cwd: string
   codexHome: string
+  pendingContextPath: string
   runtimeKind: 'pty' | 'process'
   closed: boolean
 }
@@ -108,6 +110,8 @@ const codexHomePath = () => {
   return join(userDataPath, 'codex-agent')
 }
 
+const codexPendingContextPath = (codexHome: string, id: string) => join(codexHome, 'aiopsterm-pending-context', `${id}.txt`)
+
 const codexBinaryName = () => (process.platform === 'win32' ? 'codex.exe' : 'codex')
 
 const codexTargetTriple = () => {
@@ -126,6 +130,14 @@ const codexTargetTriple = () => {
   return ''
 }
 
+const codexDevTargetTriple = () => {
+  if (process.platform === 'linux' || process.platform === 'android') {
+    if (process.arch === 'x64') return 'x86_64-unknown-linux-gnu'
+    if (process.arch === 'arm64') return 'aarch64-unknown-linux-gnu'
+  }
+  return codexTargetTriple()
+}
+
 const candidateCodexBinaryPaths = () => {
   const configured = runtimeConfig.binaryPath || process.env.AIOPSTERM_CODEX_BIN
   const configuredPackage = process.env.AIOPSTERM_CODEX_PACKAGE_DIR
@@ -133,11 +145,13 @@ const candidateCodexBinaryPaths = () => {
   const resourcesPath = runtimeConfig.getResourcesPath?.() || defaultResourcesPath()
   const binaryName = codexBinaryName()
   const targetTriple = codexTargetTriple()
+  const devTargetTriple = codexDevTargetTriple()
   return [
     configured,
     configuredPackage ? join(configuredPackage, 'bin', binaryName) : '',
     join(resourcesPath, 'codex', 'bin', binaryName),
     join(resourcesPath, 'app.asar.unpacked', 'codex', 'bin', binaryName),
+    devTargetTriple ? join(appPath, 'codex', 'codex-rs', 'target', devTargetTriple, 'aiopsterm-codex-dev-package', 'bin', binaryName) : '',
     targetTriple ? join(appPath, 'codex', 'codex-rs', 'target', targetTriple, 'aiopsterm-codex-package', 'bin', binaryName) : '',
     targetTriple ? join(appPath, 'codex', 'codex-rs', 'target', targetTriple, 'release', binaryName) : '',
     targetTriple ? join(appPath, 'codex', 'codex-rs', 'target', targetTriple, 'debug', binaryName) : ''
@@ -238,6 +252,7 @@ export const createCodexSession = async (
   const binaryPath = resolveCodexBinaryPath()
   const codexPackageRoot = codexPackageRootForBinary(binaryPath)
   const codexHome = codexHomePath()
+  const pendingContextPath = codexPendingContextPath(codexHome, id)
   const cwd = codexHome
   const cols = Math.max(20, Math.min(400, Math.round(Number(options.cols) || 100)))
   const rows = Math.max(8, Math.min(120, Math.round(Number(options.rows) || 30)))
@@ -247,6 +262,7 @@ export const createCodexSession = async (
     ...(runtimeConfig.getEnv?.() || {}),
     ...(codexProvider ? { [codexProvider.apiKeyEnv]: codexProvider.apiKey } : {}),
     AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
+    AIOPSTERM_CODEX_PENDING_CONTEXT_FILE: pendingContextPath,
     ...(codexPackageRoot ? { CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot } : {}),
     CODEX_HOME: codexHome,
     TERM: 'xterm-256color',
@@ -254,6 +270,8 @@ export const createCodexSession = async (
   }
 
   await getMkdir()(codexHome, { recursive: true })
+  await getMkdir()(dirname(pendingContextPath), { recursive: true })
+  await getWriteFile()(pendingContextPath, '', 'utf-8')
   await writeCodexConfig(codexHome, options, codexProvider)
 
   const starting = createLifecycleEvent(id, {
@@ -320,6 +338,7 @@ export const createCodexSession = async (
       binaryPath,
       cwd,
       codexHome,
+      pendingContextPath,
       runtimeKind: 'pty',
       closed: false
     }
@@ -361,6 +380,7 @@ export const createCodexSession = async (
       binaryPath,
       cwd,
       codexHome,
+      pendingContextPath,
       runtimeKind: 'process',
       closed: false
     }
@@ -382,6 +402,28 @@ export const createCodexSession = async (
   } catch (error) {
     fail(null, error)
     throw error
+  }
+}
+
+export const setCodexSessionPendingContext = async (id: string, text?: string): Promise<CodexSessionPendingContextResult> => {
+  const session = sessions.get(id)
+  if (!session) {
+    return {
+      ok: false,
+      errorCode: 'CODEX_SESSION_NOT_FOUND',
+      errorMessage: 'Codex session was not found.'
+    }
+  }
+  const value = String(text || '')
+  await getMkdir()(dirname(session.pendingContextPath), { recursive: true })
+  await getWriteFile()(session.pendingContextPath, value, 'utf-8')
+  return {
+    ok: true,
+    data: {
+      id,
+      bytes: Buffer.byteLength(value, 'utf8'),
+      cleared: value.trim().length === 0
+    }
   }
 }
 

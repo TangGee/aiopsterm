@@ -30,7 +30,7 @@ const defaultAiPreferences = {
 
 const defaultTerminalSettings = {
   terminalType: 'xterm-256color',
-  fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+  fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
   fontSize: 12,
   scrollBack: 1000,
   cursorStyle: 'block' as const,
@@ -562,6 +562,8 @@ describe('workspace store', () => {
     expect(store.activePanel.output).toContain('sudo journalctl')
     expect(store.activePanel.output).not.toContain('\x1b[')
     expect(store.getHighlightedTerminalOutput(store.activePanelId)).toContain('\x1b[1;38;5;')
+    store.extensionSettings.highlightStatus = false
+    expect(store.getHighlightedTerminalOutput(store.activePanelId)).toBe(store.activePanel.output)
   })
 
   it('switches modes and requests backend ai responses', async () => {
@@ -1911,7 +1913,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2027,7 +2029,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2164,7 +2166,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2436,7 +2438,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2539,7 +2541,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2663,7 +2665,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2807,7 +2809,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -2909,7 +2911,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -3074,7 +3076,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -3545,7 +3547,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -3749,7 +3751,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -3846,7 +3848,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4022,7 +4024,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4164,7 +4166,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4274,7 +4276,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -4428,7 +4430,7 @@ describe('workspace store', () => {
       },
       terminal: {
         terminalType: 'xterm-256color',
-        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
         fontSize: 12,
         scrollBack: 1000,
         cursorStyle: 'block',
@@ -9729,7 +9731,7 @@ describe('workspace store', () => {
       vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/unverified-bg.png'] })
       vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
         filePath: '/tmp/aiopsterm/backgrounds/unverified-bg.png',
-        url: 'file:///tmp/aiopsterm/backgrounds/unverified-bg.png',
+        url: 'aiopsterm-background://local/unverified-bg.png',
         name: 'unverified-bg.png',
         size: 128
       } as any)
@@ -9740,7 +9742,7 @@ describe('workspace store', () => {
       vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/offline-config-bg.png'] })
       vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
         filePath: '/tmp/aiopsterm/backgrounds/offline-config-bg.png',
-        url: 'file:///tmp/aiopsterm/backgrounds/offline-config-bg.png',
+        url: 'aiopsterm-background://local/offline-config-bg.png',
         name: 'offline-config-bg.png',
         size: 128,
         bytes: 128,
@@ -9755,7 +9757,7 @@ describe('workspace store', () => {
       vi.mocked(window.aiops.showOpenDialog!).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/malformed-config-bg.png'] })
       vi.mocked(window.aiops.saveCustomBackground!).mockResolvedValueOnce({
         filePath: '/tmp/aiopsterm/backgrounds/malformed-config-bg.png',
-        url: 'file:///tmp/aiopsterm/backgrounds/malformed-config-bg.png',
+        url: 'aiopsterm-background://local/malformed-config-bg.png',
         name: 'malformed-config-bg.png',
         size: 128,
         bytes: 128,
@@ -9898,7 +9900,7 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/settings-bg.png'] })
     vi.mocked(window.aiops.saveCustomBackground).mockResolvedValueOnce({
       filePath: '/tmp/aiopsterm/backgrounds/settings-bg.png',
-      url: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png',
+      url: 'aiopsterm-background://local/settings-bg.png',
       name: 'settings-bg.png',
       size: 512,
       bytes: 512,
@@ -9913,8 +9915,8 @@ describe('workspace store', () => {
     expect(store.config.background).toEqual(
       expect.objectContaining({
         mode: 'custom',
-        image: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png',
-        lastCustomImage: 'file:///tmp/aiopsterm/backgrounds/settings-bg.png'
+        image: 'aiopsterm-background://local/settings-bg.png',
+        lastCustomImage: 'aiopsterm-background://local/settings-bg.png'
       })
     )
     await expect(store.selectBackground('preset', 'dark-grid')).resolves.toBe(true)
@@ -11031,6 +11033,29 @@ describe('workspace store', () => {
     } finally {
       window.aiops.saveConfig = originalSaveConfig
     }
+  })
+
+  it('migrates legacy terminal font stacks that collapse to the same Linux fallback', async () => {
+    const store = useWorkspaceStore()
+    const backendConfig = await window.aiops.getConfig()
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      ...backendConfig,
+      terminal: {
+        ...defaultTerminalSettings,
+        fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace'
+      }
+    })
+
+    await store.hydrateConfig()
+
+    expect(store.terminalSettings.fontFamily).toBe('"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace')
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminal: expect.objectContaining({
+          fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
+        })
+      })
+    )
   })
 
   it('does not fabricate AI preference writes when the config bridge is unavailable or fails', async () => {

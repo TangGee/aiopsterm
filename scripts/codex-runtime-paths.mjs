@@ -28,6 +28,15 @@ export const codexTargetTriple = (platform = process.platform, arch = process.ar
   throw new Error(`Unsupported Codex target platform: ${platform} (${arch})`)
 }
 
+export const codexDevTargetTriple = (platform = process.platform, arch = process.arch) => {
+  arch = normalizeNodeArch(arch)
+  if (platform === 'linux' || platform === 'android') {
+    if (arch === 'x64') return 'x86_64-unknown-linux-gnu'
+    if (arch === 'arm64') return 'aarch64-unknown-linux-gnu'
+  }
+  return codexTargetTriple(platform, arch)
+}
+
 export const codexPackageDir = (projectDir = process.cwd(), platform = process.platform, arch = process.arch) =>
   resolve(
     projectDir,
@@ -38,8 +47,21 @@ export const codexPackageDir = (projectDir = process.cwd(), platform = process.p
     'aiopsterm-codex-package'
   )
 
+export const codexDevPackageDir = (projectDir = process.cwd(), platform = process.platform, arch = process.arch) =>
+  resolve(
+    projectDir,
+    'codex',
+    'codex-rs',
+    'target',
+    codexDevTargetTriple(platform, arch),
+    'aiopsterm-codex-dev-package'
+  )
+
 export const codexBuildBinaryPath = (projectDir = process.cwd(), platform = process.platform, arch = process.arch) =>
   join(codexPackageDir(projectDir, platform, arch), 'bin', codexBinaryName(platform))
+
+export const codexDevBuildBinaryPath = (projectDir = process.cwd(), platform = process.platform, arch = process.arch) =>
+  join(codexDevPackageDir(projectDir, platform, arch), 'bin', codexBinaryName(platform))
 
 export const codexLegacyCargoBinaryPath = (projectDir = process.cwd(), platform = process.platform, arch = process.arch) =>
   resolve(

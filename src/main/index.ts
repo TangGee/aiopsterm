@@ -40,7 +40,14 @@ import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiT
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
 import { configureAliasBackendRuntime, deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
-import { configureCodexCliRuntime, createCodexSession, killCodexSession, resizeCodexSession, writeCodexSession } from './backend/codexCli'
+import {
+  configureCodexCliRuntime,
+  createCodexSession,
+  killCodexSession,
+  resizeCodexSession,
+  setCodexSessionPendingContext,
+  writeCodexSession
+} from './backend/codexCli'
 import {
   appendCodexTerminalBridgeData,
   closeCodexTerminalBridgeServer,
@@ -501,13 +508,13 @@ const defaultConfig: UserConfig = {
   background: {
     mode: 'none',
     image: '',
-    opacity: 0.15,
-    brightness: 0.45,
+    opacity: 0.68,
+    brightness: 0.92,
     lastCustomImage: ''
   },
   terminal: {
     terminalType: 'xterm-256color',
-    fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+    fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
     fontSize: 12,
     scrollBack: 1000,
     cursorStyle: 'block',
@@ -1120,10 +1127,19 @@ const handleDeepLinkUrl = (rawUrl: string) => {
 const findDeepLinkArg = (argv: string[]) => argv.find((arg) => typeof arg === 'string' && arg.startsWith(aiopstermProtocolPrefix))
 
 const userAvatarProtocolScheme = 'aiopsterm-user-avatar'
+const backgroundProtocolScheme = 'aiopsterm-background'
 
 protocol.registerSchemesAsPrivileged([
   {
     scheme: userAvatarProtocolScheme,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true
+    }
+  },
+  {
+    scheme: backgroundProtocolScheme,
     privileges: {
       standard: true,
       secure: true,
@@ -1151,6 +1167,38 @@ const registerUserAvatarProtocol = () => {
       return net.fetch(pathToFileURL(assetPath).href)
     } catch {
       return new Response('Avatar not found', { status: 404 })
+    }
+  })
+}
+
+const customBackgroundUrlForPath = (filePath: string) => `${backgroundProtocolScheme}://local/${encodeURIComponent(basename(filePath))}`
+
+const resolveCustomBackgroundAssetPath = (rawUrl: string) => {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== `${backgroundProtocolScheme}:` || parsed.hostname !== 'local') return ''
+    const fileName = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''))
+    if (!fileName || fileName !== basename(fileName)) return ''
+    const backgroundRoot = resolve(getCustomBackgroundsPath())
+    const assetPath = resolve(backgroundRoot, fileName)
+    const rel = relative(backgroundRoot, assetPath)
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return ''
+    return assetPath
+  } catch {
+    return ''
+  }
+}
+
+const registerCustomBackgroundProtocol = () => {
+  protocol.handle(backgroundProtocolScheme, async (request) => {
+    const assetPath = resolveCustomBackgroundAssetPath(request.url)
+    if (!assetPath) return new Response('Background not found', { status: 404 })
+    try {
+      const metadata = await stat(assetPath)
+      if (!metadata.isFile()) return new Response('Background not found', { status: 404 })
+      return net.fetch(pathToFileURL(assetPath).href)
+    } catch {
+      return new Response('Background not found', { status: 404 })
     }
   })
 }
@@ -1318,6 +1366,13 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 })
 
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
+
+const terminalTypeOptions = new Set(['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi'])
+
+const normalizeTerminalType = (value: unknown, fallback: string) => {
+  const terminalType = typeof value === 'string' ? value.trim() : ''
+  return terminalTypeOptions.has(terminalType) ? terminalType : fallback
+}
 configureTerminalSuggestionsRuntime({ getConfig })
 configureAssetConnectionRuntime({ getConfig })
 configureDatabaseBackendRuntime({
@@ -3317,7 +3372,8 @@ const registerIpc = () => {
     return saveCustomBackgroundFile(srcAbsPath, {
       backgroundDir: getCustomBackgroundsPath(),
       maxBytes: maxCustomBackgroundBytes,
-      allowedExtensions: allowedCustomBackgroundExtensions
+      allowedExtensions: allowedCustomBackgroundExtensions,
+      toUrl: customBackgroundUrlForPath
     })
   })
   ipcMain.handle('files:read-local', async (_event, filePath: string) => {
@@ -3575,7 +3631,14 @@ const registerIpc = () => {
     }
   })
 
-  ipcMain.handle('terminal:create', (event, options: TerminalCreateOptions = {}) => {
+  ipcMain.handle('terminal:create', (event, inputOptions: TerminalCreateOptions = {}) => {
+    const savedConfig = getConfig()
+    const defaultTerminalType = normalizeTerminalType(defaultConfig.terminal?.terminalType, 'xterm-256color')
+    const savedTerminalType = normalizeTerminalType(savedConfig.terminal?.terminalType, defaultTerminalType)
+    const options: TerminalCreateOptions = {
+      ...inputOptions,
+      terminalType: normalizeTerminalType(inputOptions.terminalType, savedTerminalType)
+    }
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner) {
       logRuntimeEvent('error', 'terminal.create.no-owner', { kind: options.kind || (options.ssh || options.assetId ? 'ssh' : 'local') })
@@ -3589,6 +3652,7 @@ const registerIpc = () => {
       kind: requestedKind,
       cols: options.cols,
       rows: options.rows,
+      terminalType: options.terminalType,
       hasAssetId: Boolean(options.assetId),
       hasSshOptions: Boolean(options.ssh)
     })
@@ -3849,6 +3913,18 @@ const registerIpc = () => {
     return { ok: true, data: result }
   })
 
+  ipcMain.handle('codex:set-pending-context', async (_event, id: string, text?: string) => {
+    const result = await setCodexSessionPendingContext(String(id || ''), text)
+    logRuntimeEvent(result.ok ? 'debug' : 'warn', result.ok ? 'codex.pending-context.updated' : 'codex.pending-context.rejected', {
+      id,
+      bytes: result.data?.bytes,
+      cleared: result.data?.cleared,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage
+    })
+    return result
+  })
+
   ipcMain.handle('codex:write', (_event, id: string, data: string) => {
     const bytes = Buffer.byteLength(String(data || ''), 'utf8')
     logRuntimeEvent('debug', 'codex.write.request', { id, bytes })
@@ -4023,6 +4099,7 @@ const registerIpc = () => {
 
 app.whenReady().then(async () => {
   registerUserAvatarProtocol()
+  registerCustomBackgroundProtocol()
   registerIpc()
   await Promise.all([startSecurityConfigWatcher(), startKeywordHighlightConfigWatcher(), startMcpConfigWatcher(), startSkillsWatcher()])
   createWindow()

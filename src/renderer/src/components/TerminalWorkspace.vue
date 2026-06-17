@@ -51,6 +51,7 @@
           aria-hidden="true"
         ></span>
         <button
+          v-if="workspace.terminalSettings.showCloseButton"
           class="terminal-tab-close"
           title="关闭"
           @click.stop="closeTab(panel.id)"
@@ -370,6 +371,7 @@
           @contextmenu.prevent="handleTerminalContextMenu(panel.id, $event)"
           @mousedown="handleTerminalMouseDown(panel.id, $event)"
           @mouseup="handleTerminalMouseUp(panel.id, $event)"
+          @wheel="handleTerminalWheel(panel.id, $event)"
         ></div>
         <pre
           :data-testid="`terminal-output-${panel.id}`"
@@ -467,12 +469,16 @@ import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
-import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
+import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import type { RuntimeLogLevel, TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
+type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
+const setXtermTermName = (terminal: XtermTerminal, terminalType: string) => {
+  ;(terminal.options as XtermRuntimeOptions).termName = terminalType || 'xterm-256color'
+}
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const isTerminalKillSuccess = (result: TerminalKillResult | null | undefined, sessionId: string) =>
   result?.ok === true && isRecord(result.data) && result.data.id === sessionId
@@ -511,12 +517,25 @@ const closeTerminalMenusFromDocument = () => {
 const defaultTerminalFontSize = () => workspace.terminalSettings.fontSize || 12
 const paneFontSizes = reactive<Record<string, number>>({})
 const terminalFontSizeForPanel = (panelId: string) => paneFontSizes[panelId] || defaultTerminalFontSize()
+const terminalSettingsSignature = () => {
+  const settings = workspace.terminalSettings
+  return [
+    settings.terminalType,
+    settings.fontFamily,
+    settings.fontSize,
+    settings.lineHeight,
+    settings.cursorBlink,
+    settings.cursorStyle,
+    settings.scrollBack
+  ].join('|')
+}
 const terminalElements = new Map<string, HTMLElement>()
 type TerminalView = {
   terminal: XtermTerminal
   fit: FitAddon
   search: SearchAddon
   lastOutput: string
+  suppressInputReplyDepth?: number
   lastFitCols?: number
   lastFitRows?: number
   resizeObserver?: ResizeObserver
@@ -731,6 +750,25 @@ const normalizeTerminalSuggestions = (value: unknown): TerminalSuggestion[] | nu
   }))
 }
 
+const applyTerminalSettingsToView = (
+  panelId: string,
+  view: TerminalView,
+  settings: TerminalSettings = workspace.terminalSettings,
+  options: { preservePaneFontSize?: boolean; refit?: boolean } = {}
+) => {
+  const preservePaneFontSize = options.preservePaneFontSize ?? true
+  setXtermTermName(view.terminal, settings.terminalType)
+  view.terminal.options.fontFamily = settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'
+  view.terminal.options.fontSize = preservePaneFontSize && paneFontSizes[panelId] ? paneFontSizes[panelId] : settings.fontSize || defaultTerminalFontSize()
+  view.terminal.options.lineHeight = settings.lineHeight || 1
+  view.terminal.options.cursorBlink = settings.cursorBlink
+  view.terminal.options.cursorStyle = settings.cursorStyle
+  view.terminal.options.scrollback = settings.scrollBack
+  if (options.refit !== false) {
+    scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 3, forceGeometry: true })
+  }
+}
+
 const bridgeErrorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error && error.message.trim()) return error.message
   if (typeof error === 'string' && error.trim()) return error.trim()
@@ -765,7 +803,25 @@ const terminalZmodemRuntime = createTerminalZmodemRuntime({
   onNotice: (message) => workspace.setTopNotice(message)
 })
 
-const syncTerminalView = (panel: TerminalPanel) => {
+const writeTerminalDisplayOutput = (view: TerminalView, data: string, options: { suppressInputReplies?: boolean } = {}) => {
+  if (!data) return
+  if (!options.suppressInputReplies) {
+    view.terminal.write(data)
+    return
+  }
+  view.suppressInputReplyDepth = (view.suppressInputReplyDepth || 0) + 1
+  const restoreInputReplies = () => {
+    view.suppressInputReplyDepth = Math.max(0, (view.suppressInputReplyDepth || 1) - 1)
+  }
+  if (view.terminal.write.length >= 2) {
+    view.terminal.write(data, restoreInputReplies)
+  } else {
+    view.terminal.write(data)
+    restoreInputReplies()
+  }
+}
+
+const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?: boolean } = {}) => {
   if (panel.kind === 'knowledge') return
   const view = terminalViews.get(panel.id)
   if (!view) return
@@ -773,10 +829,10 @@ const syncTerminalView = (panel: TerminalPanel) => {
   if (displayOutput !== view.lastOutput) {
     if (displayOutput.startsWith(view.lastOutput)) {
       const chunk = displayOutput.slice(view.lastOutput.length)
-      if (chunk) view.terminal.write(chunk)
+      writeTerminalDisplayOutput(view, chunk, { suppressInputReplies: options.suppressInputReplies })
     } else {
       view.terminal.clear()
-      view.terminal.write(displayOutput)
+      writeTerminalDisplayOutput(view, displayOutput, { suppressInputReplies: true })
     }
     view.lastOutput = displayOutput
   }
@@ -875,6 +931,7 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
   terminal.loadAddon(searchAddon)
   terminal.open(element)
   const view: TerminalView = { terminal, fit, search: searchAddon, lastOutput: '' }
+  applyTerminalSettingsToView(panel.id, view, workspace.terminalSettings, { refit: false })
   if (typeof ResizeObserver !== 'undefined') {
     view.resizeObserver = new ResizeObserver(() => {
       scheduleTerminalFit(panel.id, { frames: 2 })
@@ -886,8 +943,15 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
     panelId: panel.id,
     hasSession: Boolean(panel.sessionId)
   })
-  syncTerminalView(panel)
+  syncTerminalView(panel, { suppressInputReplies: Boolean(panel.output) })
   terminal.onData((data) => {
+    if (view.suppressInputReplyDepth) {
+      writeRuntimeLog('debug', 'renderer.terminal-input.suppressed-replay-reply', {
+        panelId: panel.id,
+        bytes: new TextEncoder().encode(data).length
+      })
+      return
+    }
     void writeXtermInput(panel.id, data)
   })
   terminal.onSelectionChange(() => {
@@ -1229,7 +1293,8 @@ const startLocalTerminalForPanel = async (panel: TerminalPanel) => {
     const session = await window.aiops.createTerminal({
       kind: 'local',
       cols: size.cols,
-      rows: size.rows
+      rows: size.rows,
+      terminalType: workspace.terminalSettings.terminalType
     })
     const connected = Boolean(workspace.applyLocalTerminalSession(panel.id, session))
     if (!connected) workspace.setTopNotice('本地终端启动失败')
@@ -1256,6 +1321,7 @@ const startSshTerminalForPanel = async (panel: TerminalPanel) => {
       title: panel.title,
       cols: size.cols,
       rows: size.rows,
+      terminalType: workspace.terminalSettings.terminalType,
       ssh: {
         host: ssh.host,
         port: ssh.port,
@@ -1843,6 +1909,13 @@ const decreaseFontFromMenu = () => {
   menu.visible = false
 }
 
+const handleTerminalWheel = (panelId: string, event: WheelEvent) => {
+  if (!workspace.terminalSettings.pinchZoomStatus || (!event.ctrlKey && !event.metaKey)) return
+  event.preventDefault()
+  if (event.deltaY < 0) increaseFont(panelId)
+  if (event.deltaY > 0) decreaseFont(panelId)
+}
+
 const sendCommand = async (panel: TerminalPanel) => {
   if (suggestionSelectionMode.value && activeSuggestion.value >= 0 && suggestionItems.value[activeSuggestion.value]) {
     command.value = suggestionItems.value[activeSuggestion.value].command
@@ -1870,6 +1943,11 @@ const updateSuggestions = async (panelId: string) => {
   activeSuggestion.value = -1
   aiSuggestLoading.value = false
   if (!query) {
+    suggestionItems.value = []
+    suggestionPanel.panelId = ''
+    return
+  }
+  if (!workspace.extensionSettings.autoCompleteStatus) {
     suggestionItems.value = []
     suggestionPanel.panelId = ''
     return
@@ -1932,7 +2010,7 @@ const triggerAiSuggestion = async () => {
   const rawQuery = command.value.trim()
   const query = rawQuery.toLowerCase()
   const panelId = suggestionPanel.panelId || workspace.activePanelId
-  if (!rawQuery || suggestionSelectionMode.value || aiSuggestLoading.value || hasAiSuggestion.value) return
+  if (!workspace.extensionSettings.autoCompleteStatus || !rawQuery || suggestionSelectionMode.value || aiSuggestLoading.value || hasAiSuggestion.value) return
   const requestId = ++suggestionRequestId
   aiSuggestLoading.value = true
   updateSuggestionsPosition()
@@ -1966,7 +2044,7 @@ const sendGlobalCommand = async () => {
   const text = globalCommand.value.trim()
   if (!text) return
   const decision = await workspace.runGlobalTerminalCommand(text)
-  workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
+  workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
   if (decision.status !== 'allow') return
   globalCommand.value = ''
 }
@@ -1980,12 +2058,12 @@ const approveSecurityPrompt = async () => {
     commandLinePanelId.value = ''
     hideSuggestions()
   }
-  workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
+  workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
 }
 
 const cancelSecurityPrompt = () => {
   workspace.cancelTerminalSecurityPrompt()
-  workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView)
+  workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
 }
 
 const toggleGlobalInput = () => {
@@ -2193,9 +2271,9 @@ watch(
     workspace.panels
       .filter((panel) => panel.kind !== 'knowledge')
       .map((panel) => `${panel.id}:${panel.output.length}:${panel.outputSegments?.length || 0}:${panel.title}`)
-      .join('|') + JSON.stringify(workspace.keywordHighlightSettings),
+      .join('|') + `${workspace.extensionSettings.highlightStatus}|${JSON.stringify(workspace.keywordHighlightSettings)}`,
   () => {
-    nextTick(() => workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach(syncTerminalView))
+    nextTick(() => workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel)))
   }
 )
 
@@ -2221,13 +2299,16 @@ watch(
 )
 
 watch(
-  () => workspace.terminalSettings.fontSize,
-  (fontSize) => {
-    terminalViews.forEach((view, panelId) => {
-      if (paneFontSizes[panelId]) return
-      view.terminal.options.fontSize = fontSize || defaultTerminalFontSize()
-      scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 2 })
-    })
+  terminalSettingsSignature,
+  () => {
+    terminalViews.forEach((view, panelId) => applyTerminalSettingsToView(panelId, view))
+  }
+)
+
+watch(
+  () => workspace.extensionSettings.autoCompleteStatus,
+  (enabled) => {
+    if (!enabled) hideSuggestions()
   }
 )
 

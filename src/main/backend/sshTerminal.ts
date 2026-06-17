@@ -219,6 +219,11 @@ const getPtyRuntime = (): SshTerminalPtyRuntime | null => {
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
 
+const getTerminalType = (options: TerminalCreateOptions) => {
+  const terminalType = typeof options.terminalType === 'string' ? options.terminalType.trim() : ''
+  return terminalType || 'xterm-256color'
+}
+
 const clearPool = (pool: Map<string, PooledSshClient>) => {
   for (const entry of new Set(pool.values())) {
     try {
@@ -809,6 +814,7 @@ export const createSshTerminalSession = (
   let closed = false
   let cols = options.cols || 100
   let rows = options.rows || 30
+  const terminalType = getTerminalType(options)
   const pendingWrites: Array<string | Buffer> = []
   const keyboardInteractiveStates = new Map<string, { attempts: number; activeRequestId: string }>()
   const pendingRememberPasswords = new Map<string, { assetId: string; password: string }>()
@@ -1184,7 +1190,7 @@ export const createSshTerminalSession = (
           ? `SSH connection reused ${target.username}@${target.host}:${target.port}`
           : `SSH connected ${target.username}@${target.host}:${target.port}`
     })
-    authClient.shell({ term: 'xterm-256color', cols, rows }, (error, channel) => {
+    authClient.shell({ term: terminalType, cols, rows }, (error, channel) => {
       if (error) {
         fail(error, 'SSH shell failed.', 1)
         return
@@ -1457,6 +1463,7 @@ export const createSshTerminalSession = (
 
     const relayEnv = {
       ...getEnv(),
+      TERM: terminalType,
       AIOPSTERM_TRANSPORT: 'relay-shell',
       AIOPSTERM_RELAY_HOST: jumpTarget.host,
       AIOPSTERM_TARGET_HOST: target.host
@@ -1509,7 +1516,7 @@ export const createSshTerminalSession = (
     relayConnectionReuse = pathExists(relayMasterPath) ? 'reused' : 'created'
     const args = relayShellSshArgs(jumpTarget)
     const relayProcess = ptyRuntime.spawn('ssh', args, {
-      name: 'xterm-256color',
+      name: terminalType,
       cols,
       rows,
       cwd: getLocalSshSpawnCwd(),

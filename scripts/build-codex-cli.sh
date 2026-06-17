@@ -4,6 +4,10 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 APP_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 
+source "${APP_ROOT}/scripts/codex-rust-toolchain.sh"
+
+cd "${APP_ROOT}"
+
 target_triple="$(node --input-type=module -e "import { codexTargetTriple } from './scripts/codex-runtime-paths.mjs'; console.log(codexTargetTriple())")"
 default_package_dir="$(node --input-type=module -e "import { codexPackageDir } from './scripts/codex-runtime-paths.mjs'; console.log(codexPackageDir())")"
 package_dir="${AIOPSTERM_CODEX_PACKAGE_DIR:-${default_package_dir}}"
@@ -60,7 +64,10 @@ elif [[ -x "${codex_bin}" ]]; then
   echo "[aiopsterm] Codex package exists: ${package_dir}"
 elif [[ -d "${APP_ROOT}/codex/scripts/codex_package" && -d "${APP_ROOT}/codex/codex-rs" ]]; then
   echo "[aiopsterm] building Codex package for ${target_triple}"
-  (cd "${APP_ROOT}/codex/codex-rs" && rustup target add "${target_triple}")
+  aiopsterm_ensure_codex_rust_toolchain "${APP_ROOT}"
+  aiopsterm_install_codex_rust_target "${RUSTUP_TOOLCHAIN}" "${target_triple}"
+  codex_builder_args+=(--cargo "${AIOPSTERM_CODEX_CARGO_BIN}")
+  aiopsterm_clean_corrupt_codex_cargo_profile "${APP_ROOT}" "${target_triple}" release
   configure_musl_toolchain
   python3 "${APP_ROOT}/codex/scripts/build_codex_package.py" "${codex_builder_args[@]}"
 else

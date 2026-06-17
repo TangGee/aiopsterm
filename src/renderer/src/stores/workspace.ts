@@ -713,13 +713,13 @@ const defaultConfig: UserConfig = {
   background: {
     mode: 'none',
     image: '',
-    opacity: 0.15,
-    brightness: 0.45,
+    opacity: 0.68,
+    brightness: 0.92,
     lastCustomImage: ''
   },
   terminal: {
     terminalType: 'xterm-256color',
-    fontFamily: 'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+    fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
     fontSize: 12,
     scrollBack: 1000,
     cursorStyle: 'block',
@@ -982,6 +982,15 @@ const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt
 const terminalCursorStyles = ['block', 'bar', 'underline'] as const
 const middleMouseEventActions: TerminalMouseEventAction[] = ['none', 'paste', 'contextMenu', 'closeTab']
 const rightMouseEventActions: TerminalSettings['rightMouseEvent'][] = ['none', 'paste', 'contextMenu']
+const linuxReadableTerminalFontFamily = '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace'
+const legacyTerminalFontFamilies = new Set([
+  'Menlo, Monaco, "Courier New", Consolas, Courier, monospace',
+  'Monaco, "Courier New", Consolas, Courier, monospace',
+  '"MesloLGS NF", "Courier New", Courier, monospace',
+  'Consolas, "Courier New", Courier, monospace',
+  '"JetBrains Mono", "Courier New", Courier, monospace',
+  '"Source Code Pro", "Courier New", Courier, monospace'
+])
 const modelApiFormats: NonNullable<ModelProviderSettings['apiFormat']>[] = ['chat-completions', 'responses']
 const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standard', 'custom']
 const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5', 'TCP']
@@ -1346,9 +1355,10 @@ const knowledgeEntryToNode = (entry: KnowledgeBaseEntry): KnowledgeNode => ({
 
 const normalizeTerminalConfig = (source?: Partial<TerminalUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
+  const incomingFontFamily = typeof incoming.fontFamily === 'string' ? incoming.fontFamily.trim() : ''
   const normalized: TerminalSettings = {
     terminalType: stringFromOptions(incoming.terminalType, terminalTypes, defaultTerminalSettings.terminalType),
-    fontFamily: typeof incoming.fontFamily === 'string' && incoming.fontFamily.trim() ? incoming.fontFamily : defaultTerminalSettings.fontFamily,
+    fontFamily: incomingFontFamily ? (legacyTerminalFontFamilies.has(incomingFontFamily) ? linuxReadableTerminalFontFamily : incomingFontFamily) : defaultTerminalSettings.fontFamily,
     fontSize: numberInRange(incoming.fontSize, defaultTerminalSettings.fontSize, 8, 64),
     scrollBack: numberInRange(incoming.scrollBack, defaultTerminalSettings.scrollBack, 1, 100000),
     cursorStyle: stringFromOptions(incoming.cursorStyle, terminalCursorStyles, defaultTerminalSettings.cursorStyle),
@@ -3476,6 +3486,17 @@ const cloneBackgroundSnapshot = (background: BackgroundUserConfig): BackgroundUs
 
 const backgroundSnapshotsMatch = (left: BackgroundUserConfig, right: BackgroundUserConfig) =>
   JSON.stringify(cloneBackgroundSnapshot(left)) === JSON.stringify(cloneBackgroundSnapshot(right))
+
+const visibleBackgroundTuning = (background: BackgroundUserConfig): BackgroundUserConfig => {
+  if (background.mode === 'none') return background
+  const wasLegacyLowVisibility = background.opacity <= 0.5 && background.brightness <= 0.85
+  if (!wasLegacyLowVisibility) return background
+  return {
+    ...background,
+    opacity: defaultConfig.background.opacity,
+    brightness: defaultConfig.background.brightness
+  }
+}
 
 const isCustomBackgroundSaveResult = (source: unknown): source is CustomBackgroundSaveData =>
   isRecord(source) &&
@@ -6235,11 +6256,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const selectBackground = async (mode: UserConfig['background']['mode'], image = '') => {
-    const nextBackground = normalizeBackgroundConfig({
-      ...getBackgroundSnapshot(),
-      mode,
-      image
-    }).normalized
+    const nextBackground = visibleBackgroundTuning(
+      normalizeBackgroundConfig({
+        ...getBackgroundSnapshot(),
+        mode,
+        image
+      }).normalized
+    )
     const saved = await persistBackground(nextBackground)
     if (saved) {
       setSettingsNotice('背景设置已保存')
@@ -6269,12 +6292,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('自定义背景保存失败')
         return false
       }
-      const persisted = await persistBackground({
-        ...getBackgroundSnapshot(),
-        mode: 'custom',
-        image: saved.url,
-        lastCustomImage: saved.url
-      })
+      const persisted = await persistBackground(
+        visibleBackgroundTuning({
+          ...getBackgroundSnapshot(),
+          mode: 'custom',
+          image: saved.url,
+          lastCustomImage: saved.url
+        })
+      )
       if (!persisted) return false
       setSettingsNotice(`自定义背景已保存：${saved.name}`)
       return true
@@ -6290,12 +6315,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('请先上传自定义背景')
       return false
     }
-    const saved = await persistBackground({
-      ...getBackgroundSnapshot(),
-      mode: 'custom',
-      image: customImage,
-      lastCustomImage: customImage
-    })
+    const saved = await persistBackground(
+      visibleBackgroundTuning({
+        ...getBackgroundSnapshot(),
+        mode: 'custom',
+        image: customImage,
+        lastCustomImage: customImage
+      })
+    )
     if (saved) {
       setSettingsNotice('背景设置已保存')
     }
@@ -12281,7 +12308,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           kind: 'local',
           title: label,
           cols: 100,
-          rows: 30
+          rows: 30,
+          terminalType: terminalSettings.value.terminalType
         })
         const connected = applyLocalTerminalSession(panelId, session)
         if (!connected) {
@@ -12314,7 +12342,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         assetId: host.id,
         title: label,
         cols: 100,
-        rows: 30
+        rows: 30,
+        terminalType: terminalSettings.value.terminalType
       })
       const connected = applySshTerminalSession(panelId, session, asset)
       if (!connected) {
@@ -12728,6 +12757,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const getHighlightedTerminalOutput = (id: string) => {
     const panel = panels.value.find((item) => item.id === id || item.sessionId === id)
     if (!panel) return ''
+    if (!extensionSettings.value.highlightStatus) return panel.output
     if (!panel.outputSegments?.length) {
       panel.outputSegments = createTerminalSegments(panel.output)
     }
