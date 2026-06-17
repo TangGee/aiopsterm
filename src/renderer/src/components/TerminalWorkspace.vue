@@ -825,7 +825,7 @@ const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?
   if (panel.kind === 'knowledge') return
   const view = terminalViews.get(panel.id)
   if (!view) return
-  const displayOutput = panel.sessionId ? panel.output : workspace.getHighlightedTerminalOutput(panel.id)
+  const displayOutput = workspace.getHighlightedTerminalOutput(panel.id)
   if (displayOutput !== view.lastOutput) {
     if (displayOutput.startsWith(view.lastOutput)) {
       const chunk = displayOutput.slice(view.lastOutput.length)

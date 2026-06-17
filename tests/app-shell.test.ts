@@ -771,17 +771,18 @@ describe('AppShell', () => {
     expect(codexTerminal.options.allowTransparency).toBe(true)
     expect(codexTerminal.options.theme).toMatchObject({ background: 'rgba(9, 11, 16, 0)' })
     expect(codexTerminal.options.termName).toBe('xterm-256color')
+    const codexTerminalFont = '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace'
     await expect(
       store.updateTerminalSettings({
         terminalType: 'linux',
-        fontFamily: 'Consolas, "Courier New", Courier, monospace',
+        fontFamily: codexTerminalFont,
         fontSize: 16
       })
     ).resolves.toBe(true)
     await flushPromises()
     await wrapper.vm.$nextTick()
     expect(codexTerminal.options.termName).toBe('linux')
-    expect(codexTerminal.options.fontFamily).toBe('Consolas, "Courier New", Courier, monospace')
+    expect(codexTerminal.options.fontFamily).toBe(codexTerminalFont)
     expect(codexTerminal.options.fontSize).toBe(16)
     codexTerminal.emitSelection('codex copied text')
     vi.mocked(navigator.clipboard.writeText).mockClear()
@@ -7304,6 +7305,18 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]).toContain('sudo')
     expect(mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]).toContain('\x1b[1;38;5;')
+    mockXtermInstances.at(-1)!.write.mockClear()
+    store.activePanel.sessionId = 'live-highlight-session'
+    store.appendTerminalOutput('live-highlight-session', 'ERROR from live shell\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    const liveHighlightWrite = mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]
+    expect(liveHighlightWrite).toContain('ERROR')
+    expect(liveHighlightWrite).toContain('from live shell')
+    expect(liveHighlightWrite).toContain('\x1b[1;38;5;')
+    expect(store.activePanel.output).toContain('ERROR from live shell')
+    expect(store.activePanel.output).not.toContain('\x1b[')
+    store.activePanel.sessionId = undefined
 
     const firstHost = wrapper.find('.xterm-host')
     const styles = baseStyles()
@@ -7639,7 +7652,7 @@ describe('AppShell', () => {
       'renderer.terminal-input.suppressed-replay-reply',
       expect.objectContaining({
         panelId: store.activePanelId,
-        bytes: 10
+        bytes: 11
       })
     )
 
