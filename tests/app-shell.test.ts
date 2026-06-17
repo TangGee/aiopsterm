@@ -220,6 +220,7 @@ import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { settingsBackgroundPresets } from '@/config/settings'
 import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
 import type { FileSessionInfo, KeywordHighlightUserConfig, TerminalKeyboardInteractiveRequest } from '@shared/preload'
 
@@ -670,6 +671,11 @@ describe('AppShell', () => {
     expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm .xterm-viewport')
     expect(styles).toContain('background: transparent !important;')
     expect(styles).toContain('.ai-codex-xterm {\n  border: 1px solid var(--border);\n  border-radius: 7px;\n  background: #090b10;')
+
+    await expect(store.selectBackground('preset', 'aurora-glass-image')).resolves.toBe(true)
+    await wrapper.vm.$nextTick()
+    expect(shell.attributes('style')).toContain('--app-bg-image: url(\"')
+    expect(shell.attributes('style')).toContain('aurora-glass')
   })
 
   it('keeps the general settings background picker from forcing horizontal scrolling', () => {
@@ -13318,6 +13324,15 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Kanagawa Dragon')
     expect(workspace.text()).toContain('Catppuccin Latte')
     expect(workspace.text()).toContain('打开入门引导')
+    const generatedBackgroundPreset = settingsBackgroundPresets.find((preset) => preset.id === 'aurora-glass-image')
+    expect(generatedBackgroundPreset?.image).toContain('aurora-glass')
+    expect(workspace.findAll('.settings-bg-tile.preset')).toHaveLength(settingsBackgroundPresets.length)
+    const generatedBackgroundTile = workspace.findAll('.settings-bg-tile.preset').at(settingsBackgroundPresets.findIndex((preset) => preset.id === 'aurora-glass-image'))!
+    expect(generatedBackgroundTile.attributes('style')).toContain('aurora-glass')
+    await generatedBackgroundTile.trigger('click')
+    await flushPromises()
+    expect(store.config.background.mode).toBe('preset')
+    expect(store.config.background.image).toBe('aurora-glass-image')
     await workspace.find('.theme-select').setValue('catppuccin-latte')
     await flushPromises()
     expect(store.config.theme).toBe('catppuccin-latte')

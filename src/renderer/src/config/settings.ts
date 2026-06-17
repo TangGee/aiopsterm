@@ -1,6 +1,11 @@
 import type { Component } from 'vue'
 import { BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Plug, Settings, ShieldCheck, SlidersHorizontal, Smartphone, SquareTerminal, Zap } from 'lucide-vue-next'
 import { localeDisplayNames, supportedLocales, type I18nKey } from '@/i18n/messages'
+import auroraGlassBackground from '@/assets/backgrounds/aurora-glass.webp'
+import coastDuskSoftBackground from '@/assets/backgrounds/coast-dusk-soft.webp'
+import dawnGlassBackground from '@/assets/backgrounds/dawn-glass.webp'
+import graphiteSignalBackground from '@/assets/backgrounds/graphite-signal.webp'
+import midnightTopographyBackground from '@/assets/backgrounds/midnight-topography.webp'
 
 export type SettingSectionKey =
   | 'general'
@@ -76,6 +81,7 @@ export type BackgroundPreset = {
   id: string
   label: string
   css: string
+  image?: string
 }
 
 export const settingsBackgroundPresets: BackgroundPreset[] = [
@@ -123,6 +129,36 @@ export const settingsBackgroundPresets: BackgroundPreset[] = [
     id: 'dawn-glass',
     label: 'dawn glass',
     css: 'radial-gradient(circle at 20% 18%, rgb(242 166 112 / 0.46), transparent 30%), radial-gradient(circle at 78% 22%, rgb(112 186 177 / 0.34), transparent 38%), radial-gradient(circle at 58% 82%, rgb(139 160 199 / 0.26), transparent 36%), linear-gradient(150deg, #2b2a34 0%, #495d62 50%, #151922 100%)'
+  },
+  {
+    id: 'aurora-glass-image',
+    label: 'aurora glass',
+    css: `url("${auroraGlassBackground}")`,
+    image: auroraGlassBackground
+  },
+  {
+    id: 'graphite-signal-image',
+    label: 'graphite signal',
+    css: `url("${graphiteSignalBackground}")`,
+    image: graphiteSignalBackground
+  },
+  {
+    id: 'dawn-glass-image',
+    label: 'dawn glass image',
+    css: `url("${dawnGlassBackground}")`,
+    image: dawnGlassBackground
+  },
+  {
+    id: 'coast-dusk-soft-image',
+    label: 'coast dusk soft',
+    css: `url("${coastDuskSoftBackground}")`,
+    image: coastDuskSoftBackground
+  },
+  {
+    id: 'midnight-topography-image',
+    label: 'midnight topography',
+    css: `url("${midnightTopographyBackground}")`,
+    image: midnightTopographyBackground
   }
 ]
 

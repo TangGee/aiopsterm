@@ -9,7 +9,7 @@ export const backgroundImageCss = (image: string) => {
 
 export const backgroundStyleVars = (background: UserConfig['background']) => {
   const preset = settingsBackgroundPresets.find((item) => item.id === background.image)
-  const image = background.mode === 'custom' ? backgroundImageCss(background.image) : preset?.css || 'none'
+  const image = background.mode === 'custom' ? backgroundImageCss(background.image) : preset?.image ? backgroundImageCss(preset.image) : preset?.css || 'none'
   return {
     '--app-bg-image': image,
     '--app-bg-opacity': String(background.mode === 'none' ? 0 : background.opacity),
