@@ -189,6 +189,7 @@ import type {
   QuickCommandSnippetConfig,
   QuickCommandsUserConfig,
   SecurityUserConfig,
+  SettingsDocumentationPage,
   SettingsPreferencesSnapshot,
   ShortcutUserConfig,
   SkillUserConfig,
@@ -6030,15 +6031,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     onboardingGuideOpen.value = false
   }
 
-  const openSettingsDocumentation = async () => {
+  const openSettingsDocumentation = async (page?: SettingsDocumentationPage) => {
     closeSettingsInlineEditors()
-    activeSettingsSection.value = 'general'
+    if (!page) activeSettingsSection.value = 'general'
     if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
       setSettingsNotice('文档入口服务不可用')
       return false
     }
     try {
-      const result = await window.aiops.openSettingsDocumentation()
+      const result = await window.aiops.openSettingsDocumentation(page ? { page, locale: resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]) } : undefined)
       if (!isOpenPathResult(result)) {
         setSettingsNotice('文档入口打开失败')
         return false
@@ -6050,6 +6051,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
   }
+
+  const openSettingsPageDocumentation = (page: SettingsDocumentationPage) => openSettingsDocumentation(page)
 
   const setActiveSettingsSection = (key: SettingSectionKey) => {
     if (key === 'docs') {
@@ -14166,6 +14169,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveConfig,
     setSettingsNotice,
     setActiveSettingsSection,
+    openSettingsPageDocumentation,
     openOnboardingGuide,
     startOnboardingTour,
     stopOnboardingTour,

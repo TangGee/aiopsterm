@@ -8,6 +8,7 @@
 - [Knowledge Base](knowledge-base.md)
 - [MCP Servers](mcp-servers.md)
 - [Package Verification](package-verification.md)
+- [Settings Help](settings/index.md)
 - [Terminal Workspace](terminal-workspace.md)
 - [Troubleshooting](troubleshooting.md)
 - [User Account](user-account.md)

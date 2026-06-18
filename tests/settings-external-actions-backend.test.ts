@@ -4,7 +4,7 @@ import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 type SettingsExternalActionsBackend = {
-  openSettingsDocumentation: (runtime: ReturnType<typeof makeRuntime>) => Promise<{ path: string }>
+  openSettingsDocumentation: (runtime: ReturnType<typeof makeRuntime>, input?: { page?: string; locale?: string }) => Promise<{ path: string }>
   submitSettingsFeedbackReport: (runtime: ReturnType<typeof makeRuntime> & { now?: () => Date }) => Promise<{ path: string }>
 }
 
@@ -40,6 +40,32 @@ describe('settings external action backend boundary', () => {
 
       expect(result).toEqual({ path: docsPath })
       expect(opened).toEqual([docsPath])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('opens whitelisted settings page Markdown for the requested locale', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-settings-page-docs-'))
+    try {
+      const docsPath = join(root, 'docs', 'index.md')
+      const generalZhPath = join(root, 'docs', 'usage', 'settings', 'zh-CN', 'general.md')
+      const generalEnPath = join(root, 'docs', 'usage', 'settings', 'en-US', 'general.md')
+      await mkdir(join(root, 'docs', 'usage', 'settings', 'zh-CN'), { recursive: true })
+      await mkdir(join(root, 'docs', 'usage', 'settings', 'en-US'), { recursive: true })
+      await writeFile(docsPath, '# aiopsterm Docs\n', 'utf-8')
+      await writeFile(generalZhPath, '# 通用设置\n', 'utf-8')
+      await writeFile(generalEnPath, '# General Settings\n', 'utf-8')
+      const opened: string[] = []
+
+      const zhResult = await backend.openSettingsDocumentation(makeRuntime(root, opened), { page: 'general', locale: 'zh-CN' })
+      const enResult = await backend.openSettingsDocumentation(makeRuntime(root, opened), { page: 'general', locale: 'en-US' })
+      const unknownResult = await backend.openSettingsDocumentation(makeRuntime(root, opened), { page: '../general', locale: 'zh-CN' })
+
+      expect(zhResult).toEqual({ path: generalZhPath })
+      expect(enResult).toEqual({ path: generalEnPath })
+      expect(unknownResult).toEqual({ path: docsPath })
+      expect(opened).toEqual([generalZhPath, generalEnPath, docsPath])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

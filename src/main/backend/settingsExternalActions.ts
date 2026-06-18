@@ -1,7 +1,7 @@
 import { mkdir, stat as fsStat, writeFile as fsWriteFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import type { Stats } from 'fs'
-import type { OpenPathResult } from '@shared/preload'
+import type { OpenPathResult, OpenSettingsDocumentationInput, SettingsDocumentationPage } from '@shared/preload'
 
 type SettingsExternalActionRuntime = {
   userDataPath: string
@@ -38,8 +38,46 @@ const uniquePaths = (paths: Array<string | undefined>) => {
     })
 }
 
+const settingsDocumentationFiles: Record<SettingsDocumentationPage, string> = {
+  general: 'general.md',
+  terminal: 'terminal.md',
+  extensions: 'extensions.md',
+  models: 'models.md',
+  billing: 'billing.md',
+  ai: 'ai.md',
+  mcp: 'mcp.md',
+  skills: 'skills.md',
+  rules: 'rules.md',
+  shortcuts: 'shortcuts.md',
+  trustedDevices: 'trusted-devices.md',
+  privacy: 'privacy.md',
+  about: 'about.md'
+}
+
+const supportedDocumentationLocales = ['zh-CN', 'zh-TW', 'en-US'] as const
+type SupportedDocumentationLocale = (typeof supportedDocumentationLocales)[number]
+
+const isSettingsDocumentationPage = (page: unknown): page is SettingsDocumentationPage =>
+  typeof page === 'string' && Object.prototype.hasOwnProperty.call(settingsDocumentationFiles, page)
+
+const normalizeDocumentationLocale = (locale: unknown): SupportedDocumentationLocale | undefined => {
+  if (typeof locale !== 'string') return undefined
+  if (supportedDocumentationLocales.includes(locale as SupportedDocumentationLocale)) return locale as SupportedDocumentationLocale
+  return undefined
+}
+
+const documentationRoots = (runtime: SettingsExternalActionRuntime) =>
+  uniquePaths([runtime.cwd, runtime.appPath, runtime.moduleDir ? resolve(runtime.moduleDir, '..', '..') : undefined]).map((root) => join(root, 'docs'))
+
 const documentationCandidates = (runtime: SettingsExternalActionRuntime) =>
-  uniquePaths([runtime.cwd, runtime.appPath, runtime.moduleDir ? resolve(runtime.moduleDir, '..', '..') : undefined]).map((root) => join(root, 'docs', 'index.md'))
+  documentationRoots(runtime).map((root) => join(root, 'index.md'))
+
+const settingsDocumentationCandidates = (runtime: SettingsExternalActionRuntime, page: SettingsDocumentationPage, locale?: SupportedDocumentationLocale) => {
+  const fileName = settingsDocumentationFiles[page]
+  const locales: SupportedDocumentationLocale[] =
+    locale === 'zh-CN' ? ['zh-CN', 'en-US', 'zh-TW'] : locale === 'zh-TW' ? ['zh-TW', 'zh-CN', 'en-US'] : ['en-US', 'zh-CN', 'zh-TW']
+  return documentationRoots(runtime).flatMap((root) => locales.map((candidateLocale) => join(root, 'usage', 'settings', candidateLocale, fileName)))
+}
 
 const isFile = async (path: string, statFn: typeof fsStat) => {
   try {
@@ -56,6 +94,16 @@ const resolveDocumentationPath = async (runtime: SettingsExternalActionRuntime) 
     if (await isFile(candidate, statFn)) return candidate
   }
   throw new SettingsExternalActionError('aiopsterm documentation entry was not found.')
+}
+
+const resolveSettingsDocumentationPath = async (runtime: SettingsExternalActionRuntime, input: OpenSettingsDocumentationInput = {}) => {
+  if (!isSettingsDocumentationPage(input.page)) return resolveDocumentationPath(runtime)
+  const statFn = runtime.stat || fsStat
+  const locale = normalizeDocumentationLocale(input.locale)
+  for (const candidate of settingsDocumentationCandidates(runtime, input.page, locale)) {
+    if (await isFile(candidate, statFn)) return candidate
+  }
+  throw new SettingsExternalActionError(`aiopsterm settings documentation for ${input.page} was not found.`)
 }
 
 const openPath = async (path: string, runtime: SettingsExternalActionRuntime): Promise<OpenPathResult> => {
@@ -90,8 +138,8 @@ const feedbackReportContent = async (runtime: SettingsExternalActionRuntime, gen
   ].join('\n')
 }
 
-export const openSettingsDocumentation = async (runtime: SettingsExternalActionRuntime): Promise<OpenPathResult> => {
-  const docsPath = await resolveDocumentationPath(runtime)
+export const openSettingsDocumentation = async (runtime: SettingsExternalActionRuntime, input: OpenSettingsDocumentationInput = {}): Promise<OpenPathResult> => {
+  const docsPath = await resolveSettingsDocumentationPath(runtime, input)
   return openPath(docsPath, runtime)
 }
 
@@ -109,5 +157,6 @@ export const submitSettingsFeedbackReport = async (runtime: SettingsExternalActi
 
 export const __testing = {
   documentationCandidates,
+  settingsDocumentationCandidates,
   feedbackFileName
 }

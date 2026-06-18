@@ -1903,6 +1903,26 @@ export type OpenPathResult = {
   path: string
 }
 
+export type SettingsDocumentationPage =
+  | 'general'
+  | 'terminal'
+  | 'extensions'
+  | 'models'
+  | 'billing'
+  | 'ai'
+  | 'mcp'
+  | 'skills'
+  | 'rules'
+  | 'shortcuts'
+  | 'trustedDevices'
+  | 'privacy'
+  | 'about'
+
+export type OpenSettingsDocumentationInput = {
+  page?: SettingsDocumentationPage
+  locale?: string
+}
+
 export type CustomBackgroundSaveResult = {
   filePath: string
   url: string
@@ -3110,7 +3130,7 @@ export type AiopsPreloadApi = {
   consumeDeepLinks: () => Promise<AiopstermDeepLinkPayload[]>
   onDeepLink: (listener: (payload: AiopstermDeepLinkPayload) => void) => () => void
   openExternalUrl: (url: string) => Promise<void>
-  openSettingsDocumentation: () => Promise<OpenPathResult>
+  openSettingsDocumentation: (input?: OpenSettingsDocumentationInput) => Promise<OpenPathResult>
   submitSettingsFeedbackReport: () => Promise<OpenPathResult>
   openLogDir: () => Promise<OpenPathResult>
   writeRuntimeLog?: (level: RuntimeLogLevel, event: string, fields?: Record<string, unknown>) => Promise<AiopsMutationResult<{ event: string }>>

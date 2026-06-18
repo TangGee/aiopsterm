@@ -379,6 +379,7 @@ import type {
   QuickCommandSnippetSaveInput,
   SecurityUserConfig,
   SettingsRuleSaveInput,
+  SettingsDocumentationPage,
   SettingsShortcutSaveInput,
   ShortcutUserConfig,
   SkillDeleteResult,
@@ -933,6 +934,29 @@ const normalizeStringArray = (source: unknown, fallback: string[]) =>
   Array.isArray(source) ? source.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : [...fallback]
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const settingsDocumentationPages = new Set<SettingsDocumentationPage>([
+  'general',
+  'terminal',
+  'extensions',
+  'models',
+  'billing',
+  'ai',
+  'mcp',
+  'skills',
+  'rules',
+  'shortcuts',
+  'trustedDevices',
+  'privacy',
+  'about'
+])
+
+const normalizeSettingsDocumentationInput = (source: unknown) => {
+  if (!isRecord(source)) return {}
+  const page = typeof source.page === 'string' && settingsDocumentationPages.has(source.page as SettingsDocumentationPage) ? (source.page as SettingsDocumentationPage) : undefined
+  const locale = typeof source.locale === 'string' ? source.locale : undefined
+  return { ...(page ? { page } : {}), ...(locale ? { locale } : {}) }
+}
 
 const toStringArray = (source: unknown) =>
   Array.isArray(source) ? source.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : undefined
@@ -2894,7 +2918,9 @@ const registerIpc = () => {
     }
     await shell.openExternal(normalized.url)
   })
-  ipcMain.handle('settings:open-documentation', async () => openSettingsDocumentation(settingsExternalActionRuntime()))
+  ipcMain.handle('settings:open-documentation', async (_event, input: unknown) =>
+    openSettingsDocumentation(settingsExternalActionRuntime(), normalizeSettingsDocumentationInput(input))
+  )
   ipcMain.handle('settings:submit-feedback-report', async () => submitSettingsFeedbackReport(settingsExternalActionRuntime()))
   ipcMain.handle('app:open-log-dir', async () => {
     const logDir = getLogDirPath()

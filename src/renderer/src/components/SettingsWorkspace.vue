@@ -171,41 +171,10 @@ import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import { useI18n } from '@/i18n'
-import type { I18nKey } from '@/i18n'
+import type { SettingsDocumentationPage } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
-
-type SettingsHelpKey =
-  | 'general'
-  | 'terminal'
-  | 'extensions'
-  | 'models'
-  | 'billing'
-  | 'ai'
-  | 'mcp'
-  | 'skills'
-  | 'rules'
-  | 'shortcuts'
-  | 'trustedDevices'
-  | 'privacy'
-  | 'about'
-
-const settingsHelpTextKeys: Record<SettingsHelpKey, I18nKey> = {
-  general: 'settings.help.general',
-  terminal: 'settings.help.terminal',
-  extensions: 'settings.help.extensions',
-  models: 'settings.help.models',
-  billing: 'settings.help.billing',
-  ai: 'settings.help.ai',
-  mcp: 'settings.help.mcp',
-  skills: 'settings.help.skills',
-  rules: 'settings.help.rules',
-  shortcuts: 'settings.help.shortcuts',
-  trustedDevices: 'settings.help.trustedDevices',
-  privacy: 'settings.help.privacy',
-  about: 'settings.help.about'
-}
 
 const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi']
 const terminalFonts = [
@@ -334,15 +303,13 @@ const SettingsPageHelpButton = defineComponent({
   name: 'SettingsPageHelpButton',
   props: {
     helpKey: {
-      type: String as () => SettingsHelpKey,
+      type: String as () => SettingsDocumentationPage,
       required: true
     }
   },
   setup(props) {
-    const open = ref(false)
-    const description = computed(() => t(settingsHelpTextKeys[props.helpKey]))
     return () =>
-      h('div', { class: ['settings-page-help', { open: open.value }] }, [
+      h('div', { class: 'settings-page-help' }, [
         h(
           'button',
           {
@@ -350,22 +317,15 @@ const SettingsPageHelpButton = defineComponent({
             class: 'settings-page-help-button',
             title: t('settings.help.open'),
             'aria-label': t('settings.help.open'),
-            'aria-expanded': open.value ? 'true' : 'false',
-            onClick: () => {
-              open.value = !open.value
-            },
-            onKeydown: (event: KeyboardEvent) => {
-              if (event.key === 'Escape') open.value = false
-            }
+            onClick: () => void workspace.openSettingsPageDocumentation(props.helpKey)
           },
           [h(CircleHelp)]
-        ),
-        open.value ? h('div', { class: 'settings-page-help-popover', role: 'note' }, description.value) : null
+        )
       ])
   }
 })
 
-const settingsPageTitle = (title: string, helpKey: SettingsHelpKey, options: { compact?: boolean } = {}) =>
+const settingsPageTitle = (title: string, helpKey: SettingsDocumentationPage, options: { compact?: boolean } = {}) =>
   h('div', { class: ['settings-page-title-row', { compact: options.compact }] }, [h('h3', title), h(SettingsPageHelpButton, { helpKey })])
 
 const GeneralSettings = defineComponent({

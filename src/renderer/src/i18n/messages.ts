@@ -58,19 +58,6 @@ export type I18nKey =
   | 'settings.nav.about'
   | 'settings.nav.docs'
   | 'settings.help.open'
-  | 'settings.help.general'
-  | 'settings.help.terminal'
-  | 'settings.help.extensions'
-  | 'settings.help.models'
-  | 'settings.help.billing'
-  | 'settings.help.ai'
-  | 'settings.help.mcp'
-  | 'settings.help.skills'
-  | 'settings.help.rules'
-  | 'settings.help.shortcuts'
-  | 'settings.help.trustedDevices'
-  | 'settings.help.privacy'
-  | 'settings.help.about'
   | 'settings.general.base'
   | 'settings.general.theme'
   | 'settings.general.themeSystem'
@@ -268,20 +255,7 @@ const zhCN: LocaleMessages = {
   'settings.nav.privacy': '隐私',
   'settings.nav.about': '关于',
   'settings.nav.docs': '文档',
-  'settings.help.open': '查看本页设置说明',
-  'settings.help.general': '通用页控制应用主题、背景、默认布局、语言、水印和入门引导；编辑器设置只影响文件、知识库、SQL 与 JSON 编辑器，不影响终端和 AI 输入框。',
-  'settings.help.terminal': '终端页控制新建终端会话的 TERM 类型、字体、字号、滚动、光标、鼠标缩放和 SSH Agent 相关入口；字体变化取决于系统是否安装对应字体。',
-  'settings.help.extensions': '扩展页控制自动补全、Alias、关键词高亮等本地增强能力，并提供关键词高亮配置编辑入口。',
-  'settings.help.models': '模型页管理 AI 对话和 Codex CLI 可用的模型 Provider、API 地址、密钥、模型 ID 与启用状态；保存后会影响后续 AI 请求。',
-  'settings.help.billing': '计费概览页展示当前账户、订阅、预算比例和账户中心入口；未登录时只显示登录入口。',
-  'settings.help.ai': 'AI 偏好设置页控制普通 AI 对话和 Agent 回环的行为，包括推理预算、Reasoning Effort、知识库自动检索、命令输出过滤、模型 API 代理和终端输出等待超时。',
-  'settings.help.mcp': 'MCP 页管理 Agent 可用的 MCP Servers、Tools 和 Resources，可启停工具、设置自动批准并直接测试工具调用。',
-  'settings.help.skills': 'Skills 页管理本地技能包，可创建、编辑、导入、导出、启停或删除技能；启用后的技能可作为 AI 对话上下文使用。',
-  'settings.help.rules': '规则页维护 User Rules，这些规则会作为 Agent 行为约束参与对话和命令生成。',
-  'settings.help.shortcuts': '快捷键页配置应用级快捷键；修改后会影响窗口、终端、AI 面板等全局操作。',
-  'settings.help.trustedDevices': '可信设备页管理允许登录当前账户的设备，可查看设备数量、当前位置和撤销非当前设备。',
-  'settings.help.privacy': '隐私页控制遥测、密钥脱敏、数据同步运行状态和账户停用；启用脱敏后会在输出和上下文中处理常见密钥与 Token。',
-  'settings.help.about': '关于页展示版本、更新检查、日志目录和反馈报告入口，主要用于诊断与升级。',
+  'settings.help.open': '打开本页帮助文档',
   'settings.general.base': '基础设置',
   'settings.general.theme': '主题',
   'settings.general.themeSystem': '系统',
@@ -478,20 +452,7 @@ const enUS: LocaleMessages = {
   'settings.nav.privacy': 'Privacy',
   'settings.nav.about': 'About',
   'settings.nav.docs': 'Docs',
-  'settings.help.open': 'Show what this settings page controls',
-  'settings.help.general': 'General controls the app theme, background, default layout, language, watermark, and onboarding. Editor settings apply only to file, knowledge, SQL, and JSON editors, not terminals or the AI input.',
-  'settings.help.terminal': 'Terminal controls defaults for new terminal sessions, including TERM type, font, size, scrollback, cursor behavior, mouse zoom, and SSH Agent access. Font changes are visible only when the font is installed or matched by the system.',
-  'settings.help.extensions': 'Extensions controls local enhancements such as autocomplete, Alias, and keyword highlighting, and opens the keyword highlighting configuration editor.',
-  'settings.help.models': 'Models manages provider endpoints, API keys, model IDs, and enabled models for AI chat and Codex CLI. Saved changes affect later AI requests.',
-  'settings.help.billing': 'Billing shows the current account, subscription, budget ratio, and account center entry. When signed out, it only shows the login action.',
-  'settings.help.ai': 'AI Preferences controls AI chat and Agent loop behavior, including reasoning budget, Reasoning Effort, automatic knowledge search, command output filtering, model API proxy, and terminal output wait timeout.',
-  'settings.help.mcp': 'MCP manages the MCP servers, tools, and resources available to the Agent. You can enable tools, set auto approval, and test tool calls.',
-  'settings.help.skills': 'Skills manages local skill packages. Create, edit, import, export, enable, disable, or delete skills; enabled skills can be attached to AI chat context.',
-  'settings.help.rules': 'Rules maintains User Rules that constrain Agent behavior during conversation and command generation.',
-  'settings.help.shortcuts': 'Shortcuts configures application-level keyboard shortcuts for global window, terminal, and AI panel actions.',
-  'settings.help.trustedDevices': 'Trusted Devices manages devices allowed to sign in to the current account, including device count, location, and revoking non-current devices.',
-  'settings.help.privacy': 'Privacy controls telemetry, secret redaction, data sync runtime status, and account deactivation. Secret redaction masks common keys and tokens in output and context.',
-  'settings.help.about': 'About shows version, update checks, log directory access, and feedback report actions for diagnostics and upgrades.',
+  'settings.help.open': 'Open this settings page help document',
   'settings.general.base': 'Basic Settings',
   'settings.general.theme': 'Theme',
   'settings.general.themeSystem': 'System',
@@ -672,20 +633,7 @@ const zhTW: LocaleMessages = {
   'settings.nav.privacy': '隱私',
   'settings.nav.about': '關於',
   'settings.nav.docs': '文件',
-  'settings.help.open': '查看本頁設定說明',
-  'settings.help.general': '一般頁控制應用程式主題、背景、預設版面、語言、浮水印和入門導覽；編輯器設定只影響檔案、知識庫、SQL 與 JSON 編輯器，不影響終端和 AI 輸入框。',
-  'settings.help.terminal': '終端頁控制新建終端工作階段的 TERM 類型、字型、字號、捲動、游標、滑鼠縮放和 SSH Agent 相關入口；字型變化取決於系統是否安裝對應字型。',
-  'settings.help.extensions': '擴充頁控制自動補全、Alias、關鍵字高亮等本地增強能力，並提供關鍵字高亮設定編輯入口。',
-  'settings.help.models': '模型頁管理 AI 對話和 Codex CLI 可用的模型 Provider、API 位址、金鑰、模型 ID 與啟用狀態；儲存後會影響後續 AI 請求。',
-  'settings.help.billing': '計費概覽頁展示目前帳戶、訂閱、預算比例和帳戶中心入口；未登入時只顯示登入入口。',
-  'settings.help.ai': 'AI 偏好設定頁控制一般 AI 對話和 Agent 迴圈行為，包括推理預算、Reasoning Effort、知識庫自動檢索、命令輸出過濾、模型 API 代理和終端輸出等待逾時。',
-  'settings.help.mcp': 'MCP 頁管理 Agent 可用的 MCP Servers、Tools 和 Resources，可啟停工具、設定自動批准並直接測試工具呼叫。',
-  'settings.help.skills': 'Skills 頁管理本地技能包，可建立、編輯、匯入、匯出、啟停或刪除技能；啟用後的技能可作為 AI 對話上下文使用。',
-  'settings.help.rules': '規則頁維護 User Rules，這些規則會作為 Agent 行為約束參與對話和命令生成。',
-  'settings.help.shortcuts': '快捷鍵頁設定應用程式層級快捷鍵；修改後會影響視窗、終端、AI 面板等全域操作。',
-  'settings.help.trustedDevices': '信任裝置頁管理允許登入目前帳戶的裝置，可查看裝置數量、位置並撤銷非目前裝置。',
-  'settings.help.privacy': '隱私頁控制遙測、金鑰脫敏、資料同步執行狀態和帳戶停用；啟用脫敏後會在輸出和上下文中處理常見金鑰與 Token。',
-  'settings.help.about': '關於頁展示版本、更新檢查、日誌目錄和回饋報告入口，主要用於診斷與升級。',
+  'settings.help.open': '開啟本頁說明文件',
   'settings.general.base': '基礎設定',
   'settings.general.theme': '主題',
   'settings.general.themeSystem': '系統',
