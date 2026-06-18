@@ -441,7 +441,61 @@ describe('workspace store', () => {
     expect(store.mode).toBe('terminal')
     expect(store.activeModule).toBe('aiSessions')
     expect(store.activePanelId).toBe('panel-main')
+    expect(store.selectedManagedAiSessionKey).toBe('codex:codex-session-1')
     expect(store.managedAiSessionFocusRequest.session?.id).toBe('codex-session-1')
+  })
+
+  it('moves the AI attention bell to the next managed AI session after handling the current one', () => {
+    const store = useWorkspaceStore()
+    const firstPanelId = store.activePanelId
+    store.applyLocalTerminalSession(firstPanelId, {
+      id: 'terminal-first',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/first'
+    })
+    const secondPanel = store.createPanel()
+    const secondPanelId = secondPanel.id
+    store.applyLocalTerminalSession(secondPanelId, {
+      id: 'terminal-second',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/second'
+    })
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'permission_request',
+      sessionId: 'codex-first',
+      title: 'First approval',
+      summary: 'Approve first',
+      panelId: firstPanelId,
+      terminalSessionId: 'terminal-first',
+      receivedAt: 100
+    })
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'question',
+      sessionId: 'claude-second',
+      title: 'Second question',
+      summary: 'Answer second',
+      panelId: secondPanelId,
+      terminalSessionId: 'terminal-second',
+      receivedAt: 200
+    })
+
+    expect(store.aiAttentionUnreadCount).toBe(2)
+    expect(store.jumpToNextAiAttention()?.id).toBe('managed-ai:codex:codex-first')
+    expect(store.activePanelId).toBe(firstPanelId)
+    expect(store.selectedManagedAiSessionKey).toBe('codex:codex-first')
+
+    expect(store.markManagedAiSessionHandled('codex', 'codex-first')).toBe(true)
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.selectedManagedAiSessionKey).toBe('')
+
+    expect(store.jumpToNextAiAttention()?.id).toBe('managed-ai:claude-code:claude-second')
+    expect(store.activePanelId).toBe(secondPanelId)
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-second')
   })
 
   it('clears managed AI attention when the agent stops or terminal exits', () => {

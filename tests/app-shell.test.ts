@@ -208,6 +208,7 @@ import KubernetesWorkspace from '@/components/KubernetesWorkspace.vue'
 import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import SettingsWorkspace from '@/components/SettingsWorkspace.vue'
 import WorkspacePanel from '@/components/panels/WorkspacePanel.vue'
+import AiSessionsPanel from '@/components/panels/AiSessionsPanel.vue'
 import FilesPanel from '@/components/panels/FilesPanel.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import KnowledgePanel from '@/components/panels/KnowledgePanel.vue'
@@ -651,6 +652,45 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-sessions-workspace').exists()).toBe(false)
     expect(wrapper.find('.module-panel-pane').text()).toContain('AI 会话')
     expect(wrapper.text()).not.toContain('Managed Local Agents')
+  })
+
+  it('lets the AI session panel mark the selected managed session as handled', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'permission_request',
+      sessionId: 'codex-session-1',
+      title: 'Deploy approval',
+      summary: 'Approve npm test',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      receivedAt: 100
+    })
+    store.focusManagedAiSession('codex-session-1')
+
+    const wrapper = mount(AiSessionsPanel, {
+      global: {
+        plugins: [pinia]
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.ai-session-row.active').text()).toContain('Deploy approval')
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    await wrapper.find('.ai-session-handle').trigger('click')
+    await flushPromises()
+
+    expect(store.aiAttentionUnreadCount).toBe(0)
+    expect(store.selectedManagedAiSessionKey).toBe('')
+    expect(store.activePanelId).toBe('panel-main')
   })
 
   it('applies persisted background and watermark settings at the app shell level', async () => {

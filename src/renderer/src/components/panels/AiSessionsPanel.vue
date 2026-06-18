@@ -28,20 +28,32 @@
     </div>
 
     <div class="ai-sessions-list">
-      <button
+      <div
         v-for="session in visibleSessions"
         :key="`${session.source}:${session.id}`"
         class="ai-session-row"
-        :class="{ active: session.id === selectedSessionId, attention: session.state === 'needsInput' }"
+        role="button"
+        tabindex="0"
+        :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
         @click="selectSession(session.id)"
         @dblclick="workspace.focusManagedAiSession(session.id)"
+        @keydown.enter.prevent="selectSession(session.id)"
+        @keydown.space.prevent="selectSession(session.id)"
       >
         <span :class="`ai-session-state state-${session.state}`"></span>
         <span>
           <strong>{{ session.title }}</strong>
-          <small>{{ session.source }} · {{ stateLabel(session.state) }}</small>
+          <small>{{ session.source }} · {{ stateLabel(session.state) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
         </span>
-      </button>
+        <button
+          v-if="session.state === 'needsInput'"
+          class="ai-session-handle"
+          title="标记已处理"
+          @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+        >
+          <Check />
+        </button>
+      </div>
       <p
         v-if="visibleSessions.length === 0"
         class="ai-sessions-empty"
@@ -54,13 +66,12 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Search } from 'lucide-vue-next'
-import { useWorkspaceStore, type ManagedAiSessionState } from '@/stores/workspace'
+import { Check, Search } from 'lucide-vue-next'
+import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
 const query = ref('')
 const filter = ref<'all' | ManagedAiSessionState>('all')
-const selectedSessionId = ref('')
 const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'needsInput', label: '待处理' },
@@ -77,6 +88,8 @@ const stateLabel = (state: ManagedAiSessionState) => {
   return '未知'
 }
 
+const sessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
+
 const visibleSessions = computed(() => {
   const needle = query.value.trim().toLowerCase()
   return workspace.sortedManagedAiSessions.filter((session) => {
@@ -87,7 +100,6 @@ const visibleSessions = computed(() => {
 })
 
 const selectSession = (sessionId: string) => {
-  selectedSessionId.value = sessionId
   workspace.focusManagedAiSession(sessionId)
 }
 </script>
@@ -142,7 +154,7 @@ const selectSession = (sessionId: string) => {
 .ai-session-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
+  grid-template-columns: 10px minmax(0, 1fr) 26px;
   gap: 10px;
   align-items: center;
   border: 1px solid transparent;
@@ -163,6 +175,10 @@ const selectSession = (sessionId: string) => {
   border-color: rgba(59, 130, 246, 0.35);
 }
 
+.ai-session-row:not(.attention) {
+  grid-template-columns: 10px minmax(0, 1fr);
+}
+
 .ai-session-row strong,
 .ai-session-row small {
   display: block;
@@ -174,6 +190,23 @@ const selectSession = (sessionId: string) => {
 .ai-session-row small {
   color: var(--text-muted);
   margin-top: 3px;
+}
+
+.ai-session-handle {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--accent-color);
+}
+
+.ai-session-handle svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ai-session-state {

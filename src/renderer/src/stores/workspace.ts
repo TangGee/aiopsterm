@@ -4082,6 +4082,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
   const managedAiSessions = ref<ManagedAiSession[]>([])
   const managedAiSessionFocusRequest = ref<{ sequence: number; session: ManagedAiSession | null }>({ sequence: 0, session: null })
+  const selectedManagedAiSessionKey = ref('')
   const onboardingCompleted = ref<Record<OnboardingModuleId, boolean>>(createDefaultOnboardingCompleted())
   const onboardingActiveTour = ref<OnboardingModuleId | null>(null)
   const onboardingActiveStepIndex = ref(0)
@@ -8215,6 +8216,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const aiSessionAttentionId = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `managed-ai:${session.source}:${session.id}`
 
+  const managedAiSessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
+
   const managedAiSessionStateForEvent = (event: AiAgentSessionEventName, previous: ManagedAiSessionState = 'unknown'): ManagedAiSessionState => {
     if (event === 'session_start') return 'idle'
     if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
@@ -8269,6 +8272,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!session) return false
     const changed = markAiAttentionHandled(aiSessionAttentionId(session))
     if (session.state === 'needsInput') session.state = 'idle'
+    if (selectedManagedAiSessionKey.value === managedAiSessionKey(session)) selectedManagedAiSessionKey.value = ''
     return changed
   }
 
@@ -8278,8 +8282,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     )
     if (!session) return null
     mode.value = 'terminal'
+    selectedManagedAiSessionKey.value = managedAiSessionKey(session)
     const targetId = session.panelId || session.terminalSessionId
-    if (targetId) activateTerminalPanel(targetId)
+    if (targetId) activateTerminalPanelForManagedAiSession(targetId)
     managedAiSessionFocusRequest.value = {
       sequence: managedAiSessionFocusRequest.value.sequence + 1,
       session
@@ -12604,6 +12609,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return target
   }
 
+  const activateTerminalPanelForManagedAiSession = (panelIdOrSessionId: string) => {
+    const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
+    if (!target || target.kind !== 'terminal') return null
+    activePanelId.value = target.id
+    return target
+  }
+
   const openTerminalForAiHostContext = async (host: AiContextOption) => {
     const previousActivePanelId = activePanelId.value
     const panel = createPanel()
@@ -14236,6 +14248,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sortedManagedAiSessions,
     managedAiNeedsInputSessions,
     managedAiSessionFocusRequest,
+    selectedManagedAiSessionKey,
     upsertAiAttentionItem,
     upsertManagedAiSession,
     markManagedAiSessionHandled,

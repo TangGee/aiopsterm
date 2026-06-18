@@ -55,5 +55,6 @@ Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `title`, `summary
 
 - The `AI 会话` module is a left-side manager, like workspace/assets navigation. It lists managed sessions by state while the shared main work area remains the terminal workspace.
 - `permission_request`, `question`, and `notification` create top-bar bell entries.
-- Clicking the bell focuses the AI session manager and selects the owning terminal when `panelId` or `terminalSessionId` is known.
+- Clicking the bell focuses the AI session manager and selects the owning terminal when `panelId` or `terminalSessionId` is known. It does not mark the session handled.
+- The AI session row stays selected until the user explicitly marks that pending item handled. Handling clears the unread count and lets the next bell click move to the next pending managed session.
 - `stop`, `session_end`, and terminal close/error events clear pending attention for that session.
