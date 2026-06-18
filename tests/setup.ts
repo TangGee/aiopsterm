@@ -6090,7 +6090,18 @@ Object.defineProperty(window, 'aiops', {
     consumeDeepLinks: vi.fn(async () => []),
     onDeepLink: vi.fn(() => () => undefined),
     openExternalUrl: vi.fn(async () => undefined),
-    openSettingsDocumentation: vi.fn(async () => ({ path: '/tmp/aiopsterm/docs/index.md' })),
+    openSettingsDocumentation: vi.fn(async (input?: { page?: string; locale?: string }) => ({
+      path: input && 'documentPath' in input ? `/tmp/aiopsterm/docs/${(input as { documentPath: string }).documentPath}` : `/tmp/aiopsterm/docs/${input?.locale || 'zh-CN'}/${input?.page || 'index'}.md`,
+      title: input && 'documentPath' in input ? 'Usage Docs' : input?.page === 'general' ? (input.locale === 'en-US' ? 'General Settings' : '通用设置') : 'aiopsterm Docs',
+      content:
+        input && 'documentPath' in input
+          ? '# Usage Docs\n'
+          : input?.page === 'general'
+            ? input.locale === 'en-US'
+              ? '# General Settings\n\nTheme controls the app theme.'
+              : '# 通用设置\n\n主题控制应用主题。'
+            : '# aiopsterm Docs\n\n[Usage Docs](usage/index.md)\n'
+    })),
     submitSettingsFeedbackReport: vi.fn(async () => ({ path: '/tmp/aiopsterm/feedback/aiopsterm-feedback.md' })),
     openLogDir: vi.fn(async () => ({ path: '/tmp/aiopsterm/logs' })),
     writeRuntimeLog: vi.fn(async (_level: string, event: string) => ({ ok: true, data: { event } })),

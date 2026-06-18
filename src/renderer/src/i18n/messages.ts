@@ -58,6 +58,7 @@ export type I18nKey =
   | 'settings.nav.about'
   | 'settings.nav.docs'
   | 'settings.help.open'
+  | 'settings.help.back'
   | 'settings.general.base'
   | 'settings.general.theme'
   | 'settings.general.themeSystem'
@@ -256,6 +257,7 @@ const zhCN: LocaleMessages = {
   'settings.nav.about': '关于',
   'settings.nav.docs': '文档',
   'settings.help.open': '打开本页帮助文档',
+  'settings.help.back': '返回设置',
   'settings.general.base': '基础设置',
   'settings.general.theme': '主题',
   'settings.general.themeSystem': '系统',
@@ -453,6 +455,7 @@ const enUS: LocaleMessages = {
   'settings.nav.about': 'About',
   'settings.nav.docs': 'Docs',
   'settings.help.open': 'Open this settings page help document',
+  'settings.help.back': 'Back to settings',
   'settings.general.base': 'Basic Settings',
   'settings.general.theme': 'Theme',
   'settings.general.themeSystem': 'System',
@@ -634,6 +637,7 @@ const zhTW: LocaleMessages = {
   'settings.nav.about': '關於',
   'settings.nav.docs': '文件',
   'settings.help.open': '開啟本頁說明文件',
+  'settings.help.back': '返回設定',
   'settings.general.base': '基礎設定',
   'settings.general.theme': '主題',
   'settings.general.themeSystem': '系統',

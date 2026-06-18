@@ -1,7 +1,7 @@
-import { mkdir, stat as fsStat, writeFile as fsWriteFile } from 'fs/promises'
-import { join, resolve } from 'path'
+import { mkdir, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from 'fs/promises'
+import { dirname, isAbsolute, join, relative, resolve } from 'path'
 import type { Stats } from 'fs'
-import type { OpenPathResult, OpenSettingsDocumentationInput, SettingsDocumentationPage } from '@shared/preload'
+import type { OpenPathResult, OpenSettingsDocumentationInput, SettingsDocumentationPage, SettingsDocumentationResult } from '@shared/preload'
 
 type SettingsExternalActionRuntime = {
   userDataPath: string
@@ -15,6 +15,7 @@ type SettingsExternalActionRuntime = {
   skipOpen?: boolean
   now?: () => Date
   mkdir?: typeof mkdir
+  readFile?: typeof fsReadFile
   writeFile?: typeof fsWriteFile
   stat?: typeof fsStat
 }
@@ -72,6 +73,13 @@ const documentationRoots = (runtime: SettingsExternalActionRuntime) =>
 const documentationCandidates = (runtime: SettingsExternalActionRuntime) =>
   documentationRoots(runtime).map((root) => join(root, 'index.md'))
 
+const isPathInside = (parent: string, child: string) => {
+  const relPath = relative(parent, child)
+  return Boolean(relPath) && !relPath.startsWith('..') && !isAbsolute(relPath)
+}
+
+const isMarkdownDocumentPath = (path: string) => /\.(md|markdown)$/i.test(path)
+
 const settingsDocumentationCandidates = (runtime: SettingsExternalActionRuntime, page: SettingsDocumentationPage, locale?: SupportedDocumentationLocale) => {
   const fileName = settingsDocumentationFiles[page]
   const locales: SupportedDocumentationLocale[] =
@@ -97,6 +105,22 @@ const resolveDocumentationPath = async (runtime: SettingsExternalActionRuntime) 
 }
 
 const resolveSettingsDocumentationPath = async (runtime: SettingsExternalActionRuntime, input: OpenSettingsDocumentationInput = {}) => {
+  const documentPath = typeof input.documentPath === 'string' ? input.documentPath.trim().split(/[?#]/, 1)[0] : ''
+  if (documentPath) {
+    const statFn = runtime.stat || fsStat
+    const basePath = typeof input.basePath === 'string' && input.basePath.trim() ? input.basePath.trim() : ''
+    const docsRoots = documentationRoots(runtime)
+    const candidates = docsRoots.map((root) => {
+      const absoluteBase = basePath && isAbsolute(basePath) && isPathInside(root, basePath) ? dirname(basePath) : root
+      return resolve(absoluteBase, documentPath)
+    })
+    for (const candidate of candidates) {
+      if (!isMarkdownDocumentPath(candidate)) continue
+      if (!docsRoots.some((root) => isPathInside(root, candidate))) continue
+      if (await isFile(candidate, statFn)) return candidate
+    }
+    throw new SettingsExternalActionError('aiopsterm documentation file was not found.')
+  }
   if (!isSettingsDocumentationPage(input.page)) return resolveDocumentationPath(runtime)
   const statFn = runtime.stat || fsStat
   const locale = normalizeDocumentationLocale(input.locale)
@@ -112,6 +136,11 @@ const openPath = async (path: string, runtime: SettingsExternalActionRuntime): P
     if (typeof error === 'string' && error.trim()) throw new SettingsExternalActionError(error)
   }
   return { path }
+}
+
+const titleFromMarkdown = (content: string, fallback: string) => {
+  const heading = content.split(/\r?\n/).find((line) => /^#\s+\S/.test(line))
+  return heading?.replace(/^#\s+/, '').trim() || fallback
 }
 
 const feedbackFileName = (date: Date) => `aiopsterm-feedback-${date.toISOString().replace(/[:.]/g, '-')}.md`
@@ -138,9 +167,14 @@ const feedbackReportContent = async (runtime: SettingsExternalActionRuntime, gen
   ].join('\n')
 }
 
-export const openSettingsDocumentation = async (runtime: SettingsExternalActionRuntime, input: OpenSettingsDocumentationInput = {}): Promise<OpenPathResult> => {
+export const openSettingsDocumentation = async (runtime: SettingsExternalActionRuntime, input: OpenSettingsDocumentationInput = {}): Promise<SettingsDocumentationResult> => {
   const docsPath = await resolveSettingsDocumentationPath(runtime, input)
-  return openPath(docsPath, runtime)
+  const content = await (runtime.readFile || fsReadFile)(docsPath, 'utf-8')
+  return {
+    path: docsPath,
+    title: titleFromMarkdown(String(content), docsPath.split(/[\\/]/).pop() || 'Documentation'),
+    content: String(content)
+  }
 }
 
 export const submitSettingsFeedbackReport = async (runtime: SettingsExternalActionRuntime): Promise<OpenPathResult> => {

@@ -44,6 +44,13 @@
         </section>
 
         <section
+          v-else-if="workspace.settingsDocumentationOpen"
+          class="settings-content-page settings-documentation-page"
+        >
+          <SettingsDocumentationReaderPage />
+        </section>
+
+        <section
           v-else-if="workspace.activeSettingsSection === 'general'"
           class="settings-content-page"
           data-onboarding-id="settings-general-content"
@@ -167,6 +174,7 @@ import {
 } from '@/config/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { backgroundImageCss } from '@/services/backgroundRuntime'
+import { renderMarkdownDocumentHtml } from '@/services/markdownRuntime'
 import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
@@ -327,6 +335,28 @@ const SettingsPageHelpButton = defineComponent({
 
 const settingsPageTitle = (title: string, helpKey: SettingsDocumentationPage, options: { compact?: boolean } = {}) =>
   h('div', { class: ['settings-page-title-row', { compact: options.compact }] }, [h('h3', title), h(SettingsPageHelpButton, { helpKey })])
+
+const SettingsDocumentationReaderPage = defineComponent({
+  name: 'SettingsDocumentationReaderPage',
+  setup() {
+    const html = computed(() => renderMarkdownDocumentHtml(workspace.settingsDocumentationContent))
+    const openDocumentationLink = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-settings-doc-link]') : null
+      const documentPath = target?.dataset.settingsDocLink
+      if (!documentPath) return
+      event.preventDefault()
+      void workspace.openSettingsDocumentationLink(documentPath)
+    }
+    return () =>
+      h('div', { class: 'settings-documentation' }, [
+        h('div', { class: 'settings-documentation-toolbar' }, [
+          h('div', [h('h3', workspace.settingsDocumentationTitle || 'Documentation'), h('small', workspace.settingsDocumentationPath)]),
+          h('button', { class: 'settings-button', onClick: () => workspace.closeSettingsDocumentation() }, t('settings.help.back'))
+        ]),
+        h('article', { class: 'kb-markdown-preview settings-documentation-markdown', innerHTML: html.value, onClick: openDocumentationLink })
+      ])
+  }
+})
 
 const GeneralSettings = defineComponent({
   name: 'GeneralSettings',

@@ -13316,6 +13316,18 @@ describe('AppShell', () => {
     const workspace = mount(SettingsWorkspace, {
       global: { plugins: [pinia] }
     })
+    expect(workspace.find('.settings-documentation-page').exists()).toBe(true)
+    expect(workspace.find('.settings-documentation-markdown').text()).toContain('aiopsterm Docs')
+    vi.mocked(window.aiops.openSettingsDocumentation).mockClear()
+    await workspace.find('.settings-documentation-markdown a').trigger('click')
+    await flushPromises()
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({
+      documentPath: 'usage/index.md',
+      basePath: '/tmp/aiopsterm/docs/zh-CN/index.md'
+    })
+    expect(workspace.find('.settings-documentation-markdown').text()).toContain('Usage Docs')
+    await workspace.find('.settings-documentation-toolbar .settings-button').trigger('click')
+    await workspace.vm.$nextTick()
 
     expect(workspace.text()).toContain('基础设置')
     const generalHelpButton = workspace.find('.settings-page-help-button')
@@ -13325,6 +13337,12 @@ describe('AppShell', () => {
     await generalHelpButton.trigger('click')
     await flushPromises()
     expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'general', locale: 'zh-CN' })
+    expect(workspace.find('.settings-documentation-page').exists()).toBe(true)
+    expect(workspace.find('.settings-documentation-markdown').text()).toContain('通用设置')
+    expect(workspace.find('.settings-documentation-markdown').text()).toContain('主题控制应用主题')
+    await workspace.find('.settings-documentation-toolbar .settings-button').trigger('click')
+    await workspace.vm.$nextTick()
+    expect(workspace.find('.settings-documentation-page').exists()).toBe(false)
     await store.updateLanguage('en-US')
     await flushPromises()
     await workspace.vm.$nextTick()
@@ -13333,6 +13351,9 @@ describe('AppShell', () => {
     await workspace.find('.settings-page-help-button').trigger('click')
     await flushPromises()
     expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'general', locale: 'en-US' })
+    expect(workspace.find('.settings-documentation-markdown').text()).toContain('General Settings')
+    await workspace.find('.settings-documentation-toolbar .settings-button').trigger('click')
+    await workspace.vm.$nextTick()
     await store.updateLanguage('zh-CN')
     await flushPromises()
     await workspace.vm.$nextTick()

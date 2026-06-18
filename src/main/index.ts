@@ -955,7 +955,9 @@ const normalizeSettingsDocumentationInput = (source: unknown) => {
   if (!isRecord(source)) return {}
   const page = typeof source.page === 'string' && settingsDocumentationPages.has(source.page as SettingsDocumentationPage) ? (source.page as SettingsDocumentationPage) : undefined
   const locale = typeof source.locale === 'string' ? source.locale : undefined
-  return { ...(page ? { page } : {}), ...(locale ? { locale } : {}) }
+  const documentPath = typeof source.documentPath === 'string' ? source.documentPath : undefined
+  const basePath = typeof source.basePath === 'string' ? source.basePath : undefined
+  return { ...(page ? { page } : {}), ...(locale ? { locale } : {}), ...(documentPath ? { documentPath } : {}), ...(basePath ? { basePath } : {}) }
 }
 
 const toStringArray = (source: unknown) =>

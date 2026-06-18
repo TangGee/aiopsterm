@@ -181,6 +181,7 @@ import type {
   ModelProviderCheckKey,
   ModelOptionUserConfig,
   ModelSettingsUserConfig,
+  OpenSettingsDocumentationInput,
   PrivacyUserConfig,
   PrivacyRuntimeSnapshot,
   QuickCommandGroupConfig,
@@ -3771,6 +3772,12 @@ const defaultAboutSettings: AboutSettings = {
 
 const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<string, unknown> | undefined)?.[name] === 'function'
 const isOpenPathResult = (result: unknown): result is { path: string } => isRecord(result) && typeof result.path === 'string' && Boolean(result.path.trim())
+const isSettingsDocumentationResult = (result: unknown): result is { path: string; title: string; content: string } => {
+  if (!isOpenPathResult(result)) return false
+  const title = (result as Record<string, unknown>).title
+  const content = (result as Record<string, unknown>).content
+  return typeof title === 'string' && Boolean(title.trim()) && typeof content === 'string'
+}
 
 const appUpdateChannels: AppUpdateCheckResult['channel'][] = ['local', 'manual', 'auto']
 const appUpdateStatusMessage = '更新后端返回了无效结果'
@@ -4372,6 +4379,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const securityConfigEditorError = ref('')
   const securityConfigEditorLastSaved = ref(false)
   const securityConfigPath = ref('~/.config/aiopsterm/security-config.json')
+  const settingsDocumentationOpen = ref(false)
+  const settingsDocumentationTitle = ref('')
+  const settingsDocumentationPath = ref('')
+  const settingsDocumentationContent = ref('')
   const mcpConfigEditorOpen = ref(false)
   const mcpConfigEditorContent = ref(JSON.stringify(defaultMcpConfigFile(), null, 2))
   const mcpConfigEditorError = ref('')
@@ -6028,24 +6039,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (mcpConfigEditorOpen.value) {
       closeMcpConfigEditor()
     }
+    settingsDocumentationOpen.value = false
     onboardingGuideOpen.value = false
   }
 
+  const readSettingsDocumentation = async (input?: OpenSettingsDocumentationInput) => {
+    const result = await window.aiops.openSettingsDocumentation(input)
+    if (!isSettingsDocumentationResult(result)) {
+      setSettingsNotice('文档入口打开失败')
+      return false
+    }
+    settingsDocumentationPath.value = result.path
+    settingsDocumentationTitle.value = result.title
+    settingsDocumentationContent.value = result.content
+    settingsDocumentationOpen.value = true
+    setSettingsNotice('已打开文档')
+    return true
+  }
+
   const openSettingsDocumentation = async (page?: SettingsDocumentationPage) => {
-    closeSettingsInlineEditors()
+    if (keywordHighlightEditorOpen.value) closeKeywordHighlightEditor()
+    if (securityConfigEditorOpen.value) closeSecurityConfigEditor()
+    if (mcpConfigEditorOpen.value) closeMcpConfigEditor()
+    onboardingGuideOpen.value = false
     if (!page) activeSettingsSection.value = 'general'
     if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
       setSettingsNotice('文档入口服务不可用')
       return false
     }
     try {
-      const result = await window.aiops.openSettingsDocumentation(page ? { page, locale: resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]) } : undefined)
-      if (!isOpenPathResult(result)) {
-        setSettingsNotice('文档入口打开失败')
-        return false
-      }
-      setSettingsNotice('已打开文档')
-      return true
+      return await readSettingsDocumentation(page ? { page, locale: resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]) } : undefined)
     } catch {
       setSettingsNotice('文档入口打开失败')
       return false
@@ -6053,6 +6076,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openSettingsPageDocumentation = (page: SettingsDocumentationPage) => openSettingsDocumentation(page)
+
+  const openSettingsDocumentationLink = async (documentPath: string) => {
+    const normalizedPath = documentPath.trim()
+    if (!normalizedPath) return false
+    if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
+      setSettingsNotice('文档入口服务不可用')
+      return false
+    }
+    try {
+      return await readSettingsDocumentation({ documentPath: normalizedPath, basePath: settingsDocumentationPath.value })
+    } catch {
+      setSettingsNotice('文档入口打开失败')
+      return false
+    }
+  }
+
+  const closeSettingsDocumentation = () => {
+    settingsDocumentationOpen.value = false
+  }
 
   const setActiveSettingsSection = (key: SettingSectionKey) => {
     if (key === 'docs') {
@@ -14103,6 +14145,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     securityConfigEditorError,
     securityConfigEditorLastSaved,
     securityConfigPath,
+    settingsDocumentationOpen,
+    settingsDocumentationTitle,
+    settingsDocumentationPath,
+    settingsDocumentationContent,
     mcpConfigEditorOpen,
     mcpConfigEditorContent,
     mcpConfigEditorError,
@@ -14170,6 +14216,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setSettingsNotice,
     setActiveSettingsSection,
     openSettingsPageDocumentation,
+    openSettingsDocumentationLink,
+    closeSettingsDocumentation,
     openOnboardingGuide,
     startOnboardingTour,
     stopOnboardingTour,

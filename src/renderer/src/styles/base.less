@@ -2333,6 +2333,41 @@ em {
   min-width: 0;
 }
 
+.settings-documentation {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.settings-documentation-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.settings-documentation-toolbar h3 {
+  margin-bottom: 4px;
+}
+
+.settings-documentation-toolbar small {
+  display: block;
+  max-width: 620px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-documentation-markdown {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
+  color: var(--text);
+  padding-bottom: 48px;
+}
+
 .settings-content-page h3 + .settings-form-card,
 .settings-content-page h3 + .settings-section-card,
 .settings-page-title-row + .settings-form-card,
