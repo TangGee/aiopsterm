@@ -179,7 +179,7 @@ import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import { useI18n } from '@/i18n'
-import type { SettingsDocumentationPage } from '@shared/preload'
+import type { AgentHookInstallerStatus, SettingsDocumentationPage } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
@@ -235,6 +235,35 @@ const providerConfigSummary = (model: { name: string; apiProvider?: string; type
   else if (model.type === 'custom') parts.push('Custom')
   return parts.filter(Boolean).join(' · ')
 }
+
+const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
+  {
+    source: 'codex',
+    label: 'Codex',
+    binaryName: 'codex',
+    binaryPath: '',
+    configPath: '~/.codex/hooks.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    extraConfigPath: '~/.codex/config.toml',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'claude-code',
+    label: 'Claude Code',
+    binaryName: 'claude',
+    binaryPath: '',
+    configPath: '~/.claude/settings.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  }
+]
+
+const agentHookInstallerRows = () =>
+  agentHookInstallerFallbacks.map((fallback) => workspace.agentHookInstallers.find((installer) => installer.source === fallback.source) || fallback)
 
 const displayModelLabel = (model: { name: string; displayName?: string }) => model.displayName || model.name.replace(/-Thinking$/, '')
 const awsRegionOptions = [
@@ -942,6 +971,8 @@ const AiPreferenceSettings = defineComponent({
     return () =>
       h('div', [
         settingsPageTitle('AI 偏好设置', 'ai'),
+        h('h3', 'Agent Hook 安装器'),
+        h(AgentHookInstallerCard),
         h('h3', '通用'),
         h('div', { class: 'settings-section-card ai-preferences' }, [
           h('label', { class: 'settings-check-line' }, [
@@ -1121,6 +1152,89 @@ const AiPreferenceSettings = defineComponent({
           numberRow('Shell Integration Timeout', workspace.aiPreferences.shellIntegrationTimeout, 1, 300, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true),
           h('p', { class: 'setting-description-no-padding' }, 'Agent 等待终端命令输出的默认超时时间，单位为秒。')
         ])
+      ])
+  }
+})
+
+const AgentHookInstallerCard = defineComponent({
+  name: 'AgentHookInstallerCard',
+  setup() {
+    const renderStatusPill = (installer: AgentHookInstallerStatus) =>
+      h(
+        'span',
+        {
+          class: ['agent-hook-status-pill', installer.installed ? 'installed' : installer.error ? 'error' : installer.binaryPath ? 'ready' : 'missing']
+        },
+        installer.installed ? '已安装' : installer.error ? '配置异常' : installer.binaryPath ? '可安装' : '未检测到 CLI'
+      )
+
+    const renderMeta = (label: string, value: string) =>
+      h('div', { class: 'agent-hook-meta-row' }, [
+        h('span', label),
+        h('code', { title: value || '未检测到' }, value || '未检测到')
+      ])
+
+    const renderInstaller = (installer: AgentHookInstallerStatus) => {
+      const busy = workspace.agentHookInstallerBusySource === installer.source
+      const disabled = busy || workspace.agentHookInstallersLoading || !installer.scriptPath
+      return h('article', { class: 'agent-hook-installer-row' }, [
+        h('div', { class: 'agent-hook-installer-main' }, [
+          h('header', [
+            h('div', [h('strong', installer.label), h('small', `启动命令: ${installer.binaryName}`)]),
+            renderStatusPill(installer)
+          ]),
+          h('p', { class: 'agent-hook-description' }, '安装后，只会捕获通过 aiopsterm 本地连接终端启动的会话；外部系统终端会自动空返回，不接管审批。'),
+          h('div', { class: 'agent-hook-meta-grid' }, [
+            renderMeta('CLI', installer.binaryPath),
+            renderMeta('Hook 配置', installer.configPath),
+            installer.extraConfigPath ? renderMeta('附加配置', installer.extraConfigPath) : null,
+            renderMeta('Hook Helper', installer.scriptPath)
+          ]),
+          installer.error ? h('p', { class: 'agent-hook-error' }, installer.error) : null,
+          installer.warnings.length ? h('ul', { class: 'agent-hook-warnings' }, installer.warnings.map((warning) => h('li', warning))) : null
+        ]),
+        h('div', { class: 'agent-hook-installer-actions' }, [
+          h(
+            'button',
+            {
+              class: ['settings-button', installer.installed ? '' : 'primary'],
+              disabled,
+              onClick: () => workspace.installAgentHookInstaller(installer.source)
+            },
+            busy ? '处理中' : installer.installed ? '重新安装' : '安装'
+          ),
+          h(
+            'button',
+            {
+              class: 'settings-button danger',
+              disabled: disabled || !installer.installed,
+              onClick: () => workspace.uninstallAgentHookInstaller(installer.source)
+            },
+            '卸载'
+          )
+        ])
+      ])
+    }
+
+    return () =>
+      h('div', { class: 'settings-section-card agent-hook-installer-card' }, [
+        h('header', { class: 'agent-hook-card-header' }, [
+          h('div', [
+            h('strong', 'Codex / Claude Code 会话管理 Hook'),
+            h('small', '显式写入用户级 Hook 配置，用于让 AI 会话面板发现并定位需要处理的本地连接会话。')
+          ]),
+          h(
+            'button',
+            {
+              class: 'settings-button',
+              disabled: workspace.agentHookInstallersLoading,
+              onClick: () => workspace.refreshAgentHookInstallers()
+            },
+            workspace.agentHookInstallersLoading ? '刷新中' : '刷新'
+          )
+        ]),
+        workspace.agentHookInstallerError ? h('p', { class: 'agent-hook-error' }, workspace.agentHookInstallerError) : null,
+        ...agentHookInstallerRows().map((installer) => renderInstaller(installer))
       ])
   }
 })

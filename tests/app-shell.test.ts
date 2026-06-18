@@ -14307,6 +14307,37 @@ describe('AppShell', () => {
     expect((autoExecuteCheckbox.element as HTMLInputElement).checked).toBe(false)
   })
 
+  it('renders AI session agent hook installer controls and calls the bridge explicitly', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('ai')
+    vi.mocked(window.aiops.listAgentHookInstallers).mockClear()
+    vi.mocked(window.aiops.installAgentHook).mockClear()
+
+    await store.refreshAgentHookInstallers()
+    await workspace.vm.$nextTick()
+
+    expect(window.aiops.listAgentHookInstallers).toHaveBeenCalled()
+    expect(workspace.find('.agent-hook-installer-card').exists()).toBe(true)
+    expect(workspace.text()).toContain('Agent Hook 安装器')
+    expect(workspace.text()).toContain('Codex / Claude Code 会话管理 Hook')
+    expect(workspace.text()).toContain('/home/test/.codex/hooks.json')
+    expect(workspace.text()).toContain('/home/test/.claude/settings.json')
+    expect(workspace.text()).toContain('只会捕获通过 aiopsterm 本地连接终端启动的会话')
+
+    const codexRow = workspace.findAll('.agent-hook-installer-row').find((row) => row.text().includes('Codex'))!
+    expect(codexRow.text()).toContain('可安装')
+    await codexRow.findAll('button').find((button) => button.text() === '安装')!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.installAgentHook).toHaveBeenCalledWith({ source: 'codex' })
+    expect(store.agentHookInstallers.find((installer) => installer.source === 'codex')?.installed).toBe(true)
+    expect(workspace.text()).toContain('已安装')
+  })
+
   it('does not leave terminal setting controls visually changed when the config bridge rejects the snapshot', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

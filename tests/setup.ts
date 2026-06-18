@@ -5716,6 +5716,128 @@ Object.defineProperty(window, 'aiops', {
     listAiTodoSnapshot: vi.fn(async () => aiTodoSnapshotResultMock()),
     listAiContextCatalog: vi.fn(async () => aiContextCatalogResultMock()),
     listAiCommandCatalog: vi.fn(async () => aiCommandCatalogResultMock()),
+    listAgentHookInstallers: vi.fn(async () => ({
+      ok: true,
+      data: {
+        installers: [
+          {
+            source: 'codex' as const,
+            label: 'Codex',
+            binaryName: 'codex',
+            binaryPath: '/usr/bin/codex',
+            configPath: '/home/test/.codex/hooks.json',
+            configExists: false,
+            installed: false,
+            scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+            extraConfigPath: '/home/test/.codex/config.toml',
+            warnings: []
+          },
+          {
+            source: 'claude-code' as const,
+            label: 'Claude Code',
+            binaryName: 'claude',
+            binaryPath: '/home/test/.local/bin/claude',
+            configPath: '/home/test/.claude/settings.json',
+            configExists: false,
+            installed: false,
+            scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+            warnings: []
+          }
+        ]
+      }
+    })),
+    installAgentHook: vi.fn(async (input: { source: 'codex' | 'claude-code' }) => ({
+      ok: true,
+      data: {
+        operation: 'install' as const,
+        source: input.source,
+        status: {
+          source: input.source,
+          label: input.source === 'codex' ? 'Codex' : 'Claude Code',
+          binaryName: input.source === 'codex' ? 'codex' : 'claude',
+          binaryPath: input.source === 'codex' ? '/usr/bin/codex' : '/home/test/.local/bin/claude',
+          configPath: input.source === 'codex' ? '/home/test/.codex/hooks.json' : '/home/test/.claude/settings.json',
+          configExists: true,
+          installed: true,
+          scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+          ...(input.source === 'codex' ? { extraConfigPath: '/home/test/.codex/config.toml' } : {}),
+          warnings: []
+        },
+        snapshot: {
+          installers: [
+            {
+              source: 'codex' as const,
+              label: 'Codex',
+              binaryName: 'codex',
+              binaryPath: '/usr/bin/codex',
+              configPath: '/home/test/.codex/hooks.json',
+              configExists: true,
+              installed: input.source === 'codex',
+              scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+              extraConfigPath: '/home/test/.codex/config.toml',
+              warnings: []
+            },
+            {
+              source: 'claude-code' as const,
+              label: 'Claude Code',
+              binaryName: 'claude',
+              binaryPath: '/home/test/.local/bin/claude',
+              configPath: '/home/test/.claude/settings.json',
+              configExists: true,
+              installed: input.source === 'claude-code',
+              scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+              warnings: []
+            }
+          ]
+        }
+      }
+    })),
+    uninstallAgentHook: vi.fn(async (input: { source: 'codex' | 'claude-code' }) => ({
+      ok: true,
+      data: {
+        operation: 'uninstall' as const,
+        source: input.source,
+        status: {
+          source: input.source,
+          label: input.source === 'codex' ? 'Codex' : 'Claude Code',
+          binaryName: input.source === 'codex' ? 'codex' : 'claude',
+          binaryPath: input.source === 'codex' ? '/usr/bin/codex' : '/home/test/.local/bin/claude',
+          configPath: input.source === 'codex' ? '/home/test/.codex/hooks.json' : '/home/test/.claude/settings.json',
+          configExists: true,
+          installed: false,
+          scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+          ...(input.source === 'codex' ? { extraConfigPath: '/home/test/.codex/config.toml' } : {}),
+          warnings: []
+        },
+        snapshot: {
+          installers: [
+            {
+              source: 'codex' as const,
+              label: 'Codex',
+              binaryName: 'codex',
+              binaryPath: '/usr/bin/codex',
+              configPath: '/home/test/.codex/hooks.json',
+              configExists: true,
+              installed: false,
+              scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+              extraConfigPath: '/home/test/.codex/config.toml',
+              warnings: []
+            },
+            {
+              source: 'claude-code' as const,
+              label: 'Claude Code',
+              binaryName: 'claude',
+              binaryPath: '/home/test/.local/bin/claude',
+              configPath: '/home/test/.claude/settings.json',
+              configExists: true,
+              installed: false,
+              scriptPath: '/opt/aiopsterm/resources/aiopsterm-agent-hook.js',
+              warnings: []
+            }
+          ]
+        }
+      }
+    })),
     createChatConversation: vi.fn(async () => {
       const conversation: TestChatConversationRecord = {
         id: `conv-test-${Date.now()}-${chatHistoryStateMock.conversations.length}`,

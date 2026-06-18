@@ -97,6 +97,10 @@ import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,
   AiAgentSessionSource,
+  AgentHookInstallerOperationResult,
+  AgentHookInstallerSnapshot,
+  AgentHookInstallerStatus,
+  AgentHookInstallerSource,
   AiChatChipContentPart,
   AiChatChipRef,
   AiCommandCatalogOption,
@@ -247,6 +251,7 @@ type ModelProviderKey = ModelProviderCheckKey
 type AppUpdateDownloadData = NonNullable<AppUpdateDownloadResult['data']>
 type AppUpdateInstallData = NonNullable<AppUpdateInstallResult['data']>
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
+type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
 export type AiAttentionSource = 'codex' | 'classic-chat' | 'claude-code'
@@ -4065,6 +4070,33 @@ const isSshTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo 
   )
 }
 
+const isAgentHookInstallerSource = (value: unknown): value is AgentHookInstallerSource => value === 'codex' || value === 'claude-code'
+
+const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
+  isRecord(value) &&
+  isAgentHookInstallerSource(value.source) &&
+  isNonEmptyText(value.label) &&
+  isNonEmptyText(value.binaryName) &&
+  typeof value.binaryPath === 'string' &&
+  isNonEmptyText(value.configPath) &&
+  typeof value.configExists === 'boolean' &&
+  typeof value.installed === 'boolean' &&
+  typeof value.scriptPath === 'string' &&
+  Array.isArray(value.warnings) &&
+  value.warnings.every((item) => typeof item === 'string') &&
+  isOptionalField(value, 'extraConfigPath', isNonEmptyText) &&
+  isOptionalField(value, 'error', isNonEmptyText)
+
+const isAgentHookInstallerSnapshot = (value: unknown): value is AgentHookInstallerSnapshot =>
+  isRecord(value) && Array.isArray(value.installers) && value.installers.every(isAgentHookInstallerStatus)
+
+const isAgentHookInstallOperationData = (value: unknown): value is AgentHookInstallOperationData =>
+  isRecord(value) &&
+  (value.operation === 'install' || value.operation === 'uninstall') &&
+  isAgentHookInstallerSource(value.source) &&
+  isAgentHookInstallerStatus(value.status) &&
+  isAgentHookInstallerSnapshot(value.snapshot)
+
 const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -4429,6 +4461,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const settingsDocumentationTitle = ref('')
   const settingsDocumentationPath = ref('')
   const settingsDocumentationContent = ref('')
+  const agentHookInstallers = ref<AgentHookInstallerStatus[]>([])
+  const agentHookInstallersLoading = ref(false)
+  const agentHookInstallerBusySource = ref<AgentHookInstallerSource | ''>('')
+  const agentHookInstallerError = ref('')
   const mcpConfigEditorOpen = ref(false)
   const mcpConfigEditorContent = ref(JSON.stringify(defaultMcpConfigFile(), null, 2))
   const mcpConfigEditorError = ref('')
@@ -4723,6 +4759,85 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiCommandOptions.value = result.data.commands.map((command) => ({ ...command }))
     return true
   }
+
+  const applyAgentHookInstallerSnapshot = (snapshot: AgentHookInstallerSnapshot) => {
+    agentHookInstallers.value = snapshot.installers.map((installer) => ({
+      ...installer,
+      warnings: [...installer.warnings]
+    }))
+    agentHookInstallerError.value = ''
+  }
+
+  const refreshAgentHookInstallers = async (options: { silent?: boolean } = {}) => {
+    const listBridge = window.aiops?.listAgentHookInstallers
+    if (typeof listBridge !== 'function') {
+      agentHookInstallerError.value = 'Agent Hook 安装器服务不可用'
+      if (!options.silent) setTopNotice(agentHookInstallerError.value)
+      return false
+    }
+    agentHookInstallersLoading.value = true
+    try {
+      const result = await listBridge()
+      if (!result?.ok) {
+        agentHookInstallerError.value = result?.errorMessage || 'Agent Hook 安装器状态加载失败'
+        if (!options.silent) setTopNotice(agentHookInstallerError.value)
+        return false
+      }
+      if (!isAgentHookInstallerSnapshot(result.data)) {
+        agentHookInstallerError.value = 'Agent Hook 安装器状态加载失败'
+        if (!options.silent) setTopNotice(agentHookInstallerError.value)
+        return false
+      }
+      applyAgentHookInstallerSnapshot(result.data)
+      if (!options.silent) setTopNotice('Agent Hook 状态已刷新')
+      return true
+    } catch (error) {
+      agentHookInstallerError.value = error instanceof Error ? error.message : 'Agent Hook 安装器状态加载失败'
+      if (!options.silent) setTopNotice(agentHookInstallerError.value)
+      return false
+    } finally {
+      agentHookInstallersLoading.value = false
+    }
+  }
+
+  const runAgentHookInstallerOperation = async (source: AgentHookInstallerSource, operation: 'install' | 'uninstall') => {
+    const bridge = operation === 'install' ? window.aiops?.installAgentHook : window.aiops?.uninstallAgentHook
+    if (typeof bridge !== 'function') {
+      setTopNotice('Agent Hook 安装器服务不可用')
+      return false
+    }
+    agentHookInstallerBusySource.value = source
+    agentHookInstallerError.value = ''
+    try {
+      const result = await bridge({ source })
+      if (!result?.ok) {
+        const message = result?.errorMessage || (operation === 'install' ? 'Agent Hook 安装失败' : 'Agent Hook 卸载失败')
+        agentHookInstallerError.value = message
+        setTopNotice(message)
+        return false
+      }
+      if (!isAgentHookInstallOperationData(result.data)) {
+        const message = operation === 'install' ? 'Agent Hook 安装结果异常' : 'Agent Hook 卸载结果异常'
+        agentHookInstallerError.value = message
+        setTopNotice(message)
+        return false
+      }
+      applyAgentHookInstallerSnapshot(result.data.snapshot)
+      setTopNotice(`${result.data.status.label} Agent Hook 已${operation === 'install' ? '安装' : '卸载'}`)
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : operation === 'install' ? 'Agent Hook 安装失败' : 'Agent Hook 卸载失败'
+      agentHookInstallerError.value = message
+      setTopNotice(message)
+      return false
+    } finally {
+      agentHookInstallerBusySource.value = ''
+    }
+  }
+
+  const installAgentHookInstaller = (source: AgentHookInstallerSource) => runAgentHookInstallerOperation(source, 'install')
+
+  const uninstallAgentHookInstaller = (source: AgentHookInstallerSource) => runAgentHookInstallerOperation(source, 'uninstall')
 
   const aiSkillContextOptions = computed<AiContextOption[]>(
     () => aiContextCatalog.value.categories.find((category) => category.id === 'skills')?.options.map((option) => ({ ...option })) || []
@@ -5258,6 +5373,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setupThemeBridge()
     await refreshUserAccount()
     setupKnowledgeBridgeListeners()
+    void refreshAgentHookInstallers({ silent: true })
     await aiStartupRefresh
     restoreSavedGeneralBaseSettings()
     applyDocumentLocale(resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
@@ -9401,6 +9517,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     rightPanelOpen.value = false
     onboardingGuideOpen.value = false
     setActiveSettingsSection('ai')
+    void refreshAgentHookInstallers({ silent: true })
     setTopNotice('已打开 AI 设置')
   }
 
@@ -14429,6 +14546,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     settingsDocumentationTitle,
     settingsDocumentationPath,
     settingsDocumentationContent,
+    agentHookInstallers,
+    agentHookInstallersLoading,
+    agentHookInstallerBusySource,
+    agentHookInstallerError,
     mcpConfigEditorOpen,
     mcpConfigEditorContent,
     mcpConfigEditorError,
@@ -14492,6 +14613,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     refreshAiTodoSnapshot,
     refreshAiContextCatalog,
     refreshAiCommandCatalog,
+    refreshAgentHookInstallers,
+    installAgentHookInstaller,
+    uninstallAgentHookInstaller,
     saveConfig,
     setSettingsNotice,
     setActiveSettingsSection,

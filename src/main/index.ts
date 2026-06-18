@@ -65,6 +65,7 @@ import {
   getAiAgentSessionSocketPath,
   publishAiAgentSessionEvent
 } from './backend/agentSessions'
+import { configureAgentHookInstallerRuntime, installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './backend/agentHookInstaller'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
@@ -1456,6 +1457,11 @@ configureLocalTerminalBackendRuntime({
   getDefaultCwd: () => app.getPath('home'),
   getEnv: () => process.env,
   getAgentSocketPath: getAiAgentSessionSocketPath,
+  getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '')
+})
+configureAgentHookInstallerRuntime({
+  getHomeDir: () => app.getPath('home'),
+  getEnv: () => process.env,
   getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '')
 })
 configureCodexCliRuntime({
@@ -3905,6 +3911,9 @@ const registerIpc = () => {
   })
 
   ipcMain.handle('ai-agent:session-event', (_event, input: AiAgentSessionEventInput) => publishAiAgentSessionEvent(input, broadcastAiAgentSessionEvent))
+  ipcMain.handle('agent-hooks:list', async () => ({ ok: true, data: await listAgentHookInstallers() }))
+  ipcMain.handle('agent-hooks:install', (_event, input) => installAgentHook(input))
+  ipcMain.handle('agent-hooks:uninstall', (_event, input) => uninstallAgentHook(input))
 
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender)

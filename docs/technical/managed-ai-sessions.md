@@ -18,7 +18,7 @@ Every aiopsterm-created local shell receives these environment variables:
 
 Agent hooks can use `AIOPSTERM_AGENT_SOCKET_PATH` to send newline-delimited JSON events to the running app.
 
-`AIOPSTERM_AGENT_HOOK_PATH` points to aiopsterm's helper script. The helper is intentionally explicit and fail-open: users or future UI flows can wire it into Codex/Claude hooks, but aiopsterm does not silently modify global agent configuration.
+`AIOPSTERM_AGENT_HOOK_PATH` points to aiopsterm's helper script. The helper is intentionally explicit and fail-open: the Settings -> AI Preferences hook installer can wire it into Codex/Claude user hooks, but aiopsterm does not silently modify global agent configuration.
 
 Example hook command shape:
 
@@ -27,6 +27,16 @@ node "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
 ```
 
 The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
+
+## Hook Installer
+
+Settings -> AI Preferences includes an `Agent Hook 安装器` section for Codex and Claude Code.
+
+- Codex installation merges aiopsterm-owned commands into `~/.codex/hooks.json` and enables the Codex hooks feature in `~/.codex/config.toml` inside an aiopsterm-marked block.
+- Claude Code installation merges aiopsterm-owned commands into `~/.claude/settings.json`.
+- Install/reinstall first removes only commands containing the aiopsterm marker, then appends the current helper command.
+- Uninstall removes only aiopsterm-owned hook commands and preserves user hooks in the same event group.
+- Hook commands print `{}` and exit zero outside an aiopsterm-managed local terminal, so external terminals keep their native Codex/Claude behavior.
 
 ## Event Shape
 

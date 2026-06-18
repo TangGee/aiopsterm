@@ -616,6 +616,41 @@ export type AiAgentSessionEvent = {
 
 export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>
 
+export type AgentHookInstallerSource = 'codex' | 'claude-code'
+
+export type AgentHookInstallerStatus = {
+  source: AgentHookInstallerSource
+  label: string
+  binaryName: string
+  binaryPath: string
+  configPath: string
+  configExists: boolean
+  installed: boolean
+  scriptPath: string
+  extraConfigPath?: string
+  warnings: string[]
+  error?: string
+}
+
+export type AgentHookInstallerSnapshot = {
+  installers: AgentHookInstallerStatus[]
+}
+
+export type AgentHookInstallerOperationInput = {
+  source: AgentHookInstallerSource
+}
+
+export type AgentHookInstallerOperation = 'install' | 'uninstall'
+
+export type AgentHookInstallerOperationResult = AiopsMutationResult<{
+  operation: AgentHookInstallerOperation
+  source: AgentHookInstallerSource
+  status: AgentHookInstallerStatus
+  snapshot: AgentHookInstallerSnapshot
+}>
+
+export type AgentHookInstallerListResult = AiopsMutationResult<AgentHookInstallerSnapshot>
+
 export type ZmodemUploadFile = {
   name: string
   size: number
@@ -3370,6 +3405,9 @@ export type AiopsPreloadApi = {
   writeCodexSession: (id: string, data: string) => Promise<CodexSessionWriteResult>
   resizeCodexSession: (id: string, cols: number, rows: number) => Promise<void>
   killCodexSession: (id: string) => Promise<CodexSessionKillResult>
+  listAgentHookInstallers: () => Promise<AgentHookInstallerListResult>
+  installAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
+  uninstallAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void
   cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>

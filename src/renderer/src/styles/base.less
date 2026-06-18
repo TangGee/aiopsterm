@@ -3092,6 +3092,144 @@ em {
   gap: 16px;
 }
 
+.agent-hook-installer-card {
+  display: grid;
+  gap: 14px;
+}
+
+.agent-hook-card-header,
+.agent-hook-installer-row,
+.agent-hook-installer-row header,
+.agent-hook-installer-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-hook-card-header,
+.agent-hook-installer-row,
+.agent-hook-installer-row header {
+  justify-content: space-between;
+}
+
+.agent-hook-card-header > div,
+.agent-hook-installer-main,
+.agent-hook-installer-row header > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.agent-hook-card-header strong,
+.agent-hook-installer-row strong {
+  font-size: 14px;
+}
+
+.agent-hook-card-header small,
+.agent-hook-installer-row small,
+.agent-hook-description,
+.agent-hook-meta-row span,
+.agent-hook-warnings,
+.agent-hook-error {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-hook-description,
+.agent-hook-error {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.agent-hook-installer-row {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 58%, transparent);
+  padding: 12px;
+  align-items: flex-start;
+}
+
+.agent-hook-installer-main {
+  flex: 1 1 auto;
+}
+
+.agent-hook-installer-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.agent-hook-status-pill {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.agent-hook-status-pill.installed {
+  border-color: color-mix(in srgb, #16a34a 42%, var(--border));
+  color: #16a34a;
+}
+
+.agent-hook-status-pill.ready {
+  border-color: color-mix(in srgb, #1677ff 42%, var(--border));
+  color: #1677ff;
+}
+
+.agent-hook-status-pill.error,
+.agent-hook-error {
+  color: var(--danger);
+}
+
+.agent-hook-meta-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.agent-hook-meta-row {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-hook-meta-row code {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--text);
+  padding: 4px 6px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.agent-hook-warnings {
+  margin: 0;
+  padding-left: 16px;
+}
+
+@media (max-width: 920px) {
+  .agent-hook-card-header,
+  .agent-hook-installer-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agent-hook-installer-actions {
+    justify-content: flex-start;
+  }
+
+  .agent-hook-meta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .proxy-grid {
   width: min(620px, 100%);
   display: grid;
