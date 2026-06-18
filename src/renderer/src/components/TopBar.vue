@@ -30,6 +30,23 @@
         <ChevronRight v-if="workspace.topUpdateState === 'available'" />
       </button>
       <button
+        class="icon-button ai-attention-button"
+        :class="{ unread: workspace.aiAttentionUnreadCount > 0 }"
+        :title="aiAttentionTitle"
+        :aria-label="aiAttentionTitle"
+        data-testid="ai-attention-bell"
+        @click="workspace.jumpToNextAiAttention"
+      >
+        <Bell />
+        <span
+          v-if="workspace.aiAttentionUnreadCount > 0"
+          class="ai-attention-badge"
+          data-testid="ai-attention-count"
+        >
+          {{ aiAttentionBadge }}
+        </span>
+      </button>
+      <button
         class="icon-button layout-toggle"
         :class="{ collapsed: isLeftCollapsed }"
         :title="leftToggleTitle"
@@ -91,6 +108,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
+  Bell,
   Bot,
   CheckCircle2,
   ChevronRight,
@@ -144,6 +162,15 @@ const updateTitle = computed(() => {
   if (workspace.topUpdateState === 'available') return t('top.updateAvailable')
   if (workspace.topUpdateState === 'install-requested') return t('top.updateInstallRequested')
   return t('top.updateChecking')
+})
+const aiAttentionBadge = computed(() => (workspace.aiAttentionUnreadCount > 99 ? '99+' : String(workspace.aiAttentionUnreadCount)))
+const aiAttentionTitle = computed(() => {
+  const item = workspace.currentAiAttentionItem
+  if (!item) return t('top.aiAttentionOpen')
+  return t('top.aiAttentionPending', {
+    count: String(workspace.aiAttentionUnreadCount),
+    title: item.title
+  })
 })
 
 const minimizeWindow = () => {

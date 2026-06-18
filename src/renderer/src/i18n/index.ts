@@ -10,7 +10,11 @@ export const useI18n = () => {
   const workspace = useWorkspaceStore()
   const locale = computed(() => resolveLocale(workspace.config.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]))
   const direction = computed(() => localeDirection(locale.value))
-  const t = (key: I18nKey) => translateWithLocale(locale.value, key)
+  const t = (key: I18nKey, params?: Record<string, string | number>) => {
+    const template = translateWithLocale(locale.value, key)
+    if (!params) return template
+    return Object.entries(params).reduce((text, [name, value]) => text.split(`{${name}}`).join(String(value)), template)
+  }
   return {
     locale,
     direction,

@@ -98,6 +98,8 @@ export type I18nKey =
   | 'top.updateAvailable'
   | 'top.updateInstallRequested'
   | 'top.updateLocal'
+  | 'top.aiAttentionOpen'
+  | 'top.aiAttentionPending'
   | 'top.windowMinimize'
   | 'top.windowRestore'
   | 'top.windowMaximize'
@@ -297,6 +299,8 @@ const zhCN: LocaleMessages = {
   'top.updateAvailable': '点击更新',
   'top.updateInstallRequested': '待安装',
   'top.updateLocal': '本地版本',
+  'top.aiAttentionOpen': 'AI 会话管理',
+  'top.aiAttentionPending': 'AI 有 {count} 条未处理消息：{title}',
   'top.windowMinimize': '最小化窗口',
   'top.windowRestore': '还原窗口',
   'top.windowMaximize': '最大化窗口',
@@ -495,6 +499,8 @@ const enUS: LocaleMessages = {
   'top.updateAvailable': 'Update',
   'top.updateInstallRequested': 'Install pending',
   'top.updateLocal': 'Local version',
+  'top.aiAttentionOpen': 'AI session manager',
+  'top.aiAttentionPending': 'AI has {count} pending messages: {title}',
   'top.windowMinimize': 'Minimize window',
   'top.windowRestore': 'Restore window',
   'top.windowMaximize': 'Maximize window',

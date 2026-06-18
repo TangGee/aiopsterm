@@ -1936,6 +1936,26 @@ const codexTargetTitle = (target?: CodexSessionTargetContext | null) =>
 const codexConversationTitle = (conversation: Pick<CodexConversation, 'title' | 'boundTarget'>) =>
   conversation.title.trim() || codexTargetTitle(conversation.boundTarget)
 
+const codexAttentionId = (conversation: Pick<CodexConversation, 'id'>) => `codex:${conversation.id}`
+
+const syncCodexAttentionState = (conversation: CodexConversation) => {
+  const id = codexAttentionId(conversation)
+  if (conversation.status !== 'error') {
+    workspace.removeAiAttentionItem(id)
+    return
+  }
+  workspace.upsertAiAttentionItem({
+    id,
+    source: 'codex',
+    kind: 'error',
+    conversationId: conversation.id,
+    sessionId: conversation.sessionId || undefined,
+    surfaceId: props.agentMode ? 'agents-ai-panel' : 'terminal-ai-panel',
+    title: codexConversationTitle(conversation),
+    summary: conversation.error || t('ai.codexError')
+  })
+}
+
 const createCodexConversationRecord = (target?: CodexSessionTargetContext | null): CodexConversation => ({
   id: nextCodexConversationId(),
   title: codexTargetTitle(target),
@@ -2102,19 +2122,25 @@ const subscribeCodexBridge = () => {
     if (event.stage === 'ready') {
       conversation.status = 'ready'
       conversation.error = ''
+      syncCodexAttentionState(conversation)
       fitCodexTerminal({ force: true, conversation })
     }
     if (event.stage === 'error') {
       conversation.status = 'error'
       conversation.error = event.errorMessage || event.message || t('ai.codexError')
+      syncCodexAttentionState(conversation)
     }
-    if (event.stage === 'closed') conversation.status = 'closed'
+    if (event.stage === 'closed') {
+      conversation.status = 'closed'
+      syncCodexAttentionState(conversation)
+    }
   }) || null
   codexOffExit = window.aiops.onCodexSessionExit?.((event) => {
     const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
     if (!conversation) return
     conversation.status = event.errorCode ? 'error' : 'closed'
     if (event.errorMessage) conversation.error = event.errorMessage
+    syncCodexAttentionState(conversation)
   }) || null
 }
 
@@ -2416,6 +2442,7 @@ const startCodexSession = async (targetConversation?: CodexConversation | null) 
     if (!window.aiops?.createCodexSession) {
       conversation.status = 'error'
       conversation.error = t('ai.codexBridgeMissing')
+      syncCodexAttentionState(conversation)
       return
     }
     if (conversation.sessionId && conversation.status === 'ready') {
@@ -2449,6 +2476,7 @@ const startCodexSession = async (targetConversation?: CodexConversation | null) 
     } catch (error) {
       conversation.status = 'error'
       conversation.error = error instanceof Error && error.message.trim() ? error.message : t('ai.codexStartFailed')
+      syncCodexAttentionState(conversation)
       writeAiRuntimeLog('error', 'renderer.codex-session.start-failed', { message: conversation.error })
     }
   })().finally(() => {
@@ -2477,6 +2505,7 @@ const restartCodexSession = async () => {
   conversation.lastTargetSignature = ''
   conversation.status = 'idle'
   conversation.error = ''
+  syncCodexAttentionState(conversation)
   conversation.terminal?.clear()
   await startCodexSession(conversation)
 }
@@ -2504,6 +2533,24 @@ const selectCodexConversation = async (id: string) => {
   focusCodexTerminal()
 }
 
+const focusAiAttentionItem = async (item: typeof workspace.currentAiAttentionItem) => {
+  if (!item || item.source !== 'codex' || !item.conversationId) return
+  const conversation = codexConversations.value.find((entry) => entry.id === item.conversationId)
+  if (!conversation) {
+    workspace.removeAiAttentionItem(item.id)
+    return
+  }
+  if (aiPanelMode.value !== 'codex') await selectAiPanelMode('codex')
+  else panelModeMenuOpen.value = false
+  await selectCodexConversation(conversation.id)
+  focusCodexTerminal()
+  if (conversation.status !== 'error') {
+    workspace.markAiAttentionHandled(item.id)
+    return
+  }
+  workspace.setTopNotice(`已定位到 ${codexConversationTitle(conversation)}`)
+}
+
 const closeCodexConversation = async (id: string) => {
   const conversation = codexConversations.value.find((item) => item.id === id)
   if (!conversation) return
@@ -2512,6 +2559,7 @@ const closeCodexConversation = async (id: string) => {
     return
   }
   await stopCodexSession(conversation)
+  workspace.removeAiAttentionItem(codexAttentionId(conversation))
   conversation.resizeObserver?.disconnect()
   conversation.terminal?.dispose()
   const currentIndex = codexConversations.value.findIndex((item) => item.id === id)
@@ -2527,7 +2575,7 @@ const closeCodexConversation = async (id: string) => {
   showChatExportNotice(t('ai.tabClosed'))
 }
 
-const selectAiPanelMode = async (mode: AiPanelMode) => {
+async function selectAiPanelMode(mode: AiPanelMode) {
   if (aiPanelMode.value === mode) {
     if (mode === 'codex') void startCodexSession()
     panelModeMenuOpen.value = false
@@ -5799,6 +5847,15 @@ watch(
 )
 
 watch(
+  () => workspace.aiAttentionFocusRequest.sequence,
+  () => {
+    const item = workspace.aiAttentionFocusRequest.item
+    if (!item) return
+    void focusAiAttentionItem(item)
+  }
+)
+
+watch(
   () => workspace.onboardingAiRequest.sequence,
   async (sequence) => {
     const onboardingRequest = workspace.onboardingAiRequest
@@ -5863,6 +5920,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   codexConversations.value.forEach((conversation) => {
+    workspace.removeAiAttentionItem(codexAttentionId(conversation))
     void stopCodexSession(conversation)
     conversation.resizeObserver?.disconnect()
     conversation.terminal?.dispose()

@@ -245,6 +245,29 @@ type AppUpdateDownloadData = NonNullable<AppUpdateDownloadResult['data']>
 type AppUpdateInstallData = NonNullable<AppUpdateInstallResult['data']>
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
+export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
+export type AiAttentionSource = 'codex' | 'classic-chat' | 'claude-code'
+export type AiAttentionItem = {
+  id: string
+  source: AiAttentionSource
+  kind: AiAttentionKind
+  title: string
+  summary: string
+  priority: number
+  createdAt: number
+  conversationId?: string
+  sessionId?: string
+  surfaceId?: string
+  handledAt?: number
+}
+export type AiAttentionInput = Omit<AiAttentionItem, 'createdAt' | 'priority'> & {
+  createdAt?: number
+  priority?: number
+}
+export type AiAttentionFocusRequest = {
+  sequence: number
+  item: AiAttentionItem | null
+}
 
 export const layoutWidthLimits: {
   min: number
@@ -4037,6 +4060,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const agentsLeftWidth = ref(layoutWidthLimits.defaults.agentsLeftWidth)
   const topUpdateState = ref<TopUpdateState>('idle')
   const topNotice = ref('')
+  const aiAttentionItems = ref<AiAttentionItem[]>([])
+  const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
   const onboardingCompleted = ref<Record<OnboardingModuleId, boolean>>(createDefaultOnboardingCompleted())
   const onboardingActiveTour = ref<OnboardingModuleId | null>(null)
   const onboardingActiveStepIndex = ref(0)
@@ -8105,6 +8130,90 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     window.setTimeout(() => {
       if (topNotice.value === message) topNotice.value = ''
     }, 2400)
+  }
+
+  const attentionPriority = (kind: AiAttentionKind) => {
+    if (kind === 'approval') return 100
+    if (kind === 'question') return 90
+    if (kind === 'plan') return 80
+    if (kind === 'error') return 70
+    return 40
+  }
+
+  const pendingAiAttentionItems = computed(() =>
+    [...aiAttentionItems.value]
+      .filter((item) => !item.handledAt)
+      .sort((first, second) => {
+        if (second.priority !== first.priority) return second.priority - first.priority
+        return first.createdAt - second.createdAt
+      })
+  )
+  const aiAttentionUnreadCount = computed(() => pendingAiAttentionItems.value.length)
+  const currentAiAttentionItem = computed(() => pendingAiAttentionItems.value[0] || null)
+
+  const upsertAiAttentionItem = (input: AiAttentionInput) => {
+    const title = input.title.trim()
+    const summary = input.summary.trim()
+    const existing = aiAttentionItems.value.find((item) => item.id === input.id)
+    const handledAt = 'handledAt' in input ? input.handledAt : undefined
+    const next: AiAttentionItem = {
+      id: input.id,
+      source: input.source,
+      kind: input.kind,
+      title: title || input.source,
+      summary,
+      priority: input.priority ?? attentionPriority(input.kind),
+      createdAt: input.createdAt ?? existing?.createdAt ?? Date.now(),
+      ...(handledAt ? { handledAt } : {}),
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.surfaceId ? { surfaceId: input.surfaceId } : {})
+    }
+    aiAttentionItems.value = existing ? aiAttentionItems.value.map((item) => (item.id === input.id ? next : item)) : [next, ...aiAttentionItems.value]
+    return next
+  }
+
+  const removeAiAttentionItem = (id: string) => {
+    const before = aiAttentionItems.value.length
+    aiAttentionItems.value = aiAttentionItems.value.filter((item) => item.id !== id)
+    return aiAttentionItems.value.length !== before
+  }
+
+  const markAiAttentionHandled = (id: string) => {
+    let changed = false
+    aiAttentionItems.value = aiAttentionItems.value.map((item) => {
+      if (item.id !== id || item.handledAt) return item
+      changed = true
+      return { ...item, handledAt: Date.now() }
+    })
+    return changed
+  }
+
+  const clearAiAttentionForConversation = (conversationId: string) => {
+    aiAttentionItems.value = aiAttentionItems.value.filter((item) => item.conversationId !== conversationId)
+  }
+
+  const jumpToNextAiAttention = () => {
+    const item = currentAiAttentionItem.value
+    if (!item) {
+      mode.value = 'agents'
+      agentsLeftOpen.value = true
+      setTopNotice('没有待处理的 AI 消息')
+      return null
+    }
+    if (item.surfaceId === 'terminal-ai-panel') {
+      mode.value = 'terminal'
+      activeModule.value = 'workspace'
+      rightPanelOpen.value = true
+    } else {
+      mode.value = 'agents'
+      agentsLeftOpen.value = true
+    }
+    aiAttentionFocusRequest.value = {
+      sequence: aiAttentionFocusRequest.value.sequence + 1,
+      item
+    }
+    return item
   }
 
   const checkTopUpdate = async () => {
@@ -13987,6 +14096,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     topUpdateState,
     topNotice,
     setTopNotice,
+    aiAttentionItems,
+    pendingAiAttentionItems,
+    aiAttentionUnreadCount,
+    currentAiAttentionItem,
+    aiAttentionFocusRequest,
+    upsertAiAttentionItem,
+    removeAiAttentionItem,
+    markAiAttentionHandled,
+    clearAiAttentionForConversation,
+    jumpToNextAiAttention,
     onboardingCompleted,
     onboardingActiveTour,
     onboardingActiveStepIndex,

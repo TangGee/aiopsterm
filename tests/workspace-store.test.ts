@@ -314,6 +314,99 @@ describe('workspace store', () => {
     vi.useFakeTimers()
   })
 
+  it('orders AI attention items by priority and keeps re-reported items unread', () => {
+    const store = useWorkspaceStore()
+
+    store.upsertAiAttentionItem({
+      id: 'error-1',
+      source: 'codex',
+      kind: 'error',
+      title: 'Codex error',
+      summary: 'Process exited',
+      createdAt: 200
+    })
+    store.upsertAiAttentionItem({
+      id: 'question-1',
+      source: 'codex',
+      kind: 'question',
+      title: 'Need input',
+      summary: 'Choose a branch',
+      createdAt: 300
+    })
+    store.upsertAiAttentionItem({
+      id: 'approval-1',
+      source: 'codex',
+      kind: 'approval',
+      title: 'Approve command',
+      summary: 'Run deploy check',
+      createdAt: 100
+    })
+
+    expect(store.pendingAiAttentionItems.map((item) => item.id)).toEqual(['approval-1', 'question-1', 'error-1'])
+    expect(store.aiAttentionUnreadCount).toBe(3)
+    expect(store.currentAiAttentionItem?.id).toBe('approval-1')
+
+    expect(store.markAiAttentionHandled('approval-1')).toBe(true)
+    expect(store.aiAttentionUnreadCount).toBe(2)
+    expect(store.currentAiAttentionItem?.id).toBe('question-1')
+
+    store.upsertAiAttentionItem({
+      id: 'approval-1',
+      source: 'codex',
+      kind: 'approval',
+      title: 'Approve command again',
+      summary: 'Run deploy check again',
+      createdAt: 100
+    })
+    expect(store.aiAttentionUnreadCount).toBe(3)
+    expect(store.currentAiAttentionItem).toMatchObject({
+      id: 'approval-1',
+      title: 'Approve command again'
+    })
+    expect(store.currentAiAttentionItem?.handledAt).toBeUndefined()
+  })
+
+  it('jumps the AI attention bell to the terminal AI surface when the item belongs to the right panel', () => {
+    const store = useWorkspaceStore()
+    store.mode = 'agents'
+    store.activeModule = 'database'
+    store.rightPanelOpen = false
+
+    store.upsertAiAttentionItem({
+      id: 'codex:error:terminal',
+      source: 'codex',
+      kind: 'error',
+      title: 'Prod shell Codex',
+      summary: 'Codex crashed',
+      conversationId: 'codex-1',
+      sessionId: 'session-1',
+      surfaceId: 'terminal-ai-panel',
+      createdAt: 100
+    })
+
+    const item = store.jumpToNextAiAttention()
+
+    expect(item?.id).toBe('codex:error:terminal')
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('workspace')
+    expect(store.rightPanelOpen).toBe(true)
+    expect(store.aiAttentionFocusRequest).toMatchObject({
+      sequence: 1,
+      item: expect.objectContaining({ conversationId: 'codex-1' })
+    })
+  })
+
+  it('opens the Agents area when the AI attention bell has no pending items', () => {
+    const store = useWorkspaceStore()
+    store.mode = 'terminal'
+    store.agentsLeftOpen = false
+
+    expect(store.jumpToNextAiAttention()).toBeNull()
+    expect(store.mode).toBe('agents')
+    expect(store.agentsLeftOpen).toBe(true)
+    expect(store.topNotice).toBe('没有待处理的 AI 消息')
+  })
+
   it('creates, renames, splits, and closes terminal panels', () => {
     const store = useWorkspaceStore()
 

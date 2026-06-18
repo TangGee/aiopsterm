@@ -983,6 +983,51 @@ describe('AppShell', () => {
     expect(pendingCalls.at(-1)?.[1]).toBe('')
   })
 
+  it('registers failed Codex sessions as global AI attention items and focuses them on jump', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'terminal-failed-codex'
+    store.activePanel.cwd = '/srv/failure'
+    vi.mocked(window.aiops.createCodexSession).mockRejectedValueOnce(new Error('codex boot failed'))
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: false },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.currentAiAttentionItem).toMatchObject({
+      source: 'codex',
+      kind: 'error',
+      surfaceId: 'terminal-ai-panel',
+      summary: 'codex boot failed'
+    })
+
+    store.mode = 'agents'
+    store.rightPanelOpen = false
+    const jumped = store.jumpToNextAiAttention()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(jumped?.id).toBe(store.currentAiAttentionItem?.id)
+    expect(store.mode).toBe('terminal')
+    expect(store.rightPanelOpen).toBe(true)
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
+    expect(store.topNotice).toContain('已定位到')
+
+    wrapper.unmount()
+  })
+
   it('opens multiple Codex conversation tabs from the Codex header', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -1574,6 +1619,8 @@ describe('AppShell', () => {
     expect(wrapper.attributes('data-onboarding-id')).toBe('top-layout-controls')
     expect(wrapper.findAll('.mode-button')).toHaveLength(1)
     expect(wrapper.find('.right-ai-toggle').attributes('data-onboarding-id')).toBe('right-ai-toggle')
+    expect(wrapper.find('[data-testid="ai-attention-bell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-attention-count"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('本地版本')
 
     await wrapper.find('.mode-button').trigger('click')
@@ -1594,6 +1641,43 @@ describe('AppShell', () => {
 
     await wrapper.find('.window-control-button').trigger('click')
     expect(window.aiops.minimizeWindow).toHaveBeenCalled()
+  })
+
+  it('shows the AI attention badge and routes the bell click through the workspace store', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TopBar, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.mode = 'agents'
+    store.activeModule = 'database'
+    store.rightPanelOpen = false
+
+    store.upsertAiAttentionItem({
+      id: 'codex:error:topbar',
+      source: 'codex',
+      kind: 'error',
+      title: 'Codex CLI',
+      summary: 'Codex crashed',
+      conversationId: 'codex-topbar',
+      surfaceId: 'terminal-ai-panel'
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-attention-count"]').text()).toBe('1')
+    expect(wrapper.find('[data-testid="ai-attention-bell"]').attributes('title')).toContain('Codex CLI')
+
+    await wrapper.find('[data-testid="ai-attention-bell"]').trigger('click')
+    await flushPromises()
+
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('workspace')
+    expect(store.rightPanelOpen).toBe(true)
+    expect(store.aiAttentionFocusRequest).toMatchObject({
+      sequence: 1,
+      item: expect.objectContaining({ id: 'codex:error:topbar' })
+    })
   })
 
   it('does not fabricate top layout changes when config persistence is unavailable or malformed', async () => {
