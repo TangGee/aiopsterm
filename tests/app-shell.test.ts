@@ -693,6 +693,57 @@ describe('AppShell', () => {
     expect(store.activePanelId).toBe('panel-main')
   })
 
+  it('links the empty AI session panel to AI settings for hook setup', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.setActiveModule('aiSessions')
+
+    const wrapper = mount(AiSessionsPanel, {
+      global: {
+        plugins: [pinia]
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.ai-sessions-empty').text()).toContain('Agent Hook')
+    await wrapper.find('.ai-sessions-empty-action').trigger('click')
+    await flushPromises()
+
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('ai')
+    expect(store.rightPanelOpen).toBe(false)
+  })
+
+  it('opens AI settings from the AI session panel header', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'codex-session-1',
+      title: 'Codex work',
+      summary: 'Project setup',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      receivedAt: 100
+    })
+
+    const wrapper = mount(AiSessionsPanel, {
+      global: {
+        plugins: [pinia]
+      }
+    })
+    await flushPromises()
+
+    await wrapper.find('.ai-sessions-settings').trigger('click')
+    await flushPromises()
+
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('ai')
+  })
+
   it('applies persisted background and watermark settings at the app shell level', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

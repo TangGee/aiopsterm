@@ -5,7 +5,16 @@
         <p class="eyebrow">AI Sessions</p>
         <h2>AI 会话</h2>
       </div>
-      <span class="ai-sessions-count">{{ workspace.managedAiNeedsInputSessions.length }}</span>
+      <div class="ai-sessions-header-actions">
+        <button
+          class="ai-sessions-settings"
+          title="打开 AI 设置"
+          @click="workspace.openAiSessionSettings"
+        >
+          <Settings />
+        </button>
+        <span class="ai-sessions-count">{{ workspace.managedAiNeedsInputSessions.length }}</span>
+      </div>
     </header>
 
     <div class="panel-search">
@@ -54,19 +63,27 @@
           <Check />
         </button>
       </div>
-      <p
+      <div
         v-if="visibleSessions.length === 0"
         class="ai-sessions-empty"
       >
-        暂无 AI 会话
-      </p>
+        <p>暂无 AI 会话</p>
+        <small>安装并启用 Agent Hook 后，通过 aiopsterm 本地连接启动的 Codex / Claude Code 会显示在这里。</small>
+        <button
+          class="ai-sessions-empty-action"
+          @click="workspace.openAiSessionSettings"
+        >
+          <Settings />
+          打开 AI 设置
+        </button>
+      </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Check, Search } from 'lucide-vue-next'
+import { Check, Search, Settings } from 'lucide-vue-next'
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
@@ -122,6 +139,34 @@ const selectSession = (sessionId: string) => {
   background: rgba(59, 130, 246, 0.16);
   color: var(--accent-color);
   font-weight: 700;
+}
+
+.ai-sessions-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-sessions-settings {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.ai-sessions-settings:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.ai-sessions-settings svg {
+  width: 15px;
+  height: 15px;
 }
 
 .ai-sessions-filter {
@@ -235,5 +280,39 @@ const selectSession = (sessionId: string) => {
 .ai-sessions-empty {
   color: var(--text-muted);
   padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-sessions-empty p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.ai-sessions-empty small {
+  line-height: 1.45;
+}
+
+.ai-sessions-empty-action {
+  align-self: flex-start;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  padding: 6px 9px;
+}
+
+.ai-sessions-empty-action:hover {
+  border-color: var(--accent-color);
+}
+
+.ai-sessions-empty-action svg {
+  width: 14px;
+  height: 14px;
 }
 </style>

@@ -9394,6 +9394,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setTopNotice(organizationId ? '已打开组织资产管理' : '已打开资产管理')
   }
 
+  const openAiSessionSettings = () => {
+    mode.value = 'terminal'
+    activeModule.value = 'settings'
+    leftPanelOpen.value = true
+    rightPanelOpen.value = false
+    onboardingGuideOpen.value = false
+    setActiveSettingsSection('ai')
+    setTopNotice('已打开 AI 设置')
+  }
+
   const handleDeepLink = (payload: unknown) => {
     if (!isAiopstermDeepLinkPayload(payload)) {
       setTopNotice('aiopsterm deep link 后端返回数据异常')
@@ -14613,6 +14623,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     toggleMode,
     setActiveModule,
     openAssetManagement,
+    openAiSessionSettings,
     setFilesUiMode,
     selectFileSession,
     openFileSession,
