@@ -157,7 +157,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, ref } from 'vue'
-import { BookOpen, Brain, ExternalLink, Eye, EyeOff, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
+import { BookOpen, Brain, CircleHelp, ExternalLink, Eye, EyeOff, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   settingsBackgroundPresets,
   settingsLanguageOptions,
@@ -171,9 +171,41 @@ import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import { useI18n } from '@/i18n'
+import type { I18nKey } from '@/i18n'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
+
+type SettingsHelpKey =
+  | 'general'
+  | 'terminal'
+  | 'extensions'
+  | 'models'
+  | 'billing'
+  | 'ai'
+  | 'mcp'
+  | 'skills'
+  | 'rules'
+  | 'shortcuts'
+  | 'trustedDevices'
+  | 'privacy'
+  | 'about'
+
+const settingsHelpTextKeys: Record<SettingsHelpKey, I18nKey> = {
+  general: 'settings.help.general',
+  terminal: 'settings.help.terminal',
+  extensions: 'settings.help.extensions',
+  models: 'settings.help.models',
+  billing: 'settings.help.billing',
+  ai: 'settings.help.ai',
+  mcp: 'settings.help.mcp',
+  skills: 'settings.help.skills',
+  rules: 'settings.help.rules',
+  shortcuts: 'settings.help.shortcuts',
+  trustedDevices: 'settings.help.trustedDevices',
+  privacy: 'settings.help.privacy',
+  about: 'settings.help.about'
+}
 
 const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi']
 const terminalFonts = [
@@ -298,12 +330,50 @@ const customBackgroundImage = computed(() =>
 
 const hasSelectedBackgroundImage = computed(() => Boolean(workspace.config.background.image && workspace.config.background.mode !== 'none'))
 
+const SettingsPageHelpButton = defineComponent({
+  name: 'SettingsPageHelpButton',
+  props: {
+    helpKey: {
+      type: String as () => SettingsHelpKey,
+      required: true
+    }
+  },
+  setup(props) {
+    const open = ref(false)
+    const description = computed(() => t(settingsHelpTextKeys[props.helpKey]))
+    return () =>
+      h('div', { class: ['settings-page-help', { open: open.value }] }, [
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'settings-page-help-button',
+            title: t('settings.help.open'),
+            'aria-label': t('settings.help.open'),
+            'aria-expanded': open.value ? 'true' : 'false',
+            onClick: () => {
+              open.value = !open.value
+            },
+            onKeydown: (event: KeyboardEvent) => {
+              if (event.key === 'Escape') open.value = false
+            }
+          },
+          [h(CircleHelp)]
+        ),
+        open.value ? h('div', { class: 'settings-page-help-popover', role: 'note' }, description.value) : null
+      ])
+  }
+})
+
+const settingsPageTitle = (title: string, helpKey: SettingsHelpKey, options: { compact?: boolean } = {}) =>
+  h('div', { class: ['settings-page-title-row', { compact: options.compact }] }, [h('h3', title), h(SettingsPageHelpButton, { helpKey })])
+
 const GeneralSettings = defineComponent({
   name: 'GeneralSettings',
   setup() {
     return () =>
       h('div', [
-        h('h3', t('settings.general.base')),
+        settingsPageTitle(t('settings.general.base'), 'general'),
         h('div', { class: 'settings-form-card' }, [
           h('div', { class: 'settings-form-row' }, [
             h('label', t('settings.general.theme')),
@@ -490,7 +560,7 @@ const TerminalSettings = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('h3', '终端设置'),
+        settingsPageTitle('终端设置', 'terminal'),
         h('p', { class: 'settings-description' }, '终端类型主要影响 TERM 和程序能力探测，通常不会直接改变外观。字体只有系统已安装或能匹配到对应字体时才会明显变化。'),
         h('div', { class: 'settings-form-card' }, [
           selectRow('终端类型', workspace.terminalSettings.terminalType, terminalTypes.map((item) => ({ value: item, label: item })), (value) => workspace.updateTerminalSettings({ terminalType: value })),
@@ -797,7 +867,7 @@ const ModelSettings = defineComponent({
     }
     return () =>
       h('div', [
-        h('h3', '模型名称'),
+        settingsPageTitle('模型名称', 'models'),
         h(
           'div',
           { class: 'settings-section-card model-names-card' },
@@ -881,6 +951,7 @@ const AiPreferenceSettings = defineComponent({
   setup() {
     return () =>
       h('div', [
+        settingsPageTitle('AI 偏好设置', 'ai'),
         h('h3', '通用'),
         h('div', { class: 'settings-section-card ai-preferences' }, [
           h('label', { class: 'settings-check-line' }, [
@@ -1069,7 +1140,7 @@ const ExtensionSettingsPage = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('h3', '扩展'),
+        settingsPageTitle('扩展', 'extensions'),
         h('div', { class: 'settings-form-card' }, [
           switchRow('自动补全', workspace.extensionSettings.autoCompleteStatus, (checked) => workspace.updateExtensionSettings({ autoCompleteStatus: checked })),
           switchRow('Alias', workspace.extensionSettings.aliasStatus, (checked) => workspace.updateExtensionSettings({ aliasStatus: checked })),
@@ -1138,7 +1209,7 @@ const BillingSettingsPage = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('h3', '计费概览'),
+        settingsPageTitle('计费概览', 'billing'),
         h(
           'div',
           { class: 'settings-section-card billing-card' },
@@ -1174,7 +1245,10 @@ const McpSettingsPage = defineComponent({
     return () =>
       h('div', [
         h('div', { class: 'settings-section-title-row' }, [
-          h('div', [h('h3', 'MCP Servers'), h('small', '管理 Agent 可用的 MCP servers、tools 和 resources。')]),
+          h('div', { class: 'settings-section-title-with-help' }, [
+            settingsPageTitle('MCP Servers', 'mcp', { compact: true }),
+            h('small', '管理 Agent 可用的 MCP servers、tools 和 resources。')
+          ]),
           h('button', { class: 'settings-button primary', onClick: () => workspace.openMcpConfigEditor() }, '+ Add Server')
         ]),
         workspace.mcpServers.length === 0
@@ -1346,7 +1420,10 @@ const SkillsSettingsPage = defineComponent({
     return () =>
       h('div', [
         h('div', { class: 'settings-section-title-row' }, [
-          h('div', [h('h3', 'Skills'), h('p', { class: 'settings-path-hint' }, workspace.skillsUserPath)]),
+          h('div', { class: 'settings-section-title-with-help' }, [
+            settingsPageTitle('Skills', 'skills', { compact: true }),
+            h('p', { class: 'settings-path-hint' }, workspace.skillsUserPath)
+          ]),
           h('div', { class: 'settings-action-row' }, [
             h('button', { class: 'settings-button', onClick: () => void workspace.openSkillsFolder() }, '打开文件夹'),
             h('button', { class: 'settings-button', onClick: () => void workspace.reloadSkills() }, 'Reload'),
@@ -1391,7 +1468,10 @@ const RulesSettingsPage = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('div', { class: 'settings-section-title-row' }, [h('h3', '规则'), h('button', { class: 'settings-button', onClick: () => workspace.addSettingsRule() }, '+ 添加规则')]),
+        h('div', { class: 'settings-section-title-row' }, [
+          settingsPageTitle('规则', 'rules', { compact: true }),
+          h('button', { class: 'settings-button', onClick: () => workspace.addSettingsRule() }, '+ 添加规则')
+        ]),
         h('div', { class: 'settings-section-card rules-card' }, [
           h('p', { class: 'settings-description' }, 'User Rules 会作为 Agent 行为约束参与对话和命令生成。'),
           workspace.settingsRules.length
@@ -1430,7 +1510,7 @@ const ShortcutsSettingsPage = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('h3', '快捷键设置'),
+        settingsPageTitle('快捷键设置', 'shortcuts'),
         h('div', { class: 'settings-section-card shortcuts-card' }, [
           h('div', { class: 'shortcuts-table' }, [
             h('div', { class: 'shortcuts-header' }, [h('span', 'Shortcut Key'), h('span', 'Action')]),
@@ -1480,7 +1560,7 @@ const TrustedDevicesSettingsPage = defineComponent({
     }
     return () =>
       h('div', [
-        h('h3', '可信设备'),
+        settingsPageTitle('可信设备', 'trustedDevices'),
         workspace.userProfile.skippedLogin || workspace.userProfile.lastLoginMethod === 'skip'
           ? h('div', { class: 'settings-section-card trusted-devices-card settings-empty-state' }, [
               h('p', '登录后可查看和管理当前账户的可信设备。'),
@@ -1526,7 +1606,7 @@ const PrivacySettingsPage = defineComponent({
   setup() {
     return () =>
       h('div', [
-        h('h3', '隐私'),
+        settingsPageTitle('隐私', 'privacy'),
         h('div', { class: 'settings-form-card' }, [
           radioRow('Telemetry', 'telemetry', [
             { label: '启用', checked: workspace.privacySettings.telemetry === 'enabled', onChange: () => workspace.updatePrivacySettings({ telemetry: 'enabled' }) },
@@ -1633,6 +1713,7 @@ const AboutSettingsPage = defineComponent({
     })
     return () =>
       h('div', { class: 'about-settings-page' }, [
+        settingsPageTitle('关于', 'about'),
         h('div', { class: 'about-card settings-section-card' }, [
           h('div', { class: 'about-logo-self' }, 'A'),
           h('h3', 'aiopsterm'),

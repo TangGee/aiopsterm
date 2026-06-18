@@ -13318,6 +13318,19 @@ describe('AppShell', () => {
     })
 
     expect(workspace.text()).toContain('基础设置')
+    const generalHelpButton = workspace.find('.settings-page-help-button')
+    expect(generalHelpButton.exists()).toBe(true)
+    expect(generalHelpButton.attributes('aria-label')).toBe('查看本页设置说明')
+    await generalHelpButton.trigger('click')
+    expect(workspace.find('.settings-page-help-popover').text()).toContain('通用页控制应用主题')
+    await store.updateLanguage('en-US')
+    await flushPromises()
+    await workspace.vm.$nextTick()
+    expect(workspace.find('.settings-page-help-button').attributes('aria-label')).toBe('Show what this settings page controls')
+    expect(workspace.find('.settings-page-help-popover').text()).toContain('General controls the app theme')
+    await store.updateLanguage('zh-CN')
+    await flushPromises()
+    await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('默认背景')
     expect(workspace.text()).toContain('自定义上传（支持JPG、PNG、WebP、GIF）')
     expect(workspace.text()).toContain('Termius Light')
@@ -13433,6 +13446,7 @@ describe('AppShell', () => {
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('终端'))!.trigger('click')
     await workspace.vm.$nextTick()
+    expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
     expect(workspace.text()).toContain('终端类型')
     expect(workspace.text()).toContain('字体只有系统已安装或能匹配到对应字体时才会明显变化')
     expect(workspace.text()).toContain('DejaVu Sans Mono')
@@ -13486,6 +13500,7 @@ describe('AppShell', () => {
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('模型'))!.trigger('click')
     await workspace.vm.$nextTick()
+    expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
     expect(workspace.text()).toContain('模型名称')
     expect(workspace.text()).toContain('LiteLLM')
     expect(workspace.text()).toContain('OpenAI Compatible & Responses')
@@ -13601,6 +13616,7 @@ describe('AppShell', () => {
 
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('AI 偏好设置'))!.trigger('click')
     await workspace.vm.$nextTick()
+    expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
     expect(workspace.text()).toContain('启用 Extended Thinking')
     expect(workspace.text()).toContain('OpenAI Reasoning Effort')
     expect(workspace.find('.settings-number.wide').attributes('max')).toBe('300')
@@ -14131,6 +14147,7 @@ describe('AppShell', () => {
     const clickNav = async (label: string) => {
       await panel.findAll('.settings-nav-item').find((item) => item.text().includes(label))!.trigger('click')
       await workspace.vm.$nextTick()
+      expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
     }
 
     await clickNav('扩展')
