@@ -419,6 +419,44 @@ export type AiopsAssetSnapshot = {
   folders: AiopsCustomFolderRecord[]
 }
 
+export type ExternalCodexMcpHost = {
+  assetId: string
+  name: string
+  title: string
+  host: string
+  port: number
+  username: string
+  group?: string
+  tags: string[]
+  authType: AiopsAssetAuthType
+  authMethods: string[]
+  needProxy?: boolean
+  proxyName?: string
+  jumpHostId?: string
+  jumpHostName?: string
+  status?: AiopsAssetRecord['status']
+}
+
+export type ExternalCodexMcpConnection = {
+  connectionId: string
+  assetId: string
+  owner: 'external_codex'
+  visible: false
+  status: 'connecting' | 'connected' | 'closed' | 'error'
+  host: string
+  port: number
+  username: string
+  title: string
+  cwd?: string
+  createdAt: number
+  lastUsedAt: number
+  errorMessage?: string
+}
+
+export type ExternalCodexMcpResponse<T extends Record<string, unknown> = Record<string, unknown>> = AiopsMutationResult<T> & {
+  target?: Record<string, unknown>
+}
+
 export type AiopsOrganizationAssetRefreshInput = {
   organizationId?: string
 }

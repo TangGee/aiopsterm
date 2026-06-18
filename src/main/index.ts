@@ -57,6 +57,7 @@ import {
   updateCodexTerminalBridgeSessionTarget,
   unregisterCodexTerminalBridgeSession
 } from './backend/codexTerminalBridge'
+import { closeExternalCodexMcpBridgeServer, ensureExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
@@ -1448,6 +1449,21 @@ configureSshTerminalBackendRuntime({
   getSshControlDir: () => join(app.getPath('userData'), 'ssh-control'),
   useBackendDouble: shouldUseSshTerminalBackendDouble()
 })
+void ensureExternalCodexMcpBridgeServer({
+  enabled: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1',
+  token: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN,
+  socketPath: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET,
+  userDataPath: app.getPath('userData')
+})
+  .then((externalCodexMcpSocketPath) => {
+    if (!externalCodexMcpSocketPath) return
+    logRuntimeEvent('info', 'external-codex-mcp.started', { socketPath: externalCodexMcpSocketPath })
+  })
+  .catch((error) => {
+    logRuntimeEvent('error', 'external-codex-mcp.start-failed', {
+      errorMessage: error instanceof Error ? error.message : String(error)
+    })
+  })
 configureExtensionBackendRuntime({
   extensionRootDir: join(app.getPath('userData'), 'extensions'),
   fetch: (url, init) => net.fetch(url, init)
@@ -4144,6 +4160,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   closeCodexTerminalBridgeServer()
+  closeExternalCodexMcpBridgeServer()
   sessions.forEach((session) => {
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).kill()
@@ -4159,6 +4176,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   closeCodexTerminalBridgeServer()
+  closeExternalCodexMcpBridgeServer()
   securityConfigWatcher?.close()
   securityConfigWatcher = null
   keywordHighlightConfigWatcher?.close()

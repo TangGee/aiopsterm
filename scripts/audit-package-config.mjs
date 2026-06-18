@@ -39,6 +39,8 @@ const mustContain = [
   'to: icons',
   'from: resources/codex-aiopsterm-mcp.js',
   'to: codex-aiopsterm-mcp.js',
+  'from: resources/aiopsterm-external-codex-mcp.js',
+  'to: aiopsterm-external-codex-mcp.js',
   'afterPack: scripts/prune-packaged-native-modules.mjs',
   'schemes:',
   '- aiopsterm'
