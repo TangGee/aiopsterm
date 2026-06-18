@@ -10,7 +10,7 @@ type TestConfigDefaults = {
   modelName: string
 }
 
-let normalizeConfigModelProvider: (value: unknown, defaults: TestConfigDefaults) => 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'bedrock' | 'deepseek' | 'anthropic'
+let normalizeConfigModelProvider: (value: unknown, defaults: TestConfigDefaults) => 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'lmstudio' | 'bedrock' | 'deepseek' | 'anthropic'
 let normalizeConfigModelName: (value: unknown, defaults: TestConfigDefaults) => string
 let isLegacyLocalModelProvider: (value: unknown) => boolean
 let isLegacyLocalModelName: (value: unknown) => boolean
@@ -39,6 +39,7 @@ describe('main config boundary model normalization', () => {
 
   it('keeps valid provider model choices and rejects malformed providers', () => {
     expect(normalizeConfigModelProvider('ollama', defaults)).toBe('ollama')
+    expect(normalizeConfigModelProvider('lmstudio', defaults)).toBe('lmstudio')
     expect(normalizeConfigModelName('qwen2.5-coder', defaults)).toBe('qwen2.5-coder')
     expect(normalizeConfigModelProvider('unsupported-provider', defaults)).toBe('local')
     expect(normalizeConfigModelName('', defaults)).toBe('aiopsterm-local-agent')

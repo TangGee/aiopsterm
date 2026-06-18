@@ -1312,7 +1312,7 @@ export type ModelProviderUserConfig = {
   awsBedrockEndpoint?: string
 }
 
-export type ModelProviderCheckKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
+export type ModelProviderCheckKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama' | 'lmstudio'
 
 export type ModelProviderCheckInput = {
   provider: ModelProviderCheckKey
@@ -1365,6 +1365,7 @@ export type ModelSettingsUserConfig = {
     deepseek: ModelProviderUserConfig
     anthropic: ModelProviderUserConfig
     ollama: ModelProviderUserConfig
+    lmstudio: ModelProviderUserConfig
   }
   options: ModelOptionUserConfig[]
 }
@@ -1944,7 +1945,7 @@ export type UserConfig = {
   leftPanelWidth?: number
   rightPanelWidth?: number
   agentsLeftWidth?: number
-  modelProvider: 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'bedrock' | 'deepseek' | 'anthropic'
+  modelProvider: 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'lmstudio' | 'bedrock' | 'deepseek' | 'anthropic'
   modelEndpoint: string
   modelName: string
   watermark: 'open' | 'close'

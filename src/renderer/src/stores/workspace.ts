@@ -2077,7 +2077,8 @@ const normalizeModelSettingsConfig = (source?: unknown, fallbackOptions: ModelOp
     bedrock: normalizeModelProviderConfig(incomingProviders.bedrock, defaultModelSettingsConfig.providers.bedrock),
     deepseek: normalizeModelProviderConfig(incomingProviders.deepseek, defaultModelSettingsConfig.providers.deepseek),
     anthropic: normalizeModelProviderConfig(incomingProviders.anthropic, defaultModelSettingsConfig.providers.anthropic),
-    ollama: normalizeModelProviderConfig(incomingProviders.ollama, defaultModelSettingsConfig.providers.ollama)
+    ollama: normalizeModelProviderConfig(incomingProviders.ollama, defaultModelSettingsConfig.providers.ollama),
+    lmstudio: normalizeModelProviderConfig(incomingProviders.lmstudio, defaultModelSettingsConfig.providers.lmstudio)
   }
 
   const { normalized: options, changed: optionsChanged } = normalizeModelSettingsOptions(incoming.options, fallbackOptions)
@@ -2123,6 +2124,7 @@ const modelSettingsSnapshotsMatch = (left: ModelSettingsUserConfig, right: Model
   modelProviderSettingsMatch(left.providers.deepseek, right.providers.deepseek) &&
   modelProviderSettingsMatch(left.providers.anthropic, right.providers.anthropic) &&
   modelProviderSettingsMatch(left.providers.ollama, right.providers.ollama) &&
+  modelProviderSettingsMatch(left.providers.lmstudio, right.providers.lmstudio) &&
   modelOptionsSnapshotsMatch(left.options, right.options)
 
 const modelOptionProviderForSavedProvider = (provider: ModelProviderKey): string => (provider === 'openai' ? 'openai' : provider)
@@ -3319,7 +3321,17 @@ const normalizeMcpServersConfig = (source?: unknown, toolStatesSource?: unknown)
 const normalizeUserModelProvider = (value: unknown): UserConfig['modelProvider'] => {
   const provider = String(value || '').trim()
   if (!provider || provider === 'local') return 'local'
-  if (provider === 'litellm' || provider === 'openai-compatible' || provider === 'ollama' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic') return provider
+  if (
+    provider === 'litellm' ||
+    provider === 'openai-compatible' ||
+    provider === 'ollama' ||
+    provider === 'lmstudio' ||
+    provider === 'bedrock' ||
+    provider === 'deepseek' ||
+    provider === 'anthropic'
+  ) {
+    return provider
+  }
   return defaultConfig.modelProvider
 }
 
@@ -3668,6 +3680,11 @@ const defaultModelProviders: Record<ModelProviderKey, ModelProviderSettings> = {
     baseUrl: 'http://localhost:11434',
     apiKey: '',
     modelId: 'llama3.1'
+  },
+  lmstudio: {
+    baseUrl: 'http://localhost:1234',
+    apiKey: '',
+    modelId: 'openai/gpt-oss-20b'
   }
 }
 
@@ -4308,7 +4325,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bedrock: { ...defaultModelProviders.bedrock },
     deepseek: { ...defaultModelProviders.deepseek },
     anthropic: { ...defaultModelProviders.anthropic },
-    ollama: { ...defaultModelProviders.ollama }
+    ollama: { ...defaultModelProviders.ollama },
+    lmstudio: { ...defaultModelProviders.lmstudio }
   })
   const modelCheckState = ref<Record<ModelProviderKey, 'idle' | 'checking' | 'success' | 'error'>>({
     litellm: 'idle',
@@ -4316,7 +4334,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bedrock: 'idle',
     deepseek: 'idle',
     anthropic: 'idle',
-    ollama: 'idle'
+    ollama: 'idle',
+    lmstudio: 'idle'
   })
   const modelCheckRequestSeq = ref<Record<ModelProviderKey, number>>({
     litellm: 0,
@@ -4324,7 +4343,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bedrock: 0,
     deepseek: 0,
     anthropic: 0,
-    ollama: 0
+    ollama: 0,
+    lmstudio: 0
   })
   const aiPreferences = ref<AiPreferenceSettings>({
     ...defaultAiPreferences,
@@ -5578,7 +5598,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       bedrock: { ...modelProviders.value.bedrock },
       deepseek: { ...modelProviders.value.deepseek },
       anthropic: { ...modelProviders.value.anthropic },
-      ollama: { ...modelProviders.value.ollama }
+      ollama: { ...modelProviders.value.ollama },
+      lmstudio: { ...modelProviders.value.lmstudio }
     },
     options: settingModelOptions.value.filter(isVisibleModelSettingsOption).map((option) => ({
       name: option.name,
@@ -5650,7 +5671,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       bedrock: { ...normalized.providers.bedrock },
       deepseek: { ...normalized.providers.deepseek },
       anthropic: { ...normalized.providers.anthropic },
-      ollama: { ...normalized.providers.ollama }
+      ollama: { ...normalized.providers.ollama },
+      lmstudio: { ...normalized.providers.lmstudio }
     }
     applyModelOptionSettingsSnapshot(normalized)
     return normalized
@@ -6871,7 +6893,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       bedrock: 'bedrock',
       deepseek: 'deepseek',
       anthropic: 'anthropic',
-      ollama: 'ollama'
+      ollama: 'ollama',
+      lmstudio: 'lmstudio'
     }
     const providerLabel: Record<ModelProviderKey, string> = {
       litellm: 'LiteLLM',
@@ -6879,7 +6902,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       bedrock: 'Amazon Bedrock',
       deepseek: 'DeepSeek',
       anthropic: 'Anthropic',
-      ollama: 'Ollama'
+      ollama: 'Ollama',
+      lmstudio: 'LM Studio'
     }
     const nextModelSettings = getModelSettingsSnapshotWithProviderModel(provider, configPatch)
     try {

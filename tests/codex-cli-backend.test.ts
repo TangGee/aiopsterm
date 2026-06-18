@@ -120,7 +120,8 @@ const createConfigWithModelProvider = (patch: Partial<UserConfig> = {}): UserCon
         bedrock: { baseUrl: '', apiKey: '', modelId: '' },
         deepseek: { baseUrl: '', apiKey: '', modelId: '' },
         anthropic: { baseUrl: '', apiKey: '', modelId: '' },
-        ollama: { baseUrl: '', apiKey: '', modelId: '' }
+        ollama: { baseUrl: '', apiKey: '', modelId: '' },
+        lmstudio: { baseUrl: '', apiKey: '', modelId: '' }
       },
       options: [{ name: 'ark-code-latest', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }]
     },
@@ -478,6 +479,195 @@ describe('Codex CLI backend runtime', () => {
         baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
         apiKeyEnv: 'AIOPSTERM_CODEX_API_KEY',
         apiKey: 'ark-secret-token'
+      })
+    )
+  })
+
+  it('configures Codex built-in Ollama provider from selected aiopsterm Ollama settings', async () => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    const writeFileCalls: Array<{ path: string; content: string }> = []
+
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      getConfig: () =>
+        createConfigWithModelProvider({
+          modelProvider: 'ollama',
+          modelName: 'qwen2.5-coder',
+          modelSettings: {
+            ...createConfigWithModelProvider().modelSettings!,
+            providers: {
+              ...createConfigWithModelProvider().modelSettings!.providers,
+              ollama: {
+                baseUrl: 'http://127.0.0.1:11434',
+                apiKey: '',
+                modelId: 'qwen2.5-coder'
+              }
+            },
+            options: [{ name: 'qwen2.5-coder', locked: false, checked: true, type: 'custom', apiProvider: 'ollama' }]
+          }
+        }),
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
+      mkdir: async () => undefined,
+      writeFile: async (path: string, content: string) => {
+        writeFileCalls.push({ path: String(path), content: String(content) })
+      },
+      loadPty: () => ({
+        spawn: (file: string, args: string[], options: Record<string, unknown>) => {
+          spawnCalls.push({ file, args, options })
+          return pty
+        }
+      })
+    })
+
+    await backend.createCodexSession('codex-ollama-provider', {}, createSink(createRecorder()))
+
+    const configToml = writeFileCalls.at(-1)?.content || ''
+    expect(configToml).toContain('model = "qwen2.5-coder"')
+    expect(configToml).toContain('model_provider = "ollama"')
+    expect(configToml).not.toContain('[model_providers.ollama]')
+    expect(spawnCalls[0].options).toEqual(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          CODEX_OSS_BASE_URL: 'http://127.0.0.1:11434/v1'
+        })
+      })
+    )
+  })
+
+  it('configures Codex built-in LM Studio provider from selected aiopsterm LM Studio settings', async () => {
+    const configBackend = await loadConfigBackend()
+    const provider = configBackend.resolveAiopstermCodexProviderConfig(
+      createConfigWithModelProvider({
+        modelProvider: 'lmstudio',
+        modelName: 'openai/gpt-oss-20b',
+        modelSettings: {
+          ...createConfigWithModelProvider().modelSettings!,
+          providers: {
+            ...createConfigWithModelProvider().modelSettings!.providers,
+            lmstudio: {
+              baseUrl: 'http://127.0.0.1:1234',
+              apiKey: '',
+              modelId: 'openai/gpt-oss-20b'
+            }
+          },
+          options: [{ name: 'openai/gpt-oss-20b', locked: false, checked: true, type: 'custom', apiProvider: 'lmstudio' }]
+        }
+      })
+    )
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        providerId: 'lmstudio',
+        model: 'openai/gpt-oss-20b',
+        env: expect.objectContaining({
+          CODEX_OSS_BASE_URL: 'http://127.0.0.1:1234/v1'
+        })
+      })
+    )
+  })
+
+  it('configures Codex Amazon Bedrock only for supported OpenAI Bedrock models', async () => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    const writeFileCalls: Array<{ path: string; content: string }> = []
+
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      getConfig: () =>
+        createConfigWithModelProvider({
+          modelProvider: 'bedrock',
+          modelName: 'openai.gpt-5.5',
+          modelSettings: {
+            ...createConfigWithModelProvider().modelSettings!,
+            providers: {
+              ...createConfigWithModelProvider().modelSettings!.providers,
+              bedrock: {
+                baseUrl: '',
+                apiKey: 'bedrock-api-key',
+                modelId: 'openai.gpt-5.5',
+                awsAccessKey: 'AKIA-CODEX',
+                awsSecretKey: 'aws-secret',
+                awsSessionToken: 'session-token',
+                awsRegion: 'us-east-2'
+              }
+            },
+            options: [{ name: 'openai.gpt-5.5', locked: false, checked: true, type: 'custom', apiProvider: 'bedrock' }]
+          }
+        }),
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
+      mkdir: async () => undefined,
+      writeFile: async (path: string, content: string) => {
+        writeFileCalls.push({ path: String(path), content: String(content) })
+      },
+      loadPty: () => ({
+        spawn: (file: string, args: string[], options: Record<string, unknown>) => {
+          spawnCalls.push({ file, args, options })
+          return pty
+        }
+      })
+    })
+
+    await backend.createCodexSession('codex-bedrock-provider', {}, createSink(createRecorder()))
+
+    const configToml = writeFileCalls.at(-1)?.content || ''
+    expect(configToml).toContain('model = "openai.gpt-5.5"')
+    expect(configToml).toContain('model_provider = "amazon-bedrock"')
+    expect(configToml).toContain('[model_providers.amazon-bedrock.aws]')
+    expect(configToml).toContain('region = "us-east-2"')
+    expect(configToml).not.toContain('bedrock-api-key')
+    expect(configToml).not.toContain('aws-secret')
+    expect(spawnCalls[0].options).toEqual(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          AWS_BEARER_TOKEN_BEDROCK: 'bedrock-api-key',
+          AWS_ACCESS_KEY_ID: 'AKIA-CODEX',
+          AWS_SECRET_ACCESS_KEY: 'aws-secret',
+          AWS_SESSION_TOKEN: 'session-token',
+          AWS_REGION: 'us-east-2'
+        })
+      })
+    )
+  })
+
+  it('falls back to OpenAI Responses for non-Codex Bedrock Runtime models', async () => {
+    const configBackend = await loadConfigBackend()
+    const provider = configBackend.resolveAiopstermCodexProviderConfig(
+      createConfigWithModelProvider({
+        modelProvider: 'bedrock',
+        modelName: 'anthropic.claude-3-haiku-20240307-v1:0',
+        modelSettings: {
+          ...createConfigWithModelProvider().modelSettings!,
+          providers: {
+            ...createConfigWithModelProvider().modelSettings!.providers,
+            bedrock: {
+              baseUrl: '',
+              apiKey: '',
+              modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+              awsAccessKey: 'AKIA-CODEX',
+              awsSecretKey: 'aws-secret',
+              awsRegion: 'us-east-2'
+            }
+          },
+          options: [{ name: 'anthropic.claude-3-haiku-20240307-v1:0', locked: false, checked: true, type: 'custom', apiProvider: 'bedrock' }]
+        }
+      })
+    )
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        providerId: 'aiopsterm_openai_responses',
+        model: 'ark-code-latest'
       })
     )
   })

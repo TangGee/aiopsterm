@@ -7605,7 +7605,7 @@ Object.defineProperty(window, 'aiops', {
     listAiModels: vi.fn(async (input?: { modelSettings?: typeof defaultModelSettings; localChatBackendAvailable?: boolean }) => cloneAiModelCatalog(input)),
     checkModelProvider: vi.fn(
       async (input: {
-        provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
+        provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama' | 'lmstudio'
         config: { baseUrl: string; apiKey: string; modelId: string; awsRegion?: string; awsEndpointSelected?: boolean; awsBedrockEndpoint?: string }
       }) => {
         const labels = {
@@ -7614,7 +7614,8 @@ Object.defineProperty(window, 'aiops', {
           bedrock: 'Amazon Bedrock',
           deepseek: 'DeepSeek',
           anthropic: 'Anthropic',
-          ollama: 'Ollama'
+          ollama: 'Ollama',
+          lmstudio: 'LM Studio'
         }
         if (!input.config.modelId.trim()) return { ok: false, errorCode: 'MODEL_PROVIDER_MODEL_REQUIRED', errorMessage: 'Model is required.' }
         return {

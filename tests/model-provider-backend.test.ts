@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
 
 let checkModelProvider: (input: {
-  provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
+  provider: 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama' | 'lmstudio'
   config: Record<string, unknown>
   timeoutMs?: number
 }) => Promise<any>
@@ -83,7 +83,8 @@ describe('model provider backend boundary', () => {
         bedrock: { baseUrl: '', apiKey: '', modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0' },
         deepseek: { baseUrl: '', apiKey: '', modelId: 'deepseek-chat' },
         anthropic: { baseUrl: 'https://api.anthropic.com', apiKey: '', modelId: 'claude-3-5-sonnet-latest' },
-        ollama: { baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'qwen2.5-coder' }
+        ollama: { baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'qwen2.5-coder' },
+        lmstudio: { baseUrl: 'http://localhost:1234', apiKey: '', modelId: 'openai/gpt-oss-20b' }
       },
       options: [
         { name: 'gpt-5', locked: true, checked: true, type: 'standard', apiProvider: 'default' },
@@ -242,7 +243,7 @@ describe('model provider backend boundary', () => {
     expect(server.requests[0]).toMatchObject({ method: 'GET', url: '/api/tags' })
   })
 
-  it('validates LiteLLM and DeepSeek through OpenAI-compatible chat completions probes', async () => {
+  it('validates LiteLLM, DeepSeek, and LM Studio through OpenAI-compatible chat completions probes', async () => {
     const server = await startProviderServer((_request, response) => {
       sendJson(response, 200, { id: 'chat-test', choices: [{ message: { content: 'OK' } }] })
     })
@@ -281,9 +282,26 @@ describe('model provider backend boundary', () => {
         endpoint: `${server.baseUrl}/v1/chat/completions`
       }
     })
+    await expect(
+      checkModelProvider({
+        provider: 'lmstudio',
+        config: {
+          baseUrl: server.baseUrl,
+          apiKey: '',
+          modelId: 'openai/gpt-oss-20b'
+        },
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        provider: 'lmstudio',
+        endpoint: `${server.baseUrl}/v1/chat/completions`
+      }
+    })
 
-    expect(server.requests.map((request) => request.url)).toEqual(['/v1/chat/completions', '/v1/chat/completions'])
-    expect(server.requests.map((request) => request.headers.authorization)).toEqual(['Bearer litellm-key', 'Bearer deepseek-key'])
+    expect(server.requests.map((request) => request.url)).toEqual(['/v1/chat/completions', '/v1/chat/completions', '/v1/chat/completions'])
+    expect(server.requests.map((request) => request.headers.authorization)).toEqual(['Bearer litellm-key', 'Bearer deepseek-key', 'Bearer noop'])
   })
 
   it('returns backend failure metadata when Ollama does not list the requested model', async () => {

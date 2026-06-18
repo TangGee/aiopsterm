@@ -1083,7 +1083,8 @@ const cloneModelSettings = (settings?: ModelSettingsUserConfig): ModelSettingsUs
           bedrock: mergeModelProvider(settings.providers?.bedrock, defaultConfig.modelSettings!.providers.bedrock),
           deepseek: mergeModelProvider(settings.providers?.deepseek, defaultConfig.modelSettings!.providers.deepseek),
           anthropic: mergeModelProvider(settings.providers?.anthropic, defaultConfig.modelSettings!.providers.anthropic),
-          ollama: mergeModelProvider(settings.providers?.ollama, defaultConfig.modelSettings!.providers.ollama)
+          ollama: mergeModelProvider(settings.providers?.ollama, defaultConfig.modelSettings!.providers.ollama),
+          lmstudio: mergeModelProvider(settings.providers?.lmstudio, defaultConfig.modelSettings!.providers.lmstudio)
         },
         options: (settings.options || defaultConfig.modelSettings!.options).map((option) => ({ ...option }))
       }

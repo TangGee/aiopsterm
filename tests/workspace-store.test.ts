@@ -126,6 +126,11 @@ const defaultModelSettings = {
       baseUrl: 'http://localhost:11434',
       apiKey: '',
       modelId: 'llama3.1'
+    },
+    lmstudio: {
+      baseUrl: 'http://localhost:1234',
+      apiKey: '',
+      modelId: 'openai/gpt-oss-20b'
     }
   },
   options: [
@@ -3011,6 +3016,7 @@ describe('workspace store', () => {
     expect(store.modelProviders.deepseek).toEqual(defaultModelSettings.providers.deepseek)
     expect(store.modelProviders.anthropic).toEqual(defaultModelSettings.providers.anthropic)
     expect(store.modelProviders.ollama).toEqual(defaultModelSettings.providers.ollama)
+    expect(store.modelProviders.lmstudio).toEqual(defaultModelSettings.providers.lmstudio)
     expect(store.settingModelOptions).toEqual([
       { name: 'custom-a', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }
     ])
@@ -3033,7 +3039,8 @@ describe('workspace store', () => {
             bedrock: defaultModelSettings.providers.bedrock,
             deepseek: defaultModelSettings.providers.deepseek,
             anthropic: defaultModelSettings.providers.anthropic,
-            ollama: defaultModelSettings.providers.ollama
+            ollama: defaultModelSettings.providers.ollama,
+            lmstudio: defaultModelSettings.providers.lmstudio
           },
           options: [{ name: 'custom-a', locked: false, checked: true, type: 'custom', apiProvider: 'openai' }]
         }

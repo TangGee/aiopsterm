@@ -37,7 +37,7 @@ const toDateStamp = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g
 const providerFromRawValue = (value: unknown): ModelProviderCheckKey | null => {
   const provider = normalizeText(value)
   if (provider === 'openai-compatible' || provider === 'openai') return 'openai'
-  if (provider === 'litellm' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic' || provider === 'ollama') {
+  if (provider === 'litellm' || provider === 'bedrock' || provider === 'deepseek' || provider === 'anthropic' || provider === 'ollama' || provider === 'lmstudio') {
     return provider
   }
   return null
@@ -242,6 +242,30 @@ export function createProviderTextRequest(
       parseText: (payload) => {
         if (!isRecord(payload) || !Array.isArray(payload.content)) return ''
         return payload.content.map((part: unknown) => (isRecord(part) && part.type === 'text' ? normalizeText(part.text) : '')).join('')
+      }
+    }
+  }
+
+  if (input.provider === 'lmstudio') {
+    const endpoint = normalizeOpenAiOperationEndpoint(baseUrl || 'http://localhost:1234', 'chat/completions')
+    return {
+      provider: input.provider,
+      config: input.config,
+      endpoint,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
+      body: jsonStringify({
+        model,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        max_tokens: maxTokens
+      }),
+      parseText: (payload) => {
+        if (!isRecord(payload) || !Array.isArray(payload.choices)) return ''
+        const first = payload.choices[0]
+        if (!isRecord(first)) return ''
+        return isRecord(first.message) ? normalizeText(first.message.content) : normalizeText(first.text)
       }
     }
   }

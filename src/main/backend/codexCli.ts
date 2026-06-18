@@ -260,7 +260,7 @@ export const createCodexSession = async (
   const env = {
     ...defaultEnv(),
     ...(runtimeConfig.getEnv?.() || {}),
-    ...(codexProvider ? { [codexProvider.apiKeyEnv]: codexProvider.apiKey } : {}),
+    ...(codexProvider?.env || {}),
     AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
     AIOPSTERM_CODEX_PENDING_CONTEXT_FILE: pendingContextPath,
     ...(codexPackageRoot ? { CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot } : {}),

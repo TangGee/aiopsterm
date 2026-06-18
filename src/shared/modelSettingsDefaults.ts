@@ -44,6 +44,11 @@ export const defaultModelSettingsData = (): ModelSettingsUserConfig => ({
       baseUrl: 'http://localhost:11434',
       apiKey: '',
       modelId: 'llama3.1'
+    },
+    lmstudio: {
+      baseUrl: 'http://localhost:1234',
+      apiKey: '',
+      modelId: 'openai/gpt-oss-20b'
     }
   },
   options: cloneModelOptions(defaultModelOptions)

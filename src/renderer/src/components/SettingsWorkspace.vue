@@ -192,14 +192,15 @@ const cursorStyles = [
   { value: 'bar' as const, label: '竖线光标' },
   { value: 'underline' as const, label: '下划线光标' }
 ]
-type SettingsModelProviderKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama'
+type SettingsModelProviderKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama' | 'lmstudio'
 const modelProviderCards: Array<{ provider: SettingsModelProviderKey; title: string }> = [
   { provider: 'litellm', title: 'LiteLLM' },
   { provider: 'openai', title: 'OpenAI Compatible & Responses' },
   { provider: 'bedrock', title: 'Amazon Bedrock' },
   { provider: 'deepseek', title: 'DeepSeek' },
   { provider: 'anthropic', title: 'Anthropic' },
-  { provider: 'ollama', title: 'Ollama' }
+  { provider: 'ollama', title: 'Ollama' },
+  { provider: 'lmstudio', title: 'LM Studio' }
 ]
 
 const modelProviderLabels: Record<string, string> = {
@@ -209,7 +210,8 @@ const modelProviderLabels: Record<string, string> = {
   bedrock: 'Amazon Bedrock',
   deepseek: 'DeepSeek',
   anthropic: 'Anthropic',
-  ollama: 'Ollama'
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio'
 }
 
 const providerConfigSummary = (model: { name: string; apiProvider?: string; type?: string; locked?: boolean; displayName?: string }) => {
@@ -1765,7 +1767,7 @@ const ProviderCard = defineComponent({
         props.provider === 'openai'
           ? [
               field('OpenAI Base URL', 'baseUrl', { placeholder: 'https://api.openai.com/v1', wide: true }),
-              h('small', { class: 'provider-help' }, '末尾追加 # 可跳过自动 /v1 拼接。'),
+              h('small', { class: 'provider-help' }, '末尾追加 # 可跳过自动 /v1 拼接。Codex CLI 只支持 Responses。'),
               openAiUrlPreview.value ? h('small', { class: 'provider-help url-preview' }, `Preview: ${openAiUrlPreview.value}`) : null,
               h('label', { class: 'provider-field' }, [
                 h('span', 'API Format'),
@@ -1784,6 +1786,7 @@ const ProviderCard = defineComponent({
           : null,
         props.provider === 'bedrock'
           ? [
+              h('small', { class: 'provider-help' }, '普通 AI 对话使用 Bedrock Runtime；Codex CLI 只支持 Amazon Bedrock 上的 OpenAI 模型 openai.gpt-5.5 / openai.gpt-5.4。'),
               h('div', { class: 'provider-grid two' }, [
                 field('AWS Access Key', 'awsAccessKey', { placeholder: 'AKIA...' }),
                 field('AWS Secret Key', 'awsSecretKey', { type: 'password' }),
@@ -1812,7 +1815,15 @@ const ProviderCard = defineComponent({
         props.provider === 'anthropic'
           ? [field('Anthropic Base URL', 'baseUrl', { placeholder: 'https://api.anthropic.com', wide: true }), field('Anthropic API Key', 'apiKey', { type: 'password' })]
           : null,
-        props.provider === 'ollama' ? field('Ollama Base URL', 'baseUrl', { placeholder: 'http://localhost:11434', wide: true }) : null,
+        props.provider === 'ollama'
+          ? [field('Ollama Base URL', 'baseUrl', { placeholder: 'http://localhost:11434', wide: true }), h('small', { class: 'provider-help' }, 'Codex CLI 使用内置 ollama provider，地址会按 OpenAI-compatible /v1 路径传入。')]
+          : null,
+        props.provider === 'lmstudio'
+          ? [
+              field('LM Studio Base URL', 'baseUrl', { placeholder: 'http://localhost:1234', wide: true }),
+              h('small', { class: 'provider-help' }, '需要 LM Studio 启用 OpenAI Compatible Server。Codex CLI 使用内置 lmstudio provider。')
+            ]
+          : null,
         props.provider === 'litellm' || props.provider === 'openai' ? field('API Key', 'apiKey', { type: 'password' }) : null,
         h('label', { class: 'provider-field' }, [
           h('span', 'Model'),

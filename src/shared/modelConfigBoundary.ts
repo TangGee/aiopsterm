@@ -7,6 +7,7 @@ const modelProviders = new Set<UserConfig['modelProvider']>([
   'litellm',
   'openai-compatible',
   'ollama',
+  'lmstudio',
   'bedrock',
   'deepseek',
   'anthropic'

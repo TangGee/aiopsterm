@@ -27,7 +27,7 @@ const cloneModelCatalog = (catalog: AiModelCatalog): AiModelCatalog => ({
 const normalizeText = (value: unknown) => String(value || '').trim()
 
 const modelOptionTypes = new Set(['standard', 'custom'])
-const modelProviderKeys = new Set(['default', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama'])
+const modelProviderKeys = new Set(['default', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama', 'lmstudio'])
 
 const providerLabels: Record<ModelProviderCheckKey, string> = {
   litellm: 'LiteLLM',
@@ -35,7 +35,8 @@ const providerLabels: Record<ModelProviderCheckKey, string> = {
   bedrock: 'Amazon Bedrock',
   deepseek: 'DeepSeek',
   anthropic: 'Anthropic',
-  ollama: 'Ollama'
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio'
 }
 
 const normalizeModelOption = (value: unknown): ModelOptionUserConfig | null => {
@@ -73,7 +74,7 @@ const normalizeSettingsOptions = (value: unknown): ModelOptionUserConfig[] => {
 const configuredProviderModelIds = (settings?: ModelSettingsUserConfig) => {
   const providers = settings?.providers
   return new Set(
-    [providers?.litellm, providers?.openai, providers?.bedrock, providers?.deepseek, providers?.anthropic, providers?.ollama]
+    [providers?.litellm, providers?.openai, providers?.bedrock, providers?.deepseek, providers?.anthropic, providers?.ollama, providers?.lmstudio]
       .map((provider) => normalizeText(provider?.modelId))
       .filter(Boolean)
   )
@@ -121,7 +122,8 @@ const defaultEndpoints: Record<ModelProviderCheckKey, string> = {
   bedrock: 'bedrock-runtime',
   deepseek: 'https://api.deepseek.com',
   anthropic: 'https://api.anthropic.com',
-  ollama: 'http://localhost:11434'
+  ollama: 'http://localhost:11434',
+  lmstudio: 'http://localhost:1234'
 }
 
 const normalizeOpenAiEndpoint = (baseUrl: string, apiFormat: ModelProviderUserConfig['apiFormat']) => {
@@ -180,7 +182,7 @@ const validateUrl = (value: string, field: string): string | null => {
 }
 
 const missingSecretMessage = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
-  if (provider === 'ollama') return ''
+  if (provider === 'ollama' || provider === 'lmstudio') return ''
   if (!normalizeText(config.apiKey) && provider !== 'bedrock') return 'API key is required.'
   if (provider === 'bedrock' && (!normalizeText(config.awsAccessKey) || !normalizeText(config.awsSecretKey))) {
     return 'AWS access key and secret key are required.'
@@ -203,6 +205,7 @@ const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserC
   if (provider === 'deepseek') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.deepseek, 'chat/completions')
   if (provider === 'anthropic') return appendEndpointPath(baseUrl || defaultEndpoints.anthropic, 'v1/messages')
   if (provider === 'ollama') return appendEndpointPath(baseUrl || defaultEndpoints.ollama, 'api/tags')
+  if (provider === 'lmstudio') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.lmstudio, 'chat/completions')
   return baseUrl || defaultEndpoints[provider]
 }
 

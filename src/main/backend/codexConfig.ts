@@ -5,6 +5,7 @@ import { resolveModelProvider } from './modelProviderText'
 
 const codexOpenAiProviderId = 'aiopsterm_openai_responses'
 const codexOpenAiApiKeyEnv = 'AIOPSTERM_CODEX_API_KEY'
+const codexSupportedBedrockModels = new Set(['openai.gpt-5.5', 'openai.gpt-5.4'])
 
 const tomlString = (value: string) => JSON.stringify(value)
 
@@ -17,11 +18,13 @@ const normalizePort = (value: unknown) => {
 
 export type AiopstermCodexProviderConfig = {
   providerId: string
-  name: string
   model: string
-  baseUrl: string
-  apiKeyEnv: string
-  apiKey: string
+  name?: string
+  baseUrl?: string
+  apiKeyEnv?: string
+  apiKey?: string
+  awsRegion?: string
+  env?: Record<string, string>
 }
 
 const normalizeOpenAiBaseUrl = (baseUrl: string) => {
@@ -60,9 +63,77 @@ export const normalizeCodexResponsesBaseUrl = (baseUrl: string) => {
   return normalized
 }
 
+const normalizeCodexOssBaseUrl = (baseUrl: string, fallback: string) => {
+  const normalized = normalizeCodexResponsesBaseUrl(normalizeText(baseUrl) || fallback)
+  return normalized || fallback
+}
+
+const hasAwsAuthConfig = (providerConfig: NonNullable<ReturnType<typeof resolveModelProvider>>['config']) =>
+  Boolean(
+    normalizeText(providerConfig.apiKey) ||
+      normalizeText(providerConfig.awsAccessKey) ||
+      normalizeText(providerConfig.awsSecretKey) ||
+      normalizeText(providerConfig.awsSessionToken)
+  )
+
+const resolveBedrockCodexProviderConfig = (
+  providerConfig: NonNullable<ReturnType<typeof resolveModelProvider>>['config'],
+  modelName: string
+): AiopstermCodexProviderConfig | null => {
+  const model = normalizeText(providerConfig.modelId) || normalizeText(modelName)
+  if (!codexSupportedBedrockModels.has(model)) return null
+  const awsRegion = normalizeText(providerConfig.awsRegion) || 'us-east-1'
+  const env: Record<string, string> = {
+    AWS_REGION: awsRegion,
+    AWS_DEFAULT_REGION: awsRegion
+  }
+  const bedrockApiKey = normalizeText(providerConfig.apiKey)
+  const accessKey = normalizeText(providerConfig.awsAccessKey)
+  const secretKey = normalizeText(providerConfig.awsSecretKey)
+  const sessionToken = normalizeText(providerConfig.awsSessionToken)
+  if (bedrockApiKey) env.AWS_BEARER_TOKEN_BEDROCK = bedrockApiKey
+  if (accessKey) env.AWS_ACCESS_KEY_ID = accessKey
+  if (secretKey) env.AWS_SECRET_ACCESS_KEY = secretKey
+  if (sessionToken) env.AWS_SESSION_TOKEN = sessionToken
+  return {
+    providerId: 'amazon-bedrock',
+    model,
+    awsRegion,
+    ...(hasAwsAuthConfig(providerConfig) ? { env } : { env: { AWS_REGION: awsRegion, AWS_DEFAULT_REGION: awsRegion } })
+  }
+}
+
 export const resolveAiopstermCodexProviderConfig = (config?: UserConfig | null): AiopstermCodexProviderConfig | null => {
   if (!config) return null
   const resolved = resolveModelProvider(config)
+  if (resolved?.provider === 'ollama') {
+    const model = normalizeText(resolved.config.modelId) || normalizeText(resolved.modelName)
+    if (model) {
+      return {
+        providerId: 'ollama',
+        model,
+        env: {
+          CODEX_OSS_BASE_URL: normalizeCodexOssBaseUrl(resolved.config.baseUrl, 'http://localhost:11434/v1')
+        }
+      }
+    }
+  }
+  if (resolved?.provider === 'lmstudio') {
+    const model = normalizeText(resolved.config.modelId) || normalizeText(resolved.modelName)
+    if (model) {
+      return {
+        providerId: 'lmstudio',
+        model,
+        env: {
+          CODEX_OSS_BASE_URL: normalizeCodexOssBaseUrl(resolved.config.baseUrl, 'http://localhost:1234/v1')
+        }
+      }
+    }
+  }
+  if (resolved?.provider === 'bedrock') {
+    const provider = resolveBedrockCodexProviderConfig(resolved.config, resolved.modelName)
+    if (provider) return provider
+  }
   const fallbackOpenAi = config.modelSettings?.providers?.openai
   const providerConfig = resolved?.provider === 'openai' ? resolved.config : fallbackOpenAi
   if (!providerConfig || providerConfig.apiFormat !== 'responses') return null
@@ -76,7 +147,10 @@ export const resolveAiopstermCodexProviderConfig = (config?: UserConfig | null):
     model,
     baseUrl,
     apiKeyEnv: codexOpenAiApiKeyEnv,
-    apiKey
+    apiKey,
+    env: {
+      [codexOpenAiApiKeyEnv]: apiKey
+    }
   }
 }
 
@@ -183,16 +257,20 @@ export const buildAiopstermCodexConfigToml = (input: {
   const baseInstructions = buildAiopstermBaseInstructions()
   const developerInstructions = buildAiopstermDeveloperInstructions(input.target)
   const providerSelection = input.provider ? [`model = ${tomlString(input.provider.model)}`, `model_provider = ${tomlString(input.provider.providerId)}`] : []
-  const providerTable = input.provider
+  const providerTable = input.provider?.baseUrl && input.provider.apiKeyEnv
     ? [
         `[model_providers.${input.provider.providerId}]`,
-        `name = ${tomlString(input.provider.name)}`,
+        `name = ${tomlString(input.provider.name || input.provider.providerId)}`,
         `base_url = ${tomlString(input.provider.baseUrl)}`,
         `env_key = ${tomlString(input.provider.apiKeyEnv)}`,
         'wire_api = "responses"',
         ''
       ]
     : []
+  const bedrockTable =
+    input.provider?.providerId === 'amazon-bedrock' && input.provider.awsRegion
+      ? ['[model_providers.amazon-bedrock.aws]', `region = ${tomlString(input.provider.awsRegion)}`, '']
+      : []
   return [
     '# Generated by aiopsterm. Do not edit while aiopsterm is running.',
     `instructions = ${tomlString(baseInstructions)}`,
@@ -209,6 +287,7 @@ export const buildAiopstermCodexConfigToml = (input: {
     'sandbox_mode = "read-only"',
     '',
     ...providerTable,
+    ...bedrockTable,
     '[features]',
     'shell_tool = false',
     'unified_exec = false',
