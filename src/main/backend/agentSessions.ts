@@ -158,6 +158,12 @@ export const agentSessionSocketPathFor = (userDataPath: string) => {
   return join(userDataPath, 'agent-sessions', `aiopsterm-agent-sessions-${process.pid}.sock`)
 }
 
+export const agentHookScriptPathFor = (appPath: string, resourcesPath: string) => {
+  const scriptName = 'aiopsterm-agent-hook.js'
+  const candidates = [join(resourcesPath, scriptName), join(resourcesPath, 'resources', scriptName), join(appPath, 'resources', scriptName)]
+  return candidates.find((candidate) => existsSync(candidate)) || candidates[0]
+}
+
 export const getAiAgentSessionSocketPath = () => socketPath
 
 export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSessionSocketRuntime) => {

@@ -59,6 +59,7 @@ import {
 } from './backend/codexTerminalBridge'
 import { closeExternalCodexMcpBridgeServer, ensureExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
 import {
+  agentHookScriptPathFor,
   closeAiAgentSessionServer,
   ensureAiAgentSessionServer,
   getAiAgentSessionSocketPath,
@@ -1454,7 +1455,8 @@ configureLocalTerminalBackendRuntime({
   getDefaultShell,
   getDefaultCwd: () => app.getPath('home'),
   getEnv: () => process.env,
-  getAgentSocketPath: getAiAgentSessionSocketPath
+  getAgentSocketPath: getAiAgentSessionSocketPath,
+  getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '')
 })
 configureCodexCliRuntime({
   getUserDataPath: () => app.getPath('userData'),

@@ -14,8 +14,19 @@ Every aiopsterm-created local shell receives these environment variables:
 - `AIOPSTERM_SURFACE_ID`
 - `AIOPSTERM_WORKSPACE_ID`
 - `AIOPSTERM_AGENT_SOCKET_PATH`
+- `AIOPSTERM_AGENT_HOOK_PATH`
 
 Agent hooks can use `AIOPSTERM_AGENT_SOCKET_PATH` to send newline-delimited JSON events to the running app.
+
+`AIOPSTERM_AGENT_HOOK_PATH` points to aiopsterm's helper script. The helper is intentionally explicit and fail-open: users or future UI flows can wire it into Codex/Claude hooks, but aiopsterm does not silently modify global agent configuration.
+
+Example hook command shape:
+
+```sh
+node "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
+```
+
+The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
 
 ## Event Shape
 
