@@ -58,6 +58,12 @@ import {
   unregisterCodexTerminalBridgeSession
 } from './backend/codexTerminalBridge'
 import { closeExternalCodexMcpBridgeServer, ensureExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
+import {
+  closeAiAgentSessionServer,
+  ensureAiAgentSessionServer,
+  getAiAgentSessionSocketPath,
+  publishAiAgentSessionEvent
+} from './backend/agentSessions'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
   configureChatHistoryBackendRuntime,
@@ -298,6 +304,8 @@ import type {
   AiopsCustomFolderSaveInput,
   AiopsKeychainInput,
   AiopsOrganizationAssetRefreshInput,
+  AiAgentSessionEvent,
+  AiAgentSessionEventInput,
   AiopsUserAvatarPrepareInput,
   AiopsUserCodeInput,
   AiopsUserContactBindInput,
@@ -415,6 +423,10 @@ import type {
   AiopsSshTunnelStartInput,
   AiopsSshTunnelStopInput
 } from '@shared/preload'
+
+if (process.env.NODE_ENV === 'test') {
+  app.disableHardwareAcceleration()
+}
 
 type TerminalSession = {
   id: string
@@ -657,6 +669,17 @@ const sendCodexData = (owner: BrowserWindow, id: string, chunk: string | Buffer)
     bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
   })
   sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(id, chunk))
+}
+
+const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
+  logRuntimeEvent('info', 'ai-agent.event', {
+    source: event.source,
+    event: event.event,
+    sessionId: event.sessionId,
+    panelId: event.panelId,
+    terminalSessionId: event.terminalSessionId
+  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
 }
 
 const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -1430,7 +1453,8 @@ configureSshTunnelBackendRuntime({ getConfig })
 configureLocalTerminalBackendRuntime({
   getDefaultShell,
   getDefaultCwd: () => app.getPath('home'),
-  getEnv: () => process.env
+  getEnv: () => process.env,
+  getAgentSocketPath: getAiAgentSessionSocketPath
 })
 configureCodexCliRuntime({
   getUserDataPath: () => app.getPath('userData'),
@@ -3878,6 +3902,8 @@ const registerIpc = () => {
     return createTerminalKillResult(id, true)
   })
 
+  ipcMain.handle('ai-agent:session-event', (_event, input: AiAgentSessionEventInput) => publishAiAgentSessionEvent(input, broadcastAiAgentSessionEvent))
+
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner) {
@@ -4149,6 +4175,10 @@ app.whenReady().then(async () => {
   registerUserAvatarProtocol()
   registerCustomBackgroundProtocol()
   registerIpc()
+  await ensureAiAgentSessionServer({
+    userDataPath: app.getPath('userData'),
+    emit: broadcastAiAgentSessionEvent
+  })
   await Promise.all([startSecurityConfigWatcher(), startKeywordHighlightConfigWatcher(), startMcpConfigWatcher(), startSkillsWatcher()])
   createWindow()
   const deepLinkArg = findDeepLinkArg(process.argv)
@@ -4162,6 +4192,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  closeAiAgentSessionServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()
   sessions.forEach((session) => {

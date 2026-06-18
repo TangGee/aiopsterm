@@ -94,6 +94,9 @@ import type {
   AppUpdateDownloadResult,
   AppUpdateInstallResult,
   AppUpdateProgressEvent,
+  AiAgentSessionEvent,
+  AiAgentSessionEventName,
+  AiAgentSessionSource,
   AiChatChipContentPart,
   AiChatChipRef,
   AiCommandCatalogOption,
@@ -267,6 +270,21 @@ export type AiAttentionInput = Omit<AiAttentionItem, 'createdAt' | 'priority'> &
 export type AiAttentionFocusRequest = {
   sequence: number
   item: AiAttentionItem | null
+}
+export type ManagedAiSessionState = 'idle' | 'working' | 'needsInput' | 'ended' | 'unknown'
+export type ManagedAiSession = {
+  id: string
+  source: AiAgentSessionSource
+  title: string
+  summary: string
+  state: ManagedAiSessionState
+  lastEvent: AiAgentSessionEventName
+  lastActivityAt: number
+  panelId?: string
+  terminalSessionId?: string
+  workspaceId?: string
+  cwd?: string
+  transcriptPath?: string
 }
 
 export const layoutWidthLimits: {
@@ -4062,6 +4080,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const topNotice = ref('')
   const aiAttentionItems = ref<AiAttentionItem[]>([])
   const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
+  const managedAiSessions = ref<ManagedAiSession[]>([])
+  const managedAiSessionFocusRequest = ref<{ sequence: number; session: ManagedAiSession | null }>({ sequence: 0, session: null })
   const onboardingCompleted = ref<Record<OnboardingModuleId, boolean>>(createDefaultOnboardingCompleted())
   const onboardingActiveTour = ref<OnboardingModuleId | null>(null)
   const onboardingActiveStepIndex = ref(0)
@@ -8193,15 +8213,94 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiAttentionItems.value = aiAttentionItems.value.filter((item) => item.conversationId !== conversationId)
   }
 
+  const aiSessionAttentionId = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `managed-ai:${session.source}:${session.id}`
+
+  const managedAiSessionStateForEvent = (event: AiAgentSessionEventName, previous: ManagedAiSessionState = 'unknown'): ManagedAiSessionState => {
+    if (event === 'session_start') return 'idle'
+    if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
+    if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
+    if (event === 'stop') return 'idle'
+    if (event === 'session_end') return 'ended'
+    return previous
+  }
+
+  const sortedManagedAiSessions = computed(() => [...managedAiSessions.value].sort((first, second) => second.lastActivityAt - first.lastActivityAt))
+  const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput'))
+
+  const upsertManagedAiSession = (event: AiAgentSessionEvent) => {
+    const existing = managedAiSessions.value.find((session) => session.source === event.source && session.id === event.sessionId)
+    const next: ManagedAiSession = {
+      id: event.sessionId,
+      source: event.source,
+      title: event.title || existing?.title || event.source,
+      summary: event.summary || existing?.summary || '',
+      state: managedAiSessionStateForEvent(event.event, existing?.state),
+      lastEvent: event.event,
+      lastActivityAt: event.receivedAt,
+      ...(event.panelId || existing?.panelId ? { panelId: event.panelId || existing?.panelId } : {}),
+      ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
+      ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
+      ...(event.cwd || existing?.cwd ? { cwd: event.cwd || existing?.cwd } : {}),
+      ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {})
+    }
+    managedAiSessions.value = existing
+      ? managedAiSessions.value.map((session) => (session.source === next.source && session.id === next.id ? next : session))
+      : [next, ...managedAiSessions.value]
+
+    if (next.state === 'needsInput') {
+      upsertAiAttentionItem({
+        id: aiSessionAttentionId(next),
+        source: next.source,
+        kind: event.event === 'permission_request' ? 'approval' : 'question',
+        title: next.title,
+        summary: next.summary,
+        sessionId: next.id,
+        surfaceId: next.panelId || next.terminalSessionId,
+        createdAt: event.receivedAt
+      })
+    } else if (next.state === 'idle' || next.state === 'ended') {
+      removeAiAttentionItem(aiSessionAttentionId(next))
+    }
+    return next
+  }
+
+  const markManagedAiSessionHandled = (source: AiAgentSessionSource, sessionId: string) => {
+    const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
+    if (!session) return false
+    const changed = markAiAttentionHandled(aiSessionAttentionId(session))
+    if (session.state === 'needsInput') session.state = 'idle'
+    return changed
+  }
+
+  const focusManagedAiSession = (sessionIdOrPanelId: string) => {
+    const session = managedAiSessions.value.find(
+      (item) => item.id === sessionIdOrPanelId || item.panelId === sessionIdOrPanelId || item.terminalSessionId === sessionIdOrPanelId
+    )
+    if (!session) return null
+    mode.value = 'terminal'
+    const targetId = session.panelId || session.terminalSessionId
+    if (targetId) activateTerminalPanel(targetId)
+    managedAiSessionFocusRequest.value = {
+      sequence: managedAiSessionFocusRequest.value.sequence + 1,
+      session
+    }
+    return session
+  }
+
   const jumpToNextAiAttention = () => {
     const item = currentAiAttentionItem.value
     if (!item) {
-      mode.value = 'agents'
-      agentsLeftOpen.value = true
+      mode.value = 'terminal'
+      activeModule.value = 'aiSessions'
+      leftPanelOpen.value = true
       setTopNotice('没有待处理的 AI 消息')
       return null
     }
-    if (item.surfaceId === 'terminal-ai-panel') {
+    const managedSession = item.id.startsWith('managed-ai:') && item.sessionId ? focusManagedAiSession(item.sessionId) : null
+    if (managedSession) {
+      activeModule.value = 'aiSessions'
+      leftPanelOpen.value = true
+    } else if (item.surfaceId === 'terminal-ai-panel') {
       mode.value = 'terminal'
       activeModule.value = 'workspace'
       rightPanelOpen.value = true
@@ -12940,6 +13039,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (panel.sessionId === event.id) {
       panel.sessionId = undefined
     }
+    if (event.stage === 'closed' || event.stage === 'error') {
+      managedAiSessions.value
+        .filter((session) => session.terminalSessionId === event.id || session.panelId === panel.id)
+        .forEach((session) =>
+          upsertManagedAiSession({
+            source: session.source,
+            event: 'session_end',
+            sessionId: session.id,
+            title: session.title,
+            summary: event.errorMessage || 'Terminal closed',
+            receivedAt: event.at || Date.now(),
+            ...(session.panelId ? { panelId: session.panelId } : {}),
+            terminalSessionId: event.id
+          })
+        )
+    }
     return panel
   }
 
@@ -12956,6 +13071,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     panel.status = event.reason === 'error' || event.reason === 'network' || event.errorMessage ? 'error' : 'closed'
     appendTerminalSegment(panel, `\n[process exited: ${event.code ?? 'unknown'}]\n`, 'output')
+    managedAiSessions.value
+      .filter((session) => session.terminalSessionId === event.id || session.panelId === panel.id)
+      .forEach((session) =>
+        upsertManagedAiSession({
+          source: session.source,
+          event: 'session_end',
+          sessionId: session.id,
+          title: session.title,
+          summary: event.errorMessage || 'Terminal closed',
+          receivedAt: Date.now(),
+          ...(session.panelId ? { panelId: session.panelId } : {}),
+          terminalSessionId: event.id
+        })
+      )
     return panel
   }
 
@@ -14103,7 +14232,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiAttentionUnreadCount,
     currentAiAttentionItem,
     aiAttentionFocusRequest,
+    managedAiSessions,
+    sortedManagedAiSessions,
+    managedAiNeedsInputSessions,
+    managedAiSessionFocusRequest,
     upsertAiAttentionItem,
+    upsertManagedAiSession,
+    markManagedAiSessionHandled,
+    focusManagedAiSession,
     removeAiAttentionItem,
     markAiAttentionHandled,
     clearAiAttentionForConversation,

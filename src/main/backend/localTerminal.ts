@@ -28,6 +28,7 @@ type LocalTerminalRuntimeConfig = {
   getDefaultShell?: () => string
   getDefaultCwd?: () => string
   getEnv?: () => NodeJS.ProcessEnv
+  getAgentSocketPath?: () => string
   getPlatform?: () => NodeJS.Platform
   loadPty?: () => LocalPtyRuntime | null
   processRuntime?: LocalProcessRuntime
@@ -69,6 +70,7 @@ export const configureLocalTerminalBackendRuntime = (config: LocalTerminalRuntim
   runtimeConfig.getDefaultShell = config.getDefaultShell
   runtimeConfig.getDefaultCwd = config.getDefaultCwd
   runtimeConfig.getEnv = config.getEnv
+  runtimeConfig.getAgentSocketPath = config.getAgentSocketPath
   runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
@@ -90,6 +92,7 @@ const cleanManagedContextValue = (value: unknown) => (typeof value === 'string' 
 export const managedLocalTerminalEnvironment = (id: string, options: TerminalCreateOptions, baseEnv: NodeJS.ProcessEnv = getEnv()) => {
   const panelId = cleanManagedContextValue(options.panelId)
   const workspaceId = cleanManagedContextValue(options.workspaceId) || 'local'
+  const agentSocketPath = cleanManagedContextValue(runtimeConfig.getAgentSocketPath?.())
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
     AIOPSTERM_TERMINAL_SESSION_ID: id,
@@ -100,6 +103,7 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
     env.AIOPSTERM_PANEL_ID = panelId
     env.AIOPSTERM_SURFACE_ID = panelId
   }
+  if (agentSocketPath) env.AIOPSTERM_AGENT_SOCKET_PATH = agentSocketPath
   return env
 }
 

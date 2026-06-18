@@ -34,6 +34,7 @@ export type I18nKey =
   | 'common.submit'
   | 'common.system'
   | 'module.workspace'
+  | 'module.aiSessions'
   | 'module.assets'
   | 'module.files'
   | 'module.snippets'
@@ -235,6 +236,7 @@ const zhCN: LocaleMessages = {
   'common.submit': '提交',
   'common.system': '系统',
   'module.workspace': '工作区',
+  'module.aiSessions': 'AI 会话',
   'module.assets': '资产',
   'module.files': '文件',
   'module.snippets': '快捷命令',
@@ -435,6 +437,7 @@ const enUS: LocaleMessages = {
   'common.submit': 'Submit',
   'common.system': 'System',
   'module.workspace': 'Workspace',
+  'module.aiSessions': 'AI Sessions',
   'module.assets': 'Assets',
   'module.files': 'Files',
   'module.snippets': 'Quick Commands',
@@ -621,6 +624,7 @@ const enUS: LocaleMessages = {
 const zhTW: LocaleMessages = {
   ...zhCN,
   'module.workspace': '工作區',
+  'module.aiSessions': 'AI 會話',
   'module.assets': '資產',
   'module.files': '檔案',
   'module.snippets': '快捷命令',

@@ -4,6 +4,7 @@
     :class="{
       'module-panel-native':
         workspace.activeModule === 'workspace' ||
+        workspace.activeModule === 'aiSessions' ||
         workspace.activeModule === 'assets' ||
         workspace.activeModule === 'files' ||
         workspace.activeModule === 'knowledge' ||
@@ -13,6 +14,7 @@
     }"
   >
     <WorkspacePanel v-if="workspace.activeModule === 'workspace'" />
+    <AiSessionsPanel v-else-if="workspace.activeModule === 'aiSessions'" />
     <AssetsPanel
       v-else-if="workspace.activeModule === 'assets'"
       :query="query"
@@ -55,6 +57,7 @@ import { menuItems } from '@/config/navigation'
 import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import WorkspacePanel from '@/components/panels/WorkspacePanel.vue'
+import AiSessionsPanel from '@/components/panels/AiSessionsPanel.vue'
 import AssetsPanel from '@/components/panels/AssetsPanel.vue'
 import FilesPanel from '@/components/panels/FilesPanel.vue'
 import SnippetsPanel from '@/components/panels/SnippetsPanel.vue'

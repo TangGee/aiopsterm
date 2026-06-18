@@ -1,9 +1,10 @@
 import type { Component } from 'vue'
-import { Boxes, Cloud, Code2, Database, FileText, FolderGit2, Plug, Server, Settings, UserCircle } from 'lucide-vue-next'
+import { Boxes, Bot, Cloud, Code2, Database, FileText, FolderGit2, Plug, Server, Settings, UserCircle } from 'lucide-vue-next'
 import type { I18nKey } from '@/i18n'
 
 export type ModuleKey =
   | 'workspace'
+  | 'aiSessions'
   | 'assets'
   | 'files'
   | 'snippets'
@@ -24,6 +25,7 @@ export type MenuItem = {
 
 export const menuItems: MenuItem[] = [
   { key: 'workspace', label: '工作区', labelKey: 'module.workspace', icon: Server, position: 'main' },
+  { key: 'aiSessions', label: 'AI 会话', labelKey: 'module.aiSessions', icon: Bot, position: 'main' },
   { key: 'assets', label: '资产', labelKey: 'module.assets', icon: Cloud, position: 'main' },
   { key: 'files', label: '文件', labelKey: 'module.files', icon: FolderGit2, position: 'main' },
   { key: 'snippets', label: '快捷命令', labelKey: 'module.snippets', icon: Code2, position: 'main' },

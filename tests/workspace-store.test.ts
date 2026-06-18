@@ -402,9 +402,93 @@ describe('workspace store', () => {
     store.agentsLeftOpen = false
 
     expect(store.jumpToNextAiAttention()).toBeNull()
-    expect(store.mode).toBe('agents')
-    expect(store.agentsLeftOpen).toBe(true)
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('aiSessions')
     expect(store.topNotice).toBe('没有待处理的 AI 消息')
+  })
+
+  it('tracks managed AI session events and routes the attention bell through the AI session panel to the owning terminal', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'permission_request',
+      sessionId: 'codex-session-1',
+      title: 'Deploy approval',
+      summary: 'Approve npm test',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      receivedAt: 500
+    })
+
+    expect(store.managedAiNeedsInputSessions).toHaveLength(1)
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.currentAiAttentionItem).toMatchObject({
+      id: 'managed-ai:codex:codex-session-1',
+      kind: 'approval'
+    })
+
+    const item = store.jumpToNextAiAttention()
+
+    expect(item?.id).toBe('managed-ai:codex:codex-session-1')
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('aiSessions')
+    expect(store.activePanelId).toBe('panel-main')
+    expect(store.managedAiSessionFocusRequest.session?.id).toBe('codex-session-1')
+  })
+
+  it('clears managed AI attention when the agent stops or terminal exits', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'notification',
+      sessionId: 'claude-session-1',
+      title: 'Claude waiting',
+      summary: 'Needs input',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      receivedAt: 100
+    })
+    expect(store.aiAttentionUnreadCount).toBe(1)
+
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'stop',
+      sessionId: 'claude-session-1',
+      title: 'Claude waiting',
+      summary: 'Done',
+      receivedAt: 200
+    })
+    expect(store.managedAiSessions[0].state).toBe('idle')
+    expect(store.aiAttentionUnreadCount).toBe(0)
+
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'question',
+      sessionId: 'claude-session-1',
+      title: 'Claude question',
+      summary: 'Choose option',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      receivedAt: 300
+    })
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    store.applyTerminalExit({ id: 'terminal-session-1', code: 0, kind: 'local', reason: 'process' })
+    expect(store.managedAiSessions[0].state).toBe('ended')
+    expect(store.aiAttentionUnreadCount).toBe(0)
   })
 
   it('creates, renames, splits, and closes terminal panels', () => {

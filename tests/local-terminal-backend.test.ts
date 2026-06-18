@@ -22,6 +22,7 @@ type LocalTerminalBackend = {
     getDefaultShell?: () => string
     getDefaultCwd?: () => string
     getEnv?: () => NodeJS.ProcessEnv
+    getAgentSocketPath?: () => string
     getPlatform?: () => NodeJS.Platform
     loadPty?: () => { spawn: (shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }) => MockPtyProcess } | null
     processRuntime?: {
@@ -148,6 +149,7 @@ describe('local terminal backend runtime', () => {
       getDefaultShell: () => '/bin/bash',
       getDefaultCwd: () => '/home/ops',
       getEnv: () => ({ PATH: '/usr/bin' }),
+      getAgentSocketPath: () => '/tmp/aiopsterm-agent.sock',
       getPlatform: () => 'linux',
       loadPty: () => ({
         spawn: (shell, args, options) => {
@@ -190,7 +192,8 @@ describe('local terminal backend runtime', () => {
             AIOPSTERM_PANEL_ID: 'panel-1',
             AIOPSTERM_SURFACE_ID: 'panel-1',
             AIOPSTERM_WORKSPACE_ID: 'workspace',
-            AIOPSTERM_MANAGED_TERMINAL: '1'
+            AIOPSTERM_MANAGED_TERMINAL: '1',
+            AIOPSTERM_AGENT_SOCKET_PATH: '/tmp/aiopsterm-agent.sock'
           })
         })
       })

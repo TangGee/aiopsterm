@@ -24,6 +24,7 @@ import type {
   DatabaseTableInfo,
   AiTodoItem,
   AiTodoSnapshotResult,
+  AiAgentSessionEvent,
   McpServerUserConfig,
   SshAgentKeychainOption,
   TerminalKeyboardInteractiveRequest,
@@ -55,6 +56,7 @@ type TestAppUpdateProgressEvent = {
 }
 
 const appUpdateProgressListeners = new Set<(event: TestAppUpdateProgressEvent) => void>()
+const aiAgentSessionEventListeners = new Set<(event: AiAgentSessionEvent) => void>()
 const terminalKeyboardInteractiveRequestListeners = new Set<(event: TerminalKeyboardInteractiveRequest) => void>()
 const terminalKeyboardInteractiveResultListeners = new Set<(event: TerminalKeyboardInteractiveResult) => void>()
 
@@ -73,6 +75,14 @@ const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
 ;(globalThis as any).__resetTerminalKeyboardInteractiveMock = () => {
   terminalKeyboardInteractiveRequestListeners.clear()
   terminalKeyboardInteractiveResultListeners.clear()
+}
+
+;(globalThis as any).__emitAiAgentSessionEventMock = (event: AiAgentSessionEvent) => {
+  aiAgentSessionEventListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__resetAiAgentSessionEventMock = () => {
+  aiAgentSessionEventListeners.clear()
 }
 
 const defaultQuickCommands = {
@@ -8953,6 +8963,26 @@ Object.defineProperty(window, 'aiops', {
     onTerminalData: vi.fn(() => () => undefined),
     onTerminalLifecycle: vi.fn(() => () => undefined),
     onTerminalExit: vi.fn(() => () => undefined),
+    publishAiAgentSessionEvent: vi.fn(async (input: any) => {
+      const event: AiAgentSessionEvent = {
+        source: input.source === 'claude' ? 'claude-code' : input.source || 'codex',
+        event: input.event || input.hookEventName || 'notification',
+        sessionId: input.sessionId || input.session_id || 'ai-session-test',
+        title: input.title || 'AI session',
+        summary: input.summary || input.message || '',
+        receivedAt: input.receivedAt || Date.now(),
+        ...(input.panelId ? { panelId: input.panelId } : {}),
+        ...(input.terminalSessionId ? { terminalSessionId: input.terminalSessionId } : {})
+      }
+      aiAgentSessionEventListeners.forEach((listener) => listener(event))
+      return { ok: true, data: event }
+    }),
+    onAiAgentSessionEvent: vi.fn((listener: (event: AiAgentSessionEvent) => void) => {
+      aiAgentSessionEventListeners.add(listener)
+      return () => {
+        aiAgentSessionEventListeners.delete(listener)
+      }
+    }),
     onCodexSessionData: vi.fn(() => () => undefined),
     onCodexSessionLifecycle: vi.fn(() => () => undefined),
     onCodexSessionExit: vi.fn(() => () => undefined),

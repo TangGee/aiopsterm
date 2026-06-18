@@ -630,6 +630,29 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('local shell')
   })
 
+  it('keeps AI session management in the left panel while reusing the terminal workspace', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.setActiveModule('aiSessions')
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.module-panel-pane .ai-sessions-panel').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').exists()).toBe(true)
+    expect(wrapper.find('.ai-sessions-workspace').exists()).toBe(false)
+    expect(wrapper.find('.module-panel-pane').text()).toContain('AI 会话')
+    expect(wrapper.text()).not.toContain('Managed Local Agents')
+  })
+
   it('applies persisted background and watermark settings at the app shell level', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

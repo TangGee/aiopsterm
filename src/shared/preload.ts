@@ -548,6 +548,74 @@ export type AiopsMutationResult<T> = {
   errorMessage?: string
 }
 
+export type AiAgentSessionSource = 'codex' | 'claude-code'
+
+export type AiAgentSessionEventName =
+  | 'session_start'
+  | 'prompt_submit'
+  | 'pre_tool_use'
+  | 'permission_request'
+  | 'question'
+  | 'notification'
+  | 'stop'
+  | 'session_end'
+
+export type AiAgentSessionEventInput = {
+  source?: string
+  agent?: string
+  agentName?: string
+  agent_name?: string
+  event?: string
+  hookEventName?: string
+  hook_event_name?: string
+  type?: string
+  kind?: string
+  sessionId?: string
+  session_id?: string
+  conversationId?: string
+  conversation_id?: string
+  id?: string
+  panelId?: string
+  panel_id?: string
+  surfaceId?: string
+  surface_id?: string
+  terminalSessionId?: string
+  terminal_session_id?: string
+  terminalId?: string
+  terminal_id?: string
+  workspaceId?: string
+  workspace_id?: string
+  cwd?: string
+  workingDirectory?: string
+  working_directory?: string
+  transcriptPath?: string
+  transcript_path?: string
+  title?: string
+  summary?: string
+  message?: string
+  body?: string
+  text?: string
+  prompt?: string
+  receivedAt?: number
+  [key: string]: unknown
+}
+
+export type AiAgentSessionEvent = {
+  source: AiAgentSessionSource
+  event: AiAgentSessionEventName
+  sessionId: string
+  title: string
+  summary: string
+  receivedAt: number
+  panelId?: string
+  terminalSessionId?: string
+  workspaceId?: string
+  cwd?: string
+  transcriptPath?: string
+}
+
+export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>
+
 export type ZmodemUploadFile = {
   name: string
   size: number
@@ -3398,6 +3466,8 @@ export type AiopsPreloadApi = {
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
   onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
+  publishAiAgentSessionEvent: (input: AiAgentSessionEventInput) => Promise<AiAgentSessionEventResult>
+  onAiAgentSessionEvent: (listener: (event: AiAgentSessionEvent) => void) => () => void
   onCodexSessionData: (listener: (event: CodexSessionDataEvent) => void) => () => void
   onCodexSessionLifecycle: (listener: (event: CodexSessionLifecycleEvent) => void) => () => void
   onCodexSessionExit: (listener: (event: CodexSessionExitEvent) => void) => () => void
