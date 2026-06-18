@@ -32,6 +32,7 @@ describe('agent session backend', () => {
         source: 'codex',
         event: 'permission_request',
         sessionId: 'codex-session-1',
+        title: 'Codex · project',
         panelId: 'panel-1',
         terminalSessionId: 'terminal-1',
         cwd: '/work/project',
@@ -60,5 +61,36 @@ describe('agent session backend', () => {
       })
     )
     expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('derives question summaries and project titles when hook payloads omit display titles', async () => {
+    const { normalizeAiAgentSessionEventInput } = await loadBackend()
+    expect(
+      normalizeAiAgentSessionEventInput(
+        {
+          source: 'claude-code',
+          hookEventName: 'AskUserQuestion',
+          session_id: 'claude-session-1',
+          project_dir: '/work/release-api',
+          transcript_path: '/tmp/claude.jsonl',
+          tool_input: {
+            questions: [{ question: 'Deploy to staging or production?', options: [{ label: 'staging' }, { label: 'production' }] }]
+          }
+        },
+        200
+      )
+    ).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'claude-code',
+        event: 'question',
+        sessionId: 'claude-session-1',
+        title: 'Claude Code · release-api',
+        summary: 'Deploy to staging or production?',
+        cwd: '/work/release-api',
+        transcriptPath: '/tmp/claude.jsonl',
+        receivedAt: 200
+      })
+    })
   })
 })

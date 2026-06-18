@@ -80,6 +80,7 @@ describe('aiopsterm agent hook helper', () => {
           session_id: 'codex-session-1',
           tool_name: 'shell',
           tool_input: { command: 'npm test' },
+          cwd: '/work/project',
           transcript_path: '/tmp/codex.jsonl'
         }),
         {
@@ -99,11 +100,93 @@ describe('aiopsterm agent hook helper', () => {
           source: 'codex',
           event: 'PermissionRequest',
           sessionId: 'codex-session-1',
+          title: 'Codex · project',
           panelId: 'panel-1',
           terminalSessionId: 'terminal-1',
           workspaceId: 'workspace-1',
+          cwd: '/work/project',
           summary: 'shell: npm test',
           transcriptPath: '/tmp/codex.jsonl'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('posts events in the default installed-hook mode before returning the fail-open response', async () => {
+    const server = await startSocketServer()
+    try {
+      const result = await runHelper(
+        ['--source', 'codex', '--event', 'PermissionRequest'],
+        JSON.stringify({
+          session_id: 'codex-installed-mode-1',
+          cwd: '/work/project',
+          tool_name: 'shell',
+          tool_input: { command: 'npm run build' }
+        }),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1',
+          AIOPSTERM_PANEL_ID: 'panel-1',
+          AIOPSTERM_WORKSPACE_ID: 'workspace-1'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(result.stdout.trim()).toBe('{}')
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          event: 'PermissionRequest',
+          sessionId: 'codex-installed-mode-1',
+          title: 'Codex · project',
+          summary: 'shell: npm run build'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('derives project titles, cwd, transcript path, and question summaries from real hook payloads', async () => {
+    const server = await startSocketServer()
+    const projectDir = join(tmpdir(), 'aiopsterm-hook-project')
+    try {
+      const result = await runHelper(
+        ['--source', 'claude-code', '--event', 'AskUserQuestion', '--strict', '--print-response'],
+        JSON.stringify({
+          session_id: 'claude-session-1',
+          project_dir: projectDir,
+          transcript_path: '/tmp/claude-transcript.jsonl',
+          tool_name: 'ask_user_question',
+          tool_input: {
+            questions: [{ question: 'Which environment should be deployed?', options: [{ label: 'staging' }, { label: 'prod' }] }]
+          }
+        }),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1',
+          AIOPSTERM_PANEL_ID: 'panel-1',
+          AIOPSTERM_WORKSPACE_ID: 'workspace-1'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(result.stdout.trim()).toBe(JSON.stringify({ ok: true }))
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'claude-code',
+          event: 'AskUserQuestion',
+          sessionId: 'claude-session-1',
+          title: 'Claude Code · aiopsterm-hook-project',
+          summary: 'Which environment should be deployed?',
+          cwd: projectDir,
+          transcriptPath: '/tmp/claude-transcript.jsonl'
         })
       ])
     } finally {

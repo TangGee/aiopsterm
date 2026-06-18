@@ -26,7 +26,7 @@ Example hook command shape:
 node "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
 ```
 
-The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
+The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. In installed fail-open mode it still waits for aiopsterm to acknowledge the socket event before returning, so the agent keeps running while the notification is not lost. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
 
 ## Hook Installer
 
@@ -59,11 +59,14 @@ Supported events:
 - `Stop` / `stop`
 - `SessionEnd` / `session_end`
 
-Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `title`, `summary`, `message`, and `transcriptPath` improve terminal focusing and display text.
+Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `project_dir`, `title`, `summary`, `message`, and `transcriptPath` improve terminal focusing and display text.
+
+When hooks omit a display title, aiopsterm derives one from project/workspace fields or the basename of `cwd`/`project_dir`, for example `Codex · api-service` or `Claude Code · release-api`. Claude Code `AskUserQuestion` payloads can also derive the row summary from `tool_input.questions[0].question`, and tool payloads with `tool_name` plus `tool_input.command` are shown as `tool: command`.
 
 ## UI Behavior
 
 - The `AI 会话` module is a left-side manager, like workspace/assets navigation. It lists managed sessions by state while the shared main work area remains the terminal workspace.
+- Session rows show the project title, state, latest summary, and project path when the hook payload provides one.
 - `permission_request`, `question`, and `notification` create top-bar bell entries.
 - Clicking the bell focuses the AI session manager and selects the owning terminal when `panelId` or `terminalSessionId` is known. It does not mark the session handled.
 - The AI session row stays selected until the user explicitly marks that pending item handled. Handling clears the unread count and lets the next bell click move to the next pending managed session.

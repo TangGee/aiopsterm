@@ -78,8 +78,25 @@ const firstText = (record: Record<string, unknown>, keys: string[]) => {
   return undefined
 }
 
-const eventTitle = (source: AiAgentSessionEvent['source'], event: AiAgentSessionEvent['event'], input: Record<string, unknown>) =>
-  firstText(input, ['title', 'summary']) ||
+const nestedRecord = (record: Record<string, unknown>, key: string) => {
+  const value = record[key]
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+const baseNameFromPath = (value: unknown) => {
+  const text = cleanText(value).replace(/[\\/]+$/, '')
+  if (!text) return ''
+  return text.split(/[\\/]/).filter(Boolean).pop() || text
+}
+
+const sourceLabel = (source: AiAgentSessionEvent['source']) => (source === 'claude-code' ? 'Claude Code' : source === 'codex' ? 'Codex' : source)
+
+const eventTitle = (source: AiAgentSessionEvent['source'], event: AiAgentSessionEvent['event'], input: Record<string, unknown>, cwd?: string) =>
+  firstText(input, ['title', 'projectTitle', 'project_title', 'workspaceTitle', 'workspace_title', 'summary']) ||
+  (() => {
+    const projectName = firstText(input, ['projectName', 'project_name', 'workspaceName', 'workspace_name']) || baseNameFromPath(cwd)
+    return projectName ? `${sourceLabel(source)} · ${projectName}` : ''
+  })() ||
   (event === 'permission_request'
     ? `${source} needs approval`
     : event === 'question'
@@ -88,8 +105,16 @@ const eventTitle = (source: AiAgentSessionEvent['source'], event: AiAgentSession
         ? `${source} notification`
         : source)
 
+const questionSummary = (input: Record<string, unknown>) => {
+  const toolInput = nestedRecord(input, 'tool_input')
+  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
+  const question = questions.find((item) => item && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown> | undefined
+  return question ? firstText(question, ['question', 'header', 'prompt']) : undefined
+}
+
 const eventSummary = (event: AiAgentSessionEvent['event'], input: Record<string, unknown>) =>
   firstText(input, ['summary', 'message', 'body', 'text', 'prompt', 'lastAssistantMessage', 'last_assistant_message']) ||
+  questionSummary(input) ||
   (event === 'stop' ? 'Turn complete' : '')
 
 export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now()): AiAgentSessionEventResult => {
@@ -112,13 +137,13 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const panelId = cleanOptionalText(record.panelId || record.panel_id || record.surfaceId || record.surface_id)
   const terminalSessionId = cleanOptionalText(record.terminalSessionId || record.terminal_session_id || record.terminalId || record.terminal_id)
   const workspaceId = cleanOptionalText(record.workspaceId || record.workspace_id)
-  const cwd = cleanOptionalText(record.cwd || record.workingDirectory || record.working_directory)
+  const cwd = cleanOptionalText(record.cwd || record.workingDirectory || record.working_directory || record.project_dir || record.projectDir)
   const transcriptPath = cleanOptionalText(record.transcriptPath || record.transcript_path)
   const normalized: AiAgentSessionEvent = {
     source,
     event,
     sessionId,
-    title: eventTitle(source, event, record),
+    title: eventTitle(source, event, record, cwd),
     summary: eventSummary(event, record),
     receivedAt: typeof record.receivedAt === 'number' && Number.isFinite(record.receivedAt) ? record.receivedAt : now,
     ...(panelId ? { panelId } : {}),

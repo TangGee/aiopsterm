@@ -53,6 +53,10 @@
         <span>
           <strong>{{ session.title }}</strong>
           <small>{{ session.source }} · {{ stateLabel(session.state) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
+          <small
+            v-if="session.cwd"
+            class="ai-session-cwd"
+          >{{ session.cwd }}</small>
         </span>
         <button
           v-if="session.state === 'needsInput'"
@@ -235,6 +239,10 @@ const selectSession = (sessionId: string) => {
 .ai-session-row small {
   color: var(--text-muted);
   margin-top: 3px;
+}
+
+.ai-session-cwd {
+  color: var(--text-muted);
 }
 
 .ai-session-handle {

@@ -53,6 +53,22 @@ const commandExists = async (command: string) => {
   })
 }
 
+const hookCommandFromConfig = (config: unknown, eventName: string) => {
+  const record = config && typeof config === 'object' && !Array.isArray(config) ? (config as Record<string, unknown>) : {}
+  const hooks = record.hooks && typeof record.hooks === 'object' && !Array.isArray(record.hooks) ? (record.hooks as Record<string, unknown>) : {}
+  const groups = Array.isArray(hooks[eventName]) ? hooks[eventName] : []
+  for (const group of groups) {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) continue
+    const entries = Array.isArray((group as Record<string, unknown>).hooks) ? ((group as Record<string, unknown>).hooks as unknown[]) : [group]
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      const command = (entry as Record<string, unknown>).command
+      if (typeof command === 'string' && command.includes('aiopsterm-agent-hook-v1')) return command
+    }
+  }
+  throw new Error(`Installed hook command not found for ${eventName}`)
+}
+
 const createFakeKubectl = async () => {
   const dir = path.join(os.tmpdir(), `aiopsterm-e2e-kubectl-${Date.now()}`)
   await mkdir(dir, { recursive: true })
@@ -405,29 +421,43 @@ test('managed AI session notifications flow through real local terminal hooks', 
   const hasClaude = await commandExists('claude')
   test.skip(!hasCodex || !hasClaude, 'Codex and Claude Code CLIs must be installed for this real-agent notification E2E.')
 
-  const app = await launchApp('ai-agent-hooks')
+  const hookHome = path.join(os.tmpdir(), `aiopsterm-e2e-agent-home-${Date.now()}`)
+  const codexHome = path.join(hookHome, '.codex')
+  await mkdir(codexHome, { recursive: true })
+  const app = await launchApp('ai-agent-hooks', {
+    HOME: hookHome,
+    CODEX_HOME: codexHome
+  })
   const runId = Date.now()
   const quoteShell = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
-  const hookCommand = (input: { source: 'codex' | 'claude-code'; event: string; title: string; payload: Record<string, unknown> }) =>
-    [
-      'printf "%s\\n"',
-      quoteShell(JSON.stringify(input.payload)),
-      '|',
-      'node "$AIOPSTERM_AGENT_HOOK_PATH"',
-      '--source',
-      quoteShell(input.source),
-      '--event',
-      quoteShell(input.event),
-      '--title',
-      quoteShell(input.title),
-      '--strict',
-      '--print-response'
-    ].join(' ')
+  const runInstalledHookCommand = (command: string, payload: Record<string, unknown>) => `printf "%s\\n" ${quoteShell(JSON.stringify(payload))} | ( ${command} )`
 
   try {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
+
+    await page.evaluate(async () => {
+      const api = (window as unknown as {
+        aiops: {
+          installAgentHook: (input: { source: 'codex' | 'claude-code' }) => Promise<{ ok?: boolean; errorMessage?: string }>
+        }
+      }).aiops
+      const codex = await api.installAgentHook({ source: 'codex' })
+      if (!codex?.ok) throw new Error(codex?.errorMessage || 'Codex hook install failed')
+      const claude = await api.installAgentHook({ source: 'claude-code' })
+      if (!claude?.ok) throw new Error(claude?.errorMessage || 'Claude hook install failed')
+    })
+    const codexConfig = JSON.parse(await readFile(path.join(codexHome, 'hooks.json'), 'utf-8')) as unknown
+    const claudeConfig = JSON.parse(await readFile(path.join(hookHome, '.claude', 'settings.json'), 'utf-8')) as unknown
+    const codexToml = await readFile(path.join(codexHome, 'config.toml'), 'utf-8')
+    expect(codexToml).toContain('hooks = true')
+    expect(codexToml).toContain('aiopsterm-codex-hook-trust begin')
+    const codexPermissionCommand = hookCommandFromConfig(codexConfig, 'PermissionRequest')
+    const codexStopCommand = hookCommandFromConfig(codexConfig, 'Stop')
+    const claudeQuestionCommand = hookCommandFromConfig(claudeConfig, 'AskUserQuestion')
+    const claudeNotificationCommand = hookCommandFromConfig(claudeConfig, 'Notification')
+    const claudeStopCommand = hookCommandFromConfig(claudeConfig, 'Stop')
 
     await expect(page.locator('.workspace-search input')).toBeVisible()
     await page.locator('.workspace-search input').fill('127.0.0.1')
@@ -450,81 +480,93 @@ test('managed AI session notifications flow through real local terminal hooks', 
     }
 
     await sendTerminalCommand(
-      hookCommand({
-        source: 'codex',
-        event: 'PermissionRequest',
-        title: `Codex approval E2E ${runId}`,
-        payload: {
+      runInstalledHookCommand(codexPermissionCommand, {
           session_id: `codex-e2e-${runId}`,
+          project_dir: `/tmp/aiopsterm-codex-project-${runId}`,
           tool_name: 'shell',
           tool_input: { command: 'echo codex approval' },
           transcript_path: `/tmp/aiopsterm-codex-${runId}.jsonl`
-        }
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await page.getByTestId('ai-attention-bell').click()
     await expect(page.locator('.ai-sessions-panel')).toBeVisible()
-    const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex approval E2E ${runId}` })
+    const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex · aiopsterm-codex-project-${runId}` })
     await expect(codexRow).toContainText('待处理')
+    await expect(codexRow).toContainText(`shell: echo codex approval`)
+    await expect(codexRow).toContainText(`/tmp/aiopsterm-codex-project-${runId}`)
     await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toHaveClass(/active/)
+    await sendTerminalCommand(
+      runInstalledHookCommand(codexStopCommand, {
+        session_id: `codex-e2e-${runId}`,
+        project_dir: `/tmp/aiopsterm-codex-project-${runId}`,
+        last_assistant_message: 'Codex turn complete'
+      })
+    )
+    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
+    await expect(codexRow).toContainText('空闲')
+    await sendTerminalCommand(
+      runInstalledHookCommand(codexPermissionCommand, {
+        session_id: `codex-e2e-${runId}`,
+        project_dir: `/tmp/aiopsterm-codex-project-${runId}`,
+        tool_name: 'shell',
+        tool_input: { command: 'echo codex approval again' },
+        transcript_path: `/tmp/aiopsterm-codex-${runId}.jsonl`
+      })
+    )
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await codexRow.locator('.ai-session-handle').click()
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
     await expect(codexRow).toContainText('空闲')
 
     await sendTerminalCommand(
-      hookCommand({
-        source: 'claude-code',
-        event: 'AskUserQuestion',
-        title: `Claude question E2E ${runId}`,
-        payload: {
+      runInstalledHookCommand(claudeQuestionCommand, {
           session_id: `claude-question-e2e-${runId}`,
+          project_dir: `/tmp/aiopsterm-claude-question-${runId}`,
+          transcript_path: `/tmp/aiopsterm-claude-question-${runId}.jsonl`,
           tool_name: 'ask_user_question',
           tool_input: {
             questions: [{ question: 'Pick an environment', options: [{ label: 'staging' }, { label: 'prod' }] }]
           }
-        }
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await page.getByTestId('ai-attention-bell').click()
-    const questionRow = page.locator('.ai-session-row').filter({ hasText: `Claude question E2E ${runId}` })
+    const questionRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code · aiopsterm-claude-question-${runId}` })
     await expect(questionRow).toContainText('待处理')
+    await expect(questionRow).toContainText('Pick an environment')
+    await expect(questionRow).toContainText(`/tmp/aiopsterm-claude-question-${runId}`)
     await questionRow.locator('.ai-session-handle').click()
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
     await expect(questionRow).toContainText('空闲')
 
     await sendTerminalCommand(
-      hookCommand({
-        source: 'claude-code',
-        event: 'Notification',
-        title: `Claude notification E2E ${runId}`,
-        payload: {
+      runInstalledHookCommand(claudeNotificationCommand, {
           session_id: `claude-notification-e2e-${runId}`,
+          project_dir: `/tmp/aiopsterm-claude-notification-${runId}`,
+          transcript_path: `/tmp/aiopsterm-claude-notification-${runId}.jsonl`,
           message: 'Claude Code needs attention'
-        }
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await page.getByTestId('ai-attention-bell').click()
-    const notificationRow = page.locator('.ai-session-row').filter({ hasText: `Claude notification E2E ${runId}` })
+    const notificationRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code · aiopsterm-claude-notification-${runId}` })
     await expect(notificationRow).toContainText('待处理')
+    await expect(notificationRow).toContainText('Claude Code needs attention')
+    await expect(notificationRow).toContainText(`/tmp/aiopsterm-claude-notification-${runId}`)
 
     await sendTerminalCommand(
-      hookCommand({
-        source: 'claude-code',
-        event: 'Stop',
-        title: `Claude notification E2E ${runId}`,
-        payload: {
+      runInstalledHookCommand(claudeStopCommand, {
           session_id: `claude-notification-e2e-${runId}`,
+          project_dir: `/tmp/aiopsterm-claude-notification-${runId}`,
           last_assistant_message: 'Turn complete'
-        }
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
     await expect(notificationRow).toContainText('空闲')
   } finally {
     await app.close()
+    await rm(hookHome, { recursive: true, force: true })
   }
 })
 

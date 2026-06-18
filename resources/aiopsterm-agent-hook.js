@@ -82,12 +82,37 @@ const nestedRecord = (record, key) => {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
+const baseNameFromPath = (value) => {
+  const text = cleanText(value).replace(/[\\/]+$/, '')
+  if (!text) return ''
+  return text.split(/[\\/]/).filter(Boolean).pop() || text
+}
+
+const sourceLabel = (source) => {
+  if (source === 'claude-code' || source === 'claude') return 'Claude Code'
+  if (source === 'codex') return 'Codex'
+  return source
+}
+
+const buildTitle = (source, cwd, payload) => {
+  const direct = firstText(payload, ['title', 'projectTitle', 'project_title', 'workspaceTitle', 'workspace_title'])
+  if (direct) return direct
+  const projectName = firstText(payload, ['projectName', 'project_name', 'workspaceName', 'workspace_name']) || baseNameFromPath(cwd)
+  return projectName && source ? `${sourceLabel(source)} · ${projectName}` : projectName
+}
+
 const buildSummary = (payload) => {
   const direct = firstText(payload, ['summary', 'message', 'body', 'text', 'prompt', 'lastAssistantMessage', 'last_assistant_message'])
   if (direct) return direct
   const toolName = firstText(payload, ['tool_name', 'toolName'])
   const toolInput = nestedRecord(payload, 'tool_input')
   const command = firstText(toolInput, ['command', 'description', 'query', 'pattern', 'file_path'])
+  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
+  const question = questions.find((item) => item && typeof item === 'object' && !Array.isArray(item))
+  if (question) {
+    const questionText = firstText(question, ['question', 'header', 'prompt'])
+    if (questionText) return questionText
+  }
   if (toolName && command) return `${toolName}: ${command}`
   if (toolName) return toolName
   return compactObjectString(nestedRecord(payload, 'data')) || compactObjectString(nestedRecord(payload, 'notification'))
@@ -113,7 +138,7 @@ const createEvent = (payload) => {
     source,
     event,
     sessionId,
-    title: cleanText(options.title || payload.title) || undefined,
+    title: cleanText(options.title) || buildTitle(source, cwd, payload) || undefined,
     summary: cleanText(options.summary) || buildSummary(payload) || undefined,
     panelId: panelId || undefined,
     terminalSessionId: terminalSessionId || undefined,
@@ -155,9 +180,7 @@ const publishEvent = (socketPath, event) =>
     socket.setEncoding('utf8')
     socket.setTimeout(Number(options.timeout || 1500))
     socket.on('connect', () => {
-      socket.write(`${JSON.stringify(event)}\n`, () => {
-        if (!strict && !printResponse) settle({ ok: true })
-      })
+      socket.write(`${JSON.stringify(event)}\n`)
     })
     socket.on('data', (chunk) => {
       buffer += chunk
