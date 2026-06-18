@@ -283,6 +283,14 @@ type PrivacyRuntimeApplyData = PrivacyRuntimeSnapshot
 type KnowledgeSearchRuntimeApplyData = KnowledgeSearchRuntimeSnapshot
 
 type TerminalOutputScope = 'output' | 'input'
+type SendChatOptions = {
+  mode?: NonNullable<AiChatResponseInput['mode']>
+  skipKnowledgeSearch?: boolean
+}
+
+const agentCommandOutputFilterLimit = 12000
+const agentCommandOutputFilterHead = 4000
+const agentCommandOutputFilterTail = 6000
 type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
 type ExtensionInstallProgress = {
   pluginId: string
@@ -10196,6 +10204,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const knowledgeSearchResultToAiContext = (result: KnowledgeBaseSearchResult): AiContextOption | null => {
+    const relPath = result.path.trim()
+    if (!relPath) return null
+    const label = relPath.split('/').filter(Boolean).pop() || relPath
+    return {
+      id: `kb-doc:${relPath}`,
+      kind: 'docs',
+      label,
+      relPath,
+      detail: `Auto search match lines ${result.startLine}-${result.endLine}, score ${result.score.toFixed(2)}: ${result.snippet.trim()}`
+    }
+  }
+
+  const resolveAiKnowledgeSearchContexts = async (query: string, existingContexts: AiContextOption[]) => {
+    const normalizedQuery = query.trim()
+    if (!aiPreferences.value.kbSearchEnabled || normalizedQuery.length <= 1 || typeof window.aiops?.kbSearch !== 'function') return []
+    try {
+      const results = await window.aiops.kbSearch(normalizedQuery, { maxResults: 3, minScore: 0.25 })
+      if (!isKnowledgeSearchResultListData(results)) return []
+      const existingIds = new Set(existingContexts.map((context) => context.id))
+      return results
+        .map(knowledgeSearchResultToAiContext)
+        .filter((context): context is AiContextOption => Boolean(context && !existingIds.has(context.id)))
+    } catch {
+      return []
+    }
+  }
+
   const reindexKnowledgeContent = async () => {
     if (!window.aiops?.kbReindex) {
       setTopNotice('知识库索引服务不可用')
@@ -11532,7 +11568,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               detail: `${cluster.context_name} / ${tab.namespace}`
             }
           : undefined
-        void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput}\n\`\`\``, undefined, host ? [host] : undefined)
+        void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput}\n\`\`\``, undefined, host ? [host] : undefined, { skipKnowledgeSearch: true })
         setK8sNotice(`${tab.name} 命令输出已发送到 AI`)
       }
     }
@@ -11871,7 +11907,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       label: cluster.name,
       detail: `${cluster.context_name} / ${cluster.default_namespace}`
     }
-    const sent = await sendChat(`请分析这个 Kubernetes 输出并给出下一步排查建议：\n\nTerminal output:\n\`\`\`\n${output}\n\`\`\``, undefined, [host])
+    const sent = await sendChat(`请分析这个 Kubernetes 输出并给出下一步排查建议：\n\nTerminal output:\n\`\`\`\n${output}\n\`\`\``, undefined, [host], {
+      skipKnowledgeSearch: true
+    })
     if (!sent) return false
     setK8sNotice('Kubernetes 输出已发送到 AI')
     return true
@@ -13028,6 +13066,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined
   })
 
+  const filterAgentCommandOutputForPrompt = (output: string) => {
+    const trimmed = output.trimEnd()
+    if (!aiPreferences.value.commandOutputFilteringEnabled || trimmed.length <= agentCommandOutputFilterLimit) return trimmed
+    const omittedChars = trimmed.length - agentCommandOutputFilterHead - agentCommandOutputFilterTail
+    return [
+      trimmed.slice(0, agentCommandOutputFilterHead).trimEnd(),
+      '',
+      `[aiopsterm omitted ${omittedChars.toLocaleString()} characters from the middle of this command output because AI command output filtering is enabled.]`,
+      '',
+      trimmed.slice(-agentCommandOutputFilterTail).trimStart()
+    ].join('\n')
+  }
+
   const buildAgentCommandOutputPrompt = (command: string, output: string) =>
     [
       'Command output from the approved execute_command tool is available.',
@@ -13036,7 +13087,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       '',
       'Output:',
       '```',
-      output.trimEnd(),
+      filterAgentCommandOutputForPrompt(output),
       '```',
       '',
       'Continue the Agent loop: analyze this observation, request another <execute_command> block only if another terminal step is needed, otherwise provide the final answer.'
@@ -13054,7 +13105,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const command = input.command.trim()
     const commandMessage = chatMessages.value.find((message) => message.id === input.commandMessageId)
     if (!command || !commandMessage) return { status: 'unavailable' as const, reason: '命令卡片不可用，无法继续 Agent 循环。' }
-    const output = (input.output ?? (await waitForTerminalOutputAfter(input.terminalPanelId, input.outputStartLength, input.outputTimeoutMs))).trimEnd()
+    const outputTimeoutMs = input.outputTimeoutMs ?? Math.max(1000, Math.round(aiPreferences.value.shellIntegrationTimeout * 1000))
+    const output = (input.output ?? (await waitForTerminalOutputAfter(input.terminalPanelId, input.outputStartLength, outputTimeoutMs))).trimEnd()
     if (!output.trim()) {
       commandMessage.commandExecutionStatus = 'failed'
       commandMessage.commandExecutionMessage = '命令已发送，但未捕获到终端输出，未继续 Agent 循环。'
@@ -13080,7 +13132,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     chatMessages.value.push(commandOutputMessage, assistantMessage)
     const prompt = buildAgentCommandOutputPrompt(command, output)
-    const messages: AiChatMessageInput[] = chatMessages.value.slice(-16).map(aiChatMessageInputFromChatMessage)
+    const messages: AiChatMessageInput[] = chatMessages.value.slice(-16).map((message) => {
+      const mapped = aiChatMessageInputFromChatMessage(message)
+      if (message.id === commandOutputMessage.id) mapped.text = filterAgentCommandOutputForPrompt(message.text)
+      return mapped
+    })
     void refreshAiTodoSnapshot()
     void generateAiResponseForMessage(assistantMessage.id, {
       requestId,
@@ -13380,13 +13436,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     text: string,
     contentParts?: AiContentPart[],
     overrideHosts?: AiContextOption[],
-    options: { mode?: NonNullable<AiChatResponseInput['mode']> } = {}
+    options: SendChatOptions = {}
   ) => {
     const safeContentParts = contentParts?.filter((part) => part.type !== 'text' || part.text.trim()) || []
     const hasStructuredParts = safeContentParts.some((part) => part.type !== 'text')
     const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
     if (!prompt && !hasStructuredParts) return false
-    const messageContexts = overrideHosts ? [...overrideHosts, ...selectedContexts.value.filter((item) => item.kind !== 'hosts')] : selectedContexts.value
+    const baseMessageContexts = overrideHosts ? [...overrideHosts, ...selectedContexts.value.filter((item) => item.kind !== 'hosts')] : [...selectedContexts.value]
+    const autoKnowledgeContexts = options.skipKnowledgeSearch ? [] : await resolveAiKnowledgeSearchContexts(prompt, baseMessageContexts)
+    const messageContexts = [...baseMessageContexts, ...autoKnowledgeContexts]
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
     const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
     const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
@@ -13450,7 +13508,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const sendChat = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[], options?: { mode?: NonNullable<AiChatResponseInput['mode']> }) => {
+  const sendChat = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[], options?: SendChatOptions) => {
     return appendChatExchange(text, contentParts, overrideHosts, options)
   }
 

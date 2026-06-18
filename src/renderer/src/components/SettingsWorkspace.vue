@@ -908,7 +908,7 @@ const AiPreferenceSettings = defineComponent({
                       workspace.updateAiPreferences({ thinkingBudgetTokens: Number(value) })
                     )
                 }),
-                h('small', '为推理模型保留更多 token 预算。')
+                h('small', '影响 AI 对话请求的输出 token 预算，并写入对话系统约束。')
               ])
             : null,
           h(SettingsCheckbox, {
@@ -919,25 +919,25 @@ const AiPreferenceSettings = defineComponent({
           }),
           h(SettingsCheckbox, {
             label: '命令输出过滤',
-            description: '压缩长输出，保留和当前请求相关的片段。',
+            description: 'Agent 回传长命令输出时压缩中间部分，界面仍保留完整输出。',
             checked: workspace.aiPreferences.commandOutputFilteringEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ commandOutputFilteringEnabled: checked })
           }),
           h(SettingsCheckbox, {
             label: '知识库搜索',
-            description: '允许 AI 在上下文中检索知识库条目。',
+            description: '发送普通 AI 对话时自动检索并附加相关知识库文档。',
             checked: workspace.aiPreferences.kbSearchEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ kbSearchEnabled: checked })
           }),
           h(SettingsCheckbox, {
             label: '经验抽取',
-            description: '从对话和命令执行中提取可复用经验。',
+            description: '影响 AI 回答中是否提炼可复用运维经验。',
             checked: workspace.aiPreferences.experienceExtractionEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ experienceExtractionEnabled: checked })
           }),
           h(SettingsCheckbox, {
             label: '自动批准',
-            description: '为低风险动作保留自动审批入口。',
+            description: '只允许低风险只读动作自动通过，不绕过高风险命令审批。',
             checked: workspace.aiPreferences.autoApproval,
             onboardingId: 'settings-ai-auto-approval',
             onChange: (checked: boolean) => workspace.updateAiPreferences({ autoApproval: checked })
@@ -961,7 +961,7 @@ const AiPreferenceSettings = defineComponent({
             true
           )
         ]),
-        h('h3', '代理设置'),
+        h('h3', 'AI 模型代理'),
         h('div', { class: 'settings-section-card' }, [
           h('label', { class: 'settings-check-line' }, [
             h('input', {
@@ -1058,7 +1058,7 @@ const AiPreferenceSettings = defineComponent({
         h('h3', '终端'),
         h('div', { class: 'settings-section-card' }, [
           numberRow('Shell Integration Timeout', workspace.aiPreferences.shellIntegrationTimeout, 1, 300, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true),
-          h('p', { class: 'setting-description-no-padding' }, 'Shell integration command detection timeout in seconds.')
+          h('p', { class: 'setting-description-no-padding' }, 'Agent 等待终端命令输出的默认超时时间，单位为秒。')
         ])
       ])
   }

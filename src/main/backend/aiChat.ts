@@ -10,6 +10,7 @@ import type {
   AiChatHistoryHostContext,
   AiChatHistoryMessage,
   AiChatMessageInput,
+  AiPreferencesUserConfig,
   AiChatResponseInput,
   AiChatResponseResult,
   AiChatSkillInput,
@@ -24,10 +25,34 @@ import type {
 import { shouldUseAiChatBackendDouble } from '@shared/runtimeSwitches'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
 import { recordAiTodoCancelResult, recordAiTodoExchangeRequest, recordAiTodoResponseResult } from './aiTodos'
+import { createAiProviderProxyFetch } from './aiProviderProxyFetch'
 
 const normalizeText = (value: unknown) => String(value || '').trim()
 export const LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS = 600
 const AI_CHAT_CANCELLED_TEXT = '已停止生成。'
+const reasoningEffortValues = ['low', 'medium', 'high'] as const
+const proxyTypeValues = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'] as const
+
+const defaultAiChatPreferences: AiPreferencesUserConfig = {
+  enableExtendedThinking: true,
+  thinkingBudgetTokens: 4096,
+  autoExecuteReadOnlyCommands: false,
+  commandOutputFilteringEnabled: true,
+  kbSearchEnabled: true,
+  experienceExtractionEnabled: true,
+  autoApproval: false,
+  reasoningEffort: 'medium',
+  needProxy: false,
+  proxy: {
+    type: 'HTTP',
+    host: '127.0.0.1',
+    port: 7890,
+    enableProxyIdentity: false,
+    username: '',
+    password: ''
+  },
+  shellIntegrationTimeout: 4
+}
 
 type AiChatRuntimeConfig = {
   getConfig?: () => UserConfig
@@ -60,6 +85,63 @@ const wait = (durationMs: number) => {
 const now = () => (runtimeConfig.now ? runtimeConfig.now() : Date.now())
 
 const isAiChatLocalDoubleEnabled = () => runtimeConfig.localBackendDouble === true || shouldUseAiChatBackendDouble()
+
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
+const numberInRange = (value: unknown, fallback: number, min: number, max: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T): T => {
+  const text = normalizeText(value)
+  return options.includes(text as T) ? (text as T) : fallback
+}
+
+const normalizeThinkingBudget = (value: unknown, fallback: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  if (value === 0) return 0
+  return Math.min(6553, Math.max(1024, Math.round(value)))
+}
+
+const normalizeAiChatPreferences = (source?: Partial<AiPreferencesUserConfig>): AiPreferencesUserConfig => {
+  const incoming = isRecord(source) ? source : {}
+  const incomingProxy: Record<string, unknown> = isRecord(incoming.proxy) ? incoming.proxy : {}
+  const normalized: AiPreferencesUserConfig = {
+    enableExtendedThinking: typeof incoming.enableExtendedThinking === 'boolean' ? incoming.enableExtendedThinking : defaultAiChatPreferences.enableExtendedThinking,
+    thinkingBudgetTokens: normalizeThinkingBudget(incoming.thinkingBudgetTokens, defaultAiChatPreferences.thinkingBudgetTokens),
+    autoExecuteReadOnlyCommands:
+      typeof incoming.autoExecuteReadOnlyCommands === 'boolean' ? incoming.autoExecuteReadOnlyCommands : defaultAiChatPreferences.autoExecuteReadOnlyCommands,
+    commandOutputFilteringEnabled:
+      typeof incoming.commandOutputFilteringEnabled === 'boolean'
+        ? incoming.commandOutputFilteringEnabled
+        : defaultAiChatPreferences.commandOutputFilteringEnabled,
+    kbSearchEnabled: typeof incoming.kbSearchEnabled === 'boolean' ? incoming.kbSearchEnabled : defaultAiChatPreferences.kbSearchEnabled,
+    experienceExtractionEnabled:
+      typeof incoming.experienceExtractionEnabled === 'boolean' ? incoming.experienceExtractionEnabled : defaultAiChatPreferences.experienceExtractionEnabled,
+    autoApproval: typeof incoming.autoApproval === 'boolean' ? incoming.autoApproval : defaultAiChatPreferences.autoApproval,
+    reasoningEffort: stringFromOptions(incoming.reasoningEffort, reasoningEffortValues, defaultAiChatPreferences.reasoningEffort),
+    needProxy: typeof incoming.needProxy === 'boolean' ? incoming.needProxy : defaultAiChatPreferences.needProxy,
+    proxy: {
+      type: stringFromOptions(incomingProxy.type, proxyTypeValues, defaultAiChatPreferences.proxy.type),
+      host: typeof incomingProxy.host === 'string' ? incomingProxy.host : defaultAiChatPreferences.proxy.host,
+      port: numberInRange(incomingProxy.port, defaultAiChatPreferences.proxy.port, 1, 65535),
+      enableProxyIdentity:
+        typeof incomingProxy.enableProxyIdentity === 'boolean' ? incomingProxy.enableProxyIdentity : defaultAiChatPreferences.proxy.enableProxyIdentity,
+      username: typeof incomingProxy.username === 'string' ? incomingProxy.username : defaultAiChatPreferences.proxy.username,
+      password: typeof incomingProxy.password === 'string' ? incomingProxy.password : defaultAiChatPreferences.proxy.password
+    },
+    shellIntegrationTimeout: numberInRange(incoming.shellIntegrationTimeout, defaultAiChatPreferences.shellIntegrationTimeout, 1, 300)
+  }
+  if (!normalized.enableExtendedThinking) normalized.thinkingBudgetTokens = 0
+  if (normalized.enableExtendedThinking && normalized.thinkingBudgetTokens === 0) normalized.thinkingBudgetTokens = 1024
+  return normalized
+}
+
+const aiChatPreferencesFromConfig = (config?: UserConfig) => normalizeAiChatPreferences(config?.aiPreferences)
+
+const providerMaxTokensForPreferences = (preferences: AiPreferencesUserConfig) =>
+  preferences.enableExtendedThinking ? Math.min(8192, 1600 + preferences.thinkingBudgetTokens) : 1600
 
 export const configureAiChatRuntime = (config?: AiChatRuntimeConfig) => {
   runtimeConfig = config ? { ...config } : {}
@@ -402,7 +484,28 @@ const summarizeContexts = (input: AiChatResponseInput) => {
   return contexts.join('、')
 }
 
-const createAiChatSystemPrompt = (input: AiChatResponseInput) => {
+const createAiPreferencePrompt = (preferences: AiPreferencesUserConfig) =>
+  [
+    'AI preferences:',
+    `- Reasoning effort target: ${preferences.reasoningEffort}.`,
+    preferences.enableExtendedThinking
+      ? `- Extended Thinking is enabled with a ${preferences.thinkingBudgetTokens} token budget. Use the extra budget for internal analysis, but do not reveal hidden reasoning.`
+      : '- Extended Thinking is disabled. Keep analysis concise.',
+    preferences.commandOutputFilteringEnabled
+      ? '- Long command outputs may be compacted before they are sent to you; respect omission markers and ask for a narrower read-only command if missing lines matter.'
+      : '- Command output filtering is disabled; full captured command output may be included.',
+    preferences.kbSearchEnabled
+      ? '- Knowledge base search is enabled; automatically attached docs are relevant retrieval results, not user-selected proof unless the context says so.'
+      : '- Knowledge base search is disabled; use only explicitly selected contexts.',
+    preferences.experienceExtractionEnabled
+      ? '- When a reusable operational lesson is obvious, state it briefly as a durable practice.'
+      : '- Do not add reusable experience extraction notes unless the operator asks.',
+    preferences.autoApproval
+      ? '- Auto approval may exist only for low-risk read-only actions, but you must still mark risky or state-changing commands as requiring approval.'
+      : '- Auto approval is disabled; keep approval requirements explicit.'
+  ].join('\n')
+
+const createAiChatSystemPrompt = (input: AiChatResponseInput, preferences: AiPreferencesUserConfig = defaultAiChatPreferences) => {
   const modeLabel = input.mode === 'agent' ? 'Agent mode' : input.mode === 'command' ? 'Command mode' : 'Chat mode'
   const contextSummary = summarizeContexts(input)
   const skills = (input.skills || [])
@@ -452,7 +555,8 @@ const createAiChatSystemPrompt = (input: AiChatResponseInput) => {
       : '',
     `Selected context: ${contextSummary}`,
     command ? `Selected command chip: ${command}` : '',
-    skills ? `Activated skills:\n${skills}` : ''
+    skills ? `Activated skills:\n${skills}` : '',
+    createAiPreferencePrompt(preferences)
   ]
     .filter(Boolean)
     .join('\n')
@@ -484,8 +588,6 @@ const mapConversationForProvider = (messages: AiChatMessageInput[] | undefined, 
   }
   return normalized
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
 const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined => {
   if (!isRecord(value)) return undefined
@@ -1091,7 +1193,14 @@ async function generateProviderAiChatResponse(
   const providerConfig = resolveModelProvider(config, modelName)
   if (!providerConfig) return null
   const prompt = normalizeText(input.prompt)
-  const request = createProviderTextRequest(providerConfig, createAiChatSystemPrompt(input), mapConversationForProvider(input.messages, prompt), 1600)
+  const preferences = aiChatPreferencesFromConfig(config)
+  const request = createProviderTextRequest(
+    providerConfig,
+    createAiChatSystemPrompt(input, preferences),
+    mapConversationForProvider(input.messages, prompt),
+    providerMaxTokensForPreferences(preferences),
+    { preferences }
+  )
   if (!request) {
     return {
       ok: false,
@@ -1099,8 +1208,9 @@ async function generateProviderAiChatResponse(
       errorMessage: 'AI chat provider is unavailable'
     }
   }
+  const proxyFetch = createAiProviderProxyFetch(preferences)
   const response = await fetchProviderText(request, {
-    fetch: runtimeConfig.fetch,
+    fetch: proxyFetch || runtimeConfig.fetch,
     timeoutMs: runtimeConfig.timeoutMs || 30_000,
     errorCodePrefix: 'AI_CHAT_PROVIDER',
     signal: control.controller.signal,

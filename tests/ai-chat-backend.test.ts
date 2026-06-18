@@ -314,10 +314,87 @@ describe('ai chat backend response boundary', () => {
     )
     const body = JSON.parse(String((fetchMock as any).mock.calls[0][1].body))
     expect(body.model).toBe('ops-chat')
+    expect(body.max_tokens).toBe(1600 + 4096)
     expect(body.messages[0].role).toBe('system')
     expect(body.messages[0].content).toContain('Selected context: hosts:prod-1')
     expect(body.messages[0].content).toContain('Skill: incident-triage')
+    expect(body.messages[0].content).toContain('AI preferences:')
+    expect(body.messages[0].content).toContain('Reasoning effort target: medium.')
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: '检查生产磁盘' })
+  })
+
+  it('passes AI reasoning preferences to OpenAI Responses chat requests', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ output_text: '已按高推理强度生成响应。' })
+    })) as unknown as typeof fetch
+
+    configureAiChatRuntime({
+      fetch: fetchMock,
+      getConfig: () =>
+        ({
+          modelName: 'ops-reasoning',
+          modelProvider: 'openai-compatible',
+          aiPreferences: {
+            enableExtendedThinking: false,
+            thinkingBudgetTokens: 0,
+            autoExecuteReadOnlyCommands: false,
+            commandOutputFilteringEnabled: false,
+            kbSearchEnabled: false,
+            experienceExtractionEnabled: false,
+            autoApproval: true,
+            reasoningEffort: 'high',
+            needProxy: false,
+            proxy: {
+              type: 'HTTP',
+              host: '127.0.0.1',
+              port: 7890,
+              enableProxyIdentity: false,
+              username: '',
+              password: ''
+            },
+            shellIntegrationTimeout: 8
+          },
+          modelSettings: {
+            addModelSwitch: true,
+            options: [{ name: 'ops-reasoning', locked: false, checked: true, apiProvider: 'openai' }],
+            providers: {
+              openai: {
+                baseUrl: 'http://127.0.0.1:4010',
+                apiKey: 'sk-test',
+                modelId: 'ops-reasoning',
+                apiFormat: 'responses'
+              }
+            }
+          }
+        }) as unknown as UserConfig
+    })
+
+    const result = await generateAiChatResponse({
+      prompt: '检查生产磁盘',
+      model: 'ops-reasoning',
+      mode: 'chat'
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        provider: 'openai',
+        model: 'ops-reasoning',
+        text: '已按高推理强度生成响应。'
+      }
+    })
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4010/v1/responses', expect.any(Object))
+    const body = JSON.parse(String((fetchMock as any).mock.calls[0][1].body))
+    expect(body).toMatchObject({
+      model: 'ops-reasoning',
+      max_output_tokens: 1600,
+      reasoning: { effort: 'high' }
+    })
+    expect(body.input[0].content).toContain('Extended Thinking is disabled')
+    expect(body.input[0].content).toContain('Knowledge base search is disabled')
+    expect(body.input[0].content).toContain('Auto approval may exist only for low-risk read-only actions')
   })
 
   it('retries timed-out AI chat provider requests up to five times before surfacing failure', async () => {

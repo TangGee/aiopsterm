@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'crypto'
-import type { ModelProviderCheckKey, ModelProviderUserConfig, UserConfig } from '@shared/preload'
+import type { AiPreferencesUserConfig, ModelProviderCheckKey, ModelProviderUserConfig, UserConfig } from '@shared/preload'
 
 export type AiProviderResolvedConfig = {
   provider: ModelProviderCheckKey
@@ -19,6 +19,10 @@ export type AiProviderTextRequest = {
   headers: Record<string, string>
   body: string
   parseText: (payload: unknown) => string
+}
+
+export type AiProviderTextRequestOptions = {
+  preferences?: Pick<AiPreferencesUserConfig, 'reasoningEffort'>
 }
 
 export type AiProviderTextFetchResult =
@@ -163,12 +167,14 @@ export function createProviderTextRequest(
   input: AiProviderResolvedConfig,
   systemPrompt: string,
   messagesOrUserPrompt: string | AiProviderTextMessage[],
-  maxTokens: number
+  maxTokens: number,
+  options: AiProviderTextRequestOptions = {}
 ): AiProviderTextRequest | null {
   const model = normalizeText(input.config.modelId)
   const apiKey = normalizeText(input.config.apiKey)
   const baseUrl = normalizeText(input.config.baseUrl)
   const messages = normalizeMessages(messagesOrUserPrompt)
+  const reasoningEffort = options.preferences?.reasoningEffort
   if (!model || !messages.length) return null
 
   if (input.provider === 'ollama') {
@@ -295,7 +301,8 @@ export function createProviderTextRequest(
         ? {
             model,
             input: [{ role: 'system', content: systemPrompt }, ...messages],
-            max_output_tokens: maxTokens
+            max_output_tokens: maxTokens,
+            ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {})
           }
         : {
             model,

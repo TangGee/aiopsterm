@@ -2183,7 +2183,7 @@ const chatSelectionToAi = (panelId: string) => {
   if (selected) {
     workspace.rightPanelOpen = true
     workspace.selectedContexts = [...workspace.selectedContexts.filter((item) => item.id !== `terminal-${panelId}`), { id: `terminal-${panelId}`, kind: 'hosts', label: `Terminal selection: ${selected.slice(0, 24)}` }]
-    void workspace.sendChat(`Terminal output:\n\`\`\`\n${selected}\n\`\`\``)
+    void workspace.sendChat(`Terminal output:\n\`\`\`\n${selected}\n\`\`\``, undefined, undefined, { skipKnowledgeSearch: true })
     view?.terminal.clearSelection()
   }
   aiButtonPanelId.value = ''

@@ -1238,6 +1238,109 @@ describe('workspace store', () => {
     )
   })
 
+  it('filters long agent command output before sending it back to the provider', async () => {
+    const store = useWorkspaceStore()
+    const output = `HEAD-${'a'.repeat(120)}\n${'x'.repeat(14000)}\nTAIL-load average: 0.10`
+    store.chatMessages = [
+      {
+        id: 'command-ask',
+        role: 'assistant',
+        text: 'cat /var/log/app.log',
+        state: 'done',
+        ask: 'command',
+        commandExecution: {
+          ip: '10.24.8.12',
+          command: 'cat /var/log/app.log',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    ]
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        text: '已分析压缩输出。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: input.requestId,
+        assistantMessageId: input.assistantMessageId
+      }
+    }))
+
+    const result = await store.continueAgentCommandLoop({
+      commandMessageId: 'command-ask',
+      command: 'cat /var/log/app.log',
+      commandExecution: store.chatMessages[0].commandExecution,
+      terminalPanelId: store.activePanel.id,
+      outputStartLength: store.activePanel.output.length,
+      output
+    })
+
+    expect(result.status).toBe('continued')
+    expect(store.chatMessages.find((message) => message.say === 'command_output')?.text).toBe(output)
+    const responseInput = vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0] as any
+    expect(responseInput.prompt).toContain('[aiopsterm omitted')
+    expect(responseInput.prompt).toContain('TAIL-load average')
+    expect(responseInput.prompt.length).toBeLessThan(output.length)
+    expect(responseInput.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          say: 'command_output',
+          text: expect.stringContaining('[aiopsterm omitted')
+        })
+      ])
+    )
+  })
+
+  it('keeps long agent command output unfiltered when the AI preference is disabled', async () => {
+    const store = useWorkspaceStore()
+    store.aiPreferences.commandOutputFilteringEnabled = false
+    const output = `HEAD\n${'x'.repeat(14000)}\nTAIL`
+    store.chatMessages = [
+      {
+        id: 'command-ask',
+        role: 'assistant',
+        text: 'cat /var/log/app.log',
+        state: 'done',
+        ask: 'command',
+        commandExecution: {
+          ip: '10.24.8.12',
+          command: 'cat /var/log/app.log',
+          requiresApproval: false,
+          interactive: false
+        }
+      }
+    ]
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
+      ok: true,
+      data: {
+        text: '已分析完整输出。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: input.requestId,
+        assistantMessageId: input.assistantMessageId
+      }
+    }))
+
+    await expect(
+      store.continueAgentCommandLoop({
+        commandMessageId: 'command-ask',
+        command: 'cat /var/log/app.log',
+        terminalPanelId: store.activePanel.id,
+        outputStartLength: store.activePanel.output.length,
+        output
+      })
+    ).resolves.toMatchObject({ status: 'continued' })
+
+    const responseInput = vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0] as any
+    expect(responseInput.prompt).toContain(output)
+    expect(responseInput.prompt).not.toContain('[aiopsterm omitted')
+  })
+
   it('auto-runs agent read-only command cards when the global preference is enabled', async () => {
     const store = useWorkspaceStore()
     store.aiPreferences.autoExecuteReadOnlyCommands = true
@@ -7504,6 +7607,59 @@ describe('workspace store', () => {
         expect.objectContaining({ id: 'kb-image:images/interface.png', kind: 'images', relPath: 'images/interface.png', mediaType: DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_MIME })
       ])
     )
+  })
+
+  it('auto-attaches knowledge search results to AI chat when the preference is enabled', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.kbSearch).mockResolvedValueOnce([
+      {
+        path: 'runbooks/disk.md',
+        startLine: 10,
+        endLine: 18,
+        score: 1.4,
+        snippet: 'Use df -h and journalctl for disk incidents.',
+        matchCount: 2
+      }
+    ])
+
+    await expect(store.sendChat('磁盘故障怎么排查')).resolves.toBe(true)
+
+    expect(window.aiops.kbSearch).toHaveBeenCalledWith('磁盘故障怎么排查', { maxResults: 3, minScore: 0.25 })
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(exchangeInput.text).toBe('磁盘故障怎么排查')
+    expect(exchangeInput.contexts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'kb-doc:runbooks/disk.md',
+          kind: 'docs',
+          label: 'disk.md',
+          relPath: 'runbooks/disk.md',
+          detail: expect.stringContaining('Use df -h')
+        })
+      ])
+    )
+  })
+
+  it('does not auto-search knowledge when the AI preference is disabled', async () => {
+    const store = useWorkspaceStore()
+    store.aiPreferences.kbSearchEnabled = false
+
+    await expect(store.sendChat('磁盘故障怎么排查')).resolves.toBe(true)
+
+    expect(window.aiops.kbSearch).not.toHaveBeenCalled()
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(exchangeInput.contexts).toEqual([])
+  })
+
+  it('skips automatic knowledge search for structured terminal output sends', async () => {
+    const store = useWorkspaceStore()
+
+    await expect(store.sendChat('Terminal output:\n```\ndf -h\n```', undefined, undefined, { skipKnowledgeSearch: true })).resolves.toBe(true)
+
+    expect(window.aiops.kbSearch).not.toHaveBeenCalled()
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(exchangeInput.text).toContain('Terminal output')
+    expect(exchangeInput.contexts).toEqual([])
   })
 
   it('preserves ai rich input parts on user messages', async () => {
