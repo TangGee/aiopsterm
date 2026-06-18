@@ -44,6 +44,15 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
   })
 }
 
+const commandExists = async (command: string) => {
+  const { spawn } = await import('child_process')
+  return new Promise<boolean>((resolve) => {
+    const child = spawn('sh', ['-lc', `command -v ${command} >/dev/null 2>&1`], { stdio: 'ignore' })
+    child.on('error', () => resolve(false))
+    child.on('close', (code) => resolve(code === 0))
+  })
+}
+
 const createFakeKubectl = async () => {
   const dir = path.join(os.tmpdir(), `aiopsterm-e2e-kubectl-${Date.now()}`)
   await mkdir(dir, { recursive: true })
@@ -389,6 +398,135 @@ const disableE2eMotion = async (page: Page) => {
     `
   })
 }
+
+test('managed AI session notifications flow through real local terminal hooks', async () => {
+  test.setTimeout(120_000)
+  const hasCodex = await commandExists('codex')
+  const hasClaude = await commandExists('claude')
+  test.skip(!hasCodex || !hasClaude, 'Codex and Claude Code CLIs must be installed for this real-agent notification E2E.')
+
+  const app = await launchApp('ai-agent-hooks')
+  const runId = Date.now()
+  const quoteShell = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
+  const hookCommand = (input: { source: 'codex' | 'claude-code'; event: string; title: string; payload: Record<string, unknown> }) =>
+    [
+      'printf "%s\\n"',
+      quoteShell(JSON.stringify(input.payload)),
+      '|',
+      'node "$AIOPSTERM_AGENT_HOOK_PATH"',
+      '--source',
+      quoteShell(input.source),
+      '--event',
+      quoteShell(input.event),
+      '--title',
+      quoteShell(input.title),
+      '--strict',
+      '--print-response'
+    ].join(' ')
+
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+
+    await expect(page.locator('.workspace-search input')).toBeVisible()
+    await page.locator('.workspace-search input').fill('127.0.0.1')
+    const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
+    await expect(localRow).toBeVisible()
+    await localRow.dblclick()
+    await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toBeVisible()
+    await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
+    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
+
+    const sendTerminalCommand = async (command: string) => {
+      await page.locator('.terminal-pane.active .xterm-host').click({ button: 'right' })
+      await expect(page.locator('.terminal-context-menu')).toBeVisible()
+      await page.locator('.terminal-context-menu button').filter({ hasText: '输入命令' }).click()
+      const input = page.locator('.command-line.floating input')
+      await expect(input).toBeVisible()
+      await input.fill(command)
+      await input.press('Enter')
+      await expect(input).toHaveCount(0)
+    }
+
+    await sendTerminalCommand(
+      hookCommand({
+        source: 'codex',
+        event: 'PermissionRequest',
+        title: `Codex approval E2E ${runId}`,
+        payload: {
+          session_id: `codex-e2e-${runId}`,
+          tool_name: 'shell',
+          tool_input: { command: 'echo codex approval' },
+          transcript_path: `/tmp/aiopsterm-codex-${runId}.jsonl`
+        }
+      })
+    )
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
+    await page.getByTestId('ai-attention-bell').click()
+    await expect(page.locator('.ai-sessions-panel')).toBeVisible()
+    const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex approval E2E ${runId}` })
+    await expect(codexRow).toContainText('待处理')
+    await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toHaveClass(/active/)
+    await codexRow.locator('.ai-session-handle').click()
+    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
+    await expect(codexRow).toContainText('空闲')
+
+    await sendTerminalCommand(
+      hookCommand({
+        source: 'claude-code',
+        event: 'AskUserQuestion',
+        title: `Claude question E2E ${runId}`,
+        payload: {
+          session_id: `claude-question-e2e-${runId}`,
+          tool_name: 'ask_user_question',
+          tool_input: {
+            questions: [{ question: 'Pick an environment', options: [{ label: 'staging' }, { label: 'prod' }] }]
+          }
+        }
+      })
+    )
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
+    await page.getByTestId('ai-attention-bell').click()
+    const questionRow = page.locator('.ai-session-row').filter({ hasText: `Claude question E2E ${runId}` })
+    await expect(questionRow).toContainText('待处理')
+    await questionRow.locator('.ai-session-handle').click()
+    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
+    await expect(questionRow).toContainText('空闲')
+
+    await sendTerminalCommand(
+      hookCommand({
+        source: 'claude-code',
+        event: 'Notification',
+        title: `Claude notification E2E ${runId}`,
+        payload: {
+          session_id: `claude-notification-e2e-${runId}`,
+          message: 'Claude Code needs attention'
+        }
+      })
+    )
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
+    await page.getByTestId('ai-attention-bell').click()
+    const notificationRow = page.locator('.ai-session-row').filter({ hasText: `Claude notification E2E ${runId}` })
+    await expect(notificationRow).toContainText('待处理')
+
+    await sendTerminalCommand(
+      hookCommand({
+        source: 'claude-code',
+        event: 'Stop',
+        title: `Claude notification E2E ${runId}`,
+        payload: {
+          session_id: `claude-notification-e2e-${runId}`,
+          last_assistant_message: 'Turn complete'
+        }
+      })
+    )
+    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
+    await expect(notificationRow).toContainText('空闲')
+  } finally {
+    await app.close()
+  }
+})
 
 test('aiopsterm primary desktop flows', async () => {
   test.setTimeout(360_000)
