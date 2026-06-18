@@ -28,9 +28,10 @@ type LocalTerminalBackend = {
       spawn: (shell: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; shell: false }) => MockChildProcess
     }
   }) => void
+  managedLocalTerminalEnvironment: (id: string, options: { panelId?: string; workspaceId?: string }, baseEnv?: NodeJS.ProcessEnv) => NodeJS.ProcessEnv
   createLocalTerminalSession: (
     id: string,
-    options: { kind?: 'local'; shell?: string; cwd?: string; cols?: number; rows?: number; terminalType?: string },
+    options: { kind?: 'local'; shell?: string; cwd?: string; cols?: number; rows?: number; terminalType?: string; panelId?: string; workspaceId?: string },
     sink: ReturnType<typeof createSink>
   ) => {
     shell: string
@@ -156,7 +157,11 @@ describe('local terminal backend runtime', () => {
       })
     })
 
-    const result = backend.createLocalTerminalSession('local-pty-1', { kind: 'local', cols: 120, rows: 40, terminalType: 'vt220' }, createSink(events))
+    const result = backend.createLocalTerminalSession(
+      'local-pty-1',
+      { kind: 'local', cols: 120, rows: 40, terminalType: 'vt220', panelId: 'panel-1', workspaceId: 'workspace' },
+      createSink(events)
+    )
     result.session.write('uptime\n')
     result.session.resize(132, 44)
     pty.emitData('shell output\n')
@@ -178,7 +183,15 @@ describe('local terminal backend runtime', () => {
           cols: 120,
           rows: 40,
           name: 'vt220',
-          env: expect.objectContaining({ PATH: '/usr/bin', TERM: 'vt220' })
+          env: expect.objectContaining({
+            PATH: '/usr/bin',
+            TERM: 'vt220',
+            AIOPSTERM_TERMINAL_SESSION_ID: 'local-pty-1',
+            AIOPSTERM_PANEL_ID: 'panel-1',
+            AIOPSTERM_SURFACE_ID: 'panel-1',
+            AIOPSTERM_WORKSPACE_ID: 'workspace',
+            AIOPSTERM_MANAGED_TERMINAL: '1'
+          })
         })
       })
     ])
@@ -190,6 +203,34 @@ describe('local terminal backend runtime', () => {
     expect(events.exit).toEqual([expect.objectContaining({ code: 0 })])
     expect(events.closed).toEqual(['local-pty-1'])
     expect(result.session.writeBinary(Buffer.from([0x2a]))).toBe(false)
+  })
+
+  it('protects managed local terminal identity over inherited environment values', async () => {
+    const backend = await loadBackend()
+
+    expect(
+      backend.managedLocalTerminalEnvironment(
+        'local-managed-1',
+        { panelId: 'panel-managed', workspaceId: 'workspace-managed' },
+        {
+          AIOPSTERM_TERMINAL_SESSION_ID: 'stale-session',
+          AIOPSTERM_PANEL_ID: 'stale-panel',
+          AIOPSTERM_SURFACE_ID: 'stale-surface',
+          AIOPSTERM_WORKSPACE_ID: 'stale-workspace',
+          AIOPSTERM_MANAGED_TERMINAL: '0',
+          PATH: '/usr/bin'
+        }
+      )
+    ).toEqual(
+      expect.objectContaining({
+        AIOPSTERM_TERMINAL_SESSION_ID: 'local-managed-1',
+        AIOPSTERM_PANEL_ID: 'panel-managed',
+        AIOPSTERM_SURFACE_ID: 'panel-managed',
+        AIOPSTERM_WORKSPACE_ID: 'workspace-managed',
+        AIOPSTERM_MANAGED_TERMINAL: '1',
+        PATH: '/usr/bin'
+      })
+    )
   })
 
   it('uses subprocess fallback without writing fallback status text into terminal data', async () => {

@@ -1292,6 +1292,8 @@ const startLocalTerminalForPanel = async (panel: TerminalPanel) => {
   try {
     const session = await window.aiops.createTerminal({
       kind: 'local',
+      panelId: panel.id,
+      workspaceId: 'workspace',
       cols: size.cols,
       rows: size.rows,
       terminalType: workspace.terminalSettings.terminalType

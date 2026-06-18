@@ -3698,6 +3698,8 @@ const registerIpc = () => {
       cols: options.cols,
       rows: options.rows,
       terminalType: options.terminalType,
+      panelId: options.panelId,
+      workspaceId: options.workspaceId,
       hasAssetId: Boolean(options.assetId),
       hasSshOptions: Boolean(options.ssh)
     })
@@ -3789,6 +3791,7 @@ const registerIpc = () => {
     sessions.set(id, terminalRecord)
     registerTerminalForCodexBridge(terminalRecord, {
       kind: 'local',
+      panelId: options.panelId,
       sessionId: id,
       label: 'Local terminal',
       cwd: result.cwd

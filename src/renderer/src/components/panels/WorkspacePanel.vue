@@ -2325,6 +2325,8 @@ const connectAsset = async (assetId: string) => {
     try {
       const session = await window.aiops.createTerminal({
         kind: 'local',
+        panelId,
+        workspaceId: 'workspace',
         title: asset.name,
         cols: 100,
         rows: 30,

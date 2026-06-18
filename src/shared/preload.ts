@@ -6,6 +6,8 @@ export type TerminalCreateOptions = {
   cols?: number
   rows?: number
   terminalType?: string
+  panelId?: string
+  workspaceId?: string
   kind?: 'local' | 'ssh'
   assetId?: string
   title?: string

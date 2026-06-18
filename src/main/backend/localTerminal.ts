@@ -85,6 +85,24 @@ const getTerminalType = (options: TerminalCreateOptions) => {
   return terminalType || 'xterm-256color'
 }
 
+const cleanManagedContextValue = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+export const managedLocalTerminalEnvironment = (id: string, options: TerminalCreateOptions, baseEnv: NodeJS.ProcessEnv = getEnv()) => {
+  const panelId = cleanManagedContextValue(options.panelId)
+  const workspaceId = cleanManagedContextValue(options.workspaceId) || 'local'
+  const env: NodeJS.ProcessEnv = {
+    ...baseEnv,
+    AIOPSTERM_TERMINAL_SESSION_ID: id,
+    AIOPSTERM_WORKSPACE_ID: workspaceId,
+    AIOPSTERM_MANAGED_TERMINAL: '1'
+  }
+  if (panelId) {
+    env.AIOPSTERM_PANEL_ID = panelId
+    env.AIOPSTERM_SURFACE_ID = panelId
+  }
+  return env
+}
+
 const getPlatform = () => runtimeConfig.getPlatform?.() || process.platform
 
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
@@ -121,7 +139,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
   const terminalArgs = localShellArgs(terminalShell)
   const cwd = getCwd(options)
   const terminalType = getTerminalType(options)
-  const env = { ...getEnv(), TERM: terminalType }
+  const env = { ...managedLocalTerminalEnvironment(id, options), TERM: terminalType }
   const lifecycleBase = {
     kind: 'local' as const,
     shell: terminalShell,

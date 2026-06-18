@@ -12522,6 +12522,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       try {
         const session = await window.aiops.createTerminal({
           kind: 'local',
+          panelId,
+          workspaceId: 'workspace',
           title: label,
           cols: 100,
           rows: 30,
