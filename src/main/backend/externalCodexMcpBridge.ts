@@ -18,6 +18,7 @@ import type {
 } from '@shared/preload'
 import {
   clearManagedAiSession,
+  clearManagedAiNotifications,
   dismissManagedAiNotification,
   jumpToUnreadManagedAiNotification,
   listManagedAiNotifications,
@@ -895,6 +896,17 @@ const dismissAiNotification = async (params: Record<string, unknown>) =>
     })
   )
 
+const clearAiNotifications = async () => {
+  const result = await clearManagedAiNotifications()
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_NOTIFICATIONS_CLEAR_FAILED', result.errorMessage || 'Managed AI notifications clear failed.')
+  return ok({
+    changed: result.data.changed,
+    notifications: [],
+    count: 0,
+    unreadCount: 0
+  })
+}
+
 const openAiNotification = async (params: Record<string, unknown>) => {
   const result = await openManagedAiNotification({
     id: cleanOptionalText(params.id),
@@ -948,6 +960,7 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'list_ai_notifications') return listAiNotifications(params)
   if (request.method === 'mark_ai_notification_read') return markAiNotificationRead(params)
   if (request.method === 'dismiss_ai_notification') return dismissAiNotification(params)
+  if (request.method === 'clear_ai_notifications') return clearAiNotifications()
   if (request.method === 'open_ai_notification') return openAiNotification(params)
   if (request.method === 'jump_to_unread_ai_notification') return jumpToUnreadAiNotification()
   return fail('UNKNOWN_METHOD', `Unknown external Codex MCP bridge method: ${request.method || ''}`)

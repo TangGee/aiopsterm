@@ -139,12 +139,13 @@ The preload boundary exposes:
 - `listManagedAiNotifications({ query, source, unread, read, limit })`
 - `markManagedAiNotificationRead({ id, source, sessionId, all })`
 - `dismissManagedAiNotification({ id, source, sessionId, allRead })`
+- `clearManagedAiNotifications()`
 - `openManagedAiNotification({ id, source, sessionId })`
 - `jumpToUnreadManagedAiNotification()`
 
 Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Codex hook approvals remain telemetry/visibility unless the agent itself asks through its native approval path.
 
-The notification API is derived from managed session records rather than a separate notification store. Notification ids use `managed-ai:<source>:<sessionId>`. A session is unread while its state is `needsInput` and it has not been handled. `open` and `jump` return a focus request for the renderer to select the AI session panel and the owning visible terminal. `dismiss` only removes read notifications; unread notifications must be marked read first so an active approval or question is not hidden accidentally.
+The notification API is derived from managed session records rather than a separate notification store. Notification ids use `managed-ai:<source>:<sessionId>`. A session is unread while its state is `needsInput` and it has not been handled. `open` and `jump` return a focus request for the renderer to select the AI session panel and the owning visible terminal. `dismiss` only removes read notifications; unread notifications must be marked read first so an active approval or question is not hidden accidentally. `clear` removes all managed AI notification records, matching control_compat's bulk clear semantics, but it still does not kill the owning terminal or agent process.
 
 ## Auto Title
 

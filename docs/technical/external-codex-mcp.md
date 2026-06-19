@@ -38,6 +38,7 @@ The external server currently exposes:
 - `list_ai_notifications`: Lists notification-style attention items derived from managed AI sessions.
 - `mark_ai_notification_read`: Marks one notification or all unread notifications as locally handled.
 - `dismiss_ai_notification`: Removes one read notification or all read notifications from the managed session list.
+- `clear_ai_notifications`: Clears all managed AI notification records without closing terminals or agent processes.
 - `open_ai_notification`: Requests aiopsterm to focus the notification's AI session and owning visible terminal.
 - `jump_to_unread_ai_notification`: Requests aiopsterm to focus the newest unread managed AI notification.
 
@@ -47,7 +48,7 @@ The external server currently exposes:
 
 `list_ai_session_events` is the request-response MCP form of the managed-AI event stream. It accepts `afterSeq`/`after_seq`, `name`/`names`, `category`/`categories`, `source`/`sources`, `sessionId`/`sessionIds`, and `limit`, then returns `boot_id`, cursor metadata, `gap`, and matching event frames. The frames come from the in-memory replay ring; use `list_ai_sessions` to refresh state if `gap` is true.
 
-`list_ai_notifications` returns compact attention items with `id`, source, session id, title, summary, read state, event type, cwd, and visible-terminal routing fields. Notification ids use `managed-ai:<source>:<sessionId>`. Opening or jumping to a notification does not mark it read. Dismissing an unread notification is rejected; call `mark_ai_notification_read` first when the user has handled it.
+`list_ai_notifications` returns compact attention items with `id`, source, session id, title, summary, read state, event type, cwd, and visible-terminal routing fields. Notification ids use `managed-ai:<source>:<sessionId>`. Opening or jumping to a notification does not mark it read. Dismissing an unread notification is rejected; call `mark_ai_notification_read` first when the user has handled it. `clear_ai_notifications` is the bulk-clear form and removes all managed AI notification records regardless of read state, but it does not close the owning visible terminal or the agent process.
 
 ## Enablement
 

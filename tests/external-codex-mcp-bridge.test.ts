@@ -762,6 +762,34 @@ describe('external Codex MCP bridge runtime', () => {
         })
       })
     )
+
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PermissionRequest',
+        sessionId: 'codex-notification-clear-mcp-1',
+        actionable: true,
+        summary: 'approve prod deploy',
+        receivedAt: 910
+      },
+      null
+    )
+    const clearResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'clear_ai_notifications',
+      token: 'test-token',
+      params: {}
+    })
+    expect(clearResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          changed: 1,
+          count: 0,
+          unreadCount: 0,
+          notifications: []
+        })
+      })
+    )
   })
 
   it('serves socket bridge requests and the external stdio MCP tool list', async () => {
@@ -827,6 +855,7 @@ describe('external Codex MCP bridge runtime', () => {
           'list_ai_notifications',
           'mark_ai_notification_read',
           'dismiss_ai_notification',
+          'clear_ai_notifications',
           'open_ai_notification',
           'jump_to_unread_ai_notification'
         ])
@@ -840,6 +869,8 @@ describe('external Codex MCP bridge runtime', () => {
         expect(listAiSessionEventsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
         const dismissAiNotificationTool = tools.result?.tools?.find((tool) => tool.name === 'dismiss_ai_notification')
         expect(dismissAiNotificationTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
+        const clearAiNotificationsTool = tools.result?.tools?.find((tool) => tool.name === 'clear_ai_notifications')
+        expect(clearAiNotificationsTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
         const jumpToUnreadAiNotificationTool = tools.result?.tools?.find((tool) => tool.name === 'jump_to_unread_ai_notification')
         expect(jumpToUnreadAiNotificationTool?.annotations).toEqual(expect.objectContaining({ idempotentHint: true }))
       } finally {

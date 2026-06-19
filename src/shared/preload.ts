@@ -831,6 +831,12 @@ export type ManagedAiNotificationMutationResult = AiopsMutationResult<{
   focusRequest?: ManagedAiSessionFocusRequest
 }>
 
+export type ManagedAiNotificationClearResult = AiopsMutationResult<{
+  changed: number
+  notifications: ManagedAiNotificationRecord[]
+  snapshot: ManagedAiSessionSnapshot
+}>
+
 export type AgentHookInstallerSource =
   | 'codex'
   | 'claude-code'
@@ -3646,6 +3652,7 @@ export type AiopsPreloadApi = {
   listManagedAiNotifications: (input?: ManagedAiNotificationListInput) => Promise<ManagedAiNotificationListResult>
   markManagedAiNotificationRead: (input: ManagedAiNotificationMarkReadInput) => Promise<ManagedAiNotificationMutationResult>
   dismissManagedAiNotification: (input: ManagedAiNotificationDismissInput) => Promise<ManagedAiNotificationMutationResult>
+  clearManagedAiNotifications: () => Promise<ManagedAiNotificationClearResult>
   openManagedAiNotification: (input: ManagedAiNotificationOpenInput) => Promise<ManagedAiNotificationMutationResult>
   jumpToUnreadManagedAiNotification: () => Promise<ManagedAiNotificationMutationResult>
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void

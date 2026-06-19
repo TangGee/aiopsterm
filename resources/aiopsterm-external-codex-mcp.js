@@ -378,6 +378,14 @@ const tools = [
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
   },
   {
+    name: 'clear_ai_notifications',
+    title: 'Clear aiopsterm AI notifications',
+    description:
+      'Clear all managed AI notification records from aiopsterm. This removes session-manager records only and does not kill visible terminals or agent processes.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+  },
+  {
     name: 'open_ai_notification',
     title: 'Open aiopsterm AI notification',
     description:

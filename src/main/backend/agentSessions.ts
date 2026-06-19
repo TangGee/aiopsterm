@@ -17,6 +17,7 @@ import type {
   ManagedAiSessionLifecycle,
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
+  ManagedAiNotificationClearResult,
   ManagedAiNotificationDismissInput,
   ManagedAiNotificationListInput,
   ManagedAiNotificationListResult,
@@ -1347,6 +1348,8 @@ const bulkError = (errorCode: string, errorMessage: string): ManagedAiSessionBul
 
 const notificationMutationError = (errorCode: string, errorMessage: string): ManagedAiNotificationMutationResult => ({ ok: false, errorCode, errorMessage })
 
+const notificationClearError = (errorCode: string, errorMessage: string): ManagedAiNotificationClearResult => ({ ok: false, errorCode, errorMessage })
+
 const getSessionForInput = (sourceValue: unknown, sessionIdValue: unknown) => {
   const source = normalizeSource(sourceValue)
   const sessionId = cleanOptionalText(sessionIdValue)
@@ -1721,6 +1724,30 @@ export const dismissManagedAiNotification = async (input: ManagedAiNotificationD
       notification: notificationForSession(session),
       notifications: listManagedAiNotificationPayload().notifications,
       snapshot: snapshot()
+    }
+  }
+}
+
+export const clearManagedAiNotifications = async (): Promise<ManagedAiNotificationClearResult> => {
+  await loadStoreIfNeeded()
+  const result = await bulkManagedAiSessions({ operation: 'clear-all' })
+  if (!result.ok || !result.data) {
+    return notificationClearError(result.errorCode || 'MANAGED_AI_NOTIFICATIONS_CLEAR_FAILED', result.errorMessage || 'Managed AI notifications clear failed.')
+  }
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'notification.dismissed',
+    changed: result.data.changed
+  })
+  publishManagedAiStreamFrame('managed_ai.notification.cleared', null, {
+    changed: result.data.changed
+  })
+  return {
+    ok: true,
+    data: {
+      changed: result.data.changed,
+      notifications: [],
+      snapshot: result.data.snapshot
     }
   }
 }

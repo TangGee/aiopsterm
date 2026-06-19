@@ -11,6 +11,7 @@ type AgentSessionsBackend = {
   listManagedAiNotifications: (input?: Record<string, unknown>) => Promise<unknown>
   markManagedAiNotificationRead: (input: Record<string, unknown>) => Promise<unknown>
   dismissManagedAiNotification: (input: Record<string, unknown>) => Promise<unknown>
+  clearManagedAiNotifications: () => Promise<unknown>
   openManagedAiNotification: (input: Record<string, unknown>) => Promise<unknown>
   jumpToUnreadManagedAiNotification: () => Promise<unknown>
   normalizeAiAgentSessionEventInput: (input: unknown, now?: number) => unknown
@@ -557,6 +558,56 @@ describe('agent session backend', () => {
           notifications: [],
           snapshot: { sessions: [] }
         })
+      })
+    )
+  })
+
+  it('clears all managed AI notifications without requiring read state', async () => {
+    const { clearManagedAiNotifications, configureAiAgentSessionStore, listManagedAiNotifications, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-notification-clear-')))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PermissionRequest',
+        sessionId: 'codex-notification-clear-1',
+        actionable: true,
+        summary: 'approve deploy',
+        receivedAt: 710
+      },
+      null
+    )
+    publishAiAgentSessionEvent(
+      {
+        source: 'gemini',
+        event: 'Stop',
+        sessionId: 'gemini-notification-clear-1',
+        summary: 'turn complete',
+        receivedAt: 705
+      },
+      null
+    )
+
+    await expect(listManagedAiNotifications()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ total: 2, unreadCount: 1 })
+      })
+    )
+    await expect(clearManagedAiNotifications()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: {
+          changed: 2,
+          notifications: [],
+          snapshot: { sessions: [] }
+        }
+      })
+    )
+    await expect(listManagedAiNotifications()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ total: 0, unreadCount: 0, notifications: [] })
       })
     )
   })

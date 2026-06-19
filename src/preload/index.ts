@@ -236,6 +236,7 @@ const api: AiopsPreloadApi = {
   listManagedAiNotifications: (input) => ipcRenderer.invoke('ai-agent:notifications:list', input),
   markManagedAiNotificationRead: (input) => ipcRenderer.invoke('ai-agent:notifications:mark-read', input),
   dismissManagedAiNotification: (input) => ipcRenderer.invoke('ai-agent:notifications:dismiss', input),
+  clearManagedAiNotifications: () => ipcRenderer.invoke('ai-agent:notifications:clear'),
   openManagedAiNotification: (input) => ipcRenderer.invoke('ai-agent:notifications:open', input),
   jumpToUnreadManagedAiNotification: () => ipcRenderer.invoke('ai-agent:notifications:jump-unread'),
   respondTerminalKeyboardInteractive: (id: string, response) => ipcRenderer.send(`terminal:keyboard-interactive:response:${id}`, response),

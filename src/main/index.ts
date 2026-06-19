@@ -61,6 +61,7 @@ import { closeExternalCodexMcpBridgeServer, ensureExternalCodexMcpBridgeServer }
 import {
   agentHookScriptPathFor,
   bulkManagedAiSessions,
+  clearManagedAiNotifications,
   clearManagedAiSession,
   closeAiAgentSessionServer,
   dismissManagedAiNotification,
@@ -3956,6 +3957,7 @@ const registerIpc = () => {
   ipcMain.handle('ai-agent:notifications:list', (_event, input) => listManagedAiNotifications(input))
   ipcMain.handle('ai-agent:notifications:mark-read', (_event, input) => markManagedAiNotificationRead(input))
   ipcMain.handle('ai-agent:notifications:dismiss', (_event, input) => dismissManagedAiNotification(input))
+  ipcMain.handle('ai-agent:notifications:clear', () => clearManagedAiNotifications())
   ipcMain.handle('ai-agent:notifications:open', async (_event, input) => {
     const result = await openManagedAiNotification(input)
     if (result.ok && result.data?.focusRequest) broadcastManagedAiSessionFocusRequest(result.data.focusRequest)
