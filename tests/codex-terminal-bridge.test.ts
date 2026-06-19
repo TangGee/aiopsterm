@@ -416,6 +416,95 @@ describe('Codex terminal bridge runtime', () => {
     }
   })
 
+  it('lists registered visible terminal targets without writing to them', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-list-local',
+        kind: 'local',
+        cwd: '/home/ops',
+        window: {} as never,
+        target: {
+          kind: 'local',
+          panelId: 'panel-local',
+          sessionId: 'terminal-list-local',
+          label: 'Local shell',
+          cwd: '/home/ops'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-list-ssh',
+        kind: 'ssh',
+        host: 'prod.internal',
+        cwd: '/srv/app',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          panelId: 'panel-ssh',
+          sessionId: 'terminal-list-ssh',
+          label: 'prod.internal',
+          host: 'prod.internal',
+          port: 22,
+          username: 'deploy',
+          assetId: 'asset-prod',
+          assetName: 'Production',
+          cwd: '/srv/app'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-list-ssh', { strict: true })
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+      const response = await socketRequest(socketPath, {
+        id: 'request-list-terminals',
+        method: 'list_terminals',
+        params: {}
+      })
+
+      expect(writes).toEqual([])
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-list-terminals',
+          ok: true,
+          data: {
+            count: 2,
+            selectedSessionId: 'terminal-list-ssh',
+            strictSelected: true,
+            terminals: [
+              expect.objectContaining({
+                sessionId: 'terminal-list-local',
+                kind: 'local',
+                panelId: 'panel-local',
+                label: 'Local shell',
+                selected: false,
+                cwd: '/home/ops'
+              }),
+              expect.objectContaining({
+                sessionId: 'terminal-list-ssh',
+                kind: 'ssh',
+                panelId: 'panel-ssh',
+                label: 'prod.internal',
+                selected: true,
+                strictSelected: true,
+                host: 'prod.internal',
+                port: 22,
+                username: 'deploy',
+                assetId: 'asset-prod',
+                assetName: 'Production',
+                cwd: '/srv/app'
+              })
+            ]
+          }
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('runs structured read-only file and search tools through the selected terminal', async () => {
     const bridge = await loadBridge()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
@@ -589,12 +678,24 @@ describe('Codex terminal bridge runtime', () => {
       mcp = startMcpScript(socketPath)
 
       const listResponse = await mcp.request({ jsonrpc: '2.0', id: 0, method: 'tools/list' })
-      expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual(['run_command', 'read_file', 'glob_search', 'grep_search', 'target_context'])
+      expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual(['list_terminals', 'run_command', 'read_file', 'glob_search', 'grep_search', 'target_context'])
+      const listTerminalsTool = listResponse.result?.tools?.find((tool) => tool.name === 'list_terminals')
       const runCommandTool = listResponse.result?.tools?.find((tool) => tool.name === 'run_command')
       const readFileTool = listResponse.result?.tools?.find((tool) => tool.name === 'read_file')
       const globSearchTool = listResponse.result?.tools?.find((tool) => tool.name === 'glob_search')
       const grepSearchTool = listResponse.result?.tools?.find((tool) => tool.name === 'grep_search')
       const targetContextTool = listResponse.result?.tools?.find((tool) => tool.name === 'target_context')
+      expect(listTerminalsTool).toEqual(
+        expect.objectContaining({
+          description: expect.stringContaining('visible aiopsterm terminal sessions'),
+          annotations: expect.objectContaining({
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false
+          })
+        })
+      )
       expect(runCommandTool).toEqual(
         expect.objectContaining({
           description: expect.stringContaining('managed host'),
@@ -639,6 +740,27 @@ describe('Codex terminal bridge runtime', () => {
           })
         )
       })
+
+      const terminalListResponse = await mcp.request({
+        jsonrpc: '2.0',
+        id: 'mcp-list-terminals',
+        method: 'tools/call',
+        params: {
+          name: 'list_terminals',
+          arguments: {}
+        }
+      })
+      expect(terminalListResponse.result).toEqual(
+        expect.objectContaining({
+          structuredContent: expect.objectContaining({
+            ok: true,
+            data: expect.objectContaining({
+              selectedSessionId: 'terminal-mcp',
+              terminals: [expect.objectContaining({ sessionId: 'terminal-mcp', selected: true })]
+            })
+          })
+        })
+      )
 
       const callPromise = mcp.request({
         jsonrpc: '2.0',

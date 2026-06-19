@@ -199,6 +199,24 @@ const targetContextForSession = (session: CodexTerminalBridgeSession): CodexSess
   ...(session.target || {})
 })
 
+const terminalSummaryForSession = (session: CodexTerminalBridgeSession) => {
+  const target = targetContextForSession(session)
+  return {
+    sessionId: session.id,
+    kind: target.kind || session.kind,
+    label: target.label || (session.kind === 'local' ? 'Local terminal' : 'SSH terminal'),
+    selected: session.id === preferredSessionId,
+    strictSelected: session.id === preferredSessionId && preferredSessionStrict,
+    ...(target.panelId ? { panelId: target.panelId } : {}),
+    ...(target.host ? { host: target.host } : {}),
+    ...(target.port ? { port: target.port } : {}),
+    ...(target.username ? { username: target.username } : {}),
+    ...(target.assetId ? { assetId: target.assetId } : {}),
+    ...(target.assetName ? { assetName: target.assetName } : {}),
+    ...(target.cwd ? { cwd: target.cwd } : {})
+  }
+}
+
 const resolveTargetSession = (params: Record<string, unknown>): CodexTerminalBridgeSession | null => {
   const requestedSessionId = cleanText(params.sessionId)
   if (requestedSessionId) return sessions.get(requestedSessionId) || null
@@ -457,8 +475,22 @@ const targetContext = (params: Record<string, unknown>): CodexBridgeResponse => 
   return { ok: true, target: targetContextForSession(session) }
 }
 
+const listTerminals = (): CodexBridgeResponse => {
+  const terminals = [...sessions.values()].map(terminalSummaryForSession)
+  return {
+    ok: true,
+    data: {
+      terminals,
+      count: terminals.length,
+      selectedSessionId: preferredSessionId || undefined,
+      strictSelected: preferredSessionStrict
+    }
+  }
+}
+
 const handleBridgeRequest = async (request: CodexTerminalBridgeRequest): Promise<CodexBridgeResponse> => {
   const params = request.params || {}
+  if (request.method === 'list_terminals') return listTerminals()
   if (request.method === 'run_command') return runTerminalCommand(params)
   if (request.method === 'read_file') return readRemoteFile(params)
   if (request.method === 'glob_search') return globRemoteFiles(params)

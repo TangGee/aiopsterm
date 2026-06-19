@@ -91,6 +91,12 @@ const targetContextSchema = {
   additionalProperties: false
 }
 
+const listTerminalsSchema = {
+  type: 'object',
+  properties: {},
+  additionalProperties: false
+}
+
 const readFileSchema = {
   type: 'object',
   properties: {
@@ -193,6 +199,19 @@ const grepSearchSchema = {
 }
 
 const tools = [
+  {
+    name: 'list_terminals',
+    title: 'List aiopsterm terminals',
+    description:
+      'List visible aiopsterm terminal sessions currently registered with the embedded Codex bridge, including selected target metadata. This is read-only and does not create, close, focus, or write to terminals.',
+    inputSchema: listTerminalsSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    }
+  },
   {
     name: 'run_command',
     title: 'Run command in aiopsterm terminal',

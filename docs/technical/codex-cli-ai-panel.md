@@ -63,6 +63,7 @@ Codex local command tools are disabled for the embedded aiopsterm mode. Host ope
 
 Enabled tools:
 
+- `mcp__aiopsterm_remote__list_terminals`: lists visible aiopsterm terminal sessions registered with the embedded bridge and marks the selected target. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
 - `mcp__aiopsterm_remote__run_command`: writes a marker-wrapped, non-interactive command to the selected real aiopsterm terminal session and returns captured output plus exit code. Codex config sets this tool to `approval_mode = "prompt"` so remote execution stays approval-gated.
 - `mcp__aiopsterm_remote__read_file`: reads a bounded line range from a remote file through the selected terminal. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
 - `mcp__aiopsterm_remote__glob_search`: runs a bounded remote file-name search through the selected terminal and returns structured path entries. Codex config sets this tool to `approval_mode = "approve"` because it is read-only.
@@ -74,7 +75,7 @@ Codex normally exposes MCP tools as Responses `namespace` tools. Some OpenAI-com
 Prompt boundaries now explicitly require the embedded agent to:
 
 - Treat the local Codex process, cwd, filesystem, and project docs as client implementation details, not host state.
-- Call `target_context` before the first command when the target is ambiguous or may have changed.
+- Call `target_context` before the first command when the target is ambiguous or may have changed, and use `list_terminals` when it needs to understand available aiopsterm terminal targets.
 - Continue in analysis/Q&A mode when no live terminal is selected instead of fabricating output.
 - Prefer read-only diagnostics, require explicit confirmation for risky host changes, and stop without bypass suggestions when aiopsterm reports a security block.
 
@@ -94,7 +95,7 @@ Deferred toolset work:
 
 `resources/codex-aiopsterm-mcp.js` is packaged as an extra resource and started by Codex as a stdio MCP server. It does not execute commands locally. It forwards `tools/call` requests to the Electron main-process Unix/pipe socket exposed by `src/main/backend/codexTerminalBridge.ts`.
 
-The bridge keeps a registry of active aiopsterm terminal sessions. `run_command` resolves the requested or currently selected terminal, writes:
+The bridge keeps a registry of active aiopsterm terminal sessions. `list_terminals` snapshots that registry without creating, focusing, closing, or writing to terminals. `run_command` resolves the requested or currently selected terminal, writes:
 
 ```text
 echo '<start marker>'; <command>; __aiopsterm_status=$?; echo '<end marker>':$__aiopsterm_status
