@@ -597,6 +597,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetSkillsStoreMock?.()
     ;(globalThis as any).__resetMcpStoreMock?.()
     ;(globalThis as any).__resetConfigStoreMock?.()
+    ;(globalThis as any).__resetAiAgentSessionEventMock?.()
     ;(globalThis as any).__resetTerminalKeyboardInteractiveMock?.()
   })
 
@@ -652,6 +653,67 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-sessions-workspace').exists()).toBe(false)
     expect(wrapper.find('.module-panel-pane').text()).toContain('AI 会话')
     expect(wrapper.text()).not.toContain('Managed Local Agents')
+  })
+
+  it('refreshes managed AI sessions when backend managed events arrive', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.setActiveModule('aiSessions')
+    const renamedSnapshot = {
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: 'codex-auto-title-1',
+            source: 'codex',
+            title: '发布脚本修复',
+            summary: '修复发布脚本失败重试',
+            state: 'idle',
+            lastEvent: 'stop',
+            lastActivityAt: 900,
+            createdAt: 800,
+            updatedAt: 950,
+            autoTitle: '发布脚本修复',
+            events: [],
+            decisions: []
+          }
+        ]
+      }
+    } as any
+    vi.mocked(window.aiops.listManagedAiSessions).mockResolvedValue(renamedSnapshot).mockResolvedValueOnce({
+      ok: true,
+      data: { sessions: [] }
+    } as any)
+
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await flushPromises()
+
+    const callsBeforeManagedEvent = vi.mocked(window.aiops.listManagedAiSessions).mock.calls.length
+    ;(globalThis as any).__emitManagedAiSessionEventMock({
+      name: 'managed_ai.session.renamed',
+      category: 'managed-ai',
+      source: 'codex',
+      sessionId: 'codex-auto-title-1',
+      title: '发布脚本修复',
+      payload: { source: 'codex', sessionId: 'codex-auto-title-1', title: '发布脚本修复' },
+      seq: 2
+    })
+    await flushPromises()
+    await new Promise((resolve) => queueMicrotask(() => resolve(undefined)))
+    await flushPromises()
+
+    expect(window.aiops.onManagedAiSessionEvent).toHaveBeenCalled()
+    expect(vi.mocked(window.aiops.listManagedAiSessions).mock.calls.length).toBeGreaterThanOrEqual(callsBeforeManagedEvent + 1)
+    expect(wrapper.find('.ai-sessions-panel').text()).toContain('发布脚本修复')
+    expect(store.managedAiSessions[0]?.autoTitle).toBe('发布脚本修复')
   })
 
   it('lets the AI session panel mark the selected managed session as handled', async () => {

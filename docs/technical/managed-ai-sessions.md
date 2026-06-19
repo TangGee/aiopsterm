@@ -128,6 +128,8 @@ The first frame is an `ack` with protocol `aiopsterm-agent-events`, a process `b
 
 Clients can filter by `name`/`names` and `category`/`categories`, resume with `after_seq` or `after`, and disable heartbeat frames with `include_heartbeats: false`. Replay is kept in a bounded in-memory ring of recent events; the JSONL audit file remains the durable long-term record.
 
+The main process also forwards live `managed-ai` stream frames to renderer windows through the preload `onManagedAiSessionEvent()` channel. The renderer treats that notification as an invalidation signal and reloads `listManagedAiSessions()` instead of trusting the event payload as state. This keeps local UI rows synchronized with backend-only mutations such as auto-naming, notification clearing, and external MCP decisions.
+
 ## Actions And Bulk API
 
 The preload boundary exposes:

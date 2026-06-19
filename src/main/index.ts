@@ -322,6 +322,7 @@ import type {
   AiopsOrganizationAssetRefreshInput,
   AiAgentSessionEvent,
   AiAgentSessionEventInput,
+  ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
   AiopsUserAvatarPrepareInput,
   AiopsUserCodeInput,
@@ -723,6 +724,16 @@ const broadcastManagedAiSessionFocusRequest = (request: ManagedAiSessionFocusReq
   const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
   focusWindow(target)
   broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-focus', request)
+}
+
+const broadcastManagedAiSessionEvent = (event: ManagedAiSessionEvent) => {
+  logRuntimeEvent('debug', 'ai-agent.managed-event', {
+    name: event.name,
+    source: event.source,
+    sessionId: event.sessionId,
+    seq: event.seq
+  })
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:managed-session-event', event)
 }
 
 const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -2283,6 +2294,7 @@ configureAiChatRuntime({
 const syncManagedAiAutoNamingRuntime = (config = getConfig()) => {
   configureManagedAiSessionAutoNamingRuntime({
     enabled: config.aiPreferences?.managedAiAutoNamingEnabled === true,
+    emit: broadcastManagedAiSessionEvent,
     generateTitle: async ({ prompt }) => {
       const current = getConfig()
       const provider = resolveModelProvider(current)

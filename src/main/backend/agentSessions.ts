@@ -9,6 +9,7 @@ import type {
   AiAgentSessionEventName,
   AiAgentSessionEventResult,
   AiAgentSessionSource,
+  ManagedAiSessionEvent,
   ManagedAiSessionBulkInput,
   ManagedAiSessionBulkResult,
   ManagedAiSessionClearInput,
@@ -35,6 +36,7 @@ import type {
 } from '@shared/preload'
 
 export type AgentSessionEventSink = (event: AiAgentSessionEvent) => void
+export type ManagedAiSessionEventSink = (event: ManagedAiSessionEvent) => void
 
 type AgentSessionSocketResponse = AiAgentSessionEventResult & {
   status?: 'acknowledged' | 'pending' | 'resolved' | 'timeout'
@@ -111,6 +113,7 @@ export type ManagedAiSessionAutoNamingRuntime = {
   minEventGrowth?: number
   minIntervalMs?: number
   maxContextMessages?: number
+  emit?: ManagedAiSessionEventSink
   generateTitle?: (input: ManagedAiSessionAutoNamingInput) => Promise<string | null | undefined>
 }
 
@@ -219,7 +222,7 @@ const streamBootId = randomUUID()
 let streamEvents: AgentSessionEventStreamFrame[] = []
 let streamSubscribers = new Map<string, AgentSessionEventStreamSubscriber>()
 let autoNamingRuntime: Required<Pick<ManagedAiSessionAutoNamingRuntime, 'enabled' | 'minEventGrowth' | 'minIntervalMs' | 'maxContextMessages'>> &
-  Pick<ManagedAiSessionAutoNamingRuntime, 'generateTitle'> = {
+  Pick<ManagedAiSessionAutoNamingRuntime, 'emit' | 'generateTitle'> = {
   enabled: false,
   minEventGrowth: defaultAutoTitleMinEventGrowth,
   minIntervalMs: defaultAutoTitleMinIntervalMs,
@@ -630,6 +633,7 @@ export const configureManagedAiSessionAutoNamingRuntime = (config: ManagedAiSess
     minEventGrowth: normalizeAutoNamingPositiveInteger(config.minEventGrowth, defaultAutoTitleMinEventGrowth, 1, 100),
     minIntervalMs: normalizeAutoNamingPositiveInteger(config.minIntervalMs, defaultAutoTitleMinIntervalMs, 30_000, 3_600_000),
     maxContextMessages: normalizeAutoNamingPositiveInteger(config.maxContextMessages, defaultAutoTitleMaxContextMessages, 3, 40),
+    emit: config.emit,
     generateTitle: config.generateTitle
   }
 }
@@ -856,28 +860,40 @@ const publishAgentEventStreamFrame = (event: AiAgentSessionEvent, session: Manag
 }
 
 const publishManagedAiStreamFrame = (name: string, session: ManagedAiSessionRecord | null, payload: Record<string, unknown>) => {
-  publishStreamFrame(
-    eventStreamFrame({
-      name,
-      category: 'managed-ai',
-      source: session?.source || 'aiopsterm',
-      workspace_id: session?.workspaceId,
-      surface_id: session?.panelId,
-      terminal_session_id: session?.terminalSessionId,
-      payload: {
-        ...(session
-          ? {
-              source: session.source,
-              sessionId: session.id,
-              title: session.title,
-              state: session.state,
-              lastEvent: session.lastEvent
-            }
-          : {}),
-        ...payload
-      }
-    })
-  )
+  const frame = eventStreamFrame({
+    name,
+    category: 'managed-ai',
+    source: session?.source || 'aiopsterm',
+    workspace_id: session?.workspaceId,
+    surface_id: session?.panelId,
+    terminal_session_id: session?.terminalSessionId,
+    payload: {
+      ...(session
+        ? {
+            source: session.source,
+            sessionId: session.id,
+            title: session.title,
+            state: session.state,
+            lastEvent: session.lastEvent
+          }
+        : {}),
+      ...payload
+    }
+  })
+  publishStreamFrame(frame)
+  autoNamingRuntime.emit?.({
+    name: frame.name,
+    category: 'managed-ai',
+    source: frame.source,
+    sessionId: cleanOptionalText(frame.payload.sessionId),
+    title: cleanOptionalText(frame.payload.title),
+    state:
+      frame.payload.state === 'idle' || frame.payload.state === 'working' || frame.payload.state === 'needsInput' || frame.payload.state === 'ended' || frame.payload.state === 'unknown'
+        ? frame.payload.state
+        : undefined,
+    payload: frame.payload,
+    seq: frame.seq
+  })
 }
 
 const cleanStringSet = (value: unknown) => {

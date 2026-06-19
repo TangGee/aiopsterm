@@ -25,6 +25,7 @@ import type {
   AiTodoItem,
   AiTodoSnapshotResult,
   AiAgentSessionEvent,
+  ManagedAiSessionEvent,
   McpServerUserConfig,
   SshAgentKeychainOption,
   TerminalKeyboardInteractiveRequest,
@@ -57,6 +58,7 @@ type TestAppUpdateProgressEvent = {
 
 const appUpdateProgressListeners = new Set<(event: TestAppUpdateProgressEvent) => void>()
 const aiAgentSessionEventListeners = new Set<(event: AiAgentSessionEvent) => void>()
+const managedAiSessionEventListeners = new Set<(event: ManagedAiSessionEvent) => void>()
 const terminalKeyboardInteractiveRequestListeners = new Set<(event: TerminalKeyboardInteractiveRequest) => void>()
 const terminalKeyboardInteractiveResultListeners = new Set<(event: TerminalKeyboardInteractiveResult) => void>()
 
@@ -83,6 +85,11 @@ const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
 
 ;(globalThis as any).__resetAiAgentSessionEventMock = () => {
   aiAgentSessionEventListeners.clear()
+  managedAiSessionEventListeners.clear()
+}
+
+;(globalThis as any).__emitManagedAiSessionEventMock = (event: ManagedAiSessionEvent) => {
+  managedAiSessionEventListeners.forEach((listener) => listener(event))
 }
 
 const defaultQuickCommands = {
@@ -9143,6 +9150,12 @@ Object.defineProperty(window, 'aiops', {
       aiAgentSessionEventListeners.add(listener)
       return () => {
         aiAgentSessionEventListeners.delete(listener)
+      }
+    }),
+    onManagedAiSessionEvent: vi.fn((listener: (event: ManagedAiSessionEvent) => void) => {
+      managedAiSessionEventListeners.add(listener)
+      return () => {
+        managedAiSessionEventListeners.delete(listener)
       }
     }),
     onCodexSessionData: vi.fn(() => () => undefined),

@@ -219,6 +219,7 @@ let stopDeepLink: (() => void) | undefined
 let stopKeyboardInteractiveRequest: (() => void) | undefined
 let stopKeyboardInteractiveResult: (() => void) | undefined
 let stopAiAgentSessionEvent: (() => void) | undefined
+let stopManagedAiSessionEvent: (() => void) | undefined
 let stopManagedAiSessionFocusRequest: (() => void) | undefined
 const terminalMfaInputRefs = ref<HTMLInputElement[]>([])
 const terminalMfaDialog = ref<TerminalMfaDialogState>({
@@ -466,6 +467,9 @@ onMounted(() => {
   stopAiAgentSessionEvent = window.aiops?.onAiAgentSessionEvent?.((event) => {
     workspace.upsertManagedAiSession(event)
   })
+  stopManagedAiSessionEvent = window.aiops?.onManagedAiSessionEvent?.(() => {
+    workspace.refreshManagedAiSessionsDebounced()
+  })
   stopManagedAiSessionFocusRequest = window.aiops?.onManagedAiSessionFocusRequest?.((request) => {
     void workspace.focusManagedAiSessionRequest(request)
   })
@@ -477,6 +481,7 @@ onUnmounted(() => {
   stopKeyboardInteractiveRequest?.()
   stopKeyboardInteractiveResult?.()
   stopAiAgentSessionEvent?.()
+  stopManagedAiSessionEvent?.()
   stopManagedAiSessionFocusRequest?.()
   window.removeEventListener('mousemove', handleResizeMove)
   window.removeEventListener('mouseup', endResize)

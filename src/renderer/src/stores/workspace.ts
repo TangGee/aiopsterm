@@ -8531,6 +8531,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  let managedAiSessionRefreshQueued = false
+  const refreshManagedAiSessionsDebounced = () => {
+    if (managedAiSessionRefreshQueued) return
+    managedAiSessionRefreshQueued = true
+    queueMicrotask(() => {
+      managedAiSessionRefreshQueued = false
+      void refreshManagedAiSessions({ silent: true })
+    })
+  }
+
   const upsertManagedAiSession = (event: AiAgentSessionEvent) => {
     const existing = managedAiSessions.value.find((session) => session.source === event.source && session.id === event.sessionId)
     const now = Date.now()
@@ -14745,6 +14755,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectedManagedAiSessionKey,
     upsertAiAttentionItem,
     refreshManagedAiSessions,
+    refreshManagedAiSessionsDebounced,
     applyManagedAiSessionSnapshot,
     upsertManagedAiSession,
     markManagedAiSessionHandled,

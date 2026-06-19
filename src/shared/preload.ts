@@ -724,6 +724,17 @@ export type ManagedAiSessionSnapshot = {
   sessions: ManagedAiSessionRecord[]
 }
 
+export type ManagedAiSessionEvent = {
+  name: string
+  category: 'managed-ai'
+  source: string
+  sessionId?: string
+  title?: string
+  state?: ManagedAiSessionState
+  payload: Record<string, unknown>
+  seq?: number
+}
+
 export type ManagedAiSessionListResult = AiopsMutationResult<ManagedAiSessionSnapshot>
 
 export type ManagedAiSessionReplyInput = {
@@ -3757,6 +3768,7 @@ export type AiopsPreloadApi = {
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
   publishAiAgentSessionEvent: (input: AiAgentSessionEventInput) => Promise<AiAgentSessionEventResult>
   onAiAgentSessionEvent: (listener: (event: AiAgentSessionEvent) => void) => () => void
+  onManagedAiSessionEvent: (listener: (event: ManagedAiSessionEvent) => void) => () => void
   onManagedAiSessionFocusRequest: (listener: (request: ManagedAiSessionFocusRequest) => void) => () => void
   onCodexSessionData: (listener: (event: CodexSessionDataEvent) => void) => () => void
   onCodexSessionLifecycle: (listener: (event: CodexSessionLifecycleEvent) => void) => () => void
