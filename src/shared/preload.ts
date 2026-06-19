@@ -157,6 +157,25 @@ export type ControlTerminalSummary = {
   rows?: number
 }
 
+export type ControlSurfaceResumeBindingSummary = {
+  name?: string
+  kind?: string
+  command: string
+  cwd?: string
+  checkpointId?: string
+  checkpoint_id?: string
+  source?: string
+  environment?: Record<string, string>
+  autoResume: boolean
+  auto_resume?: boolean
+  approvalPolicy?: string
+  approval_policy?: string
+  approvalRecordId?: string
+  approval_record_id?: string
+  updatedAt: number
+  updated_at?: number
+}
+
 export type ControlSurfaceSummary = {
   panelId: string
   title: string
@@ -173,6 +192,8 @@ export type ControlSurfaceSummary = {
   splitOrder?: number
   workspaceGroupId?: string
   workspaceGroupName?: string
+  resumeBinding?: ControlSurfaceResumeBindingSummary
+  resume_binding?: ControlSurfaceResumeBindingSummary
   knowledge?: {
     relPath: string
     isImage: boolean

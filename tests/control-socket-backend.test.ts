@@ -199,6 +199,46 @@ describe('control socket backend', () => {
     expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.group.list' })])
   })
 
+  it('routes surface resume requests to the renderer window', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow(() => ({
+      ok: true,
+      data: {
+        surfaceId: 'panel-1',
+        surface_id: 'panel-1',
+        resumeBinding: { command: 'tmux attach -t work', kind: 'tmux', autoResume: false, updatedAt: 1717200000000 },
+        resume_binding: { command: 'tmux attach -t work', kind: 'tmux', auto_resume: false, updated_at: 1717200000000 }
+      }
+    }))
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'surface.resume.set',
+        params: { surfaceId: 'panel-1', command: 'tmux attach -t work', kind: 'tmux' }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          surfaceId: 'panel-1',
+          resumeBinding: expect.objectContaining({ command: 'tmux attach -t work', kind: 'tmux' })
+        })
+      })
+    )
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({
+        method: 'surface.resume.set',
+        params: expect.objectContaining({ surfaceId: 'panel-1', command: 'tmux attach -t work' })
+      })
+    ])
+  })
+
   it('writes terminal text through the runtime without requiring renderer focus', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

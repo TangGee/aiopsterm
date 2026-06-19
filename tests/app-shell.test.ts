@@ -7193,6 +7193,81 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('manages control_compat-style surface resume bindings through the control socket', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    expect(controlHandler).toBeTruthy()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'resume-terminal-1'
+    store.activePanel.status = 'running'
+    store.activePanel.cwd = '/work/project'
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    const setResponse = await invokeControlHandler({
+      id: 'resume-set',
+      method: 'surface.resume.set',
+      params: {
+        panelId: store.activePanelId,
+        kind: 'tmux',
+        checkpointId: 'work',
+        command: 'tmux attach -t work',
+        environment: {
+          SAFE_ENV: 'yes',
+          API_KEY: 'secret'
+        }
+      }
+    })
+    expect(setResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          surfaceId: store.activePanelId,
+          resumeBinding: expect.objectContaining({
+            command: 'tmux attach -t work',
+            kind: 'tmux',
+            checkpointId: 'work',
+            environment: { SAFE_ENV: 'yes' },
+            autoResume: false
+          })
+        })
+      })
+    )
+    expect(setResponse.data.snapshot.surfaces[0].resumeBinding).toEqual(expect.objectContaining({ command: 'tmux attach -t work' }))
+
+    const getResponse = await invokeControlHandler({ id: 'resume-get', method: 'surface.resume.get', params: { panelId: store.activePanelId } })
+    expect(getResponse.data.resume_binding).toEqual(expect.objectContaining({ command: 'tmux attach -t work' }))
+
+    const runResponse = await invokeControlHandler({ id: 'resume-run', method: 'surface.resume.run', params: { panelId: store.activePanelId } })
+    expect(runResponse).toEqual(expect.objectContaining({ ok: true }))
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('resume-terminal-1', 'tmux attach -t work\n')
+
+    const clearResponse = await invokeControlHandler({
+      id: 'resume-clear',
+      method: 'surface.resume.clear',
+      params: { panelId: store.activePanelId, checkpointId: 'work' }
+    })
+    expect(clearResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true, resumeBinding: null }) }))
+    const finalGetResponse = await invokeControlHandler({ id: 'resume-get-empty', method: 'surface.resume.get', params: { panelId: store.activePanelId } })
+    expect(finalGetResponse.data.resumeBinding).toBeNull()
+
+    wrapper.unmount()
+  })
+
   it('applies terminal type and font settings to active views and new local sessions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

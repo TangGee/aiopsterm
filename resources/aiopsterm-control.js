@@ -13,6 +13,7 @@ Commands:
   workspace group <subcommand>
   workspace-group <subcommand>
   surface list
+  surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status
   agent hibernate|resume --session <id> [--source <source>]
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
@@ -69,6 +70,7 @@ const methodParams = () => {
     const subcommand = args.shift() || 'list'
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
     if (subcommand === 'current') return { method: 'surface.current', params: {} }
+    if (subcommand === 'resume') return surfaceResumeMethodParams(args.shift() || 'show')
     throw new Error(`Unknown surface command: ${subcommand}`)
   }
   if (command === 'agent-hibernation') {
@@ -198,6 +200,53 @@ const workspaceGroupMethodParams = (subcommand) => {
   throw new Error(`Unknown workspace-group command: ${subcommand}`)
 }
 
+const surfaceTargetParams = () => {
+  const panelId = readOption('--panel') || readOption('--surface') || readOption('--surface-id') || readOption('--tab') || readOption('--tab-id')
+  const sessionId = readOption('--session') || readOption('--session-id') || readOption('--terminal') || readOption('--terminal-id')
+  return { panelId, surfaceId: panelId, surface_id: panelId, sessionId, terminalSessionId: sessionId }
+}
+
+const surfaceResumeMethodParams = (subcommand) => {
+  if (subcommand === 'show') subcommand = 'get'
+  const target = surfaceTargetParams()
+  if (subcommand === 'set') {
+    const command = readOption('--shell') || readOption('--command') || args.join(' ')
+    const checkpointId = readOption('--checkpoint') || readOption('--checkpoint-id')
+    const autoResume = hasFlag('--auto-resume')
+    return {
+      method: 'surface.resume.set',
+      params: {
+        ...target,
+        name: readOption('--name'),
+        kind: readOption('--kind'),
+        command,
+        shell: command,
+        cwd: readOption('--cwd'),
+        checkpointId,
+        checkpoint_id: checkpointId,
+        source: readOption('--source') || 'manual',
+        autoResume,
+        auto_resume: autoResume
+      }
+    }
+  }
+  if (subcommand === 'get') return { method: 'surface.resume.get', params: target }
+  if (subcommand === 'clear') {
+    const checkpointId = readOption('--checkpoint') || readOption('--checkpoint-id')
+    return {
+      method: 'surface.resume.clear',
+      params: {
+        ...target,
+        checkpointId,
+        checkpoint_id: checkpointId,
+        source: readOption('--source')
+      }
+    }
+  }
+  if (subcommand === 'run') return { method: 'surface.resume.run', params: target }
+  throw new Error(`Unknown surface resume command: ${subcommand}`)
+}
+
 const printResponse = (response) => {
   if (outputJson || !response.ok) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`)
@@ -253,6 +302,25 @@ const printResponse = (response) => {
   if (data.group) {
     const group = data.group
     process.stdout.write(`OK\t${group.ref || group.id || '-'}\t${group.name || ''}\t${group.memberCount || 0} members\n`)
+    return
+  }
+  if ('resumeBinding' in data || 'resume_binding' in data) {
+    const binding = data.resumeBinding || data.resume_binding
+    const surfaceId = data.surfaceId || data.surface_id || data.surface?.panelId || '-'
+    if (!binding) {
+      process.stdout.write(`resume\t${surfaceId}\t-\n`)
+      return
+    }
+    process.stdout.write(
+      [
+        'resume',
+        surfaceId,
+        binding.kind || '-',
+        binding.checkpointId || binding.checkpoint_id || '-',
+        binding.autoResume || binding.auto_resume ? 'auto' : 'manual',
+        binding.command || ''
+      ].join('\t') + '\n'
+    )
     return
   }
   if (data.config) {

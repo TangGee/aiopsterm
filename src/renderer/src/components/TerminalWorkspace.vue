@@ -483,6 +483,7 @@ import type {
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
   ControlSplitGroupSummary,
+  ControlSurfaceResumeBindingSummary,
   ControlSurfaceSummary,
   ControlTerminalSummary,
   ControlWorkspaceGroupSummary,
@@ -609,8 +610,10 @@ const controlBool = (value: unknown, fallback = false) => {
 }
 
 type ControlWorkspaceGroupState = Omit<ControlWorkspaceGroupSummary, 'ref' | 'memberCount' | 'active'>
+type ControlSurfaceResumeBindingState = ControlSurfaceResumeBindingSummary
 
 const controlWorkspaceGroups = ref<ControlWorkspaceGroupState[]>([])
+const controlSurfaceResumeBindings = ref<Record<string, ControlSurfaceResumeBindingState>>({})
 
 const normalizeWorkspaceGroupId = (value: unknown) => {
   const text = controlText(value)
@@ -636,6 +639,15 @@ const resolveControlPanelId = (value: unknown) => {
   return panel?.id || ''
 }
 
+const resolveControlSurfacePanel = (params: Record<string, unknown> = {}) => {
+  const panelId = controlText(params.panelId || params.surfaceId || params.surface_id || params.tabId || params.tab_id)
+  const sessionId = controlText(params.sessionId || params.terminalSessionId || params.terminal_session_id || params.terminalId || params.terminal_id)
+  if (panelId || sessionId) {
+    return workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId || panel.id === sessionId || panel.sessionId === sessionId) || null
+  }
+  return workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0] || null
+}
+
 const resolveWorkspaceGroup = (value: unknown) => {
   const groupId = normalizeWorkspaceGroupId(value)
   return controlWorkspaceGroups.value.find((group) => group.id === groupId || workspaceGroupRefForControl(group.id) === groupId) || null
@@ -650,6 +662,7 @@ const pruneWorkspaceGroups = () => {
       return { ...group, anchorPanelId, memberPanelIds: [...new Set(memberPanelIds)] }
     })
     .filter((group) => group.anchorPanelId && group.memberPanelIds.length)
+  controlSurfaceResumeBindings.value = Object.fromEntries(Object.entries(controlSurfaceResumeBindings.value).filter(([panelId]) => panelIds.has(panelId)))
 }
 
 const groupForPanelId = (panelId: string) => {
@@ -685,6 +698,7 @@ const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary
 
 const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary => {
   const workspaceGroup = groupForPanelId(panel.id)
+  const resumeBinding = controlSurfaceResumeBindings.value[panel.id]
   return {
     panelId: panel.id,
     title: panel.title,
@@ -699,6 +713,7 @@ const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary =
     ...(panel.splitGroupId ? { splitGroupId: panel.splitGroupId } : {}),
     ...(typeof panel.splitOrder === 'number' ? { splitOrder: panel.splitOrder } : {}),
     ...(workspaceGroup ? { workspaceGroupId: workspaceGroup.id, workspaceGroupName: workspaceGroup.name } : {}),
+    ...(resumeBinding ? { resumeBinding, resume_binding: resumeBinding } : {}),
     ...(panel.knowledge
       ? {
           knowledge: {
@@ -1048,6 +1063,101 @@ const handleWorkspaceGroupControlRequest = async (method: string, params: Record
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
+const cleanSurfaceResumeEnvironment = (value: unknown) => {
+  if (!isRecord(value)) return undefined
+  const entries = Object.entries(value)
+    .map(([key, entry]) => [key.trim(), typeof entry === 'string' ? entry.trim() : ''] as const)
+    .filter(([key, entry]) => key && entry && !/(token|password|passwd|secret|api[_-]?key|credential|auth|bearer)/i.test(key))
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
+const surfaceResumeBindingPayload = (binding?: ControlSurfaceResumeBindingState | null) => {
+  if (!binding) return null
+  return {
+    ...binding,
+    checkpoint_id: binding.checkpointId || binding.checkpoint_id,
+    auto_resume: binding.autoResume,
+    approval_policy: binding.approvalPolicy || binding.approval_policy,
+    approval_record_id: binding.approvalRecordId || binding.approval_record_id,
+    updated_at: binding.updatedAt
+  }
+}
+
+const surfaceResumePayload = (panel: TerminalPanel, cleared = false) => {
+  const binding = surfaceResumeBindingPayload(controlSurfaceResumeBindings.value[panel.id])
+  return {
+    surface: surfaceSummaryForControl(panel),
+    terminal: panel.kind === 'knowledge' ? null : terminalSummaryForControl(panel),
+    surfaceId: panel.id,
+    surface_id: panel.id,
+    surface_ref: panel.id,
+    workspaceId: 'main',
+    workspace_id: 'main',
+    workspace_ref: 'main',
+    cleared,
+    resumeBinding: binding,
+    resume_binding: binding,
+    snapshot: workspaceSnapshotForControl()
+  }
+}
+
+const handleSurfaceResumeControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const panel = resolveControlSurfacePanel(params)
+  if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+  if (method === 'surface.resume.set') {
+    const command = controlText(params.command || params.shell || params.shellCommand)
+    if (!command) return controlFail('SURFACE_RESUME_COMMAND_REQUIRED', 'Resume command is required.')
+    const now = Date.now()
+    const checkpointId = controlText(params.checkpointId || params.checkpoint_id || params.checkpoint)
+    const approvalPolicy = controlText(params.approvalPolicy || params.approval_policy)
+    const approvalRecordId = controlText(params.approvalRecordId || params.approval_record_id)
+    const environment = cleanSurfaceResumeEnvironment(params.environment)
+    const binding: ControlSurfaceResumeBindingState = {
+      ...(controlText(params.name) ? { name: controlText(params.name) } : {}),
+      ...(controlText(params.kind) ? { kind: controlText(params.kind) } : {}),
+      command,
+      ...(controlText(params.cwd) || panel.cwd ? { cwd: controlText(params.cwd) || panel.cwd } : {}),
+      ...(checkpointId ? { checkpointId, checkpoint_id: checkpointId } : {}),
+      ...(controlText(params.source) ? { source: controlText(params.source) } : {}),
+      ...(environment ? { environment } : {}),
+      autoResume: controlBool(params.autoResume ?? params.auto_resume, false),
+      ...(approvalPolicy ? { approvalPolicy, approval_policy: approvalPolicy } : {}),
+      ...(approvalRecordId ? { approvalRecordId, approval_record_id: approvalRecordId } : {}),
+      updatedAt: now,
+      updated_at: now
+    }
+    controlSurfaceResumeBindings.value = { ...controlSurfaceResumeBindings.value, [panel.id]: binding }
+    return controlOk(surfaceResumePayload(panel))
+  }
+  if (method === 'surface.resume.get' || method === 'surface.resume.show') {
+    return controlOk(surfaceResumePayload(panel))
+  }
+  if (method === 'surface.resume.clear') {
+    const existing = controlSurfaceResumeBindings.value[panel.id]
+    if (!existing) return controlOk(surfaceResumePayload(panel, false))
+    const expectedCheckpoint = controlText(params.checkpointId || params.checkpoint_id || params.checkpoint)
+    const expectedSource = controlText(params.source)
+    if (expectedCheckpoint && existing.checkpointId !== expectedCheckpoint && existing.checkpoint_id !== expectedCheckpoint) {
+      return controlFail('SURFACE_RESUME_CHECKPOINT_MISMATCH', 'Resume binding checkpoint does not match.', { resumeBinding: surfaceResumeBindingPayload(existing), resume_binding: surfaceResumeBindingPayload(existing) })
+    }
+    if (expectedSource && existing.source !== expectedSource) {
+      return controlFail('SURFACE_RESUME_SOURCE_MISMATCH', 'Resume binding source does not match.', { resumeBinding: surfaceResumeBindingPayload(existing), resume_binding: surfaceResumeBindingPayload(existing) })
+    }
+    const next = { ...controlSurfaceResumeBindings.value }
+    delete next[panel.id]
+    controlSurfaceResumeBindings.value = next
+    return controlOk(surfaceResumePayload(panel, true))
+  }
+  if (method === 'surface.resume.run') {
+    if (panel.kind === 'knowledge') return controlFail('SURFACE_RESUME_TERMINAL_REQUIRED', 'Resume command can only run in a terminal surface.')
+    const binding = controlSurfaceResumeBindings.value[panel.id]
+    if (!binding?.command.trim()) return controlFail('SURFACE_RESUME_BINDING_NOT_FOUND', 'Surface has no resume binding.')
+    const decision = await workspace.runTerminalCommand(panel.id, binding.command, { source: 'agent', writeToShell: true })
+    return controlOk({ ...surfaceResumePayload(panel), decision })
+  }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
+
 const normalizeAgentTeamSource = (value: unknown): ControlAgentTeamLaunchSource => {
   const source = controlText(value).toLowerCase()
   if (source === 'claude' || source === 'claude-code' || source === 'claude_code') return 'claude-code'
@@ -1225,6 +1335,7 @@ const handleAgentHibernationControlRequest = async (method: string, params: Reco
 const handleControlRequest = async (request: ControlRequest): Promise<ControlResponse> => {
   const params = request.params || {}
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
+  if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
   if (request.method.startsWith('agent.team.')) return handleAgentTeamControlRequest(request.method, params)
   if (request.method.startsWith('agent-hibernation.') || request.method.startsWith('agent.')) return handleAgentHibernationControlRequest(request.method, params)
   if (request.method === 'workspace.snapshot' || request.method === 'tree' || request.method === 'top') {

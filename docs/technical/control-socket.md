@@ -55,6 +55,13 @@ The Agent Teams slice adds control_compat-style multi-agent launch primitives fo
 
 This starts agents in terminals owned by aiopsterm's main work panel. It does not manage the embedded right-side Codex panel and does not use external OS terminals.
 
+The surface resume slice adds control_compat-style resume bindings for visible work-panel surfaces:
+
+- `surface.resume.set`: attach a resume command to the current or selected surface.
+- `surface.resume.get` / `surface.resume.show`: read the selected surface's resume binding.
+- `surface.resume.clear`: remove a binding, optionally guarded by checkpoint/source.
+- `surface.resume.run`: explicitly write the stored command into the selected terminal through aiopsterm terminal command security.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
@@ -118,6 +125,10 @@ node /path/to/resources/aiopsterm-control.js workspace-group list
 node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
 node /path/to/resources/aiopsterm-control.js workspace-group focus workspace_group:1
 node /path/to/resources/aiopsterm-control.js surface list
+node /path/to/resources/aiopsterm-control.js surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
+node /path/to/resources/aiopsterm-control.js surface resume show --json
+node /path/to/resources/aiopsterm-control.js surface resume run --panel panel-main
+node /path/to/resources/aiopsterm-control.js surface resume clear --checkpoint work
 node /path/to/resources/aiopsterm-control.js agent-hibernation status
 node /path/to/resources/aiopsterm-control.js agent-hibernation on
 node /path/to/resources/aiopsterm-control.js agent hibernate --session codex-session-1 --source codex
@@ -154,6 +165,8 @@ This hibernation slice does not implement an automatic idle reaper. Automatic hi
 
 The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
+`surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; aiopsterm does not auto-run them when the app restarts. `surface.resume.run` is an explicit action and uses the same terminal command security path as AI-generated terminal commands. Environment values supplied with the binding are optional and obvious sensitive keys such as token, password, secret, credential, auth, bearer, and API key names are dropped before storage.
+
 ## Generic Notifications
 
 Generic notifications are stored in the main process memory queue. They are separate from managed AI session notifications, but both feed the same top-bar attention bell:
@@ -174,6 +187,7 @@ The queue is intentionally not persisted in this slice. Session restore and pers
 - `terminals`: terminal-only summaries with connection, cwd, SSH target, and xterm size when available.
 - `splitGroups`: grouped panel ids for split layouts.
 - `workspaceGroups`: control_compat-style surface group metadata for the shared main work panel.
+- `resumeBinding` / `resume_binding`: optional surface-level resume command metadata for each surface.
 - `agentHibernation`: explicit hibernation config for managed AI sessions.
 - `notifications`: generic control notifications currently held by the main process and synced into the renderer.
 - `managedAiSessions`: Claude/Codex session summaries without full event transcripts.

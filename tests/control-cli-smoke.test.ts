@@ -274,4 +274,65 @@ describe('aiopsterm-control CLI', () => {
       })
     ])
   })
+
+  it('sends surface resume requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          surfaceId: 'panel-1',
+          surface_id: 'panel-1',
+          resumeBinding: {
+            kind: 'tmux',
+            command: "tmux attach -t work",
+            checkpointId: 'work',
+            autoResume: false
+          },
+          resume_binding: {
+            kind: 'tmux',
+            command: "tmux attach -t work",
+            checkpoint_id: 'work',
+            auto_resume: false
+          }
+        }
+      }
+    })
+
+    const set = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'set', '--panel', 'panel-1', '--kind', 'tmux', '--checkpoint', 'work', '--shell', 'tmux attach -t work'],
+      { cwd: process.cwd() }
+    )
+    expect(set.stdout).toContain('resume\tpanel-1\ttmux\twork\tmanual\ttmux attach -t work')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'show', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'clear', '--panel', 'panel-1', '--checkpoint', 'work'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'run', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'surface.resume.set',
+        params: expect.objectContaining({
+          panelId: 'panel-1',
+          surfaceId: 'panel-1',
+          kind: 'tmux',
+          command: 'tmux attach -t work',
+          checkpointId: 'work',
+          checkpoint_id: 'work',
+          source: 'manual'
+        })
+      }),
+      expect.objectContaining({ method: 'surface.resume.get', params: expect.objectContaining({ panelId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.resume.clear', params: expect.objectContaining({ panelId: 'panel-1', checkpointId: 'work', checkpoint_id: 'work' }) }),
+      expect.objectContaining({ method: 'surface.resume.run', params: expect.objectContaining({ panelId: 'panel-1' }) })
+    ])
+  })
 })
