@@ -106,6 +106,10 @@ The events slice adds a control_compat-style local JSONL stream for automation:
 - `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.
 - `events.list`: list retained events for simple polling and tests.
 
+The synchronization slice adds control_compat-style automation rendezvous:
+
+- `sync.wait_for`: wait for or signal a named local token. `wait-for` and `wait_for` are aliases.
+
 The Agent Vault slice adds custom agent launch metadata for visible local-terminal automation:
 
 - `agent.vault.register`: register a custom agent id and command templates.
@@ -126,6 +130,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `read-screen` maps to `terminal.read_screen`.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
+- `wait-for` maps to `sync.wait_for`.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
 - `open-notification` maps to `notification.open`.
@@ -229,6 +234,8 @@ node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM
 node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
 node /path/to/resources/aiopsterm-control.js send-panel --panel panel-main "echo hello\n"
 node /path/to/resources/aiopsterm-control.js send-key-panel --panel panel-main enter
+node /path/to/resources/aiopsterm-control.js wait-for build-ready --timeout 30
+node /path/to/resources/aiopsterm-control.js wait-for --signal build-ready
 node /path/to/resources/aiopsterm-control.js notify --title "Build done" --body "All tests passed"
 node /path/to/resources/aiopsterm-control.js list-notifications
 node /path/to/resources/aiopsterm-control.js jump-to-unread
@@ -249,6 +256,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 `terminal.send_text` and `terminal.send_key` are raw terminal input primitives, equivalent to typed text or a physical key press in the terminal. They do not run the existing AI command security approval flow, because they may need to send non-command input, prompts, or control sequences. Command-generation and AI-command execution still use the existing renderer security path.
 
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
+
+`sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
 
 Agent Hibernation is off by default and only targets coding-agent sessions that were discovered inside aiopsterm-created local connection terminals. `agent.hibernate` asks the renderer to close the owning terminal backend session and then records hibernation metadata in the managed AI session store. It refuses sessions that currently need input or have no resume command. `agent.resume` writes the stored resume command through the same renderer terminal command path used by AI session recovery, so risky commands still pass through terminal command safety approval before any bytes are written to the shell.
 

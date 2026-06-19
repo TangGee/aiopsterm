@@ -644,6 +644,57 @@ describe('control socket backend', () => {
     }
   })
 
+  it('coordinates local automation with wait-for signals over the control socket', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-wait-for-'))
+    try {
+      const socketPath = await backend.ensureControlSocketServer(root)
+      const waiter = socketRequest(socketPath, {
+        id: 'waiter-1',
+        method: 'sync.wait_for',
+        params: { name: 'build-ready', timeoutMs: 5000 }
+      })
+      await nextTick()
+      await expect(
+        socketRequest(socketPath, {
+          id: 'signal-1',
+          method: 'wait-for',
+          params: { name: 'build-ready', signal: true }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          id: 'signal-1',
+          ok: true,
+          data: expect.objectContaining({ name: 'build-ready', status: 'signaled', waiterCount: 1 })
+        })
+      )
+      await expect(waiter).resolves.toEqual(
+        expect.objectContaining({
+          id: 'waiter-1',
+          ok: true,
+          data: expect.objectContaining({ name: 'build-ready', status: 'signaled' })
+        })
+      )
+
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'sync.wait_for',
+          params: { name: '../bad', signal: true }
+        })
+      ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'WAIT_FOR_NAME_INVALID' }))
+
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'sync.wait_for',
+          params: { name: 'missing-signal', timeoutMs: 1 }
+        })
+      ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'WAIT_FOR_TIMEOUT' }))
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('persists control events to JSONL and replays them after socket restart', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-events-jsonl-'))

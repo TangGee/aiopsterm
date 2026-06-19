@@ -36,6 +36,7 @@ Commands:
   terminal send-key [--panel <id>|--session <id>] <key>
   send-panel --panel <id> <text>
   send-key-panel --panel <id> <key>
+  wait-for [-S|--signal] <name> [--timeout <seconds>]
   notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
   list-notifications
   open-notification --id <id>
@@ -162,6 +163,7 @@ const methodParams = () => {
     throw new Error(`Unknown agent command: ${subcommand}`)
   }
   if (command === 'events' || command === 'event') return eventStreamMethodParams()
+  if (command === 'wait-for' || command === 'wait_for') return waitForMethodParams()
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
   if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
@@ -378,6 +380,20 @@ const readCallerParams = () => {
   if (workspaceId) caller.workspaceId = workspaceId
   if (cwd) caller.cwd = cwd
   return caller
+}
+
+const waitForMethodParams = () => {
+  const signal = hasFlag('-S') || hasFlag('--signal')
+  const timeout = Number(readOption('--timeout') || 0)
+  const name = args.find((arg) => arg !== '--' && !arg.startsWith('-')) || ''
+  return {
+    method: 'sync.wait_for',
+    params: {
+      name,
+      signal,
+      ...(Number.isFinite(timeout) && timeout > 0 ? { timeout, timeoutMs: Math.round(timeout * 1000) } : {})
+    }
+  }
 }
 
 const readCursorFile = (cursorFile) => {
@@ -758,6 +774,10 @@ const printResponse = (response) => {
   }
   if (typeof data.bytes === 'number' && (data.id || data.sessionId || data.key)) {
     process.stdout.write(['terminal-write', data.id || data.sessionId || '-', `bytes=${data.bytes}`, data.key || ''].filter(Boolean).join('\t') + '\n')
+    return
+  }
+  if (data.name && (data.status === 'signaled' || data.status === 'waiting' || data.status === 'timeout')) {
+    process.stdout.write(['wait-for', data.status, data.name, `waited=${data.waitedMs || data.waited_ms || 0}`].join('\t') + '\n')
     return
   }
   if (Array.isArray(data.snapshots)) {

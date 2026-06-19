@@ -70,6 +70,14 @@ type ControlEventSubscription = {
   heartbeatTimer?: NodeJS.Timeout
 }
 
+type ControlWaitForWaiter = {
+  id: string
+  name: string
+  startedAt: number
+  timer: NodeJS.Timeout
+  resolve: (response: ControlResponse) => void
+}
+
 type AgentVaultEntry = {
   id: string
   name: string
@@ -142,6 +150,11 @@ const maxAgentVaultCommandLength = 2000
 const maxSessionSnapshots = 20
 const maxAgentVaultScanTerminals = 20
 const maxAgentVaultScanProcessesPerTerminal = 512
+const maxWaitForNameLength = 128
+const maxWaitForSignals = 512
+const maxWaitForWaiters = 256
+const defaultWaitForTimeoutMs = 30000
+const maxWaitForTimeoutMs = 300000
 const controlSocketCapabilities = [
   'ping',
   'system.capabilities',
@@ -162,6 +175,7 @@ const controlSocketCapabilities = [
   'notification',
   'events.stream',
   'events.list',
+  'sync.wait_for',
   'agent.hibernation',
   'agent.team',
   'agent.vault',
@@ -188,6 +202,8 @@ let sessionSnapshotStorePath = ''
 let sessionSnapshotLoadedPath = ''
 let sessionSnapshots: ControlSessionSnapshot[] = []
 let sessionSnapshotWriteQueue: Promise<void> = Promise.resolve()
+let waitForSignals = new Map<string, number>()
+let waitForWaiters = new Map<string, Set<ControlWaitForWaiter>>()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -195,6 +211,12 @@ const normalizeTimeoutMs = (value: unknown) => {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return defaultTimeoutMs
   return Math.max(500, Math.min(maxTimeoutMs, Math.round(numberValue)))
+}
+
+const normalizeWaitForTimeoutMs = (value: unknown) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return defaultWaitForTimeoutMs
+  return Math.max(1, Math.min(maxWaitForTimeoutMs, Math.round(numberValue)))
 }
 
 const normalizeLimit = (value: unknown, fallback = 50) => {
@@ -217,6 +239,12 @@ const cleanTextList = (value: unknown): string[] => {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+const normalizeWaitForName = (value: unknown) => {
+  const text = cleanText(value)
+  if (!text || text.length > maxWaitForNameLength) return ''
+  return /^[A-Za-z0-9._:-]+$/.test(text) ? text : ''
 }
 
 const ok = (data: Record<string, unknown> = {}): ControlResponse => ({ ok: true, data })
@@ -300,6 +328,8 @@ const isAgentHooksMethod = (method: string) => method.startsWith('agent.hooks.')
 const isFeedMethod = (method: string) => method.startsWith('feed.')
 
 const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
+
+const isWaitForMethod = (method: string) => method === 'wait-for' || method === 'wait_for' || method === 'sync.wait_for' || method.startsWith('sync.wait_for.')
 
 const eventFiltersFromParams = (params: Record<string, unknown> = {}): ControlEventFilters => ({
   names: new Set([...cleanTextList(params.names), ...cleanTextList(params.name)]),
@@ -1749,6 +1779,91 @@ const startEventStream = (socket: Socket, request: ControlSocketRequest) => {
   }
 }
 
+const waitForPayload = (name: string, status: 'waiting' | 'signaled' | 'timeout', extra: Record<string, unknown> = {}) => ({
+  name,
+  status,
+  ...extra
+})
+
+const trimWaitForSignals = () => {
+  if (waitForSignals.size <= maxWaitForSignals) return
+  const sorted = [...waitForSignals.entries()].sort((left, right) => left[1] - right[1])
+  for (const [name] of sorted.slice(0, Math.max(0, waitForSignals.size - maxWaitForSignals))) waitForSignals.delete(name)
+}
+
+const signalWaitFor = (name: string) => {
+  const now = Date.now()
+  waitForSignals.set(name, now)
+  trimWaitForSignals()
+  const waiters = waitForWaiters.get(name)
+  const count = waiters?.size || 0
+  if (waiters) {
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer)
+      waiter.resolve(ok(waitForPayload(name, 'signaled', { signaledAt: now, signaled_at: now, waitedMs: now - waiter.startedAt, waited_ms: now - waiter.startedAt })))
+    }
+    waitForWaiters.delete(name)
+  }
+  publishControlEvent({
+    name: 'sync.wait_for.signaled',
+    category: 'control',
+    source: 'control.socket',
+    payload: { name, waiter_count: count }
+  })
+  return ok(waitForPayload(name, 'signaled', { signaledAt: now, signaled_at: now, waiterCount: count, waiter_count: count }))
+}
+
+const waitForSignal = (name: string, timeoutMs: number) => {
+  const signaledAt = waitForSignals.get(name)
+  if (signaledAt) {
+    waitForSignals.delete(name)
+    return Promise.resolve(ok(waitForPayload(name, 'signaled', { signaledAt, signaled_at: signaledAt, waitedMs: 0, waited_ms: 0 })))
+  }
+  const waiterCount = [...waitForWaiters.values()].reduce((count, waiters) => count + waiters.size, 0)
+  if (waiterCount >= maxWaitForWaiters) return Promise.resolve(fail('WAIT_FOR_LIMIT_REACHED', `At most ${maxWaitForWaiters} wait-for calls can be pending.`))
+  const startedAt = Date.now()
+  return new Promise<ControlResponse>((resolve) => {
+    const waiter: ControlWaitForWaiter = {
+      id: randomUUID(),
+      name,
+      startedAt,
+      timer: setTimeout(() => {
+        const waiters = waitForWaiters.get(name)
+        waiters?.delete(waiter)
+        if (waiters && waiters.size === 0) waitForWaiters.delete(name)
+        publishControlEvent({
+          name: 'sync.wait_for.timeout',
+          category: 'control',
+          source: 'control.socket',
+          payload: { name, timeout_ms: timeoutMs }
+        })
+        resolve(fail('WAIT_FOR_TIMEOUT', `wait-for timed out waiting for '${name}'.`, waitForPayload(name, 'timeout', { timeoutMs, timeout_ms: timeoutMs })))
+      }, timeoutMs),
+      resolve
+    }
+    waiter.timer.unref?.()
+    const waiters = waitForWaiters.get(name) || new Set<ControlWaitForWaiter>()
+    waiters.add(waiter)
+    waitForWaiters.set(name, waiters)
+  })
+}
+
+const handleWaitForControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const action = method.startsWith('sync.wait_for.') ? method.slice('sync.wait_for.'.length) : ''
+  const name = normalizeWaitForName(params.name || params.token || params.id || params.key)
+  if (!name) return fail('WAIT_FOR_NAME_INVALID', 'wait-for requires a name containing only letters, numbers, dot, underscore, colon, or dash.')
+  const signal = action === 'signal' || params.signal === true || params.mode === 'signal'
+  if (signal) return signalWaitFor(name)
+  const timeoutMs = normalizeWaitForTimeoutMs(params.timeoutMs || params.timeout_ms || (Number.isFinite(Number(params.timeout)) ? Number(params.timeout) * 1000 : undefined))
+  publishControlEvent({
+    name: 'sync.wait_for.started',
+    category: 'control',
+    source: 'control.socket',
+    payload: { name, timeout_ms: timeoutMs }
+  })
+  return waitForSignal(name, timeoutMs)
+}
+
 const activeWindow = () => {
   const windows = runtime.getWindows?.().filter((window) => !window.isDestroyed()) || []
   return windows.find((window) => window.isFocused()) || windows[0] || null
@@ -2151,6 +2266,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
+  if (isWaitForMethod(method)) return handleWaitForControlRequest(method, params)
   if (isEventListMethod(method)) return listEvents(params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
@@ -2312,6 +2428,14 @@ export const closeControlSocketServer = () => {
     subscription.socket.destroy()
   }
   eventSubscriptions.clear()
+  for (const waiters of waitForWaiters.values()) {
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer)
+      waiter.resolve(fail('CONTROL_SOCKET_CLOSED', 'aiopsterm control socket closed before wait-for was signaled.'))
+    }
+  }
+  waitForWaiters.clear()
+  waitForSignals.clear()
   notifications = []
   eventLog = []
   nextEventSeq = 1

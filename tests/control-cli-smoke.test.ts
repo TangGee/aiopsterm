@@ -130,6 +130,34 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends wait-for synchronization requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          name: (request.params as any)?.name,
+          status: 'signaled',
+          waitedMs: 0,
+          waiterCount: (request.params as any)?.signal ? 1 : 0
+        }
+      }
+    })
+
+    const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'wait-for', '--signal', 'build-ready', '--timeout', '2'], {
+      cwd: process.cwd()
+    })
+    expect(result.stdout).toContain('wait-for\tsignaled\tbuild-ready\twaited=0')
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'sync.wait_for',
+        params: expect.objectContaining({ name: 'build-ready', signal: true, timeout: 2, timeoutMs: 2000 })
+      })
+    ])
+  })
+
   it('sends system probe and raw rpc requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
