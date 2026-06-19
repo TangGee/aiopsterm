@@ -83,6 +83,21 @@ const aiSessionSelectorProperties = {
   }
 }
 
+const aiNotificationSelectorProperties = {
+  id: {
+    type: 'string',
+    description: 'Managed AI notification id returned by list_ai_notifications.'
+  },
+  source: {
+    type: 'string',
+    description: 'Optional AI agent source, for example codex or claude-code.'
+  },
+  sessionId: {
+    type: 'string',
+    description: 'Managed AI session id associated with the notification.'
+  }
+}
+
 const tools = [
   {
     name: 'list_hosts',
@@ -312,6 +327,75 @@ const tools = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'list_ai_notifications',
+    title: 'List aiopsterm managed AI notifications',
+    description:
+      'List notification-style attention items derived from aiopsterm managed AI sessions, including read/unread state and routing to the owning visible terminal.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional case-insensitive filter across notification id, source, title, summary, cwd, and terminal ids.' },
+        source: { type: 'string', description: 'Optional agent source filter, for example codex or claude-code.' },
+        unread: { type: 'boolean', description: 'When true, return only unread attention items.' },
+        read: { type: 'boolean', description: 'When true, return only read attention items.' },
+        limit: { type: 'number', description: 'Maximum notifications to return. Defaults to 50 and is capped by aiopsterm.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'mark_ai_notification_read',
+    title: 'Mark aiopsterm AI notification read',
+    description:
+      'Mark one managed AI notification read, or mark all unread managed AI notifications read. For waiting sessions this records a local handled decision.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiNotificationSelectorProperties,
+        all: { type: 'boolean', description: 'When true, mark all unread managed AI notifications read.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'dismiss_ai_notification',
+    title: 'Dismiss aiopsterm AI notification',
+    description:
+      'Dismiss one read managed AI notification, or dismiss all read managed AI notifications. Unread notifications must be marked read before dismissal.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiNotificationSelectorProperties,
+        allRead: { type: 'boolean', description: 'When true, dismiss every read managed AI notification.' },
+        all_read: { type: 'boolean', description: 'Alias for allRead.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'open_ai_notification',
+    title: 'Open aiopsterm AI notification',
+    description:
+      'Ask aiopsterm to open the AI session manager, select the notification session, and focus its owning visible terminal panel when available.',
+    inputSchema: {
+      type: 'object',
+      properties: aiNotificationSelectorProperties,
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'jump_to_unread_ai_notification',
+    title: 'Jump to next unread aiopsterm AI notification',
+    description:
+      'Ask aiopsterm to focus the newest unread managed AI notification, matching the top-bar bell behavior. It does not mark the item read.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }
 ]
 

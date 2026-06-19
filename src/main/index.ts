@@ -63,9 +63,14 @@ import {
   bulkManagedAiSessions,
   clearManagedAiSession,
   closeAiAgentSessionServer,
+  dismissManagedAiNotification,
   ensureAiAgentSessionServer,
   getAiAgentSessionSocketPath,
+  jumpToUnreadManagedAiNotification,
+  listManagedAiNotifications,
   listManagedAiSessions,
+  markManagedAiNotificationRead,
+  openManagedAiNotification,
   publishAiAgentSessionEvent,
   renameManagedAiSession,
   replyManagedAiSession
@@ -3948,6 +3953,19 @@ const registerIpc = () => {
   ipcMain.handle('ai-agent:sessions:rename', (_event, input) => renameManagedAiSession(input))
   ipcMain.handle('ai-agent:sessions:clear', (_event, input) => clearManagedAiSession(input))
   ipcMain.handle('ai-agent:sessions:bulk', (_event, input) => bulkManagedAiSessions(input))
+  ipcMain.handle('ai-agent:notifications:list', (_event, input) => listManagedAiNotifications(input))
+  ipcMain.handle('ai-agent:notifications:mark-read', (_event, input) => markManagedAiNotificationRead(input))
+  ipcMain.handle('ai-agent:notifications:dismiss', (_event, input) => dismissManagedAiNotification(input))
+  ipcMain.handle('ai-agent:notifications:open', async (_event, input) => {
+    const result = await openManagedAiNotification(input)
+    if (result.ok && result.data?.focusRequest) broadcastManagedAiSessionFocusRequest(result.data.focusRequest)
+    return result
+  })
+  ipcMain.handle('ai-agent:notifications:jump-unread', async () => {
+    const result = await jumpToUnreadManagedAiNotification()
+    if (result.ok && result.data?.focusRequest) broadcastManagedAiSessionFocusRequest(result.data.focusRequest)
+    return result
+  })
   ipcMain.handle('agent-hooks:list', async () => ({ ok: true, data: await listAgentHookInstallers() }))
   ipcMain.handle('agent-hooks:install', (_event, input) => installAgentHook(input))
   ipcMain.handle('agent-hooks:uninstall', (_event, input) => uninstallAgentHook(input))

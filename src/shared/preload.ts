@@ -766,6 +766,71 @@ export type ManagedAiSessionFocusRequest = {
   terminalSessionId?: string
 }
 
+export type ManagedAiNotificationRecord = {
+  id: string
+  source: AiAgentSessionSource
+  sessionId: string
+  title: string
+  summary: string
+  body: string
+  state: ManagedAiSessionState
+  event: AiAgentSessionEventName
+  read: boolean
+  isRead: boolean
+  needsInput: boolean
+  actionable?: boolean
+  pendingRequestId?: string
+  panelId?: string
+  terminalSessionId?: string
+  workspaceId?: string
+  cwd?: string
+  transcriptPath?: string
+  createdAt: number
+  updatedAt: number
+  lastActivityAt: number
+  readAt?: number
+}
+
+export type ManagedAiNotificationListInput = {
+  query?: string
+  source?: AiAgentSessionSource
+  unread?: boolean
+  read?: boolean
+  limit?: number
+}
+
+export type ManagedAiNotificationSelectorInput = {
+  id?: string
+  source?: AiAgentSessionSource
+  sessionId?: string
+}
+
+export type ManagedAiNotificationMarkReadInput = ManagedAiNotificationSelectorInput & {
+  all?: boolean
+}
+
+export type ManagedAiNotificationDismissInput = ManagedAiNotificationSelectorInput & {
+  allRead?: boolean
+  all_read?: boolean
+}
+
+export type ManagedAiNotificationOpenInput = ManagedAiNotificationSelectorInput
+
+export type ManagedAiNotificationListResult = AiopsMutationResult<{
+  notifications: ManagedAiNotificationRecord[]
+  count: number
+  total: number
+  unreadCount: number
+}>
+
+export type ManagedAiNotificationMutationResult = AiopsMutationResult<{
+  changed: number
+  notification?: ManagedAiNotificationRecord
+  notifications: ManagedAiNotificationRecord[]
+  snapshot: ManagedAiSessionSnapshot
+  focusRequest?: ManagedAiSessionFocusRequest
+}>
+
 export type AgentHookInstallerSource =
   | 'codex'
   | 'claude-code'
@@ -3578,6 +3643,11 @@ export type AiopsPreloadApi = {
   renameManagedAiSession: (input: ManagedAiSessionRenameInput) => Promise<ManagedAiSessionMutationResult>
   clearManagedAiSession: (input: ManagedAiSessionClearInput) => Promise<ManagedAiSessionMutationResult>
   bulkManagedAiSessions: (input: ManagedAiSessionBulkInput) => Promise<ManagedAiSessionBulkResult>
+  listManagedAiNotifications: (input?: ManagedAiNotificationListInput) => Promise<ManagedAiNotificationListResult>
+  markManagedAiNotificationRead: (input: ManagedAiNotificationMarkReadInput) => Promise<ManagedAiNotificationMutationResult>
+  dismissManagedAiNotification: (input: ManagedAiNotificationDismissInput) => Promise<ManagedAiNotificationMutationResult>
+  openManagedAiNotification: (input: ManagedAiNotificationOpenInput) => Promise<ManagedAiNotificationMutationResult>
+  jumpToUnreadManagedAiNotification: () => Promise<ManagedAiNotificationMutationResult>
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void
   cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>

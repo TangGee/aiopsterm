@@ -17,6 +17,14 @@ import type {
   ManagedAiSessionLifecycle,
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
+  ManagedAiNotificationDismissInput,
+  ManagedAiNotificationListInput,
+  ManagedAiNotificationListResult,
+  ManagedAiNotificationMarkReadInput,
+  ManagedAiNotificationMutationResult,
+  ManagedAiNotificationOpenInput,
+  ManagedAiNotificationRecord,
+  ManagedAiNotificationSelectorInput,
   ManagedAiSessionRecord,
   ManagedAiSessionRenameInput,
   ManagedAiSessionReplyInput,
@@ -110,12 +118,16 @@ type ManagedAiSessionAuditKind =
   | 'session.renamed'
   | 'session.cleared'
   | 'sessions.bulk'
+  | 'notification.dismissed'
+  | 'notification.opened'
+  | 'notification.mark_read'
 
 type ManagedAiSessionAuditEntry = {
   at: number
   kind: ManagedAiSessionAuditKind
   source?: AiAgentSessionSource
   sessionId?: string
+  notificationId?: string
   event?: AiAgentSessionEventName
   state?: ManagedAiSessionState
   title?: string
@@ -199,6 +211,8 @@ const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 const shellToken = (value: string) => (/^[A-Za-z0-9_./:=@+-]+$/.test(value) ? value : shellQuote(value))
 
 const sessionKey = (source: AiAgentSessionSource, id: string) => `${source}:${id}`
+
+const managedAiNotificationId = (source: AiAgentSessionSource, sessionId: string) => `managed-ai:${source}:${sessionId}`
 
 const pendingDecisionKey = (source: AiAgentSessionSource, sessionId: string, requestId: string) => `${source}:${sessionId}:${requestId}`
 
@@ -1322,9 +1336,16 @@ export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResul
   return { ok: true, data: snapshot() }
 }
 
+export const listManagedAiNotifications = async (input: ManagedAiNotificationListInput = {}): Promise<ManagedAiNotificationListResult> => {
+  await loadStoreIfNeeded()
+  return { ok: true, data: listManagedAiNotificationPayload(input) }
+}
+
 const mutationError = (errorCode: string, errorMessage: string): ManagedAiSessionMutationResult => ({ ok: false, errorCode, errorMessage })
 
 const bulkError = (errorCode: string, errorMessage: string): ManagedAiSessionBulkResult => ({ ok: false, errorCode, errorMessage })
+
+const notificationMutationError = (errorCode: string, errorMessage: string): ManagedAiNotificationMutationResult => ({ ok: false, errorCode, errorMessage })
 
 const getSessionForInput = (sourceValue: unknown, sessionIdValue: unknown) => {
   const source = normalizeSource(sourceValue)
@@ -1332,6 +1353,110 @@ const getSessionForInput = (sourceValue: unknown, sessionIdValue: unknown) => {
   if (!source || !sessionId) return null
   return sessions.get(sessionKey(source, sessionId)) || null
 }
+
+const notificationReadStateForSession = (session: ManagedAiSessionRecord) => session.state !== 'needsInput' || Boolean(session.handledAt)
+
+const notificationForSession = (session: ManagedAiSessionRecord): ManagedAiNotificationRecord => {
+  const read = notificationReadStateForSession(session)
+  return {
+    id: managedAiNotificationId(session.source, session.id),
+    source: session.source,
+    sessionId: session.id,
+    title: session.title,
+    summary: session.summary,
+    body: session.summary,
+    state: session.state,
+    event: session.lastEvent,
+    read,
+    isRead: read,
+    needsInput: session.state === 'needsInput',
+    ...(typeof session.actionable === 'boolean' ? { actionable: session.actionable } : {}),
+    ...(session.pendingRequestId ? { pendingRequestId: session.pendingRequestId } : {}),
+    ...(session.panelId ? { panelId: session.panelId } : {}),
+    ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.cwd ? { cwd: session.cwd } : {}),
+    ...(session.transcriptPath ? { transcriptPath: session.transcriptPath } : {}),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastActivityAt: session.lastActivityAt,
+    ...(session.handledAt ? { readAt: session.handledAt } : {})
+  }
+}
+
+const allManagedAiNotifications = () => snapshot().sessions.map(notificationForSession)
+
+const normalizeNotificationLimit = (value: unknown) => Math.min(cleanPositiveInteger(value) || 50, maxSessions)
+
+const listManagedAiNotificationPayload = (input: ManagedAiNotificationListInput = {}) => {
+  const source = normalizeSource(input.source)
+  const query = cleanText(input.query).toLowerCase()
+  const unreadOnly = input.unread === true && input.read !== true
+  const readOnly = input.read === true && input.unread !== true
+  const limit = normalizeNotificationLimit(input.limit)
+  const all = allManagedAiNotifications()
+  const filtered = all.filter((notification) => {
+    if (source && notification.source !== source) return false
+    if (unreadOnly && notification.read) return false
+    if (readOnly && !notification.read) return false
+    if (!query) return true
+    return [
+      notification.id,
+      notification.source,
+      notification.sessionId,
+      notification.title,
+      notification.summary,
+      notification.cwd || '',
+      notification.panelId || '',
+      notification.terminalSessionId || ''
+    ].some((value) => value.toLowerCase().includes(query))
+  })
+  return {
+    notifications: filtered.slice(0, limit),
+    count: filtered.length,
+    total: all.length,
+    unreadCount: all.filter((notification) => !notification.read).length
+  }
+}
+
+const notificationPartsFromId = (id: string) => {
+  const match = id.match(/^managed-ai:([^:]+):(.+)$/)
+  if (!match) return null
+  const source = normalizeSource(match[1])
+  const sessionId = cleanOptionalText(match[2])
+  return source && sessionId ? { source, sessionId } : null
+}
+
+const resolveNotificationSession = (input: ManagedAiNotificationSelectorInput = {}) => {
+  const id = cleanText(input.id)
+  if (id.startsWith('managed-ai:') && !notificationPartsFromId(id)) {
+    return { error: notificationMutationError('MANAGED_AI_NOTIFICATION_ID_INVALID', 'Managed AI notification id is invalid.') }
+  }
+  const parsed = notificationPartsFromId(id)
+  const source = parsed?.source || normalizeSource(input.source)
+  const sessionId = parsed?.sessionId || cleanOptionalText(input.sessionId) || (!id.startsWith('managed-ai:') ? cleanOptionalText(id) : undefined)
+  if (source && sessionId) {
+    const session = sessions.get(sessionKey(source, sessionId))
+    if (!session) return { error: notificationMutationError('MANAGED_AI_NOTIFICATION_NOT_FOUND', 'Managed AI notification was not found.') }
+    return { session }
+  }
+  if (sessionId) {
+    const matches = [...sessions.values()].filter((session) => session.id === sessionId)
+    if (!matches.length) return { error: notificationMutationError('MANAGED_AI_NOTIFICATION_NOT_FOUND', 'Managed AI notification was not found.') }
+    if (matches.length > 1) {
+      return { error: notificationMutationError('MANAGED_AI_NOTIFICATION_SOURCE_REQUIRED', 'Multiple managed AI notifications match this sessionId; pass source.') }
+    }
+    return { session: matches[0] }
+  }
+  return { error: notificationMutationError('MANAGED_AI_NOTIFICATION_SELECTOR_REQUIRED', 'Managed AI notification id or sessionId is required.') }
+}
+
+const focusRequestForSession = (session: ManagedAiSessionRecord) => ({
+  source: session.source,
+  sessionId: session.id,
+  ...(session.panelId ? { panelId: session.panelId } : {}),
+  ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {})
+})
 
 export const replyManagedAiSession = async (input: ManagedAiSessionReplyInput): Promise<ManagedAiSessionMutationResult> => {
   await loadStoreIfNeeded()
@@ -1470,6 +1595,182 @@ export const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput): P
     sessionIds: [...idFilter]
   })
   return { ok: true, data: { changed, snapshot: snapshot() } }
+}
+
+export const markManagedAiNotificationRead = async (input: ManagedAiNotificationMarkReadInput): Promise<ManagedAiNotificationMutationResult> => {
+  await loadStoreIfNeeded()
+  if (input?.all === true) {
+    const result = await bulkManagedAiSessions({ operation: 'mark-handled' })
+    if (!result.ok || !result.data) return notificationMutationError(result.errorCode || 'MANAGED_AI_NOTIFICATION_MARK_READ_FAILED', result.errorMessage || 'Managed AI notification mark read failed.')
+    appendManagedAiSessionAudit({
+      at: Date.now(),
+      kind: 'notification.mark_read',
+      changed: result.data.changed
+    })
+    publishManagedAiStreamFrame('managed_ai.notification.mark_read', null, {
+      changed: result.data.changed,
+      all: true
+    })
+    return {
+      ok: true,
+      data: {
+        changed: result.data.changed,
+        notifications: listManagedAiNotificationPayload().notifications,
+        snapshot: result.data.snapshot
+      }
+    }
+  }
+
+  const resolved = resolveNotificationSession(input || {})
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  if (notificationReadStateForSession(session)) {
+    return {
+      ok: true,
+      data: {
+        changed: 0,
+        notification: notificationForSession(session),
+        notifications: listManagedAiNotificationPayload().notifications,
+        snapshot: snapshot()
+      }
+    }
+  }
+  const result = await replyManagedAiSession({ source: session.source, sessionId: session.id, kind: 'handled' })
+  if (!result.ok || !result.data) return notificationMutationError(result.errorCode || 'MANAGED_AI_NOTIFICATION_MARK_READ_FAILED', result.errorMessage || 'Managed AI notification mark read failed.')
+  const next = result.data.session || getSessionForInput(session.source, session.id) || session
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'notification.mark_read',
+    source: session.source,
+    sessionId: session.id,
+    notificationId: managedAiNotificationId(session.source, session.id),
+    changed: 1
+  })
+  publishManagedAiStreamFrame('managed_ai.notification.mark_read', next, {
+    notificationId: managedAiNotificationId(session.source, session.id),
+    changed: 1
+  })
+  return {
+    ok: true,
+    data: {
+      changed: 1,
+      notification: notificationForSession(next),
+      notifications: listManagedAiNotificationPayload().notifications,
+      snapshot: result.data.snapshot
+    }
+  }
+}
+
+export const dismissManagedAiNotification = async (input: ManagedAiNotificationDismissInput): Promise<ManagedAiNotificationMutationResult> => {
+  await loadStoreIfNeeded()
+  if (input?.allRead === true || input?.all_read === true) {
+    const readSessions = snapshot().sessions.filter((session) => notificationReadStateForSession(session))
+    let changed = 0
+    readSessions.forEach((session) => {
+      if (!sessions.delete(sessionKey(session.source, session.id))) return
+      changed += 1
+    })
+    if (changed) persistSnapshot()
+    appendManagedAiSessionAudit({
+      at: Date.now(),
+      kind: 'notification.dismissed',
+      changed
+    })
+    publishManagedAiStreamFrame('managed_ai.notification.dismissed', null, {
+      changed,
+      allRead: true
+    })
+    return {
+      ok: true,
+      data: {
+        changed,
+        notifications: listManagedAiNotificationPayload().notifications,
+        snapshot: snapshot()
+      }
+    }
+  }
+
+  const resolved = resolveNotificationSession(input || {})
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  if (!notificationReadStateForSession(session)) {
+    return notificationMutationError('MANAGED_AI_NOTIFICATION_UNREAD', 'Unread managed AI notification must be marked read before dismissing.')
+  }
+  sessions.delete(sessionKey(session.source, session.id))
+  persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'notification.dismissed',
+    source: session.source,
+    sessionId: session.id,
+    notificationId: managedAiNotificationId(session.source, session.id),
+    event: session.lastEvent,
+    state: session.state,
+    title: session.title,
+    summary: session.summary,
+    changed: 1
+  })
+  publishManagedAiStreamFrame('managed_ai.notification.dismissed', session, {
+    notificationId: managedAiNotificationId(session.source, session.id),
+    changed: 1
+  })
+  return {
+    ok: true,
+    data: {
+      changed: 1,
+      notification: notificationForSession(session),
+      notifications: listManagedAiNotificationPayload().notifications,
+      snapshot: snapshot()
+    }
+  }
+}
+
+export const openManagedAiNotification = async (input: ManagedAiNotificationOpenInput): Promise<ManagedAiNotificationMutationResult> => {
+  await loadStoreIfNeeded()
+  const resolved = resolveNotificationSession(input || {})
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const focusRequest = focusRequestForSession(session)
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'notification.opened',
+    source: session.source,
+    sessionId: session.id,
+    notificationId: managedAiNotificationId(session.source, session.id),
+    event: session.lastEvent,
+    state: session.state,
+    title: session.title,
+    summary: session.summary
+  })
+  publishManagedAiStreamFrame('managed_ai.notification.opened', session, {
+    notificationId: managedAiNotificationId(session.source, session.id)
+  })
+  return {
+    ok: true,
+    data: {
+      changed: 0,
+      notification: notificationForSession(session),
+      notifications: listManagedAiNotificationPayload().notifications,
+      snapshot: snapshot(),
+      focusRequest
+    }
+  }
+}
+
+export const jumpToUnreadManagedAiNotification = async (): Promise<ManagedAiNotificationMutationResult> => {
+  await loadStoreIfNeeded()
+  const notification = listManagedAiNotificationPayload({ unread: true, limit: 1 }).notifications[0]
+  if (!notification) {
+    return {
+      ok: true,
+      data: {
+        changed: 0,
+        notifications: listManagedAiNotificationPayload().notifications,
+        snapshot: snapshot()
+      }
+    }
+  }
+  return openManagedAiNotification({ id: notification.id })
 }
 
 const writeSocketResponse = (socket: Socket, response: AgentSessionSocketResponse) => {

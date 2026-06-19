@@ -11,11 +11,22 @@ import type {
   ManagedAiSessionClearInput,
   ManagedAiSessionDecisionKind,
   ManagedAiSessionFocusRequest,
+  ManagedAiNotificationRecord,
   ManagedAiSessionRecord,
   ManagedAiSessionReplyInput,
   TerminalLifecycleEvent
 } from '@shared/preload'
-import { clearManagedAiSession, listManagedAiSessionEvents, listManagedAiSessions, replyManagedAiSession } from './agentSessions'
+import {
+  clearManagedAiSession,
+  dismissManagedAiNotification,
+  jumpToUnreadManagedAiNotification,
+  listManagedAiNotifications,
+  listManagedAiSessionEvents,
+  listManagedAiSessions,
+  markManagedAiNotificationRead,
+  openManagedAiNotification,
+  replyManagedAiSession
+} from './agentSessions'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from './sshTerminal'
 import { listAssets } from './assets'
 
@@ -701,6 +712,31 @@ const managedAiSessionSummary = (session: ManagedAiSessionRecord, options: { inc
   }
 }
 
+const managedAiNotificationSummary = (notification: ManagedAiNotificationRecord) => ({
+  id: notification.id,
+  source: notification.source,
+  sessionId: notification.sessionId,
+  title: notification.title,
+  summary: notification.summary,
+  body: notification.body,
+  state: notification.state,
+  event: notification.event,
+  read: notification.read,
+  isRead: notification.isRead,
+  needsInput: notification.needsInput,
+  ...(typeof notification.actionable === 'boolean' ? { actionable: notification.actionable } : {}),
+  ...(notification.pendingRequestId ? { pendingRequestId: notification.pendingRequestId } : {}),
+  ...(notification.panelId ? { panelId: notification.panelId } : {}),
+  ...(notification.terminalSessionId ? { terminalSessionId: notification.terminalSessionId } : {}),
+  ...(notification.workspaceId ? { workspaceId: notification.workspaceId } : {}),
+  ...(notification.cwd ? { cwd: notification.cwd } : {}),
+  ...(notification.transcriptPath ? { transcriptPath: notification.transcriptPath } : {}),
+  createdAt: notification.createdAt,
+  updatedAt: notification.updatedAt,
+  lastActivityAt: notification.lastActivityAt,
+  ...(notification.readAt ? { readAt: notification.readAt } : {})
+})
+
 const listAiSessions = async (params: Record<string, unknown>) => {
   const snapshot = await listManagedAiSessions()
   if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MANAGED_AI_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
@@ -810,6 +846,85 @@ const listAiSessionEvents = (params: Record<string, unknown>) => {
   })
 }
 
+const listAiNotifications = async (params: Record<string, unknown>) => {
+  const result = await listManagedAiNotifications({
+    query: cleanOptionalText(params.query),
+    source: cleanOptionalText(params.source) as never,
+    unread: params.unread === true,
+    read: params.read === true,
+    limit: params.limit as never
+  })
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_NOTIFICATIONS_UNAVAILABLE', result.errorMessage || 'Managed AI notifications are unavailable.')
+  return ok({
+    notifications: result.data.notifications.map(managedAiNotificationSummary),
+    count: result.data.count,
+    total: result.data.total,
+    unreadCount: result.data.unreadCount
+  })
+}
+
+const compactNotificationMutation = (result: Awaited<ReturnType<typeof openManagedAiNotification>> | Awaited<ReturnType<typeof markManagedAiNotificationRead>> | Awaited<ReturnType<typeof dismissManagedAiNotification>>) => {
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_NOTIFICATION_MUTATION_FAILED', result.errorMessage || 'Managed AI notification request failed.')
+  return ok({
+    changed: result.data.changed,
+    ...(result.data.notification ? { notification: managedAiNotificationSummary(result.data.notification) } : {}),
+    notifications: result.data.notifications.map(managedAiNotificationSummary),
+    count: result.data.notifications.length,
+    unreadCount: result.data.notifications.filter((notification) => !notification.read).length,
+    ...(result.data.focusRequest ? { focusRequest: result.data.focusRequest, focusRequested: false } : {})
+  })
+}
+
+const markAiNotificationRead = async (params: Record<string, unknown>) =>
+  compactNotificationMutation(
+    await markManagedAiNotificationRead({
+      id: cleanOptionalText(params.id),
+      source: cleanOptionalText(params.source) as never,
+      sessionId: cleanOptionalText(params.sessionId || params.session_id),
+      all: params.all === true
+    })
+  )
+
+const dismissAiNotification = async (params: Record<string, unknown>) =>
+  compactNotificationMutation(
+    await dismissManagedAiNotification({
+      id: cleanOptionalText(params.id),
+      source: cleanOptionalText(params.source) as never,
+      sessionId: cleanOptionalText(params.sessionId || params.session_id),
+      allRead: params.allRead === true || params.all_read === true
+    })
+  )
+
+const openAiNotification = async (params: Record<string, unknown>) => {
+  const result = await openManagedAiNotification({
+    id: cleanOptionalText(params.id),
+    source: cleanOptionalText(params.source) as never,
+    sessionId: cleanOptionalText(params.sessionId || params.session_id)
+  })
+  if (result.ok && result.data?.focusRequest) runtimeConfig.focusManagedAiSession?.(result.data.focusRequest)
+  const response = compactNotificationMutation(result)
+  if (response.ok && response.data) {
+    return ok({
+      ...response.data,
+      focusRequested: typeof runtimeConfig.focusManagedAiSession === 'function'
+    })
+  }
+  return response
+}
+
+const jumpToUnreadAiNotification = async () => {
+  const result = await jumpToUnreadManagedAiNotification()
+  if (result.ok && result.data?.focusRequest) runtimeConfig.focusManagedAiSession?.(result.data.focusRequest)
+  const response = compactNotificationMutation(result)
+  if (response.ok && response.data) {
+    return ok({
+      ...response.data,
+      focusRequested: Boolean(result.data?.focusRequest && typeof runtimeConfig.focusManagedAiSession === 'function')
+    })
+  }
+  return response
+}
+
 export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodexMcpRequest): Promise<ExternalCodexMcpResponse> => {
   const token = configuredToken()
   if (!isEnabled()) return fail('EXTERNAL_CODEX_MCP_DISABLED', 'External Codex MCP is disabled.')
@@ -830,6 +945,11 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'reply_ai_session') return replyAiSession(params)
   if (request.method === 'clear_ai_session') return clearAiSession(params)
   if (request.method === 'list_ai_session_events') return listAiSessionEvents(params)
+  if (request.method === 'list_ai_notifications') return listAiNotifications(params)
+  if (request.method === 'mark_ai_notification_read') return markAiNotificationRead(params)
+  if (request.method === 'dismiss_ai_notification') return dismissAiNotification(params)
+  if (request.method === 'open_ai_notification') return openAiNotification(params)
+  if (request.method === 'jump_to_unread_ai_notification') return jumpToUnreadAiNotification()
   return fail('UNKNOWN_METHOD', `Unknown external Codex MCP bridge method: ${request.method || ''}`)
 }
 

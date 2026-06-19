@@ -8,6 +8,11 @@ type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
   listManagedAiSessions: () => Promise<unknown>
   listManagedAiSessionEvents: (input?: Record<string, unknown>) => unknown
+  listManagedAiNotifications: (input?: Record<string, unknown>) => Promise<unknown>
+  markManagedAiNotificationRead: (input: Record<string, unknown>) => Promise<unknown>
+  dismissManagedAiNotification: (input: Record<string, unknown>) => Promise<unknown>
+  openManagedAiNotification: (input: Record<string, unknown>) => Promise<unknown>
+  jumpToUnreadManagedAiNotification: () => Promise<unknown>
   normalizeAiAgentSessionEventInput: (input: unknown, now?: number) => unknown
   publishAiAgentSessionEvent: (input: Record<string, unknown>, emit?: ((event: unknown) => void) | null) => unknown
   ensureAiAgentSessionServer: (input: { userDataPath: string; emit: (event: unknown) => void }) => Promise<string>
@@ -420,6 +425,137 @@ describe('agent session backend', () => {
             title: 'Release checks',
             userTitle: 'Release checks'
           })
+        })
+      })
+    )
+  })
+
+  it('derives managed AI notifications and supports mark/open/dismiss actions', async () => {
+    const {
+      configureAiAgentSessionStore,
+      dismissManagedAiNotification,
+      jumpToUnreadManagedAiNotification,
+      listManagedAiNotifications,
+      markManagedAiNotificationRead,
+      openManagedAiNotification,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-notifications-')))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PermissionRequest',
+        sessionId: 'codex-notification-1',
+        requestId: 'approve-notification-1',
+        actionable: true,
+        title: 'Codex · api-service',
+        summary: 'approve npm test',
+        cwd: '/work/api-service',
+        panelId: 'panel-notification',
+        terminalSessionId: 'terminal-notification',
+        receivedAt: 700
+      },
+      null
+    )
+    publishAiAgentSessionEvent(
+      {
+        source: 'claude-code',
+        event: 'Stop',
+        sessionId: 'claude-notification-1',
+        summary: 'turn complete',
+        cwd: '/work/ops',
+        receivedAt: 650
+      },
+      null
+    )
+
+    await expect(listManagedAiNotifications()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          total: 2,
+          unreadCount: 1,
+          notifications: [
+            expect.objectContaining({
+              id: 'managed-ai:codex:codex-notification-1',
+              source: 'codex',
+              sessionId: 'codex-notification-1',
+              title: 'Codex · api-service',
+              summary: 'approve npm test',
+              read: false,
+              isRead: false,
+              needsInput: true,
+              panelId: 'panel-notification',
+              terminalSessionId: 'terminal-notification'
+            }),
+            expect.objectContaining({
+              id: 'managed-ai:claude-code:claude-notification-1',
+              read: true,
+              needsInput: false
+            })
+          ]
+        })
+      })
+    )
+    await expect(listManagedAiNotifications({ unread: true })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: 1,
+          notifications: [expect.objectContaining({ id: 'managed-ai:codex:codex-notification-1' })]
+        })
+      })
+    )
+
+    await expect(openManagedAiNotification({ id: 'managed-ai:codex:codex-notification-1' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          focusRequest: {
+            source: 'codex',
+            sessionId: 'codex-notification-1',
+            panelId: 'panel-notification',
+            terminalSessionId: 'terminal-notification'
+          },
+          notification: expect.objectContaining({ read: false })
+        })
+      })
+    )
+
+    await expect(dismissManagedAiNotification({ id: 'managed-ai:codex:codex-notification-1' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'MANAGED_AI_NOTIFICATION_UNREAD'
+      })
+    )
+    await expect(jumpToUnreadManagedAiNotification()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          focusRequest: expect.objectContaining({ sessionId: 'codex-notification-1' })
+        })
+      })
+    )
+    await expect(markManagedAiNotificationRead({ id: 'managed-ai:codex:codex-notification-1' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          changed: 1,
+          notification: expect.objectContaining({
+            read: true,
+            needsInput: false
+          })
+        })
+      })
+    )
+    await expect(dismissManagedAiNotification({ allRead: true })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          changed: 2,
+          notifications: [],
+          snapshot: { sessions: [] }
         })
       })
     )

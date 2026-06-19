@@ -645,6 +645,125 @@ describe('external Codex MCP bridge runtime', () => {
     )
   })
 
+  it('exposes managed AI notifications through external Codex MCP', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    const focusRequests: Array<Record<string, unknown>> = []
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      enabled: true,
+      token: 'test-token',
+      focusManagedAiSession: (request: unknown) => focusRequests.push(request as Record<string, unknown>)
+    })
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'Question',
+        sessionId: 'codex-notification-mcp-1',
+        requestId: 'question-1',
+        actionable: true,
+        title: 'Codex · rollout',
+        summary: 'choose deployment window',
+        cwd: '/work/rollout',
+        panelId: 'panel-notification-mcp',
+        terminalSessionId: 'terminal-notification-mcp',
+        receivedAt: 900
+      },
+      null
+    )
+
+    const listResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_ai_notifications',
+      token: 'test-token',
+      params: { unread: true }
+    })
+    expect(listResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: 1,
+          unreadCount: 1,
+          notifications: [
+            expect.objectContaining({
+              id: 'managed-ai:codex:codex-notification-mcp-1',
+              source: 'codex',
+              sessionId: 'codex-notification-mcp-1',
+              read: false,
+              needsInput: true,
+              panelId: 'panel-notification-mcp',
+              terminalSessionId: 'terminal-notification-mcp'
+            })
+          ]
+        })
+      })
+    )
+    expect(JSON.stringify(listResponse)).not.toContain('raw')
+
+    const openResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'open_ai_notification',
+      token: 'test-token',
+      params: { id: 'managed-ai:codex:codex-notification-mcp-1' }
+    })
+    expect(openResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          focusRequested: true,
+          focusRequest: {
+            source: 'codex',
+            sessionId: 'codex-notification-mcp-1',
+            panelId: 'panel-notification-mcp',
+            terminalSessionId: 'terminal-notification-mcp'
+          }
+        })
+      })
+    )
+    expect(focusRequests).toEqual([
+      {
+        source: 'codex',
+        sessionId: 'codex-notification-mcp-1',
+        panelId: 'panel-notification-mcp',
+        terminalSessionId: 'terminal-notification-mcp'
+      }
+    ])
+
+    const markResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'mark_ai_notification_read',
+      token: 'test-token',
+      params: { id: 'managed-ai:codex:codex-notification-mcp-1' }
+    })
+    expect(markResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          changed: 1,
+          notification: expect.objectContaining({
+            id: 'managed-ai:codex:codex-notification-mcp-1',
+            read: true,
+            needsInput: false
+          }),
+          unreadCount: 0
+        })
+      })
+    )
+
+    const dismissResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'dismiss_ai_notification',
+      token: 'test-token',
+      params: { allRead: true }
+    })
+    expect(dismissResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          changed: 1,
+          count: 0,
+          unreadCount: 0
+        })
+      })
+    )
+  })
+
   it('serves socket bridge requests and the external stdio MCP tool list', async () => {
     const { assets, bridge } = await loadBackends()
     activeBridge = bridge
@@ -704,7 +823,12 @@ describe('external Codex MCP bridge runtime', () => {
           'focus_ai_session',
           'reply_ai_session',
           'clear_ai_session',
-          'list_ai_session_events'
+          'list_ai_session_events',
+          'list_ai_notifications',
+          'mark_ai_notification_read',
+          'dismiss_ai_notification',
+          'open_ai_notification',
+          'jump_to_unread_ai_notification'
         ])
         const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')
         expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
@@ -714,6 +838,10 @@ describe('external Codex MCP bridge runtime', () => {
         expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
         const listAiSessionEventsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_session_events')
         expect(listAiSessionEventsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+        const dismissAiNotificationTool = tools.result?.tools?.find((tool) => tool.name === 'dismiss_ai_notification')
+        expect(dismissAiNotificationTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
+        const jumpToUnreadAiNotificationTool = tools.result?.tools?.find((tool) => tool.name === 'jump_to_unread_ai_notification')
+        expect(jumpToUnreadAiNotificationTool?.annotations).toEqual(expect.objectContaining({ idempotentHint: true }))
       } finally {
         mcp.child.kill()
       }

@@ -35,12 +35,19 @@ The external server currently exposes:
 - `reply_ai_session`: Sends an allow/deny/reply/handled decision through the managed session backend.
 - `clear_ai_session`: Removes a managed AI session record without killing the owning terminal or agent process.
 - `list_ai_session_events`: Reads recent managed AI event-stream frames with a sequence cursor.
+- `list_ai_notifications`: Lists notification-style attention items derived from managed AI sessions.
+- `mark_ai_notification_read`: Marks one notification or all unread notifications as locally handled.
+- `dismiss_ai_notification`: Removes one read notification or all read notifications from the managed session list.
+- `open_ai_notification`: Requests aiopsterm to focus the notification's AI session and owning visible terminal.
+- `jump_to_unread_ai_notification`: Requests aiopsterm to focus the newest unread managed AI notification.
 
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
 
 `list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
 
 `list_ai_session_events` is the request-response MCP form of the managed-AI event stream. It accepts `afterSeq`/`after_seq`, `name`/`names`, `category`/`categories`, `source`/`sources`, `sessionId`/`sessionIds`, and `limit`, then returns `boot_id`, cursor metadata, `gap`, and matching event frames. The frames come from the in-memory replay ring; use `list_ai_sessions` to refresh state if `gap` is true.
+
+`list_ai_notifications` returns compact attention items with `id`, source, session id, title, summary, read state, event type, cwd, and visible-terminal routing fields. Notification ids use `managed-ai:<source>:<sessionId>`. Opening or jumping to a notification does not mark it read. Dismissing an unread notification is rejected; call `mark_ai_notification_read` first when the user has handled it.
 
 ## Enablement
 

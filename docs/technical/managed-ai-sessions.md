@@ -123,7 +123,7 @@ The same `AIOPSTERM_AGENT_SOCKET_PATH` socket also supports a reconnectable mana
 The first frame is an `ack` with protocol `aiopsterm-agent-events`, a process `boot_id`, replay count, latest sequence, and cursor gap metadata. Subsequent `event` frames include monotonically increasing `seq`, `name`, `category`, `source`, `workspace_id`, `surface_id`, `terminal_session_id`, and a compact payload. Supported categories are:
 
 - `agent`: incoming hook events, named as `agent.hook.<EventName>`, for example `agent.hook.PermissionRequest`.
-- `managed-ai`: local session mutations such as `managed_ai.decision.created`, `managed_ai.session.renamed`, `managed_ai.session.cleared`, and `managed_ai.sessions.bulk`.
+- `managed-ai`: local session mutations such as `managed_ai.decision.created`, `managed_ai.session.renamed`, `managed_ai.session.cleared`, `managed_ai.sessions.bulk`, and notification operations such as `managed_ai.notification.opened`, `managed_ai.notification.mark_read`, and `managed_ai.notification.dismissed`.
 
 Clients can filter by `name`/`names` and `category`/`categories`, resume with `after_seq` or `after`, and disable heartbeat frames with `include_heartbeats: false`. Replay is kept in a bounded in-memory ring of recent events; the JSONL audit file remains the durable long-term record.
 
@@ -136,8 +136,15 @@ The preload boundary exposes:
 - `renameManagedAiSession({ source, sessionId, title })`
 - `clearManagedAiSession({ source, sessionId })`
 - `bulkManagedAiSessions({ operation })`
+- `listManagedAiNotifications({ query, source, unread, read, limit })`
+- `markManagedAiNotificationRead({ id, source, sessionId, all })`
+- `dismissManagedAiNotification({ id, source, sessionId, allRead })`
+- `openManagedAiNotification({ id, source, sessionId })`
+- `jumpToUnreadManagedAiNotification()`
 
 Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Codex hook approvals remain telemetry/visibility unless the agent itself asks through its native approval path.
+
+The notification API is derived from managed session records rather than a separate notification store. Notification ids use `managed-ai:<source>:<sessionId>`. A session is unread while its state is `needsInput` and it has not been handled. `open` and `jump` return a focus request for the renderer to select the AI session panel and the owning visible terminal. `dismiss` only removes read notifications; unread notifications must be marked read first so an active approval or question is not hidden accidentally.
 
 ## Auto Title
 
