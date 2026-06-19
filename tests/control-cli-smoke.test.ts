@@ -336,6 +336,31 @@ describe('aiopsterm-control CLI', () => {
           }
         }
       }
+      if (request.method === 'agent.vault.scan') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            matches: [
+              {
+                agent: {
+                  id: 'my-agent',
+                  name: 'My Agent',
+                  resumeCommand: 'my-agent --session {{sessionId}}'
+                },
+                matched: true,
+                sessionId: 'session-1',
+                panelId: 'panel-1',
+                terminalSessionId: 'terminal-1',
+                canResume: true,
+                canFork: false,
+                resumeCommand: 'my-agent --session session-1'
+              }
+            ],
+            scannedProcessCount: 1
+          }
+        }
+      }
       return {
         id: request.id,
         ok: true,
@@ -415,6 +440,10 @@ describe('aiopsterm-control CLI', () => {
       { cwd: process.cwd() }
     )
     expect(identify.stdout).toContain('agent-match\tmy-agent\tMy Agent\tsession-1\tresume')
+    const scan = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'scan', '--source', 'my-agent', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    expect(scan.stdout).toContain('agent-match\tmy-agent\tMy Agent\tsession-1\tresume')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'remove', '--id', 'my-agent'], { cwd: process.cwd() })
 
     expect(seen).toEqual([
@@ -446,6 +475,7 @@ describe('aiopsterm-control CLI', () => {
           })
         })
       }),
+      expect.objectContaining({ method: 'agent.vault.scan', params: expect.objectContaining({ id: 'my-agent', panelId: 'panel-1' }) }),
       expect.objectContaining({ method: 'agent.vault.remove', params: expect.objectContaining({ id: 'my-agent' }) })
     ])
   })

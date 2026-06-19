@@ -19,7 +19,7 @@ Commands:
   surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
-  agent vault register|list|get|remove|render|identify
+  agent vault register|list|get|remove|render|identify|scan
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
@@ -286,6 +286,16 @@ const agentVaultMethodParams = (subcommand) => {
           sessionId: readOption('--session') || readOption('--session-id'),
           sessionPath: readOption('--session-path')
         }
+      }
+    }
+  }
+  if (subcommand === 'scan' || subcommand === 'scan-processes') {
+    return {
+      method: 'agent.vault.scan',
+      params: {
+        id: readOption('--id') || readOption('--agent') || readOption('--source'),
+        panelId: readOption('--panel') || readOption('--surface'),
+        sessionId: readOption('--session') || readOption('--session-id')
       }
     }
   }

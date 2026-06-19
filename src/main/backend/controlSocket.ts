@@ -2,10 +2,10 @@ import { createServer, type Server, type Socket } from 'net'
 import { randomUUID } from 'crypto'
 import { appendFileSync, existsSync, rmSync } from 'fs'
 import { basename, dirname, join } from 'path'
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { mkdir, readdir, readFile, readlink, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
-import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse, ControlSessionSnapshot } from '@shared/preload'
+import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse, ControlSessionSnapshot, ControlTerminalSummary } from '@shared/preload'
 
 type ControlSocketRequest = {
   id?: string
@@ -102,6 +102,16 @@ type AgentVaultProcessSnapshot = {
   sessionPath?: string
 }
 
+type AgentVaultScanTarget = {
+  panelId: string
+  sessionId?: string
+  title: string
+  cwd?: string
+  processId: number
+  processGroupId?: number
+  shell?: string
+}
+
 type SessionSnapshotStore = {
   version: 1
   snapshots: ControlSessionSnapshot[]
@@ -116,6 +126,8 @@ const eventProtocol = 'aiopsterm-events' as const
 const maxAgentVaultEntries = 200
 const maxAgentVaultCommandLength = 2000
 const maxSessionSnapshots = 20
+const maxAgentVaultScanTerminals = 20
+const maxAgentVaultScanProcessesPerTerminal = 512
 
 let server: Server | null = null
 let socketPath = ''
@@ -867,6 +879,49 @@ const agentVaultSessionIdFromProcess = (entry: AgentVaultEntry, process: AgentVa
   return explicit
 }
 
+const agentVaultMatchForProcess = (entry: AgentVaultEntry, process: AgentVaultProcessSnapshot, params: Record<string, unknown> = {}, terminal?: AgentVaultScanTarget) => {
+  const sessionId = agentVaultSessionIdFromProcess(entry, process, params)
+  const sessionPath = cleanText(params.sessionPath || params.session_path || process.sessionPath || sessionId)
+  const cwd = entry.cwd === 'ignore' ? '' : cleanText(params.cwd || process.cwd || terminal?.cwd)
+  const renderParams = {
+    ...params,
+    executable: process.executable || entry.executable,
+    cwd,
+    sessionId,
+    session_id: sessionId,
+    sessionPath,
+    session_path: sessionPath,
+    sessionDir: params.sessionDir || params.sessionDirectory || params.session_directory || entry.sessionDirectory
+  }
+  return {
+    agent: cloneAgentVaultEntry(entry),
+    matched: true,
+    sessionId: sessionId || '',
+    ...(sessionPath ? { sessionPath } : {}),
+    ...(cwd ? { cwd } : {}),
+    ...(terminal
+      ? {
+          panelId: terminal.panelId,
+          ...(terminal.sessionId ? { terminalSessionId: terminal.sessionId } : {}),
+          terminalTitle: terminal.title,
+          terminalProcessId: terminal.processId
+        }
+      : {}),
+    process: {
+      ...(process.pid ? { pid: process.pid } : {}),
+      ...(process.ppid ? { ppid: process.ppid } : {}),
+      ...(process.pgid ? { pgid: process.pgid } : {}),
+      ...(process.processName ? { processName: process.processName } : {}),
+      ...(process.executable ? { executable: process.executable } : {}),
+      argv: process.argv
+    },
+    canResume: Boolean(entry.resumeCommand && sessionId),
+    canFork: Boolean(entry.forkCommand && sessionId),
+    ...(entry.resumeCommand && sessionId ? { resumeCommand: renderAgentVaultTemplate(entry, entry.resumeCommand, renderParams) } : {}),
+    ...(entry.forkCommand && sessionId ? { forkCommand: renderAgentVaultTemplate(entry, entry.forkCommand, renderParams) } : {})
+  }
+}
+
 const agentVaultIdentify = async (params: Record<string, unknown>) => {
   await loadAgentVaultStore(runtime.userDataPath)
   const process = normalizeAgentVaultProcessSnapshot(params.process || params)
@@ -875,45 +930,203 @@ const agentVaultIdentify = async (params: Record<string, unknown>) => {
   const candidates = (source ? [agentVaultEntryFor(source)].filter(Boolean) : sortedAgentVaultEntries()) as AgentVaultEntry[]
   const matches = candidates
     .filter((entry) => agentVaultEntryMatchesProcess(entry, process))
-    .map((entry) => {
-      const sessionId = agentVaultSessionIdFromProcess(entry, process, params)
-      const sessionPath = cleanText(params.sessionPath || params.session_path || process.sessionPath || sessionId)
-      const cwd = entry.cwd === 'ignore' ? '' : cleanText(params.cwd || process.cwd)
-      const renderParams = {
-        ...params,
-        executable: process.executable || entry.executable,
-        cwd,
-        sessionId,
-        session_id: sessionId,
-        sessionPath,
-        session_path: sessionPath,
-        sessionDir: params.sessionDir || params.sessionDirectory || params.session_directory || entry.sessionDirectory
-      }
-      return {
-        agent: cloneAgentVaultEntry(entry),
-        matched: true,
-        sessionId: sessionId || '',
-        ...(sessionPath ? { sessionPath } : {}),
-        ...(cwd ? { cwd } : {}),
-        process: {
-          ...(process.pid ? { pid: process.pid } : {}),
-          ...(process.ppid ? { ppid: process.ppid } : {}),
-          ...(process.pgid ? { pgid: process.pgid } : {}),
-          ...(process.processName ? { processName: process.processName } : {}),
-          ...(process.executable ? { executable: process.executable } : {}),
-          argv: process.argv
-        },
-        canResume: Boolean(entry.resumeCommand && sessionId),
-        canFork: Boolean(entry.forkCommand && sessionId),
-        ...(entry.resumeCommand && sessionId ? { resumeCommand: renderAgentVaultTemplate(entry, entry.resumeCommand, renderParams) } : {}),
-        ...(entry.forkCommand && sessionId ? { forkCommand: renderAgentVaultTemplate(entry, entry.forkCommand, renderParams) } : {})
-      }
-    })
+    .map((entry) => agentVaultMatchForProcess(entry, process, params))
   return ok({
     matches,
     count: matches.length,
     matched: matches.length > 0,
     process
+  })
+}
+
+const normalizeAgentVaultScanTarget = (value: unknown): AgentVaultScanTarget | null => {
+  const record = nestedRecord(value)
+  if (!record) return null
+  const kind = cleanText(record.kind).toLowerCase()
+  const panelId = cleanText(record.panelId || record.panel_id || record.surfaceId || record.surface_id)
+  const processId = cleanPositiveInteger(record.processId || record.process_id || record.pid)
+  if (!panelId || !processId || (kind && kind !== 'local')) return null
+  return {
+    panelId,
+    ...(cleanText(record.sessionId || record.session_id) ? { sessionId: cleanText(record.sessionId || record.session_id) } : {}),
+    title: cleanText(record.title) || panelId,
+    ...(cleanText(record.cwd) ? { cwd: cleanText(record.cwd) } : {}),
+    processId,
+    ...(cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid) ? { processGroupId: cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid) } : {}),
+    ...(cleanText(record.shell) ? { shell: cleanText(record.shell) } : {})
+  }
+}
+
+const extractProcStatFields = (stat: string) => {
+  const end = stat.lastIndexOf(')')
+  if (end < 0) return null
+  const processName = stat.slice(stat.indexOf('(') + 1, end)
+  const fields = stat.slice(end + 2).trim().split(/\s+/)
+  const ppid = cleanPositiveInteger(fields[1])
+  const pgid = cleanPositiveInteger(fields[2])
+  return {
+    processName,
+    ...(ppid ? { ppid } : {}),
+    ...(pgid ? { pgid } : {})
+  }
+}
+
+const procText = async (path: string) => {
+  try {
+    return await readFile(path, 'utf-8')
+  } catch {
+    return ''
+  }
+}
+
+const procLink = async (path: string) => {
+  try {
+    return await readlink(path)
+  } catch {
+    return ''
+  }
+}
+
+const expandHomePath = (value: string) => {
+  const text = cleanText(value)
+  if (!text.startsWith('~/')) return text
+  const home = cleanText(process.env.HOME)
+  return home ? join(home, text.slice(2)) : text
+}
+
+const agentVaultSessionPathFromOpenFiles = async (pid: number, entry: AgentVaultEntry) => {
+  const sessionDir = expandHomePath(entry.sessionDirectory || '')
+  if (!sessionDir) return ''
+  let names: string[] = []
+  try {
+    names = await readdir(`/proc/${pid}/fd`)
+  } catch {
+    return ''
+  }
+  for (const name of names.slice(0, 256)) {
+    const target = await procLink(`/proc/${pid}/fd/${name}`)
+    if (target && target.startsWith(sessionDir)) return target
+  }
+  return ''
+}
+
+const agentVaultSnapshotFromProc = async (pid: number, entries: AgentVaultEntry[]): Promise<AgentVaultProcessSnapshot | null> => {
+  const statText = await procText(`/proc/${pid}/stat`)
+  const stat = extractProcStatFields(statText)
+  if (!stat) return null
+  const rawCmdline = await procText(`/proc/${pid}/cmdline`)
+  const argv = rawCmdline
+    .split('\u0000')
+    .map(cleanText)
+    .filter(Boolean)
+    .slice(0, 200)
+  const executable = await procLink(`/proc/${pid}/exe`)
+  const cwd = await procLink(`/proc/${pid}/cwd`)
+  const commandLine = argv.length ? argv.join(' ') : stat.processName
+  const snapshot: AgentVaultProcessSnapshot = {
+    pid,
+    ...(stat.ppid ? { ppid: stat.ppid } : {}),
+    ...(stat.pgid ? { pgid: stat.pgid } : {}),
+    processName: stat.processName,
+    ...(executable ? { executable } : argv[0] ? { executable: argv[0] } : {}),
+    argv,
+    ...(commandLine ? { commandLine } : {}),
+    ...(cwd ? { cwd } : {})
+  }
+  for (const entry of entries) {
+    if (entry.sessionIdSource?.type !== 'piSessionFile' || !agentVaultEntryMatchesProcess(entry, snapshot)) continue
+    const sessionPath = await agentVaultSessionPathFromOpenFiles(pid, entry)
+    if (sessionPath) return { ...snapshot, sessionPath }
+  }
+  return snapshot
+}
+
+const scanDescendantProcesses = async (rootPid: number) => {
+  const children = new Map<number, number[]>()
+  const pids: number[] = []
+  let procEntries: string[] = []
+  try {
+    procEntries = await readdir('/proc')
+  } catch {
+    return []
+  }
+  await Promise.all(
+    procEntries
+      .filter((name) => /^\d+$/.test(name))
+      .map(async (name) => {
+        const pid = Number(name)
+        const stat = extractProcStatFields(await procText(`/proc/${pid}/stat`))
+        if (!stat?.ppid) return
+        pids.push(pid)
+        children.set(stat.ppid, [...(children.get(stat.ppid) || []), pid])
+      })
+  )
+  const descendants: number[] = []
+  const queue = [...(children.get(rootPid) || [])]
+  const seen = new Set<number>([rootPid])
+  while (queue.length && descendants.length < maxAgentVaultScanProcessesPerTerminal) {
+    const pid = queue.shift()
+    if (!pid || seen.has(pid)) continue
+    seen.add(pid)
+    descendants.push(pid)
+    queue.push(...(children.get(pid) || []))
+  }
+  return descendants.filter((pid) => pids.includes(pid))
+}
+
+const agentVaultScanProcesses = async (params: Record<string, unknown>) => {
+  if (process.platform !== 'linux') {
+    return ok({
+      matches: [],
+      count: 0,
+      matched: false,
+      terminals: [],
+      scannedProcessCount: 0,
+      unsupported: true,
+      platform: process.platform,
+      message: 'Agent Vault process scanning is currently implemented for Linux /proc only.'
+    })
+  }
+  const snapshotResponse = await dispatchRendererControlRequest('terminal.list', params)
+  if (!snapshotResponse.ok) return snapshotResponse
+  const terminals = Array.isArray(snapshotResponse.data?.terminals)
+    ? (snapshotResponse.data.terminals as unknown[])
+        .map(normalizeAgentVaultScanTarget)
+        .filter((item): item is AgentVaultScanTarget => Boolean(item))
+        .slice(0, maxAgentVaultScanTerminals)
+    : []
+  const requestedPanelId = cleanText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.panel)
+  const requestedSessionId = cleanText(params.sessionId || params.session_id || params.terminalSessionId || params.terminal_session_id || params.session)
+  const selectedTerminals = terminals.filter((terminal) => {
+    if (requestedPanelId && terminal.panelId !== requestedPanelId) return false
+    if (requestedSessionId && terminal.sessionId !== requestedSessionId) return false
+    return true
+  })
+  const source = normalizeAgentVaultId(params.id || params.agent || params.source)
+  const candidates = (source ? [agentVaultEntryFor(source)].filter(Boolean) : sortedAgentVaultEntries()) as AgentVaultEntry[]
+  const matches: ReturnType<typeof agentVaultMatchForProcess>[] = []
+  const scannedProcesses: AgentVaultProcessSnapshot[] = []
+  for (const terminal of selectedTerminals) {
+    const pids = await scanDescendantProcesses(terminal.processId)
+    for (const pid of pids) {
+      const processSnapshot = await agentVaultSnapshotFromProc(pid, candidates)
+      if (!processSnapshot) continue
+      scannedProcesses.push(processSnapshot)
+      for (const entry of candidates) {
+        if (!agentVaultEntryMatchesProcess(entry, processSnapshot)) continue
+        matches.push(agentVaultMatchForProcess(entry, processSnapshot, params, terminal))
+      }
+    }
+  }
+  const uniqueMatches = [...new Map(matches.map((match) => [`${match.agent.id}:${match.process.pid || ''}:${match.sessionId}:${match.panelId || ''}`, match])).values()]
+  return ok({
+    matches: uniqueMatches,
+    count: uniqueMatches.length,
+    matched: uniqueMatches.length > 0,
+    terminals: selectedTerminals,
+    scannedProcessCount: scannedProcesses.length,
+    scannedProcesses,
+    platform: process.platform
   })
 }
 
@@ -959,6 +1172,7 @@ const handleAgentVaultControlRequest = async (method: string, params: Record<str
     return ok({ agent: cloneAgentVaultEntry(entry), kind, command: renderAgentVaultTemplate(entry, template, params) })
   }
   if (action === 'identify' || action === 'detect') return agentVaultIdentify(params)
+  if (action === 'scan' || action === 'scan-processes') return agentVaultScanProcesses(params)
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent vault method: ${method}`)
 }
 

@@ -148,6 +148,9 @@ export type ControlTerminalSummary = {
   connected: boolean
   status?: string
   cwd?: string
+  shell?: string
+  processId?: number
+  processGroupId?: number
   host?: string
   port?: number
   username?: string
@@ -321,6 +324,10 @@ export type ControlAgentVaultIdentifyMatch = {
   sessionId: string
   sessionPath?: string
   cwd?: string
+  panelId?: string
+  terminalSessionId?: string
+  terminalTitle?: string
+  terminalProcessId?: number
   process: Pick<ControlAgentVaultProcessSnapshot, 'pid' | 'ppid' | 'pgid' | 'processName' | 'executable' | 'argv'>
   canResume: boolean
   canFork: boolean

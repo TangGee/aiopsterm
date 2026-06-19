@@ -84,6 +84,7 @@ The Agent Vault slice adds custom agent launch metadata for visible local-termin
 - `agent.vault.get`: read one custom agent definition.
 - `agent.vault.render`: render a launch, resume, or fork command from a template.
 - `agent.vault.identify`: match a supplied process snapshot against registered detection rules and render resume/fork commands when a session id is available.
+- `agent.vault.scan`: inspect descendants of aiopsterm visible local-terminal shell processes, match them against Vault registrations, and render resume/fork commands.
 - `agent.vault.remove`: remove one custom agent definition.
 
 Aliases are accepted for control_compat-compatible scripts where useful:
@@ -168,6 +169,7 @@ node /path/to/resources/aiopsterm-control.js agent team launch --source custom -
 node /path/to/resources/aiopsterm-control.js agent vault register --id my-agent --name "My Agent" --process-name my-agent --session-option --session --launch-command "my-agent --cwd {{cwd}} --index {{index}} {{prompt}}" --resume-command "my-agent --session {{sessionId}}"
 node /path/to/resources/aiopsterm-control.js agent vault render --id my-agent --kind resume --session session-1
 node /path/to/resources/aiopsterm-control.js agent vault identify --process-name my-agent --argv /usr/local/bin/my-agent --argv --session --argv session-1
+node /path/to/resources/aiopsterm-control.js agent vault scan --source my-agent --panel panel-main
 node /path/to/resources/aiopsterm-control.js agent team launch --source my-agent --count 3 --cwd "$PWD" --prompt "review this repo"
 node /path/to/resources/aiopsterm-control.js events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
 node /path/to/resources/aiopsterm-control.js tree
@@ -229,7 +231,11 @@ Notification event payloads include bounded title previews and content lengths; 
 
 ## Agent Vault
 
-Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. It is inspired by control_compat Vault's custom agent registrations. The current aiopsterm slice stores command templates plus process-detection metadata, and can identify an agent from a process snapshot supplied by the caller. Pi and OMP are registered by default with `piSessionFile` session ids and `{{executable}} --session {{sessionId}}` resume/fork commands. It does not yet scan the operating-system process table by itself.
+Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. It is inspired by control_compat Vault's custom agent registrations. The current aiopsterm slice stores command templates plus process-detection metadata, can identify an agent from a process snapshot supplied by the caller, and can scan visible aiopsterm local terminals on Linux. Pi and OMP are registered by default with `piSessionFile` session ids and `{{executable}} --session {{sessionId}}` resume/fork commands.
+
+`agent.vault.scan` asks the renderer for current visible local terminal summaries, including shell `processId`, optional `processGroupId`, shell name, cwd, panel id, and terminal session id. On Linux, the main process then reads `/proc` only for descendant processes of those known shell PIDs. It does not scan unrelated process trees, SSH remote shells, external OS terminals, or the embedded right-side Codex panel. On non-Linux platforms the command returns an empty unsupported result until a platform-specific process reader is added.
+
+For agents that use `sessionIdSource: { "type": "piSessionFile" }`, scan also checks each matched descendant's open file descriptors under the registered `sessionDirectory` to recover the exact session path. This is a bounded read-only inspection used only for resume/fork command rendering.
 
 Definitions are stored under the app user-data control directory as `agent-vault.json`. A definition includes:
 
@@ -245,7 +251,7 @@ Definitions are stored under the app user-data control directory as `agent-vault
 - `sessionDirectory`: optional default for `{{sessionDir}}`.
 - `cwd`: `preserve` or `ignore` for whether identified process cwd should be passed into resume/fork template rendering.
 
-`agent.vault.identify` accepts fields such as `processName`, `executable`, `argv`, `commandLine`, `cwd`, `env`, `pid`, `ppid`, `pgid`, `sessionId`, and `sessionPath`, or the same fields under a `process` object. It returns matched agents, the extracted `sessionId`, and rendered `resumeCommand`/`forkCommand` when possible. This gives later terminal-process scanning and user-visible session restore a stable contract without granting Vault authority to kill or close any terminal.
+`agent.vault.identify` accepts fields such as `processName`, `executable`, `argv`, `commandLine`, `cwd`, `env`, `pid`, `ppid`, `pgid`, `sessionId`, and `sessionPath`, or the same fields under a `process` object. It returns matched agents, the extracted `sessionId`, and rendered `resumeCommand`/`forkCommand` when possible. `agent.vault.scan` returns the same match shape plus terminal ownership fields such as `panelId`, `terminalSessionId`, `terminalTitle`, and `terminalProcessId`. Both commands are read-only and do not grant Vault authority to kill, close, or resume any terminal.
 
 Supported placeholders are `{{agentId}}`, `{{agentName}}`, `{{executable}}`, `{{cwd}}`, `{{prompt}}`, `{{role}}`, `{{model}}`, `{{index}}`, `{{count}}`, `{{sessionId}}`, `{{sessionPath}}`, and `{{sessionDir}}`.
 

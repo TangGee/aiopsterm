@@ -681,6 +681,7 @@ const terminalKindForControl = (panel: TerminalPanel): ControlTerminalSummary['k
 
 const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary => {
   const view = terminalViews.get(panel.id)
+  const lifecycle = panel.terminalLifecycle
   return {
     panelId: panel.id,
     ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
@@ -690,6 +691,9 @@ const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary
     connected: Boolean(panel.sessionId),
     status: panel.status,
     cwd: panel.cwd,
+    ...(lifecycle?.shell ? { shell: lifecycle.shell } : {}),
+    ...(typeof lifecycle?.processId === 'number' ? { processId: lifecycle.processId } : {}),
+    ...(typeof lifecycle?.processGroupId === 'number' ? { processGroupId: lifecycle.processGroupId } : {}),
     ...(panel.sshSession?.host ? { host: panel.sshSession.host } : {}),
     ...(panel.sshSession?.port ? { port: panel.sshSession.port } : {}),
     ...(panel.sshSession?.username ? { username: panel.sshSession.username } : {}),

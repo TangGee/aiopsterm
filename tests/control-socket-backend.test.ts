@@ -1,4 +1,5 @@
 import { createConnection } from 'net'
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -134,6 +135,16 @@ const socketStreamFrames = (socketPath: string, request: Record<string, unknown>
   })
 
 const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+const waitForAgentVaultScanMatch = async (backend: ControlSocketBackend, sessionId: string, attempts = 20) => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await backend.__testing.handleControlRequest({ method: 'agent.vault.scan', params: { id: 'scan-agent' } })
+    const matches = response.data?.matches
+    if (response.ok && Array.isArray(matches) && matches.some((match) => (match as Record<string, unknown>).sessionId === sessionId)) return response
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+  }
+  return backend.__testing.handleControlRequest({ method: 'agent.vault.scan', params: { id: 'scan-agent' } })
+}
 
 describe('control socket backend', () => {
   afterEach(async () => {
@@ -652,6 +663,96 @@ describe('control socket backend', () => {
       const storeFile = await readFile(backend.__testing.agentVaultPathFor(root), 'utf-8')
       expect(storeFile).toContain('"id": "my-agent"')
     } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('scans aiopsterm local terminal descendants through Agent Vault', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-vault-scan-'))
+    let child: ChildProcessWithoutNullStreams | null = null
+    try {
+      await backend.ensureControlSocketServer(root)
+      await backend.__testing.handleControlRequest({
+        method: 'agent.vault.register',
+        params: {
+          id: 'scan-agent',
+          name: 'Scan Agent',
+          executable: process.execPath,
+          detect: {
+            executableContains: 'node',
+            argvContains: ['--session', 'session-scan-1']
+          },
+          sessionIdSource: { type: 'argvOption', argvOption: '--session' },
+          resumeCommand: '{{executable}} --session {{sessionId}}',
+          cwd: 'preserve'
+        }
+      })
+      backend.registerControlSocketIpc({
+        handle: (_channel, handler) => {
+          mockIpcHandler = handler
+        }
+      })
+      mockWindow = createMockWindow((request) => {
+        if (request.method === 'terminal.list') {
+          return {
+            ok: true,
+            data: {
+              terminals: [
+                {
+                  panelId: 'panel-local',
+                  sessionId: 'terminal-local',
+                  title: 'Local',
+                  kind: 'local',
+                  active: true,
+                  connected: true,
+                  cwd: process.cwd(),
+                  processId: process.pid,
+                  processGroupId: process.pid,
+                  shell: process.execPath
+                }
+              ],
+              count: 1,
+              activePanelId: 'panel-local'
+            }
+          }
+        }
+        return { ok: false, errorCode: 'UNEXPECTED_REQUEST', errorMessage: `Unexpected request ${request.method}` }
+      })
+      backend.configureControlSocketRuntime({ userDataPath: root, getWindows: () => [mockWindow] })
+      if (process.platform !== 'linux') {
+        await expect(backend.__testing.handleControlRequest({ method: 'agent.vault.scan', params: { id: 'scan-agent' } })).resolves.toEqual(
+          expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, platform: process.platform }) })
+        )
+        return
+      }
+      child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', '--', '--session', 'session-scan-1'], { stdio: 'pipe' })
+
+      const scanned = await waitForAgentVaultScanMatch(backend, 'session-scan-1')
+      expect(scanned).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            matched: true,
+            count: 1,
+            terminals: [expect.objectContaining({ panelId: 'panel-local', processId: process.pid })],
+            matches: [
+              expect.objectContaining({
+                sessionId: 'session-scan-1',
+                panelId: 'panel-local',
+                terminalSessionId: 'terminal-local',
+                terminalProcessId: process.pid,
+                resumeCommand: expect.stringContaining('--session session-scan-1'),
+                agent: expect.objectContaining({ id: 'scan-agent' }),
+                process: expect.objectContaining({ pid: child.pid })
+              })
+            ]
+          })
+        })
+      )
+    } finally {
+      if (child && !child.killed) child.kill('SIGTERM')
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
     }
