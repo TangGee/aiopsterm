@@ -234,6 +234,19 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   const method = cleanText(request.method)
   const params = request.params || {}
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
+  if (
+    method === 'workspace.snapshot' ||
+    method === 'workspace.list' ||
+    method === 'workspace.current' ||
+    method === 'surface.list' ||
+    method === 'surface.current' ||
+    method === 'tree' ||
+    method === 'top'
+  ) {
+    return dispatchRendererControlRequest(method, params)
+  }
+  if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
+  if (method === 'list_surfaces') return dispatchRendererControlRequest('surface.list', params)
   if (method === 'terminal.list' || method === 'list_terminals' || method === 'debug.terminals') return dispatchRendererControlRequest('terminal.list', params)
   if (method === 'terminal.focus' || method === 'focus_terminal' || method === 'focus-panel') {
     return dispatchRendererControlRequest('terminal.focus', params, { focus: true })

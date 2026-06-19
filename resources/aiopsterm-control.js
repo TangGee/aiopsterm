@@ -8,6 +8,10 @@ const usage = () => `aiopsterm-control [--socket <path>] [--json] <command>
 
 Commands:
   ping
+  workspace snapshot
+  workspace list
+  surface list
+  tree
   terminal list
   terminal focus --panel <id>|--session <id>
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
@@ -47,6 +51,22 @@ if (hasFlag('--help') || hasFlag('-h')) {
 const methodParams = () => {
   const command = args.shift() || 'ping'
   if (command === 'ping') return { method: 'ping', params: {} }
+  if (command === 'workspace') {
+    const subcommand = args.shift() || 'snapshot'
+    if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
+    if (subcommand === 'list') return { method: 'workspace.list', params: {} }
+    if (subcommand === 'current') return { method: 'workspace.current', params: {} }
+    throw new Error(`Unknown workspace command: ${subcommand}`)
+  }
+  if (command === 'surface') {
+    const subcommand = args.shift() || 'list'
+    if (subcommand === 'list') return { method: 'surface.list', params: {} }
+    if (subcommand === 'current') return { method: 'surface.current', params: {} }
+    throw new Error(`Unknown surface command: ${subcommand}`)
+  }
+  if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
+  if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
+  if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
   if (command === 'list-terminals' || (command === 'terminal' && args[0] === 'list')) {
     if (command === 'terminal') args.shift()
     return { method: 'terminal.list', params: {} }
@@ -93,6 +113,56 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  const snapshot = data.snapshot
+  if (snapshot && typeof snapshot === 'object') {
+    const counts = snapshot.counts || {}
+    process.stdout.write(`workspace\t${snapshot.mode || '-'}\t${snapshot.activeModule || '-'}\tactive=${snapshot.activePanelId || '-'}\n`)
+    process.stdout.write(
+      `counts\tterminals=${counts.terminals || 0}\tsurfaces=${counts.surfaces || 0}\tsplits=${counts.splitGroups || 0}\tai=${counts.managedAiSessions || 0}\tattention=${counts.attentionItems || 0}\n`
+    )
+    if (Array.isArray(snapshot.surfaces)) {
+      for (const surface of snapshot.surfaces) {
+        process.stdout.write(
+          [
+            surface.active ? '*' : ' ',
+            surface.panelId || '-',
+            surface.surfaceKind || '-',
+            surface.connected === true ? 'connected' : surface.connected === false ? 'disconnected' : '-',
+            surface.splitGroupId || '-',
+            surface.title || ''
+          ].join('\t') + '\n'
+        )
+      }
+    }
+    if (snapshot.attention && Array.isArray(snapshot.attention.items) && snapshot.attention.items.length) {
+      process.stdout.write(`attention\t${snapshot.attention.unreadCount || snapshot.attention.items.length}\n`)
+      for (const item of snapshot.attention.items) {
+        process.stdout.write(['!', item.id || '-', item.source || '-', item.kind || '-', item.title || ''].join('\t') + '\n')
+      }
+    }
+    return
+  }
+  if (Array.isArray(data.workspaces)) {
+    for (const workspace of data.workspaces) {
+      process.stdout.write([workspace.active ? '*' : ' ', workspace.id || '-', workspace.mode || '-', workspace.activeModule || '-', workspace.title || ''].join('\t') + '\n')
+    }
+    return
+  }
+  if (Array.isArray(data.surfaces)) {
+    for (const surface of data.surfaces) {
+      process.stdout.write(
+        [
+          surface.active ? '*' : ' ',
+          surface.panelId || '-',
+          surface.surfaceKind || '-',
+          surface.connected === true ? 'connected' : surface.connected === false ? 'disconnected' : '-',
+          surface.splitGroupId || '-',
+          surface.title || ''
+        ].join('\t') + '\n'
+      )
+    }
+    return
+  }
   if (Array.isArray(data.terminals)) {
     for (const terminal of data.terminals) {
       process.stdout.write(

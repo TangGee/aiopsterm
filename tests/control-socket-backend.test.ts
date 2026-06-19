@@ -120,6 +120,58 @@ describe('control socket backend', () => {
     expect(backend.__testing.pendingRendererRequestCount()).toBe(0)
   })
 
+  it('routes workspace snapshot requests to the renderer window', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => ({
+      ok: true,
+      data: {
+        snapshot: {
+          generatedAt: 1000,
+          mode: 'terminal',
+          activeModule: 'workspace',
+          activePanelId: 'panel-1',
+          workspaces: [{ id: 'main', title: 'Main Workspace', active: true, mode: 'terminal', activeModule: 'workspace', activePanelId: 'panel-1' }],
+          terminals: [{ panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local', kind: 'local', active: true, connected: true }],
+          surfaces: [{ panelId: 'panel-1', title: 'Local', surfaceKind: 'terminal', active: true, sessionId: 'terminal-1', terminalKind: 'local', connected: true }],
+          splitGroups: [],
+          notifications: [],
+          managedAiSessions: [],
+          attention: { unreadCount: 0, items: [] },
+          counts: {
+            terminals: 1,
+            connectedTerminals: 1,
+            surfaces: 1,
+            splitGroups: 0,
+            notifications: 0,
+            unreadNotifications: 0,
+            managedAiSessions: 0,
+            managedAiNeedsInput: 0,
+            attentionItems: 0
+          }
+        }
+      }
+    }))
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.snapshot' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          snapshot: expect.objectContaining({
+            activePanelId: 'panel-1',
+            counts: expect.objectContaining({ terminals: 1 })
+          })
+        })
+      })
+    )
+    expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
+  })
+
   it('writes terminal text through the runtime without requiring renderer focus', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

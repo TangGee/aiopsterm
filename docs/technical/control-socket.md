@@ -22,8 +22,19 @@ The notification slice adds these generic notification primitives:
 - `notification.dismiss`: remove one read notification, or all read notifications.
 - `notification.clear`: clear the generic notification queue.
 
+The workspace metadata slice adds read-only model snapshots:
+
+- `workspace.snapshot`: return the current main workspace, terminal surfaces, split groups, generic notifications, managed AI session summaries, and top-bell attention items in one payload.
+- `workspace.list`: list the logical aiopsterm workspaces exposed to automation. This currently returns the single shared main workspace.
+- `workspace.current`: return the currently selected logical workspace metadata.
+- `surface.list`: list terminal and editor surfaces in the shared main work panel.
+- `surface.current`: return the currently active surface.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
+- `tree` and `top` map to `workspace.snapshot`.
+- `list_workspaces` and `list-workspaces` map to `workspace.list`.
+- `list_surfaces` and `list-surfaces` map to `surface.list`.
 - `list_terminals` and `debug.terminals` map to `terminal.list`.
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
 - `read-screen` maps to `terminal.read_screen`.
@@ -77,6 +88,9 @@ The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTE
 
 ```bash
 node /path/to/resources/aiopsterm-control.js terminal list
+node /path/to/resources/aiopsterm-control.js workspace snapshot
+node /path/to/resources/aiopsterm-control.js surface list
+node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
@@ -88,7 +102,7 @@ node /path/to/resources/aiopsterm-control.js jump-to-unread
 Use `--json` for scripting:
 
 ```bash
-node /path/to/resources/aiopsterm-control.js --json terminal list
+node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 ```
 
 ## Safety Boundary
@@ -107,3 +121,18 @@ Generic notifications are stored in the main process memory queue. They are sepa
 - If no target terminal is available, aiopsterm still marks it read and shows a top notice.
 
 The queue is intentionally not persisted in this slice. Session restore and persisted notification history will be handled by the later restore/metadata slices.
+
+## Workspace Snapshot
+
+`workspace.snapshot` is the canonical read model for later control_compat-style workspace groups, session restore, and team automation. It is intentionally read-only in this slice. The payload contains summaries only:
+
+- `workspaces`: one logical `main` workspace for the shared work panel.
+- `surfaces`: terminal panels and knowledge editor panels with active/split metadata.
+- `terminals`: terminal-only summaries with connection, cwd, SSH target, and xterm size when available.
+- `splitGroups`: grouped panel ids for split layouts.
+- `notifications`: generic control notifications currently held by the main process and synced into the renderer.
+- `managedAiSessions`: Claude/Codex session summaries without full event transcripts.
+- `attention`: top-bell pending items, including managed AI requests and unread generic notifications.
+- `counts`: stable totals for scripts that only need status checks.
+
+The snapshot does not include terminal screen text. Use `terminal.read_screen` for screen content after selecting a target `panelId` or `sessionId` from the snapshot.

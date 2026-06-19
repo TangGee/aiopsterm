@@ -473,11 +473,16 @@ import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import type {
+  ControlAiAttentionSummary,
+  ControlManagedAiSessionSummary,
   ControlRequest,
   ControlResponse,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
+  ControlSplitGroupSummary,
+  ControlSurfaceSummary,
   ControlTerminalSummary,
+  ControlWorkspaceSnapshot,
   RuntimeLogLevel,
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext,
@@ -614,6 +619,143 @@ const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary
   }
 }
 
+const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary => ({
+  panelId: panel.id,
+  title: panel.title,
+  surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
+  active: panel.id === workspace.activePanelId,
+  status: panel.status,
+  cwd: panel.cwd,
+  ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
+  ...(panel.kind === 'knowledge' ? {} : { terminalKind: terminalKindForControl(panel), connected: Boolean(panel.sessionId) }),
+  ...(panel.split ? { split: panel.split } : {}),
+  ...(panel.splitSourceId ? { splitSourceId: panel.splitSourceId } : {}),
+  ...(panel.splitGroupId ? { splitGroupId: panel.splitGroupId } : {}),
+  ...(typeof panel.splitOrder === 'number' ? { splitOrder: panel.splitOrder } : {}),
+  ...(panel.knowledge
+    ? {
+        knowledge: {
+          relPath: panel.knowledge.relPath,
+          isImage: panel.knowledge.isImage,
+          ...(typeof panel.knowledge.startLine === 'number' ? { startLine: panel.knowledge.startLine } : {}),
+          ...(typeof panel.knowledge.endLine === 'number' ? { endLine: panel.knowledge.endLine } : {})
+        }
+      }
+    : {})
+})
+
+const splitGroupsForControl = (surfaces: ControlSurfaceSummary[]): ControlSplitGroupSummary[] => {
+  const groups = new Map<string, ControlSurfaceSummary[]>()
+  surfaces.forEach((surface) => {
+    const groupId = surface.splitGroupId || (surface.split ? surface.splitSourceId || surface.panelId : '')
+    if (!groupId) return
+    groups.set(groupId, [...(groups.get(groupId) || []), surface])
+  })
+  return [...groups.entries()]
+    .filter(([, items]) => items.length > 1)
+    .map(([id, items]) => {
+      const directions = new Set(items.map((item) => item.split).filter(Boolean))
+      return {
+        id,
+        panelIds: items.map((item) => item.panelId),
+        count: items.length,
+        ...(items.some((item) => item.active) ? { activePanelId: items.find((item) => item.active)?.panelId } : {}),
+        direction: directions.size === 1 ? ([...directions][0] as 'right' | 'below') : 'mixed'
+      }
+    })
+}
+
+const aiAttentionSummaryForControl = (item: (typeof workspace.pendingAiAttentionItems)[number]): ControlAiAttentionSummary => ({
+  id: item.id,
+  source: item.source,
+  kind: item.kind,
+  title: item.title,
+  summary: item.summary,
+  priority: item.priority,
+  createdAt: item.createdAt,
+  ...(item.conversationId ? { conversationId: item.conversationId } : {}),
+  ...(item.sessionId ? { sessionId: item.sessionId } : {}),
+  ...(item.surfaceId ? { surfaceId: item.surfaceId } : {}),
+  ...(item.notificationId ? { notificationId: item.notificationId } : {})
+})
+
+const managedAiSessionSummaryForControl = (session: (typeof workspace.managedAiSessions)[number]): ControlManagedAiSessionSummary => ({
+  id: session.id,
+  source: session.source,
+  title: session.title,
+  summary: session.summary,
+  state: session.state,
+  lastEvent: session.lastEvent,
+  lastActivityAt: session.lastActivityAt,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+  needsInput: session.state === 'needsInput',
+  requestKind: session.requestKind,
+  decisionMode: session.decisionMode,
+  ...(session.pendingRequestId ? { pendingRequestId: session.pendingRequestId } : {}),
+  ...(session.panelId ? { panelId: session.panelId } : {}),
+  ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+  ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+  ...(session.cwd ? { cwd: session.cwd } : {}),
+  ...(session.transcriptPath ? { transcriptPath: session.transcriptPath } : {}),
+  ...(session.toolName ? { toolName: session.toolName } : {}),
+  ...(session.launchCommand ? { launchCommand: session.launchCommand } : {}),
+  ...(session.resumeCommand ? { resumeCommand: session.resumeCommand } : {}),
+  ...(typeof session.processId === 'number' ? { processId: session.processId } : {}),
+  ...(typeof session.parentProcessId === 'number' ? { parentProcessId: session.parentProcessId } : {}),
+  ...(typeof session.processGroupId === 'number' ? { processGroupId: session.processGroupId } : {}),
+  ...(session.agentLifecycle ? { agentLifecycle: session.agentLifecycle } : {}),
+  ...(typeof session.terminalProcessId === 'number' ? { terminalProcessId: session.terminalProcessId } : {}),
+  ...(typeof session.terminalActivityAt === 'number' ? { terminalActivityAt: session.terminalActivityAt } : {}),
+  eventCount: session.events.length,
+  decisionCount: session.decisions.length
+})
+
+const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
+  const terminals = workspace.panels.filter((panel) => panel.kind !== 'knowledge').map(terminalSummaryForControl)
+  const surfaces = workspace.panels.map(surfaceSummaryForControl)
+  const splitGroups = splitGroupsForControl(surfaces)
+  const attentionItems = workspace.pendingAiAttentionItems.map(aiAttentionSummaryForControl)
+  const managedAiSessions = workspace.managedAiSessions.map(managedAiSessionSummaryForControl)
+  return {
+    generatedAt: Date.now(),
+    mode: workspace.mode,
+    activeModule: workspace.activeModule,
+    activePanelId: workspace.activePanelId,
+    workspaces: [
+      {
+        id: 'main',
+        title: 'Main Workspace',
+        active: true,
+        mode: workspace.mode,
+        activeModule: workspace.activeModule,
+        activePanelId: workspace.activePanelId
+      }
+    ],
+    terminals,
+    surfaces,
+    splitGroups,
+    notifications: workspace.controlNotifications.map((notification) => ({ ...notification })),
+    managedAiSessions,
+    attention: {
+      unreadCount: workspace.aiAttentionUnreadCount,
+      items: attentionItems,
+      ...(attentionItems[0] ? { current: attentionItems[0] } : {})
+    },
+    counts: {
+      terminals: terminals.length,
+      connectedTerminals: terminals.filter((terminal) => terminal.connected).length,
+      surfaces: surfaces.length,
+      splitGroups: splitGroups.length,
+      notifications: workspace.controlNotifications.length,
+      unreadNotifications: workspace.controlNotifications.filter((notification) => !notification.read).length,
+      managedAiSessions: managedAiSessions.length,
+      managedAiNeedsInput: managedAiSessions.filter((session) => session.needsInput).length,
+      attentionItems: attentionItems.length
+    }
+  }
+}
+
 const resolveControlTerminalPanel = (params: Record<string, unknown> = {}) => {
   const panelId = controlText(params.panelId || params.surfaceId)
   const sessionId = controlText(params.sessionId || params.terminalSessionId)
@@ -636,6 +778,38 @@ const terminalBufferText = (view: TerminalView, tailLines: number) => {
 
 const handleControlRequest = async (request: ControlRequest): Promise<ControlResponse> => {
   const params = request.params || {}
+  if (request.method === 'workspace.snapshot' || request.method === 'tree' || request.method === 'top') {
+    return controlOk({ snapshot: workspaceSnapshotForControl() })
+  }
+  if (request.method === 'workspace.list' || request.method === 'workspace.current') {
+    const snapshot = workspaceSnapshotForControl()
+    return controlOk({
+      workspaces: snapshot.workspaces,
+      count: snapshot.workspaces.length,
+      activeWorkspaceId: 'main',
+      activePanelId: snapshot.activePanelId,
+      mode: snapshot.mode,
+      activeModule: snapshot.activeModule
+    })
+  }
+  if (request.method === 'surface.list') {
+    const snapshot = workspaceSnapshotForControl()
+    return controlOk({
+      surfaces: snapshot.surfaces,
+      terminals: snapshot.terminals,
+      splitGroups: snapshot.splitGroups,
+      count: snapshot.surfaces.length,
+      activePanelId: snapshot.activePanelId
+    })
+  }
+  if (request.method === 'surface.current') {
+    const snapshot = workspaceSnapshotForControl()
+    const surface = snapshot.surfaces.find((item) => item.panelId === snapshot.activePanelId) || snapshot.surfaces[0] || null
+    return controlOk({
+      surface,
+      activePanelId: snapshot.activePanelId
+    })
+  }
   if (request.method === 'terminal.list') {
     const terminals = workspace.panels.filter((panel) => panel.kind !== 'knowledge').map(terminalSummaryForControl)
     return controlOk({

@@ -157,6 +157,36 @@ export type ControlTerminalSummary = {
   rows?: number
 }
 
+export type ControlSurfaceSummary = {
+  panelId: string
+  title: string
+  surfaceKind: 'terminal' | 'knowledge'
+  active: boolean
+  status?: string
+  cwd?: string
+  sessionId?: string
+  terminalKind?: ControlTerminalSummary['kind']
+  connected?: boolean
+  split?: 'right' | 'below'
+  splitSourceId?: string
+  splitGroupId?: string
+  splitOrder?: number
+  knowledge?: {
+    relPath: string
+    isImage: boolean
+    startLine?: number
+    endLine?: number
+  }
+}
+
+export type ControlSplitGroupSummary = {
+  id: string
+  panelIds: string[]
+  count: number
+  activePanelId?: string
+  direction: 'right' | 'below' | 'mixed'
+}
+
 export type ControlNotificationRecord = {
   id: string
   title: string
@@ -172,6 +202,90 @@ export type ControlNotificationRecord = {
   terminalSessionId?: string
   workspaceId?: string
   source?: string
+}
+
+export type ControlAiAttentionSummary = {
+  id: string
+  source: string
+  kind: string
+  title: string
+  summary: string
+  priority: number
+  createdAt: number
+  conversationId?: string
+  sessionId?: string
+  surfaceId?: string
+  notificationId?: string
+}
+
+export type ControlManagedAiSessionSummary = {
+  id: string
+  source: string
+  title: string
+  summary: string
+  state: string
+  lastEvent: string
+  lastActivityAt: number
+  createdAt: number
+  updatedAt: number
+  needsInput: boolean
+  requestKind?: string
+  decisionMode?: string
+  pendingRequestId?: string
+  panelId?: string
+  terminalSessionId?: string
+  workspaceId?: string
+  cwd?: string
+  transcriptPath?: string
+  toolName?: string
+  launchCommand?: string
+  resumeCommand?: string
+  processId?: number
+  parentProcessId?: number
+  processGroupId?: number
+  agentLifecycle?: string
+  terminalProcessId?: number
+  terminalActivityAt?: number
+  eventCount: number
+  decisionCount: number
+}
+
+export type ControlWorkspaceSummary = {
+  id: string
+  title: string
+  active: boolean
+  mode: string
+  activeModule: string
+  activePanelId: string
+}
+
+export type ControlWorkspaceSnapshot = {
+  generatedAt: number
+  mode: string
+  activeModule: string
+  activePanelId: string
+  workspaces: ControlWorkspaceSummary[]
+  terminals: ControlTerminalSummary[]
+  surfaces: ControlSurfaceSummary[]
+  splitGroups: ControlSplitGroupSummary[]
+  notifications: ControlNotificationRecord[]
+  managedAiSessions: ControlManagedAiSessionSummary[]
+  attention: {
+    unreadCount: number
+    items: ControlAiAttentionSummary[]
+    current?: ControlAiAttentionSummary
+  }
+  counts: {
+    terminals: number
+    connectedTerminals: number
+    surfaces: number
+    splitGroups: number
+    notifications: number
+    unreadNotifications: number
+    managedAiSessions: number
+    managedAiNeedsInput: number
+    attentionItems: number
+  }
 }
 
 export type ControlNotificationFocusRequest = {

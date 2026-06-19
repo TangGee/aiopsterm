@@ -67,6 +67,34 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
   })
 
+  it('sends workspace snapshot requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          snapshot: {
+            mode: 'terminal',
+            activeModule: 'workspace',
+            activePanelId: 'panel-1',
+            counts: { terminals: 1, surfaces: 1, splitGroups: 0, managedAiSessions: 0, attentionItems: 0 },
+            surfaces: [{ panelId: 'panel-1', surfaceKind: 'terminal', connected: true, active: true, title: 'Local' }],
+            attention: { unreadCount: 0, items: [] }
+          }
+        }
+      }
+    })
+
+    const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'snapshot'], {
+      cwd: process.cwd()
+    })
+    expect(result.stdout).toContain('workspace\tterminal\tworkspace\tactive=panel-1')
+    expect(result.stdout).toContain('counts\tterminals=1')
+    expect(seen).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
+  })
+
   it('sends notification requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
