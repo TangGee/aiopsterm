@@ -586,6 +586,65 @@ describe('external Codex MCP bridge runtime', () => {
     expect(clearResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true, count: 0 }) }))
   })
 
+  it('returns managed AI session event frames through external Codex MCP cursors', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    const afterSeq = agentSessions.__testing.streamLatestSeq()
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PermissionRequest',
+        sessionId: 'codex-event-cursor-1',
+        requestId: 'cursor-approve-1',
+        actionable: true,
+        summary: 'approve build',
+        panelId: 'panel-cursor',
+        terminalSessionId: 'terminal-cursor',
+        receivedAt: 800
+      },
+      null
+    )
+    await agentSessions.replyManagedAiSession({ source: 'codex', sessionId: 'codex-event-cursor-1', kind: 'handled' })
+
+    const response = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_ai_session_events',
+      token: 'test-token',
+      params: { afterSeq, source: 'codex', limit: 10 }
+    })
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          protocol: 'aiopsterm-agent-events',
+          boot_id: expect.any(String),
+          after_seq: afterSeq,
+          latest_seq: expect.any(Number),
+          count: 2,
+          events: [
+            expect.objectContaining({
+              name: 'agent.hook.PermissionRequest',
+              category: 'agent',
+              source: 'codex',
+              payload: expect.objectContaining({
+                sessionId: 'codex-event-cursor-1',
+                state: 'needsInput'
+              })
+            }),
+            expect.objectContaining({
+              name: 'managed_ai.decision.created',
+              category: 'managed-ai',
+              payload: expect.objectContaining({
+                sessionId: 'codex-event-cursor-1',
+                decisionKind: 'handled'
+              })
+            })
+          ]
+        })
+      })
+    )
+  })
+
   it('serves socket bridge requests and the external stdio MCP tool list', async () => {
     const { assets, bridge } = await loadBackends()
     activeBridge = bridge
@@ -644,7 +703,8 @@ describe('external Codex MCP bridge runtime', () => {
           'list_ai_sessions',
           'focus_ai_session',
           'reply_ai_session',
-          'clear_ai_session'
+          'clear_ai_session',
+          'list_ai_session_events'
         ])
         const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')
         expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
@@ -652,6 +712,8 @@ describe('external Codex MCP bridge runtime', () => {
         expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
         const clearAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'clear_ai_session')
         expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
+        const listAiSessionEventsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_session_events')
+        expect(listAiSessionEventsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
       } finally {
         mcp.child.kill()
       }

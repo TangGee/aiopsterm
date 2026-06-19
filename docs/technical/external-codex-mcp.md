@@ -34,10 +34,13 @@ The external server currently exposes:
 - `focus_ai_session`: Requests aiopsterm to open the AI session manager and focus the owning visible terminal when it exists.
 - `reply_ai_session`: Sends an allow/deny/reply/handled decision through the managed session backend.
 - `clear_ai_session`: Removes a managed AI session record without killing the owning terminal or agent process.
+- `list_ai_session_events`: Reads recent managed AI event-stream frames with a sequence cursor.
 
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
 
 `list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
+
+`list_ai_session_events` is the request-response MCP form of the managed-AI event stream. It accepts `afterSeq`/`after_seq`, `name`/`names`, `category`/`categories`, `source`/`sources`, `sessionId`/`sessionIds`, and `limit`, then returns `boot_id`, cursor metadata, `gap`, and matching event frames. The frames come from the in-memory replay ring; use `list_ai_sessions` to refresh state if `gap` is true.
 
 ## Enablement
 

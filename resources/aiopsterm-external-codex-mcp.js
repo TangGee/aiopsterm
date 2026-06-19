@@ -288,6 +288,30 @@ const tools = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'list_ai_session_events',
+    title: 'List aiopsterm managed AI session events',
+    description:
+      'Read recent managed AI session event-stream frames with a reconnect-style sequence cursor. This is the MCP request-response equivalent of aiopsterm agent events streaming.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        afterSeq: { type: 'number', description: 'Return events whose seq is greater than this value.' },
+        after_seq: { type: 'number', description: 'Alias for afterSeq.' },
+        name: { type: 'string', description: 'Optional exact event name filter, for example agent.hook.PermissionRequest.' },
+        names: { type: 'array', items: { type: 'string' }, description: 'Optional exact event name filters.' },
+        category: { type: 'string', enum: ['agent', 'managed-ai'], description: 'Optional event category filter.' },
+        categories: { type: 'array', items: { type: 'string', enum: ['agent', 'managed-ai'] }, description: 'Optional event category filters.' },
+        source: { type: 'string', description: 'Optional agent source filter.' },
+        sources: { type: 'array', items: { type: 'string' }, description: 'Optional agent source filters.' },
+        sessionId: { type: 'string', description: 'Optional managed AI session id filter.' },
+        sessionIds: { type: 'array', items: { type: 'string' }, description: 'Optional managed AI session id filters.' },
+        limit: { type: 'number', description: 'Maximum events to return. Defaults to 100 and is capped by aiopsterm.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }
 ]
 

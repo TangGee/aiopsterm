@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
   listManagedAiSessions: () => Promise<unknown>
+  listManagedAiSessionEvents: (input?: Record<string, unknown>) => unknown
   normalizeAiAgentSessionEventInput: (input: unknown, now?: number) => unknown
   publishAiAgentSessionEvent: (input: Record<string, unknown>, emit?: ((event: unknown) => void) | null) => unknown
   ensureAiAgentSessionServer: (input: { userDataPath: string; emit: (event: unknown) => void }) => Promise<string>
@@ -589,6 +590,67 @@ describe('agent session backend', () => {
       stream.close()
       closeAiAgentSessionServer()
     }
+  })
+
+  it('lists managed AI session events with cursor and source filters', async () => {
+    const { __testing, listManagedAiSessionEvents, publishAiAgentSessionEvent, replyManagedAiSession } = await loadBackend()
+    const afterSeq = __testing.streamLatestSeq()
+    publishAiAgentSessionEvent(
+      {
+        source: 'claude-code',
+        event: 'AskUserQuestion',
+        sessionId: 'claude-event-list-1',
+        requestId: 'question-1',
+        actionable: true,
+        summary: 'Need deployment window',
+        panelId: 'panel-event-list',
+        terminalSessionId: 'terminal-event-list',
+        receivedAt: 750
+      },
+      null
+    )
+    await replyManagedAiSession({ source: 'claude-code', sessionId: 'claude-event-list-1', kind: 'reply', message: 'Tonight' })
+
+    expect(listManagedAiSessionEvents({ afterSeq, source: 'claude-code', limit: 10 })).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          afterSeq,
+          latestSeq: expect.any(Number),
+          gap: false,
+          count: 2,
+          events: [
+            expect.objectContaining({
+              name: 'agent.hook.Question',
+              category: 'agent',
+              source: 'claude-code',
+              terminal_session_id: 'terminal-event-list',
+              payload: expect.objectContaining({
+                source: 'claude-code',
+                sessionId: 'claude-event-list-1',
+                state: 'needsInput'
+              })
+            }),
+            expect.objectContaining({
+              name: 'managed_ai.decision.created',
+              category: 'managed-ai',
+              payload: expect.objectContaining({
+                sessionId: 'claude-event-list-1',
+                decisionKind: 'reply'
+              })
+            })
+          ]
+        })
+      })
+    )
+    expect(listManagedAiSessionEvents({ afterSeq, category: 'managed-ai', sessionId: 'claude-event-list-1' })).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          count: 1,
+          events: [expect.objectContaining({ name: 'managed_ai.decision.created' })]
+        })
+      })
+    )
   })
 
   it('waits for actionable Claude decisions and returns Claude hook output to the socket client', async () => {

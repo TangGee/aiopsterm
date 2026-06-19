@@ -15,7 +15,7 @@ import type {
   ManagedAiSessionReplyInput,
   TerminalLifecycleEvent
 } from '@shared/preload'
-import { clearManagedAiSession, listManagedAiSessions, replyManagedAiSession } from './agentSessions'
+import { clearManagedAiSession, listManagedAiSessionEvents, listManagedAiSessions, replyManagedAiSession } from './agentSessions'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from './sshTerminal'
 import { listAssets } from './assets'
 
@@ -797,6 +797,19 @@ const clearAiSession = async (params: Record<string, unknown>) => {
   })
 }
 
+const listAiSessionEvents = (params: Record<string, unknown>) => {
+  const result = listManagedAiSessionEvents(params)
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_SESSION_EVENTS_UNAVAILABLE', result.errorMessage || 'Managed AI session events are unavailable.')
+  return ok({
+    ...result.data,
+    boot_id: result.data.bootId,
+    after_seq: result.data.afterSeq,
+    oldest_seq: result.data.oldestSeq,
+    latest_seq: result.data.latestSeq,
+    next_seq: result.data.nextSeq
+  })
+}
+
 export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodexMcpRequest): Promise<ExternalCodexMcpResponse> => {
   const token = configuredToken()
   if (!isEnabled()) return fail('EXTERNAL_CODEX_MCP_DISABLED', 'External Codex MCP is disabled.')
@@ -816,6 +829,7 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'focus_ai_session') return focusAiSession(params)
   if (request.method === 'reply_ai_session') return replyAiSession(params)
   if (request.method === 'clear_ai_session') return clearAiSession(params)
+  if (request.method === 'list_ai_session_events') return listAiSessionEvents(params)
   return fail('UNKNOWN_METHOD', `Unknown external Codex MCP bridge method: ${request.method || ''}`)
 }
 

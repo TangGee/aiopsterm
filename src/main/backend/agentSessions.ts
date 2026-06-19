@@ -32,9 +32,9 @@ type AgentSessionSocketResponse = AiAgentSessionEventResult & {
   agentOutput?: Record<string, unknown>
 }
 
-type AgentSessionEventStreamCategory = 'agent' | 'managed-ai'
+export type AgentSessionEventStreamCategory = 'agent' | 'managed-ai'
 
-type AgentSessionEventStreamFrame = {
+export type AgentSessionEventStreamFrame = {
   type: 'event'
   protocol: 'aiopsterm-agent-events'
   version: 1
@@ -49,6 +49,24 @@ type AgentSessionEventStreamFrame = {
   surface_id?: string
   terminal_session_id?: string
   payload: Record<string, unknown>
+}
+
+export type AgentSessionEventStreamListResult = {
+  ok: boolean
+  data?: {
+    protocol: 'aiopsterm-agent-events'
+    version: 1
+    bootId: string
+    afterSeq: number
+    oldestSeq: number
+    latestSeq: number
+    nextSeq: number
+    gap: boolean
+    events: AgentSessionEventStreamFrame[]
+    count: number
+  }
+  errorCode?: string
+  errorMessage?: string
 }
 
 type AgentSessionEventStreamFilters = {
@@ -653,6 +671,12 @@ const cleanStringSet = (value: unknown) => {
   return new Set(values.map(cleanText).filter(Boolean))
 }
 
+const normalizeStreamLimit = (value: unknown) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return 100
+  return Math.max(1, Math.min(500, Math.floor(number)))
+}
+
 const normalizeStreamCategories = (value: unknown) => {
   const raw = cleanStringSet(value)
   const categories = new Set<AgentSessionEventStreamCategory>()
@@ -664,7 +688,14 @@ const normalizeStreamCategories = (value: unknown) => {
 
 const streamParamsFrom = (record: Record<string, unknown>) => {
   const params = isRecord(record.params) ? record.params : record
-  const after = typeof params.after_seq === 'number' ? params.after_seq : typeof params.after === 'number' ? params.after : 0
+  const after =
+    typeof params.after_seq === 'number'
+      ? params.after_seq
+      : typeof params.afterSeq === 'number'
+        ? params.afterSeq
+        : typeof params.after === 'number'
+          ? params.after
+          : 0
   return {
     afterSeq: Number.isFinite(after) ? Math.max(0, Math.floor(after)) : 0,
     filters: {
@@ -736,6 +767,39 @@ const startEventStream = (socket: Socket, request: Record<string, unknown>) => {
   }
   socket.on('close', () => closeStreamSubscriber(subscriberId))
   socket.on('error', () => closeStreamSubscriber(subscriberId))
+}
+
+export const listManagedAiSessionEvents = (input: Record<string, unknown> = {}): AgentSessionEventStreamListResult => {
+  const { afterSeq, filters } = streamParamsFrom(input)
+  const limit = normalizeStreamLimit(input.limit)
+  const sourceFilter = cleanStringSet(input.sources || input.source)
+  const sessionFilter = cleanStringSet(input.sessionIds || input.session_ids || input.sessionId || input.session_id)
+  const oldestSeq = streamEvents[0]?.seq || streamSeq + 1
+  const events = streamEvents
+    .filter((frame) => {
+      if (frame.seq <= afterSeq || !streamMatches(frame, filters)) return false
+      const source = cleanText(frame.payload.source || frame.source)
+      const sessionId = cleanText(frame.payload.sessionId || frame.payload.session_id)
+      if (sourceFilter.size && !sourceFilter.has(source)) return false
+      if (sessionFilter.size && !sessionFilter.has(sessionId)) return false
+      return true
+    })
+    .slice(0, limit)
+  return {
+    ok: true,
+    data: {
+      protocol: 'aiopsterm-agent-events',
+      version: 1,
+      bootId: streamBootId,
+      afterSeq,
+      oldestSeq,
+      latestSeq: streamSeq,
+      nextSeq: streamSeq + 1,
+      gap: afterSeq > 0 && afterSeq < oldestSeq,
+      events,
+      count: events.length
+    }
+  }
 }
 
 const auditPathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.audit.jsonl')
