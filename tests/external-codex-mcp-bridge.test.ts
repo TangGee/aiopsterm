@@ -563,6 +563,34 @@ describe('external Codex MCP bridge runtime', () => {
     )
     expect(JSON.stringify(listResponse)).not.toContain('raw')
 
+    const detailResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'get_ai_session',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-managed-1', eventLimit: 10 }
+    })
+    expect(detailResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.objectContaining({
+            source: 'codex',
+            sessionId: 'codex-managed-1',
+            eventCount: 1,
+            events: [expect.objectContaining({ event: 'permission_request', summary: 'approve npm test' })]
+          })
+        })
+      })
+    )
+    expect(JSON.stringify(detailResponse)).not.toContain('raw')
+
+    await expect(
+      bridge.handleExternalCodexMcpBridgeRequest({
+        method: 'get_ai_session',
+        token: 'test-token',
+        params: { source: 'codex', sessionId: 'missing-session' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'AI_SESSION_NOT_FOUND' }))
+
     const focusResponse = await bridge.handleExternalCodexMcpBridgeRequest({
       method: 'focus_ai_session',
       token: 'test-token',
@@ -1087,6 +1115,7 @@ describe('external Codex MCP bridge runtime', () => {
           'glob_search',
           'grep_search',
           'list_ai_sessions',
+          'get_ai_session',
           'list_ai_approvals',
           'focus_ai_session',
           'reply_ai_session',
@@ -1107,6 +1136,8 @@ describe('external Codex MCP bridge runtime', () => {
         expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
         const listAiSessionsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
         expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+        const getAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'get_ai_session')
+        expect(getAiSessionTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
         const listAiApprovalsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_approvals')
         expect(listAiApprovalsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
         const approveAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'approve_ai_session')

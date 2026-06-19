@@ -827,6 +827,16 @@ const listAiSessions = async (params: Record<string, unknown>) => {
   })
 }
 
+const getAiSession = async (params: Record<string, unknown>) => {
+  const resolved = await resolveManagedAiSession(params)
+  if (resolved.error) return resolved.error
+  const includeEvents = params.includeEvents !== false && params.include_events !== false
+  const eventLimit = normalizeInteger(params.eventLimit || params.event_limit, 25, 1, 100)
+  return ok({
+    session: managedAiSessionSummary(resolved.session!, { includeEvents, eventLimit })
+  })
+}
+
 const listAiApprovals = async (params: Record<string, unknown>) => {
   const snapshot = await listManagedAiSessions()
   if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MANAGED_AI_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
@@ -1106,6 +1116,7 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'glob_search') return globSearch(params)
   if (request.method === 'grep_search') return grepSearch(params)
   if (request.method === 'list_ai_sessions') return listAiSessions(params)
+  if (request.method === 'get_ai_session') return getAiSession(params)
   if (request.method === 'list_ai_approvals') return listAiApprovals(params)
   if (request.method === 'focus_ai_session') return focusAiSession(params)
   if (request.method === 'reply_ai_session') return replyAiSession(params)

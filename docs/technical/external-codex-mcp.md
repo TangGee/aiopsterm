@@ -31,6 +31,7 @@ The external server currently exposes:
 - `glob_search`: Finds remote files by glob pattern with bounded output.
 - `grep_search`: Searches remote file contents with bounded output.
 - `list_ai_sessions`: Lists managed AI sessions with compact state, routing, and recent-event summaries.
+- `get_ai_session`: Reads one managed AI session by source/session id, including a compact timeline tail by default.
 - `list_ai_approvals`: Lists approval, question, and plan requests with their supported decision capabilities.
 - `focus_ai_session`: Requests aiopsterm to open the AI session manager and focus the owning visible terminal when it exists.
 - `reply_ai_session`: Sends an allow/deny/reply/handled decision through the managed session backend.
@@ -49,7 +50,7 @@ The external server currently exposes:
 
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
 
-`list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, request kind, decision mode, optional wait timeout/tool name, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
+`list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, request kind, decision mode, optional wait timeout/tool name, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. `get_ai_session` returns the same safe field set for one selected session and includes recent timeline events by default, so external Codex can inspect a specific session without fetching and filtering the full list. Neither tool returns full raw hook payloads.
 
 `list_ai_approvals` is a Feed-style view over the same managed AI session store. It includes permission, question, and plan records, plus a `capabilities` block that says which decisions are meaningful for that session. Blocking Claude Code requests can report `canUnblockAgent: true` when the waiting hook is still live. Stock Codex hook `PermissionRequest` records are marked `localOnly`/`nativePrompt` and expose only `handled`; aiopsterm does not preempt Codex's native TUI or app-server approval flow. The approval action tools are ergonomic aliases over `reply_ai_session`, so they do not create a second approval store.
 

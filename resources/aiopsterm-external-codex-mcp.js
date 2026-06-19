@@ -259,6 +259,25 @@ const tools = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
+    name: 'get_ai_session',
+    title: 'Get aiopsterm managed AI session',
+    description:
+      'Read one managed AI session by source and sessionId, including a compact non-secret timeline tail by default. Use this after list_ai_sessions when you need details for a specific session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        includeEvents: { type: 'boolean', description: 'Include a compact tail of recent non-secret timeline event summaries. Defaults to true.' },
+        include_events: { type: 'boolean', description: 'Alias for includeEvents.' },
+        eventLimit: { type: 'number', description: 'Maximum recent timeline events to return. Defaults to 25 and is capped by aiopsterm.' },
+        event_limit: { type: 'number', description: 'Alias for eventLimit.' }
+      },
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
     name: 'list_ai_approvals',
     title: 'List aiopsterm AI approvals',
     description:
