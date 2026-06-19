@@ -35,6 +35,7 @@ Commands:
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
+  clear-history [--panel <id>|--session <id>]
   terminal send [--panel <id>|--session <id>] --text <text>
   terminal send-key [--panel <id>|--session <id>] <key>
   send-panel --panel <id> <text>
@@ -222,6 +223,11 @@ const methodParams = () => {
         command: pipeCommand
       }
     }
+  }
+  if (command === 'clear-history') {
+    const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+    const sessionId = readOption('--session') || readOption('--session-id')
+    return { method: 'surface.clear_history', params: { panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId } }
   }
   if (command === 'send' || command === 'send-panel' || (command === 'terminal' && args[0] === 'send')) {
     if (command === 'terminal') args.shift()

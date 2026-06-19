@@ -480,6 +480,48 @@ describe('control socket backend', () => {
     ])
   })
 
+  it('routes control_compat-style clear-history aliases to the renderer and records a terminal event', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'terminal.clear_history') {
+        return {
+          ok: true,
+          data: {
+            terminal: { panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local', kind: 'local', active: true, connected: true },
+            cleared: true
+          }
+        }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'surface.clear_history',
+        params: { surfaceId: 'panel-1' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true }) }))
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'clear-history',
+        params: { panelId: 'panel-1' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true }) }))
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'terminal.clear_history', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'terminal.clear_history', params: expect.objectContaining({ panelId: 'panel-1' }) })
+    ])
+    const terminalEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'terminal' } })
+    expect(terminalEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'terminal.history_cleared' })]))
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

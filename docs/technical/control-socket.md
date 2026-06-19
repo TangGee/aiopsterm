@@ -114,6 +114,10 @@ The terminal buffer slice adds tmux/control_compat-style runtime text buffers:
 
 - `terminal.buffer.set`, `terminal.buffer.list`, `terminal.buffer.paste`: set, list, and paste named text buffers.
 
+The terminal history slice adds renderer-owned scrollback cleanup:
+
+- `terminal.clear_history` / `surface.clear_history`: clear a selected terminal surface's visible buffer and retained panel output.
+
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 
 - `sidebar.status.set`, `sidebar.status.clear`, `sidebar.status.list`: manage keyed status entries.
@@ -139,6 +143,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list_terminals` and `debug.terminals` map to `terminal.list`.
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
 - `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
+- `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
@@ -245,6 +250,7 @@ node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js capture-pane --panel panel-main --lines 200
 node /path/to/resources/aiopsterm-control.js pipe-pane --panel panel-main --command "grep ERROR"
+node /path/to/resources/aiopsterm-control.js clear-history --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
 node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
@@ -287,6 +293,8 @@ Future higher-level automation commands should use the control socket but must c
 `sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
 
 `terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
+
+`terminal.clear_history` is renderer-owned because xterm state lives in the active window. It clears the selected terminal surface's visible buffer and aiopsterm's retained panel output; it does not send a command to the shell and does not close or restart the PTY/SSH session.
 
 `sidebar.*` metadata is a lightweight automation state source, not a command runner. It is stored in memory in the main process, exposed through the socket and events stream, and scoped by `workspaceId` with the current shared work panel defaulting to `main`. The current slice does not force a new right-sidebar UI; renderer surfaces or future MCP tools can consume the metadata through `sidebar.state`.
 

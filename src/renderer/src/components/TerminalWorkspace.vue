@@ -1960,6 +1960,7 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
       tailLines
     })
   }
+  if (request.method === 'terminal.clear_history') return clearTerminalHistoryForControl(params)
   if (request.method === 'notification.sync') {
     const notifications = Array.isArray(params.notifications) ? (params.notifications as ControlNotificationRecord[]) : []
     workspace.applyControlNotificationSnapshot(notifications)
@@ -3003,6 +3004,19 @@ const clearTerminal = (panelId = workspace.activePanelId) => {
   if (view) view.lastOutput = ''
   menu.visible = false
   termMenu.visible = false
+}
+
+const clearTerminalHistoryForControl = async (params: Record<string, unknown>) => {
+  const panel = resolveControlTerminalPanel(params)
+  if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
+  if (panel.kind === 'knowledge') return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
+  const view = terminalViews.get(panel.id)
+  if (!view) return controlFail('TERMINAL_VIEW_NOT_READY', 'Terminal view is not ready.', { panelId: panel.id, sessionId: panel.sessionId })
+  workspace.replaceTerminalOutput(panel.id, '')
+  view.terminal.clear()
+  view.lastOutput = ''
+  await nextTick()
+  return controlOk({ terminal: terminalSummaryForControl(panel), cleared: true })
 }
 
 const findNext = () => {

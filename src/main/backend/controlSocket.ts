@@ -209,6 +209,7 @@ const controlSocketCapabilities = [
   'terminal.list',
   'terminal.focus',
   'terminal.read_screen',
+  'terminal.clear_history',
   'terminal.send_text',
   'terminal.send_key',
   'terminal.buffer',
@@ -2606,6 +2607,24 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     return response
   }
   if (method === 'terminal.read_screen' || method === 'surface.read_text' || method === 'capture-pane' || method === 'read-screen') return dispatchRendererControlRequest('terminal.read_screen', params)
+  if (method === 'terminal.clear_history' || method === 'surface.clear_history' || method === 'clear-history') {
+    const response = await dispatchRendererControlRequest('terminal.clear_history', params)
+    if (response.ok) {
+      const data = response.data || {}
+      const terminal = data.terminal && typeof data.terminal === 'object' ? (data.terminal as Record<string, unknown>) : null
+      publishControlEvent({
+        name: 'terminal.history_cleared',
+        category: 'terminal',
+        source: 'control.socket',
+        surfaceId: cleanText(terminal?.panelId || params.panelId || params.surfaceId),
+        payload: {
+          panel_id: cleanText(terminal?.panelId || params.panelId || params.surfaceId),
+          session_id: cleanText(terminal?.sessionId || params.sessionId || params.terminalSessionId)
+        }
+      })
+    }
+    return response
+  }
   if (method === 'terminal.send_text' || method === 'surface.send_text' || method === 'send' || method === 'send-panel') return sendTerminalText(params)
   if (method === 'terminal.send_key' || method === 'surface.send_key' || method === 'send-key' || method === 'send-key-panel') return sendTerminalKey(params)
   if (method === 'notification.create' || method === 'notify') return createNotification(params)

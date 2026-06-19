@@ -7353,6 +7353,46 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('clears terminal scrollback through the control socket', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const panelId = store.activePanelId
+    const xterm = mockXtermInstances.at(-1)!
+    expect(xterm).toBeTruthy()
+    store.activePanel.sessionId = store.activePanel.sessionId || 'clear-terminal-1'
+    store.activePanel.status = 'running'
+    store.appendTerminalOutput(panelId, 'clear me\n')
+    await wrapper.vm.$nextTick()
+    expect(store.activePanel.output).toContain('clear me')
+
+    const response = await invokeControlHandler({ id: 'clear-history', method: 'terminal.clear_history', params: { panelId } })
+
+    expect(response).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true }) }))
+    expect(xterm.clear).toHaveBeenCalled()
+    expect(store.activePanel.output).toBe('')
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

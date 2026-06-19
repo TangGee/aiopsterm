@@ -134,6 +134,7 @@ describe('aiopsterm-control CLI', () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
+      if (request.method === 'surface.clear_history') return { id: request.id, ok: true, data: { cleared: true, terminal: { panelId: (request.params as any)?.panelId } } }
       return {
         id: request.id,
         ok: true,
@@ -154,9 +155,15 @@ describe('aiopsterm-control CLI', () => {
     })
     expect(piped.stdout.trim()).toBe('2')
 
+    const cleared = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'clear-history', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    expect(cleared.stdout).toContain('"cleared":true')
+
     expect(seen).toEqual([
       expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', tailLines: 2, lines: 2 }) }),
-      expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', scrollback: true }) })
+      expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', scrollback: true }) }),
+      expect.objectContaining({ method: 'surface.clear_history', params: expect.objectContaining({ panelId: 'panel-1', surfaceId: 'panel-1' }) })
     ])
   })
 
