@@ -17,6 +17,7 @@ type AgentSessionsBackend = {
   bulkManagedAiSessions: (input: Record<string, unknown>) => Promise<unknown>
   __testing: {
     auditPathFor: (userDataPath: string) => string
+    streamLatestSeq: () => number
     flushManagedAiSessionWrites: () => Promise<void>
   }
 }
@@ -45,6 +46,61 @@ const socketRequest = (socketPath: string, payload: Record<string, unknown>) =>
     socket.on('timeout', () => reject(new Error('agent session socket response timed out')))
     socket.on('error', reject)
   })
+
+const streamSocket = (socketPath: string, request: Record<string, unknown>) => {
+  const socket = createConnection(socketPath)
+  let buffer = ''
+  const frames: Record<string, unknown>[] = []
+  const waiters: Array<{ count: number; resolve: (frames: Record<string, unknown>[]) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }> = []
+  const flushWaiters = () => {
+    for (let index = waiters.length - 1; index >= 0; index -= 1) {
+      const waiter = waiters[index]
+      if (frames.length < waiter.count) continue
+      clearTimeout(waiter.timer)
+      waiters.splice(index, 1)
+      waiter.resolve(frames.slice(0, waiter.count))
+    }
+  }
+  socket.setEncoding('utf8')
+  socket.setTimeout(5000)
+  socket.on('connect', () => {
+    socket.write(`${JSON.stringify(request)}\n`)
+  })
+  socket.on('data', (chunk) => {
+    buffer += chunk
+    let newlineIndex = buffer.indexOf('\n')
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim()
+      buffer = buffer.slice(newlineIndex + 1)
+      if (line) frames.push(JSON.parse(line) as Record<string, unknown>)
+      newlineIndex = buffer.indexOf('\n')
+    }
+    flushWaiters()
+  })
+  socket.on('error', (error) => {
+    while (waiters.length) {
+      const waiter = waiters.pop()!
+      clearTimeout(waiter.timer)
+      waiter.reject(error)
+    }
+  })
+  return {
+    waitForFrames: (count: number, timeoutMs = 5000) =>
+      new Promise<Record<string, unknown>[]>((resolve, reject) => {
+        if (frames.length >= count) {
+          resolve(frames.slice(0, count))
+          return
+        }
+        const timer = setTimeout(() => {
+          const index = waiters.findIndex((waiter) => waiter.timer === timer)
+          if (index >= 0) waiters.splice(index, 1)
+          reject(new Error(`timed out waiting for ${count} stream frames`))
+        }, timeoutMs)
+        waiters.push({ count, resolve, reject, timer })
+      }),
+    close: () => socket.destroy()
+  }
+}
 
 describe('agent session backend', () => {
   it('normalizes Codex hook payloads into managed AI session events', async () => {
@@ -443,6 +499,96 @@ describe('agent session backend', () => {
         })
       ])
     )
+  })
+
+  it('streams managed AI session events over the agent socket with replay cursors', async () => {
+    const { __testing, ensureAiAgentSessionServer, closeAiAgentSessionServer, publishAiAgentSessionEvent, replyManagedAiSession } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-stream-'))
+    const socketPath = await ensureAiAgentSessionServer({ userDataPath, emit: vi.fn() })
+    const stream = streamSocket(socketPath, {
+      method: 'events.stream',
+      params: {
+        after_seq: __testing.streamLatestSeq(),
+        categories: ['agent', 'managed-ai'],
+        include_heartbeats: false
+      }
+    })
+    try {
+      await expect(stream.waitForFrames(1)).resolves.toEqual([
+        expect.objectContaining({
+          type: 'ack',
+          protocol: 'aiopsterm-agent-events',
+          replay_count: expect.any(Number)
+        })
+      ])
+
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'PermissionRequest',
+          sessionId: 'codex-stream-1',
+          requestId: 'request-stream-1',
+          actionable: true,
+          cwd: '/work/project',
+          summary: 'approve stream command',
+          receivedAt: 600
+        },
+        null
+      )
+      await expect(stream.waitForFrames(2)).resolves.toEqual([
+        expect.objectContaining({ type: 'ack' }),
+        expect.objectContaining({
+          type: 'event',
+          name: 'agent.hook.PermissionRequest',
+          category: 'agent',
+          source: 'codex',
+          payload: expect.objectContaining({
+            source: 'codex',
+            sessionId: 'codex-stream-1',
+            state: 'needsInput',
+            requestId: 'request-stream-1',
+            summary: 'approve stream command'
+          })
+        })
+      ])
+
+      await replyManagedAiSession({ source: 'codex', sessionId: 'codex-stream-1', kind: 'handled' })
+      const liveFrames = await stream.waitForFrames(3)
+      expect(liveFrames[2]).toEqual(
+        expect.objectContaining({
+          type: 'event',
+          name: 'managed_ai.decision.created',
+          category: 'managed-ai',
+          payload: expect.objectContaining({
+            sessionId: 'codex-stream-1',
+            decisionKind: 'handled'
+          })
+        })
+      )
+      const replay = streamSocket(socketPath, {
+        method: 'events.stream',
+        params: {
+          after_seq: Number(liveFrames[1].seq) - 1,
+          name: 'agent.hook.PermissionRequest',
+          include_heartbeats: false
+        }
+      })
+      try {
+        await expect(replay.waitForFrames(2)).resolves.toEqual([
+          expect.objectContaining({ type: 'ack', replay_count: 1 }),
+          expect.objectContaining({
+            type: 'event',
+            seq: liveFrames[1].seq,
+            name: 'agent.hook.PermissionRequest'
+          })
+        ])
+      } finally {
+        replay.close()
+      }
+    } finally {
+      stream.close()
+      closeAiAgentSessionServer()
+    }
   })
 
   it('waits for actionable Claude decisions and returns Claude hook output to the socket client', async () => {

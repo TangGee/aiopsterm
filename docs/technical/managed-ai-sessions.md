@@ -112,6 +112,21 @@ The renderer hydrates from this store on startup through `listManagedAiSessions(
 
 The current implementation records lifecycle and process facts for visibility, restore, and later automation. It does not hibernate agents or kill agent process groups. Disconnecting or closing a terminal still uses the normal terminal lifecycle path and marks matching managed AI sessions ended.
 
+## Event Stream
+
+The same `AIOPSTERM_AGENT_SOCKET_PATH` socket also supports a reconnectable managed-AI event stream. Clients send one newline-delimited JSON request and then keep reading frames:
+
+```json
+{"method":"events.stream","params":{"after_seq":0,"categories":["agent","managed-ai"],"include_heartbeats":false}}
+```
+
+The first frame is an `ack` with protocol `aiopsterm-agent-events`, a process `boot_id`, replay count, latest sequence, and cursor gap metadata. Subsequent `event` frames include monotonically increasing `seq`, `name`, `category`, `source`, `workspace_id`, `surface_id`, `terminal_session_id`, and a compact payload. Supported categories are:
+
+- `agent`: incoming hook events, named as `agent.hook.<EventName>`, for example `agent.hook.PermissionRequest`.
+- `managed-ai`: local session mutations such as `managed_ai.decision.created`, `managed_ai.session.renamed`, `managed_ai.session.cleared`, and `managed_ai.sessions.bulk`.
+
+Clients can filter by `name`/`names` and `category`/`categories`, resume with `after_seq` or `after`, and disable heartbeat frames with `include_heartbeats: false`. Replay is kept in a bounded in-memory ring of recent events; the JSONL audit file remains the durable long-term record.
+
 ## Actions And Bulk API
 
 The preload boundary exposes:

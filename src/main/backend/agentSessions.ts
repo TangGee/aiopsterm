@@ -32,6 +32,38 @@ type AgentSessionSocketResponse = AiAgentSessionEventResult & {
   agentOutput?: Record<string, unknown>
 }
 
+type AgentSessionEventStreamCategory = 'agent' | 'managed-ai'
+
+type AgentSessionEventStreamFrame = {
+  type: 'event'
+  protocol: 'aiopsterm-agent-events'
+  version: 1
+  boot_id: string
+  seq: number
+  id: string
+  name: string
+  category: AgentSessionEventStreamCategory
+  source: string
+  occurred_at: string
+  workspace_id?: string
+  surface_id?: string
+  terminal_session_id?: string
+  payload: Record<string, unknown>
+}
+
+type AgentSessionEventStreamFilters = {
+  names: Set<string>
+  categories: Set<AgentSessionEventStreamCategory>
+  includeHeartbeats: boolean
+}
+
+type AgentSessionEventStreamSubscriber = {
+  id: string
+  socket: Socket
+  filters: AgentSessionEventStreamFilters
+  heartbeat: NodeJS.Timeout | null
+}
+
 type PendingAgentDecision = {
   source: AiAgentSessionSource
   sessionId: string
@@ -85,6 +117,8 @@ const maxSessions = 200
 const maxEventsPerSession = 200
 const maxDecisionsPerSession = 40
 const maxRawKeys = 80
+const maxStreamEvents = 2000
+const streamHeartbeatIntervalMs = 15_000
 const defaultDecisionWaitTimeoutMs = 120_000
 const maxDecisionWaitTimeoutMs = 125_000
 const maxLaunchCommandLength = 600
@@ -130,6 +164,10 @@ let pendingDecisions = new Map<string, PendingAgentDecision>()
 let loadedStore = false
 let writeQueue: Promise<void> = Promise.resolve()
 let auditQueue: Promise<void> = Promise.resolve()
+let streamSeq = 0
+const streamBootId = randomUUID()
+let streamEvents: AgentSessionEventStreamFrame[] = []
+let streamSubscribers = new Map<string, AgentSessionEventStreamSubscriber>()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -517,6 +555,189 @@ const compactRawValue = (value: unknown, depth = 0): unknown => {
 
 const compactRawRecord = (record: Record<string, unknown>) => compactRawValue(record) as Record<string, unknown>
 
+const socketWriteJsonLine = (socket: Socket, value: unknown) => {
+  socket.write(`${JSON.stringify(value)}\n`)
+}
+
+const normalizeStreamName = (event: AiAgentSessionEventName) =>
+  event
+    .split('_')
+    .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
+    .join('')
+
+const compactStreamPayload = (value: Record<string, unknown>) => compactRawValue(value, 0) as Record<string, unknown>
+
+const eventStreamFrame = (
+  input: Omit<AgentSessionEventStreamFrame, 'type' | 'protocol' | 'version' | 'boot_id' | 'seq' | 'id' | 'occurred_at'>
+): AgentSessionEventStreamFrame => {
+  streamSeq += 1
+  return {
+    type: 'event',
+    protocol: 'aiopsterm-agent-events',
+    version: 1,
+    boot_id: streamBootId,
+    seq: streamSeq,
+    id: `${streamBootId}-${streamSeq}`,
+    occurred_at: new Date().toISOString(),
+    ...input,
+    payload: compactStreamPayload(input.payload)
+  }
+}
+
+const streamMatches = (frame: AgentSessionEventStreamFrame, filters: AgentSessionEventStreamFilters) =>
+  (!filters.names.size || filters.names.has(frame.name)) && (!filters.categories.size || filters.categories.has(frame.category))
+
+const publishStreamFrame = (frame: AgentSessionEventStreamFrame) => {
+  streamEvents.push(frame)
+  if (streamEvents.length > maxStreamEvents) streamEvents = streamEvents.slice(-maxStreamEvents)
+  streamSubscribers.forEach((subscriber) => {
+    if (!streamMatches(frame, subscriber.filters)) return
+    socketWriteJsonLine(subscriber.socket, frame)
+  })
+}
+
+const publishAgentEventStreamFrame = (event: AiAgentSessionEvent, session: ManagedAiSessionRecord) => {
+  publishStreamFrame(
+    eventStreamFrame({
+      name: `agent.hook.${normalizeStreamName(event.event)}`,
+      category: 'agent',
+      source: event.source,
+      workspace_id: event.workspaceId,
+      surface_id: event.panelId,
+      terminal_session_id: event.terminalSessionId,
+      payload: {
+        source: event.source,
+        event: event.event,
+        sessionId: event.sessionId,
+        title: session.title,
+        summary: event.summary,
+        state: session.state,
+        requestId: event.requestId,
+        actionable: event.actionable,
+        cwd: event.cwd,
+        transcriptPath: event.transcriptPath,
+        processId: event.processId,
+        agentLifecycle: event.agentLifecycle
+      }
+    })
+  )
+}
+
+const publishManagedAiStreamFrame = (name: string, session: ManagedAiSessionRecord | null, payload: Record<string, unknown>) => {
+  publishStreamFrame(
+    eventStreamFrame({
+      name,
+      category: 'managed-ai',
+      source: session?.source || 'aiopsterm',
+      workspace_id: session?.workspaceId,
+      surface_id: session?.panelId,
+      terminal_session_id: session?.terminalSessionId,
+      payload: {
+        ...(session
+          ? {
+              source: session.source,
+              sessionId: session.id,
+              title: session.title,
+              state: session.state,
+              lastEvent: session.lastEvent
+            }
+          : {}),
+        ...payload
+      }
+    })
+  )
+}
+
+const cleanStringSet = (value: unknown) => {
+  const values = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+  return new Set(values.map(cleanText).filter(Boolean))
+}
+
+const normalizeStreamCategories = (value: unknown) => {
+  const raw = cleanStringSet(value)
+  const categories = new Set<AgentSessionEventStreamCategory>()
+  raw.forEach((item) => {
+    if (item === 'agent' || item === 'managed-ai') categories.add(item)
+  })
+  return categories
+}
+
+const streamParamsFrom = (record: Record<string, unknown>) => {
+  const params = isRecord(record.params) ? record.params : record
+  const after = typeof params.after_seq === 'number' ? params.after_seq : typeof params.after === 'number' ? params.after : 0
+  return {
+    afterSeq: Number.isFinite(after) ? Math.max(0, Math.floor(after)) : 0,
+    filters: {
+      names: cleanStringSet(params.names || params.name),
+      categories: normalizeStreamCategories(params.categories || params.category),
+      includeHeartbeats: params.include_heartbeats === false || params.includeHeartbeats === false ? false : true
+    } satisfies AgentSessionEventStreamFilters
+  }
+}
+
+const closeStreamSubscriber = (id: string) => {
+  const subscriber = streamSubscribers.get(id)
+  if (!subscriber) return
+  if (subscriber.heartbeat) clearInterval(subscriber.heartbeat)
+  streamSubscribers.delete(id)
+}
+
+const startEventStream = (socket: Socket, request: Record<string, unknown>) => {
+  const { afterSeq, filters } = streamParamsFrom(request)
+  const subscriberId = randomUUID()
+  const oldestSeq = streamEvents[0]?.seq || streamSeq + 1
+  const replay = streamEvents.filter((frame) => frame.seq > afterSeq && streamMatches(frame, filters))
+  const subscriber: AgentSessionEventStreamSubscriber = {
+    id: subscriberId,
+    socket,
+    filters,
+    heartbeat: null
+  }
+  streamSubscribers.set(subscriberId, subscriber)
+  socketWriteJsonLine(socket, {
+    type: 'ack',
+    protocol: 'aiopsterm-agent-events',
+    version: 1,
+    boot_id: streamBootId,
+    subscription_id: subscriberId,
+    heartbeat_interval_seconds: streamHeartbeatIntervalMs / 1000,
+    replay_count: replay.length,
+    resume: {
+      after_seq: afterSeq,
+      requested_after_seq: afterSeq,
+      oldest_seq: oldestSeq,
+      latest_seq: streamSeq,
+      next_seq: streamSeq + 1,
+      gap: afterSeq > 0 && afterSeq < oldestSeq
+    },
+    filters: {
+      names: [...filters.names],
+      categories: [...filters.categories]
+    }
+  })
+  replay.forEach((frame) => socketWriteJsonLine(socket, frame))
+  if (filters.includeHeartbeats) {
+    subscriber.heartbeat = setInterval(() => {
+      if (socket.destroyed) {
+        closeStreamSubscriber(subscriberId)
+        return
+      }
+      socketWriteJsonLine(socket, {
+        type: 'heartbeat',
+        protocol: 'aiopsterm-agent-events',
+        version: 1,
+        boot_id: streamBootId,
+        subscription_id: subscriberId,
+        latest_seq: streamSeq,
+        occurred_at: new Date().toISOString()
+      })
+    }, streamHeartbeatIntervalMs)
+    subscriber.heartbeat.unref()
+  }
+  socket.on('close', () => closeStreamSubscriber(subscriberId))
+  socket.on('error', () => closeStreamSubscriber(subscriberId))
+}
+
 const auditPathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.audit.jsonl')
 
 const appendManagedAiSessionAudit = (entry: ManagedAiSessionAuditEntry) => {
@@ -885,6 +1106,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   sessions = new Map(ordered.slice(0, maxSessions).map((session) => [sessionKey(session.source, session.id), session]))
   persistSnapshot()
   auditEventReceived(event, record)
+  publishAgentEventStreamFrame(event, record)
   return record
 }
 
@@ -1071,6 +1293,11 @@ export const replyManagedAiSession = async (input: ManagedAiSessionReplyInput): 
   sessions.set(sessionKey(next.source, next.id), next)
   persistSnapshot()
   auditDecisionCreated(session, decision)
+  publishManagedAiStreamFrame('managed_ai.decision.created', next, {
+    decisionKind: decision.kind,
+    decisionId: decision.id,
+    requestId: session.pendingRequestId
+  })
   return { ok: true, data: { session: next, snapshot: snapshot() } }
 }
 
@@ -1099,6 +1326,7 @@ export const renameManagedAiSession = async (input: ManagedAiSessionRenameInput)
     title: next.title,
     summary: next.summary
   })
+  publishManagedAiStreamFrame('managed_ai.session.renamed', next, { title: next.title })
   return { ok: true, data: { session: next, snapshot: snapshot() } }
 }
 
@@ -1122,6 +1350,7 @@ export const clearManagedAiSession = async (input: ManagedAiSessionClearInput): 
     title: session.title,
     summary: session.summary
   })
+  publishManagedAiStreamFrame('managed_ai.session.cleared', session, {})
   return { ok: true, data: { snapshot: snapshot() } }
 }
 
@@ -1170,16 +1399,33 @@ export const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput): P
     operation,
     changed
   })
+  publishManagedAiStreamFrame('managed_ai.sessions.bulk', null, {
+    operation,
+    changed,
+    sources: [...sourceFilter],
+    sessionIds: [...idFilter]
+  })
   return { ok: true, data: { changed, snapshot: snapshot() } }
 }
 
 const writeSocketResponse = (socket: Socket, response: AgentSessionSocketResponse) => {
-  socket.write(`${JSON.stringify(response)}\n`)
+  socketWriteJsonLine(socket, response)
+}
+
+const isEventStreamRequest = (record: unknown) => {
+  if (!isRecord(record)) return false
+  const method = cleanText(record.method || record.type || record.command).toLowerCase()
+  return method === 'events.stream' || method === 'stream' || method === 'agent.events.stream'
 }
 
 const handleSocketLine = async (socket: Socket, line: string, emit: AgentSessionEventSink) => {
   try {
-    writeSocketResponse(socket, await publishAiAgentSessionSocketEvent(JSON.parse(line) as AiAgentSessionEventInput, emit))
+    const parsed = JSON.parse(line) as Record<string, unknown>
+    if (isEventStreamRequest(parsed)) {
+      startEventStream(socket, parsed)
+      return
+    }
+    writeSocketResponse(socket, await publishAiAgentSessionSocketEvent(parsed as AiAgentSessionEventInput, emit))
   } catch {
     writeSocketResponse(socket, {
       ok: false,
@@ -1261,6 +1507,11 @@ export const closeAiAgentSessionServer = () => {
     pending.resolve({ ok: true, status: 'timeout', agentOutput: {} })
   })
   pendingDecisions = new Map()
+  streamSubscribers.forEach((subscriber) => {
+    if (subscriber.heartbeat) clearInterval(subscriber.heartbeat)
+    subscriber.socket.destroy()
+  })
+  streamSubscribers = new Map()
 }
 
 export const __testing = {
@@ -1269,6 +1520,9 @@ export const __testing = {
   auditPathFor,
   managedAiSessionStateForEvent,
   autoTitleFor,
+  streamBootId,
+  streamEventCount: () => streamEvents.length,
+  streamLatestSeq: () => streamSeq,
   flushManagedAiSessionWrites: async () => {
     await writeQueue
     await auditQueue
