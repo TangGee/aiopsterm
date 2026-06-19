@@ -1942,6 +1942,147 @@ const surfaceOperationPayload = (panel: TerminalPanel, action: string, extra: Re
   })
 }
 
+const normalizedSurfaceAction = (value: unknown) => controlText(value).toLowerCase().replace(/[-\s]+/g, '_')
+
+const unsupportedSurfaceActionPayload = (action: string, params: Record<string, unknown>, reason: string) =>
+  controlOk({
+    action,
+    unsupported: true,
+    unsupportedReason: reason,
+    browserDisabled: true,
+    browser_disabled: true,
+    ...(controlText(params.url) ? { url: controlText(params.url) } : {}),
+    snapshot: workspaceSnapshotForControl()
+  })
+
+const closeRelativeControlPanels = async (panel: TerminalPanel, mode: 'left' | 'right' | 'others') => {
+  const panels = selectableControlPanels()
+  const index = panels.findIndex((item) => item.id === panel.id)
+  if (index < 0) return { closed: 0, skipped: 0, closedSurfaces: [] as ControlSurfaceSummary[] }
+  const targets =
+    mode === 'left'
+      ? panels.slice(0, index)
+      : mode === 'right'
+        ? panels.slice(index + 1)
+        : panels.filter((item) => item.id !== panel.id)
+  const closedSurfaces: ControlSurfaceSummary[] = []
+  let skipped = 0
+  for (const target of targets) {
+    if (workspace.panels.length <= 1) {
+      skipped += 1
+      continue
+    }
+    const snapshot = surfaceSummaryForControl(target)
+    workspace.closePanel(target.id)
+    closedSurfaces.push(snapshot)
+  }
+  workspace.activePanelId = panel.id
+  await nextTick()
+  return { closed: closedSurfaces.length, skipped, closedSurfaces }
+}
+
+const handleSurfaceActionControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const action = normalizedSurfaceAction(params.action || params.name || params.command)
+  if (!action) return controlFail('SURFACE_ACTION_REQUIRED', `${method} requires action.`)
+  if (['reload', 'reload_tab', 'duplicate', 'duplicate_tab', 'new_browser_right', 'new_browser_to_right', 'new_browser_tab_to_right'].includes(action)) {
+    return unsupportedSurfaceActionPayload(action, params, 'aiopsterm does not implement control_compat browser surfaces.')
+  }
+  const panel = resolveControlSourceSurfacePanel(params)
+  if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+  if (action === 'rename') {
+    const title = controlText(params.title || params.name)
+    if (!title) return controlFail('SURFACE_ACTION_TITLE_REQUIRED', 'surface.action rename requires title.')
+    workspace.renamePanel(panel.id, title)
+    await nextTick()
+    return surfaceOperationPayload(panel, 'surface.action', { action, title, extras: { title } })
+  }
+  if (action === 'clear_name' || action === 'clear_title') {
+    workspace.renamePanel(panel.id, `Terminal ${workspace.panels.findIndex((item) => item.id === panel.id) + 1}`, 'system')
+    await nextTick()
+    return surfaceOperationPayload(panel, 'surface.action', { action, clearedTitle: true, cleared_title: true })
+  }
+  if (action === 'pin' || action === 'unpin') {
+    return surfaceOperationPayload(panel, 'surface.action', {
+      action,
+      pinned: action === 'pin',
+      unsupported: true,
+      unsupportedReason: 'aiopsterm does not have per-surface pinning; workspace group pinning is managed through workspace.group.pin.'
+    })
+  }
+  if (action === 'mark_read' || action === 'mark_unread' || action === 'mark_as_unread') {
+    return surfaceOperationPayload(panel, 'surface.action', {
+      action,
+      read: action === 'mark_read',
+      changed: false,
+      unsupported: true,
+      unsupportedReason: 'aiopsterm surfaces do not currently store per-surface unread state.'
+    })
+  }
+  if (action === 'new_terminal_right' || action === 'new_terminal_to_right' || action === 'new_terminal_tab_to_right') {
+    const previousActivePanelId = workspace.activePanelId
+    workspace.activePanelId = panel.id
+    const created = workspace.createPanel()
+    const title = controlText(params.title || params.newTitle || params.new_title)
+    if (title) workspace.renamePanel(created.id, title)
+    const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory) || panel.cwd
+    if (cwd) created.cwd = cwd
+    if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    return surfaceOperationPayload(panel, 'surface.action', {
+      action,
+      createdSurface: surfaceSummaryForControl(created),
+      created_surface: surfaceSummaryForControl(created),
+      createdSurfaceId: created.id,
+      created_surface_id: created.id,
+      extras: { created_surface_id: created.id }
+    })
+  }
+  if (action === 'close_left' || action === 'close_to_left' || action === 'close_right' || action === 'close_to_right' || action === 'close_others' || action === 'close_other_tabs') {
+    const mode = action === 'close_left' || action === 'close_to_left' ? 'left' : action === 'close_right' || action === 'close_to_right' ? 'right' : 'others'
+    const result = await closeRelativeControlPanels(panel, mode)
+    return surfaceOperationPayload(panel, 'surface.action', {
+      action,
+      closed: result.closed,
+      skipped: result.skipped,
+      skippedPinned: 0,
+      skipped_pinned: 0,
+      closedSurfaces: result.closedSurfaces,
+      closed_surfaces: result.closedSurfaces,
+      extras: { closed: result.closed, skipped_pinned: 0 }
+    })
+  }
+  if (action === 'move_to_new_workspace' || action === 'detach_to_workspace' || action === 'detach_to_new_workspace') {
+    const changed = workspace.unsplitPanel(panel.id)
+    await nextTick()
+    return surfaceOperationPayload(panel, 'surface.action', {
+      action,
+      moved: changed,
+      detached: changed,
+      unsupported: false
+    })
+  }
+  return controlFail('SURFACE_ACTION_UNKNOWN', `Unknown surface action: ${action}`, { action })
+}
+
+const handleWorkspaceActionControlRequest = async (params: Record<string, unknown>) => {
+  const panel = resolveControlSelectablePanel(controlTargetValue(params)) || resolveControlSourceSurfacePanel(params)
+  const action = normalizedSurfaceAction(params.action || params.name || params.command)
+  if (!action) return controlFail('WORKSPACE_ACTION_REQUIRED', 'workspace.action requires action.')
+  if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
+  const response = await handleSurfaceActionControlRequest('workspace.action', { ...params, surfaceId: panel.id, surface_id: panel.id, panelId: panel.id, panel_id: panel.id, action })
+  if (!response.ok) return response
+  return controlOk({
+    ...(response.data || {}),
+    workspaceId: 'main',
+    workspace_id: 'main',
+    workspaceRef: 'workspace:1',
+    workspace_ref: 'workspace:1',
+    action
+  })
+}
+
 const movePanelInControlOrder = (panel: TerminalPanel, params: Record<string, unknown>) => {
   const panels = workspace.panels
   const currentIndex = panels.findIndex((item) => item.id === panel.id)
@@ -2457,6 +2598,8 @@ const handlePaneLayoutControlRequest = async (method: string, params: Record<str
 }
 
 const handleSurfaceOperationsControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'surface.action' || method === 'tab.action') return handleSurfaceActionControlRequest(method, params)
+
   if (method === 'surface.report_tty') {
     const panel = resolveControlSourceSurfacePanel(params)
     if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
@@ -3526,6 +3669,7 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
     return handleProjectFileControlRequest(request.method, params)
   }
   if (request.method === 'workspace.env' || request.method === 'workspace.set_auto_title') return handleWorkspaceMetadataControlRequest(request.method, params)
+  if (request.method === 'workspace.action') return handleWorkspaceActionControlRequest(params)
   if (request.method.startsWith('workspace.remote.') || request.method.startsWith('remote.tmux.')) return handleWorkspaceRemoteControlRequest(request.method, params)
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
@@ -3540,6 +3684,8 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
     [
       'surface.move',
       'surface.reorder',
+      'surface.action',
+      'tab.action',
       'surface.split_off',
       'surface.refresh',
       'surface.health',

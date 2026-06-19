@@ -1484,6 +1484,39 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends surface and workspace action requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          action: (request.params as any)?.action,
+          surface: {
+            source: 'terminal',
+            panelId: (request.params as any)?.surfaceId || (request.params as any)?.panelId || 'panel-1',
+            id: (request.params as any)?.surfaceId || (request.params as any)?.panelId || 'panel-1',
+            title: (request.params as any)?.title || 'Main',
+            state: 'idle'
+          }
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'action', 'new-terminal-right', '--surface', 'panel-1', '--no-focus'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'action', 'rename', '--workspace', 'panel-1', '--title', 'Ops'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'surface.action', params: expect.objectContaining({ action: 'new_terminal_right', surfaceId: 'panel-1', focus: false }) }),
+      expect.objectContaining({ method: 'workspace.action', params: expect.objectContaining({ action: 'rename', workspaceId: 'panel-1', title: 'Ops' }) })
+    ])
+  })
+
   it('sends agent vault requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

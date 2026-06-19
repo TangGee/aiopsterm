@@ -189,6 +189,7 @@ const methodParams = () => {
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
     if (subcommand === 'list') return { method: 'workspace.list', params: {} }
     if (subcommand === 'current') return { method: 'workspace.current', params: {} }
+    if (subcommand === 'action') return workspaceOrSurfaceActionMethodParams('workspace.action')
     if (subcommand === 'env') return workspaceEnvMethodParams()
     if (subcommand === 'set-auto-title' || subcommand === 'set_auto_title' || subcommand === 'auto-title') return workspaceAutoTitleMethodParams()
     if (subcommand === 'remote') return workspaceRemoteMethodParams(args.shift() || 'status')
@@ -204,6 +205,7 @@ const methodParams = () => {
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
     if (subcommand === 'current') return { method: 'surface.current', params: {} }
     if (subcommand === 'resume') return surfaceResumeMethodParams(args.shift() || 'show')
+    if (subcommand === 'action') return workspaceOrSurfaceActionMethodParams('surface.action')
     if (subcommand === 'focus' || subcommand === 'select') return surfaceFocusMethodParams()
     if (subcommand === 'create' || subcommand === 'new') return surfaceCreateMethodParams()
     if (subcommand === 'report-tty' || subcommand === 'report_tty') return surfaceReportTtyMethodParams()
@@ -1620,6 +1622,36 @@ const agentHooksMethodParams = (subcommand) => {
   if (subcommand === 'list') return { method: 'agent.hooks.list', params: { source, sources } }
   if (subcommand === 'setup' || subcommand === 'install' || subcommand === 'uninstall') return { method: `agent.hooks.${subcommand}`, params: { source, sources } }
   throw new Error(`Unknown hooks command: ${subcommand}`)
+}
+
+const workspaceOrSurfaceActionMethodParams = (method) => {
+  const action = (readOption('--action') || readOption('--name') || readPositional()).replace(/-/g, '_')
+  const surfaceId = readOption('--surface') || readOption('--surface-id') || readOption('--panel') || readOption('--panel-id') || readOption('--pane') || readOption('--pane-id')
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+  const title = readOption('--title') || readOption('--new-title')
+  const cwd = readOption('--cwd')
+  const url = readOption('--url')
+  const focusValue = readOption('--focus')
+  const focus = focusValue ? focusValue !== 'false' && focusValue !== '0' && focusValue !== 'no' : !hasFlag('--no-focus')
+  return {
+    method,
+    params: {
+      action,
+      title,
+      ...(title ? { name: title } : {}),
+      cwd,
+      url,
+      focus,
+      surfaceId,
+      surface_id: surfaceId,
+      panelId: surfaceId,
+      panel_id: surfaceId,
+      paneId: surfaceId,
+      pane_id: surfaceId,
+      workspaceId,
+      workspace_id: workspaceId
+    }
+  }
 }
 
 const workspaceGroupMethodParams = (subcommand) => {

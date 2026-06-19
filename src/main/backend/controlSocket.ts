@@ -3196,6 +3196,7 @@ const rendererMutationEventName = (method: string) => {
   if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
   if (method === 'surface.focus') return 'surface.focused'
   if (method === 'surface.create') return 'surface.created'
+  if (method === 'surface.action' || method === 'tab.action') return 'surface.actioned'
   if (method === 'surface.report_tty') return 'surface.tty_reported'
   if (method === 'surface.report_shell_state') return 'surface.shell_state_reported'
   if (method === 'surface.ports_kick') return 'surface.ports_kicked'
@@ -3208,6 +3209,7 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'workspace.reorder_many') return 'workspace.reordered_many'
   if (method === 'workspace.equalize_splits') return 'workspace.splits_equalized'
   if (method === 'workspace.prompt_submit') return 'workspace.prompt_submitted'
+  if (method === 'workspace.action') return 'workspace.actioned'
   if (method === 'workspace.set_auto_title') return 'workspace.auto_title_set'
   if (method === 'workspace.remote.configure') return 'workspace_remote.configured'
   if (method === 'workspace.remote.reconnect') return 'workspace_remote.reconnected'
@@ -3453,6 +3455,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.move_to_window' ||
     method === 'workspace.equalize_splits' ||
     method === 'workspace.prompt_submit' ||
+    method === 'workspace.action' ||
     method === 'workspace.env' ||
     method === 'workspace.set_auto_title' ||
     method.startsWith('workspace.remote.') ||
@@ -3468,6 +3471,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'surface.close' ||
     method === 'surface.move' ||
     method === 'surface.reorder' ||
+    method === 'surface.action' ||
+    method === 'tab.action' ||
     method === 'surface.split_off' ||
     method === 'surface.refresh' ||
     method === 'surface.health' ||

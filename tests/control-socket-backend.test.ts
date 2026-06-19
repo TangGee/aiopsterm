@@ -1139,6 +1139,18 @@ describe('control socket backend', () => {
       const params = (request.params as any) || {}
       if (request.method === 'surface.health') return { ok: true, data: { surfaces: [{ panelId: 'panel-1', surfaceKind: 'terminal', mounted: true }], count: 1 } }
       if (request.method === 'workspace.move_to_window') return { ok: true, data: { unsupported: true, unsupportedReason: 'single window', workspaceId: params.workspaceId, windowId: params.windowId } }
+      if (request.method === 'surface.action' || request.method === 'tab.action' || request.method === 'workspace.action') {
+        return {
+          ok: true,
+          data: {
+            surface: { panelId: params.surfaceId || params.panelId || params.workspaceId || 'panel-1', surfaceKind: 'terminal' },
+            action: params.action,
+            changed: true,
+            createdSurface: params.action === 'new_terminal_right' ? { panelId: 'panel-new', surfaceKind: 'terminal' } : undefined,
+            unsupported: params.action === 'new_browser_right'
+          }
+        }
+      }
       return {
         ok: true,
         data: {
@@ -1161,6 +1173,9 @@ describe('control socket backend', () => {
     await expect(backend.__testing.handleControlRequest({ method: 'reorder-workspace', params: { workspaceId: 'panel-2', index: 0 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'reorder-workspaces', params: { workspaceIds: ['panel-2', 'panel-1'] } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'move-workspace-to-window', params: { workspaceId: 'panel-2', windowId: 'window-1' } })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) }))
+    await expect(backend.__testing.handleControlRequest({ method: 'surface.action', params: { surfaceId: 'panel-2', action: 'new_terminal_right' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'tab.action', params: { surfaceId: 'panel-2', action: 'close_others' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.action', params: { workspaceId: 'panel-2', action: 'rename', title: 'Ops' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
 
     expect(mockWindow.requests).toEqual([
       expect.objectContaining({ method: 'surface.move', params: expect.objectContaining({ surfaceId: 'panel-2', paneId: 'panel-1' }) }),
@@ -1171,12 +1186,15 @@ describe('control socket backend', () => {
       expect.objectContaining({ method: 'surface.trigger_flash', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
       expect.objectContaining({ method: 'workspace.reorder', params: expect.objectContaining({ workspaceId: 'panel-2', index: 0 }) }),
       expect.objectContaining({ method: 'workspace.reorder_many', params: expect.objectContaining({ workspaceIds: ['panel-2', 'panel-1'] }) }),
-      expect.objectContaining({ method: 'workspace.move_to_window', params: expect.objectContaining({ workspaceId: 'panel-2', windowId: 'window-1' }) })
+      expect.objectContaining({ method: 'workspace.move_to_window', params: expect.objectContaining({ workspaceId: 'panel-2', windowId: 'window-1' }) }),
+      expect.objectContaining({ method: 'surface.action', params: expect.objectContaining({ surfaceId: 'panel-2', action: 'new_terminal_right' }) }),
+      expect.objectContaining({ method: 'tab.action', params: expect.objectContaining({ surfaceId: 'panel-2', action: 'close_others' }) }),
+      expect.objectContaining({ method: 'workspace.action', params: expect.objectContaining({ workspaceId: 'panel-2', action: 'rename', title: 'Ops' }) })
     ])
     const surfaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'surface' } })
-    expect(surfaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'surface.moved' }), expect.objectContaining({ name: 'surface.reordered' }), expect.objectContaining({ name: 'surface.split_off' }), expect.objectContaining({ name: 'surface.refreshed' }), expect.objectContaining({ name: 'surface.flashed' })]))
+    expect(surfaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'surface.moved' }), expect.objectContaining({ name: 'surface.reordered' }), expect.objectContaining({ name: 'surface.split_off' }), expect.objectContaining({ name: 'surface.refreshed' }), expect.objectContaining({ name: 'surface.flashed' }), expect.objectContaining({ name: 'surface.actioned' })]))
     const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
-    expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.reordered' }), expect.objectContaining({ name: 'workspace.reordered_many' })]))
+    expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.reordered' }), expect.objectContaining({ name: 'workspace.reordered_many' }), expect.objectContaining({ name: 'workspace.actioned' })]))
   })
 
   it('routes control_compat-style surface telemetry and create/focus primitives to the renderer', async () => {

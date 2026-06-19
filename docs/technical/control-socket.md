@@ -147,6 +147,12 @@ The surface resume slice adds control_compat-style resume bindings for visible w
 - `surface.resume.clear`: remove a binding, optionally guarded by checkpoint/source.
 - `surface.resume.run`: explicitly write the stored command into the selected terminal through aiopsterm terminal command security.
 
+The surface action slice adds control_compat-style action dispatch for shared work-panel terminal surfaces:
+
+- `surface.action`, `tab.action`, and `workspace.action`: run non-browser actions against the selected surface or workspace. Implemented actions include `rename`, `clear_name`, `new_terminal_right`, `close_left`, `close_right`, `close_others`, and the detach-to-workspace aliases, which map to aiopsterm's visible terminal panel model.
+- Browser actions such as `reload`, `duplicate`, and `new_browser_right` return structured unsupported responses because aiopsterm does not implement control_compat browser surfaces.
+- `pin`, `unpin`, `mark_read`, and `mark_unread` currently return structured unsupported responses; aiopsterm has workspace-group pinning and AI/notification unread state, but not per-surface pin/unread state.
+
 The events slice adds a control_compat-style local JSONL stream for automation:
 
 - `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.

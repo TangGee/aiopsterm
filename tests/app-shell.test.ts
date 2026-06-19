@@ -7078,6 +7078,52 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('handles control_compat-style surface actions inside the shared terminal workspace', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any>) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return vi.fn()
+    })
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(controlHandler).toBeTruthy()
+
+    const renamed = await controlHandler!({ id: 'surface-action-rename', method: 'surface.action', params: { surfaceId: store.activePanelId, action: 'rename', title: 'Ops Shell' } })
+    expect(renamed).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'rename', title: 'Ops Shell' }) }))
+    expect(store.activePanel.title).toBe('Ops Shell')
+
+    const anchorPanelId = store.activePanelId
+    const created = await controlHandler!({ id: 'surface-action-new', method: 'surface.action', params: { surfaceId: anchorPanelId, action: 'new_terminal_right', title: 'Side Shell', focus: false } })
+    expect(created).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'new_terminal_right', createdSurfaceId: expect.any(String) }) }))
+    expect(store.panels.map((panel) => panel.title)).toContain('Side Shell')
+    expect(store.activePanelId).toBe(anchorPanelId)
+
+    store.createPanel()
+    store.renamePanel(store.activePanelId, 'Right Shell')
+    const beforeCloseCount = store.panels.length
+    const closedRight = await controlHandler!({ id: 'surface-action-close-right', method: 'surface.action', params: { surfaceId: anchorPanelId, action: 'close_right' } })
+    expect(closedRight).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'close_right', closed: beforeCloseCount - 1 }) }))
+    expect(store.panels).toHaveLength(1)
+    expect(store.activePanelId).toBe(anchorPanelId)
+
+    const unsupportedBrowser = await controlHandler!({ id: 'surface-action-browser', method: 'surface.action', params: { surfaceId: anchorPanelId, action: 'new_browser_right', url: 'https://example.com' } })
+    expect(unsupportedBrowser).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, browserDisabled: true }) }))
+
+    const workspaceRename = await controlHandler!({ id: 'workspace-action-rename', method: 'workspace.action', params: { workspaceId: anchorPanelId, action: 'rename', title: 'Workspace Shell' } })
+    expect(workspaceRename).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'rename', workspaceId: 'main' }) }))
+    expect(store.activePanel.title).toBe('Workspace Shell')
+
+    wrapper.unmount()
+  })
+
   it('consumes backend terminal lifecycle events for reconnect-aware panel state', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
