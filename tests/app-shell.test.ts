@@ -7578,6 +7578,80 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('manages shared work-panel panes through tmux-compatible control commands', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const firstPanelId = store.activePanelId
+
+    const createResponse = await invokeControlHandler({
+      id: 'new-window',
+      method: 'workspace.create',
+      params: { title: 'Scratch', cwd: '/tmp/scratch', focus: false }
+    })
+    expect(createResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'new-window' }) }))
+    const scratchPanel = store.panels.find((panel) => panel.title === 'Scratch')
+    expect(scratchPanel).toEqual(expect.objectContaining({ cwd: '/tmp/scratch' }))
+    expect(store.activePanelId).toBe(firstPanelId)
+
+    const splitResponse = await invokeControlHandler({
+      id: 'split-window',
+      method: 'surface.split',
+      params: { paneId: firstPanelId, direction: 'right', title: 'Sidecar', focus: true }
+    })
+    expect(splitResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'split-window' }) }))
+    const sidecarPanel = store.panels.find((panel) => panel.title === 'Sidecar')
+    expect(sidecarPanel).toEqual(expect.objectContaining({ split: 'right', splitSourceId: firstPanelId, splitGroupId: firstPanelId }))
+    expect(store.activePanelId).toBe(sidecarPanel?.id)
+
+    const listPanes = await invokeControlHandler({ id: 'list-panes', method: 'pane.list', params: {} })
+    expect(listPanes).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: store.panels.length }) }))
+    expect(listPanes.data.panes).toEqual(expect.arrayContaining([expect.objectContaining({ panelId: firstPanelId }), expect.objectContaining({ panelId: sidecarPanel?.id })]))
+
+    const renameResponse = await invokeControlHandler({
+      id: 'rename-window',
+      method: 'workspace.rename',
+      params: { panelId: sidecarPanel!.id, title: 'Renamed Sidecar' }
+    })
+    expect(renameResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ title: 'Renamed Sidecar' }) }))
+    expect(store.panels.find((panel) => panel.id === sidecarPanel?.id)?.title).toBe('Renamed Sidecar')
+
+    const hasResponse = await invokeControlHandler({ id: 'has-session', method: 'workspace.has_session', params: { panelId: sidecarPanel!.id } })
+    expect(hasResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ exists: true, target: sidecarPanel!.id }) }))
+
+    const layoutResponse = await invokeControlHandler({ id: 'select-layout', method: 'workspace.select_layout', params: { layout: 'main-vertical' } })
+    expect(layoutResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ layout: 'main-vertical', applied: true }) }))
+
+    const killPaneResponse = await invokeControlHandler({ id: 'kill-pane', method: 'surface.close', params: { paneId: sidecarPanel!.id } })
+    expect(killPaneResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'kill-pane' }) }))
+    expect(store.panels.some((panel) => panel.id === sidecarPanel?.id)).toBe(false)
+
+    const scratchId = scratchPanel!.id
+    const killWindowResponse = await invokeControlHandler({ id: 'kill-window', method: 'workspace.close', params: { panelId: scratchId } })
+    expect(killWindowResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'kill-window' }) }))
+    expect(store.panels.some((panel) => panel.id === scratchId)).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

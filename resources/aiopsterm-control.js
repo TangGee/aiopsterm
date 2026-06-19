@@ -30,6 +30,15 @@ Commands:
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
+  list-windows
+  list-panes
+  new-window [--name <title>] [--cwd <path>] [--no-focus]
+  split-window [-h|-v] [--target <panel-id>] [--no-focus]
+  rename-window [--target <panel-id>] <title>
+  kill-window [--target <panel-id>]
+  kill-pane [--target <panel-id>]
+  has-session [--target <panel-id>]
+  select-layout <name>
   terminal list
   terminal focus --panel <id>|--session <id>
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
@@ -99,7 +108,7 @@ const unescapeTerminalText = (value) =>
 const socketPath = readOption('--socket') || process.env.AIOPSTERM_CONTROL_SOCKET || process.env.AIOPSTERM_SOCKET_PATH || ''
 const outputJson = hasFlag('--json')
 
-if (hasFlag('--help') || hasFlag('-h')) {
+if (args[0] === '--help' || args[0] === '-h') {
   process.stdout.write(usage())
   process.exit(0)
 }
@@ -197,6 +206,9 @@ const methodParams = () => {
   if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
   if (['next-window', 'nextw', 'previous-window', 'prev-window', 'previousw', 'prevw', 'last-window', 'lastw', 'select-window', 'selectw', 'select-pane', 'selectp', 'focus-pane', 'last-pane', 'lastp', 'find-window', 'findw'].includes(command)) {
     return paneNavigationMethodParams(command)
+  }
+  if (['list-windows', 'lsw', 'list-panes', 'lsp', 'new-window', 'neww', 'split-window', 'splitw', 'rename-window', 'renamew', 'rename-workspace', 'kill-window', 'killw', 'kill-pane', 'killp', 'has-session', 'has', 'select-layout'].includes(command)) {
+    return paneManagementMethodParams(command)
   }
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
@@ -590,6 +602,44 @@ const paneNavigationMethodParams = (command) => {
   const windowId = readOption('--window')
   const query = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ').trim()
   return { method: 'workspace.find', params: { query, content: includeContent, includeContent, select, windowId, window_id: windowId } }
+}
+
+const paneManagementMethodParams = (command) => {
+  if (command === 'list-windows' || command === 'lsw') return { method: 'workspace.list', params: { tmuxCompat: true } }
+  if (command === 'list-panes' || command === 'lsp') return { method: 'pane.list', params: { tmuxCompat: true } }
+  if (command === 'new-window' || command === 'neww') {
+    const title = readOption('--name') || readOption('-n') || readOption('--title')
+    const cwd = readOption('--cwd') || readOption('-c')
+    const focus = !(hasFlag('--no-focus') || hasFlag('-d'))
+    return { method: 'workspace.create', params: { title, name: title, cwd, focus } }
+  }
+  if (command === 'split-window' || command === 'splitw') {
+    const target = readOption('--target') || readOption('--pane') || readOption('--panel') || readOption('-t')
+    const cwd = readOption('--cwd') || readOption('-c')
+    const direction = hasFlag('-h') ? 'right' : hasFlag('-v') ? 'below' : readPaneDirection()
+    const focus = !(hasFlag('--no-focus') || hasFlag('-d'))
+    return { method: 'surface.split', params: { paneId: target, panelId: target, surfaceId: target, targetPaneId: target, direction, cwd, focus } }
+  }
+  if (command === 'rename-window' || command === 'renamew' || command === 'rename-workspace') {
+    const target = readOption('--target') || readOption('--workspace') || readOption('--panel') || readOption('-t')
+    const title = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ').trim()
+    return { method: 'workspace.rename', params: { workspaceId: target, workspace_id: target, panelId: target, surfaceId: target, title, name: title } }
+  }
+  if (command === 'kill-window' || command === 'killw') {
+    const target = readOption('--target') || readOption('--workspace') || readOption('--panel') || readOption('-t')
+    return { method: 'workspace.close', params: { workspaceId: target, workspace_id: target, panelId: target, surfaceId: target } }
+  }
+  if (command === 'kill-pane' || command === 'killp') {
+    const target = readOption('--target') || readOption('--pane') || readOption('--panel') || readOption('--surface') || readOption('-t')
+    return { method: 'surface.close', params: { paneId: target, pane_id: target, panelId: target, surfaceId: target } }
+  }
+  if (command === 'has-session' || command === 'has') {
+    const target = readOption('--target') || readOption('--workspace') || readOption('--panel') || readOption('-t') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'workspace.has_session', params: { workspaceId: target, workspace_id: target, panelId: target, surfaceId: target } }
+  }
+  const layout = args.find((arg) => arg !== '--' && !arg.startsWith('--')) || readOption('--layout') || ''
+  const target = readOption('--target') || readOption('--workspace') || readOption('--pane') || readOption('-t')
+  return { method: 'workspace.select_layout', params: { layout, name: layout, workspaceId: target, paneId: target, panelId: target, surfaceId: target } }
 }
 
 const sidebarTargetParams = () => {
@@ -1060,6 +1110,29 @@ const printResponse = (response) => {
   if (data.selectedPane || data.selectedSurface || data.workspace) {
     const pane = data.selectedPane || data.selectedSurface || data.workspace || {}
     process.stdout.write(['selected', pane.panelId || pane.id || data.activePanelId || '-', pane.title || '', data.action || ''].join('\t') + '\n')
+    return
+  }
+  if (data.createdPane || data.createdSurface || data.createdWorkspace) {
+    const pane = data.createdPane || data.createdSurface || data.createdWorkspace || {}
+    process.stdout.write(['created', pane.panelId || pane.id || data.panelId || '-', pane.title || '', data.action || ''].join('\t') + '\n')
+    return
+  }
+  if (data.closedPane || data.closedSurface || data.closedWorkspace) {
+    const pane = data.closedPane || data.closedSurface || data.closedWorkspace || {}
+    process.stdout.write(['closed', pane.panelId || pane.id || data.panelId || '-', pane.title || '', data.action || ''].join('\t') + '\n')
+    return
+  }
+  if (data.renamedPane || data.renamedWorkspace) {
+    const pane = data.renamedPane || data.renamedWorkspace || {}
+    process.stdout.write(['renamed', pane.panelId || pane.id || data.panelId || '-', pane.title || data.title || '', data.action || ''].join('\t') + '\n')
+    return
+  }
+  if (data.layout) {
+    process.stdout.write(['layout', data.layout, data.applied ? 'applied' : data.unsupported ? 'unsupported' : 'ok', data.unsupportedReason || ''].join('\t') + '\n')
+    return
+  }
+  if (data.exists !== undefined && data.target) {
+    process.stdout.write(['session', data.exists ? 'exists' : 'missing', data.target || '-'].join('\t') + '\n')
     return
   }
   if (Array.isArray(data.matches) && data.matches.some((match) => match.agent)) {

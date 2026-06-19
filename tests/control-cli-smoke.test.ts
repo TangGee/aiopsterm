@@ -330,6 +330,59 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends tmux-style pane management requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      if (request.method === 'workspace.list') {
+        return { id: request.id, ok: true, data: { workspaces: [{ id: 'main', active: true, title: 'Main', mode: 'terminal', activeModule: 'workspace' }] } }
+      }
+      if (request.method === 'pane.list') {
+        return { id: request.id, ok: true, data: { panes: [{ panelId: 'panel-1', title: 'Main', surfaceKind: 'terminal', active: true }], count: 1 } }
+      }
+      if (request.method === 'workspace.has_session') {
+        return { id: request.id, ok: true, data: { exists: true, target: params.panelId || 'panel-1' } }
+      }
+      if (request.method === 'workspace.select_layout') {
+        return { id: request.id, ok: true, data: { layout: params.layout, applied: true } }
+      }
+      if (request.method === 'workspace.rename') {
+        return { id: request.id, ok: true, data: { renamedPane: { panelId: params.panelId || 'panel-1', title: params.title }, action: 'rename-window' } }
+      }
+      if (request.method === 'workspace.close' || request.method === 'surface.close') {
+        return { id: request.id, ok: true, data: { closedPane: { panelId: params.panelId || params.paneId || 'panel-1', title: 'Closed' }, action: request.method === 'workspace.close' ? 'kill-window' : 'kill-pane' } }
+      }
+      return { id: request.id, ok: true, data: { createdPane: { panelId: 'panel-new', title: params.title || 'New' }, action: request.method } }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-windows'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-panes'], { cwd: process.cwd() })
+    const created = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'new-window', '--name', 'Scratch', '--no-focus'], { cwd: process.cwd() })
+    expect(created.stdout).toContain('created\tpanel-new\tScratch')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'split-window', '-h', '--target', 'panel-1'], { cwd: process.cwd() })
+    const renamed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'rename-window', '--target', 'panel-1', 'Main Ops'], { cwd: process.cwd() })
+    expect(renamed.stdout).toContain('renamed\tpanel-1\tMain Ops')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'kill-window', '--target', 'panel-1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'kill-pane', '--target', 'panel-2'], { cwd: process.cwd() })
+    const has = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'has-session', '--target', 'panel-1'], { cwd: process.cwd() })
+    expect(has.stdout).toContain('session\texists\tpanel-1')
+    const layout = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'select-layout', 'main-vertical'], { cwd: process.cwd() })
+    expect(layout.stdout).toContain('layout\tmain-vertical\tapplied')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'workspace.list' }),
+      expect.objectContaining({ method: 'pane.list' }),
+      expect.objectContaining({ method: 'workspace.create', params: expect.objectContaining({ title: 'Scratch', focus: false }) }),
+      expect.objectContaining({ method: 'surface.split', params: expect.objectContaining({ targetPaneId: 'panel-1', direction: 'right' }) }),
+      expect.objectContaining({ method: 'workspace.rename', params: expect.objectContaining({ panelId: 'panel-1', title: 'Main Ops' }) }),
+      expect.objectContaining({ method: 'workspace.close', params: expect.objectContaining({ panelId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.close', params: expect.objectContaining({ paneId: 'panel-2' }) }),
+      expect.objectContaining({ method: 'workspace.has_session', params: expect.objectContaining({ panelId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'workspace.select_layout', params: expect.objectContaining({ layout: 'main-vertical' }) })
+    ])
+  })
+
   it('sends wait-for synchronization requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

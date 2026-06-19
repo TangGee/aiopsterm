@@ -1305,6 +1305,103 @@ const handlePaneNavigationControlRequest = async (method: string, params: Record
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
+const managementPanelPayload = (panel: TerminalPanel, action: string, key: 'createdPane' | 'closedPane' | 'renamedPane' = 'createdPane', extra: Record<string, unknown> = {}) =>
+  controlOk({
+    [key]: surfaceSummaryForControl(panel),
+    panelId: panel.id,
+    surfaceId: panel.id,
+    action,
+    ...extra,
+    snapshot: workspaceSnapshotForControl()
+  })
+
+const handlePaneManagementControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'pane.list') {
+    const panels = selectableControlPanels()
+    return controlOk({
+      panes: panels.map((panel, index) => ({ ...surfaceSummaryForControl(panel), index: index + 1 })),
+      surfaces: panels.map(surfaceSummaryForControl),
+      count: panels.length,
+      activePanelId: workspace.activePanelId
+    })
+  }
+  if (method === 'workspace.create') {
+    const focus = controlBool(params.focus, true)
+    const previousActivePanelId = workspace.activePanelId
+    const panel = workspace.createPanel()
+    const title = controlText(params.title || params.name)
+    if (title) workspace.renamePanel(panel.id, title)
+    const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory)
+    if (cwd) panel.cwd = cwd
+    if (!focus && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    return managementPanelPayload(panel, 'new-window', 'createdPane', { previousActivePanelId })
+  }
+  if (method === 'surface.split') {
+    const target = resolveControlPanePanel(params, 'target') || resolveControlPanePanel(params)
+    if (!target) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    const previousActivePanelId = workspace.activePanelId
+    workspace.activePanelId = target.id
+    const panel = workspace.createPanel(normalizePaneLayoutDirection(params.direction || params.split))
+    const title = controlText(params.title || params.name)
+    if (title) workspace.renamePanel(panel.id, title)
+    const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory)
+    if (cwd) panel.cwd = cwd
+    if (!controlBool(params.focus, true) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    return managementPanelPayload(panel, 'split-window', 'createdPane', { targetPane: surfaceSummaryForControl(target), previousActivePanelId })
+  }
+  if (method === 'workspace.rename') {
+    const panel = resolveControlSelectablePanel(controlTargetValue(params))
+    if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
+    const title = controlText(params.title || params.name)
+    if (!title) return controlFail('WORKSPACE_TITLE_REQUIRED', 'Workspace title is required.')
+    workspace.renamePanel(panel.id, title)
+    await nextTick()
+    return managementPanelPayload(panel, 'rename-window', 'renamedPane', { title })
+  }
+  if (method === 'workspace.close' || method === 'surface.close') {
+    const panel = method === 'workspace.close' ? resolveControlSelectablePanel(controlTargetValue(params)) : resolveControlPanePanel(params)
+    if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    const snapshot = surfaceSummaryForControl(panel)
+    workspace.closePanel(panel.id)
+    await nextTick()
+    return controlOk({
+      closedPane: snapshot,
+      closedSurface: snapshot,
+      panelId: snapshot.panelId,
+      surfaceId: snapshot.panelId,
+      action: method === 'workspace.close' ? 'kill-window' : 'kill-pane',
+      snapshot: workspaceSnapshotForControl()
+    })
+  }
+  if (method === 'workspace.has_session') {
+    const target = controlText(controlTargetValue(params))
+    const panel = resolveControlSelectablePanel(target)
+    return controlOk({
+      exists: Boolean(panel),
+      target: target || 'main',
+      ...(panel ? { panel: surfaceSummaryForControl(panel), workspace: surfaceSummaryForControl(panel) } : {})
+    })
+  }
+  if (method === 'workspace.select_layout') {
+    const layout = controlText(params.layout || params.name) || 'default'
+    const supported = ['default', 'even-horizontal', 'even-vertical', 'tiled', 'main-vertical', 'main-horizontal'].includes(layout)
+    return controlOk({
+      layout,
+      applied: supported,
+      unsupported: !supported,
+      ...(supported ? {} : { unsupportedReason: `Unsupported layout: ${layout}` }),
+      snapshot: workspaceSnapshotForControl()
+    })
+  }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
+
 const normalizePaneLayoutDirection = (value: unknown) => {
   const direction = controlText(value).toLowerCase()
   if (direction === 'below' || direction === 'down' || direction === 'vertical') return 'below'
@@ -2156,6 +2253,9 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
   if (['workspace.next', 'workspace.previous', 'workspace.last', 'workspace.select', 'workspace.find', 'pane.focus', 'pane.last'].includes(request.method)) {
     return handlePaneNavigationControlRequest(request.method, params)
+  }
+  if (['pane.list', 'workspace.create', 'surface.split', 'workspace.rename', 'workspace.close', 'surface.close', 'workspace.has_session', 'workspace.select_layout'].includes(request.method)) {
+    return handlePaneManagementControlRequest(request.method, params)
   }
   if (request.method.startsWith('pane.')) return handlePaneLayoutControlRequest(request.method, params)
   if (request.method === 'surface.respawn' || request.method === 'terminal.respawn') return handleSurfaceRespawnControlRequest(params)

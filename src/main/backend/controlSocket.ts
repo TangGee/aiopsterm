@@ -1830,11 +1830,15 @@ const startEventStream = (socket: Socket, request: ControlSocketRequest) => {
     filters
   }
 
+  let cleaned = false
   const cleanup = () => {
+    if (cleaned) return
+    cleaned = true
     if (subscription.heartbeatTimer) clearInterval(subscription.heartbeatTimer)
     eventSubscriptions.delete(subscriptionId)
   }
   socket.once('close', cleanup)
+  socket.once('end', cleanup)
   socket.once('error', cleanup)
 
   writeEventFrame(socket, {
@@ -2484,6 +2488,12 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'workspace.next') return 'workspace.selected'
   if (method === 'workspace.previous') return 'workspace.selected'
   if (method === 'workspace.last') return 'workspace.selected'
+  if (method === 'workspace.create') return 'workspace.created'
+  if (method === 'surface.split') return 'pane.created'
+  if (method === 'workspace.rename') return 'workspace.renamed'
+  if (method === 'workspace.close') return 'workspace.closed'
+  if (method === 'surface.close') return 'pane.closed'
+  if (method === 'workspace.select_layout') return 'workspace.layout_selected'
   if (method === 'agent-hibernation.on') return 'agent_hibernation.enabled'
   if (method === 'agent-hibernation.off') return 'agent_hibernation.disabled'
   if (method === 'agent.hibernate') return 'agent.hibernated'
@@ -2496,6 +2506,7 @@ const rendererMutationEventName = (method: string) => {
 const rendererMutationCategory = (method: string) => {
   if (method.startsWith('workspace.group.')) return 'workspace'
   if (method.startsWith('workspace.')) return 'workspace'
+  if (method === 'surface.split' || method === 'surface.close') return 'pane'
   if (method.startsWith('surface.resume.')) return 'surface'
   if (method.startsWith('pane.')) return 'pane'
   if (method.startsWith('agent-hibernation.') || method.startsWith('agent.')) return 'agent'
@@ -2513,6 +2524,9 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
   const surface = data.surface && typeof data.surface === 'object' ? (data.surface as Record<string, unknown>) : null
   const pane = data.pane && typeof data.pane === 'object' ? (data.pane as Record<string, unknown>) : null
   const selectedPane = data.selectedPane && typeof data.selectedPane === 'object' ? (data.selectedPane as Record<string, unknown>) : null
+  const createdPane = data.createdPane && typeof data.createdPane === 'object' ? (data.createdPane as Record<string, unknown>) : null
+  const closedPane = data.closedPane && typeof data.closedPane === 'object' ? (data.closedPane as Record<string, unknown>) : null
+  const renamedPane = data.renamedPane && typeof data.renamedPane === 'object' ? (data.renamedPane as Record<string, unknown>) : null
   const targetPane = data.targetPane && typeof data.targetPane === 'object' ? (data.targetPane as Record<string, unknown>) : null
   const config = data.config && typeof data.config === 'object' ? (data.config as Record<string, unknown>) : null
   const hibernated = Array.isArray(data.hibernated) ? data.hibernated : []
@@ -2520,7 +2534,7 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
     name,
     category: rendererMutationCategory(method),
     source: 'control.socket',
-    surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || pane?.panelId || selectedPane?.panelId || params.panelId || params.surfaceId || params.paneId),
+    surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || pane?.panelId || selectedPane?.panelId || createdPane?.panelId || closedPane?.panelId || renamedPane?.panelId || params.panelId || params.surfaceId || params.paneId),
     payload: {
       method,
       ...(group
@@ -2563,6 +2577,9 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
             action: cleanText(data.action)
           }
         : {}),
+      ...(createdPane ? { created_pane_id: createdPane.panelId, created_panel_id: createdPane.panelId } : {}),
+      ...(closedPane ? { closed_pane_id: closedPane.panelId, closed_panel_id: closedPane.panelId } : {}),
+      ...(renamedPane ? { renamed_pane_id: renamedPane.panelId, renamed_panel_id: renamedPane.panelId, title: renamedPane.title } : {}),
       ...(targetPane
         ? {
             target_pane_id: targetPane.panelId,
@@ -2617,8 +2634,16 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.last' ||
     method === 'workspace.select' ||
     method === 'workspace.find' ||
+    method === 'workspace.create' ||
+    method === 'workspace.rename' ||
+    method === 'workspace.close' ||
+    method === 'workspace.has_session' ||
+    method === 'workspace.select_layout' ||
+    method === 'pane.list' ||
     method === 'pane.focus' ||
     method === 'pane.last' ||
+    method === 'surface.split' ||
+    method === 'surface.close' ||
     method === 'pane.break' ||
     method === 'pane.join' ||
     method === 'pane.swap' ||
@@ -2639,6 +2664,39 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   }
   if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
   if (method === 'list_surfaces') return dispatchRendererControlRequest('surface.list', params)
+  if (method === 'list-windows' || method === 'lsw') return dispatchRendererControlRequest('workspace.list', params)
+  if (method === 'list-panes' || method === 'lsp') return dispatchRendererControlRequest('pane.list', params)
+  if (method === 'new-window' || method === 'neww') {
+    const response = await dispatchRendererControlRequest('workspace.create', params, { focus: params.focus !== false })
+    publishRendererMutationEvent('workspace.create', params, response)
+    return response
+  }
+  if (method === 'split-window' || method === 'splitw') {
+    const response = await dispatchRendererControlRequest('surface.split', params, { focus: params.focus !== false })
+    publishRendererMutationEvent('surface.split', params, response)
+    return response
+  }
+  if (method === 'rename-window' || method === 'renamew' || method === 'rename-workspace') {
+    const response = await dispatchRendererControlRequest('workspace.rename', params)
+    publishRendererMutationEvent('workspace.rename', params, response)
+    return response
+  }
+  if (method === 'kill-window' || method === 'killw') {
+    const response = await dispatchRendererControlRequest('workspace.close', params)
+    publishRendererMutationEvent('workspace.close', params, response)
+    return response
+  }
+  if (method === 'kill-pane' || method === 'killp') {
+    const response = await dispatchRendererControlRequest('surface.close', params)
+    publishRendererMutationEvent('surface.close', params, response)
+    return response
+  }
+  if (method === 'has-session' || method === 'has') return dispatchRendererControlRequest('workspace.has_session', params)
+  if (method === 'select-layout') {
+    const response = await dispatchRendererControlRequest('workspace.select_layout', params)
+    publishRendererMutationEvent('workspace.select_layout', params, response)
+    return response
+  }
   if (method === 'next-window' || method === 'nextw') {
     const response = await dispatchRendererControlRequest('workspace.next', params, { focus: true })
     publishRendererMutationEvent('workspace.next', params, response)
