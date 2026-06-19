@@ -611,6 +611,9 @@ describe('workspace store', () => {
       {
         id: 'notification-1',
         title: 'Build done',
+        source: 'ci',
+        level: 'error',
+        group: 'build',
         body: 'All green',
         read: false,
         isRead: false,
@@ -623,6 +626,7 @@ describe('workspace store', () => {
     ])
 
     expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.currentAiAttentionItem).toEqual(expect.objectContaining({ id: 'notification:notification-1', title: 'ci: Build done', kind: 'error', summary: expect.stringContaining('build'), priority: 60 }))
     expect(store.jumpToNextAiAttention()?.id).toBe('notification:notification-1')
     await Promise.resolve()
 

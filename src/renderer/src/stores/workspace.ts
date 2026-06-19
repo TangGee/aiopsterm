@@ -8496,14 +8496,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         upsertAiAttentionItem({
           id,
           source: 'control-notification',
-          kind: 'done',
-          title: notification.title,
-          summary: [notification.subtitle, notification.body].filter(Boolean).join(' · '),
+          kind: notification.level === 'approval' ? 'approval' : notification.level === 'error' || notification.level === 'warning' ? 'error' : 'done',
+          title: notification.source ? `${notification.source}: ${notification.title}` : notification.title,
+          summary: [notification.group, notification.level && notification.level !== 'info' ? notification.level : '', notification.subtitle, notification.body].filter(Boolean).join(' · '),
           sessionId: notification.sessionId || notification.terminalSessionId,
           surfaceId: notification.panelId || notification.sessionId || notification.terminalSessionId,
           notificationId: notification.id,
           createdAt: notification.createdAt,
-          priority: 30
+          priority: notification.level === 'approval' || notification.level === 'error' ? 60 : notification.level === 'warning' ? 45 : 30
         })
       } else {
         removeAiAttentionItem(id)

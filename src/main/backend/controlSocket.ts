@@ -382,6 +382,18 @@ const cleanSidebarText = (value: unknown, max = 240) => {
   return text.length > max ? text.slice(0, max) : text
 }
 
+const cleanControlMetadataText = (value: unknown, max = 120) => {
+  const text = cleanText(value)
+  if (!text) return ''
+  return text.length > max ? text.slice(0, max) : text
+}
+
+const cleanNotificationLevel = (value: unknown): ControlNotificationRecord['level'] => {
+  const text = cleanText(value).toLowerCase()
+  if (text === 'success' || text === 'warning' || text === 'error' || text === 'approval' || text === 'done') return text
+  return 'info'
+}
+
 const cleanSidebarLevel = (value: unknown): SidebarLogEntry['level'] => {
   const text = cleanText(value).toLowerCase()
   if (text === 'progress' || text === 'success' || text === 'warning' || text === 'error') return text
@@ -691,6 +703,11 @@ const notificationEventPayload = (notification: ControlNotificationRecord) => ({
   subtitle_length: notification.subtitle?.length || 0,
   body_length: notification.body?.length || 0,
   read: notification.read,
+  ...(notification.level ? { level: notification.level } : {}),
+  ...(notification.group ? { group: notification.group } : {}),
+  ...(notification.key ? { key: notification.key } : {}),
+  ...(notification.action ? { action: notification.action } : {}),
+  ...(notification.url ? { url: notification.url } : {}),
   ...(notification.panelId ? { panel_id: notification.panelId, panelId: notification.panelId } : {}),
   ...(notification.sessionId ? { session_id: notification.sessionId, sessionId: notification.sessionId } : {}),
   ...(notification.source ? { source: notification.source } : {})
@@ -3927,14 +3944,33 @@ const handleTmuxCompatControlRequest = (method: string, params: Record<string, u
 
 const notificationPayload = (items = notifications, params: Record<string, unknown> = {}) => {
   const query = cleanText(params.query).toLowerCase()
+  const source = cleanControlMetadataText(params.source || params.from).toLowerCase()
+  const group = cleanControlMetadataText(params.group).toLowerCase()
+  const level = cleanControlMetadataText(params.level || params.severity).toLowerCase()
   const unreadOnly = params.unread === true && params.read !== true
   const readOnly = params.read === true && params.unread !== true
   const limit = normalizeLimit(params.limit)
   const filtered = items.filter((notification) => {
     if (unreadOnly && notification.read) return false
     if (readOnly && !notification.read) return false
+    if (source && cleanText(notification.source).toLowerCase() !== source) return false
+    if (group && cleanText(notification.group).toLowerCase() !== group) return false
+    if (level && cleanText(notification.level).toLowerCase() !== level) return false
     if (!query) return true
-    return [notification.id, notification.title, notification.subtitle || '', notification.body || '', notification.panelId || '', notification.sessionId || '', notification.source || '']
+    return [
+      notification.id,
+      notification.title,
+      notification.subtitle || '',
+      notification.body || '',
+      notification.panelId || '',
+      notification.sessionId || '',
+      notification.source || '',
+      notification.level || '',
+      notification.group || '',
+      notification.key || '',
+      notification.action || '',
+      notification.url || ''
+    ]
       .join('\n')
       .toLowerCase()
       .includes(query)
@@ -3951,20 +3987,40 @@ const createNotification = (params: Record<string, unknown>) => {
   const title = cleanText(params.title) || 'Notification'
   const subtitle = cleanText(params.subtitle)
   const body = typeof params.body === 'string' ? params.body.trim() : ''
+  const source = cleanControlMetadataText(params.source || params.from || params.app)
+  const level = cleanNotificationLevel(params.level || params.severity)
+  const group = cleanControlMetadataText(params.group || params.category)
+  const key = cleanControlMetadataText(params.key || params.dedupeKey || params.dedupe_key || params.idempotencyKey || params.idempotency_key)
+  const action = cleanControlMetadataText(params.action || params.kind || params.type)
+  const url = cleanControlMetadataText(params.url || params.link, 500)
   const now = Date.now()
+  const stableId = cleanText(params.id)
+  const generatedId = key ? `notification-key-${Buffer.from(JSON.stringify([source, group, key])).toString('base64url').slice(0, 96)}` : `notification-${now}-${Math.random().toString(16).slice(2)}`
+  const id = stableId || generatedId
+  const existing = notifications.find((item) => item.id === id)
   const notification: ControlNotificationRecord = {
-    id: cleanText(params.id) || `notification-${now}-${Math.random().toString(16).slice(2)}`,
+    id,
     title,
     ...(subtitle ? { subtitle } : {}),
     ...(body ? { body } : {}),
+    level,
+    ...(group ? { group } : {}),
+    ...(key ? { key } : {}),
+    ...(action ? { action } : {}),
+    ...(url ? { url } : {}),
     read: false,
     isRead: false,
-    createdAt: now,
+    createdAt: existing?.createdAt || now,
     updatedAt: now,
-    ...(cleanText(params.panelId || params.surfaceId) ? { panelId: cleanText(params.panelId || params.surfaceId) } : {}),
-    ...(cleanText(params.sessionId || params.terminalSessionId) ? { sessionId: cleanText(params.sessionId || params.terminalSessionId), terminalSessionId: cleanText(params.sessionId || params.terminalSessionId) } : {}),
-    ...(cleanText(params.workspaceId) ? { workspaceId: cleanText(params.workspaceId) } : {}),
-    ...(cleanText(params.source) ? { source: cleanText(params.source) } : {})
+    ...(cleanText(params.panelId || params.surfaceId) || existing?.panelId ? { panelId: cleanText(params.panelId || params.surfaceId) || existing?.panelId } : {}),
+    ...(cleanText(params.sessionId || params.terminalSessionId) || existing?.sessionId || existing?.terminalSessionId
+      ? {
+          sessionId: cleanText(params.sessionId || params.terminalSessionId) || existing?.sessionId || existing?.terminalSessionId,
+          terminalSessionId: cleanText(params.sessionId || params.terminalSessionId) || existing?.terminalSessionId || existing?.sessionId
+        }
+      : {}),
+    ...(cleanText(params.workspaceId) || existing?.workspaceId ? { workspaceId: cleanText(params.workspaceId) || existing?.workspaceId } : {}),
+    ...(source ? { source } : {})
   }
   notifications = [notification, ...notifications.filter((item) => item.id !== notification.id)].slice(0, maxNotifications)
   syncNotificationsToRenderer()

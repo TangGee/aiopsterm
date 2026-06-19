@@ -1203,11 +1203,44 @@ describe('aiopsterm-control CLI', () => {
       }
     })
 
-    const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, '--json', 'notify', '--title', 'Done', '--body', 'All green'], {
+    const result = await execFileAsync(
+      process.execPath,
+      [
+        'resources/aiopsterm-control.js',
+        '--socket',
+        socketPath,
+        '--json',
+        'notify',
+        '--title',
+        'Done',
+        '--body',
+        'All green',
+        '--source',
+        'ci',
+        '--level',
+        'success',
+        '--group',
+        'build',
+        '--key',
+        'main',
+        '--url',
+        'https://example.test/build'
+      ],
+      {
+        cwd: process.cwd()
+      }
+    )
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-notifications', '--source', 'ci', '--level', 'success', '--group', 'build', '--query', 'main', '--limit', '5'], {
       cwd: process.cwd()
     })
     expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ notification: expect.objectContaining({ title: 'Done' }) }) }))
-    expect(seen).toEqual([expect.objectContaining({ method: 'notification.create', params: expect.objectContaining({ title: 'Done', body: 'All green' }) })])
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'notification.create',
+        params: expect.objectContaining({ title: 'Done', body: 'All green', source: 'ci', level: 'success', group: 'build', key: 'main', url: 'https://example.test/build' })
+      }),
+      expect.objectContaining({ method: 'notification.list', params: expect.objectContaining({ source: 'ci', level: 'success', group: 'build', query: 'main', limit: 5 }) })
+    ])
   })
 
   it('sends targeted notification requests over the configured socket', async () => {

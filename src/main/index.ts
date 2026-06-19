@@ -513,8 +513,8 @@ const writeTerminalBySessionId = async (id: string, data: string) => {
 const showControlNotification = (notification: import('@shared/preload').ControlNotificationRecord) => {
   if (!Notification.isSupported()) return
   const desktop = new Notification({
-    title: notification.title,
-    body: [notification.subtitle, notification.body].filter(Boolean).join('\n') || notification.title,
+    title: notification.source ? `${notification.source}: ${notification.title}` : notification.title,
+    body: [notification.level && notification.level !== 'info' ? `[${notification.level}]` : '', notification.group, notification.subtitle, notification.body].filter(Boolean).join('\n') || notification.title,
     silent: false
   })
   desktop.on('click', () => {

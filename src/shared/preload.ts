@@ -298,6 +298,11 @@ export type ControlNotificationRecord = {
   title: string
   subtitle?: string
   body?: string
+  level?: 'info' | 'success' | 'warning' | 'error' | 'approval' | 'done'
+  group?: string
+  key?: string
+  action?: string
+  url?: string
   read: boolean
   isRead: boolean
   createdAt: number

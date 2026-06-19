@@ -138,11 +138,11 @@ Commands:
   clear-log
   list-log [--limit <n>]
   sidebar-state
-  notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
-  notify-caller --title <text> [--subtitle <text>] [--body <text>] [--panel <id>]
-  notify-surface --surface <id> --title <text> [--subtitle <text>] [--body <text>]
-  notify-target --workspace <id> --surface <id> --title <text> [--subtitle <text>] [--body <text>]
-  list-notifications
+  notify --title <text> [--subtitle <text>] [--body <text>] [--source <name>] [--level info|success|warning|error|approval|done] [--group <name>] [--key <id>] [--action <name>] [--url <url>] [--panel <id>] [--session <id>]
+  notify-caller --title <text> [--subtitle <text>] [--body <text>] [--source <name>] [--level <level>] [--group <name>] [--key <id>] [--action <name>] [--url <url>] [--panel <id>]
+  notify-surface --surface <id> --title <text> [--subtitle <text>] [--body <text>] [--source <name>] [--level <level>] [--group <name>] [--key <id>] [--action <name>] [--url <url>]
+  notify-target --workspace <id> --surface <id> --title <text> [--subtitle <text>] [--body <text>] [--source <name>] [--level <level>] [--group <name>] [--key <id>] [--action <name>] [--url <url>]
+  list-notifications [--source <name>] [--level <level>] [--group <name>] [--query <text>] [--read|--unread] [--limit <n>]
   open-notification --id <id>
   mark-notification-read (--id <id> | --all)
   dismiss-notification (--id <id> | --all-read)
@@ -462,37 +462,55 @@ const methodParams = () => {
     return { method: 'terminal.send_key', params: { panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId, key } }
   }
   if (command === 'notify') {
+    const metadata = notificationMetadataParams()
     const title = readOption('--title') || 'Notification'
     const subtitle = readOption('--subtitle')
     const body = readOption('--body')
     const panelId = readOption('--panel') || readOption('--surface')
     const sessionId = readOption('--session') || readOption('--session-id')
-    return { method: 'notification.create', params: { title, subtitle, body, panelId, sessionId } }
+    return { method: 'notification.create', params: { title, subtitle, body, panelId, sessionId, ...metadata } }
   }
   if (command === 'notify-caller') {
+    const metadata = notificationMetadataParams()
     const title = readOption('--title') || 'Notification'
     const subtitle = readOption('--subtitle')
     const body = readOption('--body')
     const panelId = readOption('--panel') || readOption('--surface')
     const workspaceId = readOption('--workspace') || readOption('--workspace-id')
-    return { method: 'notification.create_for_caller', params: { title, subtitle, body, caller: { panelId, surfaceId: panelId, workspaceId } } }
+    return { method: 'notification.create_for_caller', params: { title, subtitle, body, caller: { panelId, surfaceId: panelId, workspaceId }, ...metadata } }
   }
   if (command === 'notify-surface') {
+    const metadata = notificationMetadataParams()
     const title = readOption('--title') || 'Notification'
     const subtitle = readOption('--subtitle')
     const body = readOption('--body')
     const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readPositional()
-    return { method: 'notification.create_for_surface', params: { title, subtitle, body, surfaceId, surface_id: surfaceId, panelId: surfaceId } }
+    return { method: 'notification.create_for_surface', params: { title, subtitle, body, surfaceId, surface_id: surfaceId, panelId: surfaceId, ...metadata } }
   }
   if (command === 'notify-target') {
+    const metadata = notificationMetadataParams()
     const title = readOption('--title') || 'Notification'
     const subtitle = readOption('--subtitle')
     const body = readOption('--body')
     const workspaceId = readOption('--workspace') || readOption('--workspace-id') || 'main'
     const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readPositional()
-    return { method: 'notification.create_for_target', params: { title, subtitle, body, workspaceId, workspace_id: workspaceId, surfaceId, surface_id: surfaceId, panelId: surfaceId } }
+    return { method: 'notification.create_for_target', params: { title, subtitle, body, workspaceId, workspace_id: workspaceId, surfaceId, surface_id: surfaceId, panelId: surfaceId, ...metadata } }
   }
-  if (command === 'list-notifications') return { method: 'notification.list', params: {} }
+  if (command === 'list-notifications') {
+    const limit = Number(readOption('--limit') || 0)
+    return {
+      method: 'notification.list',
+      params: {
+        query: readOption('--query') || readOption('--search'),
+        source: readOption('--source') || readOption('--from'),
+        level: readOption('--level') || readOption('--severity'),
+        group: readOption('--group'),
+        unread: hasFlag('--unread'),
+        read: hasFlag('--read'),
+        ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {})
+      }
+    }
+  }
   if (command === 'open-notification') return { method: 'notification.open', params: { id: readOption('--id') } }
   if (command === 'jump-to-unread') return { method: 'notification.jump_to_unread', params: {} }
   if (command === 'clear-notifications') return { method: 'notification.clear', params: {} }
@@ -676,6 +694,15 @@ const readCallerParams = () => {
   if (cwd) caller.cwd = cwd
   return caller
 }
+
+const notificationMetadataParams = () => ({
+  source: readOption('--source') || readOption('--from') || readOption('--app'),
+  level: readOption('--level') || readOption('--severity'),
+  group: readOption('--group') || readOption('--category'),
+  key: readOption('--key') || readOption('--dedupe-key') || readOption('--dedupe_key') || readOption('--idempotency-key') || readOption('--idempotency_key'),
+  action: readOption('--action') || readOption('--kind') || readOption('--type'),
+  url: readOption('--url') || readOption('--link')
+})
 
 const authMethodParams = (subcommand) => {
   if (subcommand === 'login') return { method: 'auth.login', params: {} }
@@ -2805,6 +2832,9 @@ const printResponse = (response) => {
         [
           notification.read ? ' ' : '*',
           notification.id || '-',
+          notification.source || '-',
+          notification.level || 'info',
+          notification.group || '-',
           notification.panelId || notification.sessionId || '-',
           notification.title || '',
           notification.subtitle || '',

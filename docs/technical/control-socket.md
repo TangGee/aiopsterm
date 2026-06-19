@@ -32,6 +32,19 @@ The notification slice adds these generic notification primitives:
 - `notification.dismiss`: remove one read notification, or all read notifications.
 - `notification.clear`: clear the generic notification queue.
 
+Notification creation accepts the common text fields `title`, `subtitle`, and `body`, plus integration metadata for third-party tools:
+
+- `source` / `from` / `app`: the producing tool, such as `ci`, `deploy`, `codex`, or `claude-code`.
+- `level` / `severity`: one of `info`, `success`, `warning`, `error`, `approval`, or `done`; unknown values are treated as `info`.
+- `group` / `category`: a small channel name, such as `build`, `prod`, `review`, or `test`.
+- `key` / `dedupeKey` / `dedupe_key` / `idempotencyKey` / `idempotency_key`: an idempotency key for replacing a previous notification from the same `source` + `group`.
+- `action` / `kind` / `type`: optional tool-defined action metadata for scripts and event consumers.
+- `url` / `link`: optional bounded link metadata for consumers; the current UI does not execute or open it automatically.
+
+When `key` is present and no explicit `id` is supplied, aiopsterm generates a stable notification id from the `source`, `group`, and `key` tuple. Sending another notification with the same stable id replaces the old record, marks it unread again, keeps the original `createdAt`, and preserves the previous terminal target if the update does not provide a new one. This is the intended hook pattern for long-running jobs that move from `running` to `success` or `error` without spamming the bell.
+
+`notification.list` accepts `query`, `source` / `from`, `level` / `severity`, `group`, `read`, `unread`, and `limit`. `count` is the returned item count after `limit`, `total` is the full filtered count, and `unreadCount` is the global unread count across all generic notifications.
+
 The workspace metadata slice adds read-only model snapshots:
 
 - `workspace.snapshot`: return the current main workspace, terminal surfaces, split groups, generic notifications, managed AI session summaries, and top-bell attention items in one payload.
@@ -287,8 +300,10 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `set-hook`, `show-options`, `show-option`, `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, `detach-client`, `popup`, `bind-key`, `unbind-key`, and `copy-mode` map to tmux compatibility metadata/no-op/placeholder commands.
 - `set-status`, `clear-status`, `list-status`, `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log`, and `sidebar-state` map to `sidebar.*` metadata methods.
 - `notify` maps to `notification.create`.
+- `notify-caller` maps to `notification.create_for_caller`.
+- `notify`, `notify-caller`, `notify-surface`, and `notify-target` accept `--source`, `--level`, `--group`, `--key`, `--action`, and `--url` and map them onto the notification metadata fields.
 - `notify-surface` and `notify-target` map to `notification.create_for_surface` and `notification.create_for_target`.
-- `list-notifications` maps to `notification.list`.
+- `list-notifications` maps to `notification.list` and accepts `--source`, `--level`, `--group`, `--query`, `--read`, `--unread`, and `--limit`.
 - `open-notification` maps to `notification.open`.
 - `jump-to-unread` maps to `notification.jump_to_unread`.
 - `mark-notification-read` maps to `notification.mark_read`.
@@ -440,7 +455,10 @@ node /path/to/resources/aiopsterm-control.js set-progress 0.5 --label "Building"
 node /path/to/resources/aiopsterm-control.js log --level success --source test "All green"
 node /path/to/resources/aiopsterm-control.js sidebar-state
 node /path/to/resources/aiopsterm-control.js notify --title "Build done" --body "All tests passed"
+node /path/to/resources/aiopsterm-control.js notify --source ci --level success --group build --key main --title "Build done" --body "All tests passed"
+node /path/to/resources/aiopsterm-control.js notify-surface --surface panel-main --source deploy --level warning --group prod --key deploy-prod --title "Deploy needs review" --body "Check logs"
 node /path/to/resources/aiopsterm-control.js list-notifications
+node /path/to/resources/aiopsterm-control.js list-notifications --source ci --group build --unread
 node /path/to/resources/aiopsterm-control.js jump-to-unread
 ```
 
@@ -461,6 +479,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 `terminal.read_screen`, `capture-pane`, and `surface.read_text` read visible terminal buffer text from the renderer. The control event stream does not copy that text into event payloads. `pipe-pane` is a CLI-helper convenience: after reading the screen through the socket, the helper runs the user-provided shell command locally with the captured text on stdin.
 
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
+
+`notification.*` is local notification metadata, not command execution. Creating, listing, opening, marking, dismissing, or clearing notifications does not write to a terminal, run shell commands, or open arbitrary URLs. `notification.open` only asks the renderer to focus an existing aiopsterm target when the notification has a known panel/session id. Notification metadata fields are trimmed and bounded before storage; event payloads include previews and lengths rather than full bodies.
 
 `sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
 
@@ -572,6 +592,11 @@ Generic notifications are stored in the main process memory queue. They are sepa
 - Opening a generic notification marks it read in the main queue.
 - If the notification has a `panelId` or `sessionId`, opening it focuses that terminal panel.
 - If no target terminal is available, aiopsterm still marks it read and shows a top notice.
+- `source` is shown before the title in desktop notifications and top-bell attention items.
+- `level=approval` maps to an approval-style attention item; `level=error` and `level=warning` map to error attention priority; other levels map to done/info priority.
+- `group`, non-`info` `level`, `subtitle`, and `body` are combined into the attention summary so notification lists stay compact while still searchable.
+
+For external integrations, prefer `source + group + key` over manually generated ids. A CI hook can send `--source ci --group build --key main` repeatedly as the build changes state; a deployment hook can use `--source deploy --group prod --key deploy-prod`; a custom agent can use `--source my-agent --group approval --key <request-id> --level approval`. Scripts can then poll with `list-notifications --source <tool> --group <group> --unread`, or rely on the top bell and `jump-to-unread`.
 
 The queue is intentionally not persisted in this slice. Session restore and persisted notification history will be handled by the later restore/metadata slices.
 

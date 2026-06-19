@@ -1795,15 +1795,64 @@ describe('control socket backend', () => {
 
     const created = await backend.__testing.handleControlRequest({
       method: 'notification.create',
-      params: { title: 'Build done', subtitle: 'tests', body: 'All green', panelId: 'panel-1', sessionId: 'terminal-1' }
+      params: {
+        title: 'Build done',
+        subtitle: 'tests',
+        body: 'All green',
+        panelId: 'panel-1',
+        sessionId: 'terminal-1',
+        source: 'ci',
+        level: 'success',
+        group: 'build',
+        key: 'project-main',
+        action: 'done',
+        url: 'https://example.test/build/1'
+      }
     })
     const notification = created.data?.notification as Record<string, unknown>
     expect(created).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unreadCount: 1 }) }))
-    expect(notification).toEqual(expect.objectContaining({ title: 'Build done', panelId: 'panel-1', sessionId: 'terminal-1', read: false }))
-    expect(shown).toEqual([expect.objectContaining({ title: 'Build done' })])
+    expect(notification).toEqual(
+      expect.objectContaining({
+        title: 'Build done',
+        panelId: 'panel-1',
+        sessionId: 'terminal-1',
+        source: 'ci',
+        level: 'success',
+        group: 'build',
+        key: 'project-main',
+        action: 'done',
+        url: 'https://example.test/build/1',
+        read: false
+      })
+    )
+    expect(shown).toEqual([expect.objectContaining({ title: 'Build done', source: 'ci', level: 'success' })])
 
-    await expect(backend.__testing.handleControlRequest({ method: 'notification.list', params: { unread: true } })).resolves.toEqual(
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.list', params: { unread: true, source: 'ci', level: 'success', group: 'build', query: 'project-main' } })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1, unreadCount: 1 }) })
+    )
+
+    const updated = await backend.__testing.handleControlRequest({
+      method: 'notification.create',
+      params: { title: 'Build failed', body: 'Unit test failed', source: 'ci', level: 'error', group: 'build', key: 'project-main' }
+    })
+    expect(updated).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          total: 1,
+          unreadCount: 1,
+          notification: expect.objectContaining({
+            id: notification.id,
+            title: 'Build failed',
+            level: 'error',
+            source: 'ci',
+            group: 'build',
+            key: 'project-main',
+            panelId: 'panel-1',
+            sessionId: 'terminal-1'
+          })
+        })
+      })
     )
 
     await expect(backend.__testing.handleControlRequest({ method: 'notification.open', params: { id: String(notification.id) } })).resolves.toEqual(
@@ -1822,6 +1871,19 @@ describe('control socket backend', () => {
     )
     await expect(backend.__testing.handleControlRequest({ method: 'notification.clear' })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 2, total: 0 }) })
+    )
+  })
+
+  it('keeps notification key identity scoped by source and group tuples', async () => {
+    const backend = await loadBackend()
+    const sameFlattenedKey = await Promise.all([
+      backend.__testing.handleControlRequest({ method: 'notification.create', params: { title: 'Tuple 1', source: 'ci:build', group: 'main', key: 'same' } }),
+      backend.__testing.handleControlRequest({ method: 'notification.create', params: { title: 'Tuple 2', source: 'ci', group: 'build:main', key: 'same' } })
+    ])
+    expect(sameFlattenedKey.map((response) => response.data?.notification).map((item) => (item as Record<string, unknown>).id)).toEqual([expect.any(String), expect.any(String)])
+    expect((sameFlattenedKey[0].data?.notification as Record<string, unknown>).id).not.toBe((sameFlattenedKey[1].data?.notification as Record<string, unknown>).id)
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.list', params: { query: 'Tuple' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ total: 2, count: 2 }) })
     )
   })
 
