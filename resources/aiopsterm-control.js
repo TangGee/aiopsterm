@@ -10,6 +10,9 @@ const usage = () => `aiopsterm-control [--socket <path>] [--json] <command>
 
 Commands:
   ping
+  capabilities
+  identify
+  rpc <method> [--params-json <json>]
   workspace snapshot
   workspace list
   workspace group <subcommand>
@@ -63,6 +66,13 @@ if (hasFlag('--help') || hasFlag('-h')) {
 const methodParams = () => {
   const command = args.shift() || 'ping'
   if (command === 'ping') return { method: 'ping', params: {} }
+  if (command === 'capabilities' || command === 'system-capabilities') return { method: 'system.capabilities', params: {} }
+  if (command === 'identify' || command === 'system-identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
+  if (command === 'rpc') {
+    const method = args.shift() || ''
+    if (!method) throw new Error('rpc requires a method name')
+    return { method, params: readJsonParams() }
+  }
   if (command === 'workspace') {
     const subcommand = args.shift() || 'snapshot'
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
@@ -323,6 +333,27 @@ const readPositional = () => {
   const value = args[index]
   args.splice(index, 1)
   return value
+}
+
+const readJsonParams = () => {
+  const text = readOption('--params-json') || readOption('--json-params') || readOption('--params') || args.join(' ')
+  if (!text) return {}
+  const parsed = JSON.parse(text)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('rpc params must be a JSON object')
+  return parsed
+}
+
+const readCallerParams = () => {
+  const caller = {}
+  const panelId = readOption('--panel') || readOption('--surface')
+  const sessionId = readOption('--session') || readOption('--session-id')
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+  const cwd = readOption('--cwd')
+  if (panelId) caller.panelId = panelId
+  if (sessionId) caller.sessionId = sessionId
+  if (workspaceId) caller.workspaceId = workspaceId
+  if (cwd) caller.cwd = cwd
+  return caller
 }
 
 const readCursorFile = (cursorFile) => {
@@ -589,6 +620,20 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  if (Array.isArray(data.capabilities) && data.protocol === 'aiopsterm-control') {
+    const app = data.app || {}
+    const processInfo = data.process || {}
+    process.stdout.write(`aiopsterm-control\tv${data.version || 1}\t${app.name || 'aiopsterm'}@${app.version || '-'}\n`)
+    process.stdout.write(`process\tpid=${processInfo.pid || '-'}\tplatform=${processInfo.platform || '-'}\tarch=${processInfo.arch || '-'}\n`)
+    if (data.socketPath) process.stdout.write(`socket\t${data.socketPath}\n`)
+    if (data.runtime) {
+      process.stdout.write(
+        `runtime\twindows=${data.runtime.windowCount || 0}\tnotifications=${data.runtime.notificationCount || 0}\tunread=${data.runtime.unreadNotificationCount || 0}\tevents=${data.runtime.eventCount || 0}\n`
+      )
+    }
+    process.stdout.write(`capabilities\t${data.capabilities.join(',')}\n`)
+    return
+  }
   const snapshot = data.snapshot
   if (snapshot && typeof snapshot === 'object') {
     const counts = snapshot.counts || {}

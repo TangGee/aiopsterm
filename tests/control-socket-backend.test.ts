@@ -197,6 +197,43 @@ describe('control socket backend', () => {
     expect(backend.__testing.pendingRendererRequestCount()).toBe(0)
   })
 
+  it('returns system capabilities and identity for automation probes', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-system-'))
+    try {
+      await backend.ensureControlSocketServer(root)
+      backend.configureControlSocketRuntime({ userDataPath: root, getWindows: () => [] })
+
+      await expect(backend.__testing.handleControlRequest({ method: 'system.capabilities' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            protocol: 'aiopsterm-control',
+            version: 1,
+            app: expect.objectContaining({ name: 'aiopsterm' }),
+            process: expect.objectContaining({ pid: process.pid, platform: process.platform, arch: process.arch }),
+            socketPath: expect.any(String),
+            capabilities: expect.arrayContaining(['system.capabilities', 'system.identify', 'agent.session', 'events.stream'])
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'identify', params: { caller: { panelId: 'panel-1' } } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            caller: { panelId: 'panel-1' },
+            runtime: expect.objectContaining({ userDataPath: root, windowCount: 0 }),
+            capabilities: expect.arrayContaining(['terminal.list'])
+          })
+        })
+      )
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('routes workspace snapshot requests to the renderer window', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({

@@ -138,6 +138,30 @@ const maxAgentVaultCommandLength = 2000
 const maxSessionSnapshots = 20
 const maxAgentVaultScanTerminals = 20
 const maxAgentVaultScanProcessesPerTerminal = 512
+const controlSocketCapabilities = [
+  'ping',
+  'system.capabilities',
+  'system.identify',
+  'workspace.snapshot',
+  'workspace.list',
+  'workspace.current',
+  'workspace.group',
+  'session.restore',
+  'surface.list',
+  'surface.current',
+  'surface.resume',
+  'terminal.list',
+  'terminal.focus',
+  'terminal.read_screen',
+  'terminal.send_text',
+  'notification',
+  'events.stream',
+  'events.list',
+  'agent.hibernation',
+  'agent.team',
+  'agent.vault',
+  'agent.session'
+]
 
 let server: Server | null = null
 let socketPath = ''
@@ -202,6 +226,53 @@ const socketPathFor = (userDataPath: string) => {
   if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-control-${process.pid}`
   return join(userDataPath, 'control', `aiopsterm-control-${process.pid}.sock`)
 }
+
+const systemCapabilities = () =>
+  ok({
+    protocol: 'aiopsterm-control',
+    version: 1,
+    app: {
+      name: 'aiopsterm',
+      version: process.env.npm_package_version || '0.1.0'
+    },
+    process: {
+      pid: process.pid,
+      platform: process.platform,
+      arch: process.arch,
+      node: process.versions.node,
+      electron: process.versions.electron
+    },
+    socketPath,
+    capabilities: controlSocketCapabilities
+  })
+
+const systemIdentify = (params: Record<string, unknown> = {}) =>
+  ok({
+    protocol: 'aiopsterm-control',
+    version: 1,
+    app: {
+      name: 'aiopsterm',
+      version: process.env.npm_package_version || '0.1.0'
+    },
+    socketPath,
+    process: {
+      pid: process.pid,
+      platform: process.platform,
+      arch: process.arch,
+      cwd: process.cwd()
+    },
+    caller: params.caller && typeof params.caller === 'object' && !Array.isArray(params.caller) ? params.caller : {},
+    focused: {},
+    runtime: {
+      userDataPath: runtime.userDataPath || '',
+      windowCount: runtime.getWindows ? runtime.getWindows().filter((window) => !window.isDestroyed()).length : 0,
+      notificationCount: notifications.length,
+      unreadNotificationCount: notifications.filter((notification) => !notification.read).length,
+      eventCount: eventLog.length,
+      latestEventSeq: nextEventSeq - 1
+    },
+    capabilities: controlSocketCapabilities
+  })
 
 const agentVaultPathFor = (userDataPath: string) => join(userDataPath, 'control', 'agent-vault.json')
 const eventLogPathFor = (userDataPath: string) => join(userDataPath, 'control', 'events.jsonl')
@@ -1861,6 +1932,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   const method = cleanText(request.method)
   const params = request.params || {}
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
+  if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
+  if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
   if (isEventListMethod(method)) return listEvents(params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)

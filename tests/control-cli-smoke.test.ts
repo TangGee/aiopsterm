@@ -90,6 +90,48 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
   })
 
+  it('sends system probe and raw rpc requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          protocol: 'aiopsterm-control',
+          version: 1,
+          app: { name: 'aiopsterm', version: '0.1.0' },
+          process: { pid: 123, platform: 'linux', arch: 'x64' },
+          socketPath,
+          runtime: { windowCount: 0, notificationCount: 0, unreadNotificationCount: 0, eventCount: 0 },
+          capabilities: ['system.capabilities', 'system.identify', 'terminal.list']
+        }
+      }
+    })
+
+    const capabilities = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'capabilities'], {
+      cwd: process.cwd()
+    })
+    expect(capabilities.stdout).toContain('aiopsterm-control\tv1\taiopsterm@0.1.0')
+    expect(capabilities.stdout).toContain('capabilities\tsystem.capabilities,system.identify,terminal.list')
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'identify', '--panel', 'panel-1', '--session', 'terminal-1'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, '--json', 'rpc', 'terminal.list', '--params-json', '{"limit":2}'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'system.capabilities' }),
+      expect.objectContaining({
+        method: 'system.identify',
+        params: expect.objectContaining({ caller: { panelId: 'panel-1', sessionId: 'terminal-1' } })
+      }),
+      expect.objectContaining({ method: 'terminal.list', params: { limit: 2 } })
+    ])
+  })
+
   it('sends workspace snapshot requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

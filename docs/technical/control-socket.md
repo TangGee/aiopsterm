@@ -7,6 +7,8 @@ aiopsterm exposes a local newline-delimited JSON control socket for automation t
 The first control-socket slice supports these terminal primitives:
 
 - `ping`: verify that the socket is reachable.
+- `system.capabilities`: return the control protocol version, process facts, socket path, and supported capability tokens.
+- `system.identify`: return the same app/process identity plus optional caller context and current runtime counters.
 - `terminal.list`: list visible terminal panels.
 - `terminal.focus`: focus a terminal panel by `panelId` or `sessionId`.
 - `terminal.read_screen`: read recent visible xterm buffer text from a terminal panel.
@@ -159,6 +161,9 @@ The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTE
 
 ```bash
 node /path/to/resources/aiopsterm-control.js terminal list
+node /path/to/resources/aiopsterm-control.js capabilities
+node /path/to/resources/aiopsterm-control.js identify --panel "$AIOPSTERM_PANEL_ID" --session "$AIOPSTERM_TERMINAL_SESSION_ID"
+node /path/to/resources/aiopsterm-control.js rpc terminal.list --params-json '{"limit":2}'
 node /path/to/resources/aiopsterm-control.js workspace snapshot
 node /path/to/resources/aiopsterm-control.js workspace-group list
 node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
@@ -211,6 +216,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 ```
 
 ## Safety Boundary
+
+`system.capabilities`, `system.identify`, and CLI `rpc` are automation plumbing. The first two are read-only probes. `rpc` does not grant extra permission; it sends exactly the requested method and JSON object params through the same control socket dispatcher and inherits that method's safety policy.
 
 `terminal.send_text` is a raw terminal input primitive, equivalent to text typed into the terminal. It does not run the existing AI command security approval flow, because it may need to send non-command input, prompts, or key sequences. Command-generation and AI-command execution still use the existing renderer security path.
 
