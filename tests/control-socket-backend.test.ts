@@ -1,6 +1,6 @@
 import { createConnection } from 'net'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -40,6 +40,14 @@ type AgentSessionsBackend = {
   }
 }
 
+type AgentHookInstallerBackend = {
+  configureAgentHookInstallerRuntime: (config?: {
+    getEnv?: () => NodeJS.ProcessEnv
+    getHomeDir?: () => string
+    getAgentHookScriptPath?: () => string
+  }) => void
+}
+
 type MockWindow = {
   focused?: boolean
   requests: ControlRequest[]
@@ -59,6 +67,11 @@ const loadBackend = async () => {
 const loadAgentSessionsBackend = async () => {
   const modulePath = '../src/main/backend/agentSessions'
   return (await import(modulePath)) as AgentSessionsBackend
+}
+
+const loadAgentHookInstallerBackend = async () => {
+  const modulePath = '../src/main/backend/agentHookInstaller'
+  return (await import(modulePath)) as AgentHookInstallerBackend
 }
 
 const createMockWindow = (handler: (request: ControlRequest) => ControlResponse | Promise<ControlResponse>): MockWindow => ({
@@ -229,6 +242,67 @@ describe('control socket backend', () => {
         })
       )
     } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('routes control_compat-style agent hook installer controls through the control socket', async () => {
+    const backend = await loadBackend()
+    const installer = await loadAgentHookInstallerBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-hooks-'))
+    const binDir = join(root, 'bin')
+    const hookScript = join(root, 'aiopsterm-agent-hook.js')
+    try {
+      await writeFile(hookScript, '#!/usr/bin/env node\n', 'utf-8')
+      await mkdir(binDir, { recursive: true })
+      await writeFile(join(binDir, 'codex'), '#!/bin/sh\nexit 0\n', 'utf-8')
+      await chmod(join(binDir, 'codex'), 0o755)
+      installer.configureAgentHookInstallerRuntime({
+        getHomeDir: () => root,
+        getEnv: () => ({ HOME: root, PATH: binDir }),
+        getAgentHookScriptPath: () => hookScript
+      })
+
+      await backend.ensureControlSocketServer(root)
+      await expect(backend.__testing.handleControlRequest({ method: 'agent.hooks.list' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            count: expect.any(Number),
+            readyCount: 1,
+            installers: expect.arrayContaining([expect.objectContaining({ source: 'codex', binaryPath: join(binDir, 'codex'), installed: false })])
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'hooks.setup' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            operation: 'setup',
+            installed: 1,
+            failed: 0,
+            skipped: expect.arrayContaining([expect.objectContaining({ source: 'claude-code' })]),
+            installers: expect.arrayContaining([expect.objectContaining({ source: 'codex', installed: true })])
+          })
+        })
+      )
+      expect(await readFile(join(root, '.codex/hooks.json'), 'utf-8')).toContain('aiopsterm-agent-hook-v1')
+
+      await expect(backend.__testing.handleControlRequest({ method: 'agent.hooks.uninstall', params: { source: 'codex' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            operation: 'uninstall',
+            uninstalled: 1,
+            failed: 0,
+            installers: expect.arrayContaining([expect.objectContaining({ source: 'codex', installed: false })])
+          })
+        })
+      )
+    } finally {
+      installer.configureAgentHookInstallerRuntime()
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
     }

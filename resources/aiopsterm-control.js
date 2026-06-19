@@ -13,6 +13,7 @@ Commands:
   capabilities
   identify
   rpc <method> [--params-json <json>]
+  hooks list|setup|install|uninstall [--agent <name>]
   workspace snapshot
   workspace list
   workspace group <subcommand>
@@ -73,6 +74,7 @@ const methodParams = () => {
     if (!method) throw new Error('rpc requires a method name')
     return { method, params: readJsonParams() }
   }
+  if (command === 'hooks' || command === 'hook') return agentHooksMethodParams(args.shift() || 'list')
   if (command === 'workspace') {
     const subcommand = args.shift() || 'snapshot'
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
@@ -106,6 +108,7 @@ const methodParams = () => {
   if (command === 'agent') {
     const subcommand = args.shift() || 'status'
     if (subcommand === 'status') return { method: 'agent.status', params: {} }
+    if (subcommand === 'hooks' || subcommand === 'hook') return agentHooksMethodParams(args.shift() || 'list')
     if (subcommand === 'session' || subcommand === 'sessions' || subcommand === 'ai-session') return agentSessionMethodParams(args.shift() || 'list')
     if (subcommand === 'vault' || subcommand === 'agent-vault') return agentVaultMethodParams(args.shift() || 'list')
     if (subcommand === 'team' || subcommand === 'teams') {
@@ -500,6 +503,18 @@ const agentSessionMethodParams = (subcommand) => {
   throw new Error(`Unknown agent session command: ${subcommand}`)
 }
 
+const agentHooksMethodParams = (subcommand) => {
+  if (subcommand === 'status') subcommand = 'list'
+  if (subcommand === 'setup') subcommand = 'setup'
+  if (subcommand === 'add') subcommand = 'install'
+  if (subcommand === 'remove') subcommand = 'uninstall'
+  const source = readOption('--agent') || readOption('--source') || readPositional()
+  const sources = source ? source.split(',').map((item) => item.trim()).filter(Boolean) : undefined
+  if (subcommand === 'list') return { method: 'agent.hooks.list', params: { source, sources } }
+  if (subcommand === 'setup' || subcommand === 'install' || subcommand === 'uninstall') return { method: `agent.hooks.${subcommand}`, params: { source, sources } }
+  throw new Error(`Unknown hooks command: ${subcommand}`)
+}
+
 const workspaceGroupMethodParams = (subcommand) => {
   if (subcommand === 'list') return { method: 'workspace.group.list', params: {} }
   if (subcommand === 'create') {
@@ -702,6 +717,30 @@ const printResponse = (response) => {
     process.stdout.write(
       `restored\t${restored.id || '-'}\tpanels=${data.restoredPanels || 0}\tlocal=${data.launchedLocalTerminals || 0}\tremote_skipped=${data.skippedRemoteTerminals || 0}\n`
     )
+    return
+  }
+  if (Array.isArray(data.installers)) {
+    process.stdout.write(`agent-hooks\tinstalled=${data.installedCount || 0}\tready=${data.readyCount || 0}\tmissing=${data.missingCount || 0}\ttotal=${data.count || data.installers.length}\n`)
+    if (Array.isArray(data.results) && data.results.length) {
+      for (const result of data.results) {
+        process.stdout.write(['hook-result', result.ok ? 'ok' : 'failed', result.source || '-', result.errorMessage || ''].join('\t') + '\n')
+      }
+    }
+    if (Array.isArray(data.skipped) && data.skipped.length) {
+      for (const skipped of data.skipped) process.stdout.write(['hook-skipped', skipped.source || '-', skipped.reason || ''].join('\t') + '\n')
+    }
+    for (const installer of data.installers) {
+      process.stdout.write(
+        [
+          'hook',
+          installer.installed ? 'installed' : installer.error ? 'error' : installer.binaryPath ? 'ready' : 'missing',
+          installer.source || '-',
+          installer.binaryName || '-',
+          installer.configPath || '-',
+          installer.error || (Array.isArray(installer.warnings) ? installer.warnings.join('; ') : '')
+        ].join('\t') + '\n'
+      )
+    }
     return
   }
   if (Array.isArray(data.sessions) && data.sessions.every(isManagedAiSessionLike)) {

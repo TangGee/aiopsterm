@@ -6,6 +6,7 @@ import { mkdir, readdir, readFile, readlink, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
 import type {
+  AgentHookInstallerSource,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
   ControlRequest,
@@ -16,6 +17,7 @@ import type {
   ManagedAiSessionRecord
 } from '@shared/preload'
 import { clearManagedAiSession, configureAiAgentSessionStore, listManagedAiSessions, renameManagedAiSession, replyManagedAiSession } from './agentSessions'
+import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './agentHookInstaller'
 
 type ControlSocketRequest = {
   id?: string
@@ -160,7 +162,8 @@ const controlSocketCapabilities = [
   'agent.hibernation',
   'agent.team',
   'agent.vault',
-  'agent.session'
+  'agent.session',
+  'agent.hooks'
 ]
 
 let server: Server | null = null
@@ -288,6 +291,8 @@ const isEventListMethod = (method: string) => method === 'events.list' || method
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
 
 const isAgentSessionMethod = (method: string) => method.startsWith('agent.session.') || method.startsWith('agent.sessions.') || method.startsWith('ai.session.')
+
+const isAgentHooksMethod = (method: string) => method.startsWith('agent.hooks.') || method.startsWith('hooks.')
 
 const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
 
@@ -1457,6 +1462,79 @@ const handleAgentSessionControlRequest = async (method: string, params: Record<s
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent session method: ${method}`)
 }
 
+const cleanAgentHookSourceList = (params: Record<string, unknown>): AgentHookInstallerSource[] => {
+  const raw = params.source || params.agent || params.sources || params.agents
+  const values = Array.isArray(raw) ? raw : cleanText(raw) ? cleanText(raw).split(',') : []
+  return values.map((value) => cleanText(value).toLowerCase().replace(/_/g, '-') as AgentHookInstallerSource).filter(Boolean)
+}
+
+const summarizeAgentHookSnapshot = (snapshot: Awaited<ReturnType<typeof listAgentHookInstallers>>) => ({
+  installers: snapshot.installers,
+  count: snapshot.installers.length,
+  installedCount: snapshot.installers.filter((installer) => installer.installed).length,
+  readyCount: snapshot.installers.filter((installer) => Boolean(installer.binaryPath)).length,
+  missingCount: snapshot.installers.filter((installer) => !installer.binaryPath).length
+})
+
+const handleAgentHooksControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const action = method.startsWith('hooks.') ? method.slice('hooks.'.length) : method.slice('agent.hooks.'.length)
+  if (action === 'list' || action === 'status') {
+    return ok(summarizeAgentHookSnapshot(await listAgentHookInstallers()))
+  }
+  if (action === 'install' || action === 'setup') {
+    const snapshot = await listAgentHookInstallers()
+    const requestedSources = cleanAgentHookSourceList(params)
+    const installable = snapshot.installers.filter((installer) => (!requestedSources.length || requestedSources.includes(installer.source)) && (action !== 'setup' || Boolean(installer.binaryPath)))
+    const results = []
+    for (const installer of installable) {
+      const result = await installAgentHook({ source: installer.source })
+      results.push({
+        source: installer.source,
+        ok: result.ok,
+        ...(result.data?.status ? { status: result.data.status } : {}),
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {})
+      })
+    }
+    const nextSnapshot = await listAgentHookInstallers()
+    return ok({
+      operation: action,
+      results,
+      installed: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      skipped: snapshot.installers
+        .filter((installer) => (!requestedSources.length || requestedSources.includes(installer.source)) && action === 'setup' && !installer.binaryPath)
+        .map((installer) => ({ source: installer.source, reason: `${installer.binaryName} not found on PATH` })),
+      ...summarizeAgentHookSnapshot(nextSnapshot)
+    })
+  }
+  if (action === 'uninstall' || action === 'remove') {
+    const snapshot = await listAgentHookInstallers()
+    const requestedSources = cleanAgentHookSourceList(params)
+    const selected = snapshot.installers.filter((installer) => !requestedSources.length || requestedSources.includes(installer.source))
+    const results = []
+    for (const installer of selected) {
+      const result = await uninstallAgentHook({ source: installer.source })
+      results.push({
+        source: installer.source,
+        ok: result.ok,
+        ...(result.data?.status ? { status: result.data.status } : {}),
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {})
+      })
+    }
+    const nextSnapshot = await listAgentHookInstallers()
+    return ok({
+      operation: 'uninstall',
+      results,
+      uninstalled: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      ...summarizeAgentHookSnapshot(nextSnapshot)
+    })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent hook method: ${method}`)
+}
+
 const prepareAgentTeamLaunchParams = async (params: Record<string, unknown>): Promise<Record<string, unknown> | ControlResponse> => {
   await loadAgentVaultStore(runtime.userDataPath)
   const source = normalizeAgentVaultId(params.source || params.agent)
@@ -1935,6 +2013,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
   if (isEventListMethod(method)) return listEvents(params)
+  if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)
   if (isSessionMethod(method)) return handleSessionControlRequest(method, params)

@@ -9,6 +9,10 @@ The first control-socket slice supports these terminal primitives:
 - `ping`: verify that the socket is reachable.
 - `system.capabilities`: return the control protocol version, process facts, socket path, and supported capability tokens.
 - `system.identify`: return the same app/process identity plus optional caller context and current runtime counters.
+- `agent.hooks.list`: list supported AI agent hook installers and current install status.
+- `agent.hooks.setup`: install hooks for detected agent CLIs, or for selected `source` values.
+- `agent.hooks.install`: install selected agent hooks even when the binary is not currently on `PATH`.
+- `agent.hooks.uninstall`: remove aiopsterm-owned hooks for selected agents.
 - `terminal.list`: list visible terminal panels.
 - `terminal.focus`: focus a terminal panel by `panelId` or `sessionId`.
 - `terminal.read_screen`: read recent visible xterm buffer text from a terminal panel.
@@ -164,6 +168,10 @@ node /path/to/resources/aiopsterm-control.js terminal list
 node /path/to/resources/aiopsterm-control.js capabilities
 node /path/to/resources/aiopsterm-control.js identify --panel "$AIOPSTERM_PANEL_ID" --session "$AIOPSTERM_TERMINAL_SESSION_ID"
 node /path/to/resources/aiopsterm-control.js rpc terminal.list --params-json '{"limit":2}'
+node /path/to/resources/aiopsterm-control.js hooks list
+node /path/to/resources/aiopsterm-control.js hooks setup
+node /path/to/resources/aiopsterm-control.js hooks setup --agent codex
+node /path/to/resources/aiopsterm-control.js hooks uninstall codex
 node /path/to/resources/aiopsterm-control.js workspace snapshot
 node /path/to/resources/aiopsterm-control.js workspace-group list
 node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
@@ -218,6 +226,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 ## Safety Boundary
 
 `system.capabilities`, `system.identify`, and CLI `rpc` are automation plumbing. The first two are read-only probes. `rpc` does not grant extra permission; it sends exactly the requested method and JSON object params through the same control socket dispatcher and inherits that method's safety policy.
+
+`agent.hooks.*` reuses the same explicit installer used by Settings -> AI Preferences. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors control_compat's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
 
 `terminal.send_text` is a raw terminal input primitive, equivalent to text typed into the terminal. It does not run the existing AI command security approval flow, because it may need to send non-command input, prompts, or key sequences. Command-generation and AI-command execution still use the existing renderer security path.
 

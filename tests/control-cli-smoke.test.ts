@@ -132,6 +132,67 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends agent hook installer requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const installed = request.method === 'agent.hooks.setup'
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          operation: request.method === 'agent.hooks.uninstall' ? 'uninstall' : request.method === 'agent.hooks.setup' ? 'setup' : undefined,
+          installed: installed ? 1 : undefined,
+          uninstalled: request.method === 'agent.hooks.uninstall' ? 1 : undefined,
+          failed: 0,
+          results:
+            request.method === 'agent.hooks.setup' || request.method === 'agent.hooks.uninstall'
+              ? [{ source: 'codex', ok: true }]
+              : [],
+          skipped: [],
+          installers: [
+            {
+              source: 'codex',
+              label: 'Codex',
+              binaryName: 'codex',
+              binaryPath: '/usr/bin/codex',
+              configPath: '/home/test/.codex/hooks.json',
+              configExists: installed,
+              installed,
+              scriptPath: '/opt/aiopsterm/aiopsterm-agent-hook.js',
+              warnings: []
+            }
+          ],
+          count: 1,
+          installedCount: installed ? 1 : 0,
+          readyCount: 1,
+          missingCount: 0
+        }
+      }
+    })
+
+    const listed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'hooks', 'list'], {
+      cwd: process.cwd()
+    })
+    expect(listed.stdout).toContain('agent-hooks\tinstalled=0\tready=1\tmissing=0\ttotal=1')
+
+    const setup = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'hooks', 'setup', '--agent', 'codex'], {
+      cwd: process.cwd()
+    })
+    expect(setup.stdout).toContain('hook-result\tok\tcodex')
+    expect(setup.stdout).toContain('hook\tinstalled\tcodex')
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'hooks', 'uninstall', 'codex'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'agent.hooks.list' }),
+      expect.objectContaining({ method: 'agent.hooks.setup', params: expect.objectContaining({ source: 'codex', sources: ['codex'] }) }),
+      expect.objectContaining({ method: 'agent.hooks.uninstall', params: expect.objectContaining({ source: 'codex', sources: ['codex'] }) })
+    ])
+  })
+
   it('sends workspace snapshot requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
