@@ -249,7 +249,7 @@ describe('control socket backend', () => {
             app: expect.objectContaining({ name: 'aiopsterm' }),
             process: expect.objectContaining({ pid: process.pid, platform: process.platform, arch: process.arch }),
             socketPath: expect.any(String),
-            capabilities: expect.arrayContaining(['system.capabilities', 'system.identify', 'agent.session', 'events.stream'])
+            capabilities: expect.arrayContaining(['system.capabilities', 'system.identify', 'system.top', 'system.memory', 'auth.status', 'feedback.submit', 'agent.session', 'events.stream'])
           })
         })
       )
@@ -262,6 +262,95 @@ describe('control socket backend', () => {
             runtime: expect.objectContaining({ userDataPath: root, windowCount: 0 }),
             capabilities: expect.arrayContaining(['terminal.list'])
           })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'system.ping' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ pong: true, socketPath: expect.any(String) })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'auth.status' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            signed_in: false,
+            is_loading: false,
+            timed_out: false,
+            local_control_socket: true,
+            unsupported: true
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'auth.sign_in_url' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ unsupported: true, url: null })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'feedback.submit', params: { email: 'dev@example.test', body: 'feedback body', image_paths: ['/tmp/a.png'] } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            submitted: false,
+            accepted: true,
+            local_only: true,
+            email: 'dev@example.test',
+            body_length: 13,
+            attachment_count: 1
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'feedback.submit', params: { email: 'dev@example.test' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          data: { field: 'body' }
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'system.top', params: { include_processes: true } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            active: null,
+            caller: null,
+            sample: expect.objectContaining({ source: 'node.process.memoryUsage+os', process_details: true }),
+            totals: expect.objectContaining({ process_count: 1, pids: [process.pid] }),
+            memory_diagnostic: expect.objectContaining({
+              app: expect.objectContaining({ pid: process.pid, name: 'aiopsterm' }),
+              system: expect.objectContaining({ total_bytes: expect.any(Number), free_bytes: expect.any(Number) })
+            }),
+            program_totals: [expect.objectContaining({ id: 'aiopsterm' })],
+            coding_agents: [],
+            windows: [],
+            compatibility: expect.objectContaining({ control_compat_shape: true, renderer_snapshot_available: false }),
+            warning: expect.objectContaining({ ok: false, errorCode: 'NO_APP_WINDOW' })
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'system.memory', params: { top_group_limit: 3 } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            sample: expect.objectContaining({ source: 'node.process.memoryUsage+os' }),
+            memory_diagnostic: expect.objectContaining({ children: expect.objectContaining({ groups: expect.any(Array) }) }),
+            windows: [],
+            compatibility: expect.objectContaining({ control_compat_shape: true })
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'system.memory', params: { top_group_limit: 101 } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'INVALID_PARAMS'
         })
       )
     } finally {

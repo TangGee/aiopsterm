@@ -48,12 +48,17 @@ The workspace metadata slice adds read-only model snapshots:
 The control_compat system/window/settings compatibility slice adds non-browser app automation:
 
 - `auth.login`: acknowledge the local control socket auth handshake. aiopsterm currently returns `authenticated=true` and `required=false` because access is scoped to the local per-process socket.
+- `auth.status`: return a control_compat-shaped auth status for automation probes. aiopsterm marks it unauthenticated/unconfigured because the local control socket does not use control_compat Stack Auth.
+- `auth.sign_in_url`: return an explicit unsupported local response with `url=null`; aiopsterm does not expose a control_compat Stack Auth sign-in flow.
 - `system.tree`: build a control_compat-style window/workspace/pane/surface tree from the renderer `workspace.snapshot` read model. aiopsterm maps the shared main work panel to one selected workspace named `main`.
+- `system.top`: return a control_compat-shaped task-manager payload with `sample`, `totals`, `memory_diagnostic`, `program_totals`, `coding_agents`, and `windows`. aiopsterm samples the main Node/Electron process and OS memory through Node APIs; it does not claim control_compat's macOS `proc_pidinfo` process tree attribution.
+- `system.memory`: return the memory-focused subset of `system.top`, including the same renderer tree when available and a Node/OS memory diagnostic.
 - `window.list`, `window.current`, and `window.focus`: inspect and focus existing Electron windows through the main-process runtime.
 - `window.create`, `window.close`, and `window.display`: recognized compatibility controls that return `unsupported=true` rather than creating, closing, or moving native windows unexpectedly.
 - `window.displays`: return connected display metadata when the packaged main process provides it.
 - `settings.open`: open the existing Settings module and select a supported settings section such as `general`, `terminal`, `models`, `ai`, `mcp`, `skills`, or `about`.
 - `feedback.open`: reuse the existing local feedback report action.
+- `feedback.submit`: validate control_compat-style feedback fields (`email`, `body`, optional image paths) and return a local-only accepted response. aiopsterm does not submit to an external feedback service through the control socket.
 - `extension.sidebar.snapshot`: expose a control_compat-style sidebar feed derived from `workspace.snapshot`.
 - `app.focus_override.set` and `app.simulate_active`: accepted app-focus compatibility controls. They update control metadata and focus the active aiopsterm window where applicable.
 
@@ -466,7 +471,7 @@ Future higher-level automation commands should use the control socket but must c
 
 `surface.focus`, `surface.create`, and `pane.create` are also renderer-owned. They operate on aiopsterm's visible shared main work panel and do not create hidden OS terminals or manage external shell processes. `surface.report_tty`, `surface.report_shell_state`, and `surface.ports_kick` are metadata reports only: they do not write to the terminal, do not close or reconnect a session, and do not claim that a port scan has completed.
 
-`window.close`, `window.create`, and `window.display` are deliberately non-destructive compatibility probes in this slice. They do not close user windows or create separate native workspaces. `settings.open`, `feedback.open`, `extension.sidebar.snapshot`, and `system.tree` route through the active renderer because those operations depend on UI state; they do not write terminal input or bypass terminal command approval.
+`window.close`, `window.create`, and `window.display` are deliberately non-destructive compatibility probes in this slice. They do not close user windows or create separate native workspaces. `settings.open`, `feedback.open`, `extension.sidebar.snapshot`, and `system.tree` route through the active renderer because those operations depend on UI state; they do not write terminal input or bypass terminal command approval. `system.top` and `system.memory` try to attach the same renderer snapshot when a window is available, but still return Node/OS process and memory samples if no renderer can answer. `feedback.submit` is local-only and does not perform network submission.
 
 Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of control_compat's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
 

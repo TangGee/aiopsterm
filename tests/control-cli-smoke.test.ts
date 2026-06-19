@@ -106,10 +106,16 @@ describe('aiopsterm-control CLI', () => {
     })
 
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'login'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'status'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'sign-in-url'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'settings', 'open', '--target', 'models'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'open'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'submit', '--email', 'dev@example.test', '--body', 'hello', '--image-path', '/tmp/a.png'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'snapshot', '--window', 'window:1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'ping'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'tree', '--workspace', 'main'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'top', '--include-processes', '--top-group-limit', '5'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'memory', '--group-limit', '4'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'app', 'focus-override', 'active'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'app', 'simulate-active'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'window', 'list'], { cwd: process.cwd() })
@@ -117,10 +123,16 @@ describe('aiopsterm-control CLI', () => {
 
     expect(seen).toEqual([
       expect.objectContaining({ method: 'auth.login' }),
+      expect.objectContaining({ method: 'auth.status' }),
+      expect.objectContaining({ method: 'auth.sign_in_url' }),
       expect.objectContaining({ method: 'settings.open', params: expect.objectContaining({ target: 'models', activate: true }) }),
       expect.objectContaining({ method: 'feedback.open', params: expect.objectContaining({ activate: true }) }),
+      expect.objectContaining({ method: 'feedback.submit', params: expect.objectContaining({ email: 'dev@example.test', body: 'hello', image_paths: ['/tmp/a.png'] }) }),
       expect.objectContaining({ method: 'extension.sidebar.snapshot', params: expect.objectContaining({ windowId: 'window:1' }) }),
+      expect.objectContaining({ method: 'system.ping' }),
       expect.objectContaining({ method: 'system.tree', params: expect.objectContaining({ workspaceId: 'main' }) }),
+      expect.objectContaining({ method: 'system.top', params: expect.objectContaining({ includeProcesses: true, include_processes: true, topGroupLimit: 5, top_group_limit: 5 }) }),
+      expect.objectContaining({ method: 'system.memory', params: expect.objectContaining({ includeProcesses: false, include_processes: false, topGroupLimit: 4, top_group_limit: 4 }) }),
       expect.objectContaining({ method: 'app.focus_override.set', params: expect.objectContaining({ state: 'active' }) }),
       expect.objectContaining({ method: 'app.simulate_active' }),
       expect.objectContaining({ method: 'window.list' }),

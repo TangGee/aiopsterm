@@ -14,11 +14,11 @@ Commands:
   capabilities
   identify
   rpc <method> [--params-json <json>]
-  auth login
+  auth login|status|sign-in-url
   settings open [--target <section>]
-  feedback open
+  feedback open|submit [--email <email>] [--body <text>] [--image-path <path>...]
   sidebar snapshot
-  system tree
+  system ping|tree|top|memory|identify|capabilities [--include-processes]
   project open <path> [--surface <id>] [--no-focus]
   project get-state [--surface <id>]
   project set-tab files|targets|buildSettings|schemes [--surface <id>]
@@ -665,8 +665,10 @@ const readCallerParams = () => {
 }
 
 const authMethodParams = (subcommand) => {
-  if (subcommand !== 'login') throw new Error(`Unknown auth command: ${subcommand}`)
-  return { method: 'auth.login', params: {} }
+  if (subcommand === 'login') return { method: 'auth.login', params: {} }
+  if (subcommand === 'status') return { method: 'auth.status', params: {} }
+  if (subcommand === 'sign-in-url' || subcommand === 'sign_in_url' || subcommand === 'signin-url') return { method: 'auth.sign_in_url', params: {} }
+  throw new Error(`Unknown auth command: ${subcommand}`)
 }
 
 const settingsMethodParams = (subcommand) => {
@@ -677,8 +679,18 @@ const settingsMethodParams = (subcommand) => {
 }
 
 const feedbackMethodParams = (subcommand) => {
-  if (subcommand !== 'open') throw new Error(`Unknown feedback command: ${subcommand}`)
-  return { method: 'feedback.open', params: { activate: !hasFlag('--no-activate') } }
+  if (subcommand === 'open') return { method: 'feedback.open', params: { activate: !hasFlag('--no-activate') } }
+  if (subcommand === 'submit') {
+    return {
+      method: 'feedback.submit',
+      params: {
+        email: readOption('--email') || readOption('--from'),
+        body: readOption('--body') || readOption('--message') || readOption('--text') || readPositional(),
+        image_paths: readRepeatOptions(['--image-path', '--image', '--attachment'])
+      }
+    }
+  }
+  throw new Error(`Unknown feedback command: ${subcommand}`)
 }
 
 const mobileMethodParams = (subcommand) => {
@@ -832,12 +844,35 @@ const sidebarSnapshotMethodParams = () => {
 }
 
 const systemMethodParams = (subcommand) => {
+  if (subcommand === 'ping') return { method: 'system.ping', params: {} }
   if (subcommand === 'tree') {
+    const windowId = readOption('--window') || readOption('--window-id')
+    const workspaceId = readOption('--workspace') || readOption('--workspace-id')
     return {
       method: 'system.tree',
       params: {
-        windowId: readOption('--window') || readOption('--window-id'),
-        workspaceId: readOption('--workspace') || readOption('--workspace-id')
+        windowId,
+        window_id: windowId,
+        workspaceId,
+        workspace_id: workspaceId
+      }
+    }
+  }
+  if (subcommand === 'top' || subcommand === 'memory') {
+    const windowId = readOption('--window') || readOption('--window-id')
+    const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+    const topGroupLimit = Number(readOption('--top-group-limit') || readOption('--group-limit') || 0)
+    const includeProcesses = hasFlag('--include-processes') || hasFlag('--include_processes') || hasFlag('--processes')
+    return {
+      method: `system.${subcommand}`,
+      params: {
+        windowId,
+        window_id: windowId,
+        workspaceId,
+        workspace_id: workspaceId,
+        includeProcesses,
+        include_processes: includeProcesses,
+        ...(Number.isFinite(topGroupLimit) && topGroupLimit > 0 ? { topGroupLimit, top_group_limit: topGroupLimit } : {})
       }
     }
   }
@@ -2055,6 +2090,19 @@ const printResponse = (response) => {
       )
     }
     process.stdout.write(`capabilities\t${data.capabilities.join(',')}\n`)
+    return
+  }
+  if (data.sample && data.memory_diagnostic && (data.totals || data.compatibility)) {
+    const sample = data.sample || {}
+    const totals = data.totals || {}
+    const memory = data.memory_diagnostic || {}
+    const app = memory.app || {}
+    const children = memory.children || {}
+    process.stdout.write(['system-top', sample.sampled_at || '-', `rss=${app.resident_bytes || totals.resident_bytes || 0}`, `processes=${totals.process_count || 0}`].join('\t') + '\n')
+    process.stdout.write(['memory', `system=${memory.system?.used_bytes || 0}/${memory.system?.total_bytes || 0}`, `children=${children.recursive_rss_bytes || 0}`, `child_processes=${children.process_count || 0}`].join('\t') + '\n')
+    if (Array.isArray(data.coding_agents)) {
+      for (const agent of data.coding_agents) process.stdout.write(['agent', agent.id || '-', agent.session_count || 0].join('\t') + '\n')
+    }
     return
   }
   const snapshot = data.snapshot

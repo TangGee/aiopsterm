@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'crypto'
 import { appendFileSync, existsSync, rmSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { mkdir, readdir, readFile, readlink, writeFile } from 'fs/promises'
+import { freemem, loadavg, totalmem, uptime } from 'os'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
 import type {
@@ -227,12 +228,18 @@ const maxTmuxCompatHooks = 100
 const maxTmuxCompatHookCommandLength = 2000
 const controlSocketCapabilities = [
   'ping',
+  'system.ping',
   'system.capabilities',
   'system.identify',
   'system.tree',
+  'system.top',
+  'system.memory',
   'auth.login',
+  'auth.status',
+  'auth.sign_in_url',
   'settings.open',
   'feedback.open',
+  'feedback.submit',
   'extension.sidebar.snapshot',
   'window.control',
   'app.focus',
@@ -1128,8 +1135,272 @@ const systemTreeFromSnapshot = (snapshot: Record<string, unknown>) => {
   }
 }
 
+const boolParam = (value: unknown) => {
+  if (typeof value === 'boolean') return value
+  const text = cleanText(value).toLowerCase()
+  if (['true', '1', 'yes', 'on'].includes(text)) return true
+  if (['false', '0', 'no', 'off'].includes(text)) return false
+  return undefined
+}
+
+const intParam = (value: unknown) => {
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN
+  if (!Number.isFinite(numberValue) || Math.floor(numberValue) !== numberValue) return undefined
+  return numberValue
+}
+
+const topGroupLimitParam = (params: Record<string, unknown>) => {
+  const value = intParam(params.top_group_limit ?? params.topGroupLimit ?? params.group_limit ?? params.groupLimit)
+  if (value === undefined) return { value: 12 }
+  if (value < 1 || value > 100) return { error: fail('INVALID_PARAMS', 'top_group_limit must be an integer from 1 to 100.', { field: 'top_group_limit' }) }
+  return { value }
+}
+
+const resourceSummary = (input: { pid?: number; memoryBytes?: number; residentBytes?: number; virtualBytes?: number; processCount?: number }) => {
+  const pid = Number.isFinite(input.pid) && input.pid ? Math.floor(input.pid) : 0
+  const pids = pid > 0 ? [pid] : []
+  return {
+    cpu_percent: 0,
+    memory_bytes: Math.max(0, Math.floor(input.memoryBytes || 0)),
+    resident_bytes: Math.max(0, Math.floor(input.residentBytes || input.memoryBytes || 0)),
+    virtual_bytes: Math.max(0, Math.floor(input.virtualBytes || 0)),
+    process_count: input.processCount ?? pids.length,
+    pids,
+    missing_pids: [],
+    memory_source_fallback_pids: [],
+    memory_source_fallback_count: 0,
+    resident_memory_source_fallback_pids: [],
+    resident_memory_source_fallback_count: 0,
+    unavailable_memory_pids: [],
+    unavailable_memory_count: 0,
+    unavailable_resident_memory_pids: [],
+    unavailable_resident_memory_count: 0
+  }
+}
+
+const nodeProcessMemorySample = () => {
+  const usage = process.memoryUsage()
+  return {
+    pid: process.pid,
+    name: 'aiopsterm',
+    executable: process.execPath,
+    resources: resourceSummary({
+      pid: process.pid,
+      memoryBytes: usage.rss,
+      residentBytes: usage.rss,
+      virtualBytes: usage.heapTotal,
+      processCount: 1
+    }),
+    memory: {
+      rss_bytes: usage.rss,
+      heap_total_bytes: usage.heapTotal,
+      heap_used_bytes: usage.heapUsed,
+      external_bytes: usage.external,
+      array_buffers_bytes: usage.arrayBuffers
+    }
+  }
+}
+
+const systemTopSamplePayload = (includeProcesses: boolean) => ({
+  sampled_at: new Date().toISOString(),
+  source: 'node.process.memoryUsage+os',
+  cpu_source: 'unavailable',
+  memory_source: 'node.process.memoryUsage.rss',
+  memory_fallback_source: 'node.process.memoryUsage.rss',
+  resident_memory_source: 'node.process.memoryUsage.rss',
+  resident_memory_sources: ['node.process.memoryUsage.rss'],
+  resident_memory_fallback_source: 'node.process.memoryUsage.rss',
+  process_details: includeProcesses,
+  platform: process.platform,
+  load_average: loadavg(),
+  uptime_seconds: uptime()
+})
+
+const systemMemoryDiagnostic = (topGroupLimit = 12) => {
+  const processSample = nodeProcessMemorySample()
+  const memory = processSample.memory
+  const totalBytes = totalmem()
+  const freeBytes = freemem()
+  const usedBytes = Math.max(0, totalBytes - freeBytes)
+  const processGroup = {
+    id: 'aiopsterm',
+    name: 'aiopsterm',
+    rss_bytes: memory.rss_bytes,
+    resident_bytes: memory.rss_bytes,
+    process_count: 1,
+    pids: [process.pid],
+    top_attribution: null,
+    attributions: []
+  }
+  return {
+    sampled_at: new Date().toISOString(),
+    app: {
+      pid: process.pid,
+      name: 'aiopsterm',
+      path: process.execPath,
+      resources: processSample.resources,
+      physical_footprint_bytes: memory.rss_bytes,
+      resident_bytes: memory.rss_bytes,
+      memory_source: 'node.process.memoryUsage.rss',
+      resident_memory_source: 'node.process.memoryUsage.rss'
+    },
+    children: {
+      root_pid: process.pid,
+      recursive_rss_bytes: 0,
+      process_count: 0,
+      pids: [],
+      groups: topGroupLimit > 0 ? [processGroup].slice(0, topGroupLimit) : []
+    },
+    system: {
+      total_bytes: totalBytes,
+      free_bytes: freeBytes,
+      used_bytes: usedBytes
+    },
+    node: memory,
+    summary: `aiopsterm RSS ${memory.rss_bytes} bytes; system memory ${usedBytes}/${totalBytes} bytes used`
+  }
+}
+
+const codingAgentSummaries = async () => {
+  try {
+    const response = await listManagedAiSessions()
+    const sessions = response.ok && Array.isArray(response.data?.sessions) ? (response.data.sessions as ManagedAiSessionRecord[]) : []
+    const groups = new Map<string, { displayName: string; sessions: ManagedAiSessionRecord[]; pids: Set<number> }>()
+    for (const session of sessions) {
+      const key = session.source
+      const existing = groups.get(key) || { displayName: key, sessions: [], pids: new Set<number>() }
+      existing.sessions.push(session)
+      for (const pid of [session.processId, session.terminalProcessId]) {
+        if (typeof pid === 'number' && Number.isFinite(pid) && pid > 0) existing.pids.add(Math.floor(pid))
+      }
+      groups.set(key, existing)
+    }
+    return [...groups.entries()].map(([id, group]) => ({
+      id,
+      display_name: group.displayName,
+      asset_name: id,
+      resources: resourceSummary({
+        pid: [...group.pids][0],
+        processCount: group.pids.size || group.sessions.length
+      }),
+      session_count: group.sessions.length,
+      sessions: group.sessions.map((session) => ({
+        id: session.id,
+        source: session.source,
+        title: session.title,
+        state: session.state,
+        lifecycle: session.agentLifecycle || null,
+        workspace_id: session.workspaceId || null,
+        surface_id: session.panelId || null,
+        terminal_session_id: session.terminalSessionId || null,
+        cwd: session.cwd || null,
+        last_activity_at: session.lastActivityAt
+      }))
+    }))
+  } catch {
+    return []
+  }
+}
+
+const workspaceSnapshotOrNull = async (params: Record<string, unknown>) => {
+  const response = await dispatchRendererControlRequest('workspace.snapshot', params)
+  if (!response.ok) return { snapshot: null, warning: response }
+  const snapshot = response.data?.snapshot && typeof response.data.snapshot === 'object' ? (response.data.snapshot as Record<string, unknown>) : null
+  if (!snapshot) return { snapshot: null, warning: fail('SYSTEM_TOP_SNAPSHOT_INVALID', 'Renderer returned an invalid workspace snapshot.') }
+  return { snapshot, warning: null }
+}
+
+const systemTopPayload = async (params: Record<string, unknown>, options: { memoryOnly?: boolean } = {}) => {
+  const includeProcesses = boolParam(params.include_processes ?? params.includeProcesses) ?? false
+  const groupLimit = topGroupLimitParam(params)
+  if (groupLimit.error) return groupLimit.error
+  const { snapshot, warning } = await workspaceSnapshotOrNull(params)
+  const tree = snapshot ? systemTreeFromSnapshot(snapshot) : { active: null, caller: null, windows: [] as unknown[] }
+  const processSample = nodeProcessMemorySample()
+  const memoryDiagnostic = systemMemoryDiagnostic(groupLimit.value)
+  const payload = {
+    active: tree.active,
+    caller: tree.caller,
+    sample: systemTopSamplePayload(includeProcesses),
+    totals: processSample.resources,
+    memory_diagnostic: memoryDiagnostic,
+    program_totals: [
+      {
+        id: 'aiopsterm',
+        name: 'aiopsterm',
+        resources: processSample.resources
+      }
+    ],
+    coding_agents: await codingAgentSummaries(),
+    windows: tree.windows,
+    compatibility: {
+      source: 'aiopsterm',
+      control_compat_shape: true,
+      process_scope: 'aiopsterm-main-process',
+      renderer_snapshot_available: Boolean(snapshot)
+    },
+    ...(snapshot ? { snapshot } : {}),
+    ...(warning ? { warning: { ok: warning.ok, errorCode: warning.errorCode, errorMessage: warning.errorMessage } } : {})
+  }
+  if (options.memoryOnly) {
+    return ok({
+      active: payload.active,
+      caller: payload.caller,
+      sample: payload.sample,
+      memory_diagnostic: payload.memory_diagnostic,
+      windows: payload.windows,
+      compatibility: payload.compatibility,
+      ...(payload.snapshot ? { snapshot: payload.snapshot } : {}),
+      ...(payload.warning ? { warning: payload.warning } : {})
+    })
+  }
+  return ok(payload)
+}
+
+const authStatusPayload = () => ({
+  signed_in: false,
+  is_restoring_session: false,
+  is_loading: false,
+  timed_out: false,
+  configured: false,
+  local_control_socket: true,
+  unsupported: true,
+  unsupported_reason: 'aiopsterm does not use control_compat Stack Auth for the local control socket.'
+})
+
+const feedbackSubmitPayload = (params: Record<string, unknown>) => {
+  const email = cleanText(params.email)
+  const body = cleanText(params.body || params.message || params.text)
+  if (!email) return fail('INVALID_PARAMS', 'Missing email.', { field: 'email' })
+  if (!body) return fail('INVALID_PARAMS', 'Missing body.', { field: 'body' })
+  const imagePaths = Array.isArray(params.image_paths)
+    ? params.image_paths.map(cleanText).filter(Boolean)
+    : Array.isArray(params.imagePaths)
+      ? params.imagePaths.map(cleanText).filter(Boolean)
+      : []
+  return ok({
+    submitted: false,
+    accepted: true,
+    local_only: true,
+    unsupported: true,
+    unsupported_reason: 'aiopsterm accepted the feedback payload locally but has no configured feedback submission service.',
+    email,
+    body_length: body.length,
+    attachment_count: imagePaths.length
+  })
+}
+
 const handleSystemCompatibilityRequest = async (method: string, params: Record<string, unknown>) => {
   if (method === 'auth.login') return ok({ authenticated: true, required: false })
+  if (method === 'auth.status') return ok(authStatusPayload())
+  if (method === 'auth.sign_in_url') {
+    return ok({
+      unsupported: true,
+      unsupported_reason: 'aiopsterm does not expose a control_compat Stack Auth sign-in URL.',
+      url: null
+    })
+  }
+  if (method === 'feedback.submit') return feedbackSubmitPayload(params)
   if (method === 'session.restore_previous') return handleSessionControlRequest('session.restore', { ...params, id: params.id || 'latest' })
   if (method === 'system.tree') {
     const response = await dispatchRendererControlRequest('workspace.snapshot', params)
@@ -1141,6 +1412,8 @@ const handleSystemCompatibilityRequest = async (method: string, params: Record<s
       snapshot
     })
   }
+  if (method === 'system.top') return systemTopPayload(params)
+  if (method === 'system.memory') return systemTopPayload(params, { memoryOnly: true })
   if (method === 'settings.open' || method === 'feedback.open' || method === 'extension.sidebar.snapshot') {
     return dispatchRendererControlRequest(method, params, { focus: params.activate !== false })
   }
@@ -3846,16 +4119,21 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
 const handleControlRequest = async (request: ControlSocketRequest): Promise<ControlResponse> => {
   const method = cleanText(request.method)
   const params = request.params || {}
-  if (!method || method === 'ping') return ok({ pong: true, socketPath })
+  if (!method || method === 'ping' || method === 'system.ping') return ok({ pong: true, socketPath })
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
   if (method === 'mobile.host.status') return mobileHostStatus(params)
   if (
     method === 'auth.login' ||
+    method === 'auth.status' ||
+    method === 'auth.sign_in_url' ||
     method === 'session.restore_previous' ||
     method === 'system.tree' ||
+    method === 'system.top' ||
+    method === 'system.memory' ||
     method === 'settings.open' ||
     method === 'feedback.open' ||
+    method === 'feedback.submit' ||
     method === 'extension.sidebar.snapshot' ||
     method === 'app.focus_override.set' ||
     method === 'app.simulate_active'
