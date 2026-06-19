@@ -239,6 +239,8 @@ const controlSocketCapabilities = [
   'auth.sign_in_url',
   'auth.begin_sign_in',
   'auth.sign_out',
+  'vm.compat',
+  'remotes.compat',
   'settings.open',
   'feedback.open',
   'feedback.submit',
@@ -495,6 +497,10 @@ const isAgentSessionMethod = (method: string) => method.startsWith('agent.sessio
 const isAgentHooksMethod = (method: string) => method.startsWith('agent.hooks.') || method.startsWith('hooks.')
 
 const isFeedMethod = (method: string) => method.startsWith('feed.')
+
+const isCloudVmMethod = (method: string) => method.startsWith('vm.')
+
+const isCloudRemotesMethod = (method: string) => method.startsWith('remotes.')
 
 const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
 
@@ -1400,6 +1406,76 @@ const feedbackSubmitPayload = (params: Record<string, unknown>) => {
     body_length: body.length,
     attachment_count: imagePaths.length
   })
+}
+
+const cloudUnsupportedData = (method: string, extra: Record<string, unknown> = {}) => ({
+  ...extra,
+  unsupported: true,
+  unsupportedReason: 'aiopsterm does not implement control_compat Cloud VM or remote device registry services.',
+  unsupported_reason: 'aiopsterm does not implement control_compat Cloud VM or remote device registry services.',
+  method
+})
+
+const handleCloudVmControlRequest = (method: string, params: Record<string, unknown>) => {
+  if (method === 'vm.list') {
+    return ok(cloudUnsupportedData(method, { vms: [], count: 0 }))
+  }
+  if (method === 'vm.create') {
+    const idempotencyKey = cleanText(params.idempotency_key || params.idempotencyKey)
+    if (!idempotencyKey) return fail('INVALID_PARAMS', 'vm.create requires `idempotency_key`.', { field: 'idempotency_key' })
+    return ok(
+      cloudUnsupportedData(method, {
+        created: false,
+        provider: cleanText(params.provider),
+        image: cleanText(params.image),
+        idempotency_key: idempotencyKey
+      })
+    )
+  }
+  if (method === 'vm.destroy') {
+    const id = cleanText(params.id || params.vmId || params.vm_id)
+    if (!id) return fail('INVALID_PARAMS', 'vm.destroy requires `id`.', { field: 'id' })
+    return ok(cloudUnsupportedData(method, { id, destroyed: false }))
+  }
+  if (method === 'vm.exec') {
+    const id = cleanText(params.id || params.vmId || params.vm_id)
+    if (!id) return fail('INVALID_PARAMS', 'vm.exec requires `id`.', { field: 'id' })
+    const command = cleanText(params.command)
+    if (!command) return fail('INVALID_PARAMS', 'vm.exec requires `command`.', { field: 'command' })
+    return ok(cloudUnsupportedData(method, { id, command, exit_code: null, stdout: '', stderr: '', executed: false }))
+  }
+  if (method === 'vm.ssh_info' || method === 'vm.attach_info') {
+    const id = cleanText(params.id || params.vmId || params.vm_id)
+    if (!id) return fail('INVALID_PARAMS', `${method} requires \`id\`.`, { field: 'id' })
+    return ok(
+      cloudUnsupportedData(method, {
+        id,
+        host: null,
+        port: null,
+        token: null,
+        attach_url: null,
+        require_daemon: boolParam(params.require_daemon ?? params.requireDaemon) ?? false
+      })
+    )
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm Cloud VM compatibility method: ${method}`)
+}
+
+const handleCloudRemotesControlRequest = (method: string, params: Record<string, unknown>) => {
+  if (method === 'remotes.list') return ok(cloudUnsupportedData(method, { remotes: [], count: 0 }))
+  if (method === 'remotes.add') {
+    const name = cleanText(params.name)
+    if (!name) return fail('INVALID_PARAMS', 'remotes.add requires `name`.', { field: 'name' })
+    const routes = cleanTextList(params.routes)
+    if (!routes.length) return fail('INVALID_PARAMS', 'remotes.add requires at least one route.', { field: 'routes' })
+    return ok(cloudUnsupportedData(method, { ok: false, added: false, name, routes, tag: cleanText(params.tag) || null, deviceId: null }))
+  }
+  if (method === 'remotes.remove') {
+    const target = cleanText(params.target || params.name || params.deviceId || params.device_id)
+    if (!target) return fail('INVALID_PARAMS', 'remotes.remove requires `target`.', { field: 'target' })
+    return ok(cloudUnsupportedData(method, { ok: false, removed: false, target, deviceId: null }))
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm remotes compatibility method: ${method}`)
 }
 
 const handleSystemCompatibilityRequest = async (method: string, params: Record<string, unknown>) => {
@@ -4166,6 +4242,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isMobileChatMethod(method)) return handleMobileChatControlRequest(method, params)
   if (isMobileAttachTicketMethod(method)) return handleMobileAttachTicketControlRequest(params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
+  if (isCloudVmMethod(method)) return handleCloudVmControlRequest(method, params)
+  if (isCloudRemotesMethod(method)) return handleCloudRemotesControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)

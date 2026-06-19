@@ -43,6 +43,8 @@ Commands:
   workspace remote status|configure|reconnect|disconnect|pty-sessions
   workspace group <subcommand>
   workspace-group <subcommand>
+  vm list|create|destroy|exec|ssh-info|attach-info
+  remotes list|add|remove
   session save|list|show|restore|clear [--id <id>] [--name <name>]
   surface list|current|focus|create|report-tty|report-shell-state|ports-kick
   surface resume set|show|get|clear|run|trust|preview|autorun [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
@@ -215,6 +217,8 @@ const methodParams = () => {
     throw new Error(`Unknown workspace command: ${subcommand}`)
   }
   if (command === 'remote') return remoteMethodParams(args.shift() || 'tmux')
+  if (command === 'vm') return vmMethodParams(args.shift() || 'list')
+  if (command === 'remotes') return remotesMethodParams(args.shift() || 'list')
   if (command === 'workspace-group') return workspaceGroupMethodParams(args.shift() || 'list')
   if (command === 'session' || command === 'restore-session') return sessionMethodParams(command === 'restore-session' ? 'restore' : args.shift() || 'list')
   if (command === 'agent-session' || command === 'ai-session' || command === 'ai-sessions') return agentSessionMethodParams(args.shift() || 'list')
@@ -1485,6 +1489,64 @@ const remoteMethodParams = (subcommand) => {
   }
 }
 
+const vmMethodParams = (subcommand) => {
+  if (subcommand === 'list' || subcommand === 'ls') return { method: 'vm.list', params: {} }
+  if (subcommand === 'create' || subcommand === 'new') {
+    return {
+      method: 'vm.create',
+      params: {
+        image: readOption('--image'),
+        provider: readOption('--provider'),
+        idempotency_key: readOption('--idempotency-key') || readOption('--idempotency_key') || readOption('--key')
+      }
+    }
+  }
+  if (subcommand === 'destroy' || subcommand === 'rm' || subcommand === 'remove') return { method: 'vm.destroy', params: { id: readOption('--id') || readPositional() } }
+  if (subcommand === 'exec') {
+    const id = readOption('--id') || readPositional()
+    const timeoutMs = Number(readOption('--timeout-ms') || readOption('--timeout') || 0)
+    const delimiter = args.indexOf('--')
+    if (delimiter >= 0) args.splice(delimiter, 1)
+    const command = readOption('--command') || readOption('--cmd') || args.join(' ')
+    args.splice(0, args.length)
+    return {
+      method: 'vm.exec',
+      params: {
+        id,
+        command,
+        ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeout_ms: Math.floor(timeoutMs) } : {})
+      }
+    }
+  }
+  if (subcommand === 'ssh-info' || subcommand === 'ssh_info' || subcommand === 'ssh') return { method: 'vm.ssh_info', params: { id: readOption('--id') || readPositional() } }
+  if (subcommand === 'attach-info' || subcommand === 'attach_info' || subcommand === 'attach') {
+    return {
+      method: 'vm.attach_info',
+      params: {
+        id: readOption('--id') || readPositional(),
+        require_daemon: hasFlag('--require-daemon') || hasFlag('--require_daemon')
+      }
+    }
+  }
+  throw new Error(`Unknown vm command: ${subcommand}`)
+}
+
+const remotesMethodParams = (subcommand) => {
+  if (subcommand === 'list' || subcommand === 'ls') return { method: 'remotes.list', params: {} }
+  if (subcommand === 'add') {
+    return {
+      method: 'remotes.add',
+      params: {
+        name: readOption('--name') || readPositional(),
+        routes: readRepeatOptions(['--route', '--routes']),
+        tag: readOption('--tag')
+      }
+    }
+  }
+  if (subcommand === 'remove' || subcommand === 'rm') return { method: 'remotes.remove', params: { target: readOption('--target') || readOption('--name') || readPositional() } }
+  throw new Error(`Unknown remotes command: ${subcommand}`)
+}
+
 const paneLayoutMethodParams = (command) => {
   if (command === 'resize-pane' || command === 'resizep') {
     const direction = hasFlag('-L') ? 'left' : hasFlag('-U') ? 'up' : hasFlag('-D') ? 'down' : 'right'
@@ -2246,6 +2308,10 @@ const printResponse = (response) => {
         data.title || ''
       ].join('\t') + '\n'
     )
+    return
+  }
+  if (data.unsupported && typeof data.method === 'string' && (data.method.startsWith('vm.') || data.method.startsWith('remotes.'))) {
+    process.stdout.write(['cloud', 'unsupported', data.method, data.unsupportedReason || data.unsupported_reason || ''].join('\t') + '\n')
     return
   }
   const remoteSessionsPayload =

@@ -118,6 +118,13 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'tree', '--workspace', 'main'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'top', '--include-processes', '--top-group-limit', '5'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'memory', '--group-limit', '4'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'vm', 'list'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'vm', 'create', '--image', 'ubuntu', '--provider', 'test', '--idempotency-key', 'key-1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'vm', 'exec', 'vm-1', '--timeout-ms', '2500', '--', 'echo hello'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'vm', 'ssh-info', 'vm-1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'remotes', 'list'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'remotes', 'add', 'desk', '--route', 'host.example:22', '--tag', 'lab'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'remotes', 'remove', 'desk'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'app', 'focus-override', 'active'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'app', 'simulate-active'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'window', 'list'], { cwd: process.cwd() })
@@ -137,6 +144,13 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'system.tree', params: expect.objectContaining({ workspaceId: 'main' }) }),
       expect.objectContaining({ method: 'system.top', params: expect.objectContaining({ includeProcesses: true, include_processes: true, topGroupLimit: 5, top_group_limit: 5 }) }),
       expect.objectContaining({ method: 'system.memory', params: expect.objectContaining({ includeProcesses: false, include_processes: false, topGroupLimit: 4, top_group_limit: 4 }) }),
+      expect.objectContaining({ method: 'vm.list' }),
+      expect.objectContaining({ method: 'vm.create', params: expect.objectContaining({ image: 'ubuntu', provider: 'test', idempotency_key: 'key-1' }) }),
+      expect.objectContaining({ method: 'vm.exec', params: expect.objectContaining({ id: 'vm-1', command: 'echo hello', timeout_ms: 2500 }) }),
+      expect.objectContaining({ method: 'vm.ssh_info', params: expect.objectContaining({ id: 'vm-1' }) }),
+      expect.objectContaining({ method: 'remotes.list' }),
+      expect.objectContaining({ method: 'remotes.add', params: expect.objectContaining({ name: 'desk', routes: ['host.example:22'], tag: 'lab' }) }),
+      expect.objectContaining({ method: 'remotes.remove', params: expect.objectContaining({ target: 'desk' }) }),
       expect.objectContaining({ method: 'app.focus_override.set', params: expect.objectContaining({ state: 'active' }) }),
       expect.objectContaining({ method: 'app.simulate_active' }),
       expect.objectContaining({ method: 'window.list' }),

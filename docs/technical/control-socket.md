@@ -60,6 +60,8 @@ The control_compat system/window/settings compatibility slice adds non-browser a
 - `settings.open`: open the existing Settings module and select a supported settings section such as `general`, `terminal`, `models`, `ai`, `mcp`, `skills`, or `about`.
 - `feedback.open`: reuse the existing local feedback report action.
 - `feedback.submit`: validate control_compat-style feedback fields (`email`, `body`, optional image paths) and return a local-only accepted response. aiopsterm does not submit to an external feedback service through the control socket.
+- `vm.list`, `vm.create`, `vm.destroy`, `vm.exec`, `vm.ssh_info`, and `vm.attach_info`: recognized control_compat Cloud VM controls. aiopsterm validates the same required identifiers/commands where useful, then returns `unsupported=true` instead of contacting control_compat's Cloud VM API or creating hidden infrastructure.
+- `remotes.list`, `remotes.add`, and `remotes.remove`: recognized control_compat remote-device registry controls. aiopsterm returns an empty unsupported registry or validates `name` / `routes` / `target` before returning `unsupported=true`; this is separate from aiopsterm's normal SSH host inventory.
 - `extension.sidebar.snapshot`: expose a control_compat-style sidebar feed derived from `workspace.snapshot`.
 - `app.focus_override.set` and `app.simulate_active`: accepted app-focus compatibility controls. They update control metadata and focus the active aiopsterm window where applicable.
 
@@ -473,6 +475,8 @@ Future higher-level automation commands should use the control socket but must c
 `surface.focus`, `surface.create`, and `pane.create` are also renderer-owned. They operate on aiopsterm's visible shared main work panel and do not create hidden OS terminals or manage external shell processes. `surface.report_tty`, `surface.report_shell_state`, and `surface.ports_kick` are metadata reports only: they do not write to the terminal, do not close or reconnect a session, and do not claim that a port scan has completed.
 
 `window.close`, `window.create`, and `window.display` are deliberately non-destructive compatibility probes in this slice. They do not close user windows or create separate native workspaces. `settings.open`, `feedback.open`, `extension.sidebar.snapshot`, and `system.tree` route through the active renderer because those operations depend on UI state; they do not write terminal input or bypass terminal command approval. `system.top` and `system.memory` try to attach the same renderer snapshot when a window is available, but still return Node/OS process and memory samples if no renderer can answer. `feedback.submit` is local-only and does not perform network submission.
+
+`vm.*` and `remotes.*` are deliberately unsupported compatibility surfaces. control_compat implements these through its authenticated Cloud VM and device-registry services; aiopsterm does not. These methods do not create VMs, open SSH tunnels, mutate aiopsterm SSH hosts, or perform network calls.
 
 Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of control_compat's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
 

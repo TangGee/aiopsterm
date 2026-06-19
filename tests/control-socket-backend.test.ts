@@ -257,6 +257,8 @@ describe('control socket backend', () => {
               'auth.status',
               'auth.begin_sign_in',
               'auth.sign_out',
+              'vm.compat',
+              'remotes.compat',
               'feedback.submit',
               'agent.session',
               'events.stream'
@@ -386,6 +388,63 @@ describe('control socket backend', () => {
         expect.objectContaining({
           ok: false,
           errorCode: 'INVALID_PARAMS'
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'vm.list' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ vms: [], count: 0, unsupported: true, method: 'vm.list' })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'vm.create', params: { image: 'ubuntu' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          data: { field: 'idempotency_key' }
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'vm.create', params: { image: 'ubuntu', provider: 'test', idempotency_key: 'key-1' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ created: false, image: 'ubuntu', provider: 'test', idempotency_key: 'key-1', unsupported: true })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'vm.exec', params: { id: 'vm-1', command: 'echo hello' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ id: 'vm-1', command: 'echo hello', executed: false, unsupported: true })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'vm.ssh_info', params: { id: 'vm-1' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ id: 'vm-1', host: null, port: null, token: null, unsupported: true })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'remotes.list' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ remotes: [], count: 0, unsupported: true, method: 'remotes.list' })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'remotes.add', params: { name: 'desk', routes: ['host.example:22'], tag: 'lab' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ ok: false, added: false, name: 'desk', routes: ['host.example:22'], tag: 'lab', unsupported: true })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'remotes.remove', params: { target: 'desk' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ ok: false, removed: false, target: 'desk', unsupported: true })
         })
       )
     } finally {
