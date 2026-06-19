@@ -518,6 +518,54 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends control_compat-style surface operation requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      if (request.method === 'surface.health') {
+        return { id: request.id, ok: true, data: { surfaces: [{ panelId: 'panel-1', title: 'Main', surfaceKind: 'terminal', mounted: true }], count: 1 } }
+      }
+      if (request.method === 'workspace.move_to_window') {
+        return { id: request.id, ok: true, data: { unsupported: true, unsupportedReason: 'single window', workspaceId: params.workspaceId, windowId: params.windowId } }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          surface: { panelId: params.surfaceId || params.panelId || params.workspaceId || 'panel-1', title: 'Main', surfaceKind: 'terminal' },
+          movedSurface: { panelId: params.surfaceId || params.panelId || params.workspaceId || 'panel-1', title: 'Main', surfaceKind: 'terminal' },
+          action: request.method,
+          changed: true,
+          toIndex: params.index ?? 0
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'move-surface', '--surface', 'panel-2', '--pane', 'panel-1', '--focus', 'true'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'reorder-surface', '--surface', 'panel-2', '--before', 'panel-1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'split-off', '--surface', 'panel-2', 'below'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'refresh-surfaces'], { cwd: process.cwd() })
+    const health = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface-health'], { cwd: process.cwd() })
+    expect(health.stdout).toContain('panel-1\tterminal')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'trigger-flash', '--surface', 'panel-1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'reorder-workspace', '--workspace', 'panel-2', '--index', '0', '--dry-run'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'reorder-workspaces', '--order', 'panel-2,panel-1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'move-workspace-to-window', '--workspace', 'panel-2', '--window', 'window-1'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'surface.move', params: expect.objectContaining({ surfaceId: 'panel-2', paneId: 'panel-1', focus: true }) }),
+      expect.objectContaining({ method: 'surface.reorder', params: expect.objectContaining({ surfaceId: 'panel-2', beforeSurfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.split_off', params: expect.objectContaining({ surfaceId: 'panel-2', direction: 'below' }) }),
+      expect.objectContaining({ method: 'surface.refresh' }),
+      expect.objectContaining({ method: 'surface.health' }),
+      expect.objectContaining({ method: 'surface.trigger_flash', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'workspace.reorder', params: expect.objectContaining({ workspaceId: 'panel-2', index: 0, dryRun: true }) }),
+      expect.objectContaining({ method: 'workspace.reorder_many', params: expect.objectContaining({ order: 'panel-2,panel-1', workspaceIds: ['panel-2', 'panel-1'] }) }),
+      expect.objectContaining({ method: 'workspace.move_to_window', params: expect.objectContaining({ workspaceId: 'panel-2', windowId: 'window-1' }) })
+    ])
+  })
+
   it('sends wait-for synchronization requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

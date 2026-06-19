@@ -214,6 +214,7 @@ const controlSocketCapabilities = [
   'session.restore',
   'surface.list',
   'surface.current',
+  'surface.operations',
   'surface.resume',
   'terminal.list',
   'terminal.focus',
@@ -2640,6 +2641,15 @@ const jumpToUnreadNotification = async () => {
 const rendererMutationEventName = (method: string) => {
   if (method.startsWith('workspace.group.') && method !== 'workspace.group.list') return method.replace('workspace.group.', 'workspace_group.')
   if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
+  if (method === 'surface.move') return 'surface.moved'
+  if (method === 'surface.reorder') return 'surface.reordered'
+  if (method === 'surface.split_off') return 'surface.split_off'
+  if (method === 'surface.refresh') return 'surface.refreshed'
+  if (method === 'surface.trigger_flash') return 'surface.flashed'
+  if (method === 'workspace.reorder') return 'workspace.reordered'
+  if (method === 'workspace.reorder_many') return 'workspace.reordered_many'
+  if (method === 'workspace.equalize_splits') return 'workspace.splits_equalized'
+  if (method === 'workspace.prompt_submit') return 'workspace.prompt_submitted'
   if (method === 'pane.break') return 'pane.broken'
   if (method === 'pane.join') return 'pane.joined'
   if (method === 'pane.swap') return 'pane.swapped'
@@ -2668,8 +2678,7 @@ const rendererMutationEventName = (method: string) => {
 const rendererMutationCategory = (method: string) => {
   if (method.startsWith('workspace.group.')) return 'workspace'
   if (method.startsWith('workspace.')) return 'workspace'
-  if (method === 'surface.split' || method === 'surface.close') return 'pane'
-  if (method.startsWith('surface.resume.')) return 'surface'
+  if (method.startsWith('surface.')) return method === 'surface.split' || method === 'surface.close' ? 'pane' : 'surface'
   if (method.startsWith('pane.')) return 'pane'
   if (method.startsWith('agent-hibernation.') || method.startsWith('agent.')) return 'agent'
   return 'control'
@@ -2800,6 +2809,11 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.create' ||
     method === 'workspace.rename' ||
     method === 'workspace.close' ||
+    method === 'workspace.reorder' ||
+    method === 'workspace.reorder_many' ||
+    method === 'workspace.move_to_window' ||
+    method === 'workspace.equalize_splits' ||
+    method === 'workspace.prompt_submit' ||
     method === 'workspace.has_session' ||
     method === 'workspace.select_layout' ||
     method === 'pane.list' ||
@@ -2808,6 +2822,12 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'pane.last' ||
     method === 'surface.split' ||
     method === 'surface.close' ||
+    method === 'surface.move' ||
+    method === 'surface.reorder' ||
+    method === 'surface.split_off' ||
+    method === 'surface.refresh' ||
+    method === 'surface.health' ||
+    method === 'surface.trigger_flash' ||
     method === 'pane.break' ||
     method === 'pane.join' ||
     method === 'pane.swap' ||
@@ -2828,6 +2848,47 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   }
   if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
   if (method === 'list_surfaces') return dispatchRendererControlRequest('surface.list', params)
+  if (method === 'refresh-surfaces' || method === 'refresh_surfaces') {
+    const response = await dispatchRendererControlRequest('surface.refresh', params)
+    publishRendererMutationEvent('surface.refresh', params, response)
+    return response
+  }
+  if (method === 'surface-health' || method === 'surface_health') return dispatchRendererControlRequest('surface.health', params)
+  if (method === 'trigger-flash' || method === 'trigger_flash') {
+    const response = await dispatchRendererControlRequest('surface.trigger_flash', params, { focus: true })
+    publishRendererMutationEvent('surface.trigger_flash', params, response)
+    return response
+  }
+  if (method === 'move-surface') {
+    const response = await dispatchRendererControlRequest('surface.move', params)
+    publishRendererMutationEvent('surface.move', params, response)
+    return response
+  }
+  if (method === 'reorder-surface') {
+    const response = await dispatchRendererControlRequest('surface.reorder', params)
+    publishRendererMutationEvent('surface.reorder', params, response)
+    return response
+  }
+  if (method === 'split-off' || method === 'drag-surface-to-split') {
+    const response = await dispatchRendererControlRequest('surface.split_off', params)
+    publishRendererMutationEvent('surface.split_off', params, response)
+    return response
+  }
+  if (method === 'reorder-workspace') {
+    const response = await dispatchRendererControlRequest('workspace.reorder', params)
+    publishRendererMutationEvent('workspace.reorder', params, response)
+    return response
+  }
+  if (method === 'reorder-workspaces') {
+    const response = await dispatchRendererControlRequest('workspace.reorder_many', params)
+    publishRendererMutationEvent('workspace.reorder_many', params, response)
+    return response
+  }
+  if (method === 'move-workspace-to-window') {
+    const response = await dispatchRendererControlRequest('workspace.move_to_window', params)
+    publishRendererMutationEvent('workspace.move_to_window', params, response)
+    return response
+  }
   if (method === 'new-workspace') {
     const response = await dispatchRendererControlRequest('workspace.create', params, { focus: params.focus !== false })
     publishRendererMutationEvent('workspace.create', params, response)

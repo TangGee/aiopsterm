@@ -7638,6 +7638,52 @@ describe('AppShell', () => {
       })
     )
 
+    const reorderResponse = await invokeControlHandler({
+      id: 'reorder-surface',
+      method: 'surface.reorder',
+      params: { surfaceId: sidecarPanel!.id, index: 0, focus: true }
+    })
+    expect(reorderResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'surface.reorder', changed: true, toIndex: 0 }) }))
+    expect(store.panels[0].id).toBe(sidecarPanel!.id)
+    expect(store.activePanelId).toBe(sidecarPanel!.id)
+
+    const moveResponse = await invokeControlHandler({
+      id: 'move-surface',
+      method: 'surface.move',
+      params: { surfaceId: sidecarPanel!.id, paneId: firstPanelId, direction: 'below' }
+    })
+    expect(moveResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'surface.move', targetPaneId: firstPanelId }) }))
+    expect(store.panels.find((panel) => panel.id === sidecarPanel!.id)).toEqual(expect.objectContaining({ split: 'below', splitSourceId: firstPanelId, splitGroupId: firstPanelId }))
+
+    const splitOffResponse = await invokeControlHandler({
+      id: 'split-off',
+      method: 'surface.split_off',
+      params: { surfaceId: sidecarPanel!.id }
+    })
+    expect(splitOffResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'surface.split_off', splitOff: true }) }))
+    expect(store.panels.find((panel) => panel.id === sidecarPanel!.id)).toEqual(expect.objectContaining({ split: undefined, splitSourceId: undefined, splitGroupId: undefined }))
+
+    const healthResponse = await invokeControlHandler({ id: 'surface-health', method: 'surface.health', params: {} })
+    expect(healthResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: store.panels.length,
+          surfaces: expect.arrayContaining([expect.objectContaining({ panelId: sidecarPanel!.id, inWindow: true })])
+        })
+      })
+    )
+
+    const refreshResponse = await invokeControlHandler({ id: 'refresh-surfaces', method: 'surface.refresh', params: {} })
+    expect(refreshResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ refreshed: expect.any(Number) }) }))
+
+    const flashResponse = await invokeControlHandler({ id: 'trigger-flash', method: 'surface.trigger_flash', params: { surfaceId: sidecarPanel!.id } })
+    expect(flashResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ flashed: true, surfaceId: sidecarPanel!.id }) }))
+    expect(store.activePanelId).toBe(sidecarPanel!.id)
+
+    const promptResponse = await invokeControlHandler({ id: 'prompt-submit', method: 'workspace.prompt_submit', params: { workspaceId: sidecarPanel!.id, message: 'echo from control' } })
+    expect(promptResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ status: expect.stringMatching(/allow|needs-approval|unavailable|blocked/) }) }))
+
     const renameResponse = await invokeControlHandler({
       id: 'rename-window',
       method: 'workspace.rename',

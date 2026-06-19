@@ -39,6 +39,15 @@ Commands:
   close-surface [--surface <panel-id>]
   new-split [right|below|left|up] [--surface <panel-id>] [--focus <true|false>]
   new-pane [--direction right|below] [--focus <true|false>]
+  move-surface --surface <panel-id> [--pane <panel-id>] [--before <panel-id>|--after <panel-id>|--index <n>] [--focus <true|false>]
+  reorder-surface --surface <panel-id> [--before <panel-id>|--after <panel-id>|--index <n>] [--focus <true|false>]
+  split-off --surface <panel-id> [right|below] [--focus <true|false>]
+  refresh-surfaces
+  surface-health
+  trigger-flash [--surface <panel-id>]
+  reorder-workspace --workspace <panel-id> [--before <panel-id>|--after <panel-id>|--index <n>] [--dry-run]
+  reorder-workspaces --order <panel-id,panel-id,...> [--dry-run]
+  move-workspace-to-window --workspace <panel-id> --window <id>
   list-windows
   current-window
   list-panes
@@ -222,6 +231,22 @@ const methodParams = () => {
   }
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
   if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
+  if (
+    [
+      'move-surface',
+      'reorder-surface',
+      'split-off',
+      'drag-surface-to-split',
+      'refresh-surfaces',
+      'surface-health',
+      'trigger-flash',
+      'reorder-workspace',
+      'reorder-workspaces',
+      'move-workspace-to-window'
+    ].includes(command)
+  ) {
+    return surfaceOperationMethodParams(command)
+  }
   if (['new-workspace', 'current-workspace', 'select-workspace', 'close-workspace', 'list-panels', 'list-pane-surfaces', 'close-surface', 'new-split', 'new-pane'].includes(command)) {
     return surfaceWorkspaceAliasMethodParams(command)
   }
@@ -628,6 +653,97 @@ const surfaceWorkspaceAliasMethodParams = (command) => {
       focus: readFocusOption()
     }
   }
+}
+
+const surfaceOperationTargetParams = () => {
+  const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--tab') || readOption('--target') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+  const paneId = readOption('--pane') || readOption('--pane-id')
+  const beforeSurfaceId = readOption('--before') || readOption('--before-surface') || readOption('--before-panel')
+  const afterSurfaceId = readOption('--after') || readOption('--after-surface') || readOption('--after-panel')
+  const indexRaw = readOption('--index')
+  const index = indexRaw === '' ? undefined : Number(indexRaw)
+  return {
+    surfaceId,
+    surface_id: surfaceId,
+    panelId: surfaceId,
+    paneId,
+    pane_id: paneId,
+    beforeSurfaceId,
+    before_surface_id: beforeSurfaceId,
+    afterSurfaceId,
+    after_surface_id: afterSurfaceId,
+    ...(Number.isFinite(index) ? { index: Math.floor(index) } : {}),
+    focus: readFocusOption()
+  }
+}
+
+const surfaceOperationMethodParams = (command) => {
+  if (command === 'refresh-surfaces') return { method: 'surface.refresh', params: {} }
+  if (command === 'surface-health') return { method: 'surface.health', params: {} }
+  if (command === 'trigger-flash') {
+    const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'surface.trigger_flash', params: { surfaceId, surface_id: surfaceId, panelId: surfaceId } }
+  }
+  if (command === 'move-surface') return { method: 'surface.move', params: surfaceOperationTargetParams() }
+  if (command === 'reorder-surface') return { method: 'surface.reorder', params: surfaceOperationTargetParams() }
+  if (command === 'split-off' || command === 'drag-surface-to-split') {
+    const explicitSurface = readOption('--surface') || readOption('--panel') || readOption('--tab') || readOption('--target')
+    const firstPositional = readPositional()
+    const secondPositional = readPositional()
+    const surfaceId = explicitSurface || firstPositional
+    const directionRaw = readOption('--direction') || readOption('--split') || (explicitSurface ? firstPositional : secondPositional) || (!explicitSurface && ['left', 'right', 'up', 'down', 'below'].includes(firstPositional) ? firstPositional : '')
+    const direction = ['left', 'right', 'up', 'down', 'below'].includes(directionRaw.trim().toLowerCase()) ? directionRaw.trim().toLowerCase().replace('down', 'below') : readSplitDirectionValue()
+    return {
+      method: 'surface.split_off',
+      params: {
+        surfaceId,
+        surface_id: surfaceId,
+        panelId: surfaceId,
+        direction,
+        focus: readFocusOption()
+      }
+    }
+  }
+  if (command === 'reorder-workspace') {
+    const workspaceId = readOption('--workspace') || readOption('--target') || readOption('--panel') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    const beforeWorkspaceId = readOption('--before') || readOption('--before-workspace')
+    const afterWorkspaceId = readOption('--after') || readOption('--after-workspace')
+    const indexRaw = readOption('--index')
+    const index = indexRaw === '' ? undefined : Number(indexRaw)
+    const dryRun = hasFlag('--dry-run')
+    return {
+      method: 'workspace.reorder',
+      params: {
+        workspaceId,
+        workspace_id: workspaceId,
+        panelId: workspaceId,
+        surfaceId: workspaceId,
+        beforeWorkspaceId,
+        before_workspace_id: beforeWorkspaceId,
+        beforeSurfaceId: beforeWorkspaceId,
+        before_surface_id: beforeWorkspaceId,
+        afterWorkspaceId,
+        after_workspace_id: afterWorkspaceId,
+        afterSurfaceId: afterWorkspaceId,
+        after_surface_id: afterWorkspaceId,
+        ...(Number.isFinite(index) ? { index: Math.floor(index) } : {}),
+        dryRun,
+        dry_run: dryRun
+      }
+    }
+  }
+  if (command === 'reorder-workspaces') {
+    const order = readOption('--order') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    const dryRun = hasFlag('--dry-run')
+    const workspaceIds = order
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    return { method: 'workspace.reorder_many', params: { order, workspaceIds, workspace_ids: workspaceIds, dryRun, dry_run: dryRun } }
+  }
+  const workspaceId = readOption('--workspace') || readOption('--target') || readOption('--panel') || ''
+  const windowId = readOption('--window') || ''
+  return { method: 'workspace.move_to_window', params: { workspaceId, workspace_id: workspaceId, panelId: workspaceId, surfaceId: workspaceId, windowId, window_id: windowId } }
 }
 
 const paneLayoutMethodParams = (command) => {
@@ -1248,6 +1364,21 @@ const printResponse = (response) => {
   if (data.renamedPane || data.renamedWorkspace) {
     const pane = data.renamedPane || data.renamedWorkspace || {}
     process.stdout.write(['renamed', pane.panelId || pane.id || data.panelId || '-', pane.title || data.title || '', data.action || ''].join('\t') + '\n')
+    return
+  }
+  if (data.movedSurface || data.reordered || data.moved || data.splitOff || data.flashed || data.refreshed !== undefined || data.equalized !== undefined) {
+    const surface = data.movedSurface || data.surface || data.pane || {}
+    const status = data.unsupported ? 'unsupported' : data.changed === false ? 'unchanged' : 'ok'
+    process.stdout.write(
+      [
+        'surface',
+        status,
+        surface.panelId || data.surfaceId || data.panelId || '-',
+        data.action || '-',
+        data.toIndex ?? data.to_index ?? data.index ?? '-',
+        data.unsupportedReason || ''
+      ].join('\t') + '\n'
+    )
     return
   }
   if (data.layout) {

@@ -792,6 +792,57 @@ describe('control socket backend', () => {
     expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.created' }), expect.objectContaining({ name: 'pane.closed' })]))
   })
 
+  it('routes control_compat-style surface operation aliases to the renderer', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      const params = (request.params as any) || {}
+      if (request.method === 'surface.health') return { ok: true, data: { surfaces: [{ panelId: 'panel-1', surfaceKind: 'terminal', mounted: true }], count: 1 } }
+      if (request.method === 'workspace.move_to_window') return { ok: true, data: { unsupported: true, unsupportedReason: 'single window', workspaceId: params.workspaceId, windowId: params.windowId } }
+      return {
+        ok: true,
+        data: {
+          surface: { panelId: params.surfaceId || params.panelId || params.workspaceId || 'panel-1', surfaceKind: 'terminal' },
+          movedSurface: { panelId: params.surfaceId || params.panelId || params.workspaceId || 'panel-1', surfaceKind: 'terminal' },
+          action: request.method,
+          changed: true,
+          toIndex: params.index ?? 0
+        }
+      }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'move-surface', params: { surfaceId: 'panel-2', paneId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'reorder-surface', params: { surfaceId: 'panel-2', index: 0 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'split-off', params: { surfaceId: 'panel-2' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'refresh-surfaces', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'surface-health', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1 }) }))
+    await expect(backend.__testing.handleControlRequest({ method: 'trigger-flash', params: { surfaceId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'reorder-workspace', params: { workspaceId: 'panel-2', index: 0 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'reorder-workspaces', params: { workspaceIds: ['panel-2', 'panel-1'] } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'move-workspace-to-window', params: { workspaceId: 'panel-2', windowId: 'window-1' } })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) }))
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'surface.move', params: expect.objectContaining({ surfaceId: 'panel-2', paneId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.reorder', params: expect.objectContaining({ surfaceId: 'panel-2', index: 0 }) }),
+      expect.objectContaining({ method: 'surface.split_off', params: expect.objectContaining({ surfaceId: 'panel-2' }) }),
+      expect.objectContaining({ method: 'surface.refresh' }),
+      expect.objectContaining({ method: 'surface.health' }),
+      expect.objectContaining({ method: 'surface.trigger_flash', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'workspace.reorder', params: expect.objectContaining({ workspaceId: 'panel-2', index: 0 }) }),
+      expect.objectContaining({ method: 'workspace.reorder_many', params: expect.objectContaining({ workspaceIds: ['panel-2', 'panel-1'] }) }),
+      expect.objectContaining({ method: 'workspace.move_to_window', params: expect.objectContaining({ workspaceId: 'panel-2', windowId: 'window-1' }) })
+    ])
+    const surfaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'surface' } })
+    expect(surfaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'surface.moved' }), expect.objectContaining({ name: 'surface.reordered' }), expect.objectContaining({ name: 'surface.split_off' }), expect.objectContaining({ name: 'surface.refreshed' }), expect.objectContaining({ name: 'surface.flashed' })]))
+    const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
+    expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.reordered' }), expect.objectContaining({ name: 'workspace.reordered_many' })]))
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

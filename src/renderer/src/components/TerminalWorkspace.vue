@@ -12,7 +12,7 @@
         v-for="panel in visibleTerminalTabPanels"
         :key="panel.id"
         class="terminal-tab"
-        :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel) }"
+        :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         role="button"
         tabindex="0"
         :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
@@ -224,7 +224,7 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel) }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         :style="style"
         @click="activatePanel(panel.id)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
@@ -618,6 +618,8 @@ type ControlSurfaceResumeBindingState = ControlSurfaceResumeBindingSummary
 const controlWorkspaceGroups = ref<ControlWorkspaceGroupState[]>([])
 const controlSurfaceResumeBindings = ref<Record<string, ControlSurfaceResumeBindingState>>({})
 const lastActiveControlPanelId = ref('')
+const controlFlashingPanelIds = ref<string[]>([])
+let controlFlashTimer: number | null = null
 
 const normalizeWorkspaceGroupId = (value: unknown) => {
   const text = controlText(value)
@@ -636,6 +638,12 @@ const workspaceGroupRefForControl = (groupId: string) => {
 
 const panelMatchesControlId = (panel: TerminalPanel, id: string) => panel.id === id || panel.sessionId === id
 
+const panelRefForControl = (panelId: string) => {
+  const panels = selectableControlPanels()
+  const index = panels.findIndex((panel) => panel.id === panelId)
+  return index >= 0 ? `surface:${index + 1}` : panelId
+}
+
 const resolveControlPanelId = (value: unknown) => {
   const id = controlText(value)
   if (!id) return ''
@@ -650,6 +658,38 @@ const resolveControlSurfacePanel = (params: Record<string, unknown> = {}) => {
     return workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId || panel.id === sessionId || panel.sessionId === sessionId) || null
   }
   return workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0] || null
+}
+
+const resolveControlSourceSurfacePanel = (params: Record<string, unknown> = {}) => {
+  const panelId = controlText(params.surfaceId || params.surface_id || params.tabId || params.tab_id || params.panelId || params.panel_id || params.id || params.target)
+  const sessionId = controlText(params.sessionId || params.terminalSessionId || params.terminal_session_id || params.terminalId || params.terminal_id)
+  if (panelId || sessionId) {
+    return workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId || panel.id === sessionId || panel.sessionId === sessionId) || null
+  }
+  return workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0] || null
+}
+
+const controlPanelIndexFromValue = (value: unknown) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return null
+  return Math.floor(numberValue)
+}
+
+const resolveControlAnchorPanel = (params: Record<string, unknown> = {}, anchor: 'before' | 'after') => {
+  const pascal = anchor.charAt(0).toUpperCase() + anchor.slice(1)
+  const panelId = controlText(
+    params[`${anchor}SurfaceId`] ||
+      params[`${anchor}_surface_id`] ||
+      params[`${anchor}PanelId`] ||
+      params[`${anchor}_panel_id`] ||
+      params[`${anchor}PaneId`] ||
+      params[`${anchor}_pane_id`] ||
+      params[anchor] ||
+      params[`target${pascal}SurfaceId`] ||
+      params[`target_${anchor}_surface_id`]
+  )
+  if (!panelId) return null
+  return workspace.panels.find((panel) => panelMatchesControlId(panel, panelId) || panel.title === panelId) || null
 }
 
 const resolveControlPanePanel = (params: Record<string, unknown> = {}, keyPrefix = '') => {
@@ -1206,6 +1246,75 @@ const selectedPanePayload = (panel: TerminalPanel, action: string, previousActiv
     snapshot: workspaceSnapshotForControl()
   })
 
+const surfaceOperationPayload = (panel: TerminalPanel, action: string, extra: Record<string, unknown> = {}) => {
+  const surface = surfaceSummaryForControl(panel)
+  return controlOk({
+    surface,
+    pane: surface,
+    movedSurface: surface,
+    panelId: panel.id,
+    paneId: panel.id,
+    pane_id: panel.id,
+    surfaceId: panel.id,
+    surface_id: panel.id,
+    surfaceRef: panelRefForControl(panel.id),
+    surface_ref: panelRefForControl(panel.id),
+    workspaceId: 'main',
+    workspace_id: 'main',
+    workspaceRef: 'workspace:1',
+    workspace_ref: 'workspace:1',
+    action,
+    ...extra,
+    snapshot: workspaceSnapshotForControl()
+  })
+}
+
+const movePanelInControlOrder = (panel: TerminalPanel, params: Record<string, unknown>) => {
+  const panels = workspace.panels
+  const currentIndex = panels.findIndex((item) => item.id === panel.id)
+  if (currentIndex < 0) return { changed: false, fromIndex: -1, toIndex: -1 }
+  let targetIndex = controlPanelIndexFromValue(params.index)
+  const beforePanel = resolveControlAnchorPanel(params, 'before')
+  const afterPanel = resolveControlAnchorPanel(params, 'after')
+  if (beforePanel) targetIndex = panels.findIndex((item) => item.id === beforePanel.id)
+  if (afterPanel) targetIndex = panels.findIndex((item) => item.id === afterPanel.id) + 1
+  if (targetIndex === null || !Number.isFinite(targetIndex)) targetIndex = currentIndex
+  targetIndex = Math.max(0, Math.min(panels.length - 1, targetIndex))
+  const [moved] = panels.splice(currentIndex, 1)
+  if (currentIndex < targetIndex) targetIndex -= 1
+  panels.splice(Math.max(0, Math.min(panels.length, targetIndex)), 0, moved)
+  const toIndex = panels.findIndex((item) => item.id === panel.id)
+  return { changed: currentIndex !== toIndex, fromIndex: currentIndex, toIndex }
+}
+
+const surfaceHealthForControl = (panel: TerminalPanel, index: number) => {
+  const view = terminalViews.get(panel.id)
+  return {
+    ...surfaceSummaryForControl(panel),
+    id: panel.id,
+    ref: panelRefForControl(panel.id),
+    index: index + 1,
+    selected: panel.id === workspace.activePanelId,
+    mounted: panel.kind === 'knowledge' ? true : Boolean(view),
+    viewReady: panel.kind === 'knowledge' ? true : Boolean(view),
+    view_ready: panel.kind === 'knowledge' ? true : Boolean(view),
+    inWindow: true,
+    in_window: true,
+    cols: view?.terminal.cols,
+    rows: view?.terminal.rows,
+    status: panel.status
+  }
+}
+
+const triggerControlFlash = (panel: TerminalPanel) => {
+  controlFlashingPanelIds.value = [...new Set([...controlFlashingPanelIds.value, panel.id])]
+  if (controlFlashTimer) window.clearTimeout(controlFlashTimer)
+  controlFlashTimer = window.setTimeout(() => {
+    controlFlashingPanelIds.value = controlFlashingPanelIds.value.filter((id) => id !== panel.id)
+    controlFlashTimer = null
+  }, 900)
+}
+
 const selectableControlPanels = () => workspace.panels.filter((panel) => !isWelcomePlaceholderPanel(panel))
 
 const resolveControlSelectablePanel = (value: unknown) => {
@@ -1499,6 +1608,193 @@ const handlePaneLayoutControlRequest = async (method: string, params: Record<str
     await nextTick()
     terminalViews.get(workspace.activePanelId)?.terminal.focus()
     return paneLayoutPayload(panel, targetPanel, { changed: true, swapped: true })
+  }
+
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
+
+const handleSurfaceOperationsControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'surface.health') {
+    const panels = selectableControlPanels()
+    return controlOk({
+      workspaceId: 'main',
+      workspace_id: 'main',
+      workspaceRef: 'workspace:1',
+      workspace_ref: 'workspace:1',
+      surfaces: panels.map(surfaceHealthForControl),
+      count: panels.length,
+      activePanelId: workspace.activePanelId
+    })
+  }
+
+  if (method === 'surface.refresh' || method === 'workspace.equalize_splits') {
+    await nextTick()
+    scheduleVisibleTerminalFit({ scrollToBottom: false, frames: 4, forceGeometry: true })
+    return controlOk({
+      workspaceId: 'main',
+      workspace_id: 'main',
+      refreshed: workspace.panels.filter((panel) => panel.kind !== 'knowledge').length,
+      equalized: method === 'workspace.equalize_splits',
+      action: method,
+      snapshot: workspaceSnapshotForControl()
+    })
+  }
+
+  if (method === 'surface.trigger_flash') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    triggerControlFlash(panel)
+    workspace.activeModule = 'workspace'
+    workspace.activePanelId = panel.id
+    await nextTick()
+    terminalViews.get(panel.id)?.terminal.focus()
+    return surfaceOperationPayload(panel, 'surface.trigger_flash', { flashed: true })
+  }
+
+  if (method === 'surface.reorder' || method === 'surface.move') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    const previousActivePanelId = workspace.activePanelId
+    const targetPane = method === 'surface.move' ? resolveControlPanePanel(params) : null
+    let changed = false
+    let fromIndex = workspace.panels.findIndex((item) => item.id === panel.id)
+    let toIndex = fromIndex
+    if (targetPane && targetPane.id !== panel.id) {
+      changed = workspace.attachPanelToSplit(panel.id, targetPane.id, normalizePaneLayoutDirection(params.direction || params.split))
+      toIndex = workspace.panels.findIndex((item) => item.id === panel.id)
+    } else {
+      const moved = movePanelInControlOrder(panel, params)
+      changed = moved.changed
+      fromIndex = moved.fromIndex
+      toIndex = moved.toIndex
+    }
+    if (controlBool(params.focus, false)) {
+      workspace.activePanelId = panel.id
+    } else if (workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+    return surfaceOperationPayload(panel, method === 'surface.move' ? 'surface.move' : 'surface.reorder', {
+      changed,
+      moved: changed,
+      reordered: changed,
+      fromIndex,
+      from_index: fromIndex,
+      toIndex,
+      to_index: toIndex,
+      index: toIndex,
+      ...(targetPane ? { targetPane: surfaceSummaryForControl(targetPane), targetPaneId: targetPane.id, target_pane_id: targetPane.id } : {})
+    })
+  }
+
+  if (method === 'surface.split_off') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    const previousActivePanelId = workspace.activePanelId
+    const changed = workspace.unsplitPanel(panel.id)
+    if (controlBool(params.focus, false)) {
+      workspace.activePanelId = panel.id
+    } else if (workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+    return surfaceOperationPayload(panel, 'surface.split_off', {
+      changed,
+      splitOff: changed,
+      split_off: changed,
+      direction: controlText(params.direction) || 'right'
+    })
+  }
+
+  if (method === 'workspace.reorder' || method === 'workspace.reorder_many') {
+    if (method === 'workspace.reorder_many') {
+      const orderInput = Array.isArray(params.workspaceIds)
+        ? params.workspaceIds
+        : Array.isArray(params.workspace_ids)
+          ? params.workspace_ids
+          : typeof params.order === 'string'
+            ? params.order.split(',')
+            : []
+      if (!orderInput.length) return controlFail('WORKSPACE_REORDER_ORDER_REQUIRED', 'Workspace reorder requires an order.')
+      const desired = orderInput.map(resolveControlPanelId).filter(Boolean)
+      if (!desired.length) return controlFail('WORKSPACE_REORDER_ORDER_INVALID', 'Workspace reorder order did not match any surfaces.')
+      const current = workspace.panels
+      const desiredSet = new Set(desired)
+      const known = current.filter((panel) => desiredSet.has(panel.id))
+      const missing = desired.filter((id) => !known.some((panel) => panel.id === id))
+      if (missing.length) return controlFail('WORKSPACE_REORDER_SURFACE_NOT_FOUND', 'One or more reorder surfaces were not found.', { missing })
+      const untouched = current.filter((panel) => !desiredSet.has(panel.id))
+      const fromOrder = current.map((panel) => panel.id)
+      const dryRun = controlBool(params.dryRun ?? params.dry_run, false)
+      if (!dryRun) workspace.panels = [...known.sort((a, b) => desired.indexOf(a.id) - desired.indexOf(b.id)), ...untouched]
+      const toOrder = (dryRun ? current : workspace.panels).map((panel) => panel.id)
+      return controlOk({
+        workspaceId: 'main',
+        workspace_id: 'main',
+        dryRun,
+        dry_run: dryRun,
+        changed: fromOrder.join('\u0000') !== toOrder.join('\u0000'),
+        order: toOrder,
+        snapshot: workspaceSnapshotForControl()
+      })
+    }
+    const panel = resolveControlSelectablePanel(controlTargetValue(params))
+    if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
+    const dryRun = controlBool(params.dryRun ?? params.dry_run, false)
+    const fromIndex = workspace.panels.findIndex((item) => item.id === panel.id)
+    let move = { changed: false, fromIndex, toIndex: fromIndex }
+    if (!dryRun) move = movePanelInControlOrder(panel, params)
+    return controlOk({
+      workspaceId: panel.id,
+      workspace_id: panel.id,
+      workspaceRef: panelRefForControl(panel.id),
+      workspace_ref: panelRefForControl(panel.id),
+      dryRun,
+      dry_run: dryRun,
+      fromIndex: move.fromIndex,
+      from_index: move.fromIndex,
+      toIndex: move.toIndex,
+      to_index: move.toIndex,
+      index: move.toIndex,
+      changed: move.changed,
+      snapshot: workspaceSnapshotForControl()
+    })
+  }
+
+  if (method === 'workspace.move_to_window') {
+    return controlOk({
+      workspaceId: controlText(params.workspaceId || params.workspace_id) || 'main',
+      workspace_id: controlText(params.workspaceId || params.workspace_id) || 'main',
+      windowId: controlText(params.windowId || params.window_id) || 'main',
+      window_id: controlText(params.windowId || params.window_id) || 'main',
+      moved: false,
+      unsupported: true,
+      unsupportedReason: 'aiopsterm currently exposes one shared main work panel in one Electron window; moving workspaces between native windows is not supported.'
+    })
+  }
+
+  if (method === 'workspace.prompt_submit') {
+    const panel = resolveControlSelectablePanel(controlTargetValue(params))
+    if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
+    if (panel.kind === 'knowledge') return controlFail('WORKSPACE_PROMPT_TERMINAL_REQUIRED', 'Prompt submit requires a terminal surface.')
+    const message = controlText(params.message || params.prompt || params.text || params.body)
+    if (!message) return controlFail('WORKSPACE_PROMPT_REQUIRED', 'Prompt submit requires message text.')
+    const shellText = message.endsWith('\n') ? message : `${message}\n`
+    const decision = await workspace.runTerminalCommand(panel.id, message, { source: 'agent', inputText: shellText, shellText, writeToShell: true })
+    return controlOk({
+      workspaceId: panel.id,
+      workspace_id: panel.id,
+      surfaceId: panel.id,
+      surface_id: panel.id,
+      messageRecorded: decision.status === 'allow',
+      message_recorded: decision.status === 'allow',
+      decision,
+      status: decision.status,
+      messagePreview: message.slice(0, 120),
+      message_preview: message.slice(0, 120)
+    })
   }
 
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
@@ -2275,6 +2571,23 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
     return handlePaneManagementControlRequest(request.method, params)
   }
   if (request.method.startsWith('pane.')) return handlePaneLayoutControlRequest(request.method, params)
+  if (
+    [
+      'surface.move',
+      'surface.reorder',
+      'surface.split_off',
+      'surface.refresh',
+      'surface.health',
+      'surface.trigger_flash',
+      'workspace.reorder',
+      'workspace.reorder_many',
+      'workspace.move_to_window',
+      'workspace.equalize_splits',
+      'workspace.prompt_submit'
+    ].includes(request.method)
+  ) {
+    return handleSurfaceOperationsControlRequest(request.method, params)
+  }
   if (request.method === 'surface.respawn' || request.method === 'terminal.respawn') return handleSurfaceRespawnControlRequest(params)
   if (request.method.startsWith('agent.team.')) return handleAgentTeamControlRequest(request.method, params)
   if (request.method.startsWith('agent-hibernation.') || request.method.startsWith('agent.')) return handleAgentHibernationControlRequest(request.method, params)
@@ -4015,6 +4328,10 @@ onUnmounted(() => {
   offLifecycle?.()
   offExit?.()
   offControlRequest?.()
+  if (controlFlashTimer) {
+    window.clearTimeout(controlFlashTimer)
+    controlFlashTimer = null
+  }
   terminalZmodemRuntime.dispose()
   if (zmodemProgressHideTimer !== null) {
     window.clearTimeout(zmodemProgressHideTimer)

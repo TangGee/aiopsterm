@@ -7602,6 +7602,10 @@ code {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
+.terminal-tab.control-flash {
+  animation: control-surface-flash 0.9s ease-out;
+}
+
 .terminal-tab-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -8267,9 +8271,27 @@ code {
     0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+.terminal-pane.control-flash {
+  animation: control-surface-flash 0.9s ease-out;
+}
+
 .terminal-pane.drag-over {
   border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+@keyframes control-surface-flash {
+  0% {
+    border-color: color-mix(in srgb, var(--accent) 86%, var(--border));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 48%, transparent),
+      0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
 }
 
 .terminal-grid:not(.split-right) .terminal-pane.below {

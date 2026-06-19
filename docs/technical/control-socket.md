@@ -139,6 +139,10 @@ The pane layout slice adds control_compat/tmux-style structural controls over th
 - `pane.list`, `workspace.create`, `surface.split`, `workspace.rename`, `workspace.close`, `surface.close`, `workspace.has_session`, and `workspace.select_layout`: tmux-compatible list/create/rename/close/layout verbs over the shared main work panel.
 - `pane.surfaces`: return the surface hosted by a selected shared-work-panel pane. In aiopsterm's current model a pane maps to one visible terminal/knowledge surface.
 - `new-workspace`, `current-workspace`, `select-workspace`, `close-workspace`, `list-panels`, `list-pane-surfaces`, `close-surface`, `new-split`, and `new-pane`: control_compat legacy aliases accepted by the CLI/backend and routed to the structured workspace, surface, and pane methods above. `new-pane` currently creates a split-compatible shared work-panel surface rather than a separate hidden pane container.
+- `surface.move`, `surface.reorder`, and `surface.split_off`: reorder visible surfaces or detach a split surface inside the shared main work panel. Moving a surface to a target pane maps to the existing split attach behavior.
+- `surface.refresh`, `surface.health`, and `surface.trigger_flash`: refit visible terminal surfaces, report surface render readiness, and visually flash/focus a selected surface.
+- `workspace.reorder`, `workspace.reorder_many`, and `workspace.equalize_splits`: reorder shared-work-panel surfaces or refit equal-size split panes. `workspace.move_to_window` is recognized but returns `unsupported=true` because aiopsterm currently exposes one main work panel per app window.
+- `workspace.prompt_submit`: writes the prompt text to the selected terminal surface through the existing terminal command security path. It may return `needs-approval` when the command security policy requires confirmation.
 
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 
