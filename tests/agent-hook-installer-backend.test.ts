@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentHookInstallerSource } from '../src/shared/preload'
 
 type AgentHookInstallerBackend = {
@@ -12,12 +15,30 @@ type AgentHookInstallerBackend = {
   ) => { config: Record<string, unknown>; removed: number }
   installCodexHooksFeature: (content: string) => string
   uninstallCodexHooksFeature: (content: string) => string
+  configureAgentHookInstallerRuntime: (config?: {
+    getHomeDir?: () => string
+    getEnv?: () => NodeJS.ProcessEnv
+    getAgentHookScriptPath?: () => string
+  }) => void
+  installAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
+  uninstallAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
   __testing: {
     hookDefinitions: Array<{ source: AgentHookInstallerSource }>
+    fileHookMarker: string
     ownedMarker: string
+    mergeOpenCodePluginRegistration: (existing: Record<string, unknown>, install: boolean) => Record<string, unknown>
+    pluginFileContentFor: (definition: unknown) => string
+    rovoDevYamlHooksBlock: (definition: unknown, scriptPath: string) => string
     installCodexHookTrust: (content: string, configPath: string, hooks: Record<string, unknown>) => string
   }
 }
+
+const cleanupDirs: string[] = []
+
+afterEach(async () => {
+  await Promise.all(cleanupDirs.map((dir) => rm(dir, { recursive: true, force: true })))
+  cleanupDirs.length = 0
+})
 
 const loadBackend = async () => {
   const modulePath = '../src/main/backend/agentHookInstaller'
@@ -116,6 +137,84 @@ describe('agent hook installer backend', () => {
     const geminiResult = mergeAgentHookJson({}, gemini, '/opt/aiopsterm/aiopsterm-agent-hook.js', true)
     const geminiHooks = geminiResult.config.hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>
     expect(geminiHooks.SessionStart[0].hooks[0].command).toBe(agentHookCommandFor('gemini', 'SessionStart', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
+  })
+
+  it('exposes control_compat-style non-browser agent installers', async () => {
+    const { __testing } = await loadBackend()
+    expect(__testing.hookDefinitions.map((definition) => definition.source)).toEqual(
+      expect.arrayContaining(['opencode', 'amp', 'pi', 'omp', 'kiro', 'rovodev'])
+    )
+  })
+
+  it('installs Kiro agent JSON hooks with timeout_ms entries', async () => {
+    const { __testing, agentHookCommandFor, mergeAgentHookJson } = await loadBackend()
+    const kiro = __testing.hookDefinitions.find((definition) => definition.source === 'kiro')!
+
+    const result = mergeAgentHookJson({}, kiro, '/opt/aiopsterm/aiopsterm-agent-hook.js', true)
+    const hooks = result.config.hooks as Record<string, Array<{ command: string; timeout_ms: number }>>
+
+    expect(result.config).toEqual(
+      expect.objectContaining({
+        name: 'aiopsterm',
+        description: expect.stringContaining('aiopsterm'),
+        tools: ['*']
+      })
+    )
+    expect(hooks.agentSpawn[0]).toEqual({
+      command: agentHookCommandFor('kiro', 'SessionStart', '/opt/aiopsterm/aiopsterm-agent-hook.js'),
+      timeout_ms: 5000
+    })
+    expect(hooks.preToolUse[0].command).toBe(agentHookCommandFor('kiro', 'PreToolUse', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
+  })
+
+  it('generates marked plugin and YAML hook files for plugin-style agents', async () => {
+    const { __testing } = await loadBackend()
+    const opencode = __testing.hookDefinitions.find((definition) => definition.source === 'opencode')!
+    const amp = __testing.hookDefinitions.find((definition) => definition.source === 'amp')!
+    const rovodev = __testing.hookDefinitions.find((definition) => definition.source === 'rovodev')!
+
+    expect(__testing.pluginFileContentFor(opencode)).toContain(__testing.fileHookMarker)
+    expect(__testing.pluginFileContentFor(opencode)).toContain('source = "opencode"')
+    expect(__testing.pluginFileContentFor(amp)).toContain('source = "amp"')
+
+    const yaml = __testing.rovoDevYamlHooksBlock(rovodev, '/opt/aiopsterm/aiopsterm-agent-hook.js')
+    expect(yaml).toContain('aiopsterm-rovodev-hooks begin')
+    expect(yaml).toContain('SessionStart')
+    expect(yaml).toContain('AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1')
+  })
+
+  it('registers and unregisters the OpenCode plugin without removing user plugins', async () => {
+    const { __testing } = await loadBackend()
+    const installed = __testing.mergeOpenCodePluginRegistration({ plugin: ['user-plugin'] }, true)
+    expect(installed.plugin).toEqual(['user-plugin', './plugins/aiopsterm-session.js'])
+
+    const uninstalled = __testing.mergeOpenCodePluginRegistration(installed, false)
+    expect(uninstalled.plugin).toEqual(['user-plugin'])
+  })
+
+  it('installs and uninstalls OpenCode plugin files and registration', async () => {
+    const backend = await loadBackend()
+    const home = await mkdtemp(join(tmpdir(), 'aiopsterm-opencode-hooks-'))
+    cleanupDirs.push(home)
+    backend.configureAgentHookInstallerRuntime({
+      getHomeDir: () => home,
+      getEnv: () => ({ HOME: home, PATH: process.env.PATH || '' }),
+      getAgentHookScriptPath: () => '/opt/aiopsterm/aiopsterm-agent-hook.js'
+    })
+    try {
+      await expect(backend.installAgentHook({ source: 'opencode' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+      const pluginPath = join(home, '.config/opencode/plugins/aiopsterm-session.js')
+      const configPath = join(home, '.config/opencode/opencode.json')
+      expect(await readFile(pluginPath, 'utf-8')).toContain(backend.__testing.fileHookMarker)
+      expect(JSON.parse(await readFile(configPath, 'utf-8'))).toEqual({
+        plugin: ['./plugins/aiopsterm-session.js']
+      })
+
+      await expect(backend.uninstallAgentHook({ source: 'opencode' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+      expect(JSON.parse(await readFile(configPath, 'utf-8'))).toEqual({})
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
   })
 
   it('uses Codex-compatible fail-open hook commands and stable trust hashes', async () => {

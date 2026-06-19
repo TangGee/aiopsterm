@@ -766,9 +766,15 @@ export type AgentHookInstallerSource =
   | 'gemini'
   | 'copilot'
   | 'grok'
+  | 'opencode'
   | 'codebuddy'
   | 'factory'
   | 'qoder'
+  | 'amp'
+  | 'pi'
+  | 'omp'
+  | 'kiro'
+  | 'rovodev'
 
 export type AgentHookInstallerStatus = {
   source: AgentHookInstallerSource

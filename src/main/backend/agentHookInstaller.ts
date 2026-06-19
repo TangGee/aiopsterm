@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { access, mkdir, readFile, stat, writeFile } from 'fs/promises'
+import { access, mkdir, readFile, rm, stat, writeFile } from 'fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'path'
 import type {
   AgentHookInstallerOperationInput,
@@ -15,6 +15,7 @@ type AgentHookInstallerRuntimeConfig = {
   getAgentHookScriptPath?: () => string
   readFile?: typeof readFile
   writeFile?: typeof writeFile
+  rm?: typeof rm
   mkdir?: typeof mkdir
   access?: typeof access
   stat?: typeof stat
@@ -35,6 +36,10 @@ type AgentHookDefinition = {
   configDirEnv?: string
   configDirEnvSubpath?: string
   flatHooks?: boolean
+  fileTemplate?: 'opencode' | 'amp' | 'pi' | 'omp'
+  kiroAgentJson?: boolean
+  yamlTemplate?: 'rovodev'
+  createConfigDirIfMissing?: boolean
   events: HookCommandEvent[]
   configToml?: boolean
 }
@@ -57,6 +62,10 @@ const codexFeatureEnd = '# aiopsterm-codex-hooks-feature end'
 const codexFeaturePreviousPrefix = '# aiopsterm-codex-hooks-feature previous line: '
 const codexTrustBegin = '# aiopsterm-codex-hook-trust begin'
 const codexTrustEnd = '# aiopsterm-codex-hook-trust end'
+const fileHookMarker = 'aiopsterm-agent-plugin-v1'
+const rovoYamlBegin = '# aiopsterm-rovodev-hooks begin'
+const rovoYamlEnd = '# aiopsterm-rovodev-hooks end'
+const openCodePluginSpec = './plugins/aiopsterm-session.js'
 
 const hookDefinitions: AgentHookDefinition[] = [
   {
@@ -152,6 +161,16 @@ const hookDefinitions: AgentHookDefinition[] = [
     ]
   },
   {
+    source: 'opencode',
+    label: 'OpenCode',
+    binaryName: 'opencode',
+    configDirName: '.config/opencode',
+    configFileName: 'plugins/aiopsterm-session.js',
+    configDirEnv: 'OPENCODE_CONFIG_DIR',
+    fileTemplate: 'opencode',
+    events: []
+  },
+  {
     source: 'codebuddy',
     label: 'CodeBuddy',
     binaryName: 'codebuddy',
@@ -193,6 +212,66 @@ const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 },
       { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 }
     ]
+  },
+  {
+    source: 'amp',
+    label: 'Amp',
+    binaryName: 'amp',
+    configDirName: '.config/amp',
+    configFileName: 'plugins/aiopsterm-session.ts',
+    fileTemplate: 'amp',
+    events: []
+  },
+  {
+    source: 'pi',
+    label: 'Pi',
+    binaryName: 'pi',
+    configDirName: '.pi/agent',
+    configFileName: 'extensions/aiopsterm-session.ts',
+    configDirEnv: 'PI_CODING_AGENT_DIR',
+    fileTemplate: 'pi',
+    events: []
+  },
+  {
+    source: 'omp',
+    label: 'OMP',
+    binaryName: 'omp',
+    configDirName: '.omp/agent',
+    configFileName: 'extensions/aiopsterm-omp-session.ts',
+    configDirEnv: 'PI_CODING_AGENT_DIR',
+    fileTemplate: 'omp',
+    createConfigDirIfMissing: true,
+    events: []
+  },
+  {
+    source: 'kiro',
+    label: 'Kiro',
+    binaryName: 'kiro-cli',
+    configDirName: '.kiro/agents',
+    configFileName: 'aiopsterm.json',
+    configDirEnv: 'KIRO_HOME',
+    configDirEnvSubpath: 'agents',
+    kiroAgentJson: true,
+    events: [
+      { agentEvent: 'agentSpawn', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'userPromptSubmit', hookEvent: 'prompt_submit', timeout: 5 },
+      { agentEvent: 'stop', hookEvent: 'stop', timeout: 5 },
+      { agentEvent: 'preToolUse', hookEvent: 'PreToolUse', timeout: 5 },
+      { agentEvent: 'postToolUse', hookEvent: 'pre_tool_use', timeout: 5 }
+    ]
+  },
+  {
+    source: 'rovodev',
+    label: 'Rovo Dev',
+    binaryName: 'acli',
+    configDirName: '.rovodev',
+    configFileName: 'config.yml',
+    yamlTemplate: 'rovodev',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 }
+    ]
   }
 ]
 
@@ -202,6 +281,7 @@ export const configureAgentHookInstallerRuntime = (config: AgentHookInstallerRun
   runtimeConfig.getAgentHookScriptPath = config.getAgentHookScriptPath
   runtimeConfig.readFile = config.readFile
   runtimeConfig.writeFile = config.writeFile
+  runtimeConfig.rm = config.rm
   runtimeConfig.mkdir = config.mkdir
   runtimeConfig.access = config.access
   runtimeConfig.stat = config.stat
@@ -211,11 +291,14 @@ const getEnv = () => runtimeConfig.getEnv?.() || process.env
 const getHomeDir = () => runtimeConfig.getHomeDir?.() || getEnv().HOME || process.env.HOME || process.cwd()
 const getReadFile = () => runtimeConfig.readFile || readFile
 const getWriteFile = () => runtimeConfig.writeFile || writeFile
+const getRm = () => runtimeConfig.rm || rm
 const getMkdir = () => runtimeConfig.mkdir || mkdir
 const getAccess = () => runtimeConfig.access || access
 const getStat = () => runtimeConfig.stat || stat
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const cleanOptionalString = (value: unknown) => cleanText(value) || undefined
 
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
@@ -227,9 +310,15 @@ const normalizeSource = (value: unknown): AgentHookInstallerSource | null => {
   if (raw === 'gemini' || raw === 'gemini-cli') return 'gemini'
   if (raw === 'copilot' || raw === 'github-copilot') return 'copilot'
   if (raw === 'grok') return 'grok'
+  if (raw === 'opencode' || raw === 'open-code') return 'opencode'
   if (raw === 'codebuddy') return 'codebuddy'
   if (raw === 'factory') return 'factory'
   if (raw === 'qoder') return 'qoder'
+  if (raw === 'amp') return 'amp'
+  if (raw === 'pi') return 'pi'
+  if (raw === 'omp') return 'omp'
+  if (raw === 'kiro' || raw === 'kiro-cli') return 'kiro'
+  if (raw === 'rovodev' || raw === 'rovo' || raw === 'rovo-dev') return 'rovodev'
   return null
 }
 
@@ -310,6 +399,74 @@ const prettyJson = (value: Record<string, unknown>) => `${JSON.stringify(value, 
 
 const isOwnedHookCommand = (command: unknown) => typeof command === 'string' && command.includes(ownedMarker)
 
+const isOwnedFileHook = (content: unknown) => typeof content === 'string' && content.includes(fileHookMarker)
+
+const commandRuntimeSnippet = (source: AgentHookInstallerSource, eventExpression: string, extraArgs = '[]') => `
+const { spawnSync } = require('node:child_process')
+
+const marker = ${JSON.stringify(fileHookMarker)}
+const source = ${JSON.stringify(source)}
+const cleanText = (value) => (typeof value === 'string' ? value.trim() : '')
+const helper = () => cleanText(process.env.AIOPSTERM_AGENT_HOOK_PATH)
+const canReport = () => process.env.AIOPSTERM_MANAGED_TERMINAL === '1' && cleanText(process.env.AIOPSTERM_AGENT_SOCKET_PATH) && helper()
+const report = (event, payload = {}) => {
+  if (!canReport()) return
+  const args = [helper(), '--source', source, '--event', event, ...${extraArgs}]
+  spawnSync(process.execPath, args, {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: { ...process.env, AIOPSTERM_AGENT_HOOK_MARKER: marker },
+    timeout: 2000,
+    stdio: ['pipe', 'ignore', 'ignore']
+  })
+}
+`
+
+const pluginFileContentFor = (definition: AgentHookDefinition) => {
+  const header = `// ${fileHookMarker}\n// Installed by aiopsterm Agent Hook installer. Do not edit manually.\n`
+  if (definition.fileTemplate === 'opencode') {
+    return `${header}${commandRuntimeSnippet('opencode', 'event')}
+
+module.exports = async function aiopstermOpenCodePlugin(app) {
+  const on = app && typeof app.on === 'function' ? app.on.bind(app) : null
+  if (!on) return
+  on('session.start', (event) => report('SessionStart', event || {}))
+  on('message.part.updated', (event) => report('lifecycle', { ...(event || {}), status: 'running' }))
+  on('tool.execute.before', (event) => report('PreToolUse', event || {}))
+  on('tool.execute.after', (event) => report('stop', event || {}))
+  on('session.idle', (event) => report('lifecycle', { ...(event || {}), status: 'idle' }))
+}
+`
+  }
+  if (definition.fileTemplate === 'amp') {
+    return `${header}import type { PluginAPI } from '@ampcode/plugin'
+${commandRuntimeSnippet('amp', 'event').replace("const { spawnSync } = require('node:child_process')", "import { spawnSync } from 'node:child_process'")}
+
+export default function aiopstermAmpPlugin(amp: PluginAPI) {
+  amp.on('session.start', async (event: unknown) => report('SessionStart', event || {}))
+  amp.on('agent.start', async (event: unknown) => report('lifecycle', { ...(event as object || {}), status: 'running' }))
+  amp.on('tool.call', async (event: unknown) => report('PreToolUse', event || {}))
+  amp.on('agent.end', async (event: unknown) => report('stop', event || {}))
+}
+`
+  }
+  if (definition.fileTemplate === 'pi' || definition.fileTemplate === 'omp') {
+    const source = definition.fileTemplate
+    return `${header}import { spawnSync } from 'node:child_process'
+${commandRuntimeSnippet(source, 'event').replace("const { spawnSync } = require('node:child_process')", '')}
+
+export default function aiopstermExtension(agent: { on?: (event: string, handler: (payload: unknown) => void) => void }) {
+  if (!agent || typeof agent.on !== 'function') return
+  agent.on('session.start', (event: unknown) => report('SessionStart', event || {}))
+  agent.on('agent.start', (event: unknown) => report('lifecycle', { ...(event as object || {}), status: 'running' }))
+  agent.on('tool.call', (event: unknown) => report('PreToolUse', event || {}))
+  agent.on('agent.end', (event: unknown) => report('stop', event || {}))
+}
+`
+  }
+  throw new AgentHookInstallerError('AGENT_HOOK_TEMPLATE_UNSUPPORTED', `Agent hook template for ${definition.source} is not supported.`)
+}
+
 const hookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
   type: 'command',
   command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
@@ -324,6 +481,11 @@ const groupedHookEntry = (definition: AgentHookDefinition, event: HookCommandEve
 const flatHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
   command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
   timeout: event.timeout
+})
+
+const kiroHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
+  timeout_ms: Math.max(1, event.timeout * 1000)
 })
 
 const removeOwnedHooksFromGroups = (value: unknown) => {
@@ -378,7 +540,7 @@ export const mergeAgentHookJson = (
   let removed = 0
 
   for (const eventName of Object.keys(hooks)) {
-    const result = definition.flatHooks ? removeOwnedHooksFromFlatEntries(hooks[eventName]) : removeOwnedHooksFromGroups(hooks[eventName])
+    const result = definition.flatHooks || definition.kiroAgentJson ? removeOwnedHooksFromFlatEntries(hooks[eventName]) : removeOwnedHooksFromGroups(hooks[eventName])
     removed += result.removed
     if (Array.isArray(result.value) && result.value.length === 0) {
       delete hooks[eventName]
@@ -390,12 +552,21 @@ export const mergeAgentHookJson = (
   if (install) {
     for (const event of definition.events) {
       const existingGroups = Array.isArray(hooks[event.agentEvent]) ? (hooks[event.agentEvent] as unknown[]) : []
-      hooks[event.agentEvent] = [...existingGroups, definition.flatHooks ? flatHookEntry(definition, event, scriptPath) : groupedHookEntry(definition, event, scriptPath)]
+      hooks[event.agentEvent] = [
+        ...existingGroups,
+        definition.kiroAgentJson ? kiroHookEntry(definition, event, scriptPath) : definition.flatHooks ? flatHookEntry(definition, event, scriptPath) : groupedHookEntry(definition, event, scriptPath)
+      ]
     }
   }
 
   if (Object.keys(hooks).length) next.hooks = hooks
   else delete next.hooks
+  if (definition.flatHooks && install) next.version = typeof next.version === 'number' ? next.version : 1
+  if (definition.kiroAgentJson && install) {
+    next.name = cleanOptionalString(next.name) || 'aiopsterm'
+    next.description = cleanOptionalString(next.description) || 'aiopsterm notification and managed AI session hooks.'
+    if (!Array.isArray(next.tools)) next.tools = ['*']
+  }
   return { config: next, removed }
 }
 
@@ -573,6 +744,74 @@ const configHasOwnedHooks = (config: Record<string, unknown>) => {
   })
 }
 
+const configHasOwnedOpenCodePlugin = (config: Record<string, unknown>) =>
+  Array.isArray(config.plugin) && config.plugin.some((entry) => cleanText(entry) === openCodePluginSpec || cleanText(entry).endsWith('/plugins/aiopsterm-session.js'))
+
+const openCodeConfigPathFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = getEnv()) => join(configDirFor(definition, env), 'opencode.json')
+
+const mergeOpenCodePluginRegistration = (existing: Record<string, unknown>, install: boolean) => {
+  const next = { ...existing }
+  const plugin = (Array.isArray(next.plugin) ? next.plugin : []).filter((entry) => cleanText(entry) !== openCodePluginSpec && !cleanText(entry).endsWith('/plugins/aiopsterm-session.js'))
+  if (install) plugin.push(openCodePluginSpec)
+  if (plugin.length) next.plugin = plugin
+  else delete next.plugin
+  return next
+}
+
+const yamlScalar = (value: string) => JSON.stringify(value)
+
+export const rovoDevYamlHooksBlock = (definition: AgentHookDefinition, scriptPath: string) => {
+  const lines = [rovoYamlBegin, 'hooks:']
+  for (const event of definition.events) {
+    lines.push(`  ${event.agentEvent}:`)
+    lines.push(`    - command: ${yamlScalar(agentHookCommandFor(definition.source, event.hookEvent, scriptPath))}`)
+    lines.push(`      timeout: ${Math.max(1, event.timeout)}`)
+  }
+  lines.push(rovoYamlEnd)
+  return `${lines.join('\n')}\n`
+}
+
+const installRovoDevYaml = (content: string, definition: AgentHookDefinition, scriptPath: string) => {
+  const stripped = removeMarkedBlock(content || '', rovoYamlBegin, rovoYamlEnd).replace(/\s+$/, '')
+  const block = rovoDevYamlHooksBlock(definition, scriptPath).replace(/\s+$/, '')
+  return `${stripped}${stripped ? '\n\n' : ''}${block}\n`
+}
+
+const uninstallRovoDevYaml = (content: string) => `${removeMarkedBlock(content || '', rovoYamlBegin, rovoYamlEnd).replace(/\s+$/, '')}\n`
+
+const installFileHookDefinition = async (definition: AgentHookDefinition, scriptPath: string) => {
+  const configPath = configPathFor(definition)
+  const content = pluginFileContentFor(definition)
+  const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
+  if (existingRaw && !isOwnedFileHook(existingRaw)) {
+    throw new AgentHookInstallerError('AGENT_HOOK_CONFIG_CONFLICT', `${configPath} already exists and is not an aiopsterm-managed hook file.`)
+  }
+  await getMkdir()(dirname(configPath), { recursive: true })
+  await getWriteFile()(configPath, content, 'utf-8')
+  if (definition.source === 'opencode') {
+    const configJsonPath = openCodeConfigPathFor(definition)
+    const configRaw = (await pathExists(configJsonPath)) ? String(await getReadFile()(configJsonPath, 'utf-8')) : ''
+    const existing = parseConfigJson(configRaw, configJsonPath)
+    await getWriteFile()(configJsonPath, prettyJson(mergeOpenCodePluginRegistration(existing, true)), 'utf-8')
+  }
+}
+
+const uninstallFileHookDefinition = async (definition: AgentHookDefinition) => {
+  const configPath = configPathFor(definition)
+  if (await pathExists(configPath)) {
+    const existingRaw = String(await getReadFile()(configPath, 'utf-8'))
+    if (isOwnedFileHook(existingRaw)) await getRm()(configPath, { force: true })
+  }
+  if (definition.source === 'opencode') {
+    const configJsonPath = openCodeConfigPathFor(definition)
+    if (await pathExists(configJsonPath)) {
+      const configRaw = String(await getReadFile()(configJsonPath, 'utf-8'))
+      const existing = parseConfigJson(configRaw, configJsonPath)
+      await getWriteFile()(configJsonPath, prettyJson(mergeOpenCodePluginRegistration(existing, false)), 'utf-8')
+    }
+  }
+}
+
 const statusForDefinition = async (definition: AgentHookDefinition): Promise<AgentHookInstallerStatus> => {
   const env = getEnv()
   const configPath = configPathFor(definition, env)
@@ -595,8 +834,24 @@ const statusForDefinition = async (definition: AgentHookDefinition): Promise<Age
 
   try {
     const configRaw = status.configExists ? String(await getReadFile()(configPath, 'utf-8')) : ''
-    const config = parseConfigJson(configRaw, configPath)
-    status.installed = configHasOwnedHooks(config)
+    if (definition.fileTemplate) {
+      status.installed = isOwnedFileHook(configRaw)
+      if (definition.source === 'opencode') {
+        const configJsonPath = openCodeConfigPathFor(definition, env)
+        status.extraConfigPath = configJsonPath
+        if (await pathExists(configJsonPath)) {
+          const config = parseConfigJson(String(await getReadFile()(configJsonPath, 'utf-8')), configJsonPath)
+          status.installed = status.installed && configHasOwnedOpenCodePlugin(config)
+        } else {
+          status.installed = false
+        }
+      }
+    } else if (definition.yamlTemplate) {
+      status.installed = configRaw.includes(rovoYamlBegin) && configRaw.includes(rovoYamlEnd)
+    } else {
+      const config = parseConfigJson(configRaw, configPath)
+      status.installed = configHasOwnedHooks(config)
+    }
   } catch (error) {
     status.error = error instanceof Error ? error.message : String(error)
   }
@@ -631,6 +886,17 @@ const installDefinition = async (definition: AgentHookDefinition): Promise<Agent
   if (!scriptPath) throw new AgentHookInstallerError('AGENT_HOOK_SCRIPT_MISSING', 'Agent hook helper path is unavailable.')
   const configPath = configPathFor(definition)
   await getMkdir()(dirname(configPath), { recursive: true })
+  if (definition.fileTemplate) {
+    await installFileHookDefinition(definition, scriptPath)
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'install', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
+  if (definition.yamlTemplate) {
+    const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
+    await getWriteFile()(configPath, installRovoDevYaml(existingRaw, definition, scriptPath), 'utf-8')
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'install', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
   const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
   const existing = parseConfigJson(existingRaw, configPath)
   const merged = mergeAgentHookJson(existing, definition, scriptPath, true)
@@ -650,6 +916,19 @@ const installDefinition = async (definition: AgentHookDefinition): Promise<Agent
 
 const uninstallDefinition = async (definition: AgentHookDefinition): Promise<AgentHookInstallerOperationResult> => {
   const configPath = configPathFor(definition)
+  if (definition.fileTemplate) {
+    await uninstallFileHookDefinition(definition)
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'uninstall', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
+  if (definition.yamlTemplate) {
+    if (await pathExists(configPath)) {
+      const existingRaw = String(await getReadFile()(configPath, 'utf-8'))
+      await getWriteFile()(configPath, uninstallRovoDevYaml(existingRaw), 'utf-8')
+    }
+    const snapshot = await listAgentHookInstallers()
+    return { ok: true, data: { operation: 'uninstall', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
+  }
   if (await pathExists(configPath)) {
     const existingRaw = String(await getReadFile()(configPath, 'utf-8'))
     const existing = parseConfigJson(existingRaw, configPath)
@@ -701,9 +980,14 @@ export const uninstallAgentHook = async (input: AgentHookInstallerOperationInput
 
 export const __testing = {
   ownedMarker,
+  fileHookMarker,
   hookDefinitions,
   configPathFor,
   configDirFor,
+  openCodeConfigPathFor,
+  mergeOpenCodePluginRegistration,
+  pluginFileContentFor,
+  rovoDevYamlHooksBlock,
   isOwnedHookCommand,
   removeOwnedHooksFromGroups,
   installCodexHookTrust

@@ -38,11 +38,13 @@ Settings -> AI Preferences includes an `Agent Hook 安装器` section.
 - Codex installation also writes matching `hooks.state."<hooks.json path>:<event>:<group>:<handler>"` trust entries into `config.toml`. This is required because Codex disables user hooks whose current hash is new or modified. The trust hash follows Codex's command-hook identity format, including the normalized event label, command, timeout, type, and matcher when present.
 - Codex `config.toml` migration handles both `[features] hooks = ...` and dotted `features.hooks = ...` syntax, and removes the legacy `codex_hooks` key so the generated TOML does not conflict with newer Codex releases.
 - Claude Code installation merges aiopsterm-owned commands into `~/.claude/settings.json`.
-- JSON-based installers are also available for Cursor, Gemini, Copilot, Grok, CodeBuddy, Factory, and Qoder. They follow the target agent's flat or nested hook JSON shape and still only insert aiopsterm-owned commands.
+- JSON-based installers are also available for Cursor, Gemini, Copilot, Grok, CodeBuddy, Factory, Qoder, and Kiro. They follow the target agent's flat, nested, or Kiro agent hook JSON shape and still only insert aiopsterm-owned commands.
+- Plugin/extension installers are available for OpenCode, Amp, Pi, and OMP. They write aiopsterm-marked plugin or extension files that report lifecycle and tool events only when the agent is running inside an aiopsterm-managed local terminal. OpenCode installation also registers the generated plugin in `opencode.json` and removes only that registration on uninstall.
+- Rovo Dev installation writes an aiopsterm-marked block into `~/.rovodev/config.yml`; uninstall removes only that marked block.
 - Install/reinstall first removes only commands containing the aiopsterm marker, then appends the current helper command.
 - Uninstall removes only aiopsterm-owned hook commands and preserves user hooks in the same event group.
 - Hook commands print `{}` and exit zero outside an aiopsterm-managed local terminal, so external terminals keep their native Codex/Claude behavior.
-- Plugin/YAML-style agents such as OpenCode, Amp, Pi, OMP, Antigravity, Kiro, Hermes Agent, and Rovo Dev are recognized as event sources when they report compatible events, but aiopsterm does not yet install their custom plugin/YAML hook files automatically.
+- Antigravity and Hermes Agent remain recognized event sources when they report compatible events, but aiopsterm does not yet install their custom hook files automatically.
 
 To verify against real local agent binaries, run:
 
