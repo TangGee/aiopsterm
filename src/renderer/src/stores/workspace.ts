@@ -8454,17 +8454,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const managedAiSessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
 
-  const managedAiSessionStateForEvent = (event: AiAgentSessionEventName, previous: ManagedAiSessionState = 'unknown', lifecycle?: ManagedAiSession['agentLifecycle']): ManagedAiSessionState => {
+  const managedAiSessionNeedsInputForEvent = (event: AiAgentSessionEvent) => {
+    const requestKind = managedAiRequestKindForEvent(event)
+    const decisionMode = managedAiDecisionModeForEvent(event)
+    if (event.source === 'codex' && event.event === 'permission_request') return false
+    if (requestKind === 'telemetry') return false
+    if (decisionMode === 'blocking') return true
+    if (requestKind === 'notification') return true
+    return event.actionable === true
+  }
+
+  const managedAiSessionStateForEvent = (event: AiAgentSessionEvent, previous: ManagedAiSessionState = 'unknown'): ManagedAiSessionState => {
+    const lifecycle = event.agentLifecycle
     if (lifecycle === 'running') return 'working'
     if (lifecycle === 'idle') return 'idle'
     if (lifecycle === 'needsInput') return 'needsInput'
     if (lifecycle === 'ended') return 'ended'
     if (lifecycle === 'unknown') return 'unknown'
-    if (event === 'session_start') return 'idle'
-    if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
-    if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
-    if (event === 'stop') return 'idle'
-    if (event === 'session_end') return 'ended'
+    if (event.event === 'session_start') return 'idle'
+    if (event.event === 'prompt_submit' || event.event === 'pre_tool_use') return 'working'
+    if (event.event === 'permission_request' || event.event === 'question' || event.event === 'notification') return managedAiSessionNeedsInputForEvent(event) ? 'needsInput' : 'working'
+    if (event.event === 'stop') return 'idle'
+    if (event.event === 'session_end') return 'ended'
     return previous
   }
 
@@ -8600,7 +8611,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       source: event.source,
       title: existing?.userTitle || existing?.title || event.title || event.source,
       summary: event.summary || existing?.summary || '',
-      state: managedAiSessionStateForEvent(event.event, existing?.state, event.agentLifecycle),
+      state: managedAiSessionStateForEvent(event, existing?.state),
       lastEvent: event.event,
       lastActivityAt: event.receivedAt,
       createdAt: existing?.createdAt || event.receivedAt,

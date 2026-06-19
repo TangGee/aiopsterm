@@ -28,14 +28,14 @@ node "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
 
 The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. In installed fail-open mode it still waits for aiopsterm to acknowledge the socket event before returning, so the agent keeps running while the notification is not lost. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
 
-Claude Code `PermissionRequest` and `AskUserQuestion` hooks are actionable. The installed command passes `--wait-decision`, so the helper can wait up to roughly two minutes for the AI session panel to reply, then prints Claude's native `hookSpecificOutput` JSON. Timeout or missing aiopsterm still falls back to `{}` so Claude's own terminal prompt remains usable. Codex hook-level `PermissionRequest` remains telemetry because stock Codex performs its own approval flow outside the hook response path.
+Claude Code `PermissionRequest` and `AskUserQuestion` hooks are actionable. The installed command passes `--wait-decision`, so the helper can wait up to roughly two minutes for the AI session panel to reply, then prints Claude's native `hookSpecificOutput` JSON. Timeout or missing aiopsterm still falls back to `{}` so Claude's own terminal prompt remains usable. Codex hook-level `PermissionRequest` remains timeline visibility because stock Codex performs its own approval flow outside the hook response path. It is shown in the AI session list as local handling, but it does not create an unread bell item or desktop approval notification.
 
 aiopsterm normalizes hook activity into Feed-style request semantics before it stores or displays a session:
 
 - `requestKind`: `permission`, `question`, `plan`, `notification`, or `telemetry`
 - `decisionMode`: `blocking`, `local`, or `telemetry`
 
-Claude Code requests launched with `--wait-decision` can be `blocking`, which lets the AI session panel answer the waiting hook. Codex stock hooks remain local visibility or telemetry; aiopsterm records and routes them but does not preempt Codex's native approval UI.
+Claude Code requests launched with `--wait-decision` can be `blocking`, which lets the AI session panel answer the waiting hook. Codex stock hooks remain local visibility or telemetry; aiopsterm records and routes them but does not preempt Codex's native approval UI or mark the session as needing user input.
 
 ## Hook Installer
 
@@ -158,7 +158,7 @@ The preload boundary exposes:
 - `openManagedAiNotification({ id, source, sessionId })`
 - `jumpToUnreadManagedAiNotification()`
 
-Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Codex hook approvals remain telemetry/visibility unless the agent itself asks through its native approval path.
+Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Stock Codex `PermissionRequest` hooks remain local visibility only: they can be inspected and focused from the AI session manager, but they are not unread notifications and are not answered by aiopsterm.
 
 The notification API is derived from managed session records rather than a separate notification store. Notification ids use `managed-ai:<source>:<sessionId>`. A session is unread while its state is `needsInput` and it has not been handled. `open` and `jump` return a focus request for the renderer to select the AI session panel and the owning visible terminal. `dismiss` only removes read notifications; unread notifications must be marked read first so an active approval or question is not hidden accidentally. `clear` removes all managed AI notification records, matching control_compat's bulk clear semantics, but it still does not kill the owning terminal or agent process.
 
@@ -179,8 +179,8 @@ Auto-naming emits `managed_ai.session.renamed` with `auto: true` when it changes
 - Details also show normalized agent lifecycle, agent PID/PPID/PGID, terminal PID, and latest terminal activity when those facts are available from hooks or the local terminal backend.
 - When a session has a `resumeCommand`, the detail header shows a resume action. Clicking it writes the resume command into the owning aiopsterm local-connection terminal. It does not create a new terminal, close an existing terminal, or touch SSH connections.
 - Manual resume uses the same terminal command security pipeline as direct command execution. If the configured security policy requires approval, the normal terminal approval prompt appears before anything is written to the shell.
-- `permission`, `question`, `plan`, and `notification` request kinds create top-bar bell entries. The bell category is derived from `requestKind`, so a plan confirmation such as Claude Code `ExitPlanMode` is shown as a plan item rather than a generic approval.
-- The main process also emits a desktop notification for `permission_request`, `question`, and `notification` events when Electron notifications are supported.
+- Only requests that genuinely need user attention create top-bar bell entries: blocking Claude Code permission/question/plan requests, actionable local questions/plans, and notification requests. Stock Codex `PermissionRequest` hooks stay as timeline rows and do not increment the bell.
+- The main process emits a desktop notification only for those same attention-worthy events when Electron notifications are supported.
 - Clicking the bell focuses the AI session manager and selects the owning terminal when `panelId` or `terminalSessionId` is known. It does not mark the session handled.
 - The AI session row stays selected until the user explicitly marks that pending item handled. Handling clears the unread count and lets the next bell click move to the next pending managed session.
 - The owning terminal tab and pane receive a subtle highlight while a managed AI session needs attention.

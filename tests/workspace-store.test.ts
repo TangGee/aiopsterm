@@ -408,7 +408,7 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('没有待处理的 AI 消息')
   })
 
-  it('tracks managed AI session events and routes the attention bell through the AI session panel to the owning terminal', () => {
+  it('keeps stock Codex permission hook telemetry out of managed AI attention', () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {
       id: 'terminal-session-1',
@@ -426,24 +426,64 @@ describe('workspace store', () => {
       panelId: 'panel-main',
       terminalSessionId: 'terminal-session-1',
       cwd: '/work/project',
+      requestKind: 'permission',
+      decisionMode: 'local',
+      actionable: false,
+      receivedAt: 500
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        state: 'working',
+        requestKind: 'permission',
+        decisionMode: 'local',
+        actionable: false
+      })
+    )
+    expect(store.managedAiNeedsInputSessions).toHaveLength(0)
+    expect(store.aiAttentionUnreadCount).toBe(0)
+    expect(store.currentAiAttentionItem).toBeNull()
+  })
+
+  it('tracks managed AI session events and routes real attention through the AI session panel to the owning terminal', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-session-1',
+      title: 'Deploy approval',
+      summary: 'Approve npm test',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
       receivedAt: 500
     })
 
     expect(store.managedAiNeedsInputSessions).toHaveLength(1)
     expect(store.aiAttentionUnreadCount).toBe(1)
     expect(store.currentAiAttentionItem).toMatchObject({
-      id: 'managed-ai:codex:codex-session-1',
+      id: 'managed-ai:claude-code:claude-session-1',
       kind: 'approval'
     })
 
     const item = store.jumpToNextAiAttention()
 
-    expect(item?.id).toBe('managed-ai:codex:codex-session-1')
+    expect(item?.id).toBe('managed-ai:claude-code:claude-session-1')
     expect(store.mode).toBe('terminal')
     expect(store.activeModule).toBe('aiSessions')
     expect(store.activePanelId).toBe('panel-main')
-    expect(store.selectedManagedAiSessionKey).toBe('codex:codex-session-1')
-    expect(store.managedAiSessionFocusRequest.session?.id).toBe('codex-session-1')
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-session-1')
+    expect(store.managedAiSessionFocusRequest.session?.id).toBe('claude-session-1')
   })
 
   it('classifies managed AI plan requests as plan attention items', () => {
@@ -491,13 +531,16 @@ describe('workspace store', () => {
     })
 
     store.upsertManagedAiSession({
-      source: 'codex',
+      source: 'claude-code',
       event: 'permission_request',
-      sessionId: 'codex-first',
+      sessionId: 'claude-first',
       title: 'First approval',
       summary: 'Approve first',
       panelId: firstPanelId,
       terminalSessionId: 'terminal-first',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
       receivedAt: 100
     })
     store.upsertManagedAiSession({
@@ -508,15 +551,18 @@ describe('workspace store', () => {
       summary: 'Answer second',
       panelId: secondPanelId,
       terminalSessionId: 'terminal-second',
+      requestKind: 'question',
+      decisionMode: 'blocking',
+      actionable: true,
       receivedAt: 200
     })
 
     expect(store.aiAttentionUnreadCount).toBe(2)
-    expect(store.jumpToNextAiAttention()?.id).toBe('managed-ai:codex:codex-first')
+    expect(store.jumpToNextAiAttention()?.id).toBe('managed-ai:claude-code:claude-first')
     expect(store.activePanelId).toBe(firstPanelId)
-    expect(store.selectedManagedAiSessionKey).toBe('codex:codex-first')
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-first')
 
-    expect(store.markManagedAiSessionHandled('codex', 'codex-first')).toBe(true)
+    expect(store.markManagedAiSessionHandled('claude-code', 'claude-first')).toBe(true)
     expect(store.aiAttentionUnreadCount).toBe(1)
     expect(store.selectedManagedAiSessionKey).toBe('')
 
@@ -564,6 +610,9 @@ describe('workspace store', () => {
       summary: 'Choose option',
       panelId: 'panel-main',
       terminalSessionId: 'terminal-session-1',
+      requestKind: 'question',
+      decisionMode: 'blocking',
+      actionable: true,
       receivedAt: 300
     })
     expect(store.aiAttentionUnreadCount).toBe(1)

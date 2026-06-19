@@ -488,13 +488,16 @@ test('managed AI session notifications flow through real local terminal hooks', 
           transcript_path: `/tmp/aiopsterm-codex-${runId}.jsonl`
       })
     )
-    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
-    await page.getByTestId('ai-attention-bell').click()
+    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
+    await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
     await expect(page.locator('.ai-sessions-panel')).toBeVisible()
     const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex · aiopsterm-codex-project-${runId}` })
-    await expect(codexRow).toContainText('待处理')
+    await expect(codexRow).toContainText('运行中')
+    await expect(codexRow).toContainText('权限审批')
     await expect(codexRow).toContainText(`shell: echo codex approval`)
     await expect(codexRow).toContainText(`/tmp/aiopsterm-codex-project-${runId}`)
+    await codexRow.click()
+    await expect(page.locator('.ai-session-detail')).toContainText('本地处理')
     await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toHaveClass(/active/)
     await sendTerminalCommand(
       runInstalledHookCommand(codexStopCommand, {
@@ -514,10 +517,8 @@ test('managed AI session notifications flow through real local terminal hooks', 
         transcript_path: `/tmp/aiopsterm-codex-${runId}.jsonl`
       })
     )
-    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
-    await codexRow.locator('.ai-session-handle').click()
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(codexRow).toContainText('空闲')
+    await expect(codexRow).toContainText('运行中')
 
     await sendTerminalCommand(
       runInstalledHookCommand(claudeQuestionCommand, {

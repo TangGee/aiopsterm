@@ -495,7 +495,6 @@ describe('external Codex MCP bridge runtime', () => {
           event: 'PermissionRequest',
           sessionId: 'codex-managed-1',
           requestId: 'approve-1',
-          actionable: true,
           title: 'Codex · api-service',
           summary: 'approve npm test',
           cwd: '/work/api-service',
@@ -524,17 +523,35 @@ describe('external Codex MCP bridge runtime', () => {
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
+          count: 0,
+          needsInputCount: 0,
+          sessions: []
+        })
+      })
+    )
+
+    const allSessionsResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_ai_sessions',
+      token: 'test-token',
+      params: { includeEvents: true }
+    })
+    expect(allSessionsResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
           count: 1,
-          needsInputCount: 1,
+          needsInputCount: 0,
           sessions: [
             expect.objectContaining({
               source: 'codex',
               sessionId: 'codex-managed-1',
               title: 'Codex · api-service',
               summary: 'approve npm test',
-              needsInput: true,
+              state: 'working',
+              needsInput: false,
               requestKind: 'permission',
               decisionMode: 'local',
+              actionable: false,
               panelId: 'panel-1',
               terminalSessionId: 'terminal-1',
               eventCount: 1,
@@ -572,7 +589,7 @@ describe('external Codex MCP bridge runtime', () => {
         data: expect.objectContaining({
           session: expect.objectContaining({
             sessionId: 'codex-managed-1',
-            state: 'idle',
+            state: 'working',
             needsInput: false
           }),
           needsInputCount: 0
@@ -599,7 +616,6 @@ describe('external Codex MCP bridge runtime', () => {
         event: 'PermissionRequest',
         sessionId: 'codex-event-cursor-1',
         requestId: 'cursor-approve-1',
-        actionable: true,
         summary: 'approve build',
         panelId: 'panel-cursor',
         terminalSessionId: 'terminal-cursor',
@@ -607,7 +623,6 @@ describe('external Codex MCP bridge runtime', () => {
       },
       null
     )
-    await agentSessions.replyManagedAiSession({ source: 'codex', sessionId: 'codex-event-cursor-1', kind: 'handled' })
 
     const response = await bridge.handleExternalCodexMcpBridgeRequest({
       method: 'list_ai_session_events',
@@ -622,7 +637,7 @@ describe('external Codex MCP bridge runtime', () => {
           boot_id: expect.any(String),
           after_seq: afterSeq,
           latest_seq: expect.any(Number),
-          count: 2,
+          count: 1,
           events: [
             expect.objectContaining({
               name: 'agent.hook.PermissionRequest',
@@ -630,17 +645,9 @@ describe('external Codex MCP bridge runtime', () => {
               source: 'codex',
               payload: expect.objectContaining({
                 sessionId: 'codex-event-cursor-1',
-                state: 'needsInput',
+                state: 'working',
                 requestKind: 'permission',
                 decisionMode: 'local'
-              })
-            }),
-            expect.objectContaining({
-              name: 'managed_ai.decision.created',
-              category: 'managed-ai',
-              payload: expect.objectContaining({
-                sessionId: 'codex-event-cursor-1',
-                decisionKind: 'handled'
               })
             })
           ]

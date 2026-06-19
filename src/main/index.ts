@@ -690,6 +690,14 @@ const sendCodexData = (owner: BrowserWindow, id: string, chunk: string | Buffer)
   sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(id, chunk))
 }
 
+const aiAgentEventNeedsAttention = (event: AiAgentSessionEvent) => {
+  if (event.source === 'codex' && event.event === 'permission_request') return false
+  if (event.requestKind === 'telemetry') return false
+  if (event.decisionMode === 'blocking') return true
+  if (event.requestKind === 'notification') return true
+  return event.actionable === true
+}
+
 const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
   logRuntimeEvent('info', 'ai-agent.event', {
     source: event.source,
@@ -699,7 +707,7 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
     terminalSessionId: event.terminalSessionId
   })
   broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
-  if (!['permission_request', 'question', 'notification'].includes(event.event)) return
+  if (!aiAgentEventNeedsAttention(event)) return
   if (!Notification.isSupported()) return
   const notification = new Notification({
     title: event.title || 'AI session needs attention',

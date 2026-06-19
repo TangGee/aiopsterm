@@ -727,16 +727,19 @@ describe('AppShell', () => {
       cwd: '/work/project'
     })
     store.upsertManagedAiSession({
-      source: 'codex',
+      source: 'claude-code',
       event: 'permission_request',
-      sessionId: 'codex-session-1',
+      sessionId: 'claude-session-1',
       title: 'Deploy approval',
       summary: 'Approve npm test',
       panelId: 'panel-main',
       terminalSessionId: 'terminal-session-1',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
       receivedAt: 100
     })
-    store.focusManagedAiSession('codex-session-1')
+    store.focusManagedAiSession('claude-session-1')
 
     const wrapper = mount(AiSessionsPanel, {
       global: {

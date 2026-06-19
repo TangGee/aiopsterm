@@ -266,7 +266,7 @@
             :key="event.id"
             class="ai-session-event"
           >
-            <span :class="`ai-session-state state-${eventState(event.event)}`"></span>
+            <span :class="`ai-session-state state-${eventState(event)}`"></span>
             <div>
               <strong>{{ eventLabel(event.event) }}</strong>
               <small>{{ formatTime(event.receivedAt) }} · {{ requestKindLabel(event.requestKind) }} · {{ decisionModeLabel(event.decisionMode) }}</small>
@@ -386,10 +386,18 @@ const eventLabel = (event: AiAgentSessionEventName) => {
   return '会话结束'
 }
 
-const eventState = (event: AiAgentSessionEventName): ManagedAiSessionState => {
-  if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
-  if (event === 'prompt_submit' || event === 'pre_tool_use' || event === 'lifecycle') return 'working'
-  if (event === 'session_end') return 'ended'
+const timelineEventNeedsInput = (event: ManagedAiSession['events'][number]) => {
+  if (event.source === 'codex' && event.event === 'permission_request') return false
+  if (event.requestKind === 'telemetry') return false
+  if (event.decisionMode === 'blocking') return true
+  if (event.requestKind === 'notification') return true
+  return event.actionable === true
+}
+
+const eventState = (event: ManagedAiSession['events'][number]): ManagedAiSessionState => {
+  if (event.event === 'permission_request' || event.event === 'question' || event.event === 'notification') return timelineEventNeedsInput(event) ? 'needsInput' : 'working'
+  if (event.event === 'prompt_submit' || event.event === 'pre_tool_use' || event.event === 'lifecycle') return 'working'
+  if (event.event === 'session_end') return 'ended'
   return 'idle'
 }
 

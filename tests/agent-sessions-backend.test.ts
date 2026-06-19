@@ -145,6 +145,54 @@ describe('agent session backend', () => {
     })
   })
 
+  it('keeps stock Codex permission hooks as timeline telemetry instead of pending attention', async () => {
+    const { configureAiAgentSessionStore, listManagedAiNotifications, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-codex-telemetry-')))
+
+    expect(
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'PermissionRequest',
+          sessionId: 'codex-telemetry-1',
+          requestId: 'codex-request-1',
+          title: 'Codex · api-service',
+          summary: 'approve npm test',
+          cwd: '/work/api-service',
+          receivedAt: 150
+        },
+        null
+      )
+    ).toEqual(expect.objectContaining({ ok: true }))
+
+    const sessionsResponse = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    expect(sessionsResponse).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sessions: [
+            expect.objectContaining({
+              id: 'codex-telemetry-1',
+              state: 'working',
+              requestKind: 'permission',
+              decisionMode: 'local',
+              actionable: false
+            })
+          ]
+        })
+      })
+    )
+    expect(sessionsResponse.data?.sessions?.[0]).not.toHaveProperty('pendingRequestId')
+    await expect(listManagedAiNotifications({ unread: true })).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          count: 0,
+          unreadCount: 0,
+          notifications: []
+        })
+      })
+    )
+  })
+
   it('classifies ExitPlanMode as plan input without treating Codex hook telemetry as blocking', async () => {
     const { normalizeAiAgentSessionEventInput } = await loadBackend()
     expect(
@@ -169,7 +217,7 @@ describe('agent session backend', () => {
         requestKind: 'plan',
         decisionMode: 'local',
         toolName: 'ExitPlanMode',
-        actionable: true
+        actionable: false
       })
     })
   })
@@ -592,12 +640,13 @@ describe('agent session backend', () => {
 
     publishAiAgentSessionEvent(
       {
-        source: 'codex',
+        source: 'claude-code',
         event: 'PermissionRequest',
-        sessionId: 'codex-notification-1',
+        sessionId: 'claude-notification-1',
         requestId: 'approve-notification-1',
+        waitForDecision: true,
         actionable: true,
-        title: 'Codex · api-service',
+        title: 'Claude Code · api-service',
         summary: 'approve npm test',
         cwd: '/work/api-service',
         panelId: 'panel-notification',
@@ -608,9 +657,9 @@ describe('agent session backend', () => {
     )
     publishAiAgentSessionEvent(
       {
-        source: 'claude-code',
+        source: 'gemini',
         event: 'Stop',
-        sessionId: 'claude-notification-1',
+        sessionId: 'gemini-notification-1',
         summary: 'turn complete',
         cwd: '/work/ops',
         receivedAt: 650
@@ -626,10 +675,10 @@ describe('agent session backend', () => {
           unreadCount: 1,
           notifications: [
             expect.objectContaining({
-              id: 'managed-ai:codex:codex-notification-1',
-              source: 'codex',
-              sessionId: 'codex-notification-1',
-              title: 'Codex · api-service',
+              id: 'managed-ai:claude-code:claude-notification-1',
+              source: 'claude-code',
+              sessionId: 'claude-notification-1',
+              title: 'Claude Code · api-service',
               summary: 'approve npm test',
               read: false,
               isRead: false,
@@ -638,7 +687,7 @@ describe('agent session backend', () => {
               terminalSessionId: 'terminal-notification'
             }),
             expect.objectContaining({
-              id: 'managed-ai:claude-code:claude-notification-1',
+              id: 'managed-ai:gemini:gemini-notification-1',
               read: true,
               needsInput: false
             })
@@ -651,18 +700,18 @@ describe('agent session backend', () => {
         ok: true,
         data: expect.objectContaining({
           count: 1,
-          notifications: [expect.objectContaining({ id: 'managed-ai:codex:codex-notification-1' })]
+          notifications: [expect.objectContaining({ id: 'managed-ai:claude-code:claude-notification-1' })]
         })
       })
     )
 
-    await expect(openManagedAiNotification({ id: 'managed-ai:codex:codex-notification-1' })).resolves.toEqual(
+    await expect(openManagedAiNotification({ id: 'managed-ai:claude-code:claude-notification-1' })).resolves.toEqual(
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
           focusRequest: {
-            source: 'codex',
-            sessionId: 'codex-notification-1',
+            source: 'claude-code',
+            sessionId: 'claude-notification-1',
             panelId: 'panel-notification',
             terminalSessionId: 'terminal-notification'
           },
@@ -671,7 +720,7 @@ describe('agent session backend', () => {
       })
     )
 
-    await expect(dismissManagedAiNotification({ id: 'managed-ai:codex:codex-notification-1' })).resolves.toEqual(
+    await expect(dismissManagedAiNotification({ id: 'managed-ai:claude-code:claude-notification-1' })).resolves.toEqual(
       expect.objectContaining({
         ok: false,
         errorCode: 'MANAGED_AI_NOTIFICATION_UNREAD'
@@ -681,11 +730,11 @@ describe('agent session backend', () => {
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
-          focusRequest: expect.objectContaining({ sessionId: 'codex-notification-1' })
+          focusRequest: expect.objectContaining({ sessionId: 'claude-notification-1' })
         })
       })
     )
-    await expect(markManagedAiNotificationRead({ id: 'managed-ai:codex:codex-notification-1' })).resolves.toEqual(
+    await expect(markManagedAiNotificationRead({ id: 'managed-ai:claude-code:claude-notification-1' })).resolves.toEqual(
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
@@ -715,9 +764,10 @@ describe('agent session backend', () => {
 
     publishAiAgentSessionEvent(
       {
-        source: 'codex',
+        source: 'claude-code',
         event: 'PermissionRequest',
-        sessionId: 'codex-notification-clear-1',
+        sessionId: 'claude-notification-clear-1',
+        waitForDecision: true,
         actionable: true,
         summary: 'approve deploy',
         receivedAt: 710
@@ -774,10 +824,11 @@ describe('agent session backend', () => {
 
     publishAiAgentSessionEvent(
       {
-        source: 'codex',
+        source: 'claude-code',
         event: 'PermissionRequest',
-        sessionId: 'codex-audit-1',
+        sessionId: 'claude-audit-1',
         requestId: 'request-1',
+        waitForDecision: true,
         actionable: true,
         cwd: '/work/project',
         summary: 'approve shell command',
@@ -785,10 +836,10 @@ describe('agent session backend', () => {
       },
       null
     )
-    await replyManagedAiSession({ source: 'codex', sessionId: 'codex-audit-1', kind: 'handled' })
-    await renameManagedAiSession({ source: 'codex', sessionId: 'codex-audit-1', title: 'Audit Session' })
+    await replyManagedAiSession({ source: 'claude-code', sessionId: 'claude-audit-1', kind: 'handled' })
+    await renameManagedAiSession({ source: 'claude-code', sessionId: 'claude-audit-1', title: 'Audit Session' })
     await bulkManagedAiSessions({ operation: 'mark-handled' })
-    await clearManagedAiSession({ source: 'codex', sessionId: 'codex-audit-1' })
+    await clearManagedAiSession({ source: 'claude-code', sessionId: 'claude-audit-1' })
     await __testing.flushManagedAiSessionWrites()
 
     const entries = String(await readFile(__testing.auditPathFor(userDataPath), 'utf-8'))
@@ -801,8 +852,8 @@ describe('agent session backend', () => {
         expect.objectContaining({
           at: 500,
           kind: 'event.received',
-          source: 'codex',
-          sessionId: 'codex-audit-1',
+          source: 'claude-code',
+          sessionId: 'claude-audit-1',
           event: 'permission_request',
           state: 'needsInput',
           requestId: 'request-1',
@@ -811,14 +862,14 @@ describe('agent session backend', () => {
         }),
         expect.objectContaining({
           kind: 'decision.created',
-          source: 'codex',
-          sessionId: 'codex-audit-1',
+          source: 'claude-code',
+          sessionId: 'claude-audit-1',
           decisionKind: 'handled'
         }),
         expect.objectContaining({
           kind: 'session.renamed',
-          source: 'codex',
-          sessionId: 'codex-audit-1',
+          source: 'claude-code',
+          sessionId: 'claude-audit-1',
           title: 'Audit Session'
         }),
         expect.objectContaining({
@@ -828,8 +879,8 @@ describe('agent session backend', () => {
         }),
         expect.objectContaining({
           kind: 'session.cleared',
-          source: 'codex',
-          sessionId: 'codex-audit-1',
+          source: 'claude-code',
+          sessionId: 'claude-audit-1',
           title: 'Audit Session'
         })
       ])
@@ -859,10 +910,11 @@ describe('agent session backend', () => {
 
       publishAiAgentSessionEvent(
         {
-          source: 'codex',
+          source: 'claude-code',
           event: 'PermissionRequest',
-          sessionId: 'codex-stream-1',
+          sessionId: 'claude-stream-1',
           requestId: 'request-stream-1',
+          waitForDecision: true,
           actionable: true,
           cwd: '/work/project',
           summary: 'approve stream command',
@@ -876,10 +928,10 @@ describe('agent session backend', () => {
           type: 'event',
           name: 'agent.hook.PermissionRequest',
           category: 'agent',
-          source: 'codex',
+          source: 'claude-code',
           payload: expect.objectContaining({
-            source: 'codex',
-            sessionId: 'codex-stream-1',
+            source: 'claude-code',
+            sessionId: 'claude-stream-1',
             state: 'needsInput',
             requestId: 'request-stream-1',
             summary: 'approve stream command'
@@ -887,7 +939,7 @@ describe('agent session backend', () => {
         })
       ])
 
-      await replyManagedAiSession({ source: 'codex', sessionId: 'codex-stream-1', kind: 'handled' })
+      await replyManagedAiSession({ source: 'claude-code', sessionId: 'claude-stream-1', kind: 'handled' })
       const liveFrames = await stream.waitForFrames(3)
       expect(liveFrames[2]).toEqual(
         expect.objectContaining({
@@ -895,7 +947,7 @@ describe('agent session backend', () => {
           name: 'managed_ai.decision.created',
           category: 'managed-ai',
           payload: expect.objectContaining({
-            sessionId: 'codex-stream-1',
+            sessionId: 'claude-stream-1',
             decisionKind: 'handled'
           })
         })

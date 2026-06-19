@@ -634,10 +634,18 @@ const decisionModeFor = (source: AiAgentSessionSource, event: AiAgentSessionEven
 
 const actionableFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, requestKind: ManagedAiRequestKind, decisionMode: ManagedAiDecisionMode) => {
   const explicit = normalizeBoolean(input.actionable ?? input.waitForDecision ?? input.wait_for_decision)
+  if (source === 'codex' && event === 'permission_request') return false
   if (typeof explicit === 'boolean') return explicit
   if (decisionMode === 'blocking') return true
-  if (source === 'codex' && event === 'permission_request') return false
   return requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan'
+}
+
+const managedAiSessionNeedsInputForEvent = (event: Pick<AiAgentSessionEvent, 'source' | 'event' | 'requestKind' | 'decisionMode' | 'actionable'>) => {
+  if (event.source === 'codex' && event.event === 'permission_request') return false
+  if (event.requestKind === 'telemetry') return false
+  if (event.decisionMode === 'blocking') return true
+  if (event.requestKind === 'notification') return true
+  return event.actionable === true
 }
 
 const eventSummary = (event: AiAgentSessionEventName, input: Record<string, unknown>) =>
@@ -649,13 +657,14 @@ const eventSummary = (event: AiAgentSessionEventName, input: Record<string, unkn
 const managedAiSessionStateForEvent = (
   event: AiAgentSessionEventName,
   previous: ManagedAiSessionState = 'unknown',
-  lifecycle?: ManagedAiSessionLifecycle
+  lifecycle?: ManagedAiSessionLifecycle,
+  aiEvent?: Pick<AiAgentSessionEvent, 'source' | 'event' | 'requestKind' | 'decisionMode' | 'actionable'>
 ): ManagedAiSessionState => {
   const lifecycleState = stateForAgentLifecycle(lifecycle)
   if (lifecycleState) return lifecycleState
   if (event === 'session_start') return 'idle'
   if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
-  if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
+  if (event === 'permission_request' || event === 'question' || event === 'notification') return aiEvent && managedAiSessionNeedsInputForEvent(aiEvent) ? 'needsInput' : 'working'
   if (event === 'stop') return 'idle'
   if (event === 'session_end') return 'ended'
   return previous
@@ -1473,7 +1482,7 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
   const key = sessionKey(event.source, event.sessionId)
   const existing = sessions.get(key)
-  const state = managedAiSessionStateForEvent(event.event, existing?.state, event.agentLifecycle)
+  const state = managedAiSessionStateForEvent(event.event, existing?.state, event.agentLifecycle, event)
   const nextAutoTitle = event.event === 'stop' ? autoTitleFor(event, existing) : existing?.autoTitle
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
   const handledAt = state === 'needsInput' ? undefined : existing?.handledAt
