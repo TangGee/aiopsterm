@@ -170,4 +170,45 @@ describe('aiopsterm-control CLI', () => {
     expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ notification: expect.objectContaining({ title: 'Done' }) }) }))
     expect(seen).toEqual([expect.objectContaining({ method: 'notification.create', params: expect.objectContaining({ title: 'Done', body: 'All green' }) })])
   })
+
+  it('sends agent hibernation requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          config: { enabled: true, idleSeconds: 300, maxLiveTerminals: 12, confirmationSeconds: 60 },
+          session: { source: 'codex', id: 'codex-session-1', hibernated: true }
+        }
+      }
+    })
+
+    const status = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent-hibernation', 'status'], {
+      cwd: process.cwd()
+    })
+    expect(status.stdout).toContain('agent-hibernation\ton\tmax=12\tidle=300')
+
+    await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'hibernate', '--session', 'codex-session-1', '--source', 'codex', '--reason', 'manual-test'],
+      { cwd: process.cwd() }
+    )
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'resume', '--session', 'codex-session-1', '--source', 'codex'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'agent-hibernation.status' }),
+      expect.objectContaining({
+        method: 'agent.hibernate',
+        params: expect.objectContaining({ sessionId: 'codex-session-1', session_id: 'codex-session-1', source: 'codex', reason: 'manual-test' })
+      }),
+      expect.objectContaining({
+        method: 'agent.resume',
+        params: expect.objectContaining({ sessionId: 'codex-session-1', session_id: 'codex-session-1', source: 'codex' })
+      })
+    ])
+  })
 })

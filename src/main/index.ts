@@ -68,6 +68,8 @@ import {
   dismissManagedAiNotification,
   ensureAiAgentSessionServer,
   getAiAgentSessionSocketPath,
+  getAgentHibernationConfig,
+  hibernateManagedAiSession,
   jumpToUnreadManagedAiNotification,
   listManagedAiNotifications,
   listManagedAiSessions,
@@ -75,7 +77,9 @@ import {
   openManagedAiNotification,
   publishAiAgentSessionEvent,
   renameManagedAiSession,
-  replyManagedAiSession
+  replyManagedAiSession,
+  setAgentHibernationConfig,
+  wakeManagedAiSession
 } from './backend/agentSessions'
 import { configureAgentHookInstallerRuntime, installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './backend/agentHookInstaller'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
@@ -4064,6 +4068,10 @@ const registerIpc = () => {
 
   ipcMain.handle('ai-agent:session-event', (_event, input: AiAgentSessionEventInput) => publishAiAgentSessionEvent(input, broadcastAiAgentSessionEvent))
   ipcMain.handle('ai-agent:sessions:list', () => listManagedAiSessions())
+  ipcMain.handle('ai-agent:hibernation:config:get', () => getAgentHibernationConfig())
+  ipcMain.handle('ai-agent:hibernation:config:set', (_event, input) => setAgentHibernationConfig(input))
+  ipcMain.handle('ai-agent:sessions:hibernate', (_event, input) => hibernateManagedAiSession(input))
+  ipcMain.handle('ai-agent:sessions:wake', (_event, input) => wakeManagedAiSession(input))
   ipcMain.handle('ai-agent:sessions:reply', (_event, input) => replyManagedAiSession(input))
   ipcMain.handle('ai-agent:sessions:rename', (_event, input) => renameManagedAiSession(input))
   ipcMain.handle('ai-agent:sessions:clear', (_event, input) => clearManagedAiSession(input))

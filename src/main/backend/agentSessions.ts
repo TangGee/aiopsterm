@@ -9,12 +9,16 @@ import type {
   AiAgentSessionEventName,
   AiAgentSessionEventResult,
   AiAgentSessionSource,
+  AgentHibernationConfig,
+  AgentHibernationConfigResult,
   ManagedAiSessionEvent,
   ManagedAiSessionBulkInput,
   ManagedAiSessionBulkResult,
   ManagedAiSessionClearInput,
   ManagedAiSessionDecision,
   ManagedAiSessionDecisionKind,
+  ManagedAiSessionHibernateInput,
+  ManagedAiSessionHibernateResult,
   ManagedAiSessionLifecycle,
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
@@ -126,6 +130,7 @@ type AgentSessionSocketRuntime = {
 
 type PersistedManagedAiSessionSnapshot = ManagedAiSessionSnapshot & {
   version?: number
+  agentHibernation?: AgentHibernationConfig
 }
 
 type ManagedAiSessionAuditKind =
@@ -138,6 +143,8 @@ type ManagedAiSessionAuditKind =
   | 'session.auto_named'
   | 'session.auto_name_skipped'
   | 'session.cleared'
+  | 'session.hibernated'
+  | 'session.woke'
   | 'sessions.bulk'
   | 'notification.dismissed'
   | 'notification.opened'
@@ -181,6 +188,12 @@ const maxLaunchCommandLength = 600
 const defaultAutoTitleMinEventGrowth = 4
 const defaultAutoTitleMinIntervalMs = 180_000
 const defaultAutoTitleMaxContextMessages = 8
+const defaultAgentHibernationConfig: AgentHibernationConfig = {
+  enabled: false,
+  idleSeconds: 300,
+  maxLiveTerminals: 12,
+  confirmationSeconds: 60
+}
 const supportedSources = new Set<AiAgentSessionSource>([
   'codex',
   'claude-code',
@@ -219,6 +232,7 @@ let eventSink: AgentSessionEventSink | null = null
 let storePath = ''
 let auditPath = ''
 let sessions = new Map<string, ManagedAiSessionRecord>()
+let agentHibernationConfig: AgentHibernationConfig = { ...defaultAgentHibernationConfig }
 let pendingDecisions = new Map<string, PendingAgentDecision>()
 let loadedStore = false
 let writeQueue: Promise<void> = Promise.resolve()
@@ -1307,6 +1321,10 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
     ...(normalizeAgentLifecycle(value.agentLifecycle) ? { agentLifecycle: normalizeAgentLifecycle(value.agentLifecycle) } : {}),
     ...(cleanPositiveInteger(value.terminalProcessId) ? { terminalProcessId: cleanPositiveInteger(value.terminalProcessId) } : {}),
     ...(typeof value.terminalActivityAt === 'number' ? { terminalActivityAt: value.terminalActivityAt } : {}),
+    ...(value.hibernated === true ? { hibernated: true } : {}),
+    ...(typeof value.hibernatedAt === 'number' && Number.isFinite(value.hibernatedAt) ? { hibernatedAt: value.hibernatedAt } : {}),
+    ...(cleanOptionalText(value.hibernationReason) ? { hibernationReason: cleanOptionalText(value.hibernationReason) } : {}),
+    ...(cleanOptionalText(value.hibernatedTerminalSessionId) ? { hibernatedTerminalSessionId: cleanOptionalText(value.hibernatedTerminalSessionId) } : {}),
     events: events.slice(-maxEventsPerSession) as ManagedAiSessionTimelineEvent[],
     decisions: decisions.slice(-maxDecisionsPerSession) as ManagedAiSessionDecision[]
   }
@@ -1370,11 +1388,28 @@ const snapshot = (): ManagedAiSessionSnapshot => ({
     }))
 })
 
+const normalizeHibernationNumber = (value: unknown, fallback: number, min: number, max: number) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return fallback
+  return Math.max(min, Math.min(max, Math.round(numberValue)))
+}
+
+const normalizeAgentHibernationConfig = (value: unknown, fallback: AgentHibernationConfig = agentHibernationConfig): AgentHibernationConfig => {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  return {
+    enabled: typeof record.enabled === 'boolean' ? record.enabled : fallback.enabled,
+    idleSeconds: normalizeHibernationNumber(record.idleSeconds, fallback.idleSeconds, 5, 604800),
+    maxLiveTerminals: normalizeHibernationNumber(record.maxLiveTerminals, fallback.maxLiveTerminals, 1, 256),
+    confirmationSeconds: normalizeHibernationNumber(record.confirmationSeconds, fallback.confirmationSeconds, 0, 3600)
+  }
+}
+
 const persistSnapshot = () => {
   if (!storePath) return
   const targetStorePath = storePath
   const payload: PersistedManagedAiSessionSnapshot = {
     version: storeVersion,
+    agentHibernation: agentHibernationConfig,
     ...snapshot()
   }
   writeQueue = writeQueue
@@ -1392,10 +1427,12 @@ const loadStoreIfNeeded = async () => {
   try {
     const raw = String(await readFile(storePath, 'utf-8'))
     const parsed = JSON.parse(raw) as PersistedManagedAiSessionSnapshot
+    agentHibernationConfig = normalizeAgentHibernationConfig(parsed.agentHibernation, defaultAgentHibernationConfig)
     const loaded = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeStoredSession).filter(Boolean) : []
     sessions = new Map((loaded as ManagedAiSessionRecord[]).map((session) => [sessionKey(session.source, session.id), session]))
   } catch {
     sessions = new Map()
+    agentHibernationConfig = { ...defaultAgentHibernationConfig }
   }
 }
 
@@ -1409,6 +1446,7 @@ export const configureAiAgentSessionStore = async (userDataPath: string) => {
     auditPath = nextAuditPath
     loadedStore = false
     sessions = new Map()
+    agentHibernationConfig = { ...defaultAgentHibernationConfig }
   } else {
     auditPath = nextAuditPath
   }
@@ -1498,6 +1536,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const parentProcessId = event.parentProcessId || existing?.parentProcessId
   const processGroupId = event.processGroupId || existing?.processGroupId
   const agentLifecycle = event.agentLifecycle || existing?.agentLifecycle
+  const preserveHibernation = existing?.hibernated === true && event.event !== 'session_start'
   const record: ManagedAiSessionRecord = {
     id: event.sessionId,
     source: event.source,
@@ -1531,6 +1570,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(parentProcessId ? { parentProcessId } : {}),
     ...(processGroupId ? { processGroupId } : {}),
     ...(agentLifecycle ? { agentLifecycle } : {}),
+    ...(preserveHibernation ? { hibernated: true } : {}),
+    ...(preserveHibernation && existing?.hibernatedAt ? { hibernatedAt: existing.hibernatedAt } : {}),
+    ...(preserveHibernation && existing?.hibernationReason ? { hibernationReason: existing.hibernationReason } : {}),
+    ...(preserveHibernation && existing?.hibernatedTerminalSessionId ? { hibernatedTerminalSessionId: existing.hibernatedTerminalSessionId } : {}),
     events: [...(existing?.events || []), normalizeRecordEvent(event, raw)].slice(-maxEventsPerSession),
     decisions: [...(existing?.decisions || [])].slice(-maxDecisionsPerSession)
   }
@@ -1706,6 +1749,8 @@ const mutationError = (errorCode: string, errorMessage: string): ManagedAiSessio
 
 const bulkError = (errorCode: string, errorMessage: string): ManagedAiSessionBulkResult => ({ ok: false, errorCode, errorMessage })
 
+const hibernationError = (errorCode: string, errorMessage: string): ManagedAiSessionHibernateResult => ({ ok: false, errorCode, errorMessage })
+
 const notificationMutationError = (errorCode: string, errorMessage: string): ManagedAiNotificationMutationResult => ({ ok: false, errorCode, errorMessage })
 
 const notificationClearError = (errorCode: string, errorMessage: string): ManagedAiNotificationClearResult => ({ ok: false, errorCode, errorMessage })
@@ -1715,6 +1760,103 @@ const getSessionForInput = (sourceValue: unknown, sessionIdValue: unknown) => {
   const sessionId = cleanOptionalText(sessionIdValue)
   if (!source || !sessionId) return null
   return sessions.get(sessionKey(source, sessionId)) || null
+}
+
+const resolveSessionForSelector = (input: Pick<ManagedAiSessionHibernateInput, 'source' | 'sessionId'>) => {
+  const source = normalizeSource(input?.source)
+  const sessionId = cleanOptionalText(input?.sessionId)
+  if (!sessionId) return { error: hibernationError('MANAGED_AI_SESSION_ID_REQUIRED', 'Managed AI session id is required.') }
+  if (source) {
+    const session = sessions.get(sessionKey(source, sessionId))
+    if (!session) return { error: hibernationError('MANAGED_AI_SESSION_NOT_FOUND', 'Managed AI session was not found.') }
+    return { session }
+  }
+  const matches = [...sessions.values()].filter((session) => session.id === sessionId)
+  if (!matches.length) return { error: hibernationError('MANAGED_AI_SESSION_NOT_FOUND', 'Managed AI session was not found.') }
+  if (matches.length > 1) return { error: hibernationError('MANAGED_AI_SESSION_SOURCE_REQUIRED', 'Multiple managed AI sessions match this sessionId; pass source.') }
+  return { session: matches[0] }
+}
+
+export const getAgentHibernationConfig = async (): Promise<AgentHibernationConfigResult> => {
+  await loadStoreIfNeeded()
+  return { ok: true, data: { config: { ...agentHibernationConfig } } }
+}
+
+export const setAgentHibernationConfig = async (input: Partial<AgentHibernationConfig> = {}): Promise<AgentHibernationConfigResult> => {
+  await loadStoreIfNeeded()
+  agentHibernationConfig = normalizeAgentHibernationConfig(input)
+  persistSnapshot()
+  return { ok: true, data: { config: { ...agentHibernationConfig } } }
+}
+
+export const hibernateManagedAiSession = async (input: ManagedAiSessionHibernateInput): Promise<ManagedAiSessionHibernateResult> => {
+  await loadStoreIfNeeded()
+  if (!agentHibernationConfig.enabled) return hibernationError('AGENT_HIBERNATION_DISABLED', 'Agent hibernation is disabled.')
+  const resolved = resolveSessionForSelector(input)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  if (session.state === 'needsInput' || session.agentLifecycle === 'needsInput') return hibernationError('AGENT_HIBERNATION_NEEDS_INPUT', 'Managed AI session needs input and cannot hibernate.')
+  if (!session.resumeCommand) return hibernationError('AGENT_HIBERNATION_RESUME_UNAVAILABLE', 'Managed AI session has no resume command.')
+  const now = Date.now()
+  const next: ManagedAiSessionRecord = {
+    ...session,
+    hibernated: true,
+    hibernatedAt: now,
+    hibernationReason: cleanOptionalText(input.reason) || 'manual',
+    hibernatedTerminalSessionId: cleanOptionalText(input.terminalSessionId) || session.terminalSessionId,
+    state: session.state === 'working' ? 'idle' : session.state,
+    agentLifecycle: session.agentLifecycle === 'running' ? 'idle' : session.agentLifecycle,
+    updatedAt: now
+  }
+  sessions.set(sessionKey(next.source, next.id), next)
+  persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: now,
+    kind: 'session.hibernated',
+    source: next.source,
+    sessionId: next.id,
+    event: next.lastEvent,
+    state: next.state,
+    title: next.title,
+    summary: next.summary,
+    reason: next.hibernationReason
+  })
+  publishManagedAiStreamFrame('managed_ai.session.hibernated', next, { reason: next.hibernationReason })
+  return { ok: true, data: { session: next, snapshot: snapshot(), config: { ...agentHibernationConfig } } }
+}
+
+export const wakeManagedAiSession = async (input: ManagedAiSessionHibernateInput): Promise<ManagedAiSessionHibernateResult> => {
+  await loadStoreIfNeeded()
+  const resolved = resolveSessionForSelector(input)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const now = Date.now()
+  const {
+    hibernated: _hibernated,
+    hibernatedAt: _hibernatedAt,
+    hibernationReason: _hibernationReason,
+    hibernatedTerminalSessionId: _hibernatedTerminalSessionId,
+    ...rest
+  } = session
+  const next: ManagedAiSessionRecord = {
+    ...rest,
+    updatedAt: now
+  }
+  sessions.set(sessionKey(next.source, next.id), next)
+  persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: now,
+    kind: 'session.woke',
+    source: next.source,
+    sessionId: next.id,
+    event: next.lastEvent,
+    state: next.state,
+    title: next.title,
+    summary: next.summary,
+    reason: cleanOptionalText(input.reason) || 'manual'
+  })
+  publishManagedAiStreamFrame('managed_ai.session.woke', next, { reason: cleanOptionalText(input.reason) || 'manual' })
+  return { ok: true, data: { session: next, snapshot: snapshot(), config: { ...agentHibernationConfig } } }
 }
 
 const notificationReadStateForSession = (session: ManagedAiSessionRecord) => session.state !== 'needsInput' || Boolean(session.handledAt)

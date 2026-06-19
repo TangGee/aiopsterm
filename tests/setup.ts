@@ -5852,6 +5852,83 @@ Object.defineProperty(window, 'aiops', {
         sessions: []
       }
     })),
+    getAgentHibernationConfig: vi.fn(async () => ({
+      ok: true,
+      data: {
+        config: {
+          enabled: false,
+          idleSeconds: 300,
+          maxLiveTerminals: 12,
+          confirmationSeconds: 60
+        }
+      }
+    })),
+    setAgentHibernationConfig: vi.fn(async (input: { enabled?: boolean } = {}) => ({
+      ok: true,
+      data: {
+        config: {
+          enabled: input.enabled === true,
+          idleSeconds: 300,
+          maxLiveTerminals: 12,
+          confirmationSeconds: 60
+        }
+      }
+    })),
+    hibernateManagedAiSession: vi.fn(async () => ({
+      ok: true,
+      data: {
+        session: {
+          id: 'codex-session-1',
+          source: 'codex',
+          title: 'Codex',
+          summary: '',
+          state: 'idle',
+          lastEvent: 'stop',
+          lastActivityAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          requestKind: 'telemetry',
+          decisionMode: 'telemetry',
+          hibernated: true,
+          events: [],
+          decisions: []
+        },
+        snapshot: { sessions: [] },
+        config: {
+          enabled: true,
+          idleSeconds: 300,
+          maxLiveTerminals: 12,
+          confirmationSeconds: 60
+        }
+      }
+    })),
+    wakeManagedAiSession: vi.fn(async () => ({
+      ok: true,
+      data: {
+        session: {
+          id: 'codex-session-1',
+          source: 'codex',
+          title: 'Codex',
+          summary: '',
+          state: 'idle',
+          lastEvent: 'stop',
+          lastActivityAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          requestKind: 'telemetry',
+          decisionMode: 'telemetry',
+          events: [],
+          decisions: []
+        },
+        snapshot: { sessions: [] },
+        config: {
+          enabled: true,
+          idleSeconds: 300,
+          maxLiveTerminals: 12,
+          confirmationSeconds: 60
+        }
+      }
+    })),
     replyManagedAiSession: vi.fn(async () => ({
       ok: true,
       data: {

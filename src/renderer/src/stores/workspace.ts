@@ -101,8 +101,11 @@ import type {
   AgentHookInstallerSnapshot,
   AgentHookInstallerStatus,
   AgentHookInstallerSource,
+  AgentHibernationConfig,
+  AgentHibernationConfigResult,
   ManagedAiSessionBulkInput,
   ManagedAiSessionBulkResult,
+  ManagedAiSessionHibernateResult,
   ManagedAiSessionDecision,
   ManagedAiSessionFocusRequest,
   ManagedAiSessionListResult,
@@ -265,6 +268,7 @@ type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
 type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationResult['data']>
 type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
+type ManagedAiSessionHibernateData = NonNullable<ManagedAiSessionHibernateResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
 export type AiAttentionSource = AiAgentSessionSource | 'classic-chat' | 'control-notification'
@@ -292,6 +296,13 @@ export type AiAttentionFocusRequest = {
 }
 export type ManagedAiSessionState = ManagedAiSessionRecord['state']
 export type ManagedAiSession = ManagedAiSessionRecord
+
+const defaultAgentHibernationConfig: AgentHibernationConfig = {
+  enabled: false,
+  idleSeconds: 300,
+  maxLiveTerminals: 12,
+  confirmationSeconds: 60
+}
 
 export const layoutWidthLimits: {
   min: number
@@ -4156,6 +4167,15 @@ const isManagedAiSessionDecision = (value: unknown): value is ManagedAiSessionDe
   (value.kind === 'allow' || value.kind === 'always' || value.kind === 'bypass' || value.kind === 'deny' || value.kind === 'reply' || value.kind === 'handled') &&
   typeof value.createdAt === 'number'
 
+const isAgentHibernationConfig = (value: unknown): value is AgentHibernationConfig =>
+  isRecord(value) &&
+  typeof value.enabled === 'boolean' &&
+  isPositiveInteger(value.idleSeconds) &&
+  isPositiveInteger(value.maxLiveTerminals) &&
+  typeof value.confirmationSeconds === 'number' &&
+  Number.isFinite(value.confirmationSeconds) &&
+  value.confirmationSeconds >= 0
+
 const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionRecord =>
   isRecord(value) &&
   isNonEmptyString(value.id) &&
@@ -4179,6 +4199,10 @@ const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionReco
   isOptionalField(value, 'agentLifecycle', isManagedAiSessionLifecycle) &&
   isOptionalField(value, 'terminalProcessId', isPositiveInteger) &&
   isOptionalField(value, 'terminalActivityAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
+  isOptionalField(value, 'hibernated', (item) => typeof item === 'boolean') &&
+  isOptionalField(value, 'hibernatedAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
+  isOptionalField(value, 'hibernationReason', isNonEmptyText) &&
+  isOptionalField(value, 'hibernatedTerminalSessionId', isNonEmptyText) &&
   Array.isArray(value.events) &&
   value.events.every(isManagedAiSessionTimelineEvent) &&
   Array.isArray(value.decisions) &&
@@ -4192,6 +4216,9 @@ const isManagedAiSessionMutationData = (value: unknown): value is ManagedAiSessi
 
 const isManagedAiSessionBulkData = (value: unknown): value is ManagedAiSessionBulkData =>
   isRecord(value) && typeof value.changed === 'number' && isManagedAiSessionSnapshot(value.snapshot)
+
+const isManagedAiSessionHibernateData = (value: unknown): value is ManagedAiSessionHibernateData =>
+  isRecord(value) && isManagedAiSessionRecord(value.session) && isManagedAiSessionSnapshot(value.snapshot) && isAgentHibernationConfig(value.config)
 
 const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
   isRecord(value) &&
@@ -4235,6 +4262,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const controlNotifications = ref<ControlNotificationRecord[]>([])
   const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
   const managedAiSessions = ref<ManagedAiSession[]>([])
+  const agentHibernationConfig = ref<AgentHibernationConfig>({ ...defaultAgentHibernationConfig })
   const managedAiSessionsLoading = ref(false)
   const managedAiSessionsError = ref('')
   const managedAiSessionFocusRequest = ref<{ sequence: number; session: ManagedAiSession | null }>({ sequence: 0, session: null })
@@ -8840,6 +8868,92 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const refreshAgentHibernationConfig = async () => {
+    const bridge = window.aiops?.getAgentHibernationConfig
+    if (typeof bridge !== 'function') return false
+    try {
+      const result = (await bridge()) as AgentHibernationConfigResult
+      if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
+        setTopNotice(result?.errorMessage || 'Agent Hibernation 配置加载失败')
+        return false
+      }
+      agentHibernationConfig.value = { ...result.data.config }
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'Agent Hibernation 配置加载失败')
+      return false
+    }
+  }
+
+  const setAgentHibernationEnabled = async (enabled: boolean) => {
+    const bridge = window.aiops?.setAgentHibernationConfig
+    if (typeof bridge !== 'function') {
+      setTopNotice('Agent Hibernation 服务不可用')
+      return false
+    }
+    try {
+      const result = (await bridge({ ...agentHibernationConfig.value, enabled })) as AgentHibernationConfigResult
+      if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
+        setTopNotice(result?.errorMessage || 'Agent Hibernation 配置保存失败')
+        return false
+      }
+      agentHibernationConfig.value = { ...result.data.config }
+      setTopNotice(enabled ? 'Agent Hibernation 已开启' : 'Agent Hibernation 已关闭')
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'Agent Hibernation 配置保存失败')
+      return false
+    }
+  }
+
+  const hibernateManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, reason = 'manual') => {
+    const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
+    if (!session) {
+      setTopNotice('AI 会话不存在')
+      return false
+    }
+    if (!agentHibernationConfig.value.enabled) {
+      setTopNotice('Agent Hibernation 未开启')
+      return false
+    }
+    if (session.state === 'needsInput' || session.agentLifecycle === 'needsInput') {
+      setTopNotice('等待输入的 AI 会话不能休眠')
+      return false
+    }
+    if (!session.resumeCommand?.trim()) {
+      setTopNotice('此 AI 会话没有可用的恢复命令')
+      return false
+    }
+    const targetId = session.panelId || session.terminalSessionId
+    const panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
+    const terminalSessionId = panel?.sessionId || session.terminalSessionId
+    if (terminalSessionId && typeof window.aiops?.killTerminal === 'function') {
+      const killResult = await window.aiops.killTerminal(terminalSessionId)
+      if (!killResult?.ok) {
+        setTopNotice(killResult?.errorMessage || 'AI 会话休眠失败')
+        return false
+      }
+      if (panel?.sessionId === terminalSessionId) {
+        panel.sessionId = undefined
+        panel.status = 'closed'
+      }
+    }
+    const bridge = window.aiops?.hibernateManagedAiSession
+    if (typeof bridge !== 'function') {
+      setTopNotice('Agent Hibernation 服务不可用')
+      return false
+    }
+    const result = (await bridge({ source, sessionId, reason, terminalSessionId })) as ManagedAiSessionHibernateResult
+    if (!result?.ok || !isManagedAiSessionHibernateData(result.data)) {
+      setTopNotice(result?.errorMessage || 'AI 会话休眠失败')
+      return false
+    }
+    agentHibernationConfig.value = { ...result.data.config }
+    applyManagedAiSessionSnapshot(result.data.snapshot)
+    setTopNotice('AI 会话已休眠')
+    return true
+  }
+
   const managedAiSessionNeedsAttentionForPanel = (panelIdOrSessionId: string) => managedAiAttentionPanelIds.value.has(panelIdOrSessionId)
 
   const focusManagedAiSession = (sessionIdOrPanelId: string) => {
@@ -8900,6 +9014,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const decision = await runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
     if (decision.status === 'allow') {
+      const wakeBridge = window.aiops?.wakeManagedAiSession
+      if (session.hibernated && typeof wakeBridge === 'function') {
+        const result = (await wakeBridge({ source, sessionId, reason: 'resume' })) as ManagedAiSessionHibernateResult
+        if (result?.ok && isManagedAiSessionHibernateData(result.data)) {
+          agentHibernationConfig.value = { ...result.data.config }
+          applyManagedAiSessionSnapshot(result.data.snapshot)
+        }
+      }
       setTopNotice('已向所属终端写入 AI 会话恢复命令')
       return true
     }
@@ -14888,6 +15010,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     currentAiAttentionItem,
     aiAttentionFocusRequest,
     managedAiSessions,
+    agentHibernationConfig,
     managedAiSessionsLoading,
     managedAiSessionsError,
     sortedManagedAiSessions,
@@ -14905,6 +15028,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     renameManagedAiSession,
     clearManagedAiSession,
     bulkManagedAiSessions,
+    refreshAgentHibernationConfig,
+    setAgentHibernationEnabled,
+    hibernateManagedAiSession,
     managedAiSessionNeedsAttentionForPanel,
     focusManagedAiSession,
     focusManagedAiSessionRequest,

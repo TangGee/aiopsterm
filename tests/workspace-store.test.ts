@@ -812,6 +812,75 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('AI 会话恢复命令等待安全审批')
   })
 
+  it('hibernates managed AI sessions by killing the owning terminal and marking metadata', async () => {
+    const store = useWorkspaceStore()
+    store.agentHibernationConfig = {
+      enabled: true,
+      idleSeconds: 300,
+      maxLiveTerminals: 12,
+      confirmationSeconds: 60
+    }
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'stop',
+      sessionId: 'codex-hibernate-1',
+      title: 'Codex · project',
+      summary: '',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      resumeCommand: "cd '/work/project' && codex resume 'codex-hibernate-1'",
+      agentLifecycle: 'idle',
+      receivedAt: 700
+    })
+    vi.mocked(window.aiops.killTerminal).mockClear()
+    vi.mocked(window.aiops.hibernateManagedAiSession).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        session: {
+          ...store.managedAiSessions[0],
+          hibernated: true,
+          hibernatedAt: 800,
+          hibernationReason: 'manual',
+          hibernatedTerminalSessionId: 'terminal-session-1',
+          updatedAt: 800
+        },
+        snapshot: {
+          sessions: [
+            {
+              ...store.managedAiSessions[0],
+              hibernated: true,
+              hibernatedAt: 800,
+              hibernationReason: 'manual',
+              hibernatedTerminalSessionId: 'terminal-session-1',
+              updatedAt: 800
+            }
+          ]
+        },
+        config: store.agentHibernationConfig
+      }
+    })
+
+    await expect(store.hibernateManagedAiSession('codex', 'codex-hibernate-1')).resolves.toBe(true)
+
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('terminal-session-1')
+    expect(window.aiops.hibernateManagedAiSession).toHaveBeenCalledWith({
+      source: 'codex',
+      sessionId: 'codex-hibernate-1',
+      reason: 'manual',
+      terminalSessionId: 'terminal-session-1'
+    })
+    expect(store.panels[0].sessionId).toBeUndefined()
+    expect(store.panels[0].status).toBe('closed')
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ hibernated: true, hibernatedTerminalSessionId: 'terminal-session-1' }))
+  })
+
   it('creates, renames, splits, and closes terminal panels', () => {
     const store = useWorkspaceStore()
 

@@ -779,6 +779,10 @@ const managedAiSessionSummaryForControl = (session: (typeof workspace.managedAiS
   ...(session.agentLifecycle ? { agentLifecycle: session.agentLifecycle } : {}),
   ...(typeof session.terminalProcessId === 'number' ? { terminalProcessId: session.terminalProcessId } : {}),
   ...(typeof session.terminalActivityAt === 'number' ? { terminalActivityAt: session.terminalActivityAt } : {}),
+  ...(session.hibernated ? { hibernated: true } : {}),
+  ...(typeof session.hibernatedAt === 'number' ? { hibernatedAt: session.hibernatedAt } : {}),
+  ...(session.hibernationReason ? { hibernationReason: session.hibernationReason } : {}),
+  ...(session.hibernatedTerminalSessionId ? { hibernatedTerminalSessionId: session.hibernatedTerminalSessionId } : {}),
   eventCount: session.events.length,
   decisionCount: session.decisions.length
 })
@@ -812,6 +816,7 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
     workspaceGroups,
     notifications: workspace.controlNotifications.map((notification) => ({ ...notification })),
     managedAiSessions,
+    agentHibernation: { ...workspace.agentHibernationConfig },
     attention: {
       unreadCount: workspace.aiAttentionUnreadCount,
       items: attentionItems,
@@ -1029,9 +1034,43 @@ const handleWorkspaceGroupControlRequest = async (method: string, params: Record
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
+const handleAgentHibernationControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'agent-hibernation.status' || method === 'agent.status') {
+    await workspace.refreshAgentHibernationConfig()
+    return controlOk({
+      config: { ...workspace.agentHibernationConfig },
+      sessions: workspace.managedAiSessions.map(managedAiSessionSummaryForControl),
+      snapshot: workspaceSnapshotForControl()
+    })
+  }
+  if (method === 'agent-hibernation.on') {
+    const changed = await workspace.setAgentHibernationEnabled(true)
+    return changed ? controlOk({ config: { ...workspace.agentHibernationConfig } }) : controlFail('AGENT_HIBERNATION_ENABLE_FAILED', 'Agent hibernation could not be enabled.')
+  }
+  if (method === 'agent-hibernation.off') {
+    const changed = await workspace.setAgentHibernationEnabled(false)
+    return changed ? controlOk({ config: { ...workspace.agentHibernationConfig } }) : controlFail('AGENT_HIBERNATION_DISABLE_FAILED', 'Agent hibernation could not be disabled.')
+  }
+  const source = controlText(params.source)
+  const sessionId = controlText(params.sessionId || params.session_id || params.id)
+  if (!sessionId) return controlFail('AGENT_SESSION_ID_REQUIRED', 'Managed AI session id is required.')
+  const session = workspace.managedAiSessions.find((item) => item.id === sessionId && (!source || item.source === source))
+  if (!session) return controlFail('AGENT_SESSION_NOT_FOUND', 'Managed AI session was not found.')
+  if (method === 'agent.hibernate') {
+    const ok = await workspace.hibernateManagedAiSession(session.source, session.id, controlText(params.reason) || 'manual')
+    return ok ? controlOk({ session: managedAiSessionSummaryForControl(session), snapshot: workspaceSnapshotForControl() }) : controlFail('AGENT_HIBERNATE_FAILED', 'Managed AI session hibernation failed.')
+  }
+  if (method === 'agent.resume') {
+    const ok = await workspace.resumeManagedAiSession(session.source, session.id)
+    return ok ? controlOk({ session: managedAiSessionSummaryForControl(session), snapshot: workspaceSnapshotForControl() }) : controlFail('AGENT_RESUME_FAILED', 'Managed AI session resume failed.')
+  }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
+
 const handleControlRequest = async (request: ControlRequest): Promise<ControlResponse> => {
   const params = request.params || {}
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
+  if (request.method.startsWith('agent-hibernation.') || request.method.startsWith('agent.')) return handleAgentHibernationControlRequest(request.method, params)
   if (request.method === 'workspace.snapshot' || request.method === 'tree' || request.method === 'top') {
     return controlOk({ snapshot: workspaceSnapshotForControl() })
   }

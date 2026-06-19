@@ -41,6 +41,14 @@ The workspace group slice adds control_compat-style group metadata for the share
 - `workspace.group.new_workspace`: create a new local terminal panel and add it to the group.
 - `workspace.group.focus`: focus the group anchor surface.
 
+The Agent Hibernation slice adds explicit managed-agent lifecycle controls:
+
+- `agent-hibernation.status`: return the current hibernation config, managed session summaries, and a workspace snapshot.
+- `agent-hibernation.on` and `agent-hibernation.off`: enable or disable explicit hibernation controls.
+- `agent.status`: alias for `agent-hibernation.status`.
+- `agent.hibernate`: hibernate one managed AI session by `sessionId`, with optional `source` when ids are ambiguous.
+- `agent.resume`: focus one managed AI session and write its stored resume command into the owning local terminal.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
@@ -104,6 +112,10 @@ node /path/to/resources/aiopsterm-control.js workspace-group list
 node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
 node /path/to/resources/aiopsterm-control.js workspace-group focus workspace_group:1
 node /path/to/resources/aiopsterm-control.js surface list
+node /path/to/resources/aiopsterm-control.js agent-hibernation status
+node /path/to/resources/aiopsterm-control.js agent-hibernation on
+node /path/to/resources/aiopsterm-control.js agent hibernate --session codex-session-1 --source codex
+node /path/to/resources/aiopsterm-control.js agent resume --session codex-session-1 --source codex
 node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
@@ -125,6 +137,10 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
 
+Agent Hibernation is also explicit. It is off by default and only targets coding-agent sessions that were discovered inside aiopsterm-created local connection terminals. `agent.hibernate` asks the renderer to close the owning terminal backend session and then records hibernation metadata in the managed AI session store. It refuses sessions that currently need input or have no resume command. `agent.resume` writes the stored resume command through the same renderer terminal command path used by AI session recovery, so risky commands still pass through terminal command safety approval before any bytes are written to the shell.
+
+This hibernation slice does not implement an automatic idle reaper. Automatic hibernation needs reliable terminal activity sampling and a user-visible confirmation window before aiopsterm kills a process group.
+
 ## Generic Notifications
 
 Generic notifications are stored in the main process memory queue. They are separate from managed AI session notifications, but both feed the same top-bar attention bell:
@@ -145,6 +161,7 @@ The queue is intentionally not persisted in this slice. Session restore and pers
 - `terminals`: terminal-only summaries with connection, cwd, SSH target, and xterm size when available.
 - `splitGroups`: grouped panel ids for split layouts.
 - `workspaceGroups`: control_compat-style surface group metadata for the shared main work panel.
+- `agentHibernation`: explicit hibernation config for managed AI sessions.
 - `notifications`: generic control notifications currently held by the main process and synced into the renderer.
 - `managedAiSessions`: Claude/Codex session summaries without full event transcripts.
 - `attention`: top-bell pending items, including managed AI requests and unread generic notifications.

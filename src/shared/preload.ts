@@ -266,6 +266,10 @@ export type ControlManagedAiSessionSummary = {
   agentLifecycle?: string
   terminalProcessId?: number
   terminalActivityAt?: number
+  hibernated?: boolean
+  hibernatedAt?: number
+  hibernationReason?: string
+  hibernatedTerminalSessionId?: string
   eventCount: number
   decisionCount: number
 }
@@ -291,6 +295,7 @@ export type ControlWorkspaceSnapshot = {
   workspaceGroups: ControlWorkspaceGroupSummary[]
   notifications: ControlNotificationRecord[]
   managedAiSessions: ControlManagedAiSessionSummary[]
+  agentHibernation: AgentHibernationConfig
   attention: {
     unreadCount: number
     items: ControlAiAttentionSummary[]
@@ -924,6 +929,10 @@ export type ManagedAiSessionRecord = {
   agentLifecycle?: ManagedAiSessionLifecycle
   terminalProcessId?: number
   terminalActivityAt?: number
+  hibernated?: boolean
+  hibernatedAt?: number
+  hibernationReason?: string
+  hibernatedTerminalSessionId?: string
   events: ManagedAiSessionTimelineEvent[]
   decisions: ManagedAiSessionDecision[]
 }
@@ -979,6 +988,30 @@ export type ManagedAiSessionMutationResult = AiopsMutationResult<{
 export type ManagedAiSessionBulkResult = AiopsMutationResult<{
   changed: number
   snapshot: ManagedAiSessionSnapshot
+}>
+
+export type AgentHibernationConfig = {
+  enabled: boolean
+  idleSeconds: number
+  maxLiveTerminals: number
+  confirmationSeconds: number
+}
+
+export type AgentHibernationConfigResult = AiopsMutationResult<{
+  config: AgentHibernationConfig
+}>
+
+export type ManagedAiSessionHibernateInput = {
+  source?: AiAgentSessionSource
+  sessionId: string
+  reason?: string
+  terminalSessionId?: string
+}
+
+export type ManagedAiSessionHibernateResult = AiopsMutationResult<{
+  session: ManagedAiSessionRecord
+  snapshot: ManagedAiSessionSnapshot
+  config: AgentHibernationConfig
 }>
 
 export type ManagedAiSessionFocusRequest = {
@@ -3872,6 +3905,10 @@ export type AiopsPreloadApi = {
   installAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   uninstallAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   listManagedAiSessions: () => Promise<ManagedAiSessionListResult>
+  getAgentHibernationConfig: () => Promise<AgentHibernationConfigResult>
+  setAgentHibernationConfig: (input: Partial<AgentHibernationConfig> & { enabled?: boolean }) => Promise<AgentHibernationConfigResult>
+  hibernateManagedAiSession: (input: ManagedAiSessionHibernateInput) => Promise<ManagedAiSessionHibernateResult>
+  wakeManagedAiSession: (input: ManagedAiSessionHibernateInput) => Promise<ManagedAiSessionHibernateResult>
   replyManagedAiSession: (input: ManagedAiSessionReplyInput) => Promise<ManagedAiSessionMutationResult>
   renameManagedAiSession: (input: ManagedAiSessionRenameInput) => Promise<ManagedAiSessionMutationResult>
   clearManagedAiSession: (input: ManagedAiSessionClearInput) => Promise<ManagedAiSessionMutationResult>

@@ -22,6 +22,10 @@ type AgentSessionsBackend = {
   replyManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   clearManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   bulkManagedAiSessions: (input: Record<string, unknown>) => Promise<unknown>
+  getAgentHibernationConfig: () => Promise<unknown>
+  setAgentHibernationConfig: (input: Record<string, unknown>) => Promise<unknown>
+  hibernateManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
+  wakeManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   configureManagedAiSessionAutoNamingRuntime: (config?: Record<string, unknown>) => void
   __testing: {
     auditPathFor: (userDataPath: string) => string
@@ -367,6 +371,80 @@ describe('agent session backend', () => {
         ]
       }
     })
+  })
+
+  it('tracks explicit agent hibernation state and config', async () => {
+    const {
+      configureAiAgentSessionStore,
+      getAgentHibernationConfig,
+      hibernateManagedAiSession,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent,
+      setAgentHibernationConfig,
+      wakeManagedAiSession
+    } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-hibernate-')))
+
+    await expect(getAgentHibernationConfig()).resolves.toEqual({
+      ok: true,
+      data: {
+        config: { enabled: false, idleSeconds: 300, maxLiveTerminals: 12, confirmationSeconds: 60 }
+      }
+    })
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'Stop',
+        sessionId: 'codex-hibernate-1',
+        cwd: '/work/project',
+        resumeCommand: "cd '/work/project' && codex resume 'codex-hibernate-1'",
+        terminalSessionId: 'terminal-session-1',
+        agentLifecycle: 'idle',
+        receivedAt: 500
+      },
+      null
+    )
+
+    await expect(hibernateManagedAiSession({ source: 'codex', sessionId: 'codex-hibernate-1' })).resolves.toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'AGENT_HIBERNATION_DISABLED' })
+    )
+    await expect(setAgentHibernationConfig({ enabled: true, idleSeconds: 10, maxLiveTerminals: 2, confirmationSeconds: 1 })).resolves.toEqual({
+      ok: true,
+      data: {
+        config: { enabled: true, idleSeconds: 10, maxLiveTerminals: 2, confirmationSeconds: 1 }
+      }
+    })
+    await expect(
+      hibernateManagedAiSession({ source: 'codex', sessionId: 'codex-hibernate-1', terminalSessionId: 'terminal-session-1', reason: 'manual-test' })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.objectContaining({
+            id: 'codex-hibernate-1',
+            hibernated: true,
+            hibernationReason: 'manual-test',
+            hibernatedTerminalSessionId: 'terminal-session-1'
+          })
+        })
+      })
+    )
+    await expect(listManagedAiSessions()).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sessions: [expect.objectContaining({ id: 'codex-hibernate-1', hibernated: true })]
+        })
+      })
+    )
+    await expect(wakeManagedAiSession({ source: 'codex', sessionId: 'codex-hibernate-1', reason: 'resume' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.not.objectContaining({ hibernated: true })
+        })
+      })
+    )
   })
 
   it('tracks lifecycle and process metadata for managed AI sessions', async () => {

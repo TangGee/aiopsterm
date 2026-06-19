@@ -13,6 +13,8 @@ Commands:
   workspace group <subcommand>
   workspace-group <subcommand>
   surface list
+  agent-hibernation on|off|status
+  agent hibernate|resume --session <id> [--source <source>]
   tree
   terminal list
   terminal focus --panel <id>|--session <id>
@@ -67,6 +69,24 @@ const methodParams = () => {
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
     if (subcommand === 'current') return { method: 'surface.current', params: {} }
     throw new Error(`Unknown surface command: ${subcommand}`)
+  }
+  if (command === 'agent-hibernation') {
+    const subcommand = args.shift() || 'status'
+    if (subcommand === 'on' || subcommand === 'enable') return { method: 'agent-hibernation.on', params: {} }
+    if (subcommand === 'off' || subcommand === 'disable') return { method: 'agent-hibernation.off', params: {} }
+    if (subcommand === 'status') return { method: 'agent-hibernation.status', params: {} }
+    throw new Error(`Unknown agent-hibernation command: ${subcommand}`)
+  }
+  if (command === 'agent') {
+    const subcommand = args.shift() || 'status'
+    if (subcommand === 'status') return { method: 'agent.status', params: {} }
+    if (subcommand === 'hibernate' || subcommand === 'resume') {
+      const sessionId = readOption('--session') || readOption('--session-id') || args.find((arg) => !arg.startsWith('--')) || ''
+      const source = readOption('--source') || readOption('--agent')
+      const reason = readOption('--reason')
+      return { method: `agent.${subcommand}`, params: { sessionId, session_id: sessionId, source, reason } }
+    }
+    throw new Error(`Unknown agent command: ${subcommand}`)
   }
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
@@ -180,6 +200,9 @@ const printResponse = (response) => {
         )
       }
     }
+    if (snapshot.agentHibernation) {
+      process.stdout.write(`agent-hibernation\t${snapshot.agentHibernation.enabled ? 'on' : 'off'}\tmax=${snapshot.agentHibernation.maxLiveTerminals}\tidle=${snapshot.agentHibernation.idleSeconds}\n`)
+    }
     if (Array.isArray(snapshot.surfaces)) {
       for (const surface of snapshot.surfaces) {
         process.stdout.write(
@@ -205,6 +228,10 @@ const printResponse = (response) => {
   if (data.group) {
     const group = data.group
     process.stdout.write(`OK\t${group.ref || group.id || '-'}\t${group.name || ''}\t${group.memberCount || 0} members\n`)
+    return
+  }
+  if (data.config) {
+    process.stdout.write(`agent-hibernation\t${data.config.enabled ? 'on' : 'off'}\tmax=${data.config.maxLiveTerminals}\tidle=${data.config.idleSeconds}\n`)
     return
   }
   if (Array.isArray(data.groups)) {

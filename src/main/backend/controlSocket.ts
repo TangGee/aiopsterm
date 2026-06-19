@@ -241,6 +241,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method.startsWith('workspace.group.') ||
     method === 'surface.list' ||
     method === 'surface.current' ||
+    method.startsWith('agent-hibernation.') ||
+    method.startsWith('agent.') ||
     method === 'tree' ||
     method === 'top'
   ) {
