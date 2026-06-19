@@ -175,6 +175,10 @@ export type ControlSurfaceResumeBindingSummary = {
   approval_policy?: string
   approvalRecordId?: string
   approval_record_id?: string
+  trustedAt?: number
+  trusted_at?: number
+  trustReason?: string
+  trust_reason?: string
   updatedAt: number
   updated_at?: number
 }

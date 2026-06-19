@@ -7227,6 +7227,7 @@ describe('AppShell', () => {
         kind: 'tmux',
         checkpointId: 'work',
         command: 'tmux attach -t work',
+        autoResume: true,
         environment: {
           SAFE_ENV: 'yes',
           API_KEY: 'secret'
@@ -7243,7 +7244,7 @@ describe('AppShell', () => {
             kind: 'tmux',
             checkpointId: 'work',
             environment: { SAFE_ENV: 'yes' },
-            autoResume: false
+            autoResume: true
           })
         })
       })
@@ -7252,6 +7253,33 @@ describe('AppShell', () => {
 
     const getResponse = await invokeControlHandler({ id: 'resume-get', method: 'surface.resume.get', params: { panelId: store.activePanelId } })
     expect(getResponse.data.resume_binding).toEqual(expect.objectContaining({ command: 'tmux attach -t work' }))
+
+    const untrustedPreview = await invokeControlHandler({ id: 'resume-preview-untrusted', method: 'surface.resume.preview', params: { panelId: store.activePanelId } })
+    expect(untrustedPreview.data.candidates[0]).toEqual(expect.objectContaining({ ready: false, trusted: false, reason: 'untrusted' }))
+    const untrustedAutorun = await invokeControlHandler({ id: 'resume-autorun-untrusted', method: 'surface.resume.autorun', params: { panelId: store.activePanelId } })
+    expect(untrustedAutorun.data).toEqual(expect.objectContaining({ ranCount: 0, readyCount: 0 }))
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    const trustResponse = await invokeControlHandler({
+      id: 'resume-trust',
+      method: 'surface.resume.trust',
+      params: { panelId: store.activePanelId, policy: 'auto', reason: 'unit-test' }
+    })
+    expect(trustResponse.data.resumeBinding).toEqual(
+      expect.objectContaining({
+        autoResume: true,
+        approvalPolicy: 'auto',
+        approval_record_id: expect.stringContaining('surface-resume:'),
+        trustReason: 'unit-test'
+      })
+    )
+    const trustedPreview = await invokeControlHandler({ id: 'resume-preview-trusted', method: 'surface.resume.preview', params: { panelId: store.activePanelId } })
+    expect(trustedPreview.data).toEqual(expect.objectContaining({ readyCount: 1, trustedCount: 1 }))
+    expect(trustedPreview.data.candidates[0]).toEqual(expect.objectContaining({ ready: true, trusted: true, reason: 'ready' }))
+    const trustedAutorun = await invokeControlHandler({ id: 'resume-autorun-trusted', method: 'surface.resume.autorun', params: { panelId: store.activePanelId } })
+    expect(trustedAutorun.data).toEqual(expect.objectContaining({ ranCount: 1, readyCount: 1 }))
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('resume-terminal-1', 'tmux attach -t work\n')
+    vi.mocked(window.aiops.writeTerminal).mockClear()
 
     const runResponse = await invokeControlHandler({ id: 'resume-run', method: 'surface.resume.run', params: { panelId: store.activePanelId } })
     expect(runResponse).toEqual(expect.objectContaining({ ok: true }))

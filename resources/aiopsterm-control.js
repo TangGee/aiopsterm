@@ -16,7 +16,7 @@ Commands:
   workspace-group <subcommand>
   session save|list|show|restore|clear [--id <id>] [--name <name>]
   surface list
-  surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
+  surface resume set|show|get|clear|run|trust|preview|autorun [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
   agent vault register|list|get|remove|render|identify|scan
@@ -443,6 +443,18 @@ const surfaceResumeMethodParams = (subcommand) => {
     }
   }
   if (subcommand === 'get') return { method: 'surface.resume.get', params: target }
+  if (subcommand === 'trust' || subcommand === 'approve') {
+    return {
+      method: 'surface.resume.trust',
+      params: {
+        ...target,
+        policy: readOption('--policy') || (hasFlag('--manual') ? 'manual' : 'auto'),
+        reason: readOption('--reason')
+      }
+    }
+  }
+  if (subcommand === 'preview' || subcommand === 'autorun-preview') return { method: 'surface.resume.preview', params: target }
+  if (subcommand === 'autorun' || subcommand === 'run-auto') return { method: 'surface.resume.autorun', params: target }
   if (subcommand === 'clear') {
     const checkpointId = readOption('--checkpoint') || readOption('--checkpoint-id')
     return {
@@ -533,6 +545,17 @@ const printResponse = (response) => {
     process.stdout.write(
       `restored\t${restored.id || '-'}\tpanels=${data.restoredPanels || 0}\tlocal=${data.launchedLocalTerminals || 0}\tremote_skipped=${data.skippedRemoteTerminals || 0}\n`
     )
+    return
+  }
+  if (Array.isArray(data.candidates)) {
+    process.stdout.write(`resume-candidates\t${data.readyCount || 0}/${data.count || data.candidates.length}\ttrusted=${data.trustedCount || 0}\tran=${data.ranCount || 0}\n`)
+    for (const item of data.candidates) {
+      const surface = item.surface || {}
+      const binding = item.resumeBinding || item.resume_binding || {}
+      process.stdout.write(
+        ['resume-candidate', surface.panelId || '-', item.ready ? 'ready' : item.reason || '-', item.trusted ? 'trusted' : 'untrusted', binding.command || ''].join('\t') + '\n'
+      )
+    }
     return
   }
   if ('resumeBinding' in data || 'resume_binding' in data) {

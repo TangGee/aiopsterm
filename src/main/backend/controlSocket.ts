@@ -498,6 +498,15 @@ const normalizeSessionPanelSnapshot = (value: unknown): ControlSessionSnapshot['
             ...(cleanText(resumeBinding.checkpointId || resumeBinding.checkpoint_id) ? { checkpointId: cleanText(resumeBinding.checkpointId || resumeBinding.checkpoint_id), checkpoint_id: cleanText(resumeBinding.checkpointId || resumeBinding.checkpoint_id) } : {}),
             ...(cleanText(resumeBinding.source) ? { source: cleanText(resumeBinding.source) } : {}),
             autoResume: resumeBinding.autoResume === true || resumeBinding.auto_resume === true,
+            ...(cleanText(resumeBinding.approvalPolicy || resumeBinding.approval_policy) ? { approvalPolicy: cleanText(resumeBinding.approvalPolicy || resumeBinding.approval_policy), approval_policy: cleanText(resumeBinding.approvalPolicy || resumeBinding.approval_policy) } : {}),
+            ...(cleanText(resumeBinding.approvalRecordId || resumeBinding.approval_record_id) ? { approvalRecordId: cleanText(resumeBinding.approvalRecordId || resumeBinding.approval_record_id), approval_record_id: cleanText(resumeBinding.approvalRecordId || resumeBinding.approval_record_id) } : {}),
+            ...(Number.isFinite(resumeBinding.trustedAt) || Number.isFinite(resumeBinding.trusted_at)
+              ? {
+                  trustedAt: Number.isFinite(resumeBinding.trustedAt) ? Number(resumeBinding.trustedAt) : Number(resumeBinding.trusted_at),
+                  trusted_at: Number.isFinite(resumeBinding.trusted_at) ? Number(resumeBinding.trusted_at) : Number(resumeBinding.trustedAt)
+                }
+              : {}),
+            ...(cleanText(resumeBinding.trustReason || resumeBinding.trust_reason) ? { trustReason: cleanText(resumeBinding.trustReason || resumeBinding.trust_reason), trust_reason: cleanText(resumeBinding.trustReason || resumeBinding.trust_reason) } : {}),
             updatedAt: Number.isFinite(resumeBinding.updatedAt) ? Number(resumeBinding.updatedAt) : Date.now(),
             updated_at: Number.isFinite(resumeBinding.updated_at) ? Number(resumeBinding.updated_at) : Number.isFinite(resumeBinding.updatedAt) ? Number(resumeBinding.updatedAt) : Date.now()
           }
@@ -1569,7 +1578,7 @@ const jumpToUnreadNotification = async () => {
 
 const rendererMutationEventName = (method: string) => {
   if (method.startsWith('workspace.group.') && method !== 'workspace.group.list') return method.replace('workspace.group.', 'workspace_group.')
-  if (method.startsWith('surface.resume.') && method !== 'surface.resume.get' && method !== 'surface.resume.show') return method.replace('surface.resume.', 'surface_resume.')
+  if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
   if (method === 'agent-hibernation.on') return 'agent_hibernation.enabled'
   if (method === 'agent-hibernation.off') return 'agent_hibernation.disabled'
   if (method === 'agent.hibernate') return 'agent.hibernated'

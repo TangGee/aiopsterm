@@ -69,6 +69,9 @@ The surface resume slice adds control_compat-style resume bindings for visible w
 
 - `surface.resume.set`: attach a resume command to the current or selected surface.
 - `surface.resume.get` / `surface.resume.show`: read the selected surface's resume binding.
+- `surface.resume.trust`: explicitly mark the selected resume binding as trusted for manual or automatic recovery.
+- `surface.resume.preview`: list current resume bindings and explain whether each one is ready for trusted automatic recovery.
+- `surface.resume.autorun`: run only trusted automatic resume bindings through terminal command security.
 - `surface.resume.clear`: remove a binding, optionally guarded by checkpoint/source.
 - `surface.resume.run`: explicitly write the stored command into the selected terminal through aiopsterm terminal command security.
 
@@ -154,6 +157,9 @@ node /path/to/resources/aiopsterm-control.js session list
 node /path/to/resources/aiopsterm-control.js session restore --id latest
 node /path/to/resources/aiopsterm-control.js surface list
 node /path/to/resources/aiopsterm-control.js surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
+node /path/to/resources/aiopsterm-control.js surface resume trust --panel panel-main --policy auto --reason "trusted tmux session"
+node /path/to/resources/aiopsterm-control.js surface resume preview --panel panel-main
+node /path/to/resources/aiopsterm-control.js surface resume autorun --panel panel-main
 node /path/to/resources/aiopsterm-control.js surface resume show --json
 node /path/to/resources/aiopsterm-control.js surface resume run --panel panel-main
 node /path/to/resources/aiopsterm-control.js surface resume clear --checkpoint work
@@ -203,7 +209,9 @@ By default `sweep` uses the configured `confirmationSeconds` settle window. The 
 
 The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
-`surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; aiopsterm does not auto-run them when the app restarts. `surface.resume.run` is an explicit action and uses the same terminal command security path as AI-generated terminal commands. Environment values supplied with the binding are optional and obvious sensitive keys such as token, password, secret, credential, auth, bearer, and API key names are dropped before storage.
+`surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; setting `autoResume=true` alone does not authorize automatic execution. A binding becomes auto-runnable only after `surface.resume.trust --policy auto`, which records a command fingerprint and trust metadata on that binding. `surface.resume.preview` reports `ready`, `manual`, `untrusted`, or `terminal-not-connected` reasons before anything runs.
+
+`surface.resume.run` and `surface.resume.autorun` both use the same terminal command security path as AI-generated terminal commands. If the configured command policy requires approval, the normal terminal approval prompt appears before any bytes are written to the shell. Environment values supplied with the binding are optional and obvious sensitive keys such as token, password, secret, credential, auth, bearer, and API key names are dropped before storage.
 
 `session.restore` restores layout and metadata; it does not checkpoint arbitrary live process state. Local terminal panels are recreated as new local shells in the saved working directory. SSH panels are restored as disconnected surfaces with their connection metadata so the user can explicitly reconnect. Saved resume bindings are restored for inspection and manual `surface.resume.run`, but aiopsterm does not automatically run resume commands from a session snapshot.
 

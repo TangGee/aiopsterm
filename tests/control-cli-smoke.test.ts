@@ -496,6 +496,23 @@ describe('aiopsterm-control CLI', () => {
             checkpointId: 'work',
             autoResume: false
           },
+          ...(request.method === 'surface.resume.preview' || request.method === 'surface.resume.autorun'
+            ? {
+                candidates: [
+                  {
+                    surface: { panelId: 'panel-1' },
+                    resumeBinding: { command: 'tmux attach -t work' },
+                    trusted: request.method === 'surface.resume.autorun',
+                    ready: request.method === 'surface.resume.autorun',
+                    reason: request.method === 'surface.resume.autorun' ? 'ready' : 'untrusted'
+                  }
+                ],
+                count: 1,
+                readyCount: request.method === 'surface.resume.autorun' ? 1 : 0,
+                trustedCount: request.method === 'surface.resume.autorun' ? 1 : 0,
+                ranCount: request.method === 'surface.resume.autorun' ? 1 : 0
+              }
+            : {}),
           resume_binding: {
             kind: 'tmux',
             command: "tmux attach -t work",
@@ -515,6 +532,17 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'show', '--panel', 'panel-1'], {
       cwd: process.cwd()
     })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'trust', '--panel', 'panel-1', '--policy', 'auto', '--reason', 'test'], {
+      cwd: process.cwd()
+    })
+    const preview = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'preview', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    expect(preview.stdout).toContain('resume-candidates\t0/1\ttrusted=0')
+    const autorun = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'autorun', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    expect(autorun.stdout).toContain('resume-candidates\t1/1\ttrusted=1\tran=1')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'resume', 'clear', '--panel', 'panel-1', '--checkpoint', 'work'], {
       cwd: process.cwd()
     })
@@ -536,6 +564,9 @@ describe('aiopsterm-control CLI', () => {
         })
       }),
       expect.objectContaining({ method: 'surface.resume.get', params: expect.objectContaining({ panelId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.resume.trust', params: expect.objectContaining({ panelId: 'panel-1', policy: 'auto', reason: 'test' }) }),
+      expect.objectContaining({ method: 'surface.resume.preview', params: expect.objectContaining({ panelId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.resume.autorun', params: expect.objectContaining({ panelId: 'panel-1' }) }),
       expect.objectContaining({ method: 'surface.resume.clear', params: expect.objectContaining({ panelId: 'panel-1', checkpointId: 'work', checkpoint_id: 'work' }) }),
       expect.objectContaining({ method: 'surface.resume.run', params: expect.objectContaining({ panelId: 'panel-1' }) })
     ])
