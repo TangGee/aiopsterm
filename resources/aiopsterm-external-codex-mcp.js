@@ -71,6 +71,18 @@ const hostSelectorProperties = {
   }
 }
 
+const aiSessionSelectorProperties = {
+  source: {
+    type: 'string',
+    description:
+      'Optional AI agent source, for example codex or claude-code. Required when multiple managed AI sessions share the same sessionId.'
+  },
+  sessionId: {
+    type: 'string',
+    description: 'Managed AI session id returned by list_ai_sessions.'
+  }
+}
+
 const tools = [
   {
     name: 'list_hosts',
@@ -210,6 +222,72 @@ const tools = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'list_ai_sessions',
+    title: 'List aiopsterm managed AI sessions',
+    description:
+      'List AI coding-agent sessions reported by agents running inside aiopsterm-managed local terminals. This does not manage the embedded Codex sidebar or external OS terminals.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional case-insensitive filter across source, title, summary, cwd, and terminal ids.' },
+        source: { type: 'string', description: 'Optional agent source filter, for example codex or claude-code.' },
+        state: { type: 'string', enum: ['idle', 'working', 'needsInput', 'ended', 'unknown'], description: 'Optional managed session state filter.' },
+        needsInput: { type: 'boolean', description: 'When true, return only sessions waiting for user input.' },
+        includeEvents: { type: 'boolean', description: 'Include a compact tail of recent non-secret timeline event summaries.' },
+        eventLimit: { type: 'number', description: 'Maximum recent timeline events per session when includeEvents is true. Defaults to 5.' },
+        limit: { type: 'number', description: 'Maximum sessions to return. Defaults to 50 and is capped by aiopsterm.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'focus_ai_session',
+    title: 'Focus aiopsterm managed AI session',
+    description:
+      'Ask aiopsterm to open the AI session manager, select the managed AI session, and focus its owning visible terminal panel when available. This does not create or close connections.',
+    inputSchema: {
+      type: 'object',
+      properties: aiSessionSelectorProperties,
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'reply_ai_session',
+    title: 'Reply to aiopsterm managed AI session',
+    description:
+      'Resolve a managed AI session request through aiopsterm. For Claude Code actionable hooks this can unblock the waiting hook; for telemetry-only agents it marks local handling state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        kind: {
+          type: 'string',
+          enum: ['allow', 'always', 'bypass', 'deny', 'reply', 'handled'],
+          description: 'Decision kind to send to aiopsterm.'
+        },
+        message: { type: 'string', description: 'Optional reply text, answer, denial reason, or handling note.' }
+      },
+      required: ['sessionId', 'kind'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  },
+  {
+    name: 'clear_ai_session',
+    title: 'Clear aiopsterm managed AI session',
+    description: 'Remove a managed AI session from aiopsterm session management. This does not kill the owning terminal or agent process.',
+    inputSchema: {
+      type: 'object',
+      properties: aiSessionSelectorProperties,
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
   }
 ]
 

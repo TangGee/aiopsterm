@@ -104,6 +104,7 @@ import type {
   ManagedAiSessionBulkInput,
   ManagedAiSessionBulkResult,
   ManagedAiSessionDecision,
+  ManagedAiSessionFocusRequest,
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
   ManagedAiSessionRecord,
@@ -8702,6 +8703,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return session
   }
 
+  const findManagedAiSessionForFocusRequest = (request: ManagedAiSessionFocusRequest) =>
+    managedAiSessions.value.find((item) => {
+      if (request.source && item.source !== request.source) return false
+      if (request.sessionId && item.id === request.sessionId) return true
+      if (request.panelId && item.panelId === request.panelId) return true
+      if (request.terminalSessionId && item.terminalSessionId === request.terminalSessionId) return true
+      return false
+    })
+
+  const focusManagedAiSessionRequest = async (request: ManagedAiSessionFocusRequest) => {
+    let session = findManagedAiSessionForFocusRequest(request)
+    if (!session) {
+      await refreshManagedAiSessions({ silent: true })
+      session = findManagedAiSessionForFocusRequest(request)
+    }
+    if (!session) return null
+    const focused = focusManagedAiSession(session.id)
+    activeModule.value = 'aiSessions'
+    leftPanelOpen.value = true
+    return focused
+  }
+
   const resumeManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {
     const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
     if (!session) {
@@ -14725,6 +14748,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bulkManagedAiSessions,
     managedAiSessionNeedsAttentionForPanel,
     focusManagedAiSession,
+    focusManagedAiSessionRequest,
     resumeManagedAiSession,
     removeAiAttentionItem,
     markAiAttentionHandled,

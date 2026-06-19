@@ -219,6 +219,7 @@ let stopDeepLink: (() => void) | undefined
 let stopKeyboardInteractiveRequest: (() => void) | undefined
 let stopKeyboardInteractiveResult: (() => void) | undefined
 let stopAiAgentSessionEvent: (() => void) | undefined
+let stopManagedAiSessionFocusRequest: (() => void) | undefined
 const terminalMfaInputRefs = ref<HTMLInputElement[]>([])
 const terminalMfaDialog = ref<TerminalMfaDialogState>({
   open: false,
@@ -465,6 +466,9 @@ onMounted(() => {
   stopAiAgentSessionEvent = window.aiops?.onAiAgentSessionEvent?.((event) => {
     workspace.upsertManagedAiSession(event)
   })
+  stopManagedAiSessionFocusRequest = window.aiops?.onManagedAiSessionFocusRequest?.((request) => {
+    void workspace.focusManagedAiSessionRequest(request)
+  })
   void consumePendingDeepLinks()
 })
 
@@ -473,6 +477,7 @@ onUnmounted(() => {
   stopKeyboardInteractiveRequest?.()
   stopKeyboardInteractiveResult?.()
   stopAiAgentSessionEvent?.()
+  stopManagedAiSessionFocusRequest?.()
   window.removeEventListener('mousemove', handleResizeMove)
   window.removeEventListener('mouseup', endResize)
   document.body.classList.remove('layout-resizing')

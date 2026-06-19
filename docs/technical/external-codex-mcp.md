@@ -7,6 +7,8 @@ aiopsterm exposes two Codex-facing MCP boundaries:
 
 The two systems are intentionally separate. External Codex connections are stored in an independent connection pool with ids prefixed by `mcp-`, `owner: "external_codex"`, and `visible: false`.
 
+The external server can also inspect and act on managed AI sessions reported by agents that were launched inside aiopsterm-created local terminal panes. Those managed AI sessions stay attached to their visible terminal owner; the external MCP does not create, own, or close those terminal panes.
+
 ## Lifecycle
 
 `connect_host` creates a headless SSH shell from a saved aiopsterm host asset. It waits until the SSH backend reports `shell-ready` before returning a successful connection, so a following `run_command` can write to a live remote shell.
@@ -28,8 +30,14 @@ The external server currently exposes:
 - `read_file`: Reads a bounded line range from a remote file.
 - `glob_search`: Finds remote files by glob pattern with bounded output.
 - `grep_search`: Searches remote file contents with bounded output.
+- `list_ai_sessions`: Lists managed AI sessions with compact state, routing, and recent-event summaries.
+- `focus_ai_session`: Requests aiopsterm to open the AI session manager and focus the owning visible terminal when it exists.
+- `reply_ai_session`: Sends an allow/deny/reply/handled decision through the managed session backend.
+- `clear_ai_session`: Removes a managed AI session record without killing the owning terminal or agent process.
 
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
+
+`list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
 
 ## Enablement
 
@@ -72,6 +80,7 @@ The external MCP is different: it is a headless host gateway for an external Cod
 - no secret exposure in host listing or connection snapshots
 - external Codex MCP tool approval for execution tools
 - destructive tool annotations on `run_command` and `disconnect_host`
+- destructive tool annotations on `clear_ai_session`
 - bounded output and timeout caps for command/file/search operations
 
 Do not reuse external MCP connection ids for UI terminals, and do not register external MCP sessions with `codexTerminalBridge.ts`.

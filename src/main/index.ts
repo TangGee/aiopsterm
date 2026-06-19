@@ -313,6 +313,7 @@ import type {
   AiopsOrganizationAssetRefreshInput,
   AiAgentSessionEvent,
   AiAgentSessionEventInput,
+  ManagedAiSessionFocusRequest,
   AiopsUserAvatarPrepareInput,
   AiopsUserCodeInput,
   AiopsUserContactBindInput,
@@ -700,6 +701,18 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
     broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
   })
   notification.show()
+}
+
+const broadcastManagedAiSessionFocusRequest = (request: ManagedAiSessionFocusRequest) => {
+  logRuntimeEvent('info', 'ai-agent.focus-request', {
+    source: request.source,
+    sessionId: request.sessionId,
+    panelId: request.panelId,
+    terminalSessionId: request.terminalSessionId
+  })
+  const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
+  focusWindow(target)
+  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-focus', request)
 }
 
 const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -1503,7 +1516,8 @@ void ensureExternalCodexMcpBridgeServer({
   enabled: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1',
   token: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN,
   socketPath: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET,
-  userDataPath: app.getPath('userData')
+  userDataPath: app.getPath('userData'),
+  focusManagedAiSession: broadcastManagedAiSessionFocusRequest
 })
   .then((externalCodexMcpSocketPath) => {
     if (!externalCodexMcpSocketPath) return

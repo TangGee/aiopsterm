@@ -759,6 +759,13 @@ export type ManagedAiSessionBulkResult = AiopsMutationResult<{
   snapshot: ManagedAiSessionSnapshot
 }>
 
+export type ManagedAiSessionFocusRequest = {
+  source?: AiAgentSessionSource
+  sessionId?: string
+  panelId?: string
+  terminalSessionId?: string
+}
+
 export type AgentHookInstallerSource =
   | 'codex'
   | 'claude-code'
@@ -3669,6 +3676,7 @@ export type AiopsPreloadApi = {
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void
   publishAiAgentSessionEvent: (input: AiAgentSessionEventInput) => Promise<AiAgentSessionEventResult>
   onAiAgentSessionEvent: (listener: (event: AiAgentSessionEvent) => void) => () => void
+  onManagedAiSessionFocusRequest: (listener: (request: ManagedAiSessionFocusRequest) => void) => () => void
   onCodexSessionData: (listener: (event: CodexSessionDataEvent) => void) => () => void
   onCodexSessionLifecycle: (listener: (event: CodexSessionLifecycleEvent) => void) => () => void
   onCodexSessionExit: (listener: (event: CodexSessionExitEvent) => void) => () => void

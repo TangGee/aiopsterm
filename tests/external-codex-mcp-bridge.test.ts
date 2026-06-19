@@ -236,21 +236,27 @@ const loadBackends = async () => {
   const assetsModulePath = '../src/main/backend/assets'
   const sshTerminalModulePath = '../src/main/backend/sshTerminal'
   const bridgeModulePath = '../src/main/backend/externalCodexMcpBridge'
+  const agentSessionsModulePath = '../src/main/backend/agentSessions'
   const assets = await import(assetsModulePath)
   const sshTerminal = await import(sshTerminalModulePath)
   const bridge = await import(bridgeModulePath)
+  const agentSessions = await import(agentSessionsModulePath)
   assets.configureAssetBackendRuntime({ useSeedData: false, forceFallbackStore: true })
   sshTerminal.configureSshTerminalBackendRuntime()
+  agentSessions.closeAiAgentSessionServer()
+  await agentSessions.configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-external-agent-sessions-')))
   bridge.closeExternalCodexMcpBridgeServer()
   bridge.configureExternalCodexMcpBridgeRuntime({
     enabled: true,
-    token: 'test-token'
+    token: 'test-token',
+    focusManagedAiSession: undefined
   })
-  return { assets, sshTerminal, bridge }
+  return { assets, sshTerminal, bridge, agentSessions }
 }
 
 let activeBridge: Awaited<ReturnType<typeof loadBackends>>['bridge'] | null = null
 let activeSshTerminal: Awaited<ReturnType<typeof loadBackends>>['sshTerminal'] | null = null
+let activeAgentSessions: Awaited<ReturnType<typeof loadBackends>>['agentSessions'] | null = null
 
 describe('external Codex MCP bridge runtime', () => {
   beforeEach(() => {
@@ -261,9 +267,12 @@ describe('external Codex MCP bridge runtime', () => {
 
   afterEach(async () => {
     activeBridge?.closeExternalCodexMcpBridgeServer()
+    activeAgentSessions?.closeAiAgentSessionServer()
     activeSshTerminal?.configureSshTerminalBackendRuntime()
+    await activeAgentSessions?.configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-external-agent-sessions-reset-')))
     activeBridge = null
     activeSshTerminal = null
+    activeAgentSessions = null
     delete process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE
     delete process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN
     delete process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET
@@ -469,6 +478,114 @@ describe('external Codex MCP bridge runtime', () => {
     )
   })
 
+  it('exposes managed AI sessions to external Codex MCP without owning visible terminals', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    const focusRequests: Array<Record<string, unknown>> = []
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      enabled: true,
+      token: 'test-token',
+      focusManagedAiSession: (request: unknown) => focusRequests.push(request as Record<string, unknown>)
+    })
+    expect(
+      agentSessions.publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'PermissionRequest',
+          sessionId: 'codex-managed-1',
+          requestId: 'approve-1',
+          actionable: true,
+          title: 'Codex · api-service',
+          summary: 'approve npm test',
+          cwd: '/work/api-service',
+          panelId: 'panel-1',
+          terminalSessionId: 'terminal-1',
+          receivedAt: 700
+        },
+        null
+      )
+    ).toEqual(expect.objectContaining({ ok: true }))
+    await expect(agentSessions.listManagedAiSessions()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          sessions: [expect.objectContaining({ id: 'codex-managed-1', source: 'codex' })]
+        })
+      })
+    )
+
+    const listResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_ai_sessions',
+      token: 'test-token',
+      params: { needsInput: true, includeEvents: true }
+    })
+    expect(listResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: 1,
+          needsInputCount: 1,
+          sessions: [
+            expect.objectContaining({
+              source: 'codex',
+              sessionId: 'codex-managed-1',
+              title: 'Codex · api-service',
+              summary: 'approve npm test',
+              needsInput: true,
+              panelId: 'panel-1',
+              terminalSessionId: 'terminal-1',
+              eventCount: 1,
+              events: [expect.objectContaining({ event: 'permission_request', summary: 'approve npm test' })]
+            })
+          ]
+        })
+      })
+    )
+    expect(JSON.stringify(listResponse)).not.toContain('raw')
+
+    const focusResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'focus_ai_session',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-managed-1' }
+    })
+    expect(focusResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ focusRequested: true }) }))
+    expect(focusRequests).toEqual([
+      {
+        source: 'codex',
+        sessionId: 'codex-managed-1',
+        panelId: 'panel-1',
+        terminalSessionId: 'terminal-1'
+      }
+    ])
+
+    const replyResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'reply_ai_session',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-managed-1', kind: 'handled', message: 'done' }
+    })
+    expect(replyResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.objectContaining({
+            sessionId: 'codex-managed-1',
+            state: 'idle',
+            needsInput: false
+          }),
+          needsInputCount: 0
+        })
+      })
+    )
+
+    const clearResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'clear_ai_session',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-managed-1' }
+    })
+    expect(clearResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true, count: 0 }) }))
+  })
+
   it('serves socket bridge requests and the external stdio MCP tool list', async () => {
     const { assets, bridge } = await loadBackends()
     activeBridge = bridge
@@ -523,10 +640,18 @@ describe('external Codex MCP bridge runtime', () => {
           'run_command',
           'read_file',
           'glob_search',
-          'grep_search'
+          'grep_search',
+          'list_ai_sessions',
+          'focus_ai_session',
+          'reply_ai_session',
+          'clear_ai_session'
         ])
         const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')
         expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
+        const listAiSessionsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
+        expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+        const clearAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'clear_ai_session')
+        expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
       } finally {
         mcp.child.kill()
       }

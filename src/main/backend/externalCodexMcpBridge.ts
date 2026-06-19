@@ -8,8 +8,14 @@ import type {
   ExternalCodexMcpConnection,
   ExternalCodexMcpHost,
   ExternalCodexMcpResponse,
+  ManagedAiSessionClearInput,
+  ManagedAiSessionDecisionKind,
+  ManagedAiSessionFocusRequest,
+  ManagedAiSessionRecord,
+  ManagedAiSessionReplyInput,
   TerminalLifecycleEvent
 } from '@shared/preload'
+import { clearManagedAiSession, listManagedAiSessions, replyManagedAiSession } from './agentSessions'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from './sshTerminal'
 import { listAssets } from './assets'
 
@@ -45,6 +51,7 @@ type ExternalCodexMcpRuntimeConfig = {
   token?: string
   socketPath?: string
   userDataPath?: string
+  focusManagedAiSession?: (request: ManagedAiSessionFocusRequest) => void
 }
 
 const connections = new Map<string, ExternalConnectionRecord>()
@@ -55,6 +62,11 @@ let socketPath = ''
 let runtimeConfig: ExternalCodexMcpRuntimeConfig = {}
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const cleanOptionalText = (value: unknown) => {
+  const text = cleanText(value)
+  return text || undefined
+}
 
 const normalizeInteger = (value: unknown, fallback: number, min: number, max: number) => {
   const numberValue = Number(value)
@@ -639,6 +651,152 @@ const targetContext = (params: Record<string, unknown>) => {
   return ok({ context: { assetId: host.assetId, host: host.host, port: host.port, username: host.username, title: host.title, status: 'disconnected' } })
 }
 
+const managedAiSessionSummary = (session: ManagedAiSessionRecord, options: { includeEvents?: boolean; eventLimit?: number } = {}) => {
+  const eventLimit = normalizeInteger(options.eventLimit, 5, 1, 50)
+  return {
+    source: session.source,
+    sessionId: session.id,
+    title: session.title,
+    summary: session.summary,
+    state: session.state,
+    needsInput: session.state === 'needsInput',
+    lastEvent: session.lastEvent,
+    actionable: session.actionable === true,
+    ...(session.pendingRequestId ? { pendingRequestId: session.pendingRequestId } : {}),
+    ...(session.panelId ? { panelId: session.panelId } : {}),
+    ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.cwd ? { cwd: session.cwd } : {}),
+    ...(session.transcriptPath ? { transcriptPath: session.transcriptPath } : {}),
+    ...(session.launchCommand ? { launchCommand: session.launchCommand } : {}),
+    ...(session.resumeCommand ? { resumeCommand: session.resumeCommand } : {}),
+    ...(session.processId ? { processId: session.processId } : {}),
+    ...(session.parentProcessId ? { parentProcessId: session.parentProcessId } : {}),
+    ...(session.processGroupId ? { processGroupId: session.processGroupId } : {}),
+    ...(session.agentLifecycle ? { agentLifecycle: session.agentLifecycle } : {}),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastActivityAt: session.lastActivityAt,
+    ...(session.handledAt ? { handledAt: session.handledAt } : {}),
+    eventCount: session.events.length,
+    decisionCount: session.decisions.length,
+    ...(options.includeEvents
+      ? {
+          events: session.events.slice(-eventLimit).map((event) => ({
+            id: event.id,
+            source: event.source,
+            event: event.event,
+            sessionId: event.sessionId,
+            title: event.title,
+            summary: event.summary,
+            receivedAt: event.receivedAt,
+            ...(event.requestId ? { requestId: event.requestId } : {}),
+            ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : {}),
+            ...(event.cwd ? { cwd: event.cwd } : {}),
+            ...(event.transcriptPath ? { transcriptPath: event.transcriptPath } : {}),
+            ...(event.agentLifecycle ? { agentLifecycle: event.agentLifecycle } : {})
+          }))
+        }
+      : {})
+  }
+}
+
+const listAiSessions = async (params: Record<string, unknown>) => {
+  const snapshot = await listManagedAiSessions()
+  if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MANAGED_AI_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
+  const query = cleanText(params.query).toLowerCase()
+  const source = cleanOptionalText(params.source)
+  const state = cleanOptionalText(params.state)
+  const needsInput = params.needsInput === true
+  const includeEvents = params.includeEvents === true || params.include_events === true
+  const eventLimit = normalizeInteger(params.eventLimit || params.event_limit, 5, 1, 50)
+  const limit = normalizeInteger(params.limit, 50, 1, 200)
+  const filtered = snapshot.data.sessions.filter((session) => {
+    if (source && session.source !== source) return false
+    if (state && session.state !== state) return false
+    if (needsInput && session.state !== 'needsInput') return false
+    if (!query) return true
+    return [session.source, session.id, session.title, session.summary, session.cwd || '', session.panelId || '', session.terminalSessionId || ''].some((value) =>
+      value.toLowerCase().includes(query)
+    )
+  })
+  return ok({
+    sessions: filtered.slice(0, limit).map((session) => managedAiSessionSummary(session, { includeEvents, eventLimit })),
+    count: filtered.length,
+    total: snapshot.data.sessions.length,
+    needsInputCount: snapshot.data.sessions.filter((session) => session.state === 'needsInput').length
+  })
+}
+
+const resolveManagedAiSession = async (params: Record<string, unknown>) => {
+  const sessionId = cleanText(params.sessionId || params.session_id)
+  if (!sessionId) return { error: fail('AI_SESSION_ID_REQUIRED', 'sessionId is required.') }
+  const source = cleanOptionalText(params.source)
+  const snapshot = await listManagedAiSessions()
+  if (!snapshot.ok || !snapshot.data) {
+    return { error: fail(snapshot.errorCode || 'MANAGED_AI_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.') }
+  }
+  const matches = snapshot.data.sessions.filter((session) => session.id === sessionId && (!source || session.source === source))
+  if (!matches.length) return { error: fail('AI_SESSION_NOT_FOUND', `Managed AI session was not found: ${source ? `${source}:` : ''}${sessionId}`) }
+  if (matches.length > 1) return { error: fail('AI_SESSION_SOURCE_REQUIRED', `Multiple managed AI sessions match ${sessionId}; pass source.`) }
+  return { session: matches[0] }
+}
+
+const focusAiSession = async (params: Record<string, unknown>) => {
+  const resolved = await resolveManagedAiSession(params)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const request: ManagedAiSessionFocusRequest = {
+    source: session.source,
+    sessionId: session.id,
+    ...(session.panelId ? { panelId: session.panelId } : {}),
+    ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {})
+  }
+  runtimeConfig.focusManagedAiSession?.(request)
+  return ok({
+    focusRequested: typeof runtimeConfig.focusManagedAiSession === 'function',
+    session: managedAiSessionSummary(session)
+  })
+}
+
+const replyAiSession = async (params: Record<string, unknown>) => {
+  const resolved = await resolveManagedAiSession(params)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const kind = cleanText(params.kind) as ManagedAiSessionDecisionKind
+  const input: ManagedAiSessionReplyInput = {
+    source: session.source,
+    sessionId: session.id,
+    kind,
+    ...(cleanOptionalText(params.message) ? { message: cleanOptionalText(params.message) } : {})
+  }
+  const result = await replyManagedAiSession(input)
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_SESSION_REPLY_FAILED', result.errorMessage || 'Managed AI session reply failed.')
+  return ok({
+    session: result.data.session ? managedAiSessionSummary(result.data.session) : managedAiSessionSummary(session),
+    count: result.data.snapshot.sessions.length,
+    needsInputCount: result.data.snapshot.sessions.filter((item) => item.state === 'needsInput').length
+  })
+}
+
+const clearAiSession = async (params: Record<string, unknown>) => {
+  const resolved = await resolveManagedAiSession(params)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const input: ManagedAiSessionClearInput = {
+    source: session.source,
+    sessionId: session.id
+  }
+  const result = await clearManagedAiSession(input)
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_SESSION_CLEAR_FAILED', result.errorMessage || 'Managed AI session clear failed.')
+  return ok({
+    cleared: true,
+    session: managedAiSessionSummary(session),
+    count: result.data.snapshot.sessions.length,
+    needsInputCount: result.data.snapshot.sessions.filter((item) => item.state === 'needsInput').length
+  })
+}
+
 export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodexMcpRequest): Promise<ExternalCodexMcpResponse> => {
   const token = configuredToken()
   if (!isEnabled()) return fail('EXTERNAL_CODEX_MCP_DISABLED', 'External Codex MCP is disabled.')
@@ -654,6 +812,10 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'read_file') return readFile(params)
   if (request.method === 'glob_search') return globSearch(params)
   if (request.method === 'grep_search') return grepSearch(params)
+  if (request.method === 'list_ai_sessions') return listAiSessions(params)
+  if (request.method === 'focus_ai_session') return focusAiSession(params)
+  if (request.method === 'reply_ai_session') return replyAiSession(params)
+  if (request.method === 'clear_ai_session') return clearAiSession(params)
   return fail('UNKNOWN_METHOD', `Unknown external Codex MCP bridge method: ${request.method || ''}`)
 }
 

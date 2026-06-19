@@ -351,6 +351,11 @@ const api: AiopsPreloadApi = {
     ipcRenderer.on('ai-agent:session-event', wrapped)
     return () => ipcRenderer.off('ai-agent:session-event', wrapped)
   },
+  onManagedAiSessionFocusRequest: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('ai-agent:session-focus', wrapped)
+    return () => ipcRenderer.off('ai-agent:session-focus', wrapped)
+  },
   onCodexSessionData: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
     ipcRenderer.on('codex:data', wrapped)
