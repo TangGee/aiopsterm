@@ -35,6 +35,10 @@ Commands:
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
+  resize-pane [--pane <id>|--panel <id>] [-L|-R|-U|-D] [--amount <n>]
+  swap-pane --pane <id> --target-pane <id> [--focus <true|false>]
+  break-pane [--pane <id>|--panel <id>] [--focus <true|false>] [--no-focus]
+  join-pane --target-pane <id> [--pane <id>|--panel <id>] [--direction right|below] [--focus <true|false>] [--no-focus]
   clear-history [--panel <id>|--session <id>]
   respawn-pane [--panel <id>|--session <id>] [--command <shell-command>]
   terminal send [--panel <id>|--session <id>] --text <text>
@@ -185,6 +189,7 @@ const methodParams = () => {
   if (command === 'display-message' || command === 'display' || command === 'displayp') return displayMessageMethodParams()
   if (['set-buffer', 'paste-buffer', 'list-buffers'].includes(command)) return terminalBufferMethodParams(command)
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
+  if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
   if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
@@ -476,6 +481,87 @@ const terminalBufferMethodParams = (command) => {
   const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
   const sessionId = readOption('--session') || readOption('--session-id')
   return { method: 'terminal.buffer.paste', params: { name, panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId } }
+}
+
+const readPaneTarget = (fallbackFlag = '--pane') => {
+  const paneId =
+    readOption(fallbackFlag) ||
+    readOption('--pane') ||
+    readOption('--pane-id') ||
+    readOption('--panel') ||
+    readOption('--panel-id') ||
+    readOption('--surface') ||
+    readOption('--surface-id') ||
+    readOption('-t')
+  const sessionId = readOption('--session') || readOption('--session-id')
+  return { paneId, pane_id: paneId, panelId: paneId, surfaceId: paneId, sessionId, terminalSessionId: sessionId }
+}
+
+const readFocusOption = () => {
+  const focusRaw = readOption('--focus')
+  const noFocus = hasFlag('--no-focus')
+  if (noFocus) return false
+  if (!focusRaw) return false
+  return !['false', '0', 'no', 'off'].includes(focusRaw.trim().toLowerCase())
+}
+
+const readPaneDirection = () => {
+  const explicit = (readOption('--direction') || readOption('--split') || '').trim().toLowerCase()
+  if (explicit === 'below' || explicit === 'down' || explicit === 'vertical') return 'below'
+  if (explicit === 'right' || explicit === 'horizontal') return 'right'
+  if (hasFlag('--below') || hasFlag('-v')) return 'below'
+  if (hasFlag('--right') || hasFlag('-h')) return 'right'
+  return 'right'
+}
+
+const paneLayoutMethodParams = (command) => {
+  if (command === 'resize-pane' || command === 'resizep') {
+    const direction = hasFlag('-L') ? 'left' : hasFlag('-U') ? 'up' : hasFlag('-D') ? 'down' : 'right'
+    const target = readPaneTarget()
+    const amount = Number(readOption('--amount') || readOption('-x') || readOption('-y') || 1)
+    return {
+      method: 'pane.resize',
+      params: {
+        ...target,
+        direction,
+        ...(Number.isFinite(amount) && amount > 0 ? { amount: Math.floor(amount) } : {})
+      }
+    }
+  }
+  if (command === 'swap-pane' || command === 'swapp') {
+    const targetPaneId = readOption('--target-pane') || readOption('--target') || readOption('--target-panel')
+    const sourcePaneId = readOption('--pane') || readOption('--pane-id') || readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id') || readOption('-s')
+    return {
+      method: 'pane.swap',
+      params: {
+        paneId: sourcePaneId,
+        pane_id: sourcePaneId,
+        panelId: sourcePaneId,
+        surfaceId: sourcePaneId,
+        targetPaneId,
+        target_pane_id: targetPaneId,
+        targetPanelId: targetPaneId,
+        targetSurfaceId: targetPaneId,
+        focus: readFocusOption()
+      }
+    }
+  }
+  if (command === 'break-pane' || command === 'breakp') {
+    return { method: 'pane.break', params: { ...readPaneTarget(), focus: readFocusOption() } }
+  }
+  const targetPaneId = readOption('--target-pane') || readOption('--target') || readOption('--target-panel')
+  return {
+    method: 'pane.join',
+    params: {
+      ...readPaneTarget(),
+      targetPaneId,
+      target_pane_id: targetPaneId,
+      targetPanelId: targetPaneId,
+      targetSurfaceId: targetPaneId,
+      direction: readPaneDirection(),
+      focus: readFocusOption()
+    }
+  }
 }
 
 const sidebarTargetParams = () => {
@@ -925,6 +1011,22 @@ const printResponse = (response) => {
     const surface = data.surface || {}
     const terminal = data.terminal || {}
     process.stdout.write(['respawn', decision.status || '-', surface.panelId || terminal.panelId || data.surfaceId || '-', terminal.sessionId || '-', data.command].join('\t') + '\n')
+    return
+  }
+  if (data.pane || data.targetPane || data.unsupportedReason) {
+    const pane = data.pane || data.surface || {}
+    const target = data.targetPane || data.targetSurface || {}
+    const status = data.unsupported ? 'unsupported' : data.changed || data.joined || data.broken || data.swapped ? 'ok' : 'unchanged'
+    process.stdout.write(
+      [
+        'pane',
+        status,
+        pane.panelId || data.surfaceId || data.paneId || '-',
+        target.panelId || data.targetPaneId || '-',
+        data.direction || '-',
+        data.unsupportedReason || ''
+      ].join('\t') + '\n'
+    )
     return
   }
   if (Array.isArray(data.snapshots)) {

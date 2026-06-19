@@ -234,6 +234,53 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends tmux-style pane layout requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          pane: { panelId: params.paneId || params.panelId || 'panel-2', title: 'Pane 2', surfaceKind: 'terminal' },
+          targetPane: params.targetPaneId ? { panelId: params.targetPaneId, title: 'Main', surfaceKind: 'terminal' } : undefined,
+          changed: request.method !== 'pane.resize',
+          unsupported: request.method === 'pane.resize',
+          unsupportedReason: request.method === 'pane.resize' ? 'equal-size layout' : undefined,
+          direction: params.direction
+        }
+      }
+    })
+
+    const joined = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'join-pane', '--pane', 'panel-2', '--target-pane', 'panel-1', '--direction', 'below', '--focus', 'true'], {
+      cwd: process.cwd()
+    })
+    expect(joined.stdout).toContain('pane\tok\tpanel-2\tpanel-1\tbelow')
+
+    const broken = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'break-pane', '--pane', 'panel-2', '--no-focus'], {
+      cwd: process.cwd()
+    })
+    expect(broken.stdout).toContain('pane\tok\tpanel-2')
+
+    const swapped = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'swap-pane', '--pane', 'panel-2', '--target-pane', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    expect(swapped.stdout).toContain('pane\tok\tpanel-2\tpanel-1')
+
+    const resized = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'resize-pane', '--pane', 'panel-1', '-R', '--amount', '5'], {
+      cwd: process.cwd()
+    })
+    expect(resized.stdout).toContain('pane\tunsupported\tpanel-1')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'pane.join', params: expect.objectContaining({ paneId: 'panel-2', targetPaneId: 'panel-1', direction: 'below', focus: true }) }),
+      expect.objectContaining({ method: 'pane.break', params: expect.objectContaining({ paneId: 'panel-2', focus: false }) }),
+      expect.objectContaining({ method: 'pane.swap', params: expect.objectContaining({ paneId: 'panel-2', targetPaneId: 'panel-1', focus: false }) }),
+      expect.objectContaining({ method: 'pane.resize', params: expect.objectContaining({ paneId: 'panel-1', direction: 'right', amount: 5 }) })
+    ])
+  })
+
   it('sends wait-for synchronization requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

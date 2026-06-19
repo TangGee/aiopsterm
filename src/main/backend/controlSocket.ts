@@ -211,6 +211,7 @@ const controlSocketCapabilities = [
   'terminal.read_screen',
   'terminal.clear_history',
   'terminal.respawn',
+  'pane.layout',
   'terminal.send_text',
   'terminal.send_key',
   'terminal.buffer',
@@ -2472,6 +2473,10 @@ const jumpToUnreadNotification = async () => {
 const rendererMutationEventName = (method: string) => {
   if (method.startsWith('workspace.group.') && method !== 'workspace.group.list') return method.replace('workspace.group.', 'workspace_group.')
   if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
+  if (method === 'pane.break') return 'pane.broken'
+  if (method === 'pane.join') return 'pane.joined'
+  if (method === 'pane.swap') return 'pane.swapped'
+  if (method === 'pane.resize') return 'pane.resize_rejected'
   if (method === 'agent-hibernation.on') return 'agent_hibernation.enabled'
   if (method === 'agent-hibernation.off') return 'agent_hibernation.disabled'
   if (method === 'agent.hibernate') return 'agent.hibernated'
@@ -2484,6 +2489,7 @@ const rendererMutationEventName = (method: string) => {
 const rendererMutationCategory = (method: string) => {
   if (method.startsWith('workspace.group.')) return 'workspace'
   if (method.startsWith('surface.resume.')) return 'surface'
+  if (method.startsWith('pane.')) return 'pane'
   if (method.startsWith('agent-hibernation.') || method.startsWith('agent.')) return 'agent'
   return 'control'
 }
@@ -2497,13 +2503,15 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
   const team = data.team && typeof data.team === 'object' ? (data.team as Record<string, unknown>) : null
   const session = data.session && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
   const surface = data.surface && typeof data.surface === 'object' ? (data.surface as Record<string, unknown>) : null
+  const pane = data.pane && typeof data.pane === 'object' ? (data.pane as Record<string, unknown>) : null
+  const targetPane = data.targetPane && typeof data.targetPane === 'object' ? (data.targetPane as Record<string, unknown>) : null
   const config = data.config && typeof data.config === 'object' ? (data.config as Record<string, unknown>) : null
   const hibernated = Array.isArray(data.hibernated) ? data.hibernated : []
   publishControlEvent({
     name,
     category: rendererMutationCategory(method),
     source: 'control.socket',
-    surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || params.panelId || params.surfaceId),
+    surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || pane?.panelId || params.panelId || params.surfaceId || params.paneId),
     payload: {
       method,
       ...(group
@@ -2531,6 +2539,21 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
           }
         : {}),
       ...(surface ? { surface_id: surface.panelId, surface_kind: surface.surfaceKind } : {}),
+      ...(pane
+        ? {
+            pane_id: pane.panelId,
+            panel_id: pane.panelId,
+            split_group_id: pane.splitGroupId
+          }
+        : {}),
+      ...(targetPane
+        ? {
+            target_pane_id: targetPane.panelId,
+            target_panel_id: targetPane.panelId,
+            target_split_group_id: targetPane.splitGroupId
+          }
+        : {}),
+      ...(typeof data.unsupportedReason === 'string' ? { unsupported_reason: data.unsupportedReason } : {}),
       ...(config ? { enabled: config.enabled } : {}),
       ...(method === 'agent-hibernation.sweep' || method === 'agent.sweep'
         ? {
@@ -2572,6 +2595,10 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'surface.list' ||
     method === 'surface.current' ||
     method.startsWith('surface.resume.') ||
+    method === 'pane.break' ||
+    method === 'pane.join' ||
+    method === 'pane.swap' ||
+    method === 'pane.resize' ||
     method.startsWith('session.') ||
     method.startsWith('agent-hibernation.') ||
     method.startsWith('agent.') ||
@@ -2588,6 +2615,26 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   }
   if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
   if (method === 'list_surfaces') return dispatchRendererControlRequest('surface.list', params)
+  if (method === 'break-pane' || method === 'breakp') {
+    const response = await dispatchRendererControlRequest('pane.break', params, { focus: params.focus === true })
+    publishRendererMutationEvent('pane.break', params, response)
+    return response
+  }
+  if (method === 'join-pane' || method === 'joinp') {
+    const response = await dispatchRendererControlRequest('pane.join', params, { focus: params.focus === true })
+    publishRendererMutationEvent('pane.join', params, response)
+    return response
+  }
+  if (method === 'swap-pane' || method === 'swapp') {
+    const response = await dispatchRendererControlRequest('pane.swap', params, { focus: params.focus === true })
+    publishRendererMutationEvent('pane.swap', params, response)
+    return response
+  }
+  if (method === 'resize-pane' || method === 'resizep') {
+    const response = await dispatchRendererControlRequest('pane.resize', params)
+    publishRendererMutationEvent('pane.resize', params, response)
+    return response
+  }
   if (method === 'terminal.list' || method === 'list_terminals' || method === 'debug.terminals') return dispatchRendererControlRequest('terminal.list', params)
   if (method === 'terminal.focus' || method === 'focus_terminal' || method === 'focus-panel') {
     const response = await dispatchRendererControlRequest('terminal.focus', params, { focus: true })

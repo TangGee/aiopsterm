@@ -651,6 +651,33 @@ const resolveControlSurfacePanel = (params: Record<string, unknown> = {}) => {
   return workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0] || null
 }
 
+const resolveControlPanePanel = (params: Record<string, unknown> = {}, keyPrefix = '') => {
+  const prefixed = (key: string) => (keyPrefix ? `${keyPrefix}${key.charAt(0).toUpperCase()}${key.slice(1)}` : key)
+  const snakePrefix = keyPrefix ? `${keyPrefix}_` : ''
+  const panelId = controlText(
+    params[prefixed('paneId')] ||
+      params[prefixed('panelId')] ||
+      params[prefixed('surfaceId')] ||
+      params[prefixed('pane_id')] ||
+      params[prefixed('panel_id')] ||
+      params[prefixed('surface_id')] ||
+      params[`${snakePrefix}pane_id`] ||
+      params[`${snakePrefix}panel_id`] ||
+      params[`${snakePrefix}surface_id`]
+  )
+  const sessionId = controlText(
+    params[prefixed('sessionId')] ||
+      params[prefixed('terminalSessionId')] ||
+      params[prefixed('terminal_session_id')] ||
+      params[`${snakePrefix}session_id`] ||
+      params[`${snakePrefix}terminal_session_id`]
+  )
+  if (panelId || sessionId) {
+    return workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId || panel.id === sessionId || panel.sessionId === sessionId) || null
+  }
+  return workspace.panels.find((panel) => panel.id === workspace.activePanelId) || workspace.panels[0] || null
+}
+
 const resolveWorkspaceGroup = (value: unknown) => {
   const groupId = normalizeWorkspaceGroupId(value)
   return controlWorkspaceGroups.value.find((group) => group.id === groupId || workspaceGroupRefForControl(group.id) === groupId) || null
@@ -1150,6 +1177,99 @@ const workspaceGroupPayload = (group?: ControlWorkspaceGroupState | null) => {
     ...(group ? { group: workspaceGroupSummaryForControl(group) } : {}),
     snapshot: workspaceSnapshotForControl()
   }
+}
+
+const paneLayoutPayload = (panel?: TerminalPanel | null, targetPanel?: TerminalPanel | null, extra: Record<string, unknown> = {}) =>
+  controlOk({
+    ...(panel ? { pane: surfaceSummaryForControl(panel), surface: surfaceSummaryForControl(panel), surfaceId: panel.id, surface_id: panel.id } : {}),
+    ...(targetPanel ? { targetPane: surfaceSummaryForControl(targetPanel), targetSurface: surfaceSummaryForControl(targetPanel), targetPaneId: targetPanel.id, target_pane_id: targetPanel.id } : {}),
+    ...extra,
+    snapshot: workspaceSnapshotForControl()
+  })
+
+const normalizePaneLayoutDirection = (value: unknown) => {
+  const direction = controlText(value).toLowerCase()
+  if (direction === 'below' || direction === 'down' || direction === 'vertical') return 'below'
+  return 'right'
+}
+
+const handlePaneLayoutControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'pane.resize') {
+    const panel = resolveControlPanePanel(params)
+    return paneLayoutPayload(panel, null, {
+      resized: false,
+      unsupported: true,
+      unsupportedReason: 'aiopsterm split panes currently use an equal-size layout and do not store per-pane dimensions.',
+      direction: controlText(params.direction) || 'right',
+      amount: controlNumber(params.amount, 1, 1, 999)
+    })
+  }
+
+  if (method === 'pane.break') {
+    const panel = resolveControlPanePanel(params)
+    if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    const previousActivePanelId = workspace.activePanelId
+    const changed = workspace.unsplitPanel(panel.id)
+    if (!controlBool(params.focus, false) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+    return paneLayoutPayload(panel, null, { changed, broken: changed })
+  }
+
+  if (method === 'pane.join') {
+    const panel = resolveControlPanePanel(params)
+    const targetPanel = resolveControlPanePanel(params, 'target')
+    if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    if (!targetPanel) return controlFail('TARGET_PANE_NOT_FOUND', 'Target pane not found.')
+    if (panel.id === targetPanel.id) return controlFail('PANE_TARGET_INVALID', 'Source and target panes must be different.')
+    const previousActivePanelId = workspace.activePanelId
+    const changed = workspace.attachPanelToSplit(panel.id, targetPanel.id, normalizePaneLayoutDirection(params.direction || params.split))
+    if (!controlBool(params.focus, false) && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+    return paneLayoutPayload(panel, targetPanel, { changed, joined: changed })
+  }
+
+  if (method === 'pane.swap') {
+    const panel = resolveControlPanePanel(params)
+    const targetPanel = resolveControlPanePanel(params, 'target')
+    if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    if (!targetPanel) return controlFail('TARGET_PANE_NOT_FOUND', 'Target pane not found.')
+    if (panel.id === targetPanel.id) return controlFail('PANE_TARGET_INVALID', 'Source and target panes must be different.')
+    const panelIndex = workspace.panels.findIndex((item) => item.id === panel.id)
+    const targetIndex = workspace.panels.findIndex((item) => item.id === targetPanel.id)
+    if (panelIndex < 0 || targetIndex < 0) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    const previousActivePanelId = workspace.activePanelId
+    const sourceSplit = panel.split
+    const sourceSplitSourceId = panel.splitSourceId
+    const sourceSplitGroupId = panel.splitGroupId
+    const sourceSplitOrder = panel.splitOrder
+    panel.split = targetPanel.split
+    panel.splitSourceId = targetPanel.splitSourceId === panel.id ? targetPanel.id : targetPanel.splitSourceId
+    panel.splitGroupId = targetPanel.splitGroupId
+    panel.splitOrder = targetPanel.splitOrder
+    targetPanel.split = sourceSplit
+    targetPanel.splitSourceId = sourceSplitSourceId === targetPanel.id ? panel.id : sourceSplitSourceId
+    targetPanel.splitGroupId = sourceSplitGroupId
+    targetPanel.splitOrder = sourceSplitOrder
+    const movedPanel = workspace.panels[panelIndex]
+    workspace.panels[panelIndex] = workspace.panels[targetIndex]
+    workspace.panels[targetIndex] = movedPanel
+    if (controlBool(params.focus, false)) {
+      workspace.activePanelId = targetPanel.id
+    } else if (workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    terminalViews.get(workspace.activePanelId)?.terminal.focus()
+    return paneLayoutPayload(panel, targetPanel, { changed: true, swapped: true })
+  }
+
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
 const createWorkspaceGroupForControl = (params: Record<string, unknown>) => {
@@ -1916,6 +2036,7 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   if (request.method === 'session.restore') return restoreSessionSnapshotForControl(params)
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
+  if (request.method.startsWith('pane.')) return handlePaneLayoutControlRequest(request.method, params)
   if (request.method === 'surface.respawn' || request.method === 'terminal.respawn') return handleSurfaceRespawnControlRequest(params)
   if (request.method.startsWith('agent.team.')) return handleAgentTeamControlRequest(request.method, params)
   if (request.method.startsWith('agent-hibernation.') || request.method.startsWith('agent.')) return handleAgentHibernationControlRequest(request.method, params)

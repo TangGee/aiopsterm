@@ -557,6 +557,80 @@ describe('control socket backend', () => {
     expect(terminalEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'terminal.respawn_requested', payload: expect.objectContaining({ decision_status: 'allow' }) })]))
   })
 
+  it('routes control_compat-style pane layout aliases to the renderer and records pane events', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'pane.resize') {
+        return {
+          ok: true,
+          data: {
+            pane: { panelId: (request.params as any)?.paneId || 'panel-1', surfaceKind: 'terminal', title: 'Pane' },
+            resized: false,
+            unsupported: true,
+            unsupportedReason: 'equal-size layout'
+          }
+        }
+      }
+      return {
+        ok: true,
+        data: {
+          pane: { panelId: (request.params as any)?.paneId || 'panel-2', surfaceKind: 'terminal', title: 'Pane 2', splitGroupId: 'panel-1' },
+          targetPane: (request.params as any)?.targetPaneId
+            ? { panelId: (request.params as any)?.targetPaneId, surfaceKind: 'terminal', title: 'Main', splitGroupId: 'panel-1' }
+            : undefined,
+          changed: true
+        }
+      }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'join-pane',
+        params: { paneId: 'panel-2', targetPaneId: 'panel-1', direction: 'below', focus: true }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: true }) }))
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'break-pane',
+        params: { paneId: 'panel-2' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: true }) }))
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'swap-pane',
+        params: { paneId: 'panel-2', targetPaneId: 'panel-1' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: true }) }))
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'resize-pane',
+        params: { paneId: 'panel-1', direction: 'right', amount: 5 }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) }))
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'pane.join', params: expect.objectContaining({ paneId: 'panel-2', targetPaneId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'pane.break', params: expect.objectContaining({ paneId: 'panel-2' }) }),
+      expect.objectContaining({ method: 'pane.swap', params: expect.objectContaining({ paneId: 'panel-2', targetPaneId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'pane.resize', params: expect.objectContaining({ paneId: 'panel-1' }) })
+    ])
+    const paneEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'pane' } })
+    expect(paneEvents.data?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'pane.joined' }),
+        expect.objectContaining({ name: 'pane.broken' }),
+        expect.objectContaining({ name: 'pane.swapped' }),
+        expect.objectContaining({ name: 'pane.resize_rejected', payload: expect.objectContaining({ unsupported_reason: 'equal-size layout' }) })
+      ])
+    )
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

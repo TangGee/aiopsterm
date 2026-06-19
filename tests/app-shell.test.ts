@@ -7434,6 +7434,82 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('updates split pane layout through the control socket without writing terminal input', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const firstPanelId = store.activePanelId
+    const secondPanel = store.createPanel()
+    secondPanel.title = 'Pane 2'
+    const secondPanelId = secondPanel.id
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    const joinResponse = await invokeControlHandler({
+      id: 'pane-join',
+      method: 'pane.join',
+      params: { paneId: secondPanelId, targetPaneId: firstPanelId, direction: 'below', focus: true }
+    })
+    expect(joinResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ joined: true }) }))
+    expect(store.panels.find((panel) => panel.id === secondPanelId)).toEqual(
+      expect.objectContaining({ split: 'below', splitSourceId: firstPanelId, splitGroupId: firstPanelId })
+    )
+    expect(store.activePanelId).toBe(secondPanelId)
+
+    const breakResponse = await invokeControlHandler({
+      id: 'pane-break',
+      method: 'pane.break',
+      params: { paneId: secondPanelId, focus: false }
+    })
+    expect(breakResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ broken: true }) }))
+    expect(store.panels.find((panel) => panel.id === secondPanelId)).toEqual(
+      expect.objectContaining({ split: undefined, splitSourceId: undefined, splitGroupId: undefined })
+    )
+
+    await invokeControlHandler({
+      id: 'pane-join-right',
+      method: 'pane.join',
+      params: { paneId: secondPanelId, targetPaneId: firstPanelId, direction: 'right' }
+    })
+    const firstIndexBeforeSwap = store.panels.findIndex((panel) => panel.id === firstPanelId)
+    const secondIndexBeforeSwap = store.panels.findIndex((panel) => panel.id === secondPanelId)
+    const swapResponse = await invokeControlHandler({
+      id: 'pane-swap',
+      method: 'pane.swap',
+      params: { paneId: secondPanelId, targetPaneId: firstPanelId }
+    })
+    expect(swapResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ swapped: true }) }))
+    expect(store.panels[firstIndexBeforeSwap].id).toBe(secondPanelId)
+    expect(store.panels[secondIndexBeforeSwap].id).toBe(firstPanelId)
+
+    const resizeResponse = await invokeControlHandler({
+      id: 'pane-resize',
+      method: 'pane.resize',
+      params: { paneId: firstPanelId, direction: 'right', amount: 5 }
+    })
+    expect(resizeResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, resized: false }) }))
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
