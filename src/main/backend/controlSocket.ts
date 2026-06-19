@@ -210,6 +210,7 @@ const controlSocketCapabilities = [
   'terminal.focus',
   'terminal.read_screen',
   'terminal.clear_history',
+  'terminal.respawn',
   'terminal.send_text',
   'terminal.send_key',
   'terminal.buffer',
@@ -2620,6 +2621,28 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
         payload: {
           panel_id: cleanText(terminal?.panelId || params.panelId || params.surfaceId),
           session_id: cleanText(terminal?.sessionId || params.sessionId || params.terminalSessionId)
+        }
+      })
+    }
+    return response
+  }
+  if (method === 'terminal.respawn' || method === 'surface.respawn' || method === 'respawn-pane') {
+    const response = await dispatchRendererControlRequest('surface.respawn', params)
+    if (response.ok) {
+      const data = response.data || {}
+      const surface = data.surface && typeof data.surface === 'object' ? (data.surface as Record<string, unknown>) : null
+      const terminal = data.terminal && typeof data.terminal === 'object' ? (data.terminal as Record<string, unknown>) : null
+      const decision = data.decision && typeof data.decision === 'object' ? (data.decision as Record<string, unknown>) : null
+      publishControlEvent({
+        name: 'terminal.respawn_requested',
+        category: 'terminal',
+        source: 'control.socket',
+        surfaceId: cleanText(surface?.panelId || terminal?.panelId || params.panelId || params.surfaceId),
+        payload: {
+          panel_id: cleanText(surface?.panelId || terminal?.panelId || params.panelId || params.surfaceId),
+          session_id: cleanText(terminal?.sessionId || params.sessionId || params.terminalSessionId),
+          command_length: cleanText(data.command || params.command || params.tmux_start_command).length,
+          decision_status: cleanText(decision?.status)
         }
       })
     }

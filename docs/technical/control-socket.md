@@ -118,6 +118,10 @@ The terminal history slice adds renderer-owned scrollback cleanup:
 
 - `terminal.clear_history` / `surface.clear_history`: clear a selected terminal surface's visible buffer and retained panel output.
 
+The terminal respawn slice adds a control_compat-compatible restart-command bridge:
+
+- `terminal.respawn` / `surface.respawn`: send a restart command to a selected terminal surface through terminal command security.
+
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 
 - `sidebar.status.set`, `sidebar.status.clear`, `sidebar.status.list`: manage keyed status entries.
@@ -144,6 +148,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
 - `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
 - `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
+- `respawn-pane` and `surface.respawn` map to `terminal.respawn`.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
@@ -251,6 +256,7 @@ node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js capture-pane --panel panel-main --lines 200
 node /path/to/resources/aiopsterm-control.js pipe-pane --panel panel-main --command "grep ERROR"
 node /path/to/resources/aiopsterm-control.js clear-history --panel panel-main
+node /path/to/resources/aiopsterm-control.js respawn-pane --panel panel-main --command 'exec ${SHELL:-/bin/bash} -l'
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
 node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
@@ -295,6 +301,8 @@ Future higher-level automation commands should use the control socket but must c
 `terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
 
 `terminal.clear_history` is renderer-owned because xterm state lives in the active window. It clears the selected terminal surface's visible buffer and aiopsterm's retained panel output; it does not send a command to the shell and does not close or restart the PTY/SSH session.
+
+`terminal.respawn` is also renderer-owned. Unlike raw `terminal.send_text`, it routes the restart command through aiopsterm terminal command security and may return a `needs-approval` decision instead of writing to the shell. It does not close the PTY or SSH channel by itself; the command text controls whether the running shell process is replaced.
 
 `sidebar.*` metadata is a lightweight automation state source, not a command runner. It is stored in memory in the main process, exposed through the socket and events stream, and scoped by `workspaceId` with the current shared work panel defaulting to `main`. The current slice does not force a new right-sidebar UI; renderer surfaces or future MCP tools can consume the metadata through `sidebar.state`.
 

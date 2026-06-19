@@ -135,6 +135,18 @@ describe('aiopsterm-control CLI', () => {
     const socketPath = await startControlServer((request) => {
       seen.push(request)
       if (request.method === 'surface.clear_history') return { id: request.id, ok: true, data: { cleared: true, terminal: { panelId: (request.params as any)?.panelId } } }
+      if (request.method === 'surface.respawn') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            surface: { panelId: (request.params as any)?.panelId || 'panel-1' },
+            terminal: { panelId: (request.params as any)?.panelId || 'panel-1', sessionId: 'terminal-1' },
+            command: (request.params as any)?.command,
+            decision: { status: 'allow' }
+          }
+        }
+      }
       return {
         id: request.id,
         ok: true,
@@ -160,10 +172,16 @@ describe('aiopsterm-control CLI', () => {
     })
     expect(cleared.stdout).toContain('"cleared":true')
 
+    const respawn = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'respawn-pane', '--panel', 'panel-1', '--command', 'exec bash -l'], {
+      cwd: process.cwd()
+    })
+    expect(respawn.stdout).toContain('respawn\tallow\tpanel-1\tterminal-1\texec bash -l')
+
     expect(seen).toEqual([
       expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', tailLines: 2, lines: 2 }) }),
       expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', scrollback: true }) }),
-      expect.objectContaining({ method: 'surface.clear_history', params: expect.objectContaining({ panelId: 'panel-1', surfaceId: 'panel-1' }) })
+      expect.objectContaining({ method: 'surface.clear_history', params: expect.objectContaining({ panelId: 'panel-1', surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.respawn', params: expect.objectContaining({ panelId: 'panel-1', surfaceId: 'panel-1', command: 'exec bash -l' }) })
     ])
   })
 

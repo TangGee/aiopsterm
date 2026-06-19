@@ -7393,6 +7393,47 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('respawns a terminal through command security from the control socket', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const panelId = store.activePanelId
+    const sessionId = store.activePanel.sessionId
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    const response = await invokeControlHandler({ id: 'respawn-pane', method: 'surface.respawn', params: { panelId, command: 'exec bash -l' } })
+
+    expect(response).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ command: 'exec bash -l', decision: expect.objectContaining({ status: 'allow' }) }) }))
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'exec bash -l\n')
+
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const approval = await invokeControlHandler({ id: 'respawn-danger', method: 'surface.respawn', params: { panelId, command: 'rm /tmp/file' } })
+
+    expect(approval).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ decision: expect.objectContaining({ status: 'needs-approval' }) }) }))
+    expect(store.terminalSecurityPrompt?.command).toBe('rm /tmp/file')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

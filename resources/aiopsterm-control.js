@@ -36,6 +36,7 @@ Commands:
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
   clear-history [--panel <id>|--session <id>]
+  respawn-pane [--panel <id>|--session <id>] [--command <shell-command>]
   terminal send [--panel <id>|--session <id>] --text <text>
   terminal send-key [--panel <id>|--session <id>] <key>
   send-panel --panel <id> <text>
@@ -228,6 +229,12 @@ const methodParams = () => {
     const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
     const sessionId = readOption('--session') || readOption('--session-id')
     return { method: 'surface.clear_history', params: { panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId } }
+  }
+  if (command === 'respawn-pane') {
+    const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+    const sessionId = readOption('--session') || readOption('--session-id')
+    const commandText = readOption('--command') || readOption('--shell') || args.filter((arg) => arg !== '--').join(' ')
+    return { method: 'surface.respawn', params: { panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId, command: commandText, tmux_start_command: commandText } }
   }
   if (command === 'send' || command === 'send-panel' || (command === 'terminal' && args[0] === 'send')) {
     if (command === 'terminal') args.shift()
@@ -911,6 +918,13 @@ const printResponse = (response) => {
     }
     for (const buffer of data.buffers) process.stdout.write(['buffer', buffer.name || '-', buffer.size ?? 0].join('\t') + '\n')
     if (data.buffers.length === 0) process.stdout.write('No buffers\n')
+    return
+  }
+  if (data.command && data.decision) {
+    const decision = data.decision || {}
+    const surface = data.surface || {}
+    const terminal = data.terminal || {}
+    process.stdout.write(['respawn', decision.status || '-', surface.panelId || terminal.panelId || data.surfaceId || '-', terminal.sessionId || '-', data.command].join('\t') + '\n')
     return
   }
   if (Array.isArray(data.snapshots)) {

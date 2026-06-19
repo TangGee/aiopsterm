@@ -522,6 +522,41 @@ describe('control socket backend', () => {
     expect(terminalEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'terminal.history_cleared' })]))
   })
 
+  it('routes control_compat-style respawn aliases to the renderer and records a terminal event', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'surface.respawn') {
+        return {
+          ok: true,
+          data: {
+            surface: { panelId: 'panel-1', surfaceKind: 'terminal', active: true, title: 'Local' },
+            terminal: { panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local', kind: 'local', active: true, connected: true },
+            command: (request.params as Record<string, unknown>).command || 'exec ${SHELL:-/bin/bash} -l',
+            decision: { status: 'allow' }
+          }
+        }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'respawn-pane',
+        params: { panelId: 'panel-1', command: 'exec bash -l' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ command: 'exec bash -l', decision: expect.objectContaining({ status: 'allow' }) }) }))
+
+    expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'surface.respawn', params: expect.objectContaining({ panelId: 'panel-1', command: 'exec bash -l' }) })])
+    const terminalEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'terminal' } })
+    expect(terminalEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'terminal.respawn_requested', payload: expect.objectContaining({ decision_status: 'allow' }) })]))
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

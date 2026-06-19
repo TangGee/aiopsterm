@@ -1537,6 +1537,25 @@ const handleSurfaceResumeControlRequest = async (method: string, params: Record<
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
+const defaultRespawnCommand = 'exec ${SHELL:-/bin/bash} -l'
+
+const handleSurfaceRespawnControlRequest = async (params: Record<string, unknown>) => {
+  const panel = resolveControlSurfacePanel(params)
+  if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+  if (panel.kind === 'knowledge') return controlFail('SURFACE_RESPAWN_TERMINAL_REQUIRED', 'Respawn command can only run in a terminal surface.')
+  const command = controlText(params.command || params.tmux_start_command || params.shell || params.shellCommand) || defaultRespawnCommand
+  const decision = await workspace.runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
+  return controlOk({
+    surface: surfaceSummaryForControl(panel),
+    terminal: terminalSummaryForControl(panel),
+    surfaceId: panel.id,
+    surface_id: panel.id,
+    command,
+    decision,
+    snapshot: workspaceSnapshotForControl()
+  })
+}
+
 const normalizeAgentTeamSource = (value: unknown): ControlAgentTeamLaunchSource => {
   const source = controlText(value).toLowerCase()
   if (source === 'claude' || source === 'claude-code' || source === 'claude_code') return 'claude-code'
@@ -1897,6 +1916,7 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   if (request.method === 'session.restore') return restoreSessionSnapshotForControl(params)
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
+  if (request.method === 'surface.respawn' || request.method === 'terminal.respawn') return handleSurfaceRespawnControlRequest(params)
   if (request.method.startsWith('agent.team.')) return handleAgentTeamControlRequest(request.method, params)
   if (request.method.startsWith('agent-hibernation.') || request.method.startsWith('agent.')) return handleAgentHibernationControlRequest(request.method, params)
   if (request.method === 'workspace.snapshot' || request.method === 'tree' || request.method === 'top') {
