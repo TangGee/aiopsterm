@@ -91,6 +91,12 @@ Commands:
   terminal replay [--panel <id>|--session <id>] [--lines <n>]
   terminal viewport [--panel <id>|--session <id>] [--columns <n>] [--rows <n>] [--clear]
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
+  mobile chat sessions [--workspace <id>] [--source <agent>] [--include-ended]
+  mobile chat history --session <id> [--source <agent>] [--limit <n>] [--before-seq <n>]
+  mobile chat send --session <id> --text <text>
+  mobile chat interrupt --session <id> [--hard]
+  mobile chat answer --session <id> --option-index <n>
+  chat sessions dump
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
   resize-pane [--pane <id>|--panel <id>] [-L|-R|-U|-D] [--amount <n>]
@@ -185,6 +191,7 @@ const methodParams = () => {
   if (command === 'app') return appMethodParams(args.shift() || '')
   if (command === 'window') return windowMethodParams(args.shift() || 'list')
   if (command === 'mobile') return mobileMethodParams(args.shift() || 'host-status')
+  if (command === 'chat') return chatMethodParams(args.shift() || 'sessions')
   if (command === 'rpc') {
     const method = args.shift() || ''
     if (!method) throw new Error('rpc requires a method name')
@@ -674,6 +681,9 @@ const feedbackMethodParams = (subcommand) => {
 const mobileMethodParams = (subcommand) => {
   if (subcommand === 'host-status' || subcommand === 'host.status' || subcommand === 'status') return { method: 'mobile.host.status', params: {} }
   if (subcommand === 'workspace-list' || subcommand === 'workspace.list') return { method: 'mobile.workspace.list', params: {} }
+  if (subcommand === 'chat') return mobileChatMethodParams(args.shift() || 'sessions')
+  if (subcommand.startsWith('chat.')) return mobileChatMethodParams(subcommand.slice('chat.'.length))
+  if (subcommand.startsWith('chat-')) return mobileChatMethodParams(subcommand.slice('chat-'.length))
   if (subcommand === 'events' || subcommand === 'event') {
     const action = args.shift() || 'subscribe'
     return mobileEventsMethodParams(action)
@@ -683,6 +693,63 @@ const mobileMethodParams = (subcommand) => {
   if (subcommand === 'events-subscribe' || subcommand === 'event-subscribe') return mobileEventsMethodParams('subscribe')
   if (subcommand === 'events-unsubscribe' || subcommand === 'event-unsubscribe') return mobileEventsMethodParams('unsubscribe')
   throw new Error(`Unknown mobile command: ${subcommand}`)
+}
+
+const mobileChatSelectorParams = () => {
+  const sessionId = readOption('--session') || readOption('--session-id') || readOption('--id') || readPositional()
+  const source = readOption('--source') || readOption('--agent') || readOption('--agent-kind')
+  return { sessionId, session_id: sessionId, id: sessionId, source, agent: source, agent_kind: source }
+}
+
+const mobileChatMethodParams = (action) => {
+  if (action === 'list') action = 'sessions'
+  if (action === 'get') action = 'history'
+  if (action === 'sessions') {
+    const includeEnded = hasFlag('--include-ended') || hasFlag('--all')
+    const limit = Number(readOption('--limit') || 0)
+    const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+    const source = readOption('--source') || readOption('--agent') || readOption('--agent-kind')
+    return {
+      method: 'mobile.chat.sessions',
+      params: {
+        workspaceId,
+        workspace_id: workspaceId,
+        source,
+        agent: source,
+        agent_kind: source,
+        includeEnded,
+        include_ended: includeEnded,
+        ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {})
+      }
+    }
+  }
+  if (action === 'history') {
+    const limit = Number(readOption('--limit') || 0)
+    const beforeSeq = Number(readOption('--before-seq') || readOption('--before_seq') || '')
+    return {
+      method: 'mobile.chat.history',
+      params: {
+        ...mobileChatSelectorParams(),
+        ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}),
+        ...(Number.isFinite(beforeSeq) && beforeSeq >= 0 ? { beforeSeq: Math.floor(beforeSeq), before_seq: Math.floor(beforeSeq) } : {})
+      }
+    }
+  }
+  if (action === 'send') {
+    const selector = mobileChatSelectorParams()
+    const text = unescapeTerminalText(readOption('--text') || args.join(' '))
+    return { method: 'mobile.chat.send', params: { ...selector, text } }
+  }
+  if (action === 'interrupt') {
+    return { method: 'mobile.chat.interrupt', params: { ...mobileChatSelectorParams(), hard: hasFlag('--hard') } }
+  }
+  if (action === 'answer') {
+    const optionIndexRaw = readOption('--option-index') || readOption('--option_index') || readOption('--index')
+    const selector = mobileChatSelectorParams()
+    const optionIndex = Number(optionIndexRaw || readPositional())
+    return { method: 'mobile.chat.answer', params: { ...selector, optionIndex, option_index: Number.isFinite(optionIndex) ? Math.floor(optionIndex) : optionIndex } }
+  }
+  throw new Error(`Unknown mobile chat command: ${action}`)
 }
 
 const mobileEventsMethodParams = (action) => {
@@ -716,6 +783,16 @@ const mobileEventsMethodParams = (action) => {
     }
   }
   throw new Error(`Unknown mobile events command: ${action}`)
+}
+
+const chatMethodParams = (subcommand) => {
+  if (subcommand === 'sessions') {
+    const action = args.shift() || 'dump'
+    if (action === 'dump' || action === 'debug') return { method: 'chat.sessions.dump', params: {} }
+    throw new Error(`Unknown chat sessions command: ${action}`)
+  }
+  if (subcommand === 'sessions.dump') return { method: 'chat.sessions.dump', params: {} }
+  throw new Error(`Unknown chat command: ${subcommand}`)
 }
 
 const sidebarSnapshotMethodParams = () => {
@@ -1856,6 +1933,15 @@ const surfaceResumeMethodParams = (subcommand) => {
 const isManagedAiSessionLike = (session) =>
   session && typeof session === 'object' && (typeof session.sessionId === 'string' || typeof session.id === 'string') && typeof session.source === 'string' && typeof session.state === 'string'
 
+const isMobileChatSessionLike = (session) =>
+  session && typeof session === 'object' && typeof session.session_id === 'string' && typeof session.agent_kind === 'string'
+
+const mobileChatStateLabel = (state) => {
+  if (typeof state === 'string') return state
+  if (state && typeof state === 'object') return state.state || '-'
+  return '-'
+}
+
 const printAgentSessionLine = (session, prefix = 'agent-session') => {
   process.stdout.write(
     [
@@ -2218,6 +2304,44 @@ const printResponse = (response) => {
         ].join('\t') + '\n'
       )
     }
+    return
+  }
+  if (Array.isArray(data.sessions) && data.sessions.every(isMobileChatSessionLike)) {
+    process.stdout.write(`mobile-chat-sessions\t${data.count || data.sessions.length}/${data.total || data.sessions.length}\tneeds_input=${data.needs_input_count || 0}\n`)
+    for (const session of data.sessions) {
+      process.stdout.write(
+        [
+          'mobile-chat',
+          session.needs_input ? '!' : ' ',
+          session.agent_kind || '-',
+          session.session_id || '-',
+          mobileChatStateLabel(session.state),
+          session.terminal_id || session.terminal_session_id || '-',
+          session.title || ''
+        ].join('\t') + '\n'
+      )
+    }
+    if (data.sessions.length === 0) process.stdout.write('No mobile chat sessions\n')
+    return
+  }
+  if (Array.isArray(data.messages) && data.source === 'managed-ai-events') {
+    process.stdout.write(`mobile-chat-history\t${data.messages.length}\thas_more=${data.has_more ? 'true' : 'false'}\n`)
+    for (const message of data.messages) {
+      const kind = message.kind || {}
+      process.stdout.write(['chat-message', message.seq ?? '-', message.role || '-', kind.type || '-', kind.text || kind.prompt || kind.subject || kind.detail || ''].join('\t') + '\n')
+    }
+    return
+  }
+  if (data.sent && data.session_id) {
+    process.stdout.write(['mobile-chat-send', data.session_id, data.submitted ? 'submitted' : 'sent'].join('\t') + '\n')
+    return
+  }
+  if (data.interrupted && data.session_id) {
+    process.stdout.write(['mobile-chat-interrupt', data.session_id, data.hard ? 'hard' : 'soft'].join('\t') + '\n')
+    return
+  }
+  if (data.answered && data.session_id) {
+    process.stdout.write(['mobile-chat-answer', data.session_id, `option=${data.option_index}`].join('\t') + '\n')
     return
   }
   if (Array.isArray(data.sessions) && data.sessions.every(isManagedAiSessionLike)) {

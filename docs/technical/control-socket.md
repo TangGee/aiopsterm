@@ -69,6 +69,15 @@ The mobile terminal compatibility slice maps control_compat's mobile-host data-p
 - `mobile.terminal.scroll` / `terminal.scroll` and `mobile.terminal.mouse` / `terminal.mouse`: recognized compatibility probes that return `unsupported=true`, because aiopsterm does not expose xterm scroll/mouse gesture injection through the control socket yet.
 - `mobile.terminal.paste_image` / `terminal.paste_image`: recognized compatibility probe that returns `unsupported=true`; image payload materialization is not implemented in aiopsterm's control socket.
 
+The mobile chat compatibility slice maps control_compat's agent-chat RPC names onto aiopsterm's managed AI sessions discovered from aiopsterm-owned local connection terminals:
+
+- `mobile.chat.sessions`: list chat-capable managed AI sessions, optionally filtered by `workspace_id`, `source` / `agent_kind`, and `include_ended`.
+- `mobile.chat.history`: return a `ChatHistoryPage`-style page synthesized from safe managed-session event summaries. It does not expose raw hook payloads, terminal screen text, or typed input.
+- `mobile.chat.send`: bracketed-paste text into the session's bound terminal and submit it. Attachments currently return `MOBILE_CHAT_ATTACHMENTS_UNSUPPORTED`.
+- `mobile.chat.interrupt`: send Escape for a soft interrupt or Ctrl-C when `hard=true`.
+- `mobile.chat.answer`: send the 1-based digit corresponding to the requested zero-based `option_index`.
+- `chat.sessions.dump`: return debug-safe managed session summaries plus the mobile chat descriptor for each record.
+
 The project/file compatibility slice maps control_compat project openers onto aiopsterm's shared main work panel:
 
 - `markdown.open`: open a Knowledge file as a knowledge surface in the shared main work panel, with optional `line` / `startLine` and `endLine` jump metadata.
@@ -245,6 +254,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
 - `mobile host-status` maps to `mobile.host.status`; `mobile workspace-list` maps to `mobile.workspace.list`.
 - `mobile events subscribe` and `mobile events unsubscribe` map to `mobile.events.subscribe` and `mobile.events.unsubscribe`.
+- `mobile chat sessions|history|send|interrupt|answer` maps to `mobile.chat.*`; `chat sessions dump` maps to `chat.sessions.dump`.
 - `terminal create`, `terminal input`, `terminal paste`, `terminal replay`, and `terminal viewport` map to the matching control_compat-style terminal data-plane methods.
 - `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
 - `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
@@ -364,6 +374,8 @@ node /path/to/resources/aiopsterm-control.js feed list
 node /path/to/resources/aiopsterm-control.js feed mark-handled
 node /path/to/resources/aiopsterm-control.js feed clear-ended
 node /path/to/resources/aiopsterm-control.js feed clear --yes
+node /path/to/resources/aiopsterm-control.js mobile chat sessions --workspace main
+node /path/to/resources/aiopsterm-control.js mobile chat send --session claude-session-1 --text "继续"
 node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
 node /path/to/resources/aiopsterm-control.js agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
 node /path/to/resources/aiopsterm-control.js agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
@@ -472,6 +484,8 @@ The current Teams slice intentionally stops at visible local-terminal orchestrat
 `agent.session.*` operates only on the managed AI session store built from hooks/events emitted by agents running in aiopsterm-created local connection terminals. It does not close terminal panels, kill agent processes, disconnect SSH sessions, or take ownership of the visible terminal connection. `clear` removes the AI session manager record only. `reply` records a compact decision; for blocking Claude Code hooks it may resolve the waiting hook through the existing managed-session backend, while stock Codex permission events remain visibility-only because Codex keeps its native approval path. Session summaries intentionally omit raw hook payloads, terminal screen text, typed input, and command output.
 
 `agent.session.bulk` and `feed.*` are batch operations over the same managed session records. `mark-handled` can resolve waiting Claude Code hooks as locally handled, while `clear-ended` and `clear-all` remove only aiopsterm's AI session records. `clear-all` requires an explicit confirmation flag (`confirm=true` or CLI `--yes`) and still does not kill agent processes or terminal panels.
+
+`mobile.chat.*` is a control_compat-compatible view over those same managed AI session records. It does not manage aiopsterm's embedded right-side Codex panel and does not discover external OS terminals; it only operates on agent sessions launched inside aiopsterm-created local connection terminal surfaces. `send`, `interrupt`, and `answer` write raw terminal input to the bound visible terminal, so callers should treat them like typing into that terminal. `history` is currently a safe event-summary transcript page, not a parser for Claude/Codex transcript files.
 
 `surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; setting `autoResume=true` alone does not authorize automatic execution. A binding becomes auto-runnable only after `surface.resume.trust --policy auto`, which records a command fingerprint and trust metadata on that binding. `surface.resume.preview` reports `ready`, `manual`, `untrusted`, or `terminal-not-connected` reasons before anything runs.
 

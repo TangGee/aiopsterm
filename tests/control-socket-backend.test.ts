@@ -2587,6 +2587,114 @@ describe('control socket backend', () => {
     }
   })
 
+  it('exposes control_compat-style mobile chat sessions and actions for managed terminal agents', async () => {
+    const backend = await loadBackend()
+    const agentSessions = await loadAgentSessionsBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-mobile-chat-'))
+    const writes: Array<{ sessionId: string; data: string }> = []
+    try {
+      await backend.ensureControlSocketServer(root)
+      await agentSessions.configureAiAgentSessionStore(root)
+      backend.configureControlSocketRuntime({
+        writeTerminal: (sessionId, data) => {
+          writes.push({ sessionId, data })
+          return { ok: true, data: { id: sessionId, bytes: Buffer.byteLength(data, 'utf8') } }
+        }
+      })
+      agentSessions.publishAiAgentSessionEvent(
+        {
+          source: 'claude-code',
+          event: 'PermissionRequest',
+          sessionId: 'claude-mobile-chat-1',
+          requestId: 'mobile-request-1',
+          waitForDecision: true,
+          actionable: true,
+          panelId: 'panel-mobile-ai',
+          terminalSessionId: 'terminal-mobile-ai',
+          workspaceId: 'main',
+          cwd: '/work/mobile-chat',
+          title: 'Deploy review',
+          summary: 'Approve deploy command',
+          toolName: 'Bash',
+          raw_secret: 'do-not-return',
+          receivedAt: 1717200000000
+        },
+        null
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'mobile.chat.sessions', params: { workspace_id: 'main' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            count: 1,
+            needs_input_count: 1,
+            sessions: [
+              expect.objectContaining({
+                session_id: 'claude-mobile-chat-1',
+                agent_kind: 'claude',
+                terminal_id: 'panel-mobile-ai',
+                terminal_session_id: 'terminal-mobile-ai',
+                cwd: '/work/mobile-chat',
+                state: expect.objectContaining({ state: 'needs_input' })
+              })
+            ]
+          })
+        })
+      )
+
+      const history = await backend.__testing.handleControlRequest({ method: 'mobile.chat.history', params: { session_id: 'claude-mobile-chat-1', limit: 5 } })
+      expect(history).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            source: 'managed-ai-events',
+            messages: [
+              expect.objectContaining({
+                role: 'agent',
+                kind: expect.objectContaining({ type: 'permission_request', subject: 'Approve deploy command' }),
+                request_id: 'mobile-request-1'
+              })
+            ]
+          })
+        })
+      )
+      expect(JSON.stringify(history)).not.toContain('raw_secret')
+      expect(JSON.stringify(history)).not.toContain('do-not-return')
+
+      await expect(backend.__testing.handleControlRequest({ method: 'chat.sessions.dump' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            count: 1,
+            sessions: [expect.objectContaining({ sessionId: 'claude-mobile-chat-1', descriptor: expect.objectContaining({ session_id: 'claude-mobile-chat-1' }) })]
+          })
+        })
+      )
+      await expect(
+        backend.__testing.handleControlRequest({ method: 'mobile.chat.send', params: { session_id: 'claude-mobile-chat-1', text: 'Ship it' } })
+      ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ sent: true, session_id: 'claude-mobile-chat-1' }) }))
+      await expect(
+        backend.__testing.handleControlRequest({ method: 'mobile.chat.interrupt', params: { session_id: 'claude-mobile-chat-1', hard: true } })
+      ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ interrupted: true, hard: true }) }))
+      await expect(
+        backend.__testing.handleControlRequest({ method: 'mobile.chat.answer', params: { session_id: 'claude-mobile-chat-1', option_index: 1 } })
+      ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ answered: true, option_index: 1 }) }))
+      await expect(
+        backend.__testing.handleControlRequest({ method: 'mobile.chat.send', params: { session_id: 'claude-mobile-chat-1', attachments: [{ data_b64: 'abc', format: 'png' }] } })
+      ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'MOBILE_CHAT_ATTACHMENTS_UNSUPPORTED' }))
+
+      expect(writes).toEqual([
+        { sessionId: 'terminal-mobile-ai', data: '\x1b[200~Ship it\x1b[201~\r' },
+        { sessionId: 'terminal-mobile-ai', data: '\x03' },
+        { sessionId: 'terminal-mobile-ai', data: '2' }
+      ])
+    } finally {
+      await agentSessions.__testing.flushManagedAiSessionWrites()
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('serves newline-delimited JSON requests over the local socket', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-socket-'))

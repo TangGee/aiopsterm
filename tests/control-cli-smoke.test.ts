@@ -318,6 +318,78 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends control_compat-style mobile chat requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      const session = {
+        session_id: 'claude-mobile-cli-1',
+        id: 'claude-mobile-cli-1',
+        agent_kind: 'claude',
+        source: 'claude-code',
+        kind: 'agent',
+        title: 'Deploy review',
+        terminal_id: 'panel-ai',
+        terminal_session_id: 'terminal-ai',
+        workspace_id: 'main',
+        cwd: '/work/project',
+        state: { state: 'needs_input', since: '2024-06-01T00:00:00.000Z' },
+        needs_input: true
+      }
+      if (request.method === 'mobile.chat.sessions') return { id: request.id, ok: true, data: { sessions: [session], count: 1, total: 1, needs_input_count: 1 } }
+      if (request.method === 'mobile.chat.history') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            source: 'managed-ai-events',
+            messages: [{ id: 'event-1', seq: 0, role: 'agent', timestamp: '2024-06-01T00:00:00.000Z', kind: { type: 'permission_request', subject: 'Approve deploy command' } }],
+            has_more: false
+          }
+        }
+      }
+      if (request.method === 'mobile.chat.send') return { id: request.id, ok: true, data: { sent: true, submitted: true, session_id: params.session_id } }
+      if (request.method === 'mobile.chat.interrupt') return { id: request.id, ok: true, data: { interrupted: true, hard: params.hard === true, session_id: params.session_id } }
+      if (request.method === 'mobile.chat.answer') return { id: request.id, ok: true, data: { answered: true, option_index: params.option_index, session_id: params.session_id } }
+      if (request.method === 'chat.sessions.dump') return { id: request.id, ok: true, data: { sessions: [session], count: 1, needs_input_count: 1 } }
+      return { id: request.id, ok: false, errorCode: 'UNKNOWN', errorMessage: String(request.method) }
+    })
+
+    const listed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'chat', 'sessions', '--workspace', 'main'], { cwd: process.cwd() })
+    expect(listed.stdout).toContain('mobile-chat-sessions\t1/1\tneeds_input=1')
+    expect(listed.stdout).toContain('mobile-chat\t!\tclaude\tclaude-mobile-cli-1')
+    const history = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'chat', 'history', '--session', 'claude-mobile-cli-1', '--limit', '5'], {
+      cwd: process.cwd()
+    })
+    expect(history.stdout).toContain('mobile-chat-history\t1\thas_more=false')
+    expect(history.stdout).toContain('permission_request\tApprove deploy command')
+    const sent = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'chat', 'send', '--session', 'claude-mobile-cli-1', '--text', 'Ship it'], {
+      cwd: process.cwd()
+    })
+    expect(sent.stdout).toContain('mobile-chat-send\tclaude-mobile-cli-1\tsubmitted')
+    const interrupted = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'chat', 'interrupt', '--session', 'claude-mobile-cli-1', '--hard'], {
+      cwd: process.cwd()
+    })
+    expect(interrupted.stdout).toContain('mobile-chat-interrupt\tclaude-mobile-cli-1\thard')
+    const answered = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'chat', 'answer', '--session', 'claude-mobile-cli-1', '--option-index', '1'],
+      { cwd: process.cwd() }
+    )
+    expect(answered.stdout).toContain('mobile-chat-answer\tclaude-mobile-cli-1\toption=1')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'chat', 'sessions', 'dump'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'mobile.chat.sessions', params: expect.objectContaining({ workspace_id: 'main' }) }),
+      expect.objectContaining({ method: 'mobile.chat.history', params: expect.objectContaining({ session_id: 'claude-mobile-cli-1', limit: 5 }) }),
+      expect.objectContaining({ method: 'mobile.chat.send', params: expect.objectContaining({ session_id: 'claude-mobile-cli-1', text: 'Ship it' }) }),
+      expect.objectContaining({ method: 'mobile.chat.interrupt', params: expect.objectContaining({ session_id: 'claude-mobile-cli-1', hard: true }) }),
+      expect.objectContaining({ method: 'mobile.chat.answer', params: expect.objectContaining({ session_id: 'claude-mobile-cli-1', option_index: 1 }) }),
+      expect.objectContaining({ method: 'chat.sessions.dump' })
+    ])
+  })
+
   it('sends tmux-style buffer requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const savePath = join(tmpdir(), `aiopsterm-buffer-${process.pid}-${Date.now()}.txt`)

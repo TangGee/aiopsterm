@@ -256,6 +256,7 @@ const controlSocketCapabilities = [
   'mobile.host',
   'mobile.workspace',
   'mobile.terminal',
+  'mobile.chat',
   'terminal.list',
   'terminal.focus',
   'terminal.read_screen',
@@ -472,6 +473,8 @@ const isEventStreamMethod = (method: unknown) => {
 const isEventListMethod = (method: string) => method === 'events.list' || method === 'event.list'
 
 const isMobileEventsMethod = (method: string) => method === 'mobile.events.subscribe' || method === 'mobile.events.unsubscribe'
+
+const isMobileChatMethod = (method: string) => method.startsWith('mobile.chat.') || method === 'chat.sessions.dump'
 
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
 
@@ -1879,6 +1882,252 @@ const managedAiSessionMatchesWorkstream = (session: ManagedAiSessionRecord, work
   session.terminalSessionId === workstreamId ||
   session.workspaceId === workstreamId ||
   session.events.some((event) => event.id === workstreamId || event.requestId === workstreamId)
+
+const control_compatChatTimestamp = (value: unknown) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return undefined
+  return new Date(numberValue).toISOString()
+}
+
+const control_compatChatAgentKind = (source: string) => (source === 'claude-code' || source === 'claude' ? 'claude' : source === 'codex' ? 'codex' : source)
+
+const control_compatChatState = (session: ManagedAiSessionRecord) => {
+  const since = control_compatChatTimestamp(session.lastActivityAt || session.updatedAt || session.createdAt)
+  if (session.state === 'needsInput') return { state: 'needs_input', ...(since ? { since } : {}) }
+  if (session.state === 'working') return { state: 'working', ...(since ? { since } : {}) }
+  if (session.state === 'ended') return { state: 'ended' }
+  return { state: 'idle' }
+}
+
+const control_compatMobileChatDescriptor = (session: ManagedAiSessionRecord) => ({
+  session_id: session.id,
+  id: session.id,
+  agent_kind: control_compatChatAgentKind(session.source),
+  source: session.source,
+  kind: 'agent',
+  title: session.title || session.summary || session.id,
+  ...(session.workspaceId ? { workspace_id: session.workspaceId, workspaceId: session.workspaceId } : {}),
+  ...(session.panelId ? { terminal_id: session.panelId, panelId: session.panelId, surface_id: session.panelId } : {}),
+  ...(session.terminalSessionId ? { terminal_session_id: session.terminalSessionId, terminalSessionId: session.terminalSessionId } : {}),
+  ...(session.cwd ? { cwd: session.cwd, workingDirectory: session.cwd } : {}),
+  state: control_compatChatState(session),
+  ...(control_compatChatTimestamp(session.lastActivityAt) ? { last_activity_at: control_compatChatTimestamp(session.lastActivityAt), lastActivityAt: session.lastActivityAt } : {}),
+  needs_input: session.state === 'needsInput',
+  needsInput: session.state === 'needsInput',
+  actionable: session.actionable === true,
+  event_count: session.events.length,
+  decision_count: session.decisions.length,
+  updated_at: session.updatedAt,
+  created_at: session.createdAt
+})
+
+const control_compatChatEventText = (event: ReturnType<typeof managedAiTimelineSummary>[number]) =>
+  cleanText(event.summary || event.title || event.toolName || event.event || event.requestId || event.id)
+
+const control_compatChatEventKind = (event: ReturnType<typeof managedAiTimelineSummary>[number], session: ManagedAiSessionRecord) => {
+  const text = control_compatChatEventText(event)
+  if (event.requestKind === 'permission' || event.requestKind === 'plan') {
+    return {
+      type: 'permission_request',
+      title: event.requestKind === 'plan' ? 'Review plan' : `${session.source} needs permission`,
+      subject: text || event.toolName || event.event || 'Permission request'
+    }
+  }
+  if (event.requestKind === 'question') {
+    return {
+      type: 'question',
+      prompt: text || 'Question',
+      options: []
+    }
+  }
+  if (event.event === 'session_start') return { type: 'status', event: 'session_started', ...(text ? { detail: text } : {}) }
+  if (event.event === 'session_end' || event.event === 'stop') return { type: 'status', event: 'session_ended', ...(text ? { detail: text } : {}) }
+  return { type: 'prose', text: text || event.event || 'Session event' }
+}
+
+const control_compatChatMessageFromEvent = (event: ReturnType<typeof managedAiTimelineSummary>[number], session: ManagedAiSessionRecord, index: number) => {
+  const seq = Math.max(0, index)
+  const timestamp = control_compatChatTimestamp(event.receivedAt) || control_compatChatTimestamp(session.lastActivityAt) || new Date(session.updatedAt || Date.now()).toISOString()
+  const role = event.requestKind === 'permission' || event.requestKind === 'question' || event.requestKind === 'plan' ? 'agent' : event.event === 'prompt_submit' ? 'user' : 'system'
+  return {
+    id: event.id || `${session.id}-${seq}`,
+    seq,
+    role,
+    timestamp,
+    kind: control_compatChatEventKind(event, session),
+    source: event.source,
+    event: event.event,
+    request_kind: event.requestKind,
+    decision_mode: event.decisionMode,
+    ...(event.requestId ? { request_id: event.requestId } : {}),
+    ...(event.toolName ? { tool_name: event.toolName } : {})
+  }
+}
+
+const control_compatChatSessionDebugSummary = (session: ManagedAiSessionRecord) => ({
+  ...managedAiControlSummary(session, { includeEvents: true, includeDecisions: true, eventLimit: 25, decisionLimit: 25 }),
+  descriptor: control_compatMobileChatDescriptor(session)
+})
+
+const resolveMobileChatSession = async (params: Record<string, unknown>) => {
+  const sessionId = cleanText(params.sessionId || params.session_id || params.id)
+  if (!sessionId) return { error: fail('MOBILE_CHAT_SESSION_ID_REQUIRED', 'mobile.chat requires session_id.') }
+  const source = cleanText(params.source || params.agent || params.agent_kind)
+  const snapshot = await listManagedAiSessions()
+  if (!snapshot.ok || !snapshot.data) return { error: fail(snapshot.errorCode || 'MOBILE_CHAT_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.') }
+  const matches = snapshot.data.sessions.filter((session) => session.id === sessionId && (!source || session.source === source || control_compatChatAgentKind(session.source) === source))
+  if (!matches.length) return { error: fail('MOBILE_CHAT_SESSION_NOT_FOUND', `Mobile chat session was not found: ${source ? `${source}:` : ''}${sessionId}`) }
+  if (matches.length > 1) return { error: fail('MOBILE_CHAT_SOURCE_REQUIRED', `Multiple mobile chat sessions match ${sessionId}; pass source.`) }
+  return { session: matches[0], snapshot: snapshot.data }
+}
+
+const mobileChatTerminalTarget = (session: ManagedAiSessionRecord) => {
+  if (!session.terminalSessionId && !session.panelId) return null
+  return {
+    ...(session.terminalSessionId
+      ? {
+          sessionId: session.terminalSessionId,
+          session_id: session.terminalSessionId,
+          terminalSessionId: session.terminalSessionId,
+          terminal_session_id: session.terminalSessionId
+        }
+      : {}),
+    ...(session.panelId
+      ? {
+          panelId: session.panelId,
+          panel_id: session.panelId,
+          surfaceId: session.panelId,
+          surface_id: session.panelId,
+          terminal_id: session.panelId
+        }
+      : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId, workspace_id: session.workspaceId } : {})
+  }
+}
+
+const mobileChatPastePayload = (text: string, submitKey: unknown) => {
+  const normalized = cleanText(submitKey || 'return').toLowerCase().replace(/[\s_]+/g, '')
+  const suffix = !normalized || normalized === 'return' || normalized === 'enter' ? '\r' : normalized === 'none' ? '' : normalized === 'ctrl+enter' || normalized === 'control+enter' || normalized === 'ctrl-enter' || normalized === 'control-enter' ? '\x1b[13;5u' : null
+  if (suffix === null) return null
+  return `\x1b[200~${text}\x1b[201~${suffix}`
+}
+
+const handleMobileChatControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (runtime.userDataPath) await configureAiAgentSessionStore(runtime.userDataPath)
+  if (method === 'mobile.chat.sessions') {
+    const snapshot = await listManagedAiSessions()
+    if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MOBILE_CHAT_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
+    const workspaceId = cleanText(params.workspace_id || params.workspaceId)
+    const source = cleanText(params.source || params.agent || params.agent_kind)
+    const includeEnded = params.includeEnded === true || params.include_ended === true
+    const limit = normalizeLimit(params.limit, 100)
+    const filtered = snapshot.data.sessions.filter((session) => {
+      if (workspaceId && session.workspaceId !== workspaceId) return false
+      if (source && session.source !== source && control_compatChatAgentKind(session.source) !== source) return false
+      if (!includeEnded && session.state === 'ended') return false
+      return Boolean(session.panelId || session.terminalSessionId || session.cwd || session.transcriptPath || session.events.length)
+    })
+    return ok({
+      sessions: filtered.slice(0, limit).map(control_compatMobileChatDescriptor),
+      count: filtered.length,
+      total: snapshot.data.sessions.length,
+      needs_input_count: filtered.filter((session) => session.state === 'needsInput').length
+    })
+  }
+  if (method === 'chat.sessions.dump') {
+    const snapshot = await listManagedAiSessions()
+    if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MOBILE_CHAT_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
+    return ok({
+      sessions: snapshot.data.sessions.map(control_compatChatSessionDebugSummary),
+      count: snapshot.data.sessions.length,
+      needs_input_count: snapshot.data.sessions.filter((session) => session.state === 'needsInput').length
+    })
+  }
+  if (method === 'mobile.chat.history') {
+    const resolved = await resolveMobileChatSession(params)
+    if (resolved.error) return resolved.error
+    const limit = normalizeLimit(params.limit, 100)
+    const beforeSeq = Number(params.before_seq || params.beforeSeq)
+    const session = resolved.session!
+    const events = managedAiTimelineSummary(session, session.events.length || 1)
+    const pageEvents = Number.isFinite(beforeSeq) && beforeSeq >= 0 ? events.filter((_event, index) => index < beforeSeq).slice(-limit) : events.slice(-limit)
+    const baseSeq = Number.isFinite(beforeSeq) && beforeSeq >= 0 ? Math.max(0, Math.floor(beforeSeq) - pageEvents.length) : Math.max(0, events.length - pageEvents.length)
+    return ok({
+      messages: pageEvents.map((event, index) => control_compatChatMessageFromEvent(event, session, baseSeq + index)),
+      has_more: events.length > pageEvents.length && baseSeq > 0,
+      session: control_compatMobileChatDescriptor(session),
+      source: 'managed-ai-events',
+      transcript_unavailable: Boolean(session.transcriptPath) ? false : true
+    })
+  }
+  if (method === 'mobile.chat.send') {
+    const resolved = await resolveMobileChatSession(params)
+    if (resolved.error) return resolved.error
+    const session = resolved.session!
+    const text = typeof params.text === 'string' ? params.text : ''
+    const attachments = Array.isArray(params.attachments) ? params.attachments : []
+    if (!text && !attachments.length) return fail('MOBILE_CHAT_EMPTY_SEND', 'mobile.chat.send requires text or attachments.')
+    if (attachments.length) return fail('MOBILE_CHAT_ATTACHMENTS_UNSUPPORTED', 'mobile.chat.send attachments are not supported yet.', { unsupported: true, session_id: session.id })
+    const target = mobileChatTerminalTarget(session)
+    if (!target) return fail('MOBILE_CHAT_TERMINAL_NOT_FOUND', "The agent session is not bound to an aiopsterm terminal.", { session_id: session.id })
+    const payload = mobileChatPastePayload(text, params.submit_key || params.submitKey || 'return')
+    if (payload === null) return fail('MOBILE_CHAT_SUBMIT_KEY_UNSUPPORTED', 'Unsupported submit_key.', { submit_key: cleanText(params.submit_key || params.submitKey) })
+    const response =
+      session.terminalSessionId && runtime.writeTerminal
+        ? await runtime.writeTerminal(session.terminalSessionId, payload)
+        : await handleMobileTerminalControlRequest('terminal.paste', { ...target, text, submit_key: params.submit_key || params.submitKey || 'return' })
+    if (!response.ok) return response
+    publishControlEvent({
+      name: 'mobile_chat.sent',
+      category: 'agent',
+      source: 'control.socket',
+      workspaceId: session.workspaceId,
+      surfaceId: session.panelId,
+      payload: { source: session.source, session_id: session.id, text_length: text.length }
+    })
+    return ok({ sent: true, submitted: true, session_id: session.id, terminal: response.data || {} })
+  }
+  if (method === 'mobile.chat.interrupt') {
+    const resolved = await resolveMobileChatSession(params)
+    if (resolved.error) return resolved.error
+    const session = resolved.session!
+    const target = mobileChatTerminalTarget(session)
+    if (!target) return fail('MOBILE_CHAT_TERMINAL_NOT_FOUND', "The agent session is not bound to an aiopsterm terminal.", { session_id: session.id })
+    const hard = params.hard === true
+    const response = await sendTerminalKey({ ...target, key: hard ? 'ctrl+c' : 'escape' })
+    if (!response.ok) return response
+    publishControlEvent({
+      name: 'mobile_chat.interrupted',
+      category: 'agent',
+      source: 'control.socket',
+      workspaceId: session.workspaceId,
+      surfaceId: session.panelId,
+      payload: { source: session.source, session_id: session.id, hard }
+    })
+    return ok({ interrupted: true, hard, session_id: session.id, terminal: response.data || {} })
+  }
+  if (method === 'mobile.chat.answer') {
+    const resolved = await resolveMobileChatSession(params)
+    if (resolved.error) return resolved.error
+    const optionIndex = Number(params.option_index ?? params.optionIndex)
+    if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex > 8) return fail('MOBILE_CHAT_OPTION_INDEX_INVALID', 'mobile.chat.answer option_index must be an integer from 0 to 8.')
+    const session = resolved.session!
+    const target = mobileChatTerminalTarget(session)
+    if (!target) return fail('MOBILE_CHAT_TERMINAL_NOT_FOUND', "The agent session is not bound to an aiopsterm terminal.", { session_id: session.id })
+    const response = await sendTerminalKey({ ...target, key: String(optionIndex + 1) })
+    if (!response.ok) return response
+    publishControlEvent({
+      name: 'mobile_chat.answered',
+      category: 'agent',
+      source: 'control.socket',
+      workspaceId: session.workspaceId,
+      surfaceId: session.panelId,
+      payload: { source: session.source, session_id: session.id, option_index: optionIndex }
+    })
+    return ok({ answered: true, option_index: optionIndex, session_id: session.id, terminal: response.data || {} })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm mobile chat method: ${method}`)
+}
 
 const resolveManagedAiControlSessionByRequest = async (params: Record<string, unknown>) => {
   const requestId = cleanText(params.requestId || params.request_id || params.id)
@@ -3542,6 +3791,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isTmuxCompatMethod(method)) return handleTmuxCompatControlRequest(method, params)
   if (isEventListMethod(method)) return listEvents(params)
   if (isMobileEventsMethod(method)) return handleMobileEventsControlRequest(method, params)
+  if (isMobileChatMethod(method)) return handleMobileChatControlRequest(method, params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
