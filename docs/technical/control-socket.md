@@ -37,6 +37,18 @@ The workspace metadata slice adds read-only model snapshots:
 - `surface.list`: list terminal and editor surfaces in the shared main work panel.
 - `surface.current`: return the currently active surface.
 
+The control_compat system/window/settings compatibility slice adds non-browser app automation:
+
+- `auth.login`: acknowledge the local control socket auth handshake. aiopsterm currently returns `authenticated=true` and `required=false` because access is scoped to the local per-process socket.
+- `system.tree`: build a control_compat-style window/workspace/pane/surface tree from the renderer `workspace.snapshot` read model. aiopsterm maps the shared main work panel to one selected workspace named `main`.
+- `window.list`, `window.current`, and `window.focus`: inspect and focus existing Electron windows through the main-process runtime.
+- `window.create`, `window.close`, and `window.display`: recognized compatibility controls that return `unsupported=true` rather than creating, closing, or moving native windows unexpectedly.
+- `window.displays`: return connected display metadata when the packaged main process provides it.
+- `settings.open`: open the existing Settings module and select a supported settings section such as `general`, `terminal`, `models`, `ai`, `mcp`, `skills`, or `about`.
+- `feedback.open`: reuse the existing local feedback report action.
+- `extension.sidebar.snapshot`: expose a control_compat-style sidebar feed derived from `workspace.snapshot`.
+- `app.focus_override.set` and `app.simulate_active`: accepted app-focus compatibility controls. They update control metadata and focus the active aiopsterm window where applicable.
+
 The workspace group slice adds control_compat-style group metadata for the shared main work panel:
 
 - `workspace.group.list`: list automation-visible surface groups.
@@ -237,6 +249,14 @@ node /path/to/resources/aiopsterm-control.js hooks list
 node /path/to/resources/aiopsterm-control.js hooks setup
 node /path/to/resources/aiopsterm-control.js hooks setup --agent codex
 node /path/to/resources/aiopsterm-control.js hooks uninstall codex
+node /path/to/resources/aiopsterm-control.js auth login
+node /path/to/resources/aiopsterm-control.js system tree
+node /path/to/resources/aiopsterm-control.js settings open --target models
+node /path/to/resources/aiopsterm-control.js feedback open
+node /path/to/resources/aiopsterm-control.js sidebar snapshot
+node /path/to/resources/aiopsterm-control.js window list
+node /path/to/resources/aiopsterm-control.js window focus --window window:1
+node /path/to/resources/aiopsterm-control.js app focus-override active
 node /path/to/resources/aiopsterm-control.js workspace snapshot
 node /path/to/resources/aiopsterm-control.js workspace-group list
 node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
@@ -352,6 +372,8 @@ Future higher-level automation commands should use the control socket but must c
 `terminal.respawn` is also renderer-owned. Unlike raw `terminal.send_text`, it routes the restart command through aiopsterm terminal command security and may return a `needs-approval` decision instead of writing to the shell. It does not close the PTY or SSH channel by itself; the command text controls whether the running shell process is replaced.
 
 `pane.break`, `pane.join`, and `pane.swap` are renderer-owned structural controls. They only update the main work panel's surface layout metadata. They do not write to any shell, close terminal sessions, or reuse the terminal raw-input path. `pane.resize` is deliberately explicit about the current limitation: it returns `unsupported=true`, `resized=false`, and `unsupportedReason` instead of pretending to resize equal-split panes.
+
+`window.close`, `window.create`, and `window.display` are deliberately non-destructive compatibility probes in this slice. They do not close user windows or create separate native workspaces. `settings.open`, `feedback.open`, `extension.sidebar.snapshot`, and `system.tree` route through the active renderer because those operations depend on UI state; they do not write terminal input or bypass terminal command approval.
 
 Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of control_compat's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
 

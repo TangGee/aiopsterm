@@ -31,6 +31,12 @@ type ControlSocketRuntime = {
   userDataPath?: string
   getWindows?: () => BrowserWindow[]
   focusWindow?: (window?: BrowserWindow) => BrowserWindow | null
+  getDisplays?: () => Array<{
+    id?: number
+    label?: string
+    bounds?: { x: number; y: number; width: number; height: number }
+    workArea?: { x: number; y: number; width: number; height: number }
+  }>
   writeTerminal?: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
   showNotification?: (notification: ControlNotificationRecord) => void
 }
@@ -207,6 +213,13 @@ const controlSocketCapabilities = [
   'ping',
   'system.capabilities',
   'system.identify',
+  'system.tree',
+  'auth.login',
+  'settings.open',
+  'feedback.open',
+  'extension.sidebar.snapshot',
+  'window.control',
+  'app.focus',
   'workspace.snapshot',
   'workspace.list',
   'workspace.current',
@@ -851,6 +864,274 @@ const sessionSnapshotPayload = (snapshot?: ControlSessionSnapshot | null) => ({
   latest: sortedSessionSnapshots()[0] || null,
   ...(snapshot ? { snapshot: cloneSessionSnapshot(snapshot) } : {})
 })
+
+const appWindows = () => runtime.getWindows?.().filter((window) => !window.isDestroyed()) || []
+
+const windowNumericId = (window: BrowserWindow, index: number) => {
+  const id = Number((window as unknown as { id?: number }).id)
+  return Number.isFinite(id) && id > 0 ? Math.floor(id) : index + 1
+}
+
+const windowControlId = (window: BrowserWindow, index: number) => `window:${windowNumericId(window, index)}`
+
+const normalizeWindowSelector = (value: unknown) => {
+  const text = cleanText(value)
+  if (!text) return ''
+  return text.startsWith('window:') ? text.slice('window:'.length) : text
+}
+
+const resolveControlWindow = (params: Record<string, unknown> = {}) => {
+  const windows = appWindows()
+  const selector = normalizeWindowSelector(params.windowId || params.window_id || params.id || params.window)
+  if (!selector) return activeWindow()
+  return (
+    windows.find((window, index) => {
+      const numericId = String(windowNumericId(window, index))
+      return selector === numericId || selector === String(index) || selector === String(index + 1) || selector === windowControlId(window, index)
+    }) || null
+  )
+}
+
+const windowSummary = (window: BrowserWindow, index: number) => {
+  const id = windowControlId(window, index)
+  const numericId = windowNumericId(window, index)
+  const bounds = typeof window.getBounds === 'function' ? window.getBounds() : undefined
+  return {
+    id,
+    windowId: id,
+    window_id: id,
+    electronId: numericId,
+    electron_id: numericId,
+    ref: id,
+    index,
+    key: window.isFocused(),
+    focused: window.isFocused(),
+    visible: typeof window.isVisible === 'function' ? window.isVisible() : true,
+    minimized: typeof window.isMinimized === 'function' ? window.isMinimized() : false,
+    workspaceCount: 1,
+    workspace_count: 1,
+    selectedWorkspaceId: 'main',
+    selected_workspace_id: 'main',
+    selectedWorkspaceRef: 'workspace:1',
+    selected_workspace_ref: 'workspace:1',
+    ...(bounds ? { bounds } : {})
+  }
+}
+
+const handleWindowControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const windows = appWindows()
+  if (method === 'window.list') {
+    return ok({
+      windows: windows.map(windowSummary),
+      count: windows.length
+    })
+  }
+  if (method === 'window.current') {
+    const window = resolveControlWindow(params)
+    if (!window) return fail('WINDOW_NOT_FOUND', 'Current window was not found.')
+    const index = Math.max(0, windows.indexOf(window))
+    const summary = windowSummary(window, index)
+    return ok({
+      window: summary,
+      windowId: summary.windowId,
+      window_id: summary.window_id,
+      window_ref: summary.ref
+    })
+  }
+  if (method === 'window.focus') {
+    const window = resolveControlWindow(params)
+    if (!window) return fail('WINDOW_NOT_FOUND', 'Window was not found.')
+    runtime.focusWindow?.(window)
+    const index = Math.max(0, windows.indexOf(window))
+    const summary = windowSummary(window, index)
+    publishControlEvent({
+      name: 'window.focused',
+      category: 'window',
+      source: 'control.socket',
+      payload: { window_id: summary.window_id, electron_id: summary.electron_id }
+    })
+    return ok({
+      window: summary,
+      windowId: summary.windowId,
+      window_id: summary.window_id,
+      window_ref: summary.ref,
+      focused: true
+    })
+  }
+  if (method === 'window.displays') {
+    const displays = runtime.getDisplays?.() || []
+    if (!displays.length) {
+      return ok({
+        displays: [],
+        count: 0,
+        unsupported: true,
+        unsupportedReason: 'No display runtime is available for this aiopsterm control socket.'
+      })
+    }
+    return ok({
+      displays: displays.map((display, index) => ({
+        name: cleanText(display.label) || `Display ${index + 1}`,
+        index,
+        displayId: display.id ?? null,
+        display_id: display.id ?? null,
+        main: index === 0,
+        frame: display.bounds || null,
+        bounds: display.bounds || null,
+        workArea: display.workArea || null,
+        work_area: display.workArea || null
+      })),
+      count: displays.length
+    })
+  }
+  if (method === 'window.create') {
+    return ok({
+      created: false,
+      unsupported: true,
+      unsupportedReason: 'Creating native Electron windows through the control socket is not supported yet.'
+    })
+  }
+  if (method === 'window.close') {
+    const requestedWindowId = cleanText(params.windowId || params.window_id || params.id || params.window)
+    return ok({
+      windowId: requestedWindowId,
+      window_id: requestedWindowId,
+      closed: false,
+      unsupported: true,
+      unsupportedReason: 'Closing native Electron windows through the control socket is disabled to avoid closing user work unexpectedly.'
+    })
+  }
+  if (method === 'window.display') {
+    const requestedDisplay = cleanText(params.display || params.name || params.target)
+    return ok({
+      display: requestedDisplay,
+      moved: [],
+      changed: false,
+      unsupported: true,
+      unsupportedReason: 'Moving native Electron windows between displays through the control socket is not supported yet.'
+    })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm window method: ${method}`)
+}
+
+const systemTreeFromSnapshot = (snapshot: Record<string, unknown>) => {
+  const surfaces = Array.isArray(snapshot.surfaces) ? (snapshot.surfaces as Record<string, unknown>[]) : []
+  const activePanelId = cleanText(snapshot.activePanelId)
+  const windows = appWindows()
+  const active = activeWindow()
+  const window = active || windows[0] || null
+  const windowIndex = window ? Math.max(0, windows.indexOf(window)) : 0
+  const windowId = window ? windowControlId(window, windowIndex) : 'window:1'
+  const paneNodes = surfaces.map((surface, index) => {
+    const panelId = cleanText(surface.panelId || surface.id || surface.surfaceId || surface.surface_id) || `surface-${index + 1}`
+    const surfaceNode = {
+      id: panelId,
+      ref: `surface:${index + 1}`,
+      index,
+      type: cleanText(surface.surfaceKind || surface.type || surface.kind) || 'terminal',
+      title: cleanText(surface.title) || panelId,
+      focused: panelId === activePanelId,
+      selected: panelId === activePanelId,
+      selected_in_pane: true,
+      pane_id: panelId,
+      pane_ref: `pane:${index + 1}`,
+      index_in_pane: 0,
+      tty: cleanText(surface.sessionId || surface.terminalSessionId) || null,
+      url: null
+    }
+    return {
+      id: panelId,
+      ref: `pane:${index + 1}`,
+      index,
+      focused: panelId === activePanelId,
+      surface_ids: [panelId],
+      surface_refs: [surfaceNode.ref],
+      selected_surface_id: panelId,
+      selected_surface_ref: surfaceNode.ref,
+      surface_count: 1,
+      surfaces: [surfaceNode]
+    }
+  })
+  const workspaceNode = {
+    id: 'main',
+    ref: 'workspace:1',
+    index: 0,
+    title: 'Main Workspace',
+    description: null,
+    selected: true,
+    pinned: true,
+    panes: paneNodes
+  }
+  return {
+    active: {
+      window_id: windowId,
+      window_ref: windowId,
+      workspace_id: 'main',
+      workspace_ref: 'workspace:1',
+      pane_id: activePanelId || null,
+      surface_id: activePanelId || null
+    },
+    caller: null,
+    windows: [
+      {
+        id: windowId,
+        ref: windowId,
+        index: windowIndex,
+        key: true,
+        visible: true,
+        workspace_count: 1,
+        selected_workspace_id: 'main',
+        selected_workspace_ref: 'workspace:1',
+        workspaces: [workspaceNode]
+      }
+    ]
+  }
+}
+
+const handleSystemCompatibilityRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'auth.login') return ok({ authenticated: true, required: false })
+  if (method === 'session.restore_previous') return handleSessionControlRequest('session.restore', { ...params, id: params.id || 'latest' })
+  if (method === 'system.tree') {
+    const response = await dispatchRendererControlRequest('workspace.snapshot', params)
+    if (!response.ok) return response
+    const snapshot = response.data?.snapshot && typeof response.data.snapshot === 'object' ? (response.data.snapshot as Record<string, unknown>) : null
+    if (!snapshot) return fail('SYSTEM_TREE_SNAPSHOT_INVALID', 'Renderer returned an invalid workspace snapshot.')
+    return ok({
+      ...systemTreeFromSnapshot(snapshot),
+      snapshot
+    })
+  }
+  if (method === 'settings.open' || method === 'feedback.open' || method === 'extension.sidebar.snapshot') {
+    return dispatchRendererControlRequest(method, params, { focus: params.activate !== false })
+  }
+  if (method === 'app.focus_override.set') {
+    const state = cleanText(params.state).toLowerCase()
+    let override: boolean | null
+    if (state) {
+      if (state === 'active') override = true
+      else if (state === 'inactive') override = false
+      else if (state === 'clear' || state === 'none') override = null
+      else return fail('APP_FOCUS_STATE_INVALID', 'Invalid state (active|inactive|clear).', { state })
+    } else if (Object.prototype.hasOwnProperty.call(params, 'focused')) {
+      override = typeof params.focused === 'boolean' ? params.focused : null
+    } else {
+      return fail('APP_FOCUS_STATE_REQUIRED', 'Missing state or focused.')
+    }
+    publishControlEvent({
+      name: 'app.focus_override.set',
+      category: 'app',
+      source: 'control.socket',
+      payload: { override }
+    })
+    return ok({ override })
+  }
+  if (method === 'app.simulate_active') {
+    const window = activeWindow()
+    if (window) runtime.focusWindow?.(window)
+    publishControlEvent({ name: 'app.simulate_active', category: 'app', source: 'control.socket', payload: {} })
+    return ok({ active: Boolean(window) })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm system compatibility method: ${method}`)
+}
 
 const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): AgentVaultEntry | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -2783,6 +3064,19 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
+  if (
+    method === 'auth.login' ||
+    method === 'session.restore_previous' ||
+    method === 'system.tree' ||
+    method === 'settings.open' ||
+    method === 'feedback.open' ||
+    method === 'extension.sidebar.snapshot' ||
+    method === 'app.focus_override.set' ||
+    method === 'app.simulate_active'
+  ) {
+    return handleSystemCompatibilityRequest(method, params)
+  }
+  if (method.startsWith('window.')) return handleWindowControlRequest(method, params)
   if (isWaitForMethod(method)) return handleWaitForControlRequest(method, params)
   if (isSidebarMetadataMethod(method)) return handleSidebarMetadataControlRequest(method, params)
   if (isTerminalBufferMethod(method)) return handleTerminalBufferControlRequest(method, params)

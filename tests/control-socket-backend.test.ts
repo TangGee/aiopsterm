@@ -11,6 +11,7 @@ type ControlSocketBackend = {
     userDataPath?: string
     getWindows?: () => Array<Record<string, unknown>>
     focusWindow?: (window?: Record<string, unknown> | null) => Record<string, unknown> | null
+    getDisplays?: () => Array<Record<string, unknown>>
     writeTerminal?: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
     showNotification?: (notification: Record<string, unknown>) => void
   }) => void
@@ -51,10 +52,16 @@ type AgentHookInstallerBackend = {
 }
 
 type MockWindow = {
+  id?: number
   focused?: boolean
+  visible?: boolean
+  minimized?: boolean
   requests: ControlRequest[]
   isDestroyed: () => boolean
   isFocused: () => boolean
+  isVisible: () => boolean
+  isMinimized: () => boolean
+  getBounds: () => { x: number; y: number; width: number; height: number }
   webContents: {
     isDestroyed: () => boolean
     send: (channel: string, request: ControlRequest) => void
@@ -77,11 +84,23 @@ const loadAgentHookInstallerBackend = async () => {
 }
 
 const createMockWindow = (handler: (request: ControlRequest) => ControlResponse | Promise<ControlResponse>): MockWindow => ({
+  id: 1,
   focused: true,
+  visible: true,
+  minimized: false,
   requests: [],
   isDestroyed: () => false,
   isFocused() {
     return this.focused === true
+  },
+  isVisible() {
+    return this.visible !== false
+  },
+  isMinimized() {
+    return this.minimized === true
+  },
+  getBounds() {
+    return { x: 10, y: 20, width: 1200, height: 800 }
   },
   webContents: {
     isDestroyed: () => false,
@@ -356,6 +375,97 @@ describe('control socket backend', () => {
             activePanelId: 'panel-1',
             counts: expect.objectContaining({ terminals: 1 })
           })
+        })
+      })
+    )
+    expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
+  })
+
+  it('exposes control_compat-style system and window compatibility controls without closing user windows', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow(() => ({
+      ok: true,
+      data: {
+        snapshot: {
+          generatedAt: 1000,
+          mode: 'terminal',
+          activeModule: 'workspace',
+          activePanelId: 'panel-1',
+          workspaces: [{ id: 'main', title: 'Main Workspace', active: true, mode: 'terminal', activeModule: 'workspace', activePanelId: 'panel-1' }],
+          terminals: [{ panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local', kind: 'local', active: true, connected: true, cwd: '/work' }],
+          surfaces: [{ panelId: 'panel-1', title: 'Local', surfaceKind: 'terminal', active: true, sessionId: 'terminal-1', terminalKind: 'local', connected: true }],
+          splitGroups: [],
+          workspaceGroups: [],
+          notifications: [],
+          managedAiSessions: [],
+          agentHibernation: { enabled: false, idleSeconds: 0, maxLiveTerminals: 0, confirmationSeconds: 0 },
+          attention: { unreadCount: 0, items: [] },
+          counts: {
+            terminals: 1,
+            connectedTerminals: 1,
+            surfaces: 1,
+            splitGroups: 0,
+            workspaceGroups: 0,
+            notifications: 0,
+            unreadNotifications: 0,
+            managedAiSessions: 0,
+            managedAiNeedsInput: 0,
+            attentionItems: 0
+          }
+        }
+      }
+    }))
+    const secondWindow = createMockWindow(() => ({ ok: true, data: {} }))
+    secondWindow.id = 17
+    secondWindow.focused = false
+    let focusedWindow: Record<string, unknown> | null = null
+    backend.configureControlSocketRuntime({
+      getWindows: () => [mockWindow, secondWindow],
+      focusWindow: (window) => {
+        focusedWindow = window || null
+        mockWindow.focused = window === mockWindow
+        secondWindow.focused = window === secondWindow
+        return window || null
+      },
+      getDisplays: () => [{ id: 101, label: 'Unit Display', bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 24, width: 1920, height: 1056 } }]
+    })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'auth.login' })).resolves.toEqual(expect.objectContaining({ ok: true, data: { authenticated: true, required: false } }))
+    await expect(backend.__testing.handleControlRequest({ method: 'window.list' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          windows: [
+            expect.objectContaining({ id: 'window:1', electronId: 1, key: true, selected_workspace_id: 'main' }),
+            expect.objectContaining({ id: 'window:17', electronId: 17, key: false })
+          ]
+        })
+      })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'window.focus', params: { windowId: 'window:17' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ windowId: 'window:17', focused: true }) })
+    )
+    expect(focusedWindow).toBe(secondWindow)
+    await expect(backend.__testing.handleControlRequest({ method: 'window.displays' })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ displays: [expect.objectContaining({ displayId: 101, name: 'Unit Display' })] }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'window.close', params: { windowId: 'window:17' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ closed: false, unsupported: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'window.focus', params: { windowId: 'window:1' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ windowId: 'window:1', focused: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'system.tree' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          active: expect.objectContaining({ workspace_id: 'main', surface_id: 'panel-1' }),
+          windows: [expect.objectContaining({ workspaces: [expect.objectContaining({ panes: [expect.objectContaining({ selected_surface_id: 'panel-1' })] })] })]
         })
       })
     )

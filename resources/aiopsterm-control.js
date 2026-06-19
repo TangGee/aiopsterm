@@ -14,6 +14,14 @@ Commands:
   capabilities
   identify
   rpc <method> [--params-json <json>]
+  auth login
+  settings open [--target <section>]
+  feedback open
+  sidebar snapshot
+  system tree
+  app focus-override active|inactive|clear
+  app simulate-active
+  window list|current|focus|create|close|displays|display
   hooks list|setup|install|uninstall [--agent <name>]
   feed list|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
@@ -142,6 +150,13 @@ const methodParams = () => {
   if (command === 'ping') return { method: 'ping', params: {} }
   if (command === 'capabilities' || command === 'system-capabilities') return { method: 'system.capabilities', params: {} }
   if (command === 'identify' || command === 'system-identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
+  if (command === 'auth') return authMethodParams(args.shift() || 'login')
+  if (command === 'settings') return settingsMethodParams(args.shift() || 'open')
+  if (command === 'feedback') return feedbackMethodParams(args.shift() || 'open')
+  if (command === 'sidebar' && args[0] === 'snapshot') return sidebarSnapshotMethodParams()
+  if (command === 'system') return systemMethodParams(args.shift() || 'tree')
+  if (command === 'app') return appMethodParams(args.shift() || '')
+  if (command === 'window') return windowMethodParams(args.shift() || 'list')
   if (command === 'rpc') {
     const method = args.shift() || ''
     if (!method) throw new Error('rpc requires a method name')
@@ -503,6 +518,78 @@ const readCallerParams = () => {
   if (workspaceId) caller.workspaceId = workspaceId
   if (cwd) caller.cwd = cwd
   return caller
+}
+
+const authMethodParams = (subcommand) => {
+  if (subcommand !== 'login') throw new Error(`Unknown auth command: ${subcommand}`)
+  return { method: 'auth.login', params: {} }
+}
+
+const settingsMethodParams = (subcommand) => {
+  if (subcommand !== 'open') throw new Error(`Unknown settings command: ${subcommand}`)
+  const target = readOption('--target') || readOption('--section') || readOption('--page') || readPositional() || 'general'
+  const activate = !hasFlag('--no-activate')
+  return { method: 'settings.open', params: { target, section: target, activate } }
+}
+
+const feedbackMethodParams = (subcommand) => {
+  if (subcommand !== 'open') throw new Error(`Unknown feedback command: ${subcommand}`)
+  return { method: 'feedback.open', params: { activate: !hasFlag('--no-activate') } }
+}
+
+const sidebarSnapshotMethodParams = () => {
+  args.shift()
+  return {
+    method: 'extension.sidebar.snapshot',
+    params: {
+      windowId: readOption('--window') || readOption('--window-id'),
+      workspaceId: readOption('--workspace') || readOption('--workspace-id')
+    }
+  }
+}
+
+const systemMethodParams = (subcommand) => {
+  if (subcommand === 'tree') {
+    return {
+      method: 'system.tree',
+      params: {
+        windowId: readOption('--window') || readOption('--window-id'),
+        workspaceId: readOption('--workspace') || readOption('--workspace-id')
+      }
+    }
+  }
+  if (subcommand === 'identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
+  if (subcommand === 'capabilities') return { method: 'system.capabilities', params: {} }
+  throw new Error(`Unknown system command: ${subcommand}`)
+}
+
+const appMethodParams = (subcommand) => {
+  if (subcommand === 'focus-override' || subcommand === 'focus_override') {
+    const state = readOption('--state') || readPositional() || 'clear'
+    return { method: 'app.focus_override.set', params: { state } }
+  }
+  if (subcommand === 'simulate-active' || subcommand === 'simulate_active') return { method: 'app.simulate_active', params: {} }
+  throw new Error(`Unknown app command: ${subcommand}`)
+}
+
+const windowSelectorParams = () => {
+  const windowId = readOption('--window') || readOption('--window-id') || readOption('--id') || readPositional()
+  return { windowId, window_id: windowId }
+}
+
+const windowMethodParams = (subcommand) => {
+  if (subcommand === 'list' || subcommand === 'ls') return { method: 'window.list', params: {} }
+  if (subcommand === 'current') return { method: 'window.current', params: windowSelectorParams() }
+  if (subcommand === 'focus') return { method: 'window.focus', params: windowSelectorParams() }
+  if (subcommand === 'create' || subcommand === 'new') return { method: 'window.create', params: {} }
+  if (subcommand === 'close') return { method: 'window.close', params: windowSelectorParams() }
+  if (subcommand === 'displays') return { method: 'window.displays', params: {} }
+  if (subcommand === 'display') {
+    const selector = windowSelectorParams()
+    const display = readOption('--display') || readOption('--name') || readPositional()
+    return { method: 'window.display', params: { ...selector, display } }
+  }
+  throw new Error(`Unknown window command: ${subcommand}`)
 }
 
 const waitForMethodParams = () => {

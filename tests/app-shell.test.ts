@@ -7710,6 +7710,62 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('opens control_compat-style settings, feedback, and sidebar snapshots through the shared terminal workspace control handler', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    store.upsertAiAttentionItem({ id: 'attention-1', source: 'codex', kind: 'approval', title: 'Approve deploy', summary: 'Needs review', priority: 90, createdAt: 1717200010000 })
+
+    const settingsResponse = await invokeControlHandler({ id: 'settings-open', method: 'settings.open', params: { target: 'models' } })
+    expect(settingsResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ opened: true, target: 'models', activeModule: 'settings' })
+      })
+    )
+    expect(store.activeModule).toBe('settings')
+    expect(store.activeSettingsSection).toBe('models')
+    expect(store.rightPanelOpen).toBe(false)
+
+    const invalidSettingsResponse = await invokeControlHandler({ id: 'settings-invalid', method: 'settings.open', params: { target: 'not-a-section' } })
+    expect(invalidSettingsResponse).toEqual(expect.objectContaining({ ok: false, errorCode: 'SETTINGS_TARGET_INVALID' }))
+
+    vi.mocked(window.aiops.submitSettingsFeedbackReport).mockClear()
+    const feedbackResponse = await invokeControlHandler({ id: 'feedback-open', method: 'feedback.open', params: {} })
+    expect(feedbackResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ opened: true }) }))
+    expect(window.aiops.submitSettingsFeedbackReport).toHaveBeenCalledTimes(1)
+
+    const sidebarResponse = await invokeControlHandler({ id: 'sidebar-snapshot', method: 'extension.sidebar.snapshot', params: { windowId: 'window:1' } })
+    expect(sidebarResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          selected_workspace_id: 'main',
+          window_id: 'window:1',
+          workspaces: [expect.objectContaining({ id: 'main', unread_count: 1, latest_notification_text: 'Needs review' })],
+          snapshot: expect.objectContaining({ activeModule: 'settings' })
+        })
+      })
+    )
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

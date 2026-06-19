@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, dialog, ipcMain, net, protocol, shell, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, Notification, dialog, ipcMain, net, protocol, screen, shell, type IpcMainEvent } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { randomUUID } from 'crypto'
@@ -1575,6 +1575,7 @@ configureControlSocketRuntime({
   userDataPath: app.getPath('userData'),
   getWindows: () => BrowserWindow.getAllWindows(),
   focusWindow,
+  getDisplays: () => screen.getAllDisplays().map((display) => ({ id: display.id, label: display.label, bounds: display.bounds, workArea: display.workArea })),
   writeTerminal: writeTerminalBySessionId,
   showNotification: showControlNotification
 })

@@ -90,6 +90,44 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
   })
 
+  it('sends control_compat-style system, settings, app, and window requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          method: request.method,
+          params: request.params,
+          windows: request.method === 'window.list' ? [{ id: 'window:1', key: true, visible: true }] : undefined
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'login'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'settings', 'open', '--target', 'models'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'open'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'snapshot', '--window', 'window:1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'tree', '--workspace', 'main'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'app', 'focus-override', 'active'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'app', 'simulate-active'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'window', 'list'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'window', 'focus', '--window', 'window:1'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'auth.login' }),
+      expect.objectContaining({ method: 'settings.open', params: expect.objectContaining({ target: 'models', activate: true }) }),
+      expect.objectContaining({ method: 'feedback.open', params: expect.objectContaining({ activate: true }) }),
+      expect.objectContaining({ method: 'extension.sidebar.snapshot', params: expect.objectContaining({ windowId: 'window:1' }) }),
+      expect.objectContaining({ method: 'system.tree', params: expect.objectContaining({ workspaceId: 'main' }) }),
+      expect.objectContaining({ method: 'app.focus_override.set', params: expect.objectContaining({ state: 'active' }) }),
+      expect.objectContaining({ method: 'app.simulate_active' }),
+      expect.objectContaining({ method: 'window.list' }),
+      expect.objectContaining({ method: 'window.focus', params: expect.objectContaining({ windowId: 'window:1' }) })
+    ])
+  })
+
   it('sends terminal text and key input requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

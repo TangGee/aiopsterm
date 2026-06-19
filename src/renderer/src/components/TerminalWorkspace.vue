@@ -469,6 +469,7 @@ import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
+import type { SettingSectionKey } from '@/config/settings'
 import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
@@ -940,6 +941,76 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
     }
   }
 }
+
+const controlSettingsTargetAliases: Record<string, SettingSectionKey> = {
+  account: 'billing',
+  accounts: 'billing',
+  agent: 'ai',
+  agents: 'ai',
+  ai: 'ai',
+  'ai-preferences': 'ai',
+  aihooks: 'ai',
+  billing: 'billing',
+  docs: 'docs',
+  documentation: 'docs',
+  extensions: 'extensions',
+  extension: 'extensions',
+  general: 'general',
+  hooks: 'ai',
+  keyboard: 'shortcuts',
+  keybindings: 'shortcuts',
+  mcp: 'mcp',
+  model: 'models',
+  models: 'models',
+  privacy: 'privacy',
+  rules: 'rules',
+  security: 'privacy',
+  shortcuts: 'shortcuts',
+  skills: 'skills',
+  terminal: 'terminal',
+  terminals: 'terminal',
+  theme: 'general',
+  trusted: 'trustedDevices',
+  trusteddevices: 'trustedDevices',
+  'trusted-devices': 'trustedDevices',
+  updates: 'about',
+  about: 'about'
+}
+
+const resolveControlSettingsSection = (value: unknown): SettingSectionKey | null => {
+  const target = controlText(value || 'general')
+  if (!target) return 'general'
+  const normalized = target.replace(/[_\s]+/g, '-')
+  return controlSettingsTargetAliases[normalized.toLowerCase()] || null
+}
+
+const workspaceSidebarRowsForControl = (snapshot: ControlWorkspaceSnapshot) =>
+  snapshot.workspaces.map((item, index) => ({
+    id: item.id,
+    ref: item.id === 'main' ? 'workspace:1' : item.id,
+    index,
+    title: item.title,
+    description: null,
+    selected: item.active,
+    pinned: true,
+    root_path: null,
+    project_root_path: null,
+    branch_summary: null,
+    remote_display_target: null,
+    remote_connection_state: 'local',
+    remote: null,
+    current_directory: workspace.activePanel.kind === 'terminal' ? workspace.activePanel.cwd : '',
+    custom_color: null,
+    unread_count: snapshot.attention.unreadCount,
+    latest_notification_text: snapshot.attention.items[0]?.summary || snapshot.attention.items[0]?.title || null,
+    latest_conversation_message: null,
+    latest_submitted_message: null,
+    latest_submitted_at: null,
+    listening_ports: [],
+    pull_request_urls: [],
+    panel_directories: snapshot.terminals.map((terminal) => terminal.cwd || '').filter(Boolean),
+    git_branches: []
+  }))
 
 const sessionPanelSnapshotForControl = (panel: TerminalPanel): ControlSessionPanelSnapshot => {
   const resumeBinding = controlSurfaceResumeBindings.value[panel.id]
@@ -2562,6 +2633,46 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   const params = request.params || {}
   if (request.method === 'session.export') return controlOk({ snapshot: exportSessionSnapshotForControl(params) })
   if (request.method === 'session.restore') return restoreSessionSnapshotForControl(params)
+  if (request.method === 'settings.open') {
+    const requestedTarget = controlText(params.target || params.section || params.page || 'general') || 'general'
+    const section = resolveControlSettingsSection(requestedTarget)
+    if (!section) return controlFail('SETTINGS_TARGET_INVALID', 'Unknown settings target.', { target: requestedTarget })
+    workspace.mode = 'terminal'
+    workspace.activeModule = 'settings'
+    workspace.leftPanelOpen = true
+    workspace.rightPanelOpen = false
+    workspace.setActiveSettingsSection(section)
+    await nextTick()
+    return controlOk({
+      opened: true,
+      target: section,
+      requestedTarget,
+      requested_target: requestedTarget,
+      activeModule: workspace.activeModule,
+      active_module: workspace.activeModule
+    })
+  }
+  if (request.method === 'feedback.open') {
+    const opened = await workspace.openSettingsExternalAction('反馈页面')
+    return controlOk({
+      opened,
+      unsupported: !opened,
+      ...(opened ? {} : { unsupportedReason: 'Feedback report bridge is unavailable or failed.' })
+    })
+  }
+  if (request.method === 'extension.sidebar.snapshot') {
+    const snapshot = workspaceSnapshotForControl()
+    return controlOk({
+      seq: snapshot.generatedAt,
+      sequence: snapshot.generatedAt,
+      window_id: controlText(params.windowId || params.window_id) || null,
+      window_ref: controlText(params.windowId || params.window_id) || null,
+      selected_workspace_id: 'main',
+      selected_workspace_ref: 'workspace:1',
+      workspaces: workspaceSidebarRowsForControl(snapshot),
+      snapshot
+    })
+  }
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
   if (['workspace.next', 'workspace.previous', 'workspace.last', 'workspace.select', 'workspace.find', 'pane.focus', 'pane.last'].includes(request.method)) {
