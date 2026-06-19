@@ -288,7 +288,7 @@ export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent:
     `--source ${shellSingleQuote(normalizedSource)}`,
     `--event ${shellSingleQuote(hookEvent)}`
   ].join(' ')
-  return `command -v node >/dev/null 2>&1 && ${dispatch} || printf '{}\\n'`
+  return `command -v node >/dev/null 2>&1 && ${dispatch} || echo '{}'`
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -433,6 +433,12 @@ const tomlLineDefinesKey = (line: string, key: string) => new RegExp(`^\\s*${key
 
 const tomlLineDefinesTrueKey = (line: string, key: string) => new RegExp(`^\\s*${key}\\s*=\\s*true\\s*(#.*)?$`).test(line)
 
+const tomlLineDefinesDottedFeaturesKey = (line: string, key: string) => new RegExp(`^\\s*features\\s*\\.\\s*${key}\\s*=`).test(line)
+
+const tomlLineDefinesDottedFeaturesTrueKey = (line: string, key: string) => new RegExp(`^\\s*features\\s*\\.\\s*${key}\\s*=\\s*true\\s*(#.*)?$`).test(line)
+
+const tomlLineDefinesAnyDottedFeaturesKey = (line: string) => /^\s*features\s*\.\s*[^=\s]+\s*=/.test(line)
+
 const tomlLineIsTable = (line: string, tableName: string) => new RegExp(`^\\s*\\[\\s*${tableName}\\s*\\]\\s*(#.*)?$`).test(line)
 
 const tomlLineIsAnyTable = (line: string) => /^\s*\[[^\]]+\]\s*(#.*)?$/.test(line)
@@ -443,6 +449,11 @@ export const installCodexHooksFeature = (content: string) => {
   const stripped = removeCodexFeatureBlock(content || '', false)
   const lines = stripped.replace(/\s+$/, '').split(/\r?\n/)
   if (lines.length === 1 && lines[0] === '') lines.pop()
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (tomlLineDefinesKey(lines[index], 'codex_hooks') || tomlLineDefinesDottedFeaturesKey(lines[index], 'codex_hooks')) {
+      lines.splice(index, 1)
+    }
+  }
 
   const featuresIndex = lines.findIndex((line) => tomlLineIsTable(line, 'features'))
   if (featuresIndex >= 0) {
@@ -464,6 +475,19 @@ export const installCodexHooksFeature = (content: string) => {
     return tomlContent(lines)
   }
 
+  const dottedHooksIndex = lines.findIndex((line) => tomlLineDefinesDottedFeaturesKey(line, 'hooks'))
+  if (dottedHooksIndex >= 0) {
+    if (tomlLineDefinesDottedFeaturesTrueKey(lines[dottedHooksIndex], 'hooks')) return tomlContent(lines)
+    lines.splice(dottedHooksIndex, 1, codexFeatureBegin, `${codexFeaturePreviousPrefix}${lines[dottedHooksIndex]}`, 'features.hooks = true', codexFeatureEnd)
+    return tomlContent(lines)
+  }
+
+  const firstDottedFeaturesIndex = lines.findIndex(tomlLineDefinesAnyDottedFeaturesKey)
+  if (firstDottedFeaturesIndex >= 0) {
+    lines.splice(firstDottedFeaturesIndex, 0, codexFeatureBegin, 'features.hooks = true', codexFeatureEnd)
+    return tomlContent(lines)
+  }
+
   if (lines.length) lines.push('')
   lines.push('[features]', codexFeatureBegin, 'hooks = true', codexFeatureEnd)
   return tomlContent(lines)
@@ -472,7 +496,12 @@ export const installCodexHooksFeature = (content: string) => {
 export const uninstallCodexHooksFeature = (content: string) => {
   let next = removeCodexFeatureBlock(content || '', true)
   next = removeMarkedBlock(next, codexTrustBegin, codexTrustEnd)
-  return tomlContent(next.replace(/\s+$/, '').split(/\r?\n/).filter((line) => !tomlLineDefinesKey(line, 'codex_hooks')))
+  return tomlContent(
+    next
+      .replace(/\s+$/, '')
+      .split(/\r?\n/)
+      .filter((line) => !tomlLineDefinesKey(line, 'codex_hooks') && !tomlLineDefinesDottedFeaturesKey(line, 'codex_hooks'))
+  )
 }
 
 const codexHookEventLabel = (eventName: string) => {
@@ -498,7 +527,7 @@ const stableJsonStringify = (value: unknown): string => {
   return JSON.stringify(value)
 }
 
-const codexHookHash = (eventName: string, command: string, timeout: number, matcher = '') => {
+export const codexHookHash = (eventName: string, command: string, timeout: number, matcher = '') => {
   const identity: Record<string, unknown> = {
     event_name: codexHookEventLabel(eventName),
     hooks: [{ async: false, command, timeout: Math.max(timeout, 1), type: 'command' }]

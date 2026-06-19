@@ -3,6 +3,7 @@ import type { AgentHookInstallerSource } from '../src/shared/preload'
 
 type AgentHookInstallerBackend = {
   agentHookCommandFor: (source: AgentHookInstallerSource, hookEvent: string, scriptPath?: string) => string
+  codexHookHash: (eventName: string, command: string, timeout: number, matcher?: string) => string
   mergeAgentHookJson: (
     existing: Record<string, unknown>,
     definition: unknown,
@@ -14,6 +15,7 @@ type AgentHookInstallerBackend = {
   __testing: {
     hookDefinitions: Array<{ source: AgentHookInstallerSource }>
     ownedMarker: string
+    installCodexHookTrust: (content: string, configPath: string, hooks: Record<string, unknown>) => string
   }
 }
 
@@ -87,6 +89,18 @@ describe('agent hook installer backend', () => {
     expect(uninstalled).toBe('[features]\nhooks = false\n')
   })
 
+  it('preserves dotted Codex hooks feature syntax and removes legacy codex_hooks keys', async () => {
+    const { installCodexHooksFeature, uninstallCodexHooksFeature } = await loadBackend()
+    const installed = installCodexHooksFeature('codex_hooks = true\nfeatures.hooks = false\nfeatures.experimental = true\n')
+
+    expect(installed).not.toContain('codex_hooks')
+    expect(installed).toContain('features.hooks = true')
+    expect(installed).toContain('features.experimental = true')
+
+    const uninstalled = uninstallCodexHooksFeature(installed)
+    expect(uninstalled).toBe('features.hooks = false\nfeatures.experimental = true\n')
+  })
+
   it('installs additional JSON-based agent hooks without nesting flat hook formats', async () => {
     const { __testing, agentHookCommandFor, mergeAgentHookJson } = await loadBackend()
     const cursor = __testing.hookDefinitions.find((definition) => definition.source === 'cursor')!
@@ -102,5 +116,29 @@ describe('agent hook installer backend', () => {
     const geminiResult = mergeAgentHookJson({}, gemini, '/opt/aiopsterm/aiopsterm-agent-hook.js', true)
     const geminiHooks = geminiResult.config.hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>
     expect(geminiHooks.SessionStart[0].hooks[0].command).toBe(agentHookCommandFor('gemini', 'SessionStart', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
+  })
+
+  it('uses Codex-compatible fail-open hook commands and stable trust hashes', async () => {
+    const { agentHookCommandFor, codexHookHash } = await loadBackend()
+    const command = agentHookCommandFor('codex', 'Stop', '/opt/aiopsterm/aiopsterm-agent-hook.js')
+
+    expect(command).toBe(
+      "command -v node >/dev/null 2>&1 && AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1 node '/opt/aiopsterm/aiopsterm-agent-hook.js' --source 'codex' --event 'Stop' || echo '{}'"
+    )
+    expect(command).not.toContain('printf')
+    expect(codexHookHash('Stop', command, 5)).toBe('sha256:9602d844b7330ac63541d559890c9f6dd9f155c1814bb8af441aa4e3999041ca')
+  })
+
+  it('writes Codex hook trust entries using Codex hook state keys', async () => {
+    const { __testing, agentHookCommandFor, codexHookHash, mergeAgentHookJson } = await loadBackend()
+    const codex = __testing.hookDefinitions.find((definition) => definition.source === 'codex')!
+    const result = mergeAgentHookJson({}, codex, '/opt/aiopsterm/aiopsterm-agent-hook.js', true)
+    const hooks = result.config.hooks as Record<string, unknown>
+    const command = agentHookCommandFor('codex', 'Stop', '/opt/aiopsterm/aiopsterm-agent-hook.js')
+    const trusted = __testing.installCodexHookTrust('[features]\nhooks = true\n', '/home/ops/.codex/hooks.json', hooks)
+
+    expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:stop:0:0"]')
+    expect(trusted).toContain(`trusted_hash = "${codexHookHash('Stop', command, 5)}"`)
+    expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:permission_request:0:0"]')
   })
 })
