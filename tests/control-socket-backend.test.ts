@@ -21,6 +21,7 @@ type ControlSocketBackend = {
     pendingRendererRequestCount: () => number
     listNotifications: () => Array<Record<string, unknown>>
     listEvents: () => Array<Record<string, unknown>>
+    eventLogPathFor: (userDataPath: string) => string
     listAgentVaultEntries: () => Array<Record<string, unknown>>
     agentVaultPathFor: (userDataPath: string) => string
     eventSubscriptionCount: () => number
@@ -436,6 +437,56 @@ describe('control socket backend', () => {
       expect(liveFrames[1]).toEqual(expect.objectContaining({ type: 'event', name: 'notification.created', category: 'notification' }))
       await nextTick()
       expect(backend.__testing.eventSubscriptionCount()).toBe(0)
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('persists control events to JSONL and replays them after socket restart', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-events-jsonl-'))
+    try {
+      const firstSocketPath = await backend.ensureControlSocketServer(root)
+      backend.configureControlSocketRuntime({
+        writeTerminal: (sessionId, data) => ({ ok: true, data: { id: sessionId, bytes: Buffer.byteLength(data, 'utf8') } })
+      })
+      await backend.__testing.handleControlRequest({
+        method: 'terminal.send_text',
+        params: { sessionId: 'terminal-jsonl', text: 'secret durable terminal text\n' }
+      })
+      await backend.__testing.handleControlRequest({
+        method: 'notification.create',
+        params: { title: 'Durable event', body: 'durable body should not be copied into jsonl' }
+      })
+
+      const eventFile = await readFile(backend.__testing.eventLogPathFor(root), 'utf-8')
+      expect(eventFile).toContain('"name":"terminal.text_sent"')
+      expect(eventFile).toContain('"name":"notification.created"')
+      expect(eventFile).not.toContain('secret durable terminal text')
+      expect(eventFile).not.toContain('durable body should not be copied')
+      const previousLatestSeq = Number(backend.__testing.listEvents().at(-1)?.seq)
+      expect(Number.isFinite(previousLatestSeq)).toBe(true)
+
+      backend.closeControlSocketServer()
+      const secondSocketPath = await backend.ensureControlSocketServer(root)
+      expect(secondSocketPath).toBe(firstSocketPath)
+      expect(backend.__testing.listEvents().map((event) => event.name)).toEqual(['terminal.text_sent', 'notification.created'])
+
+      const replayFrames = await socketStreamFrames(secondSocketPath, {
+        id: 'events-durable-replay',
+        method: 'events.stream',
+        params: { after_seq: 0, include_heartbeats: false }
+      }, 3)
+      expect(replayFrames[0]).toEqual(expect.objectContaining({ type: 'ack', replay_count: 2 }))
+      expect(replayFrames[1]).toEqual(expect.objectContaining({ type: 'event', name: 'terminal.text_sent' }))
+      expect(replayFrames[2]).toEqual(expect.objectContaining({ type: 'event', name: 'notification.created' }))
+
+      await backend.__testing.handleControlRequest({
+        method: 'notification.create',
+        params: { title: 'After restart' }
+      })
+      expect(Number(backend.__testing.listEvents().at(-1)?.seq)).toBe(previousLatestSeq + 1)
     } finally {
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })

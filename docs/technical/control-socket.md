@@ -65,7 +65,7 @@ The surface resume slice adds control_compat-style resume bindings for visible w
 The events slice adds a control_compat-style local JSONL stream for automation:
 
 - `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.
-- `events.list`: list retained in-memory events for simple polling and tests.
+- `events.list`: list retained events for simple polling and tests.
 
 The Agent Vault slice adds custom agent launch metadata for visible local-terminal automation:
 
@@ -202,7 +202,9 @@ Current event categories are:
 - `surface`: surface resume mutations.
 - `agent`: hibernation and visible agent-team automation mutations.
 
-The event replay buffer is process-local memory capped at 4,096 events. It is not yet written to a durable JSONL file, so clients should refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true or after app restart. Notification event payloads include bounded title previews and content lengths; they do not copy full notification bodies into the event stream.
+Events are appended to `<userData>/control/events.jsonl` and the app reloads the newest 4,096 events on startup for replay. `seq` continues from the largest durable event sequence, so cursor files remain useful across app restarts. Clients should still refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true, because the replay window is bounded.
+
+Notification event payloads include bounded title previews and content lengths; they do not copy full notification bodies into the event stream or JSONL audit log. Terminal input events store lengths and byte counts only, not raw terminal text.
 
 ## Agent Vault
 

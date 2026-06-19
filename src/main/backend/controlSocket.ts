@@ -1,6 +1,6 @@
 import { createServer, type Server, type Socket } from 'net'
 import { randomUUID } from 'crypto'
-import { existsSync, rmSync } from 'fs'
+import { appendFileSync, existsSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
@@ -87,6 +87,8 @@ let notifications: ControlNotificationRecord[] = []
 const eventBootId = randomUUID()
 let nextEventSeq = 1
 let eventLog: ControlEventFrame[] = []
+let eventLogStorePath = ''
+let eventLogLoadedPath = ''
 const eventSubscriptions = new Map<string, ControlEventSubscription>()
 let agentVaultStorePath = ''
 let agentVaultLoadedPath = ''
@@ -138,6 +140,7 @@ const socketPathFor = (userDataPath: string) => {
 }
 
 const agentVaultPathFor = (userDataPath: string) => join(userDataPath, 'control', 'agent-vault.json')
+const eventLogPathFor = (userDataPath: string) => join(userDataPath, 'control', 'events.jsonl')
 
 const isEventStreamMethod = (method: unknown) => {
   const normalized = cleanText(method)
@@ -161,6 +164,78 @@ const eventMatchesFilters = (event: ControlEventFrame, filters: ControlEventFilt
 
 const writeEventFrame = (socket: Socket, frame: Record<string, unknown>) => {
   socket.write(`${JSON.stringify(frame)}\n`)
+}
+
+const normalizeDurableEvent = (value: unknown): ControlEventFrame | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  if (record.type !== 'event' || record.protocol !== eventProtocol) return null
+  const seq = Number(record.seq)
+  if (!Number.isFinite(seq) || seq < 1) return null
+  const name = cleanText(record.name)
+  const category = cleanText(record.category)
+  const id = cleanText(record.id)
+  const bootId = cleanText(record.boot_id)
+  const occurredAt = cleanText(record.occurred_at)
+  if (!name || !category || !id || !bootId || !occurredAt) return null
+  const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload) ? (record.payload as Record<string, unknown>) : {}
+  return {
+    type: 'event',
+    protocol: eventProtocol,
+    version: 1,
+    boot_id: bootId,
+    seq: Math.floor(seq),
+    id,
+    name,
+    category,
+    source: cleanText(record.source) || 'control.socket',
+    occurred_at: occurredAt,
+    ...(cleanText(record.workspace_id) ? { workspace_id: cleanText(record.workspace_id) } : {}),
+    ...(cleanText(record.surface_id) ? { surface_id: cleanText(record.surface_id) } : {}),
+    ...(record.pane_id === null || cleanText(record.pane_id) ? { pane_id: record.pane_id === null ? null : cleanText(record.pane_id) } : {}),
+    ...(record.window_id === null || cleanText(record.window_id) ? { window_id: record.window_id === null ? null : cleanText(record.window_id) } : {}),
+    payload: boundedPayload(payload)
+  }
+}
+
+const loadDurableEventLog = async (userDataPath?: string) => {
+  if (userDataPath) eventLogStorePath = eventLogPathFor(userDataPath)
+  if (!eventLogStorePath || eventLogLoadedPath === eventLogStorePath) return
+  eventLogLoadedPath = eventLogStorePath
+  eventLog = []
+  nextEventSeq = 1
+  if (!existsSync(eventLogStorePath)) return
+  try {
+    const raw = await readFile(eventLogStorePath, 'utf-8')
+    const events: ControlEventFrame[] = []
+    let maxSeq = 0
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const event = normalizeDurableEvent(JSON.parse(trimmed) as unknown)
+        if (!event) continue
+        events.push(event)
+        maxSeq = Math.max(maxSeq, event.seq)
+      } catch {
+        // Keep reading the rest of the audit log if one JSONL line is corrupt.
+      }
+    }
+    eventLog = events.slice(-eventReplayLimit)
+    nextEventSeq = maxSeq + 1
+  } catch {
+    eventLog = []
+    nextEventSeq = 1
+  }
+}
+
+const appendDurableEvent = (event: ControlEventFrame) => {
+  if (!eventLogStorePath) return
+  try {
+    appendFileSync(eventLogStorePath, `${JSON.stringify(event)}\n`, 'utf-8')
+  } catch {
+    // Event streaming must keep working even if the audit log cannot be written.
+  }
 }
 
 const boundedPreview = (value: unknown, max = 160) => {
@@ -202,6 +277,7 @@ const publishControlEvent = (input: {
     payload: boundedPayload(input.payload || {})
   }
   eventLog = [...eventLog, event].slice(-eventReplayLimit)
+  appendDurableEvent(event)
   for (const subscription of eventSubscriptions.values()) {
     if (eventMatchesFilters(event, subscription.filters)) writeEventFrame(subscription.socket, event)
   }
@@ -825,6 +901,8 @@ export const configureControlSocketRuntime = (config: ControlSocketRuntime = {})
   if (config.userDataPath) {
     agentVaultStorePath = agentVaultPathFor(config.userDataPath)
     if (agentVaultLoadedPath && agentVaultLoadedPath !== agentVaultStorePath) agentVaultLoadedPath = ''
+    eventLogStorePath = eventLogPathFor(config.userDataPath)
+    if (eventLogLoadedPath && eventLogLoadedPath !== eventLogStorePath) eventLogLoadedPath = ''
   }
 }
 
@@ -846,6 +924,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   if (server && socketPath) return socketPath
   socketPath = socketPathFor(userDataPath)
   runtime = { ...runtime, userDataPath }
+  await loadDurableEventLog(userDataPath)
   await loadAgentVaultStore(userDataPath)
   if (process.platform !== 'win32') {
     await mkdir(dirname(socketPath), { recursive: true })
@@ -911,6 +990,8 @@ export const closeControlSocketServer = () => {
   notifications = []
   eventLog = []
   nextEventSeq = 1
+  eventLogLoadedPath = ''
+  eventLogStorePath = ''
   agentVaultEntries = new Map()
   agentVaultLoadedPath = ''
   agentVaultStorePath = ''
@@ -925,6 +1006,7 @@ export const invokeControlSocketMethod = (method: string, params?: Record<string
 export const __testing = {
   handleControlRequest,
   listEvents: () => eventLog,
+  eventLogPathFor,
   listAgentVaultEntries: () => sortedAgentVaultEntries(),
   agentVaultPathFor,
   listNotifications: () => notifications,
