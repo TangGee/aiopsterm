@@ -76,6 +76,19 @@ The workspace group slice adds control_compat-style group metadata for the share
 - `workspace.group.new_workspace`: create a new local terminal panel and add it to the group.
 - `workspace.group.focus`: focus the group anchor surface.
 
+The workspace remote compatibility slice maps control_compat remote-workspace controls to aiopsterm's visible SSH terminal panels:
+
+- `workspace.remote.status`: return the current remote summary for the shared main workspace.
+- `workspace.remote.configure`: register SSH metadata on a visible terminal surface. It does not connect by default; pass `auto_connect=true` or CLI `--connect` when the caller intentionally wants to open the SSH session.
+- `workspace.remote.reconnect`: start or restart the selected visible SSH terminal surface.
+- `workspace.remote.disconnect`: disconnect the selected visible SSH terminal surface. `clear=true` also removes the stored remote metadata from that surface.
+- `workspace.remote.foreground_auth_ready`: record foreground authentication readiness metadata without echoing auth tokens into events.
+- `workspace.remote.pty_sessions`: list visible aiopsterm SSH terminal panels in a control_compat-compatible session shape.
+- `workspace.remote.pty_close`, `workspace.remote.pty_detach`, `workspace.remote.pty_bridge`, and `workspace.remote.pty_resize`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not expose control_compat's hidden remote PTY daemon.
+- `remote.tmux.sessions`, `remote.tmux.attach`, `remote.tmux.detach`, `remote.tmux.state`, `remote.tmux.mirror`, and `remote.tmux.window`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not implement control_compat remote tmux control-mode mirroring in the control socket.
+
+This slice deliberately keeps remote execution visible. It does not create hidden SSH control streams, remote daemons, or background tmux mirrors. Automation that needs a remote shell should configure/reconnect a visible SSH panel and then use normal terminal controls against that panel.
+
 The session restore slice adds control_compat-style saved layouts for the shared main work panel:
 
 - `session.save`: ask the active renderer to export the current work-panel layout and persist it.
@@ -205,6 +218,8 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` map to `workspace.*`, `pane.*`, and shared-panel lookup commands.
 - `list-windows`, `current-window`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
 - `surface focus`, `surface create`, `pane create`, `surface report-tty`, `surface report-shell-state`, and `surface ports-kick` map to the matching structured `surface.*` / `pane.*` primitives.
+- `workspace remote status`, `configure`, `reconnect`, `disconnect`, `foreground-auth-ready`, and `pty-sessions` map to `workspace.remote.*` visible SSH panel controls.
+- `remote tmux sessions`, `attach`, `detach`, `state`, `mirror`, and `window` map to `remote.tmux.*` compatibility placeholders.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `project open`, `project get-state`, `project set-*`, `markdown open`, and `file open` map to the `project.*`, `markdown.open`, and `file.open` compatibility methods.
@@ -442,7 +457,7 @@ Current event categories are:
 
 - `notification`: generic control notifications created, opened, marked read, dismissed, or cleared.
 - `terminal`: control-socket terminal focus and raw text-send effects. Text payloads include lengths/byte counts only, not the raw terminal input.
-- `workspace`: workspace-group mutations.
+- `workspace`: workspace-group mutations, workspace navigation, visible remote workspace compatibility actions, and remote tmux unsupported compatibility probes.
 - `surface`: surface resume mutations, surface create/focus events, and surface telemetry reports.
 - `agent`: hibernation and visible agent-team automation mutations.
 

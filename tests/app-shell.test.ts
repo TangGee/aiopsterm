@@ -7783,6 +7783,83 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('maps workspace remote controls to visible SSH terminal surfaces without hidden sessions', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    const configured = await invokeControlHandler({
+      id: 'remote-configure',
+      method: 'workspace.remote.configure',
+      params: { destination: 'root@example.com', port: 2222, title: 'Example Remote' }
+    })
+    expect(configured).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          configured: true,
+          autoConnect: false,
+          remote: expect.objectContaining({ connection_state: 'disconnected', host: 'example.com', port: 2222, username: 'root' })
+        })
+      })
+    )
+    const remotePanelId = configured.data.surfaceId
+    expect(store.panels.find((panel) => panel.id === remotePanelId)).toEqual(expect.objectContaining({ title: 'Example Remote', sshSession: expect.objectContaining({ host: 'example.com', port: 2222, username: 'root' }) }))
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    vi.mocked(window.aiops.createTerminal).mockResolvedValueOnce({
+      id: 'ssh-control-1',
+      shell: 'ssh',
+      cwd: '/home/root',
+      kind: 'ssh',
+      connection: {
+        connectionId: 'ssh-connection-1',
+        host: 'example.com',
+        port: 2222,
+        username: 'root',
+        assetName: 'Example Remote',
+        createdAt: 1717200010000
+      }
+    } as any)
+    const reconnected = await invokeControlHandler({ id: 'remote-reconnect', method: 'workspace.remote.reconnect', params: { surface_id: remotePanelId } })
+    expect(reconnected).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ reconnected: true, remote: expect.objectContaining({ connection_state: 'connected', session_id: 'ssh-control-1' }) }) }))
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', ssh: expect.objectContaining({ host: 'example.com', port: 2222, username: 'root' }) }))
+
+    vi.mocked(window.aiops.killTerminal).mockResolvedValueOnce({ ok: true, data: { id: 'ssh-control-1' } })
+    const disconnected = await invokeControlHandler({ id: 'remote-disconnect', method: 'workspace.remote.disconnect', params: { surface_id: remotePanelId } })
+    expect(disconnected).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ disconnected: true, remote: expect.objectContaining({ connection_state: 'disconnected' }) }) }))
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('ssh-control-1')
+
+    const sessions = await invokeControlHandler({ id: 'remote-pty-sessions', method: 'workspace.remote.pty_sessions', params: {} })
+    expect(sessions).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ sessions: [expect.objectContaining({ surface_id: remotePanelId, connected: false })] }) }))
+
+    const bridge = await invokeControlHandler({ id: 'remote-pty-bridge', method: 'workspace.remote.pty_bridge', params: { session_id: 'ssh-control-1' } })
+    expect(bridge).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, method: 'workspace.remote.pty_bridge' }) }))
+    const tmux = await invokeControlHandler({ id: 'remote-tmux', method: 'remote.tmux.sessions', params: { host: 'example.com' } })
+    expect(tmux).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, method: 'remote.tmux.sessions' }) }))
+
+    wrapper.unmount()
+  })
+
   it('opens control_compat-style settings, feedback, and sidebar snapshots through the shared terminal workspace control handler', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

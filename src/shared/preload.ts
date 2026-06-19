@@ -405,6 +405,37 @@ export type ControlManagedAiSessionSummary = {
   decisionCount: number
 }
 
+export type ControlWorkspaceRemoteSummary = {
+  configured: boolean
+  state: 'local' | 'configured' | 'connecting' | 'connected' | 'disconnected' | 'error' | 'unsupported'
+  connectionState: string
+  connection_state?: string
+  displayTarget?: string
+  display_target?: string
+  remoteDisplayTarget?: string
+  remote_display_target?: string
+  surfaceId?: string
+  surface_id?: string
+  panelId?: string
+  sessionId?: string
+  session_id?: string
+  terminalSessionId?: string
+  terminal_session_id?: string
+  transport?: string
+  host?: string
+  destination?: string
+  port?: number
+  username?: string
+  assetId?: string
+  assetName?: string
+  proxyName?: string
+  needProxy?: boolean
+  foregroundAuthReadyAt?: number
+  foreground_auth_ready_at?: number
+  updatedAt?: number
+  updated_at?: number
+}
+
 export type ControlWorkspaceSummary = {
   id: string
   title: string
@@ -412,6 +443,11 @@ export type ControlWorkspaceSummary = {
   mode: string
   activeModule: string
   activePanelId: string
+  remoteDisplayTarget?: string | null
+  remote_display_target?: string | null
+  remoteConnectionState?: string
+  remote_connection_state?: string
+  remote?: ControlWorkspaceRemoteSummary | null
 }
 
 export type ControlWorkspaceSnapshot = {
@@ -427,6 +463,7 @@ export type ControlWorkspaceSnapshot = {
   notifications: ControlNotificationRecord[]
   managedAiSessions: ControlManagedAiSessionSummary[]
   agentHibernation: AgentHibernationConfig
+  remote?: ControlWorkspaceRemoteSummary | null
   attention: {
     unreadCount: number
     items: ControlAiAttentionSummary[]

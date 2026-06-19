@@ -36,12 +36,14 @@ Commands:
   feed list|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
   workspace list|current
+  workspace remote status|configure|reconnect|disconnect|pty-sessions
   workspace group <subcommand>
   workspace-group <subcommand>
   session save|list|show|restore|clear [--id <id>] [--name <name>]
   surface list|current|focus|create|report-tty|report-shell-state|ports-kick
   surface resume set|show|get|clear|run|trust|preview|autorun [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   pane create [--direction right|below] [--surface <id>] [--focus <true|false>]
+  remote tmux sessions|attach|detach|state|mirror|window
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
   agent session list|show|reply|approve|deny|handle|rename|clear [--session <id>] [--source <source>]
@@ -185,9 +187,11 @@ const methodParams = () => {
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
     if (subcommand === 'list') return { method: 'workspace.list', params: {} }
     if (subcommand === 'current') return { method: 'workspace.current', params: {} }
+    if (subcommand === 'remote') return workspaceRemoteMethodParams(args.shift() || 'status')
     if (subcommand === 'group') return workspaceGroupMethodParams(args.shift() || 'list')
     throw new Error(`Unknown workspace command: ${subcommand}`)
   }
+  if (command === 'remote') return remoteMethodParams(args.shift() || 'tmux')
   if (command === 'workspace-group') return workspaceGroupMethodParams(args.shift() || 'list')
   if (command === 'session' || command === 'restore-session') return sessionMethodParams(command === 'restore-session' ? 'restore' : args.shift() || 'list')
   if (command === 'agent-session' || command === 'ai-session' || command === 'ai-sessions') return agentSessionMethodParams(args.shift() || 'list')
@@ -1068,6 +1072,89 @@ const surfaceOperationMethodParams = (command) => {
   return { method: 'workspace.move_to_window', params: { workspaceId, workspace_id: workspaceId, panelId: workspaceId, surfaceId: workspaceId, windowId, window_id: windowId } }
 }
 
+const workspaceRemoteTargetParams = () => {
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id') || readOption('--tab') || readOption('--tab-id') || 'main'
+  const surfaceId = readOption('--surface') || readOption('--surface-id') || readOption('--panel') || readOption('--panel-id') || readOption('-t')
+  return { workspaceId, workspace_id: workspaceId, surfaceId, surface_id: surfaceId, panelId: surfaceId }
+}
+
+const workspaceRemoteMethodParams = (subcommand) => {
+  if (subcommand === 'status' || subcommand === 'show') return { method: 'workspace.remote.status', params: workspaceRemoteTargetParams() }
+  if (subcommand === 'configure' || subcommand === 'config') {
+    const target = workspaceRemoteTargetParams()
+    const destination = readOption('--destination') || readOption('--host') || readPositional()
+    const username = readOption('--username') || readOption('--user')
+    const portRaw = readOption('--port')
+    const port = portRaw === '' ? undefined : Number(portRaw)
+    const autoConnect = hasFlag('--connect') || hasFlag('--auto-connect')
+    return {
+      method: 'workspace.remote.configure',
+      params: {
+        ...target,
+        destination,
+        host: destination,
+        username,
+        user: username,
+        ...(Number.isFinite(port) ? { port: Math.floor(port) } : {}),
+        title: readOption('--title') || readOption('--name'),
+        proxyName: readOption('--proxy') || readOption('--proxy-name'),
+        needProxy: hasFlag('--proxy-enabled'),
+        autoConnect,
+        auto_connect: autoConnect
+      }
+    }
+  }
+  if (subcommand === 'reconnect' || subcommand === 'connect') return { method: 'workspace.remote.reconnect', params: workspaceRemoteTargetParams() }
+  if (subcommand === 'disconnect') {
+    const clear = hasFlag('--clear') || hasFlag('--clear-configuration')
+    return { method: 'workspace.remote.disconnect', params: { ...workspaceRemoteTargetParams(), clear, clearConfiguration: clear, clear_configuration: clear } }
+  }
+  if (subcommand === 'foreground-auth-ready') return { method: 'workspace.remote.foreground_auth_ready', params: { ...workspaceRemoteTargetParams(), foreground_auth_token: readOption('--token') } }
+  if (subcommand === 'pty-sessions') {
+    const allWorkspaces = hasFlag('--all-workspaces') || hasFlag('--all')
+    return { method: 'workspace.remote.pty_sessions', params: { ...workspaceRemoteTargetParams(), allWorkspaces, all_workspaces: allWorkspaces } }
+  }
+  if (subcommand === 'pty-close') return { method: 'workspace.remote.pty_close', params: { ...workspaceRemoteTargetParams(), session_id: readOption('--session') || readOption('--session-id') || readPositional() } }
+  if (subcommand === 'pty-detach') {
+    return {
+      method: 'workspace.remote.pty_detach',
+      params: {
+        ...workspaceRemoteTargetParams(),
+        session_id: readOption('--session') || readOption('--session-id') || readPositional(),
+        attachment_id: readOption('--attachment') || readOption('--attachment-id'),
+        attachment_token: readOption('--token') || readOption('--attachment-token')
+      }
+    }
+  }
+  throw new Error(`Unknown workspace remote command: ${subcommand}`)
+}
+
+const remoteMethodParams = (subcommand) => {
+  if (subcommand !== 'tmux') throw new Error(`Unknown remote command: ${subcommand}`)
+  const action = args.shift() || 'sessions'
+  const hostOption = readOption('--host') || readOption('--destination')
+  const sessionOption = readOption('--session') || readOption('--name')
+  const portRaw = readOption('--port')
+  const identityFile = readOption('--identity-file')
+  const host = hostOption || readPositional()
+  const session = sessionOption || readPositional()
+  const port = portRaw === '' ? undefined : Number(portRaw)
+  if (host && (host.startsWith('-') || /[\u0000-\u001f\u007f]/.test(host))) throw new Error('remote tmux host is invalid')
+  if (identityFile && (identityFile.startsWith('-') || /[\u0000-\u001f\u007f]/.test(identityFile))) throw new Error('remote tmux identity file is invalid')
+  return {
+    method: `remote.tmux.${action}`,
+    params: {
+      host,
+      destination: host,
+      session,
+      ...(Number.isFinite(port) ? { port: Math.floor(port) } : {}),
+      identity_file: identityFile,
+      create: hasFlag('--create'),
+      activate: !hasFlag('--no-activate')
+    }
+  }
+}
+
 const paneLayoutMethodParams = (command) => {
   if (command === 'resize-pane' || command === 'resizep') {
     const direction = hasFlag('-L') ? 'left' : hasFlag('-U') ? 'up' : hasFlag('-D') ? 'down' : 'right'
@@ -1643,6 +1730,27 @@ const printResponse = (response) => {
   }
   if (data.noop && data.command) {
     process.stdout.write('OK\n')
+    return
+  }
+  const remoteSessionsPayload =
+    Array.isArray(data.sessions) && (data.all_workspaces !== undefined || data.workspace_count !== undefined || data.sessions.some((session) => session && typeof session === 'object' && ('surface_id' in session || 'workspace_ref' in session)))
+  if (data.remote || data.configured !== undefined || data.reconnected !== undefined || data.disconnected !== undefined || remoteSessionsPayload) {
+    const remote = data.remote || {}
+    if (remoteSessionsPayload) {
+      process.stdout.write(`remote-sessions\t${data.sessions.length}\t${data.all_workspaces ? 'all-workspaces' : 'workspace'}\n`)
+      for (const session of data.sessions) {
+        process.stdout.write(['remote-session', session.connected ? 'connected' : 'disconnected', session.surface_id || session.surfaceId || '-', session.session_id || session.id || '-', session.title || ''].join('\t') + '\n')
+      }
+      return
+    }
+    if (data.unsupported) {
+      process.stdout.write(['remote', 'unsupported', data.method || '-', data.unsupportedReason || data.unsupported_reason || ''].join('\t') + '\n')
+      return
+    }
+    const state = remote.connection_state || remote.connectionState || remote.state || '-'
+    const target = remote.remote_display_target || remote.remoteDisplayTarget || remote.displayTarget || remote.destination || remote.host || '-'
+    const action = data.configured ? 'configured' : data.reconnected ? 'reconnected' : data.disconnected ? 'disconnected' : 'status'
+    process.stdout.write(['remote', action, state, target, data.surfaceId || data.surface_id || remote.surface_id || '-'].join('\t') + '\n')
     return
   }
   if (data.project || data.project_url || data.projectUrl) {

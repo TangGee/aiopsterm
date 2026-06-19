@@ -499,6 +499,130 @@ describe('control socket backend', () => {
     expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.group.list' })])
   })
 
+  it('routes workspace remote controls to the renderer and records sanitized workspace events', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      const params = (request.params as any) || {}
+      if (request.method === 'workspace.remote.configure') {
+        return {
+          ok: true,
+          data: {
+            configured: true,
+            autoConnect: params.autoConnect === true || params.auto_connect === true,
+            surfaceId: params.surfaceId || 'panel-remote',
+            remote: {
+              configured: true,
+              state: 'disconnected',
+              connection_state: 'disconnected',
+              remote_display_target: 'root@example.com:2222',
+              destination: 'example.com',
+              host: 'example.com',
+              port: 2222,
+              username: 'root'
+            }
+          }
+        }
+      }
+      if (request.method === 'workspace.remote.reconnect') {
+        return {
+          ok: true,
+          data: {
+            reconnected: true,
+            connected: true,
+            surfaceId: params.surfaceId || 'panel-remote',
+            remote: {
+              configured: true,
+              state: 'connected',
+              connection_state: 'connected',
+              remote_display_target: 'root@example.com:2222',
+              destination: 'example.com'
+            }
+          }
+        }
+      }
+      if (request.method === 'workspace.remote.disconnect') {
+        return {
+          ok: true,
+          data: {
+            disconnected: true,
+            clear: params.clear === true,
+            remote: {
+              configured: true,
+              state: 'disconnected',
+              connection_state: 'disconnected',
+              remote_display_target: 'root@example.com:2222',
+              destination: 'example.com'
+            }
+          }
+        }
+      }
+      if (request.method === 'workspace.remote.pty_bridge' || request.method === 'remote.tmux.sessions') {
+        return {
+          ok: true,
+          data: {
+            method: request.method,
+            unsupported: true,
+            unsupportedReason: 'unsupported compatibility path',
+            remote: {
+              configured: true,
+              state: 'disconnected',
+              connection_state: 'disconnected',
+              remote_display_target: 'root@example.com:2222',
+              destination: 'example.com'
+            }
+          }
+        }
+      }
+      return { ok: true, data: { remote: { connection_state: 'disconnected', destination: 'example.com' } } }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'workspace.remote.configure',
+        params: { destination: 'root@example.com', port: 2222, auto_connect: true, foreground_auth_token: 'secret-token' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ configured: true }) }))
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.remote.reconnect', params: { surfaceId: 'panel-remote' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ reconnected: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.remote.disconnect', params: { surfaceId: 'panel-remote', clear: true } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ disconnected: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.remote.pty_bridge', params: { session_id: 'ssh-1' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'remote.tmux.sessions', params: { host: 'example.com', identity_file: '/tmp/key' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) })
+    )
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'workspace.remote.configure', params: expect.objectContaining({ destination: 'root@example.com', port: 2222 }) }),
+      expect.objectContaining({ method: 'workspace.remote.reconnect', params: expect.objectContaining({ surfaceId: 'panel-remote' }) }),
+      expect.objectContaining({ method: 'workspace.remote.disconnect', params: expect.objectContaining({ surfaceId: 'panel-remote', clear: true }) }),
+      expect.objectContaining({ method: 'workspace.remote.pty_bridge', params: expect.objectContaining({ session_id: 'ssh-1' }) }),
+      expect.objectContaining({ method: 'remote.tmux.sessions', params: expect.objectContaining({ host: 'example.com', identity_file: '/tmp/key' }) })
+    ])
+    const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
+    expect(workspaceEvents.data?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'workspace_remote.configured', payload: expect.objectContaining({ remote_state: 'disconnected', remote_display_target: 'root@example.com:2222', destination: 'example.com', reconnected: false }) }),
+        expect.objectContaining({ name: 'workspace_remote.reconnected', payload: expect.objectContaining({ remote_state: 'connected', reconnected: true }) }),
+        expect.objectContaining({ name: 'workspace_remote.disconnected', payload: expect.objectContaining({ remote_state: 'disconnected', disconnected: true }) }),
+        expect.objectContaining({ name: 'workspace_remote.pty_unsupported', payload: expect.objectContaining({ unsupported: true, unsupported_reason: 'unsupported compatibility path' }) }),
+        expect.objectContaining({ name: 'remote_tmux.unsupported', payload: expect.objectContaining({ unsupported: true, destination: 'example.com' }) })
+      ])
+    )
+    const serializedEvents = JSON.stringify(workspaceEvents.data?.events)
+    expect(serializedEvents).not.toContain('secret-token')
+    expect(serializedEvents).not.toContain('/tmp/key')
+  })
+
   it('routes surface resume requests to the renderer window', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({

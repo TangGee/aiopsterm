@@ -226,6 +226,7 @@ const controlSocketCapabilities = [
   'workspace.snapshot',
   'workspace.list',
   'workspace.current',
+  'workspace.remote',
   'workspace.group',
   'session.restore',
   'surface.list',
@@ -246,6 +247,7 @@ const controlSocketCapabilities = [
   'terminal.send_key',
   'terminal.buffer',
   'tmux.compat',
+  'remote.tmux.compat',
   'notification',
   'notification.targeted',
   'events.stream',
@@ -2990,6 +2992,14 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'workspace.reorder_many') return 'workspace.reordered_many'
   if (method === 'workspace.equalize_splits') return 'workspace.splits_equalized'
   if (method === 'workspace.prompt_submit') return 'workspace.prompt_submitted'
+  if (method === 'workspace.remote.configure') return 'workspace_remote.configured'
+  if (method === 'workspace.remote.reconnect') return 'workspace_remote.reconnected'
+  if (method === 'workspace.remote.disconnect') return 'workspace_remote.disconnected'
+  if (method === 'workspace.remote.foreground_auth_ready') return 'workspace_remote.foreground_auth_ready'
+  if (method === 'workspace.remote.pty_attach_end') return 'workspace_remote.pty_attach_ended'
+  if (method === 'workspace.remote.terminal_session_end') return 'workspace_remote.terminal_session_ended'
+  if (method.startsWith('workspace.remote.pty_')) return 'workspace_remote.pty_unsupported'
+  if (method.startsWith('remote.tmux.')) return 'remote_tmux.unsupported'
   if (method === 'pane.break') return 'pane.broken'
   if (method === 'pane.join') return 'pane.joined'
   if (method === 'pane.swap') return 'pane.swapped'
@@ -3020,6 +3030,7 @@ const rendererMutationCategory = (method: string) => {
   if (method.startsWith('project.') || method === 'markdown.open' || method === 'file.open') return 'project'
   if (method.startsWith('workspace.group.')) return 'workspace'
   if (method.startsWith('workspace.')) return 'workspace'
+  if (method.startsWith('remote.tmux.')) return 'workspace'
   if (method.startsWith('surface.')) return method === 'surface.split' || method === 'surface.close' ? 'pane' : 'surface'
   if (method.startsWith('pane.')) return 'pane'
   if (method.startsWith('agent-hibernation.') || method.startsWith('agent.')) return 'agent'
@@ -3044,6 +3055,7 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
   const renamedPane = data.renamedPane && typeof data.renamedPane === 'object' ? (data.renamedPane as Record<string, unknown>) : null
   const targetPane = data.targetPane && typeof data.targetPane === 'object' ? (data.targetPane as Record<string, unknown>) : null
   const config = data.config && typeof data.config === 'object' ? (data.config as Record<string, unknown>) : null
+  const remote = data.remote && typeof data.remote === 'object' ? (data.remote as Record<string, unknown>) : null
   const hibernated = Array.isArray(data.hibernated) ? data.hibernated : []
   publishControlEvent({
     name,
@@ -3115,6 +3127,16 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
             reason: cleanText(data.reason || params.reason) || 'command',
             kicked: data.kicked === true,
             port_scan_started: data.portScanStarted === true || data.port_scan_started === true
+          }
+        : {}),
+      ...(method.startsWith('workspace.remote.') || method.startsWith('remote.tmux.')
+        ? {
+            remote_state: cleanText(remote?.connection_state || remote?.connectionState || remote?.state),
+            remote_display_target: cleanText(remote?.remote_display_target || remote?.remoteDisplayTarget || remote?.displayTarget),
+            destination: cleanText(remote?.destination || remote?.host || data.host || params.destination || params.host),
+            reconnected: data.reconnected === true,
+            disconnected: data.disconnected === true,
+            unsupported: data.unsupported === true
           }
         : {}),
       ...(typeof data.unsupportedReason === 'string' ? { unsupported_reason: data.unsupportedReason } : {}),
@@ -3196,6 +3218,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.move_to_window' ||
     method === 'workspace.equalize_splits' ||
     method === 'workspace.prompt_submit' ||
+    method.startsWith('workspace.remote.') ||
+    method.startsWith('remote.tmux.') ||
     method === 'workspace.has_session' ||
     method === 'workspace.select_layout' ||
     method === 'pane.list' ||

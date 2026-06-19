@@ -840,6 +840,60 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends workspace remote and remote tmux compatibility requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          method: request.method,
+          params,
+          configured: request.method === 'workspace.remote.configure',
+          reconnected: request.method === 'workspace.remote.reconnect',
+          disconnected: request.method === 'workspace.remote.disconnect',
+          unsupported: String(request.method || '').startsWith('remote.tmux.'),
+          unsupportedReason: String(request.method || '').startsWith('remote.tmux.') ? 'unsupported compatibility path' : undefined,
+          remote: {
+            configured: true,
+            state: 'disconnected',
+            connection_state: 'disconnected',
+            remote_display_target: 'root@example.com:2222',
+            destination: params.destination || params.host || 'example.com'
+          },
+          sessions: request.method === 'workspace.remote.pty_sessions' ? [{ surface_id: 'panel-remote', connected: false }] : undefined
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'status'], { cwd: process.cwd() })
+    await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'configure', 'root@example.com', '--port', '2222', '--title', 'Example Remote', '--connect'],
+      { cwd: process.cwd() }
+    )
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'reconnect', '--surface', 'panel-remote'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'disconnect', '--surface', 'panel-remote', '--clear'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'pty-sessions', '--all-workspaces'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'remote', 'tmux', 'sessions', '--host', 'example.com', '--port', '2222', '--identity-file', '/tmp/id_rsa'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'workspace.remote.status', params: expect.objectContaining({ workspaceId: 'main' }) }),
+      expect.objectContaining({
+        method: 'workspace.remote.configure',
+        params: expect.objectContaining({ destination: 'root@example.com', host: 'root@example.com', port: 2222, title: 'Example Remote', autoConnect: true, auto_connect: true })
+      }),
+      expect.objectContaining({ method: 'workspace.remote.reconnect', params: expect.objectContaining({ surfaceId: 'panel-remote', surface_id: 'panel-remote' }) }),
+      expect.objectContaining({ method: 'workspace.remote.disconnect', params: expect.objectContaining({ surfaceId: 'panel-remote', clear: true, clear_configuration: true }) }),
+      expect.objectContaining({ method: 'workspace.remote.pty_sessions', params: expect.objectContaining({ allWorkspaces: true, all_workspaces: true }) }),
+      expect.objectContaining({ method: 'remote.tmux.sessions', params: expect.objectContaining({ host: 'example.com', destination: 'example.com', port: 2222, identity_file: '/tmp/id_rsa' }) })
+    ])
+  })
+
   it('requires an explicit confirm flag for workspace group delete commands', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
