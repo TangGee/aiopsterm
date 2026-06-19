@@ -2265,6 +2265,7 @@ const k8sClusterSources: Array<K8sCluster['source_type']> = ['local', 'jumpserve
 const k8sTerminalStatuses: K8sTerminalStatus[] = ['connecting', 'connected', 'ended', 'error']
 
 const isNonNegativeFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+const isPositiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0
 const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string'
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const isPositiveFiniteNumber = (value: unknown): value is number => isFiniteNumber(value) && value > 0
@@ -3997,6 +3998,8 @@ const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedK
     return false
   }
   return (
+    isOptionalField(value, 'processId', isPositiveInteger) &&
+    isOptionalField(value, 'processGroupId', isPositiveInteger) &&
     isOptionalNonEmptyText(value, 'shell') &&
     isOptionalNonEmptyText(value, 'cwd') &&
     isOptionalNonEmptyText(value, 'host') &&
@@ -4104,11 +4107,14 @@ const isAiAgentSessionEventName = (value: unknown): value is AiAgentSessionEvent
   value === 'permission_request' ||
   value === 'question' ||
   value === 'notification' ||
+  value === 'lifecycle' ||
   value === 'stop' ||
   value === 'session_end'
 
 const isManagedAiSessionState = (value: unknown): value is ManagedAiSessionState =>
   value === 'idle' || value === 'working' || value === 'needsInput' || value === 'ended' || value === 'unknown'
+
+const isManagedAiSessionLifecycle = (value: unknown) => value === 'idle' || value === 'running' || value === 'needsInput' || value === 'ended' || value === 'unknown'
 
 const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSessionTimelineEvent =>
   isRecord(value) &&
@@ -4120,7 +4126,11 @@ const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSess
   typeof value.summary === 'string' &&
   typeof value.receivedAt === 'number' &&
   isOptionalField(value, 'launchCommand', isNonEmptyText) &&
-  isOptionalField(value, 'resumeCommand', isNonEmptyText)
+  isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
+  isOptionalField(value, 'processId', isPositiveInteger) &&
+  isOptionalField(value, 'parentProcessId', isPositiveInteger) &&
+  isOptionalField(value, 'processGroupId', isPositiveInteger) &&
+  isOptionalField(value, 'agentLifecycle', isManagedAiSessionLifecycle)
 
 const isManagedAiSessionDecision = (value: unknown): value is ManagedAiSessionDecision =>
   isRecord(value) &&
@@ -4141,6 +4151,12 @@ const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionReco
   typeof value.updatedAt === 'number' &&
   isOptionalField(value, 'launchCommand', isNonEmptyText) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
+  isOptionalField(value, 'processId', isPositiveInteger) &&
+  isOptionalField(value, 'parentProcessId', isPositiveInteger) &&
+  isOptionalField(value, 'processGroupId', isPositiveInteger) &&
+  isOptionalField(value, 'agentLifecycle', isManagedAiSessionLifecycle) &&
+  isOptionalField(value, 'terminalProcessId', isPositiveInteger) &&
+  isOptionalField(value, 'terminalActivityAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
   Array.isArray(value.events) &&
   value.events.every(isManagedAiSessionTimelineEvent) &&
   Array.isArray(value.decisions) &&
@@ -8419,7 +8435,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const managedAiSessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
 
-  const managedAiSessionStateForEvent = (event: AiAgentSessionEventName, previous: ManagedAiSessionState = 'unknown'): ManagedAiSessionState => {
+  const managedAiSessionStateForEvent = (event: AiAgentSessionEventName, previous: ManagedAiSessionState = 'unknown', lifecycle?: ManagedAiSession['agentLifecycle']): ManagedAiSessionState => {
+    if (lifecycle === 'running') return 'working'
+    if (lifecycle === 'idle') return 'idle'
+    if (lifecycle === 'needsInput') return 'needsInput'
+    if (lifecycle === 'ended') return 'ended'
+    if (lifecycle === 'unknown') return 'unknown'
     if (event === 'session_start') return 'idle'
     if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
     if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
@@ -8515,7 +8536,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       source: event.source,
       title: existing?.userTitle || existing?.title || event.title || event.source,
       summary: event.summary || existing?.summary || '',
-      state: managedAiSessionStateForEvent(event.event, existing?.state),
+      state: managedAiSessionStateForEvent(event.event, existing?.state, event.agentLifecycle),
       lastEvent: event.event,
       lastActivityAt: event.receivedAt,
       createdAt: existing?.createdAt || event.receivedAt,
@@ -8532,7 +8553,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(event.requestId && event.actionable ? { pendingRequestId: event.requestId } : {}),
       ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
       ...(event.launchCommand || existing?.launchCommand ? { launchCommand: event.launchCommand || existing?.launchCommand } : {}),
-      ...(event.resumeCommand || existing?.resumeCommand ? { resumeCommand: event.resumeCommand || existing?.resumeCommand } : {})
+      ...(event.resumeCommand || existing?.resumeCommand ? { resumeCommand: event.resumeCommand || existing?.resumeCommand } : {}),
+      ...(event.processId || existing?.processId ? { processId: event.processId || existing?.processId } : {}),
+      ...(event.parentProcessId || existing?.parentProcessId ? { parentProcessId: event.parentProcessId || existing?.parentProcessId } : {}),
+      ...(event.processGroupId || existing?.processGroupId ? { processGroupId: event.processGroupId || existing?.processGroupId } : {}),
+      ...(event.agentLifecycle || existing?.agentLifecycle ? { agentLifecycle: event.agentLifecycle || existing?.agentLifecycle } : {}),
+      ...(existing?.terminalProcessId ? { terminalProcessId: existing.terminalProcessId } : {}),
+      ...(existing?.terminalActivityAt ? { terminalActivityAt: existing.terminalActivityAt } : {})
     }
     managedAiSessions.value = existing
       ? managedAiSessions.value.map((session) => (session.source === next.source && session.id === next.id ? next : session))
@@ -13415,6 +13442,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!panel) return
     appendTerminalSegment(panel, data, 'output')
     panel.status = 'running'
+    const now = Date.now()
+    managedAiSessions.value = managedAiSessions.value.map((session) =>
+      session.terminalSessionId === panel.sessionId || session.panelId === panel.id ? { ...session, terminalActivityAt: now, updatedAt: now } : session
+    )
   }
 
   const applyTerminalLifecycle = (event: TerminalLifecycleEvent) => {
@@ -13454,6 +13485,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panel.kind = 'terminal'
     if (event.cwd) panel.cwd = event.cwd
     if (nextSshSession) panel.sshSession = nextSshSession
+    if (event.processId) {
+      managedAiSessions.value = managedAiSessions.value.map((session) =>
+        session.terminalSessionId === event.id || session.panelId === panel.id
+          ? { ...session, terminalProcessId: event.processId, terminalActivityAt: event.at, updatedAt: Date.now() }
+          : session
+      )
+    }
     if (event.stage === 'starting' || event.stage === 'connecting' || event.stage === 'proxy-opening') {
       panel.status = 'connecting'
       return panel

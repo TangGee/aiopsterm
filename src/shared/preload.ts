@@ -159,6 +159,8 @@ export type TerminalLifecycleEvent = {
   kind: 'local' | 'ssh'
   stage: TerminalLifecycleStage
   at: number
+  processId?: number
+  processGroupId?: number
   shell?: string
   cwd?: string
   host?: string
@@ -574,6 +576,7 @@ export type AiAgentSessionEventName =
   | 'permission_request'
   | 'question'
   | 'notification'
+  | 'lifecycle'
   | 'stop'
   | 'session_end'
 
@@ -623,6 +626,19 @@ export type AiAgentSessionEventInput = {
   launch_command?: string
   resumeCommand?: string
   resume_command?: string
+  processId?: number
+  process_id?: number
+  pid?: number
+  parentProcessId?: number
+  parent_process_id?: number
+  ppid?: number
+  processGroupId?: number
+  process_group_id?: number
+  pgid?: number
+  agentLifecycle?: ManagedAiSessionLifecycle
+  agent_lifecycle?: ManagedAiSessionLifecycle
+  lifecycle?: ManagedAiSessionLifecycle
+  status?: string
   receivedAt?: number
   [key: string]: unknown
 }
@@ -643,11 +659,17 @@ export type AiAgentSessionEvent = {
   actionable?: boolean
   launchCommand?: string
   resumeCommand?: string
+  processId?: number
+  parentProcessId?: number
+  processGroupId?: number
+  agentLifecycle?: ManagedAiSessionLifecycle
 }
 
 export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>
 
 export type ManagedAiSessionState = 'idle' | 'working' | 'needsInput' | 'ended' | 'unknown'
+
+export type ManagedAiSessionLifecycle = 'idle' | 'running' | 'needsInput' | 'ended' | 'unknown'
 
 export type ManagedAiSessionDecisionKind = 'allow' | 'always' | 'bypass' | 'deny' | 'reply' | 'handled'
 
@@ -685,6 +707,12 @@ export type ManagedAiSessionRecord = {
   actionable?: boolean
   launchCommand?: string
   resumeCommand?: string
+  processId?: number
+  parentProcessId?: number
+  processGroupId?: number
+  agentLifecycle?: ManagedAiSessionLifecycle
+  terminalProcessId?: number
+  terminalActivityAt?: number
   events: ManagedAiSessionTimelineEvent[]
   decisions: ManagedAiSessionDecision[]
 }

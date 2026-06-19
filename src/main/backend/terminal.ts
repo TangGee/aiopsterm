@@ -119,6 +119,12 @@ const cleanTerminalEndpointConfidence = (value: unknown): TerminalLifecycleEvent
   return text === 'confirmed' || text === 'inferred' || text === 'unknown' ? text : undefined
 }
 
+const cleanPositiveInteger = (value: unknown) => {
+  if (!Number.isFinite(value)) return undefined
+  const normalized = Math.floor(Number(value))
+  return normalized > 0 ? normalized : undefined
+}
+
 export const diagnoseSshConnectionError = (error: unknown, context: SshConnectionErrorContext = {}): SshConnectionErrorDiagnosis => {
   const record = typeof error === 'object' && error ? (error as Record<string, unknown>) : {}
   const rawMessage = terminalErrorMessage(error)
@@ -215,6 +221,8 @@ export const createTerminalLifecycleEvent = (
     kind: event.kind,
     stage: event.stage,
     at: Number.isFinite(event.at) ? Number(event.at) : at,
+    ...(cleanPositiveInteger(event.processId) ? { processId: cleanPositiveInteger(event.processId) } : {}),
+    ...(cleanPositiveInteger(event.processGroupId) ? { processGroupId: cleanPositiveInteger(event.processGroupId) } : {}),
     ...(cleanOptional(event.shell) ? { shell: cleanOptional(event.shell) } : {}),
     ...(cleanOptional(event.cwd) ? { cwd: cleanOptional(event.cwd) } : {}),
     ...(cleanOptional(event.host) ? { host: cleanOptional(event.host) } : {}),

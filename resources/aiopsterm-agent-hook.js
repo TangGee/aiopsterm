@@ -34,6 +34,11 @@ const waitDecision = options['wait-decision'] === 'true'
 
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '')
 
+const positiveInteger = (value) => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined
+}
+
 const firstText = (record, keys) => {
   for (const key of keys) {
     const text = cleanText(record[key])
@@ -147,6 +152,10 @@ const createEvent = (payload) => {
   const requestId = cleanText(options['request-id'] || payload.requestId || payload.request_id || payload.tool_use_id || payload.toolUseID)
   const launchCommand = cleanText(options['launch-command'] || payload.launchCommand || payload.launch_command || process.env.AIOPSTERM_AGENT_LAUNCH_COMMAND)
   const resumeCommand = cleanText(options['resume-command'] || payload.resumeCommand || payload.resume_command)
+  const processId = positiveInteger(options.pid || options['process-id'] || payload.processId || payload.process_id || payload.pid || process.env.AIOPSTERM_AGENT_PID)
+  const parentProcessId = positiveInteger(options.ppid || options['parent-process-id'] || payload.parentProcessId || payload.parent_process_id || payload.ppid || process.env.PPID)
+  const processGroupId = positiveInteger(options.pgid || options['process-group-id'] || payload.processGroupId || payload.process_group_id || payload.pgid)
+  const agentLifecycle = cleanText(options.lifecycle || options.status || payload.agentLifecycle || payload.agent_lifecycle || payload.lifecycle || payload.status)
   return {
     source,
     event,
@@ -163,7 +172,11 @@ const createEvent = (payload) => {
     waitForDecision: waitDecision || undefined,
     waitTimeoutMs: waitDecision ? Number(options['wait-timeout-ms'] || 120000) : undefined,
     launchCommand: launchCommand || undefined,
-    resumeCommand: resumeCommand || undefined
+    resumeCommand: resumeCommand || undefined,
+    processId,
+    parentProcessId,
+    processGroupId,
+    agentLifecycle: agentLifecycle || undefined
   }
 }
 

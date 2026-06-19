@@ -221,6 +221,42 @@ describe('aiopsterm agent hook helper', () => {
     }
   })
 
+  it('posts process and lifecycle metadata for managed agent sessions', async () => {
+    const server = await startSocketServer()
+    try {
+      const result = await runHelper(
+        ['--source', 'amp', '--event', 'Lifecycle', '--pid', '4242', '--ppid', '41', '--pgid', '4200', '--status', 'running'],
+        JSON.stringify({
+          session_id: 'amp-lifecycle-1',
+          cwd: '/work/project'
+        }),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1',
+          AIOPSTERM_PANEL_ID: 'panel-1',
+          AIOPSTERM_WORKSPACE_ID: 'workspace-1'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'amp',
+          event: 'Lifecycle',
+          sessionId: 'amp-lifecycle-1',
+          processId: 4242,
+          parentProcessId: 41,
+          processGroupId: 4200,
+          agentLifecycle: 'running'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
   it('derives project titles, cwd, transcript path, and question summaries from real hook payloads', async () => {
     const server = await startSocketServer()
     const projectDir = join(tmpdir(), 'aiopsterm-hook-project')

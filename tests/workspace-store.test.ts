@@ -545,6 +545,75 @@ describe('workspace store', () => {
     expect(store.aiAttentionUnreadCount).toBe(0)
   })
 
+  it('tracks managed AI lifecycle and process metadata without detaching from the owning terminal', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+
+    store.upsertManagedAiSession({
+      source: 'amp',
+      event: 'lifecycle',
+      sessionId: 'amp-session-1',
+      title: 'Amp · project',
+      summary: 'thinking',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      processId: 4242,
+      parentProcessId: 41,
+      processGroupId: 4200,
+      agentLifecycle: 'running',
+      receivedAt: 500
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        state: 'working',
+        processId: 4242,
+        parentProcessId: 41,
+        processGroupId: 4200,
+        agentLifecycle: 'running'
+      })
+    )
+
+    store.applyTerminalLifecycle({
+      id: 'terminal-session-1',
+      kind: 'local',
+      stage: 'shell-ready',
+      shell: '/bin/bash',
+      cwd: '/work/project',
+      processId: 999,
+      at: 700
+    })
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ terminalProcessId: 999, terminalActivityAt: 700 }))
+
+    store.appendTerminalOutput('terminal-session-1', 'agent output\n')
+    expect(store.managedAiSessions[0].terminalActivityAt).toBeGreaterThanOrEqual(700)
+
+    store.upsertManagedAiSession({
+      source: 'amp',
+      event: 'lifecycle',
+      sessionId: 'amp-session-1',
+      title: 'Amp · project',
+      summary: 'idle',
+      agentLifecycle: 'idle',
+      receivedAt: 800
+    })
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        state: 'idle',
+        terminalSessionId: 'terminal-session-1',
+        terminalProcessId: 999,
+        processId: 4242,
+        agentLifecycle: 'idle'
+      })
+    )
+  })
+
   it('resumes managed AI sessions by writing the resume command to the owning terminal', async () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {

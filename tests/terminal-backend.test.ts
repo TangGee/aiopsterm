@@ -182,6 +182,8 @@ describe('terminal backend boundary', () => {
           endpointConfidence: 'confirmed',
           connectionId: 'ssh-terminal-life-unit',
           proxyName: 'release-proxy',
+          processId: 4321,
+          processGroupId: 4300,
           message: 'Opening proxy'
         },
         1717200003000
@@ -214,6 +216,8 @@ describe('terminal backend boundary', () => {
       endpointConfidence: 'confirmed',
       connectionId: 'ssh-terminal-life-unit',
       proxyName: 'release-proxy',
+      processId: 4321,
+      processGroupId: 4300,
       message: 'Opening proxy'
     })
   })

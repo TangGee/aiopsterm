@@ -216,6 +216,87 @@ describe('agent session backend', () => {
     })
   })
 
+  it('tracks lifecycle and process metadata for managed AI sessions', async () => {
+    const { configureAiAgentSessionStore, listManagedAiSessions, normalizeAiAgentSessionEventInput, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-lifecycle-')))
+
+    expect(
+      normalizeAiAgentSessionEventInput(
+        {
+          source: 'amp',
+          event: 'Lifecycle',
+          sessionId: 'amp-session-1',
+          panelId: 'panel-1',
+          terminalSessionId: 'terminal-1',
+          cwd: '/work/project',
+          pid: '4242',
+          ppid: 41,
+          pgid: 4200,
+          status: 'thinking'
+        },
+        450
+      )
+    ).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'amp',
+        event: 'lifecycle',
+        sessionId: 'amp-session-1',
+        processId: 4242,
+        parentProcessId: 41,
+        processGroupId: 4200,
+        agentLifecycle: 'running'
+      })
+    })
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'amp',
+        event: 'Lifecycle',
+        sessionId: 'amp-session-1',
+        panelId: 'panel-1',
+        terminalSessionId: 'terminal-1',
+        cwd: '/work/project',
+        pid: '4242',
+        ppid: 41,
+        pgid: 4200,
+        status: 'thinking',
+        receivedAt: 450
+      },
+      null
+    )
+    publishAiAgentSessionEvent(
+      {
+        source: 'amp',
+        event: 'Lifecycle',
+        sessionId: 'amp-session-1',
+        status: 'idle',
+        receivedAt: 460
+      },
+      null
+    )
+
+    expect(await listManagedAiSessions()).toEqual({
+      ok: true,
+      data: {
+        sessions: [
+          expect.objectContaining({
+            id: 'amp-session-1',
+            state: 'idle',
+            processId: 4242,
+            parentProcessId: 41,
+            processGroupId: 4200,
+            agentLifecycle: 'idle',
+            events: expect.arrayContaining([
+              expect.objectContaining({ event: 'lifecycle', agentLifecycle: 'running' }),
+              expect.objectContaining({ event: 'lifecycle', agentLifecycle: 'idle' })
+            ])
+          })
+        ]
+      }
+    })
+  })
+
   it('persists managed session records with timeline, decisions, and auto titles', async () => {
     const { configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent, renameManagedAiSession, replyManagedAiSession } = await loadBackend()
     await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-sessions-')))

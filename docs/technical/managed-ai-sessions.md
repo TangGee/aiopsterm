@@ -73,7 +73,7 @@ Supported events:
 - `Stop` / `stop`
 - `SessionEnd` / `session_end`
 
-Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `project_dir`, `title`, `summary`, `message`, `transcriptPath`, `launchCommand`, and `resumeCommand` improve terminal focusing, display text, and manual restore behavior.
+Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `project_dir`, `title`, `summary`, `message`, `transcriptPath`, `launchCommand`, `resumeCommand`, `pid`, `ppid`, `pgid`, and `agentLifecycle` improve terminal focusing, display text, manual restore behavior, and lifecycle visibility.
 
 When hooks omit a display title, aiopsterm derives one from project/workspace fields or the basename of `cwd`/`project_dir`, for example `Codex · api-service` or `Claude Code · release-api`. Claude Code `AskUserQuestion` payloads can also derive the row summary from `tool_input.questions[0].question`, and tool payloads with `tool_name` plus `tool_input.command` are shown as `tool: command`.
 
@@ -100,8 +100,12 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 - `pendingRequestId` and `actionable` fields for live Claude Code permission/question hooks
 - `autoTitle` and `userTitle` fields so automatic names do not overwrite manual names
 - sanitized `launchCommand` and native `resumeCommand` metadata when the agent source supports session resume
+- agent process facts (`processId`, `parentProcessId`, `processGroupId`) and normalized lifecycle (`running`, `idle`, `needsInput`, `ended`, or `unknown`)
+- owning local terminal process and activity facts (`terminalProcessId`, `terminalActivityAt`) when the terminal backend reports them
 
 The renderer hydrates from this store on startup through `listManagedAiSessions()`. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
+
+The current implementation records lifecycle and process facts for visibility, restore, and later automation. It does not hibernate agents or kill agent process groups. Disconnecting or closing a terminal still uses the normal terminal lifecycle path and marks matching managed AI sessions ended.
 
 ## Actions And Bulk API
 
@@ -125,6 +129,7 @@ On `stop`, aiopsterm can derive a short 2-5 word title from the current turn sum
 - Session rows show the project title, state, latest summary, and project path when the hook payload provides one.
 - Selecting a row opens details inside the left AI session panel. The shared main work area remains the terminal workspace.
 - Details show metadata, a timeline of recent events, local decisions, manual title editing, reply notes, clear actions, and quick focus back to the owning terminal.
+- Details also show normalized agent lifecycle, agent PID/PPID/PGID, terminal PID, and latest terminal activity when those facts are available from hooks or the local terminal backend.
 - When a session has a `resumeCommand`, the detail header shows a resume action. Clicking it writes the resume command into the owning aiopsterm local-connection terminal. It does not create a new terminal, close an existing terminal, or touch SSH connections.
 - Manual resume uses the same terminal command security pipeline as direct command execution. If the configured security policy requires approval, the normal terminal approval prompt appears before anything is written to the shell.
 - `permission_request`, `question`, and `notification` create top-bar bell entries.

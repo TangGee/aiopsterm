@@ -14,6 +14,7 @@ import type {
   ManagedAiSessionClearInput,
   ManagedAiSessionDecision,
   ManagedAiSessionDecisionKind,
+  ManagedAiSessionLifecycle,
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
   ManagedAiSessionRecord,
@@ -84,6 +85,7 @@ const supportedEvents = new Set<AiAgentSessionEventName>([
   'permission_request',
   'question',
   'notification',
+  'lifecycle',
   'stop',
   'session_end'
 ])
@@ -203,6 +205,12 @@ const normalizeEventName = (value: unknown): AiAgentSessionEventName | null => {
     user_prompt_submit: 'prompt_submit',
     askuserquestion: 'question',
     ask_user_question: 'question',
+    lifecycle: 'lifecycle',
+    status: 'lifecycle',
+    tab_status: 'lifecycle',
+    tabstatus: 'lifecycle',
+    agent_lifecycle: 'lifecycle',
+    agentlifecycle: 'lifecycle',
     question: 'question',
     notification: 'notification',
     notify: 'notification'
@@ -215,6 +223,36 @@ const firstText = (record: Record<string, unknown>, keys: string[]) => {
     const text = cleanOptionalText(record[key])
     if (text) return text
   }
+  return undefined
+}
+
+const cleanPositiveInteger = (value: unknown) => {
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    const normalized = Math.floor(Number(value))
+    return normalized > 0 ? normalized : undefined
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const normalized = Math.floor(value)
+  return normalized > 0 ? normalized : undefined
+}
+
+const normalizeAgentLifecycle = (value: unknown): ManagedAiSessionLifecycle | undefined => {
+  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
+  if (!normalized) return undefined
+  if (normalized === 'idle' || normalized === 'done' || normalized === 'ready' || normalized === 'completed') return 'idle'
+  if (normalized === 'running' || normalized === 'working' || normalized === 'thinking' || normalized === 'reading' || normalized === 'busy') return 'running'
+  if (normalized === 'needsinput' || normalized === 'waiting' || normalized === 'blocked' || normalized === 'approval' || normalized === 'question') return 'needsInput'
+  if (normalized === 'ended' || normalized === 'closed' || normalized === 'exited' || normalized === 'stopped') return 'ended'
+  if (normalized === 'unknown') return 'unknown'
+  return undefined
+}
+
+const stateForAgentLifecycle = (lifecycle?: ManagedAiSessionLifecycle): ManagedAiSessionState | undefined => {
+  if (lifecycle === 'running') return 'working'
+  if (lifecycle === 'idle') return 'idle'
+  if (lifecycle === 'needsInput') return 'needsInput'
+  if (lifecycle === 'ended') return 'ended'
+  if (lifecycle === 'unknown') return 'unknown'
   return undefined
 }
 
@@ -406,9 +444,16 @@ const questionSummary = (input: Record<string, unknown>) => {
 const eventSummary = (event: AiAgentSessionEventName, input: Record<string, unknown>) =>
   firstText(input, ['summary', 'message', 'body', 'text', 'prompt', 'lastAssistantMessage', 'last_assistant_message']) ||
   questionSummary(input) ||
+  (event === 'lifecycle' ? cleanText(input.status || input.lifecycle || input.agentLifecycle || input.agent_lifecycle) : '') ||
   (event === 'stop' ? 'Turn complete' : '')
 
-const managedAiSessionStateForEvent = (event: AiAgentSessionEventName, previous: ManagedAiSessionState = 'unknown'): ManagedAiSessionState => {
+const managedAiSessionStateForEvent = (
+  event: AiAgentSessionEventName,
+  previous: ManagedAiSessionState = 'unknown',
+  lifecycle?: ManagedAiSessionLifecycle
+): ManagedAiSessionState => {
+  const lifecycleState = stateForAgentLifecycle(lifecycle)
+  if (lifecycleState) return lifecycleState
   if (event === 'session_start') return 'idle'
   if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
   if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
@@ -531,6 +576,12 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
     ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
     ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
+    ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
+    ...(cleanPositiveInteger(value.parentProcessId) ? { parentProcessId: cleanPositiveInteger(value.parentProcessId) } : {}),
+    ...(cleanPositiveInteger(value.processGroupId) ? { processGroupId: cleanPositiveInteger(value.processGroupId) } : {}),
+    ...(normalizeAgentLifecycle(value.agentLifecycle) ? { agentLifecycle: normalizeAgentLifecycle(value.agentLifecycle) } : {}),
+    ...(cleanPositiveInteger(value.terminalProcessId) ? { terminalProcessId: cleanPositiveInteger(value.terminalProcessId) } : {}),
+    ...(typeof value.terminalActivityAt === 'number' ? { terminalActivityAt: value.terminalActivityAt } : {}),
     events: events.slice(-maxEventsPerSession) as ManagedAiSessionTimelineEvent[],
     decisions: decisions.slice(-maxDecisionsPerSession) as ManagedAiSessionDecision[]
   }
@@ -558,6 +609,10 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
     ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
+    ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
+    ...(cleanPositiveInteger(value.parentProcessId) ? { parentProcessId: cleanPositiveInteger(value.parentProcessId) } : {}),
+    ...(cleanPositiveInteger(value.processGroupId) ? { processGroupId: cleanPositiveInteger(value.processGroupId) } : {}),
+    ...(normalizeAgentLifecycle(value.agentLifecycle) ? { agentLifecycle: normalizeAgentLifecycle(value.agentLifecycle) } : {}),
     ...(isRecord(value.raw) ? { raw: compactRawRecord(value.raw) } : {})
   } satisfies ManagedAiSessionTimelineEvent
 }
@@ -650,6 +705,10 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const actionable = normalizeBoolean(record.actionable ?? record.waitForDecision ?? record.wait_for_decision)
   const launchCommand = sanitizeLaunchCommand(record.launchCommand || record.launch_command)
   const resumeCommand = resumeCommandFor(source, sessionId, cwd, record.resumeCommand || record.resume_command || record.launchCommand || record.launch_command)
+  const processId = cleanPositiveInteger(record.processId || record.process_id || record.pid || process.env.AIOPSTERM_AGENT_PID)
+  const parentProcessId = cleanPositiveInteger(record.parentProcessId || record.parent_process_id || record.ppid || process.env.PPID)
+  const processGroupId = cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid)
+  const agentLifecycle = normalizeAgentLifecycle(record.agentLifecycle || record.agent_lifecycle || record.lifecycle || record.status)
   const normalized: AiAgentSessionEvent = {
     source,
     event,
@@ -665,7 +724,11 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
     ...(requestId ? { requestId } : {}),
     ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(launchCommand ? { launchCommand } : {}),
-    ...(resumeCommand ? { resumeCommand } : {})
+    ...(resumeCommand ? { resumeCommand } : {}),
+    ...(processId ? { processId } : {}),
+    ...(parentProcessId ? { parentProcessId } : {}),
+    ...(processGroupId ? { processGroupId } : {}),
+    ...(agentLifecycle ? { agentLifecycle } : {})
   }
   return { ok: true, data: normalized }
 }
@@ -673,7 +736,7 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
   const key = sessionKey(event.source, event.sessionId)
   const existing = sessions.get(key)
-  const state = managedAiSessionStateForEvent(event.event, existing?.state)
+  const state = managedAiSessionStateForEvent(event.event, existing?.state, event.agentLifecycle)
   const nextAutoTitle = event.event === 'stop' ? autoTitleFor(event, existing) : existing?.autoTitle
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
   const handledAt = state === 'needsInput' ? undefined : existing?.handledAt
@@ -681,6 +744,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const cwd = event.cwd || existing?.cwd
   const launchCommand = event.launchCommand || existing?.launchCommand
   const resumeCommand = event.resumeCommand && event.cwd ? event.resumeCommand : existing?.resumeCommand || resumeCommandFor(event.source, event.sessionId, cwd, launchCommand)
+  const processId = event.processId || existing?.processId
+  const parentProcessId = event.parentProcessId || existing?.parentProcessId
+  const processGroupId = event.processGroupId || existing?.processGroupId
+  const agentLifecycle = event.agentLifecycle || existing?.agentLifecycle
   const record: ManagedAiSessionRecord = {
     id: event.sessionId,
     source: event.source,
@@ -703,6 +770,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
     ...(launchCommand ? { launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
+    ...(processId ? { processId } : {}),
+    ...(parentProcessId ? { parentProcessId } : {}),
+    ...(processGroupId ? { processGroupId } : {}),
+    ...(agentLifecycle ? { agentLifecycle } : {}),
     events: [...(existing?.events || []), normalizeRecordEvent(event, raw)].slice(-maxEventsPerSession),
     decisions: [...(existing?.decisions || [])].slice(-maxDecisionsPerSession)
   }

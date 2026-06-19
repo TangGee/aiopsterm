@@ -148,6 +148,30 @@
             <dt>会话</dt>
             <dd>{{ selectedSession.id }}</dd>
           </div>
+          <div v-if="selectedSession.agentLifecycle">
+            <dt>Agent 状态</dt>
+            <dd>{{ lifecycleLabel(selectedSession.agentLifecycle) }}</dd>
+          </div>
+          <div v-if="selectedSession.processId">
+            <dt>Agent PID</dt>
+            <dd>{{ selectedSession.processId }}</dd>
+          </div>
+          <div v-if="selectedSession.parentProcessId">
+            <dt>父进程</dt>
+            <dd>{{ selectedSession.parentProcessId }}</dd>
+          </div>
+          <div v-if="selectedSession.processGroupId">
+            <dt>进程组</dt>
+            <dd>{{ selectedSession.processGroupId }}</dd>
+          </div>
+          <div v-if="selectedSession.terminalProcessId">
+            <dt>终端 PID</dt>
+            <dd>{{ selectedSession.terminalProcessId }}</dd>
+          </div>
+          <div v-if="selectedSession.terminalActivityAt">
+            <dt>终端活动</dt>
+            <dd>{{ formatTime(selectedSession.terminalActivityAt) }}</dd>
+          </div>
           <div v-if="selectedSession.transcriptPath">
             <dt>记录</dt>
             <dd>{{ selectedSession.transcriptPath }}</dd>
@@ -312,6 +336,14 @@ const stateLabel = (state: ManagedAiSessionState) => {
   return '未知'
 }
 
+const lifecycleLabel = (lifecycle: NonNullable<ManagedAiSession['agentLifecycle']>) => {
+  if (lifecycle === 'running') return '运行中'
+  if (lifecycle === 'idle') return '空闲'
+  if (lifecycle === 'needsInput') return '待处理'
+  if (lifecycle === 'ended') return '已结束'
+  return '未知'
+}
+
 const eventLabel = (event: AiAgentSessionEventName) => {
   if (event === 'session_start') return '会话开始'
   if (event === 'prompt_submit') return '提交提示'
@@ -319,13 +351,14 @@ const eventLabel = (event: AiAgentSessionEventName) => {
   if (event === 'permission_request') return '权限请求'
   if (event === 'question') return '提问'
   if (event === 'notification') return '通知'
+  if (event === 'lifecycle') return '生命周期'
   if (event === 'stop') return '轮次结束'
   return '会话结束'
 }
 
 const eventState = (event: AiAgentSessionEventName): ManagedAiSessionState => {
   if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
-  if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
+  if (event === 'prompt_submit' || event === 'pre_tool_use' || event === 'lifecycle') return 'working'
   if (event === 'session_end') return 'ended'
   return 'idle'
 }

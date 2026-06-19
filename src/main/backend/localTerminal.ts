@@ -4,6 +4,7 @@ import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycle
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
 
 export type LocalPtyProcess = {
+  pid?: number
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(): void
@@ -142,6 +143,8 @@ const sendErrorLifecycle = (
   return payload
 }
 
+const cleanProcessId = (value: unknown) => (Number.isFinite(value) && Number(value) > 0 ? Math.floor(Number(value)) : undefined)
+
 export const createLocalTerminalSession = (id: string, options: TerminalCreateOptions, sink: LocalTerminalEventSink): LocalTerminalCreateResult => {
   const terminalShell = getShell(options)
   const terminalArgs = localShellArgs(terminalShell)
@@ -196,6 +199,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       cwd,
       env
     })
+    const processId = cleanProcessId(ptyProcess.pid)
     const session: LocalTerminalSession = {
       write(data: string | Buffer) {
         ptyProcess.write(typeof data === 'string' ? data : data.toString('utf8'))
@@ -217,6 +221,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     lifecycle = sendLifecycle(id, sink, {
       ...lifecycleBase,
       stage: 'shell-ready',
+      ...(processId ? { processId } : {}),
       message: `Local shell ready ${terminalShell}`
     })
     ptyProcess.onData((data) => sink.data(data))
@@ -231,6 +236,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     env,
     shell: false
   }) as ChildProcessWithoutNullStreams
+  const processId = cleanProcessId(child.pid)
   const session: LocalTerminalSession = {
     write(data: string | Buffer) {
       child.stdin.write(data)
@@ -253,6 +259,7 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
   lifecycle = sendLifecycle(id, sink, {
     ...lifecycleBase,
     stage: 'shell-ready',
+    ...(processId ? { processId } : {}),
     message: `Local shell ready ${terminalShell}`
   })
   child.stdout.on('data', (chunk: Buffer) => sink.data(chunk))

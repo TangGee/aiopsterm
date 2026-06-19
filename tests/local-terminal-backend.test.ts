@@ -9,6 +9,8 @@ type TerminalLifecycleEvent = {
   at: number
   shell?: string
   cwd?: string
+  processId?: number
+  processGroupId?: number
   code?: number | null
   reason?: 'manual' | 'network' | 'process' | 'error' | 'unknown'
   isNetworkDisconnect?: boolean
@@ -57,6 +59,7 @@ type RecordedEvents = {
 }
 
 class MockPtyProcess {
+  pid = 2222
   writes: string[] = []
   resizes: Array<{ cols: number; rows: number }> = []
   killed = false
@@ -93,6 +96,7 @@ class MockPtyProcess {
 }
 
 class MockChildProcess extends EventEmitter {
+  pid = 3333
   stdout = new PassThrough()
   stderr = new PassThrough()
   stdin = new PassThrough()
@@ -204,6 +208,7 @@ describe('local terminal backend runtime', () => {
     expect(pty.writes).toEqual(['uptime\n'])
     expect(pty.resizes).toEqual([{ cols: 132, rows: 44 }])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['starting', 'shell-ready', 'closed'])
+    expect(events.lifecycle[1]).toEqual(expect.objectContaining({ processId: 2222 }))
     expect(events.data.map((chunk) => chunk.toString())).toEqual(['shell output\n'])
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('[aiopsterm]')
     expect(events.exit).toEqual([expect.objectContaining({ code: 0 })])
@@ -279,6 +284,7 @@ describe('local terminal backend runtime', () => {
     ])
     expect(child.writes).toEqual(['date\n', Buffer.from([0x00, 0xff])])
     expect(events.lifecycle.map((event) => event.stage)).toEqual(['starting', 'shell-ready', 'closed'])
+    expect(events.lifecycle[1]).toEqual(expect.objectContaining({ processId: 3333 }))
     expect(events.data.map((chunk) => chunk.toString())).toEqual(['process stdout\n', 'process stderr\n'])
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('[aiopsterm]')
     expect(events.exit).toEqual([expect.objectContaining({ code: 7 })])
