@@ -27,6 +27,7 @@ type ControlSocketBackend = {
     sessionSnapshotPathFor: (userDataPath: string) => string
     listAgentVaultEntries: () => Array<Record<string, unknown>>
     agentVaultPathFor: (userDataPath: string) => string
+    listTerminalBuffers: () => Array<Record<string, unknown>>
     eventSubscriptionCount: () => number
   }
 }
@@ -540,6 +541,77 @@ describe('control socket backend', () => {
         expect.objectContaining({ name: 'terminal.key_sent', payload: expect.objectContaining({ key: 'enter', panel_id: 'panel-1' }) })
       ])
     )
+  })
+
+  it('stores tmux-style buffers and pastes them through terminal text input', async () => {
+    const backend = await loadBackend()
+    const writes: Array<{ sessionId: string; data: string }> = []
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'terminal.focus') {
+        return {
+          ok: true,
+          data: {
+            terminal: { panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local', kind: 'local', active: true, connected: true }
+          }
+        }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({
+      getWindows: () => [mockWindow],
+      writeTerminal: (sessionId, data) => {
+        writes.push({ sessionId, data })
+        return { ok: true, data: { id: sessionId, bytes: Buffer.byteLength(data, 'utf8') } }
+      }
+    })
+    const deployCommand = 'kubectl rollout status deploy/api\n'
+    const deployBytes = Buffer.byteLength(deployCommand, 'utf8')
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'set-buffer',
+        params: { name: 'deploy', text: deployCommand }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          buffer: expect.objectContaining({ name: 'deploy', size: deployBytes }),
+          buffers: [expect.objectContaining({ name: 'deploy', size: deployBytes })]
+        })
+      })
+    )
+
+    await expect(backend.__testing.handleControlRequest({ method: 'list-buffers', params: {} })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1, buffers: [expect.objectContaining({ name: 'deploy' })] }) })
+    )
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'paste-buffer',
+        params: { name: 'deploy', panelId: 'panel-1' }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          id: 'terminal-1',
+          bytes: deployBytes,
+          bufferName: 'deploy'
+        })
+      })
+    )
+
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.buffer.paste', params: { name: 'missing', sessionId: 'terminal-1' } })).resolves.toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'TERMINAL_BUFFER_NOT_FOUND' })
+    )
+    expect(writes).toEqual([{ sessionId: 'terminal-1', data: deployCommand }])
+    expect(backend.__testing.listTerminalBuffers()).toEqual([expect.objectContaining({ name: 'deploy' })])
   })
 
   it('creates, lists, opens, marks, dismisses, and clears generic notifications', async () => {

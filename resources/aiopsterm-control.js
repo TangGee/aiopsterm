@@ -41,6 +41,9 @@ Commands:
   send-key-panel --panel <id> <key>
   wait-for [-S|--signal] <name> [--timeout <seconds>]
   display-message [-p|--print] <text>
+  set-buffer [--name <name>] <text>
+  paste-buffer [--name <name>] [--panel <id>|--session <id>]
+  list-buffers
   set-status <key> <value> [--icon <name>] [--color <#hex>] [--priority <n>]
   clear-status <key>
   list-status
@@ -178,6 +181,7 @@ const methodParams = () => {
   if (command === 'events' || command === 'event') return eventStreamMethodParams()
   if (command === 'wait-for' || command === 'wait_for') return waitForMethodParams()
   if (command === 'display-message' || command === 'display' || command === 'displayp') return displayMessageMethodParams()
+  if (['set-buffer', 'paste-buffer', 'list-buffers'].includes(command)) return terminalBufferMethodParams(command)
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
@@ -447,6 +451,18 @@ const displayMessageMethodParams = () => {
     },
     displayMessageText: text || 'Message'
   }
+}
+
+const terminalBufferMethodParams = (command) => {
+  if (command === 'list-buffers') return { method: 'terminal.buffer.list', params: {} }
+  const name = readOption('--name') || readOption('--buffer') || 'default'
+  if (command === 'set-buffer') {
+    const text = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ')
+    return { method: 'terminal.buffer.set', params: { name, text } }
+  }
+  const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+  const sessionId = readOption('--session') || readOption('--session-id')
+  return { method: 'terminal.buffer.paste', params: { name, panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId } }
 }
 
 const sidebarTargetParams = () => {
@@ -880,6 +896,15 @@ const printResponse = (response) => {
   }
   if (data.name && (data.status === 'signaled' || data.status === 'waiting' || data.status === 'timeout')) {
     process.stdout.write(['wait-for', data.status, data.name, `waited=${data.waitedMs || data.waited_ms || 0}`].join('\t') + '\n')
+    return
+  }
+  if (Array.isArray(data.buffers)) {
+    if (data.buffer) {
+      process.stdout.write(['buffer', data.buffer.name || '-', data.buffer.size ?? 0].join('\t') + '\n')
+      return
+    }
+    for (const buffer of data.buffers) process.stdout.write(['buffer', buffer.name || '-', buffer.size ?? 0].join('\t') + '\n')
+    if (data.buffers.length === 0) process.stdout.write('No buffers\n')
     return
   }
   if (Array.isArray(data.snapshots)) {

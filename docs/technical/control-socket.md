@@ -110,6 +110,10 @@ The synchronization slice adds control_compat-style automation rendezvous:
 
 - `sync.wait_for`: wait for or signal a named local token. `wait-for` and `wait_for` are aliases.
 
+The terminal buffer slice adds tmux/control_compat-style runtime text buffers:
+
+- `terminal.buffer.set`, `terminal.buffer.list`, `terminal.buffer.paste`: set, list, and paste named text buffers.
+
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 
 - `sidebar.status.set`, `sidebar.status.clear`, `sidebar.status.list`: manage keyed status entries.
@@ -139,6 +143,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
 - `display-message` maps to `notification.create`; `display-message -p` prints locally without using the socket.
+- `set-buffer`, `paste-buffer`, and `list-buffers` map to `terminal.buffer.*`.
 - `set-status`, `clear-status`, `list-status`, `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log`, and `sidebar-state` map to `sidebar.*` metadata methods.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
@@ -249,6 +254,9 @@ node /path/to/resources/aiopsterm-control.js wait-for build-ready --timeout 30
 node /path/to/resources/aiopsterm-control.js wait-for --signal build-ready
 node /path/to/resources/aiopsterm-control.js display-message "deploy done"
 node /path/to/resources/aiopsterm-control.js display-message --print "deploy done"
+node /path/to/resources/aiopsterm-control.js set-buffer --name deploy "kubectl rollout status deploy/api"
+node /path/to/resources/aiopsterm-control.js list-buffers
+node /path/to/resources/aiopsterm-control.js paste-buffer --name deploy --panel panel-main
 node /path/to/resources/aiopsterm-control.js set-status build compiling --priority 80
 node /path/to/resources/aiopsterm-control.js set-progress 0.5 --label "Building"
 node /path/to/resources/aiopsterm-control.js log --level success --source test "All green"
@@ -277,6 +285,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
 
 `sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
+
+`terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
 
 `sidebar.*` metadata is a lightweight automation state source, not a command runner. It is stored in memory in the main process, exposed through the socket and events stream, and scoped by `workspaceId` with the current shared work panel defaulting to `main`. The current slice does not force a new right-sidebar UI; renderer surfaces or future MCP tools can consume the metadata through `sidebar.state`.
 

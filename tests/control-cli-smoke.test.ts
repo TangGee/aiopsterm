@@ -160,6 +160,55 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends tmux-style buffer requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      if (request.method === 'terminal.buffer.paste') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            id: (request.params as any)?.sessionId || 'terminal-1',
+            bytes: 33,
+            buffer: { name: (request.params as any)?.name || 'default', size: 33 },
+            bufferName: (request.params as any)?.name || 'default'
+          }
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          buffer: { name: (request.params as any)?.name || 'deploy', size: ((request.params as any)?.text || '').length || 33 },
+          buffers: [{ name: (request.params as any)?.name || 'deploy', size: ((request.params as any)?.text || '').length || 33 }],
+          count: 1
+        }
+      }
+    })
+
+    const set = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-buffer', '--name', 'deploy', 'kubectl rollout status deploy/api\\n'], {
+      cwd: process.cwd()
+    })
+    expect(set.stdout).toContain('buffer\tdeploy')
+
+    const list = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-buffers'], {
+      cwd: process.cwd()
+    })
+    expect(list.stdout).toContain('buffer\tdeploy')
+
+    const paste = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'paste-buffer', '--name', 'deploy', '--panel', 'panel-1'], {
+      cwd: process.cwd()
+    })
+    expect(paste.stdout).toContain('terminal-write\tterminal-1\tbytes=33')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'terminal.buffer.set', params: expect.objectContaining({ name: 'deploy', text: 'kubectl rollout status deploy/api\\n' }) }),
+      expect.objectContaining({ method: 'terminal.buffer.list' }),
+      expect.objectContaining({ method: 'terminal.buffer.paste', params: expect.objectContaining({ name: 'deploy', panelId: 'panel-1', surfaceId: 'panel-1' }) })
+    ])
+  })
+
   it('sends wait-for synchronization requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

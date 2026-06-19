@@ -105,6 +105,14 @@ type SidebarLogEntry = {
   createdAt: number
 }
 
+type TerminalBufferEntry = {
+  name: string
+  text: string
+  size: number
+  createdAt: number
+  updatedAt: number
+}
+
 type AgentVaultEntry = {
   id: string
   name: string
@@ -184,6 +192,8 @@ const defaultWaitForTimeoutMs = 30000
 const maxWaitForTimeoutMs = 300000
 const maxSidebarStatusEntries = 200
 const maxSidebarLogEntries = 500
+const maxTerminalBuffers = 100
+const maxTerminalBufferBytes = 1024 * 1024
 const controlSocketCapabilities = [
   'ping',
   'system.capabilities',
@@ -201,6 +211,7 @@ const controlSocketCapabilities = [
   'terminal.read_screen',
   'terminal.send_text',
   'terminal.send_key',
+  'terminal.buffer',
   'notification',
   'events.stream',
   'events.list',
@@ -237,6 +248,7 @@ let waitForWaiters = new Map<string, Set<ControlWaitForWaiter>>()
 let sidebarStatusEntries = new Map<string, SidebarStatusEntry>()
 let sidebarProgressEntries = new Map<string, SidebarProgressEntry>()
 let sidebarLogEntries: SidebarLogEntry[] = []
+let terminalBuffers = new Map<string, TerminalBufferEntry>()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -298,6 +310,19 @@ const cleanSidebarLevel = (value: unknown): SidebarLogEntry['level'] => {
   const text = cleanText(value).toLowerCase()
   if (text === 'progress' || text === 'success' || text === 'warning' || text === 'error') return text
   return 'info'
+}
+
+const cleanTerminalBufferName = (value: unknown) => {
+  const text = cleanText(value) || 'default'
+  if (text.length > 80) return ''
+  return /^[A-Za-z0-9._:-]+$/.test(text) ? text : ''
+}
+
+const terminalBufferText = (params: Record<string, unknown>) => {
+  const value = typeof params.text === 'string' ? params.text : typeof params.data === 'string' ? params.data : typeof params.value === 'string' ? params.value : ''
+  const bytes = Buffer.byteLength(value, 'utf8')
+  if (!value || bytes > maxTerminalBufferBytes) return { text: '', bytes }
+  return { text: value, bytes }
 }
 
 const ok = (data: Record<string, unknown> = {}): ControlResponse => ({ ok: true, data })
@@ -397,6 +422,9 @@ const isSidebarMetadataMethod = (method: string) =>
     'list-log',
     'sidebar-state'
   ].includes(method)
+
+const isTerminalBufferMethod = (method: string) =>
+  method.startsWith('terminal.buffer.') || method.startsWith('buffer.') || ['set-buffer', 'paste-buffer', 'list-buffers'].includes(method)
 
 const eventFiltersFromParams = (params: Record<string, unknown> = {}): ControlEventFilters => ({
   names: new Set([...cleanTextList(params.names), ...cleanTextList(params.name)]),
@@ -2200,6 +2228,89 @@ const sendTerminalKey = async (params: Record<string, unknown>) => {
   return response
 }
 
+const terminalBufferSummary = (entry: TerminalBufferEntry) => ({
+  name: entry.name,
+  size: entry.size,
+  createdAt: entry.createdAt,
+  created_at: entry.createdAt,
+  updatedAt: entry.updatedAt,
+  updated_at: entry.updatedAt
+})
+
+const terminalBufferPayload = (buffer?: TerminalBufferEntry | null) => {
+  const buffers = [...terminalBuffers.values()].sort((left, right) => left.name.localeCompare(right.name)).map(terminalBufferSummary)
+  return {
+    buffers,
+    count: buffers.length,
+    ...(buffer ? { buffer: terminalBufferSummary(buffer) } : {})
+  }
+}
+
+const handleTerminalBufferControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const action = method.startsWith('terminal.buffer.')
+    ? method.slice('terminal.buffer.'.length)
+    : method.startsWith('buffer.')
+      ? method.slice('buffer.'.length)
+      : method
+  if (action === 'list' || action === 'list-buffers') return ok(terminalBufferPayload())
+  if (action === 'set' || action === 'set-buffer') {
+    const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
+    if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
+    const { text, bytes } = terminalBufferText(params)
+    if (!text) {
+      return fail(
+        bytes > maxTerminalBufferBytes ? 'TERMINAL_BUFFER_TOO_LARGE' : 'TERMINAL_BUFFER_TEXT_REQUIRED',
+        bytes > maxTerminalBufferBytes ? `Buffer text exceeds ${maxTerminalBufferBytes} bytes.` : 'set-buffer requires text.'
+      )
+    }
+    const now = Date.now()
+    const existing = terminalBuffers.get(name)
+    const entry: TerminalBufferEntry = {
+      name,
+      text,
+      size: bytes,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    terminalBuffers.set(name, entry)
+    if (terminalBuffers.size > maxTerminalBuffers) {
+      const oldest = [...terminalBuffers.values()].sort((left, right) => left.updatedAt - right.updatedAt)[0]
+      if (oldest) terminalBuffers.delete(oldest.name)
+    }
+    publishControlEvent({
+      name: 'terminal.buffer.set',
+      category: 'terminal',
+      source: 'control.socket',
+      payload: { buffer_name: name, size: bytes }
+    })
+    return ok(terminalBufferPayload(entry))
+  }
+  if (action === 'paste' || action === 'paste-buffer') {
+    const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
+    if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
+    const entry = terminalBuffers.get(name)
+    if (!entry) return fail('TERMINAL_BUFFER_NOT_FOUND', `Buffer not found: ${name}`)
+    const response = await sendTerminalText({ ...params, text: entry.text })
+    if (response.ok) {
+      response.data = { ...(response.data || {}), buffer: terminalBufferSummary(entry), bufferName: name, buffer_name: name }
+      publishControlEvent({
+        name: 'terminal.buffer.pasted',
+        category: 'terminal',
+        source: 'control.socket',
+        surfaceId: terminalPanelId(params),
+        payload: {
+          buffer_name: name,
+          size: entry.size,
+          session_id: cleanText(response.data.id || response.data.sessionId || params.sessionId || params.terminalSessionId),
+          panel_id: terminalPanelId(params)
+        }
+      })
+    }
+    return response
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm terminal buffer method: ${method}`)
+}
+
 const notificationPayload = (items = notifications, params: Record<string, unknown> = {}) => {
   const query = cleanText(params.query).toLowerCase()
   const unreadOnly = params.unread === true && params.read !== true
@@ -2444,6 +2555,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
   if (isWaitForMethod(method)) return handleWaitForControlRequest(method, params)
   if (isSidebarMetadataMethod(method)) return handleSidebarMetadataControlRequest(method, params)
+  if (isTerminalBufferMethod(method)) return handleTerminalBufferControlRequest(method, params)
   if (isEventListMethod(method)) return listEvents(params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
@@ -2616,6 +2728,7 @@ export const closeControlSocketServer = () => {
   sidebarStatusEntries.clear()
   sidebarProgressEntries.clear()
   sidebarLogEntries = []
+  terminalBuffers.clear()
   notifications = []
   eventLog = []
   nextEventSeq = 1
@@ -2644,6 +2757,7 @@ export const __testing = {
   listAgentVaultEntries: () => sortedAgentVaultEntries(),
   agentVaultPathFor,
   listNotifications: () => notifications,
+  listTerminalBuffers: () => [...terminalBuffers.values()].sort((left, right) => left.name.localeCompare(right.name)),
   pendingRendererRequestCount: () => pendingRendererRequests.size,
   eventSubscriptionCount: () => eventSubscriptions.size
 }
