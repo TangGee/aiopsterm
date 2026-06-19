@@ -131,6 +131,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
+- `display-message` maps to `notification.create`; `display-message -p` prints locally without using the socket.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
 - `open-notification` maps to `notification.open`.
@@ -238,6 +239,8 @@ node /path/to/resources/aiopsterm-control.js send-panel --panel panel-main "echo
 node /path/to/resources/aiopsterm-control.js send-key-panel --panel panel-main enter
 node /path/to/resources/aiopsterm-control.js wait-for build-ready --timeout 30
 node /path/to/resources/aiopsterm-control.js wait-for --signal build-ready
+node /path/to/resources/aiopsterm-control.js display-message "deploy done"
+node /path/to/resources/aiopsterm-control.js display-message --print "deploy done"
 node /path/to/resources/aiopsterm-control.js notify --title "Build done" --body "All tests passed"
 node /path/to/resources/aiopsterm-control.js list-notifications
 node /path/to/resources/aiopsterm-control.js jump-to-unread

@@ -395,6 +395,31 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'notification.create', params: expect.objectContaining({ title: 'Done', body: 'All green' }) })])
   })
 
+  it('prints or sends display-message through the notification bridge', async () => {
+    const printed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'display-message', '--print', 'hello', 'operator'], {
+      cwd: process.cwd()
+    })
+    expect(printed.stdout).toBe('hello operator\n')
+
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: { notification: { id: 'notification-1', title: 'aiopsterm', body: (request.params as any)?.body, read: false } }
+      }
+    })
+
+    const displayed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'display-message', 'deploy', 'done'], {
+      cwd: process.cwd()
+    })
+    expect(displayed.stdout).toBe('deploy done\n')
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'notification.create', params: expect.objectContaining({ title: 'aiopsterm', body: 'deploy done' }) })
+    ])
+  })
+
   it('sends agent hibernation requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

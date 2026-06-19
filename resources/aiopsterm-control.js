@@ -40,6 +40,7 @@ Commands:
   send-panel --panel <id> <text>
   send-key-panel --panel <id> <key>
   wait-for [-S|--signal] <name> [--timeout <seconds>]
+  display-message [-p|--print] <text>
   notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
   list-notifications
   open-notification --id <id>
@@ -167,6 +168,7 @@ const methodParams = () => {
   }
   if (command === 'events' || command === 'event') return eventStreamMethodParams()
   if (command === 'wait-for' || command === 'wait_for') return waitForMethodParams()
+  if (command === 'display-message' || command === 'display' || command === 'displayp') return displayMessageMethodParams()
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
   if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
@@ -416,6 +418,24 @@ const waitForMethodParams = () => {
       signal,
       ...(Number.isFinite(timeout) && timeout > 0 ? { timeout, timeoutMs: Math.round(timeout * 1000) } : {})
     }
+  }
+}
+
+const displayMessageMethodParams = () => {
+  const printOnly = hasFlag('-p') || hasFlag('--print')
+  const text = args.filter((arg) => arg !== '--' && !arg.startsWith('-')).join(' ').trim()
+  if (printOnly) {
+    return {
+      localPrint: text
+    }
+  }
+  return {
+    method: 'notification.create',
+    params: {
+      title: 'aiopsterm',
+      body: text || 'Message'
+    },
+    displayMessageText: text || 'Message'
   }
 }
 
@@ -1075,6 +1095,11 @@ const printResponse = (response) => {
 
 const request = methodParams()
 
+if ('localPrint' in request) {
+  process.stdout.write(`${request.localPrint || ''}\n`)
+  process.exit(0)
+}
+
 if (!socketPath) {
   process.stderr.write('AIOPSTERM_CONTROL_SOCKET is not set. Start this CLI inside an aiopsterm managed local terminal or pass --socket.\n')
   process.exit(2)
@@ -1122,6 +1147,10 @@ socket.on('data', (chunk) => {
             process.exit(1)
           }
           process.exit(child.status === null ? 1 : child.status)
+        }
+        if (request.displayMessageText && response.ok && !outputJson) {
+          process.stdout.write(`${request.displayMessageText}\n`)
+          process.exit(0)
         }
         printResponse(response)
         process.exit(response.ok ? 0 : 1)
