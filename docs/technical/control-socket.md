@@ -57,6 +57,18 @@ The control_compat system/window/settings compatibility slice adds non-browser a
 - `extension.sidebar.snapshot`: expose a control_compat-style sidebar feed derived from `workspace.snapshot`.
 - `app.focus_override.set` and `app.simulate_active`: accepted app-focus compatibility controls. They update control metadata and focus the active aiopsterm window where applicable.
 
+The mobile terminal compatibility slice maps control_compat's mobile-host data-plane verbs onto aiopsterm's shared terminal panel model:
+
+- `mobile.host.status`: return local app/process identity, advertised mobile-terminal capability tokens, visible workspace/terminal counts, active surface id, and the current renderer snapshot when available.
+- `mobile.workspace.list`: return the same shared main workspace and visible terminal/surface list in a mobile-friendly shape. The bare `workspace.list` continues to use the normal workspace list payload.
+- `mobile.terminal.create` / `terminal.create`: create a visible local terminal surface through the existing `surface.create` path. Browser surfaces remain unsupported.
+- `mobile.terminal.input` / `terminal.input`: write raw typed text to the resolved aiopsterm terminal session. Targets may use `surface_id`, `terminal_id`, `panelId`, or `session_id` style selectors.
+- `mobile.terminal.paste` / `terminal.paste`: send bracketed paste text to the resolved terminal and optionally submit it. Supported `submit_key` values are `return`, `enter`, `ctrl+enter`, and `none`.
+- `mobile.terminal.replay` / `terminal.replay`: return a cold-attach text snapshot from the xterm buffer, plus the effective terminal `columns` and `rows`. aiopsterm uses `snapshot_format=aiopsterm.text` instead of control_compat's Ghostty render-grid payload.
+- `mobile.terminal.viewport` / `terminal.viewport`: echo the selected terminal's effective grid and the caller's reported viewport size. This is currently observational; aiopsterm does not resize shared terminals to the smallest mobile viewport.
+- `mobile.terminal.scroll` / `terminal.scroll` and `mobile.terminal.mouse` / `terminal.mouse`: recognized compatibility probes that return `unsupported=true`, because aiopsterm does not expose xterm scroll/mouse gesture injection through the control socket yet.
+- `mobile.terminal.paste_image` / `terminal.paste_image`: recognized compatibility probe that returns `unsupported=true`; image payload materialization is not implemented in aiopsterm's control socket.
+
 The project/file compatibility slice maps control_compat project openers onto aiopsterm's shared main work panel:
 
 - `markdown.open`: open a Knowledge file as a knowledge surface in the shared main work panel, with optional `line` / `startLine` and `endLine` jump metadata.
@@ -229,6 +241,8 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list_surfaces` and `list-surfaces` map to `surface.list`.
 - `list_terminals` and `debug.terminals` map to `terminal.list`.
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
+- `mobile host-status` maps to `mobile.host.status`; `mobile workspace-list` maps to `mobile.workspace.list`.
+- `terminal create`, `terminal input`, `terminal paste`, `terminal replay`, and `terminal viewport` map to the matching control_compat-style terminal data-plane methods.
 - `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
 - `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
 - `respawn-pane` and `surface.respawn` map to `terminal.respawn`.

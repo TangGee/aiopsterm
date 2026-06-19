@@ -817,6 +817,83 @@ describe('control socket backend', () => {
     ])
   })
 
+  it('routes control_compat-style mobile terminal controls to shared terminal surfaces', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      const params = (request.params as any) || {}
+      if (request.method === 'workspace.snapshot') {
+        return {
+          ok: true,
+          data: {
+            snapshot: {
+              activePanelId: 'panel-1',
+              workspaces: [{ id: 'main', title: 'Main Workspace' }],
+              terminals: [{ panelId: 'panel-1', sessionId: 'terminal-1' }]
+            }
+          }
+        }
+      }
+      if (request.method === 'surface.create') {
+        return { ok: true, data: { surface_id: 'panel-new', surface: { panelId: 'panel-new' }, createdPane: { panelId: 'panel-new', title: params.title || 'New' } } }
+      }
+      if (request.method === 'mobile.workspace.list') {
+        return { ok: true, data: { workspace_count: 1, terminals: [{ panelId: 'panel-1', sessionId: 'terminal-1' }] } }
+      }
+      if (request.method === 'terminal.input' || request.method === 'terminal.paste' || request.method === 'terminal.replay' || request.method === 'terminal.viewport') {
+        return {
+          ok: true,
+          data: {
+            workspace_id: 'main',
+            surface_id: params.surface_id || params.surfaceId || 'panel-1',
+            session_id: params.session_id || params.sessionId || 'terminal-1',
+            queued: request.method === 'terminal.input' ? false : undefined,
+            submitted: request.method === 'terminal.paste' ? true : undefined,
+            snapshot_format: request.method === 'terminal.replay' ? 'aiopsterm.text' : undefined,
+            columns: request.method === 'terminal.replay' || request.method === 'terminal.viewport' ? 80 : undefined,
+            rows: request.method === 'terminal.replay' || request.method === 'terminal.viewport' ? 24 : undefined
+          }
+        }
+      }
+      if (request.method === 'terminal.scroll' || request.method === 'terminal.mouse') {
+        return { ok: true, data: { surface_id: params.surface_id || 'panel-1', unsupported: true } }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'mobile.host.status' })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ terminal_count: 1, capabilities: expect.arrayContaining(['terminal.input.v1']) }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'mobile.workspace.list' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.create', params: { title: 'Mobile Shell' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.input', params: { surface_id: 'panel-1', text: 'pwd' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.paste', params: { surface_id: 'panel-1', text: 'hello', submit_key: 'none' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.replay', params: { surface_id: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.viewport', params: { surface_id: 'panel-1', viewport_columns: 120 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.scroll', params: { surface_id: 'panel-1', delta_lines: 3 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.mouse', params: { surface_id: 'panel-1', col: 2, row: 3 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'terminal.paste_image', params: { surface_id: 'panel-1', image_base64: 'abc' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) })
+    )
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'workspace.snapshot' }),
+      expect.objectContaining({ method: 'mobile.workspace.list' }),
+      expect.objectContaining({ method: 'surface.create', params: expect.objectContaining({ title: 'Mobile Shell' }) }),
+      expect.objectContaining({ method: 'terminal.input', params: expect.objectContaining({ surface_id: 'panel-1', text: 'pwd' }) }),
+      expect.objectContaining({ method: 'terminal.paste', params: expect.objectContaining({ surface_id: 'panel-1', submit_key: 'none' }) }),
+      expect.objectContaining({ method: 'terminal.replay', params: expect.objectContaining({ surface_id: 'panel-1' }) }),
+      expect.objectContaining({ method: 'terminal.viewport', params: expect.objectContaining({ surface_id: 'panel-1', viewport_columns: 120 }) }),
+      expect.objectContaining({ method: 'terminal.scroll', params: expect.objectContaining({ surface_id: 'panel-1', delta_lines: 3 }) }),
+      expect.objectContaining({ method: 'terminal.mouse', params: expect.objectContaining({ surface_id: 'panel-1', col: 2, row: 3 }) })
+    ])
+  })
+
   it('routes control_compat-style clear-history aliases to the renderer and records a terminal event', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({

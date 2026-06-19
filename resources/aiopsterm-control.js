@@ -32,6 +32,7 @@ Commands:
   app focus-override active|inactive|clear
   app simulate-active
   window list|current|focus|create|close|displays|display
+  mobile host-status
   hooks list|setup|install|uninstall [--agent <name>]
   feed list|jump|push|permission-reply|question-reply|exit-plan-reply|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
@@ -83,6 +84,11 @@ Commands:
   select-layout <name>
   terminal list
   terminal focus --panel <id>|--session <id>
+  terminal create [--title <text>] [--cwd <path>] [--focus <true|false>]
+  terminal input [--panel <id>|--session <id>] --text <text>
+  terminal paste [--panel <id>|--session <id>] --text <text> [--submit-key return|ctrl+enter|none]
+  terminal replay [--panel <id>|--session <id>] [--lines <n>]
+  terminal viewport [--panel <id>|--session <id>] [--columns <n>] [--rows <n>] [--clear]
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
@@ -177,6 +183,7 @@ const methodParams = () => {
   if (command === 'file') return fileMethodParams(args.shift() || 'open')
   if (command === 'app') return appMethodParams(args.shift() || '')
   if (command === 'window') return windowMethodParams(args.shift() || 'list')
+  if (command === 'mobile') return mobileMethodParams(args.shift() || 'host-status')
   if (command === 'rpc') {
     const method = args.shift() || ''
     if (!method) throw new Error('rpc requires a method name')
@@ -345,6 +352,54 @@ const methodParams = () => {
     const lines = Number(readOption('--lines') || readOption('--tail-lines') || 0)
     const scrollback = command === 'capture-pane' && hasFlag('--scrollback')
     return { method: 'terminal.read_screen', params: { panelId, surfaceId: panelId, sessionId, scrollback, ...(Number.isFinite(lines) && lines > 0 ? { tailLines: lines, lines: Math.floor(lines) } : {}) } }
+  }
+  if (command === 'terminal' && ['create', 'new'].includes(args[0])) {
+    args.shift()
+    const title = readOption('--title') || readOption('--name')
+    const cwd = readOption('--cwd')
+    const focusRaw = readOption('--focus')
+    const focus = focusRaw ? focusRaw !== 'false' && focusRaw !== '0' && focusRaw !== 'no' : true
+    return { method: 'terminal.create', params: { title, name: title, cwd, focus } }
+  }
+  if (command === 'terminal' && ['input', 'paste', 'replay', 'viewport'].includes(args[0])) {
+    const subcommand = args.shift()
+    const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+    const sessionId = readOption('--session') || readOption('--session-id')
+    const target = {
+      panelId,
+      panel_id: panelId,
+      surfaceId: panelId,
+      surface_id: panelId,
+      sessionId,
+      session_id: sessionId,
+      terminalSessionId: sessionId,
+      terminal_session_id: sessionId
+    }
+    if (subcommand === 'input') {
+      const text = unescapeTerminalText(readOption('--text') || args.join(' '))
+      return { method: 'terminal.input', params: { ...target, text } }
+    }
+    if (subcommand === 'paste') {
+      const text = unescapeTerminalText(readOption('--text') || args.join(' '))
+      const submitKey = readOption('--submit-key') || readOption('--submit_key') || 'return'
+      return { method: 'terminal.paste', params: { ...target, text, submitKey, submit_key: submitKey } }
+    }
+    if (subcommand === 'replay') {
+      const lines = Number(readOption('--lines') || readOption('--tail-lines') || 0)
+      return { method: 'terminal.replay', params: { ...target, ...(Number.isFinite(lines) && lines > 0 ? { tailLines: Math.floor(lines), lines: Math.floor(lines) } : {}) } }
+    }
+    const columns = Number(readOption('--columns') || readOption('--cols') || 0)
+    const rows = Number(readOption('--rows') || 0)
+    const clear = hasFlag('--clear')
+    return {
+      method: 'terminal.viewport',
+      params: {
+        ...target,
+        clear,
+        ...(Number.isFinite(columns) && columns > 0 ? { viewportColumns: Math.floor(columns), viewport_columns: Math.floor(columns) } : {}),
+        ...(Number.isFinite(rows) && rows > 0 ? { viewportRows: Math.floor(rows), viewport_rows: Math.floor(rows) } : {})
+      }
+    }
   }
   if (command === 'pipe-pane') {
     const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
@@ -613,6 +668,12 @@ const settingsMethodParams = (subcommand) => {
 const feedbackMethodParams = (subcommand) => {
   if (subcommand !== 'open') throw new Error(`Unknown feedback command: ${subcommand}`)
   return { method: 'feedback.open', params: { activate: !hasFlag('--no-activate') } }
+}
+
+const mobileMethodParams = (subcommand) => {
+  if (subcommand === 'host-status' || subcommand === 'host.status' || subcommand === 'status') return { method: 'mobile.host.status', params: {} }
+  if (subcommand === 'workspace-list' || subcommand === 'workspace.list') return { method: 'mobile.workspace.list', params: {} }
+  throw new Error(`Unknown mobile command: ${subcommand}`)
 }
 
 const sidebarSnapshotMethodParams = () => {
@@ -1851,6 +1912,29 @@ const printResponse = (response) => {
   }
   if (typeof data.bytes === 'number' && (data.id || data.sessionId || data.key)) {
     process.stdout.write(['terminal-write', data.id || data.sessionId || '-', `bytes=${data.bytes}`, data.key || ''].filter(Boolean).join('\t') + '\n')
+    return
+  }
+  if ((data.surface_id || data.surfaceId || data.terminal_id || data.terminalId) && (data.queued !== undefined || data.submitted !== undefined || data.snapshot_format || data.columns || data.rows)) {
+    const surfaceId = data.surface_id || data.surfaceId || data.terminal_id || data.terminalId || '-'
+    const mode = data.snapshot_format
+      ? 'replay'
+      : data.submitted !== undefined
+        ? 'paste'
+        : data.queued !== undefined
+          ? 'input'
+          : 'viewport'
+    process.stdout.write(
+      [
+        'terminal-mobile',
+        mode,
+        surfaceId,
+        data.session_id || data.sessionId || '-',
+        data.columns && data.rows ? `${data.columns}x${data.rows}` : '-',
+        data.submitted !== undefined ? `submitted=${data.submitted ? 'true' : 'false'}` : data.queued !== undefined ? `queued=${data.queued ? 'true' : 'false'}` : ''
+      ]
+        .filter(Boolean)
+        .join('\t') + '\n'
+    )
     return
   }
   if (data.name && (data.status === 'signaled' || data.status === 'waiting' || data.status === 'timeout')) {

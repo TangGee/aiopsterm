@@ -7439,6 +7439,71 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('handles control_compat-style mobile terminal data-plane controls on shared terminal surfaces', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const panelId = store.activePanelId
+    const sessionId = store.activePanel.sessionId
+    const xterm = mockXtermInstances.at(-1)!
+    xterm.cols = 100
+    xterm.rows = 30
+    xterm.buffer.active = {
+      ...xterm.buffer.active,
+      length: 3,
+      getLine: (index: number) => ({ translateToString: () => ['alpha', 'beta', 'gamma'][index] || '' })
+    } as any
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    const workspaceList = await invokeControlHandler({ id: 'mobile-workspace-list', method: 'mobile.workspace.list', params: {} })
+    expect(workspaceList).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ workspace_count: 1, count: expect.any(Number) }) }))
+    expect(workspaceList.data.terminals).toEqual(expect.arrayContaining([expect.objectContaining({ panelId, panel_id: panelId, session_id: sessionId })]))
+
+    const input = await invokeControlHandler({ id: 'terminal-input', method: 'terminal.input', params: { surface_id: panelId, text: 'pwd' } })
+    expect(input).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: panelId, queued: false, bytes: 3 }) }))
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'pwd')
+
+    const paste = await invokeControlHandler({ id: 'terminal-paste', method: 'terminal.paste', params: { surface_id: panelId, text: 'hello', submit_key: 'none' } })
+    expect(paste).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: panelId, submitted: false }) }))
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, '\x1b[200~hello\x1b[201~')
+
+    const pasteSubmit = await invokeControlHandler({ id: 'terminal-paste-submit', method: 'mobile.terminal.paste', params: { surface_id: panelId, text: 'go', submit_key: 'return' } })
+    expect(pasteSubmit).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ submitted: true }) }))
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, '\x1b[200~go\x1b[201~\r')
+
+    const replay = await invokeControlHandler({ id: 'terminal-replay', method: 'terminal.replay', params: { surface_id: panelId, lines: 2 } })
+    expect(replay).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: panelId, columns: 100, rows: 30, snapshot_format: 'aiopsterm.text', text: 'beta\ngamma' }) }))
+
+    const viewport = await invokeControlHandler({ id: 'terminal-viewport', method: 'terminal.viewport', params: { surface_id: panelId, viewport_columns: 120, viewport_rows: 40 } })
+    expect(viewport).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: panelId, columns: 100, rows: 30, viewport_columns: 120, viewport_rows: 40 }) }))
+
+    const scroll = await invokeControlHandler({ id: 'terminal-scroll', method: 'terminal.scroll', params: { surface_id: panelId, delta_lines: 2 } })
+    expect(scroll).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: panelId, unsupported: true }) }))
+
+    const mouse = await invokeControlHandler({ id: 'terminal-mouse', method: 'terminal.mouse', params: { surface_id: panelId, col: 2, row: 3 } })
+    expect(mouse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: panelId, unsupported: true }) }))
+
+    wrapper.unmount()
+  })
+
   it('respawns a terminal through command security from the control socket', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

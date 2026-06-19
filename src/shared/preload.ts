@@ -141,7 +141,15 @@ export type TerminalKillResult = AiopsMutationResult<{
 
 export type ControlTerminalSummary = {
   panelId: string
+  panel_id?: string
+  surfaceId?: string
+  surface_id?: string
+  terminalId?: string
+  terminal_id?: string
   sessionId?: string
+  session_id?: string
+  terminalSessionId?: string
+  terminal_session_id?: string
   title: string
   titleSource?: 'system' | 'user' | 'auto'
   title_source?: 'system' | 'user' | 'auto'
@@ -202,6 +210,9 @@ export type ControlSurfaceTelemetrySummary = {
 
 export type ControlSurfaceSummary = {
   panelId: string
+  panel_id?: string
+  surfaceId?: string
+  surface_id?: string
   title: string
   titleSource?: 'system' | 'user' | 'auto'
   title_source?: 'system' | 'user' | 'auto'
@@ -210,6 +221,9 @@ export type ControlSurfaceSummary = {
   status?: string
   cwd?: string
   sessionId?: string
+  session_id?: string
+  terminalSessionId?: string
+  terminal_session_id?: string
   terminalKind?: ControlTerminalSummary['kind']
   connected?: boolean
   split?: 'right' | 'below'

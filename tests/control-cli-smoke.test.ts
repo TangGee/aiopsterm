@@ -267,6 +267,57 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends control_compat-style mobile terminal requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      if (request.method === 'mobile.host.status') {
+        return { id: request.id, ok: true, data: { app: 'aiopsterm', workspace_count: 1, terminal_count: 1, capabilities: ['terminal.input.v1'] } }
+      }
+      if (request.method === 'terminal.create') {
+        return { id: request.id, ok: true, data: { createdPane: { panelId: 'panel-new', title: params.title || 'New' }, surface: { panelId: 'panel-new' }, action: 'surface.create' } }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          workspace_id: 'main',
+          surface_id: params.surface_id || params.surfaceId || 'panel-1',
+          session_id: params.session_id || params.sessionId || 'terminal-1',
+          queued: request.method === 'terminal.input' ? false : undefined,
+          submitted: request.method === 'terminal.paste' ? params.submit_key !== 'none' : undefined,
+          snapshot_format: request.method === 'terminal.replay' ? 'aiopsterm.text' : undefined,
+          columns: request.method === 'terminal.replay' || request.method === 'terminal.viewport' ? 80 : undefined,
+          rows: request.method === 'terminal.replay' || request.method === 'terminal.viewport' ? 24 : undefined
+        }
+      }
+    })
+
+    const status = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, '--json', 'mobile', 'host-status'], { cwd: process.cwd() })
+    expect(JSON.parse(status.stdout)).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ terminal_count: 1 }) }))
+    const created = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'create', '--title', 'Mobile Shell', '--cwd', '/tmp/mobile'], { cwd: process.cwd() })
+    expect(created.stdout).toContain('created\tpanel-new\tMobile Shell')
+    const input = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'input', '--surface', 'panel-1', '--text', 'pwd'], { cwd: process.cwd() })
+    expect(input.stdout).toContain('terminal-mobile\tinput\tpanel-1\tterminal-1')
+    const paste = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'paste', '--surface', 'panel-1', '--text', 'hello', '--submit-key', 'none'], { cwd: process.cwd() })
+    expect(paste.stdout).toContain('terminal-mobile\tpaste\tpanel-1\tterminal-1')
+    expect(paste.stdout).toContain('submitted=false')
+    const replay = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'replay', '--surface', 'panel-1', '--lines', '5'], { cwd: process.cwd() })
+    expect(replay.stdout).toContain('terminal-mobile\treplay\tpanel-1\tterminal-1\t80x24')
+    const viewport = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'viewport', '--surface', 'panel-1', '--columns', '120', '--rows', '40'], { cwd: process.cwd() })
+    expect(viewport.stdout).toContain('terminal-mobile\tviewport\tpanel-1\tterminal-1\t80x24')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'mobile.host.status' }),
+      expect.objectContaining({ method: 'terminal.create', params: expect.objectContaining({ title: 'Mobile Shell', cwd: '/tmp/mobile', focus: true }) }),
+      expect.objectContaining({ method: 'terminal.input', params: expect.objectContaining({ surface_id: 'panel-1', text: 'pwd' }) }),
+      expect.objectContaining({ method: 'terminal.paste', params: expect.objectContaining({ surface_id: 'panel-1', text: 'hello', submit_key: 'none' }) }),
+      expect.objectContaining({ method: 'terminal.replay', params: expect.objectContaining({ surface_id: 'panel-1', tailLines: 5, lines: 5 }) }),
+      expect.objectContaining({ method: 'terminal.viewport', params: expect.objectContaining({ surface_id: 'panel-1', viewport_columns: 120, viewport_rows: 40 }) })
+    ])
+  })
+
   it('sends tmux-style buffer requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const savePath = join(tmpdir(), `aiopsterm-buffer-${process.pid}-${Date.now()}.txt`)

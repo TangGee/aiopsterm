@@ -245,6 +245,9 @@ const controlSocketCapabilities = [
   'surface.telemetry',
   'surface.resume',
   'surface.create',
+  'mobile.host',
+  'mobile.workspace',
+  'mobile.terminal',
   'terminal.list',
   'terminal.focus',
   'terminal.read_screen',
@@ -2686,6 +2689,76 @@ const terminalWriteData = (params: Record<string, unknown>) => {
 
 const terminalPanelId = (params: Record<string, unknown>) => cleanText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.panel || params.surface)
 
+const isMobileTerminalMethod = (method: string) =>
+  [
+    'mobile.workspace.list',
+    'mobile.terminal.create',
+    'terminal.create',
+    'mobile.terminal.input',
+    'terminal.input',
+    'mobile.terminal.paste',
+    'terminal.paste',
+    'mobile.terminal.paste_image',
+    'terminal.paste_image',
+    'mobile.terminal.replay',
+    'terminal.replay',
+    'mobile.terminal.viewport',
+    'terminal.viewport',
+    'mobile.terminal.scroll',
+    'terminal.scroll',
+    'mobile.terminal.mouse',
+    'terminal.mouse'
+  ].includes(method)
+
+const mobileHostStatus = async (params: Record<string, unknown>) => {
+  const response = await dispatchRendererControlRequest('workspace.snapshot', params)
+  const snapshot = response.ok && response.data?.snapshot && typeof response.data.snapshot === 'object' ? (response.data.snapshot as Record<string, unknown>) : null
+  return ok({
+    app: 'aiopsterm',
+    protocol: 'aiopsterm-control',
+    version: 1,
+    hostname: process.env.HOSTNAME || '',
+    platform: process.platform,
+    arch: process.arch,
+    pid: process.pid,
+    route: 'local-control-socket',
+    capabilities: [
+      'events.v1',
+      'workspace.list.v1',
+      'terminal.input.v1',
+      'terminal.paste.v1',
+      'terminal.replay.v1',
+      'terminal.viewport.v1'
+    ],
+    workspace_count: Array.isArray(snapshot?.workspaces) ? snapshot.workspaces.length : 0,
+    terminal_count: Array.isArray(snapshot?.terminals) ? snapshot.terminals.length : 0,
+    active_surface_id: cleanText(snapshot?.activePanelId),
+    socketPath,
+    private: true,
+    snapshot
+  })
+}
+
+const normalizeMobileTerminalMethod = (method: string) => {
+  if (method === 'mobile.terminal.create' || method === 'terminal.create') return 'surface.create'
+  return method
+}
+
+const handleMobileTerminalControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'mobile.terminal.paste_image' || method === 'terminal.paste_image') {
+    return ok({
+      workspace_id: cleanText(params.workspace_id || params.workspaceId) || 'main',
+      surface_id: cleanText(params.surface_id || params.surfaceId || params.panelId),
+      unsupported: true,
+      unsupportedReason: 'aiopsterm does not accept image paste payloads through the control socket yet.'
+    })
+  }
+  const rendererMethod = normalizeMobileTerminalMethod(method)
+  const response = await dispatchRendererControlRequest(rendererMethod, params, { focus: method.includes('.input') || method.includes('.paste') })
+  if (rendererMethod === 'surface.create') publishRendererMutationEvent('surface.create', params, response)
+  return response
+}
+
 const keyDataForTerminal = (value: unknown) => {
   const raw = cleanText(value)
   if (!raw) return null
@@ -3401,6 +3474,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
+  if (method === 'mobile.host.status') return mobileHostStatus(params)
   if (
     method === 'auth.login' ||
     method === 'session.restore_previous' ||
@@ -3424,6 +3498,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)
   if (isSessionMethod(method)) return handleSessionControlRequest(method, params)
+  if (isMobileTerminalMethod(method)) return handleMobileTerminalControlRequest(method, params)
   if (isProjectFileControlMethod(method)) {
     const response = await dispatchRendererControlRequest(method, params, { focus: ['project.open', 'markdown.open', 'file.open'].includes(method) && params.focus !== false })
     publishRendererMutationEvent(method, params, response)
