@@ -1055,6 +1055,14 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'reconnect', '--surface', 'panel-remote'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'disconnect', '--surface', 'panel-remote', '--clear'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'pty-sessions', '--all-workspaces'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'pty-bridge', 'ssh-1', '--attachment', 'attach-1', '--require-existing'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'remote', 'pty-resize', 'ssh-1', '--attachment', 'attach-1', '--token', 'token-1', '--cols', '100', '--rows', '40'],
+      { cwd: process.cwd() }
+    )
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'remote', 'tmux', 'sessions', '--host', 'example.com', '--port', '2222', '--identity-file', '/tmp/id_rsa'], {
       cwd: process.cwd()
     })
@@ -1068,6 +1076,8 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'workspace.remote.reconnect', params: expect.objectContaining({ surfaceId: 'panel-remote', surface_id: 'panel-remote' }) }),
       expect.objectContaining({ method: 'workspace.remote.disconnect', params: expect.objectContaining({ surfaceId: 'panel-remote', clear: true, clear_configuration: true }) }),
       expect.objectContaining({ method: 'workspace.remote.pty_sessions', params: expect.objectContaining({ allWorkspaces: true, all_workspaces: true }) }),
+      expect.objectContaining({ method: 'workspace.remote.pty_bridge', params: expect.objectContaining({ session_id: 'ssh-1', attachment_id: 'attach-1', require_existing: true }) }),
+      expect.objectContaining({ method: 'workspace.remote.pty_resize', params: expect.objectContaining({ session_id: 'ssh-1', attachment_id: 'attach-1', attachment_token: 'token-1', cols: 100, rows: 40 }) }),
       expect.objectContaining({ method: 'remote.tmux.sessions', params: expect.objectContaining({ host: 'example.com', destination: 'example.com', port: 2222, identity_file: '/tmp/id_rsa' }) })
     ])
   })

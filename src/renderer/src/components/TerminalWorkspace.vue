@@ -1844,10 +1844,45 @@ const handleWorkspaceRemoteControlRequest = async (method: string, params: Recor
     })
   }
 
+  if (method === 'workspace.remote.pty_bridge') {
+    const sessionId = controlText(params.sessionId || params.session_id)
+    if (!sessionId) return controlFail('REMOTE_PTY_SESSION_REQUIRED', 'workspace.remote.pty_bridge requires session_id.')
+    const attachmentId = controlText(params.attachmentId || params.attachment_id) || `aiopsterm-${Date.now().toString(36)}`
+    return unsupportedRemoteControlPayload(method, 'aiopsterm does not expose control_compat remote PTY bridge daemon sessions; use visible SSH terminal surfaces instead.', {
+      session_id: sessionId,
+      attachment_id: attachmentId,
+      require_existing: controlBool(params.requireExisting ?? params.require_existing, false),
+      wait_for_ready: controlBool(params.waitForReady ?? params.wait_for_ready, false),
+      command: controlText(params.command),
+      bridge_available: false
+    })
+  }
+
+  if (method === 'workspace.remote.pty_resize') {
+    const sessionId = controlText(params.sessionId || params.session_id)
+    if (!sessionId) return controlFail('REMOTE_PTY_SESSION_REQUIRED', 'workspace.remote.pty_resize requires session_id.')
+    const attachmentId = controlText(params.attachmentId || params.attachment_id)
+    if (!attachmentId) return controlFail('REMOTE_PTY_ATTACHMENT_REQUIRED', 'workspace.remote.pty_resize requires attachment_id.')
+    const attachmentToken = controlText(params.attachmentToken || params.attachment_token)
+    if (!attachmentToken) return controlFail('REMOTE_PTY_ATTACHMENT_TOKEN_REQUIRED', 'workspace.remote.pty_resize requires attachment_token.')
+    const cols = controlNumber(params.cols || params.columns, 0, 0, 1000)
+    const rows = controlNumber(params.rows, 0, 0, 1000)
+    if (!cols || !rows) return controlFail('REMOTE_PTY_SIZE_INVALID', 'workspace.remote.pty_resize requires positive cols and rows.')
+    return unsupportedRemoteControlPayload(method, 'aiopsterm does not expose control_compat remote PTY resize for detached bridge sessions; resize the visible SSH terminal surface instead.', {
+      session_id: sessionId,
+      attachment_id: attachmentId,
+      cols,
+      rows,
+      resized: false
+    })
+  }
+
   if (method.startsWith('workspace.remote.pty_')) {
     return unsupportedRemoteControlPayload(method, 'aiopsterm does not expose control_compat remote PTY bridge daemon sessions; use visible SSH terminal surfaces instead.', {
       session_id: controlText(params.sessionId || params.session_id),
-      attachment_id: controlText(params.attachmentId || params.attachment_id)
+      attachment_id: controlText(params.attachmentId || params.attachment_id),
+      closed: false,
+      detached: false
     })
   }
 

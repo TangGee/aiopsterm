@@ -106,7 +106,7 @@ The workspace remote compatibility slice maps control_compat remote-workspace co
 - `workspace.remote.disconnect`: disconnect the selected visible SSH terminal surface. `clear=true` also removes the stored remote metadata from that surface.
 - `workspace.remote.foreground_auth_ready`: record foreground authentication readiness metadata without echoing auth tokens into events.
 - `workspace.remote.pty_sessions`: list visible aiopsterm SSH terminal panels in a control_compat-compatible session shape.
-- `workspace.remote.pty_close`, `workspace.remote.pty_detach`, `workspace.remote.pty_bridge`, and `workspace.remote.pty_resize`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not expose control_compat's hidden remote PTY daemon.
+- `workspace.remote.pty_close`, `workspace.remote.pty_detach`, `workspace.remote.pty_bridge`, and `workspace.remote.pty_resize`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not expose control_compat's hidden remote PTY daemon. `pty_bridge` still validates `session_id` and returns an `attachment_id`; `pty_resize` validates `session_id`, `attachment_id`, `attachment_token`, `cols`, and `rows`, then returns `resized=false`.
 - `remote.tmux.sessions`, `remote.tmux.attach`, `remote.tmux.detach`, `remote.tmux.state`, `remote.tmux.mirror`, and `remote.tmux.window`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not implement control_compat remote tmux control-mode mirroring in the control socket.
 
 This slice deliberately keeps remote execution visible. It does not create hidden SSH control streams, remote daemons, or background tmux mirrors. Automation that needs a remote shell should configure/reconnect a visible SSH panel and then use normal terminal controls against that panel.
@@ -266,7 +266,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list-windows`, `current-window`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
 - `workspace env` and `workspace set-auto-title` map to `workspace.env` and `workspace.set_auto_title`.
 - `surface focus`, `surface create`, `pane create`, `surface report-tty`, `surface report-shell-state`, and `surface ports-kick` map to the matching structured `surface.*` / `pane.*` primitives.
-- `workspace remote status`, `configure`, `reconnect`, `disconnect`, `foreground-auth-ready`, and `pty-sessions` map to `workspace.remote.*` visible SSH panel controls.
+- `workspace remote status`, `configure`, `reconnect`, `disconnect`, `foreground-auth-ready`, `pty-sessions`, `pty-bridge`, and `pty-resize` map to `workspace.remote.*` visible SSH panel controls and structured remote PTY compatibility probes.
 - `remote tmux sessions`, `attach`, `detach`, `state`, `mirror`, and `window` map to `remote.tmux.*` compatibility placeholders.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.

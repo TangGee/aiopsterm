@@ -7980,7 +7980,13 @@ describe('AppShell', () => {
     expect(sessions).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ sessions: [expect.objectContaining({ surface_id: remotePanelId, connected: false })] }) }))
 
     const bridge = await invokeControlHandler({ id: 'remote-pty-bridge', method: 'workspace.remote.pty_bridge', params: { session_id: 'ssh-control-1' } })
-    expect(bridge).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, method: 'workspace.remote.pty_bridge' }) }))
+    expect(bridge).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, method: 'workspace.remote.pty_bridge', session_id: 'ssh-control-1', bridge_available: false }) }))
+    const resize = await invokeControlHandler({
+      id: 'remote-pty-resize',
+      method: 'workspace.remote.pty_resize',
+      params: { session_id: 'ssh-control-1', attachment_id: 'attach-1', attachment_token: 'token-1', cols: 100, rows: 40 }
+    })
+    expect(resize).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, method: 'workspace.remote.pty_resize', resized: false, cols: 100, rows: 40 }) }))
     const tmux = await invokeControlHandler({ id: 'remote-tmux', method: 'remote.tmux.sessions', params: { host: 'example.com' } })
     expect(tmux).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, method: 'remote.tmux.sessions' }) }))
 

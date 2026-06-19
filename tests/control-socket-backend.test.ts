@@ -615,12 +615,13 @@ describe('control socket backend', () => {
           }
         }
       }
-      if (request.method === 'workspace.remote.pty_bridge' || request.method === 'remote.tmux.sessions') {
+      if (request.method === 'workspace.remote.pty_bridge' || request.method === 'workspace.remote.pty_resize' || request.method === 'remote.tmux.sessions') {
         return {
           ok: true,
           data: {
             method: request.method,
             unsupported: true,
+            resized: request.method === 'workspace.remote.pty_resize' ? false : undefined,
             unsupportedReason: 'unsupported compatibility path',
             remote: {
               configured: true,
@@ -651,6 +652,9 @@ describe('control socket backend', () => {
     await expect(backend.__testing.handleControlRequest({ method: 'workspace.remote.pty_bridge', params: { session_id: 'ssh-1' } })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) })
     )
+    await expect(
+      backend.__testing.handleControlRequest({ method: 'workspace.remote.pty_resize', params: { session_id: 'ssh-1', attachment_id: 'attach-1', attachment_token: 'token-1', cols: 100, rows: 40 } })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, resized: false }) }))
     await expect(backend.__testing.handleControlRequest({ method: 'remote.tmux.sessions', params: { host: 'example.com', identity_file: '/tmp/key' } })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true }) })
     )
@@ -660,6 +664,7 @@ describe('control socket backend', () => {
       expect.objectContaining({ method: 'workspace.remote.reconnect', params: expect.objectContaining({ surfaceId: 'panel-remote' }) }),
       expect.objectContaining({ method: 'workspace.remote.disconnect', params: expect.objectContaining({ surfaceId: 'panel-remote', clear: true }) }),
       expect.objectContaining({ method: 'workspace.remote.pty_bridge', params: expect.objectContaining({ session_id: 'ssh-1' }) }),
+      expect.objectContaining({ method: 'workspace.remote.pty_resize', params: expect.objectContaining({ session_id: 'ssh-1', attachment_id: 'attach-1', cols: 100, rows: 40 }) }),
       expect.objectContaining({ method: 'remote.tmux.sessions', params: expect.objectContaining({ host: 'example.com', identity_file: '/tmp/key' }) })
     ])
     const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })

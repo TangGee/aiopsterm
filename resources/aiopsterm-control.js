@@ -97,6 +97,8 @@ Commands:
   mobile chat interrupt --session <id> [--hard]
   mobile chat answer --session <id> --option-index <n>
   mobile attach-ticket create [--scope mac] [--ttl-seconds <n>] [--workspace <id>] [--terminal <id>]
+  workspace remote pty-bridge --session <id> [--attachment <id>] [--require-existing] [--wait-for-ready]
+  workspace remote pty-resize --session <id> --attachment <id> --token <token> --cols <n> --rows <n>
   chat sessions dump
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
@@ -1373,6 +1375,41 @@ const workspaceRemoteMethodParams = (subcommand) => {
         session_id: readOption('--session') || readOption('--session-id') || readPositional(),
         attachment_id: readOption('--attachment') || readOption('--attachment-id'),
         attachment_token: readOption('--token') || readOption('--attachment-token')
+      }
+    }
+  }
+  if (subcommand === 'pty-bridge') {
+    const sessionId = readOption('--session') || readOption('--session-id') || readPositional()
+    const attachmentId = readOption('--attachment') || readOption('--attachment-id')
+    const requireExisting = hasFlag('--require-existing')
+    const waitForReady = hasFlag('--wait-for-ready')
+    return {
+      method: 'workspace.remote.pty_bridge',
+      params: {
+        ...workspaceRemoteTargetParams(),
+        session_id: sessionId,
+        attachment_id: attachmentId,
+        command: readOption('--command'),
+        requireExisting,
+        require_existing: requireExisting,
+        waitForReady,
+        wait_for_ready: waitForReady
+      }
+    }
+  }
+  if (subcommand === 'pty-resize') {
+    const sessionId = readOption('--session') || readOption('--session-id') || readPositional()
+    const cols = Number(readOption('--cols') || readOption('--columns') || 0)
+    const rows = Number(readOption('--rows') || 0)
+    return {
+      method: 'workspace.remote.pty_resize',
+      params: {
+        ...workspaceRemoteTargetParams(),
+        session_id: sessionId,
+        attachment_id: readOption('--attachment') || readOption('--attachment-id'),
+        attachment_token: readOption('--token') || readOption('--attachment-token'),
+        ...(Number.isFinite(cols) && cols > 0 ? { cols: Math.floor(cols), columns: Math.floor(cols) } : {}),
+        ...(Number.isFinite(rows) && rows > 0 ? { rows: Math.floor(rows) } : {})
       }
     }
   }
