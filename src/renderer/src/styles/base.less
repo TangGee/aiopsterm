@@ -7586,6 +7586,22 @@ code {
   background: color-mix(in srgb, var(--accent) 9%, var(--glass-surface));
 }
 
+.terminal-tab.ai-attention {
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
+  color: var(--text);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.terminal-tab.ai-attention::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .terminal-tab-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -8242,6 +8258,13 @@ code {
 
 .terminal-pane.active {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.terminal-pane.ai-attention {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .terminal-pane.drag-over {

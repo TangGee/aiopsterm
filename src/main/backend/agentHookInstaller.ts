@@ -33,6 +33,8 @@ type AgentHookDefinition = {
   configDirName: string
   configFileName: string
   configDirEnv?: string
+  configDirEnvSubpath?: string
+  flatHooks?: boolean
   events: HookCommandEvent[]
   configToml?: boolean
 }
@@ -88,6 +90,109 @@ const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 5 },
       { agentEvent: 'AskUserQuestion', hookEvent: 'AskUserQuestion', timeout: 5 }
     ]
+  },
+  {
+    source: 'cursor',
+    label: 'Cursor',
+    binaryName: 'cursor-agent',
+    configDirName: '.cursor',
+    configFileName: 'hooks.json',
+    flatHooks: true,
+    events: [
+      { agentEvent: 'beforeSubmitPrompt', hookEvent: 'prompt_submit', timeout: 5 },
+      { agentEvent: 'stop', hookEvent: 'stop', timeout: 5 },
+      { agentEvent: 'afterAgentResponse', hookEvent: 'stop', timeout: 5 },
+      { agentEvent: 'beforeShellExecution', hookEvent: 'pre_tool_use', timeout: 5 }
+    ]
+  },
+  {
+    source: 'gemini',
+    label: 'Gemini',
+    binaryName: 'gemini',
+    configDirName: '.gemini',
+    configFileName: 'settings.json',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 10 },
+      { agentEvent: 'BeforeAgent', hookEvent: 'prompt_submit', timeout: 10 },
+      { agentEvent: 'AfterAgent', hookEvent: 'stop', timeout: 10 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 10 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 10 }
+    ]
+  },
+  {
+    source: 'copilot',
+    label: 'Copilot',
+    binaryName: 'copilot',
+    configDirName: '.copilot',
+    configFileName: 'config.json',
+    configDirEnv: 'COPILOT_HOME',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 }
+    ]
+  },
+  {
+    source: 'grok',
+    label: 'Grok',
+    binaryName: 'grok',
+    configDirName: '.grok/hooks',
+    configFileName: 'aiopsterm-session.json',
+    configDirEnv: 'GROK_HOME',
+    configDirEnvSubpath: 'hooks',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 }
+    ]
+  },
+  {
+    source: 'codebuddy',
+    label: 'CodeBuddy',
+    binaryName: 'codebuddy',
+    configDirName: '.codebuddy',
+    configFileName: 'settings.json',
+    configDirEnv: 'CODEBUDDY_CONFIG_DIR',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 }
+    ]
+  },
+  {
+    source: 'factory',
+    label: 'Factory',
+    binaryName: 'droid',
+    configDirName: '.factory',
+    configFileName: 'settings.json',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 }
+    ]
+  },
+  {
+    source: 'qoder',
+    label: 'Qoder',
+    binaryName: 'qodercli',
+    configDirName: '.qoder',
+    configFileName: 'settings.json',
+    configDirEnv: 'QODER_CONFIG_DIR',
+    events: [
+      { agentEvent: 'SessionStart', hookEvent: 'SessionStart', timeout: 5 },
+      { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
+      { agentEvent: 'SessionEnd', hookEvent: 'SessionEnd', timeout: 5 },
+      { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 }
+    ]
   }
 ]
 
@@ -115,9 +220,16 @@ const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() 
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
 const normalizeSource = (value: unknown): AgentHookInstallerSource | null => {
-  const raw = cleanText(value).toLowerCase()
+  const raw = cleanText(value).toLowerCase().replace(/_/g, '-')
   if (raw === 'codex') return 'codex'
   if (raw === 'claude' || raw === 'claude-code' || raw === 'claude_code') return 'claude-code'
+  if (raw === 'cursor' || raw === 'cursor-agent') return 'cursor'
+  if (raw === 'gemini' || raw === 'gemini-cli') return 'gemini'
+  if (raw === 'copilot' || raw === 'github-copilot') return 'copilot'
+  if (raw === 'grok') return 'grok'
+  if (raw === 'codebuddy') return 'codebuddy'
+  if (raw === 'factory') return 'factory'
+  if (raw === 'qoder') return 'qoder'
   return null
 }
 
@@ -125,7 +237,10 @@ const definitionFor = (source: AgentHookInstallerSource) => hookDefinitions.find
 
 const configDirFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = getEnv()) => {
   const override = definition.configDirEnv ? cleanText(env[definition.configDirEnv]) : ''
-  if (override) return isAbsolute(override) ? override : join(getHomeDir(), override)
+  if (override) {
+    const resolved = isAbsolute(override) ? override : join(getHomeDir(), override)
+    return definition.configDirEnvSubpath ? join(resolved, definition.configDirEnvSubpath) : resolved
+  }
   return join(getHomeDir(), definition.configDirName)
 }
 
@@ -165,7 +280,7 @@ const hookScriptPath = () => cleanText(runtimeConfig.getAgentHookScriptPath?.())
 export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath = hookScriptPath()) => {
   const script = cleanText(scriptPath)
   if (!script) throw new AgentHookInstallerError('AGENT_HOOK_SCRIPT_MISSING', 'Agent hook helper path is unavailable.')
-  const normalizedSource = source === 'claude-code' ? 'claude-code' : 'codex'
+  const normalizedSource = normalizeSource(source) || source
   const dispatch = [
     `AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}`,
     'node',
@@ -204,6 +319,11 @@ const groupedHookEntry = (definition: AgentHookDefinition, event: HookCommandEve
   hooks: [hookEntry(definition, event, scriptPath)]
 })
 
+const flatHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
+  timeout: event.timeout
+})
+
 const removeOwnedHooksFromGroups = (value: unknown) => {
   if (!Array.isArray(value)) return { value, removed: 0 }
   let removed = 0
@@ -233,6 +353,17 @@ const removeOwnedHooksFromGroups = (value: unknown) => {
   return { value: groups, removed }
 }
 
+const removeOwnedHooksFromFlatEntries = (value: unknown) => {
+  if (!Array.isArray(value)) return { value, removed: 0 }
+  let removed = 0
+  const entries = value.filter((entry) => {
+    const owned = isPlainObject(entry) && isOwnedHookCommand(entry.command)
+    if (owned) removed += 1
+    return !owned
+  })
+  return { value: entries, removed }
+}
+
 export const mergeAgentHookJson = (
   existing: Record<string, unknown>,
   definition: AgentHookDefinition,
@@ -245,7 +376,7 @@ export const mergeAgentHookJson = (
   let removed = 0
 
   for (const eventName of Object.keys(hooks)) {
-    const result = removeOwnedHooksFromGroups(hooks[eventName])
+    const result = definition.flatHooks ? removeOwnedHooksFromFlatEntries(hooks[eventName]) : removeOwnedHooksFromGroups(hooks[eventName])
     removed += result.removed
     if (Array.isArray(result.value) && result.value.length === 0) {
       delete hooks[eventName]
@@ -257,7 +388,7 @@ export const mergeAgentHookJson = (
   if (install) {
     for (const event of definition.events) {
       const existingGroups = Array.isArray(hooks[event.agentEvent]) ? (hooks[event.agentEvent] as unknown[]) : []
-      hooks[event.agentEvent] = [...existingGroups, groupedHookEntry(definition, event, scriptPath)]
+      hooks[event.agentEvent] = [...existingGroups, definition.flatHooks ? flatHookEntry(definition, event, scriptPath) : groupedHookEntry(definition, event, scriptPath)]
     }
   }
 
@@ -516,7 +647,7 @@ const operationErrorResult = (error: unknown): AgentHookInstallerOperationResult
 export const installAgentHook = async (input: AgentHookInstallerOperationInput): Promise<AgentHookInstallerOperationResult> => {
   try {
     const source = normalizeSource(input?.source)
-    if (!source) throw new AgentHookInstallerError('AGENT_HOOK_SOURCE_INVALID', 'Agent hook source must be codex or claude-code.')
+    if (!source) throw new AgentHookInstallerError('AGENT_HOOK_SOURCE_INVALID', 'Agent hook source is not supported.')
     const definition = definitionFor(source)
     if (!definition) throw new AgentHookInstallerError('AGENT_HOOK_SOURCE_UNSUPPORTED', `Agent hook source ${source} is not supported.`)
     return await installDefinition(definition)
@@ -528,7 +659,7 @@ export const installAgentHook = async (input: AgentHookInstallerOperationInput):
 export const uninstallAgentHook = async (input: AgentHookInstallerOperationInput): Promise<AgentHookInstallerOperationResult> => {
   try {
     const source = normalizeSource(input?.source)
-    if (!source) throw new AgentHookInstallerError('AGENT_HOOK_SOURCE_INVALID', 'Agent hook source must be codex or claude-code.')
+    if (!source) throw new AgentHookInstallerError('AGENT_HOOK_SOURCE_INVALID', 'Agent hook source is not supported.')
     const definition = definitionFor(source)
     if (!definition) throw new AgentHookInstallerError('AGENT_HOOK_SOURCE_UNSUPPORTED', `Agent hook source ${source} is not supported.`)
     return await uninstallDefinition(definition)

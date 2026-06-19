@@ -548,7 +548,24 @@ export type AiopsMutationResult<T> = {
   errorMessage?: string
 }
 
-export type AiAgentSessionSource = 'codex' | 'claude-code'
+export type AiAgentSessionSource =
+  | 'codex'
+  | 'claude-code'
+  | 'cursor'
+  | 'gemini'
+  | 'copilot'
+  | 'grok'
+  | 'opencode'
+  | 'codebuddy'
+  | 'factory'
+  | 'qoder'
+  | 'antigravity'
+  | 'kiro'
+  | 'hermes-agent'
+  | 'rovodev'
+  | 'amp'
+  | 'pi'
+  | 'omp'
 
 export type AiAgentSessionEventName =
   | 'session_start'
@@ -616,7 +633,96 @@ export type AiAgentSessionEvent = {
 
 export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>
 
-export type AgentHookInstallerSource = 'codex' | 'claude-code'
+export type ManagedAiSessionState = 'idle' | 'working' | 'needsInput' | 'ended' | 'unknown'
+
+export type ManagedAiSessionDecisionKind = 'allow' | 'deny' | 'reply' | 'handled'
+
+export type ManagedAiSessionTimelineEvent = AiAgentSessionEvent & {
+  id: string
+  raw?: Record<string, unknown>
+}
+
+export type ManagedAiSessionDecision = {
+  id: string
+  kind: ManagedAiSessionDecisionKind
+  message?: string
+  createdAt: number
+}
+
+export type ManagedAiSessionRecord = {
+  id: string
+  source: AiAgentSessionSource
+  title: string
+  summary: string
+  state: ManagedAiSessionState
+  lastEvent: AiAgentSessionEventName
+  lastActivityAt: number
+  createdAt: number
+  updatedAt: number
+  handledAt?: number
+  autoTitle?: string
+  userTitle?: string
+  panelId?: string
+  terminalSessionId?: string
+  workspaceId?: string
+  cwd?: string
+  transcriptPath?: string
+  events: ManagedAiSessionTimelineEvent[]
+  decisions: ManagedAiSessionDecision[]
+}
+
+export type ManagedAiSessionSnapshot = {
+  sessions: ManagedAiSessionRecord[]
+}
+
+export type ManagedAiSessionListResult = AiopsMutationResult<ManagedAiSessionSnapshot>
+
+export type ManagedAiSessionReplyInput = {
+  source: AiAgentSessionSource
+  sessionId: string
+  kind: ManagedAiSessionDecisionKind
+  message?: string
+}
+
+export type ManagedAiSessionRenameInput = {
+  source: AiAgentSessionSource
+  sessionId: string
+  title: string
+}
+
+export type ManagedAiSessionClearInput = {
+  source: AiAgentSessionSource
+  sessionId: string
+}
+
+export type ManagedAiSessionBulkOperation = 'mark-handled' | 'clear-ended' | 'clear-all'
+
+export type ManagedAiSessionBulkInput = {
+  operation: ManagedAiSessionBulkOperation
+  sources?: AiAgentSessionSource[]
+  sessionIds?: string[]
+}
+
+export type ManagedAiSessionMutationResult = AiopsMutationResult<{
+  session?: ManagedAiSessionRecord
+  snapshot: ManagedAiSessionSnapshot
+}>
+
+export type ManagedAiSessionBulkResult = AiopsMutationResult<{
+  changed: number
+  snapshot: ManagedAiSessionSnapshot
+}>
+
+export type AgentHookInstallerSource =
+  | 'codex'
+  | 'claude-code'
+  | 'cursor'
+  | 'gemini'
+  | 'copilot'
+  | 'grok'
+  | 'codebuddy'
+  | 'factory'
+  | 'qoder'
 
 export type AgentHookInstallerStatus = {
   source: AgentHookInstallerSource
@@ -3408,6 +3514,11 @@ export type AiopsPreloadApi = {
   listAgentHookInstallers: () => Promise<AgentHookInstallerListResult>
   installAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   uninstallAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
+  listManagedAiSessions: () => Promise<ManagedAiSessionListResult>
+  replyManagedAiSession: (input: ManagedAiSessionReplyInput) => Promise<ManagedAiSessionMutationResult>
+  renameManagedAiSession: (input: ManagedAiSessionRenameInput) => Promise<ManagedAiSessionMutationResult>
+  clearManagedAiSession: (input: ManagedAiSessionClearInput) => Promise<ManagedAiSessionMutationResult>
+  bulkManagedAiSessions: (input: ManagedAiSessionBulkInput) => Promise<ManagedAiSessionBulkResult>
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void
   cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>

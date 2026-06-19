@@ -456,6 +456,7 @@ const startResize = (side: ResizeSide, event: MouseEvent) => {
 onMounted(() => {
   workspace.installShortcutRuntime()
   workspace.hydrateConfig()
+  void workspace.refreshManagedAiSessions({ silent: true })
   stopDeepLink = window.aiops?.onDeepLink?.((payload) => {
     applyDeepLinkPayload(payload)
   })

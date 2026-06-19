@@ -2,7 +2,7 @@
 
 aiopsterm tracks coding-agent sessions that run inside aiopsterm-created local shell terminals.
 
-This is separate from the embedded right-side Codex panel. The first implementation covers visible local shell terminals opened through aiopsterm's workspace/assets flows; external OS terminals and SSH remote shells are not tracked yet.
+This is separate from the embedded right-side Codex panel. The implementation covers visible local shell terminals opened through aiopsterm's workspace/assets flows; external OS terminals and SSH remote shells are not tracked yet.
 
 ## Managed Terminal Context
 
@@ -30,13 +30,15 @@ The helper reads hook JSON from stdin, adds the managed terminal identifiers, po
 
 ## Hook Installer
 
-Settings -> AI Preferences includes an `Agent Hook 安装器` section for Codex and Claude Code.
+Settings -> AI Preferences includes an `Agent Hook 安装器` section.
 
 - Codex installation merges aiopsterm-owned commands into `~/.codex/hooks.json` and enables the Codex hooks feature in `~/.codex/config.toml` inside an aiopsterm-marked block.
 - Claude Code installation merges aiopsterm-owned commands into `~/.claude/settings.json`.
+- JSON-based installers are also available for Cursor, Gemini, Copilot, Grok, CodeBuddy, Factory, and Qoder. They follow the target agent's flat or nested hook JSON shape and still only insert aiopsterm-owned commands.
 - Install/reinstall first removes only commands containing the aiopsterm marker, then appends the current helper command.
 - Uninstall removes only aiopsterm-owned hook commands and preserves user hooks in the same event group.
 - Hook commands print `{}` and exit zero outside an aiopsterm-managed local terminal, so external terminals keep their native Codex/Claude behavior.
+- Plugin/YAML-style agents such as OpenCode, Amp, Pi, OMP, Antigravity, Kiro, Hermes Agent, and Rovo Dev are recognized as event sources when they report compatible events, but aiopsterm does not yet install their custom plugin/YAML hook files automatically.
 
 ## Event Shape
 
@@ -44,7 +46,7 @@ The socket accepts one JSON object per line. The renderer also exposes the same 
 
 Required fields:
 
-- `source`: `codex`, `claude`, or `claude-code`
+- `source`: `codex`, `claude-code`, or another supported source such as `cursor`, `gemini`, `copilot`, `grok`, `opencode`, `codebuddy`, `factory`, `qoder`, `antigravity`, `kiro`, `hermes-agent`, `rovodev`, `amp`, `pi`, or `omp`
 - `sessionId` or `session_id`
 - `event`, `hookEventName`, or `hook_event_name`
 
@@ -63,11 +65,48 @@ Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `project_dir`, `t
 
 When hooks omit a display title, aiopsterm derives one from project/workspace fields or the basename of `cwd`/`project_dir`, for example `Codex · api-service` or `Claude Code · release-api`. Claude Code `AskUserQuestion` payloads can also derive the row summary from `tool_input.questions[0].question`, and tool payloads with `tool_name` plus `tool_input.command` are shown as `tool: command`.
 
+## Persistent Session Store
+
+The main process keeps the managed-session fact store in the app user data directory:
+
+```text
+agent-sessions/managed-ai-sessions.json
+```
+
+The store is capped to 200 sessions, 200 timeline events per session, and 40 local decisions per session. Each session record includes:
+
+- source, session id, state, title, summary, cwd, transcript path, terminal panel id, and terminal session id
+- a chronological event timeline with compact raw payload previews
+- local decisions such as `allow`, `deny`, `reply`, or `handled`
+- `autoTitle` and `userTitle` fields so automatic names do not overwrite manual names
+
+The renderer hydrates from this store on startup through `listManagedAiSessions()`. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
+
+## Actions And Bulk API
+
+The preload boundary exposes:
+
+- `listManagedAiSessions()`
+- `replyManagedAiSession({ source, sessionId, kind, message })`
+- `renameManagedAiSession({ source, sessionId, title })`
+- `clearManagedAiSession({ source, sessionId })`
+- `bulkManagedAiSessions({ operation })`
+
+Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. These actions are aiopsterm management records. They do not impersonate the agent's native blocking approval protocol; Codex hook approvals remain telemetry/visibility unless the agent itself asks through its native approval path.
+
+## Auto Title
+
+On `stop`, aiopsterm can derive a short 2-5 word title from the current turn summary when it is useful. Generic completion text such as `Turn complete` and tool summaries such as `shell: ...` are ignored, and manual titles are never overwritten.
+
 ## UI Behavior
 
 - The `AI 会话` module is a left-side manager, like workspace/assets navigation. It lists managed sessions by state while the shared main work area remains the terminal workspace.
 - Session rows show the project title, state, latest summary, and project path when the hook payload provides one.
+- Selecting a row opens details inside the left AI session panel. The shared main work area remains the terminal workspace.
+- Details show metadata, a timeline of recent events, local decisions, manual title editing, reply notes, clear actions, and quick focus back to the owning terminal.
 - `permission_request`, `question`, and `notification` create top-bar bell entries.
+- The main process also emits a desktop notification for `permission_request`, `question`, and `notification` events when Electron notifications are supported.
 - Clicking the bell focuses the AI session manager and selects the owning terminal when `panelId` or `terminalSessionId` is known. It does not mark the session handled.
 - The AI session row stays selected until the user explicitly marks that pending item handled. Handling clears the unread count and lets the next bell click move to the next pending managed session.
+- The owning terminal tab and pane receive a subtle highlight while a managed AI session needs attention.
 - `stop`, `session_end`, and terminal close/error events clear pending attention for that session.

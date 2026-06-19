@@ -12,7 +12,7 @@
         v-for="panel in visibleTerminalTabPanels"
         :key="panel.id"
         class="terminal-tab"
-        :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id }"
+        :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel) }"
         role="button"
         tabindex="0"
         :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
@@ -224,7 +224,7 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'drag-over': paneDragOverPanelId === panel.id }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel) }"
         :style="style"
         @click="activatePanel(panel.id)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
@@ -586,6 +586,8 @@ const terminalStatusLabel = (panel: TerminalPanel) => {
   if (panel.status === 'closed') return '已断开'
   return '已连接'
 }
+const panelNeedsAiAttention = (panel: TerminalPanel) =>
+  workspace.managedAiSessionNeedsAttentionForPanel(panel.id) || Boolean(panel.sessionId && workspace.managedAiSessionNeedsAttentionForPanel(panel.sessionId))
 const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
 const draggedTerminalPanelId = ref('')
 const tabDragOverPanelId = ref('')

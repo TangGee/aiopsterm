@@ -13,6 +13,13 @@
         >
           <Settings />
         </button>
+        <button
+          class="ai-sessions-settings"
+          title="刷新 AI 会话"
+          @click="workspace.refreshManagedAiSessions()"
+        >
+          <RefreshCw />
+        </button>
         <span class="ai-sessions-count">{{ workspace.managedAiNeedsInputSessions.length }}</span>
       </div>
     </header>
@@ -36,63 +43,194 @@
       </button>
     </div>
 
-    <div class="ai-sessions-list">
-      <div
-        v-for="session in visibleSessions"
-        :key="`${session.source}:${session.id}`"
-        class="ai-session-row"
-        role="button"
-        tabindex="0"
-        :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-        @click="selectSession(session.id)"
-        @dblclick="workspace.focusManagedAiSession(session.id)"
-        @keydown.enter.prevent="selectSession(session.id)"
-        @keydown.space.prevent="selectSession(session.id)"
-      >
-        <span :class="`ai-session-state state-${session.state}`"></span>
-        <span>
-          <strong>{{ session.title }}</strong>
-          <small>{{ session.source }} · {{ stateLabel(session.state) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
-          <small
-            v-if="session.cwd"
-            class="ai-session-cwd"
-          >{{ session.cwd }}</small>
-        </span>
-        <button
-          v-if="session.state === 'needsInput'"
-          class="ai-session-handle"
-          title="标记已处理"
-          @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+    <div
+      v-if="workspace.managedAiSessionsError"
+      class="ai-sessions-error"
+    >
+      {{ workspace.managedAiSessionsError }}
+    </div>
+
+    <div class="ai-sessions-bulk">
+      <button @click="workspace.bulkManagedAiSessions({ operation: 'mark-handled' })">
+        <CheckCheck />
+        全部已处理
+      </button>
+      <button @click="workspace.bulkManagedAiSessions({ operation: 'clear-ended' })">
+        <ArchiveX />
+        清理已结束
+      </button>
+    </div>
+
+    <div class="ai-sessions-content">
+      <div class="ai-sessions-list">
+        <div
+          v-for="session in visibleSessions"
+          :key="`${session.source}:${session.id}`"
+          class="ai-session-row"
+          role="button"
+          tabindex="0"
+          :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
+          @click="selectSession(session.id)"
+          @dblclick="workspace.focusManagedAiSession(session.id)"
+          @keydown.enter.prevent="selectSession(session.id)"
+          @keydown.space.prevent="selectSession(session.id)"
         >
-          <Check />
-        </button>
-      </div>
-      <div
-        v-if="visibleSessions.length === 0"
-        class="ai-sessions-empty"
-      >
-        <p>暂无 AI 会话</p>
-        <small>安装并启用 Agent Hook 后，通过 aiopsterm 本地连接启动的 Codex / Claude Code 会显示在这里。</small>
-        <button
-          class="ai-sessions-empty-action"
-          @click="workspace.openAiSessionSettings"
+          <span :class="`ai-session-state state-${session.state}`"></span>
+          <span>
+            <strong>{{ session.title }}</strong>
+            <small>{{ sourceLabel(session.source) }} · {{ stateLabel(session.state) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
+            <small
+              v-if="session.cwd"
+              class="ai-session-cwd"
+            >{{ session.cwd }}</small>
+          </span>
+          <button
+            v-if="session.state === 'needsInput'"
+            class="ai-session-handle"
+            title="标记已处理"
+            @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+          >
+            <Check />
+          </button>
+        </div>
+        <div
+          v-if="visibleSessions.length === 0"
+          class="ai-sessions-empty"
         >
-          <Settings />
-          打开 AI 设置
-        </button>
+          <p>暂无 AI 会话</p>
+          <small>安装并启用 Agent Hook 后，通过 aiopsterm 本地连接启动的 Codex / Claude Code / Cursor / Gemini 等会显示在这里。</small>
+          <button
+            class="ai-sessions-empty-action"
+            @click="workspace.openAiSessionSettings"
+          >
+            <Settings />
+            打开 AI 设置
+          </button>
+        </div>
       </div>
+
+      <aside
+        v-if="selectedSession"
+        class="ai-session-detail"
+      >
+        <header>
+          <div>
+            <p>{{ sourceLabel(selectedSession.source) }} · {{ stateLabel(selectedSession.state) }}</p>
+            <input
+              v-model="renameTitle"
+              @keydown.enter.prevent="renameSelectedSession"
+              @blur="renameSelectedSession"
+            />
+          </div>
+          <button
+            title="定位终端"
+            @click="workspace.focusManagedAiSession(selectedSession.id)"
+          >
+            <LocateFixed />
+          </button>
+        </header>
+
+        <dl class="ai-session-meta">
+          <div>
+            <dt>路径</dt>
+            <dd>{{ selectedSession.cwd || '-' }}</dd>
+          </div>
+          <div>
+            <dt>会话</dt>
+            <dd>{{ selectedSession.id }}</dd>
+          </div>
+          <div v-if="selectedSession.transcriptPath">
+            <dt>记录</dt>
+            <dd>{{ selectedSession.transcriptPath }}</dd>
+          </div>
+        </dl>
+
+        <div
+          v-if="selectedSession.state === 'needsInput'"
+          class="ai-session-actions"
+        >
+          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'allow')">
+            <Check />
+            允许
+          </button>
+          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'deny')">
+            <Ban />
+            拒绝
+          </button>
+          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'handled')">
+            <CheckCheck />
+            已处理
+          </button>
+        </div>
+
+        <div class="ai-session-reply">
+          <textarea
+            v-model="replyText"
+            rows="2"
+            placeholder="记录处理说明"
+          ></textarea>
+          <button
+            :disabled="replyText.trim() === ''"
+            @click="submitReply"
+          >
+            <Send />
+          </button>
+        </div>
+
+        <section class="ai-session-timeline">
+          <h3>事件流</h3>
+          <div
+            v-for="event in selectedSession.events.slice().reverse()"
+            :key="event.id"
+            class="ai-session-event"
+          >
+            <span :class="`ai-session-state state-${eventState(event.event)}`"></span>
+            <div>
+              <strong>{{ eventLabel(event.event) }}</strong>
+              <small>{{ formatTime(event.receivedAt) }}</small>
+              <p v-if="event.summary">{{ event.summary }}</p>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-if="selectedSession.decisions.length"
+          class="ai-session-decisions"
+        >
+          <h3>处理记录</h3>
+          <div
+            v-for="decision in selectedSession.decisions.slice().reverse()"
+            :key="decision.id"
+          >
+            <strong>{{ decisionLabel(decision.kind) }}</strong>
+            <small>{{ formatTime(decision.createdAt) }}</small>
+            <p v-if="decision.message">{{ decision.message }}</p>
+          </div>
+        </section>
+
+        <button
+          class="ai-session-clear"
+          @click="workspace.clearManagedAiSession(selectedSession.source, selectedSession.id)"
+        >
+          <Trash2 />
+          清理此会话
+        </button>
+      </aside>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Check, Search, Settings } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { ArchiveX, Ban, Check, CheckCheck, LocateFixed, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-vue-next'
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
+import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const query = ref('')
 const filter = ref<'all' | ManagedAiSessionState>('all')
+const replyText = ref('')
+const renameTitle = ref('')
 const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'needsInput', label: '待处理' },
@@ -101,12 +239,60 @@ const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
   { key: 'ended', label: '已结束' }
 ]
 
+const sourceLabel = (source: AiAgentSessionSource) => {
+  const labels: Record<AiAgentSessionSource, string> = {
+    'claude-code': 'Claude Code',
+    antigravity: 'Antigravity',
+    amp: 'Amp',
+    codebuddy: 'CodeBuddy',
+    codex: 'Codex',
+    copilot: 'Copilot',
+    cursor: 'Cursor',
+    factory: 'Factory',
+    gemini: 'Gemini',
+    grok: 'Grok',
+    'hermes-agent': 'Hermes Agent',
+    kiro: 'Kiro',
+    omp: 'OMP',
+    opencode: 'OpenCode',
+    pi: 'Pi',
+    qoder: 'Qoder',
+    rovodev: 'Rovo Dev'
+  }
+  return labels[source] || source
+}
+
 const stateLabel = (state: ManagedAiSessionState) => {
   if (state === 'needsInput') return '待处理'
   if (state === 'working') return '运行中'
   if (state === 'idle') return '空闲'
   if (state === 'ended') return '已结束'
   return '未知'
+}
+
+const eventLabel = (event: AiAgentSessionEventName) => {
+  if (event === 'session_start') return '会话开始'
+  if (event === 'prompt_submit') return '提交提示'
+  if (event === 'pre_tool_use') return '工具调用'
+  if (event === 'permission_request') return '权限请求'
+  if (event === 'question') return '提问'
+  if (event === 'notification') return '通知'
+  if (event === 'stop') return '轮次结束'
+  return '会话结束'
+}
+
+const eventState = (event: AiAgentSessionEventName): ManagedAiSessionState => {
+  if (event === 'permission_request' || event === 'question' || event === 'notification') return 'needsInput'
+  if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
+  if (event === 'session_end') return 'ended'
+  return 'idle'
+}
+
+const decisionLabel = (kind: string) => {
+  if (kind === 'allow') return '允许'
+  if (kind === 'deny') return '拒绝'
+  if (kind === 'reply') return '回复'
+  return '已处理'
 }
 
 const sessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
@@ -120,9 +306,42 @@ const visibleSessions = computed(() => {
   })
 })
 
+const selectedSession = computed(() => workspace.selectedManagedAiSession || visibleSessions.value[0] || null)
+
+watch(
+  selectedSession,
+  (session) => {
+    renameTitle.value = session?.title || ''
+    replyText.value = ''
+  },
+  { immediate: true }
+)
+
 const selectSession = (sessionId: string) => {
   workspace.focusManagedAiSession(sessionId)
 }
+
+const renameSelectedSession = () => {
+  const session = selectedSession.value
+  const title = renameTitle.value.trim()
+  if (!session || !title || title === session.title) return
+  void workspace.renameManagedAiSession(session.source, session.id, title)
+}
+
+const submitReply = async () => {
+  const session = selectedSession.value
+  const message = replyText.value.trim()
+  if (!session || !message) return
+  const ok = await workspace.replyManagedAiSession(session.source, session.id, 'reply', message)
+  if (ok) replyText.value = ''
+}
+
+const formatTime = (timestamp: number) =>
+  new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(new Date(timestamp))
 </script>
 
 <style scoped>
@@ -145,13 +364,17 @@ const selectSession = (sessionId: string) => {
   font-weight: 700;
 }
 
-.ai-sessions-header-actions {
+.ai-sessions-header-actions,
+.ai-sessions-bulk,
+.ai-session-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
-.ai-sessions-settings {
+.ai-sessions-settings,
+.ai-session-detail header button,
+.ai-session-reply button {
   width: 28px;
   height: 28px;
   border: 1px solid var(--border-color);
@@ -163,12 +386,18 @@ const selectSession = (sessionId: string) => {
   color: var(--text-secondary);
 }
 
-.ai-sessions-settings:hover {
+.ai-sessions-settings:hover,
+.ai-session-detail header button:hover,
+.ai-session-reply button:hover:not(:disabled) {
   color: var(--text-primary);
   border-color: var(--accent-color);
 }
 
-.ai-sessions-settings svg {
+.ai-sessions-settings svg,
+.ai-session-detail button svg,
+.ai-session-reply button svg,
+.ai-sessions-bulk svg,
+.ai-session-actions svg {
   width: 15px;
   height: 15px;
 }
@@ -180,7 +409,10 @@ const selectSession = (sessionId: string) => {
   overflow-x: auto;
 }
 
-.ai-sessions-filter button {
+.ai-sessions-filter button,
+.ai-sessions-bulk button,
+.ai-session-actions button,
+.ai-session-clear {
   border: 1px solid var(--border-color);
   background: var(--surface-2);
   color: var(--text-secondary);
@@ -194,10 +426,33 @@ const selectSession = (sessionId: string) => {
   border-color: var(--accent-color);
 }
 
-.ai-sessions-list {
+.ai-sessions-error {
+  margin: 0 12px 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.ai-sessions-bulk {
+  padding: 0 12px 8px;
+  overflow-x: auto;
+}
+
+.ai-sessions-bulk button,
+.ai-session-actions button,
+.ai-session-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-sessions-content {
   min-height: 0;
   overflow: auto;
   padding: 6px 8px 12px;
+}
+
+.ai-sessions-list {
+  min-height: 0;
 }
 
 .ai-session-row {
@@ -315,12 +570,140 @@ const selectSession = (sessionId: string) => {
   padding: 6px 9px;
 }
 
-.ai-sessions-empty-action:hover {
+.ai-session-detail {
+  margin-top: 10px;
+  border-top: 1px solid var(--border-color);
+  padding: 10px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-session-detail header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-session-detail header p,
+.ai-session-meta,
+.ai-session-event p,
+.ai-session-decisions p {
+  margin: 0;
+}
+
+.ai-session-detail header p,
+.ai-session-event small,
+.ai-session-decisions small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-session-detail input,
+.ai-session-reply textarea {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  padding: 6px 7px;
+  outline: 0;
+}
+
+.ai-session-detail input:focus,
+.ai-session-reply textarea:focus {
   border-color: var(--accent-color);
 }
 
-.ai-sessions-empty-action svg {
-  width: 14px;
-  height: 14px;
+.ai-session-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-session-meta div {
+  min-width: 0;
+}
+
+.ai-session-meta dt {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-session-meta dd {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-session-actions {
+  overflow-x: auto;
+}
+
+.ai-session-reply {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.ai-session-reply textarea {
+  resize: vertical;
+  min-height: 44px;
+  max-height: 120px;
+}
+
+.ai-session-reply button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.ai-session-timeline,
+.ai-session-decisions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-session-timeline h3,
+.ai-session-decisions h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ai-session-event {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 6px 0;
+}
+
+.ai-session-event strong,
+.ai-session-decisions strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.ai-session-event p,
+.ai-session-decisions p {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ai-session-decisions > div {
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  padding: 7px;
+  background: var(--surface-2);
+}
+
+.ai-session-clear {
+  justify-content: center;
+  color: var(--danger);
 }
 </style>

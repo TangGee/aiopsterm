@@ -91,6 +91,15 @@ const baseNameFromPath = (value) => {
 const sourceLabel = (source) => {
   if (source === 'claude-code' || source === 'claude') return 'Claude Code'
   if (source === 'codex') return 'Codex'
+  if (source === 'codebuddy') return 'CodeBuddy'
+  if (source === 'copilot') return 'Copilot'
+  if (source === 'cursor') return 'Cursor'
+  if (source === 'gemini') return 'Gemini'
+  if (source === 'grok') return 'Grok'
+  if (source === 'opencode') return 'OpenCode'
+  if (source === 'hermes-agent' || source === 'hermes') return 'Hermes Agent'
+  if (source === 'rovodev' || source === 'rovo') return 'Rovo Dev'
+  if (source === 'qoder') return 'Qoder'
   return source
 }
 

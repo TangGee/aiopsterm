@@ -5838,6 +5838,45 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     })),
+    listManagedAiSessions: vi.fn(async () => ({
+      ok: true,
+      data: {
+        sessions: []
+      }
+    })),
+    replyManagedAiSession: vi.fn(async () => ({
+      ok: true,
+      data: {
+        snapshot: {
+          sessions: []
+        }
+      }
+    })),
+    renameManagedAiSession: vi.fn(async () => ({
+      ok: true,
+      data: {
+        snapshot: {
+          sessions: []
+        }
+      }
+    })),
+    clearManagedAiSession: vi.fn(async () => ({
+      ok: true,
+      data: {
+        snapshot: {
+          sessions: []
+        }
+      }
+    })),
+    bulkManagedAiSessions: vi.fn(async () => ({
+      ok: true,
+      data: {
+        changed: 0,
+        snapshot: {
+          sessions: []
+        }
+      }
+    })),
     createChatConversation: vi.fn(async () => {
       const conversation: TestChatConversationRecord = {
         id: `conv-test-${Date.now()}-${chatHistoryStateMock.conversations.length}`,

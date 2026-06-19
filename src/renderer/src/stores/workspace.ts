@@ -101,6 +101,14 @@ import type {
   AgentHookInstallerSnapshot,
   AgentHookInstallerStatus,
   AgentHookInstallerSource,
+  ManagedAiSessionBulkInput,
+  ManagedAiSessionBulkResult,
+  ManagedAiSessionDecision,
+  ManagedAiSessionListResult,
+  ManagedAiSessionMutationResult,
+  ManagedAiSessionRecord,
+  ManagedAiSessionSnapshot,
+  ManagedAiSessionTimelineEvent,
   AiChatChipContentPart,
   AiChatChipRef,
   AiCommandCatalogOption,
@@ -252,9 +260,11 @@ type AppUpdateDownloadData = NonNullable<AppUpdateDownloadResult['data']>
 type AppUpdateInstallData = NonNullable<AppUpdateInstallResult['data']>
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
+type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationResult['data']>
+type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
-export type AiAttentionSource = 'codex' | 'classic-chat' | 'claude-code'
+export type AiAttentionSource = AiAgentSessionSource | 'classic-chat'
 export type AiAttentionItem = {
   id: string
   source: AiAttentionSource
@@ -276,21 +286,8 @@ export type AiAttentionFocusRequest = {
   sequence: number
   item: AiAttentionItem | null
 }
-export type ManagedAiSessionState = 'idle' | 'working' | 'needsInput' | 'ended' | 'unknown'
-export type ManagedAiSession = {
-  id: string
-  source: AiAgentSessionSource
-  title: string
-  summary: string
-  state: ManagedAiSessionState
-  lastEvent: AiAgentSessionEventName
-  lastActivityAt: number
-  panelId?: string
-  terminalSessionId?: string
-  workspaceId?: string
-  cwd?: string
-  transcriptPath?: string
-}
+export type ManagedAiSessionState = ManagedAiSessionRecord['state']
+export type ManagedAiSession = ManagedAiSessionRecord
 
 export const layoutWidthLimits: {
   min: number
@@ -4070,7 +4067,89 @@ const isSshTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo 
   )
 }
 
-const isAgentHookInstallerSource = (value: unknown): value is AgentHookInstallerSource => value === 'codex' || value === 'claude-code'
+const isAgentHookInstallerSource = (value: unknown): value is AgentHookInstallerSource =>
+  value === 'codex' ||
+  value === 'claude-code' ||
+  value === 'cursor' ||
+  value === 'gemini' ||
+  value === 'copilot' ||
+  value === 'grok' ||
+  value === 'codebuddy' ||
+  value === 'factory' ||
+  value === 'qoder'
+
+const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource =>
+  value === 'codex' ||
+  value === 'claude-code' ||
+  value === 'cursor' ||
+  value === 'gemini' ||
+  value === 'copilot' ||
+  value === 'grok' ||
+  value === 'opencode' ||
+  value === 'codebuddy' ||
+  value === 'factory' ||
+  value === 'qoder' ||
+  value === 'antigravity' ||
+  value === 'kiro' ||
+  value === 'hermes-agent' ||
+  value === 'rovodev' ||
+  value === 'amp' ||
+  value === 'pi' ||
+  value === 'omp'
+
+const isAiAgentSessionEventName = (value: unknown): value is AiAgentSessionEventName =>
+  value === 'session_start' ||
+  value === 'prompt_submit' ||
+  value === 'pre_tool_use' ||
+  value === 'permission_request' ||
+  value === 'question' ||
+  value === 'notification' ||
+  value === 'stop' ||
+  value === 'session_end'
+
+const isManagedAiSessionState = (value: unknown): value is ManagedAiSessionState =>
+  value === 'idle' || value === 'working' || value === 'needsInput' || value === 'ended' || value === 'unknown'
+
+const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSessionTimelineEvent =>
+  isRecord(value) &&
+  isNonEmptyString(value.id) &&
+  isAiAgentSessionSource(value.source) &&
+  isAiAgentSessionEventName(value.event) &&
+  isNonEmptyString(value.sessionId) &&
+  isNonEmptyString(value.title) &&
+  typeof value.summary === 'string' &&
+  typeof value.receivedAt === 'number'
+
+const isManagedAiSessionDecision = (value: unknown): value is ManagedAiSessionDecision =>
+  isRecord(value) &&
+  isNonEmptyString(value.id) &&
+  (value.kind === 'allow' || value.kind === 'deny' || value.kind === 'reply' || value.kind === 'handled') &&
+  typeof value.createdAt === 'number'
+
+const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionRecord =>
+  isRecord(value) &&
+  isNonEmptyString(value.id) &&
+  isAiAgentSessionSource(value.source) &&
+  isNonEmptyString(value.title) &&
+  typeof value.summary === 'string' &&
+  isManagedAiSessionState(value.state) &&
+  isAiAgentSessionEventName(value.lastEvent) &&
+  typeof value.lastActivityAt === 'number' &&
+  typeof value.createdAt === 'number' &&
+  typeof value.updatedAt === 'number' &&
+  Array.isArray(value.events) &&
+  value.events.every(isManagedAiSessionTimelineEvent) &&
+  Array.isArray(value.decisions) &&
+  value.decisions.every(isManagedAiSessionDecision)
+
+const isManagedAiSessionSnapshot = (value: unknown): value is ManagedAiSessionSnapshot =>
+  isRecord(value) && Array.isArray(value.sessions) && value.sessions.every(isManagedAiSessionRecord)
+
+const isManagedAiSessionMutationData = (value: unknown): value is ManagedAiSessionMutationData =>
+  isRecord(value) && isManagedAiSessionSnapshot(value.snapshot) && (value.session === undefined || isManagedAiSessionRecord(value.session))
+
+const isManagedAiSessionBulkData = (value: unknown): value is ManagedAiSessionBulkData =>
+  isRecord(value) && typeof value.changed === 'number' && isManagedAiSessionSnapshot(value.snapshot)
 
 const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
   isRecord(value) &&
@@ -4113,6 +4192,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const aiAttentionItems = ref<AiAttentionItem[]>([])
   const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
   const managedAiSessions = ref<ManagedAiSession[]>([])
+  const managedAiSessionsLoading = ref(false)
+  const managedAiSessionsError = ref('')
   const managedAiSessionFocusRequest = ref<{ sequence: number; session: ManagedAiSession | null }>({ sequence: 0, session: null })
   const selectedManagedAiSessionKey = ref('')
   const onboardingCompleted = ref<Record<OnboardingModuleId, boolean>>(createDefaultOnboardingCompleted())
@@ -8345,17 +8426,100 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const sortedManagedAiSessions = computed(() => [...managedAiSessions.value].sort((first, second) => second.lastActivityAt - first.lastActivityAt))
   const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput'))
+  const selectedManagedAiSession = computed(() => sortedManagedAiSessions.value.find((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value) || null)
+  const managedAiAttentionPanelIds = computed(() => {
+    const ids = new Set<string>()
+    managedAiNeedsInputSessions.value.forEach((session) => {
+      if (session.panelId) ids.add(session.panelId)
+      if (session.terminalSessionId) ids.add(session.terminalSessionId)
+    })
+    return ids
+  })
+
+  const refreshManagedAiAttentionItems = () => {
+    const managedIds = new Set(managedAiSessions.value.map(aiSessionAttentionId))
+    aiAttentionItems.value = aiAttentionItems.value.filter((item) => !item.id.startsWith('managed-ai:') || managedIds.has(item.id))
+    managedAiSessions.value.forEach((session) => {
+      const id = aiSessionAttentionId(session)
+      if (session.state === 'needsInput') {
+        upsertAiAttentionItem({
+          id,
+          source: session.source,
+          kind: session.lastEvent === 'permission_request' ? 'approval' : 'question',
+          title: session.title,
+          summary: session.summary,
+          sessionId: session.id,
+          surfaceId: session.panelId || session.terminalSessionId,
+          createdAt: session.lastActivityAt,
+          ...(session.handledAt ? { handledAt: session.handledAt } : {})
+        })
+      } else {
+        removeAiAttentionItem(id)
+      }
+    })
+  }
+
+  const applyManagedAiSessionSnapshot = (snapshot: ManagedAiSessionSnapshot) => {
+    managedAiSessions.value = snapshot.sessions.map((session) => ({
+      ...session,
+      events: session.events.map((event) => ({ ...event, raw: event.raw ? { ...event.raw } : undefined })),
+      decisions: session.decisions.map((decision) => ({ ...decision }))
+    }))
+    managedAiSessionsError.value = ''
+    if (selectedManagedAiSessionKey.value && !managedAiSessions.value.some((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value)) {
+      selectedManagedAiSessionKey.value = ''
+    }
+    refreshManagedAiAttentionItems()
+  }
+
+  const refreshManagedAiSessions = async (options: { silent?: boolean } = {}) => {
+    const listBridge = window.aiops?.listManagedAiSessions
+    if (typeof listBridge !== 'function') {
+      managedAiSessionsError.value = 'AI 会话管理服务不可用'
+      if (!options.silent) setTopNotice(managedAiSessionsError.value)
+      return false
+    }
+    managedAiSessionsLoading.value = true
+    try {
+      const result = (await listBridge()) as ManagedAiSessionListResult
+      if (!result?.ok || !isManagedAiSessionSnapshot(result.data)) {
+        managedAiSessionsError.value = result?.errorMessage || 'AI 会话列表加载失败'
+        if (!options.silent) setTopNotice(managedAiSessionsError.value)
+        return false
+      }
+      applyManagedAiSessionSnapshot(result.data)
+      if (!options.silent) setTopNotice('AI 会话已刷新')
+      return true
+    } catch (error) {
+      managedAiSessionsError.value = error instanceof Error ? error.message : 'AI 会话列表加载失败'
+      if (!options.silent) setTopNotice(managedAiSessionsError.value)
+      return false
+    } finally {
+      managedAiSessionsLoading.value = false
+    }
+  }
 
   const upsertManagedAiSession = (event: AiAgentSessionEvent) => {
     const existing = managedAiSessions.value.find((session) => session.source === event.source && session.id === event.sessionId)
+    const now = Date.now()
+    const timelineEvent: ManagedAiSessionTimelineEvent = {
+      ...event,
+      id: `${event.receivedAt}-${event.event}`
+    }
     const next: ManagedAiSession = {
       id: event.sessionId,
       source: event.source,
-      title: event.title || existing?.title || event.source,
+      title: existing?.userTitle || existing?.title || event.title || event.source,
       summary: event.summary || existing?.summary || '',
       state: managedAiSessionStateForEvent(event.event, existing?.state),
       lastEvent: event.event,
       lastActivityAt: event.receivedAt,
+      createdAt: existing?.createdAt || event.receivedAt,
+      updatedAt: now,
+      ...(existing?.autoTitle ? { autoTitle: existing.autoTitle } : {}),
+      ...(existing?.userTitle ? { userTitle: existing.userTitle } : {}),
+      events: [...(existing?.events || []), timelineEvent].slice(-200),
+      decisions: [...(existing?.decisions || [])],
       ...(event.panelId || existing?.panelId ? { panelId: event.panelId || existing?.panelId } : {}),
       ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
       ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
@@ -8366,20 +8530,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ? managedAiSessions.value.map((session) => (session.source === next.source && session.id === next.id ? next : session))
       : [next, ...managedAiSessions.value]
 
-    if (next.state === 'needsInput') {
-      upsertAiAttentionItem({
-        id: aiSessionAttentionId(next),
-        source: next.source,
-        kind: event.event === 'permission_request' ? 'approval' : 'question',
-        title: next.title,
-        summary: next.summary,
-        sessionId: next.id,
-        surfaceId: next.panelId || next.terminalSessionId,
-        createdAt: event.receivedAt
-      })
-    } else if (next.state === 'idle' || next.state === 'ended') {
-      removeAiAttentionItem(aiSessionAttentionId(next))
-    }
+    refreshManagedAiAttentionItems()
     return next
   }
 
@@ -8387,10 +8538,106 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
     if (!session) return false
     const changed = markAiAttentionHandled(aiSessionAttentionId(session))
+    const now = Date.now()
     if (session.state === 'needsInput') session.state = 'idle'
+    session.handledAt = now
+    session.updatedAt = now
+    session.decisions = [...session.decisions, { id: `${now}-handled`, kind: 'handled', createdAt: now }]
     if (selectedManagedAiSessionKey.value === managedAiSessionKey(session)) selectedManagedAiSessionKey.value = ''
+    const bridge = window.aiops?.replyManagedAiSession
+    if (typeof bridge === 'function') {
+      void bridge({ source, sessionId, kind: 'handled' }).then((result: ManagedAiSessionMutationResult) => {
+        if (result?.ok && isManagedAiSessionMutationData(result.data)) applyManagedAiSessionSnapshot(result.data.snapshot)
+      })
+    }
     return changed
   }
+
+  const replyManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, kind: ManagedAiSessionDecision['kind'], message?: string) => {
+    const bridge = window.aiops?.replyManagedAiSession
+    if (typeof bridge !== 'function') {
+      setTopNotice('AI 会话管理服务不可用')
+      return false
+    }
+    try {
+      const result = (await bridge({ source, sessionId, kind, message })) as ManagedAiSessionMutationResult
+      if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
+        setTopNotice(result?.errorMessage || 'AI 会话处理失败')
+        return false
+      }
+      applyManagedAiSessionSnapshot(result.data.snapshot)
+      setTopNotice(kind === 'allow' ? '已记录允许' : kind === 'deny' ? '已记录拒绝' : kind === 'reply' ? '已记录回复' : '已标记处理')
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'AI 会话处理失败')
+      return false
+    }
+  }
+
+  const renameManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, title: string) => {
+    const bridge = window.aiops?.renameManagedAiSession
+    if (typeof bridge !== 'function') {
+      setTopNotice('AI 会话管理服务不可用')
+      return false
+    }
+    try {
+      const result = (await bridge({ source, sessionId, title })) as ManagedAiSessionMutationResult
+      if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
+        setTopNotice(result?.errorMessage || 'AI 会话重命名失败')
+        return false
+      }
+      applyManagedAiSessionSnapshot(result.data.snapshot)
+      setTopNotice('AI 会话已重命名')
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'AI 会话重命名失败')
+      return false
+    }
+  }
+
+  const clearManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {
+    const bridge = window.aiops?.clearManagedAiSession
+    if (typeof bridge !== 'function') {
+      setTopNotice('AI 会话管理服务不可用')
+      return false
+    }
+    try {
+      const result = (await bridge({ source, sessionId })) as ManagedAiSessionMutationResult
+      if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
+        setTopNotice(result?.errorMessage || 'AI 会话清理失败')
+        return false
+      }
+      applyManagedAiSessionSnapshot(result.data.snapshot)
+      setTopNotice('AI 会话已清理')
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'AI 会话清理失败')
+      return false
+    }
+  }
+
+  const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput) => {
+    const bridge = window.aiops?.bulkManagedAiSessions
+    if (typeof bridge !== 'function') {
+      setTopNotice('AI 会话管理服务不可用')
+      return false
+    }
+    try {
+      const result = (await bridge(input)) as ManagedAiSessionBulkResult
+      if (!result?.ok || !isManagedAiSessionBulkData(result.data)) {
+        setTopNotice(result?.errorMessage || 'AI 会话批量操作失败')
+        return false
+      }
+      applyManagedAiSessionSnapshot(result.data.snapshot)
+      setTopNotice(`已处理 ${result.data.changed} 个 AI 会话`)
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : 'AI 会话批量操作失败')
+      return false
+    }
+  }
+
+  const managedAiSessionNeedsAttentionForPanel = (panelIdOrSessionId: string) => managedAiAttentionPanelIds.value.has(panelIdOrSessionId)
 
   const focusManagedAiSession = (sessionIdOrPanelId: string) => {
     const session = managedAiSessions.value.find(
@@ -14372,13 +14619,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     currentAiAttentionItem,
     aiAttentionFocusRequest,
     managedAiSessions,
+    managedAiSessionsLoading,
+    managedAiSessionsError,
     sortedManagedAiSessions,
     managedAiNeedsInputSessions,
+    selectedManagedAiSession,
     managedAiSessionFocusRequest,
     selectedManagedAiSessionKey,
     upsertAiAttentionItem,
+    refreshManagedAiSessions,
+    applyManagedAiSessionSnapshot,
     upsertManagedAiSession,
     markManagedAiSessionHandled,
+    replyManagedAiSession,
+    renameManagedAiSession,
+    clearManagedAiSession,
+    bulkManagedAiSessions,
+    managedAiSessionNeedsAttentionForPanel,
     focusManagedAiSession,
     removeAiAttentionItem,
     markAiAttentionHandled,

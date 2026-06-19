@@ -86,4 +86,21 @@ describe('agent hook installer backend', () => {
     const uninstalled = uninstallCodexHooksFeature(installed)
     expect(uninstalled).toBe('[features]\nhooks = false\n')
   })
+
+  it('installs additional JSON-based agent hooks without nesting flat hook formats', async () => {
+    const { __testing, agentHookCommandFor, mergeAgentHookJson } = await loadBackend()
+    const cursor = __testing.hookDefinitions.find((definition) => definition.source === 'cursor')!
+    const gemini = __testing.hookDefinitions.find((definition) => definition.source === 'gemini')!
+
+    const cursorResult = mergeAgentHookJson({ version: 1 }, cursor, '/opt/aiopsterm/aiopsterm-agent-hook.js', true)
+    const cursorHooks = cursorResult.config.hooks as Record<string, Array<{ command: string }>>
+    expect(cursorHooks.beforeSubmitPrompt[0]).toEqual({
+      command: agentHookCommandFor('cursor', 'prompt_submit', '/opt/aiopsterm/aiopsterm-agent-hook.js'),
+      timeout: 5
+    })
+
+    const geminiResult = mergeAgentHookJson({}, gemini, '/opt/aiopsterm/aiopsterm-agent-hook.js', true)
+    const geminiHooks = geminiResult.config.hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>
+    expect(geminiHooks.SessionStart[0].hooks[0].command).toBe(agentHookCommandFor('gemini', 'SessionStart', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
+  })
 })

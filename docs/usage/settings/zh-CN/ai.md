@@ -4,14 +4,15 @@
 
 ## Agent Hook 安装器
 
-- Codex / Claude Code 会话管理 Hook：把 aiopsterm 的 Hook Helper 显式写入 Codex 或 Claude Code 的用户级 Hook 配置，用于让左侧 `AI 会话` 面板发现通过 aiopsterm 本地连接终端启动的 AI 会话。
-- CLI：显示是否在当前 `PATH` 中检测到 `codex` 或 `claude` 命令。未检测到时需要先安装对应 CLI，或确认启动 aiopsterm 的环境能访问该命令。
-- Hook 配置：Codex 使用 `~/.codex/hooks.json`，Claude Code 使用 `~/.claude/settings.json`。安装器只插入带 aiopsterm marker 的命令，不删除其它用户 Hook。
+- 会话管理 Hook：把 aiopsterm 的 Hook Helper 显式写入支持的 Agent 用户级 Hook 配置，用于让左侧 `AI 会话` 面板发现通过 aiopsterm 本地连接终端启动的 AI 会话。
+- CLI：显示是否在当前 `PATH` 中检测到对应命令，例如 `codex`、`claude`、`cursor-agent`、`gemini`、`copilot`、`grok`、`codebuddy`、`droid`、`qodercli`。未检测到时需要先安装对应 CLI，或确认启动 aiopsterm 的环境能访问该命令。
+- Hook 配置：Codex 使用 `~/.codex/hooks.json`，Claude Code 使用 `~/.claude/settings.json`。Cursor、Gemini、Copilot、Grok、CodeBuddy、Factory、Qoder 使用各自 JSON Hook 配置。安装器只插入带 aiopsterm marker 的命令，不删除其它用户 Hook。
 - 附加配置：Codex 还会在 `~/.codex/config.toml` 的 aiopsterm 标记块内启用 hooks feature。卸载时会移除该标记块，并尽量恢复安装前的 `hooks` 配置行。
 - Hook Helper：显示当前应用打包出的 `aiopsterm-agent-hook.js` 路径。Hook 命令通过 `node` 调用它，避免依赖脚本可执行位。
 - 安装 / 重新安装：先清理旧的 aiopsterm-owned Hook 命令，再写入当前 Helper 路径。不会静默执行，必须在设置页显式点击。
 - 卸载：只移除 aiopsterm-owned Hook 命令；同一事件里其它 Hook，例如用户自己的审计或通知 Hook，会保留。
-- 生效范围：Hook Helper 只有在 `AIOPSTERM_MANAGED_TERMINAL=1` 且存在 `AIOPSTERM_AGENT_SOCKET_PATH` 的 aiopsterm 本地连接终端里才会上报事件。外部系统终端会输出 `{}` 并正常退出，不接管 Codex/Claude 原生审批。
+- 生效范围：Hook Helper 只有在 `AIOPSTERM_MANAGED_TERMINAL=1` 且存在 `AIOPSTERM_AGENT_SOCKET_PATH` 的 aiopsterm 本地连接终端里才会上报事件。外部系统终端会输出 `{}` 并正常退出，不接管 Agent 原生审批。
+- 管理能力：会话会持久保存到应用数据目录，左侧面板可查看事件流、处理记录、手动重命名、标记已处理、清理已结束会话。`允许`、`拒绝`、`回复` 是 aiopsterm 的本地管理记录，不伪装成 Agent 原生阻塞审批。
 
 ## 通用
 

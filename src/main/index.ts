@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, Notification, dialog, ipcMain, net, protocol, shell, type IpcMainEvent } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { randomUUID } from 'crypto'
@@ -60,10 +60,15 @@ import {
 import { closeExternalCodexMcpBridgeServer, ensureExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
 import {
   agentHookScriptPathFor,
+  bulkManagedAiSessions,
+  clearManagedAiSession,
   closeAiAgentSessionServer,
   ensureAiAgentSessionServer,
   getAiAgentSessionSocketPath,
-  publishAiAgentSessionEvent
+  listManagedAiSessions,
+  publishAiAgentSessionEvent,
+  renameManagedAiSession,
+  replyManagedAiSession
 } from './backend/agentSessions'
 import { configureAgentHookInstallerRuntime, installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './backend/agentHookInstaller'
 import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
@@ -682,6 +687,19 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
     terminalSessionId: event.terminalSessionId
   })
   broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
+  if (!['permission_request', 'question', 'notification'].includes(event.event)) return
+  if (!Notification.isSupported()) return
+  const notification = new Notification({
+    title: event.title || 'AI session needs attention',
+    body: event.summary || `${event.source} needs attention`,
+    silent: false
+  })
+  notification.on('click', () => {
+    const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
+    focusWindow(target)
+    broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
+  })
+  notification.show()
 }
 
 const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -3911,6 +3929,11 @@ const registerIpc = () => {
   })
 
   ipcMain.handle('ai-agent:session-event', (_event, input: AiAgentSessionEventInput) => publishAiAgentSessionEvent(input, broadcastAiAgentSessionEvent))
+  ipcMain.handle('ai-agent:sessions:list', () => listManagedAiSessions())
+  ipcMain.handle('ai-agent:sessions:reply', (_event, input) => replyManagedAiSession(input))
+  ipcMain.handle('ai-agent:sessions:rename', (_event, input) => renameManagedAiSession(input))
+  ipcMain.handle('ai-agent:sessions:clear', (_event, input) => clearManagedAiSession(input))
+  ipcMain.handle('ai-agent:sessions:bulk', (_event, input) => bulkManagedAiSessions(input))
   ipcMain.handle('agent-hooks:list', async () => ({ ok: true, data: await listAgentHookInstallers() }))
   ipcMain.handle('agent-hooks:install', (_event, input) => installAgentHook(input))
   ipcMain.handle('agent-hooks:uninstall', (_event, input) => uninstallAgentHook(input))
