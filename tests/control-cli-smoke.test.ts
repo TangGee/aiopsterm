@@ -281,6 +281,55 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends tmux-style pane navigation requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      if (request.method === 'workspace.find') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            matches: [{ panelId: 'panel-2', title: 'Deploy', kind: 'terminal', active: false, reason: (request.params as any)?.content ? 'content' : 'title' }],
+            count: 1,
+            query: (request.params as any)?.query
+          }
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          selectedPane: { panelId: (request.params as any)?.paneId || (request.params as any)?.panelId || 'panel-2', title: 'Pane 2', surfaceKind: 'terminal' },
+          activePanelId: (request.params as any)?.paneId || (request.params as any)?.panelId || 'panel-2',
+          action: String(request.method)
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'next-window'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'previous-window'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'last-window'], { cwd: process.cwd() })
+
+    const selected = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'select-pane', '--target', 'panel-3'], {
+      cwd: process.cwd()
+    })
+    expect(selected.stdout).toContain('selected\tpanel-3')
+
+    const found = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'find-window', '--content', '--select', 'deploy'], {
+      cwd: process.cwd()
+    })
+    expect(found.stdout).toContain('panel-2\tterminal\tDeploy')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'workspace.next' }),
+      expect.objectContaining({ method: 'workspace.previous' }),
+      expect.objectContaining({ method: 'workspace.last' }),
+      expect.objectContaining({ method: 'pane.focus', params: expect.objectContaining({ paneId: 'panel-3' }) }),
+      expect.objectContaining({ method: 'workspace.find', params: expect.objectContaining({ query: 'deploy', content: true, select: true }) })
+    ])
+  })
+
   it('sends wait-for synchronization requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

@@ -39,6 +39,11 @@ Commands:
   swap-pane --pane <id> --target-pane <id> [--focus <true|false>]
   break-pane [--pane <id>|--panel <id>] [--focus <true|false>] [--no-focus]
   join-pane --target-pane <id> [--pane <id>|--panel <id>] [--direction right|below] [--focus <true|false>] [--no-focus]
+  next-window | previous-window | last-window
+  select-window --target <panel-id>
+  select-pane --target <panel-id>
+  last-pane
+  find-window [--content] [--select] <query>
   clear-history [--panel <id>|--session <id>]
   respawn-pane [--panel <id>|--session <id>] [--command <shell-command>]
   terminal send [--panel <id>|--session <id>] --text <text>
@@ -190,6 +195,9 @@ const methodParams = () => {
   if (['set-buffer', 'paste-buffer', 'list-buffers'].includes(command)) return terminalBufferMethodParams(command)
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
   if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
+  if (['next-window', 'nextw', 'previous-window', 'prev-window', 'previousw', 'prevw', 'last-window', 'lastw', 'select-window', 'selectw', 'select-pane', 'selectp', 'focus-pane', 'last-pane', 'lastp', 'find-window', 'findw'].includes(command)) {
+    return paneNavigationMethodParams(command)
+  }
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
   if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
@@ -562,6 +570,26 @@ const paneLayoutMethodParams = (command) => {
       focus: readFocusOption()
     }
   }
+}
+
+const paneNavigationMethodParams = (command) => {
+  if (command === 'next-window' || command === 'nextw') return { method: 'workspace.next', params: {} }
+  if (command === 'previous-window' || command === 'prev-window' || command === 'previousw' || command === 'prevw') return { method: 'workspace.previous', params: {} }
+  if (command === 'last-window' || command === 'lastw') return { method: 'workspace.last', params: {} }
+  if (command === 'last-pane' || command === 'lastp') return { method: 'pane.last', params: {} }
+  if (command === 'select-window' || command === 'selectw') {
+    const target = readOption('--target') || readOption('--window') || readOption('--workspace') || readOption('--panel') || readOption('-t') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'workspace.select', params: { workspaceId: target, workspace_id: target, panelId: target, surfaceId: target } }
+  }
+  if (command === 'select-pane' || command === 'selectp' || command === 'focus-pane') {
+    const target = readOption('--target') || readOption('--pane') || readOption('--panel') || readOption('--surface') || readOption('-t') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'pane.focus', params: { paneId: target, pane_id: target, panelId: target, surfaceId: target } }
+  }
+  const includeContent = hasFlag('--content')
+  const select = hasFlag('--select')
+  const windowId = readOption('--window')
+  const query = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ').trim()
+  return { method: 'workspace.find', params: { query, content: includeContent, includeContent, select, windowId, window_id: windowId } }
 }
 
 const sidebarTargetParams = () => {
@@ -1029,6 +1057,39 @@ const printResponse = (response) => {
     )
     return
   }
+  if (data.selectedPane || data.selectedSurface || data.workspace) {
+    const pane = data.selectedPane || data.selectedSurface || data.workspace || {}
+    process.stdout.write(['selected', pane.panelId || pane.id || data.activePanelId || '-', pane.title || '', data.action || ''].join('\t') + '\n')
+    return
+  }
+  if (Array.isArray(data.matches) && data.matches.some((match) => match.agent)) {
+    if (data.matches.length === 0) {
+      process.stdout.write('No agent vault matches\n')
+      return
+    }
+    for (const match of data.matches) {
+      const agent = match.agent || {}
+      process.stdout.write(
+        [
+          'agent-match',
+          agent.id || '-',
+          agent.name || '-',
+          match.sessionId || '-',
+          match.canResume ? 'resume' : '-',
+          match.canFork ? 'fork' : '-'
+        ].join('\t') + '\n'
+      )
+      if (match.resumeCommand) process.stdout.write(`${match.resumeCommand}\n`)
+    }
+    return
+  }
+  if (Array.isArray(data.matches)) {
+    for (const match of data.matches) {
+      process.stdout.write([match.active ? '*' : ' ', match.panelId || match.id || '-', match.kind || match.surfaceKind || '-', match.title || '', match.reason || ''].join('\t') + '\n')
+    }
+    if (data.matches.length === 0) process.stdout.write('No matches\n')
+    return
+  }
   if (Array.isArray(data.snapshots)) {
     for (const snapshot of data.snapshots) {
       process.stdout.write([snapshot.id || '-', snapshot.name || '-', `panels=${(snapshot.panels || []).length}`, `groups=${(snapshot.workspaceGroups || []).length}`, snapshot.updatedAt || '-'].join('\t') + '\n')
@@ -1193,27 +1254,6 @@ const printResponse = (response) => {
           ].join('\t') + '\n'
         )
       }
-    }
-    return
-  }
-  if (Array.isArray(data.matches)) {
-    if (data.matches.length === 0) {
-      process.stdout.write('No agent vault matches\n')
-      return
-    }
-    for (const match of data.matches) {
-      const agent = match.agent || {}
-      process.stdout.write(
-        [
-          'agent-match',
-          agent.id || '-',
-          agent.name || '-',
-          match.sessionId || '-',
-          match.canResume ? 'resume' : '-',
-          match.canFork ? 'fork' : '-'
-        ].join('\t') + '\n'
-      )
-      if (match.resumeCommand) process.stdout.write(`${match.resumeCommand}\n`)
     }
     return
   }

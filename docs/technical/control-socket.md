@@ -128,6 +128,7 @@ The pane layout slice adds control_compat/tmux-style structural controls over th
 - `pane.join`: attach a source surface next to a target surface, using `direction=right` or `direction=below`.
 - `pane.swap`: swap two surfaces' split placement metadata without swapping their terminal sessions or xterm buffers.
 - `pane.resize`: accepted as a compatibility command, but currently returns `unsupported=true` because aiopsterm split panes use an equal-size layout and do not store per-pane dimensions.
+- `workspace.next`, `workspace.previous`, `workspace.last`, `workspace.select`, `pane.focus`, `pane.last`, and `workspace.find`: control_compat/tmux-style navigation and lookup over the same shared main work panel.
 
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 
@@ -157,6 +158,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
 - `respawn-pane` and `surface.respawn` map to `terminal.respawn`.
 - `break-pane`, `join-pane`, `swap-pane`, and `resize-pane` map to `pane.break`, `pane.join`, `pane.swap`, and `pane.resize`.
+- `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` map to `workspace.*`, `pane.*`, and shared-panel lookup commands.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
@@ -269,6 +271,9 @@ node /path/to/resources/aiopsterm-control.js break-pane --pane panel-2 --focus t
 node /path/to/resources/aiopsterm-control.js join-pane --pane panel-2 --target-pane panel-main --direction below
 node /path/to/resources/aiopsterm-control.js swap-pane --pane panel-2 --target-pane panel-main
 node /path/to/resources/aiopsterm-control.js resize-pane --pane panel-main -R --amount 5
+node /path/to/resources/aiopsterm-control.js next-window
+node /path/to/resources/aiopsterm-control.js select-pane --target panel-main
+node /path/to/resources/aiopsterm-control.js find-window --content --select "deploy"
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
 node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
@@ -317,6 +322,8 @@ Future higher-level automation commands should use the control socket but must c
 `terminal.respawn` is also renderer-owned. Unlike raw `terminal.send_text`, it routes the restart command through aiopsterm terminal command security and may return a `needs-approval` decision instead of writing to the shell. It does not close the PTY or SSH channel by itself; the command text controls whether the running shell process is replaced.
 
 `pane.break`, `pane.join`, and `pane.swap` are renderer-owned structural controls. They only update the main work panel's surface layout metadata. They do not write to any shell, close terminal sessions, or reuse the terminal raw-input path. `pane.resize` is deliberately explicit about the current limitation: it returns `unsupported=true`, `resized=false`, and `unsupportedReason` instead of pretending to resize equal-split panes.
+
+Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of control_compat's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
 
 `sidebar.*` metadata is a lightweight automation state source, not a command runner. It is stored in memory in the main process, exposed through the socket and events stream, and scoped by `workspaceId` with the current shared work panel defaulting to `main`. The current slice does not force a new right-sidebar UI; renderer surfaces or future MCP tools can consume the metadata through `sidebar.state`.
 

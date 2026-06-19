@@ -631,6 +631,61 @@ describe('control socket backend', () => {
     )
   })
 
+  it('routes control_compat-style pane navigation aliases to the renderer and records focus events', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'workspace.find') {
+        return {
+          ok: true,
+          data: {
+            matches: [{ panelId: 'panel-2', title: 'Deploy', kind: 'terminal', active: false, reason: 'title' }],
+            count: 1,
+            query: (request.params as any)?.query
+          }
+        }
+      }
+      return {
+        ok: true,
+        data: {
+          selectedPane: { panelId: (request.params as any)?.paneId || (request.params as any)?.panelId || 'panel-2', surfaceKind: 'terminal', title: 'Pane 2' },
+          previousActivePanelId: 'panel-1',
+          activePanelId: (request.params as any)?.paneId || (request.params as any)?.panelId || 'panel-2',
+          action: request.method
+        }
+      }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'next-window', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'previous-window', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'last-window', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'select-window', params: { panelId: 'panel-3' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'select-pane', params: { paneId: 'panel-4' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'last-pane', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'find-window', params: { query: 'deploy' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ matches: [expect.objectContaining({ panelId: 'panel-2' })] }) })
+    )
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'workspace.next' }),
+      expect.objectContaining({ method: 'workspace.previous' }),
+      expect.objectContaining({ method: 'workspace.last' }),
+      expect.objectContaining({ method: 'workspace.select', params: expect.objectContaining({ panelId: 'panel-3' }) }),
+      expect.objectContaining({ method: 'pane.focus', params: expect.objectContaining({ paneId: 'panel-4' }) }),
+      expect.objectContaining({ method: 'pane.last' }),
+      expect.objectContaining({ method: 'workspace.find', params: expect.objectContaining({ query: 'deploy' }) })
+    ])
+    const paneEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'pane' } })
+    expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.focused' })]))
+    const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
+    expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.selected' })]))
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

@@ -617,6 +617,7 @@ type ControlSurfaceResumeBindingState = ControlSurfaceResumeBindingSummary
 
 const controlWorkspaceGroups = ref<ControlWorkspaceGroupState[]>([])
 const controlSurfaceResumeBindings = ref<Record<string, ControlSurfaceResumeBindingState>>({})
+const lastActiveControlPanelId = ref('')
 
 const normalizeWorkspaceGroupId = (value: unknown) => {
   const text = controlText(value)
@@ -1186,6 +1187,123 @@ const paneLayoutPayload = (panel?: TerminalPanel | null, targetPanel?: TerminalP
     ...extra,
     snapshot: workspaceSnapshotForControl()
   })
+
+const selectedPanePayload = (panel: TerminalPanel, action: string, previousActivePanelId: string) =>
+  controlOk({
+    workspace: {
+      id: 'main',
+      title: 'Main Workspace',
+      active: true,
+      mode: workspace.mode,
+      activeModule: workspace.activeModule,
+      activePanelId: panel.id
+    },
+    selectedPane: surfaceSummaryForControl(panel),
+    selectedSurface: surfaceSummaryForControl(panel),
+    activePanelId: panel.id,
+    previousActivePanelId,
+    action,
+    snapshot: workspaceSnapshotForControl()
+  })
+
+const selectableControlPanels = () => workspace.panels.filter((panel) => !isWelcomePlaceholderPanel(panel))
+
+const resolveControlSelectablePanel = (value: unknown) => {
+  const target = controlText(value)
+  const panels = selectableControlPanels()
+  if (!target || target === 'main' || target === 'workspace' || target === 'workspace:1') {
+    return panels.find((panel) => panel.id === workspace.activePanelId) || panels[0] || null
+  }
+  const indexMatch = target.match(/^(?:window|pane|surface|workspace):(\d+)$/i)
+  const numericIndex = indexMatch ? Number(indexMatch[1]) : Number(target)
+  if (Number.isInteger(numericIndex) && numericIndex > 0 && numericIndex <= panels.length) return panels[numericIndex - 1]
+  return panels.find((panel) => panelMatchesControlId(panel, target) || panel.title === target) || null
+}
+
+const focusControlPanel = async (panel: TerminalPanel, action: string) => {
+  const previousActivePanelId = workspace.activePanelId
+  workspace.activeModule = 'workspace'
+  workspace.activePanelId = panel.id
+  await nextTick()
+  terminalViews.get(panel.id)?.terminal.focus()
+  return selectedPanePayload(panel, action, previousActivePanelId)
+}
+
+const focusControlPanelByOffset = async (offset: number, action: string) => {
+  const panels = selectableControlPanels()
+  if (!panels.length) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+  const activeIndex = Math.max(0, panels.findIndex((panel) => panel.id === workspace.activePanelId))
+  const nextIndex = (activeIndex + offset + panels.length) % panels.length
+  return focusControlPanel(panels[nextIndex], action)
+}
+
+const controlTargetValue = (params: Record<string, unknown>) =>
+  params.panelId ||
+  params.surfaceId ||
+  params.paneId ||
+  params.workspaceId ||
+  params.panel_id ||
+  params.surface_id ||
+  params.pane_id ||
+  params.workspace_id ||
+  params.target ||
+  params.id
+
+const handlePaneNavigationControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'workspace.next') return focusControlPanelByOffset(1, 'next')
+  if (method === 'workspace.previous') return focusControlPanelByOffset(-1, 'previous')
+  if (method === 'workspace.last' || method === 'pane.last') {
+    const target = resolveControlSelectablePanel(lastActiveControlPanelId.value)
+    if (target) return focusControlPanel(target, method === 'pane.last' ? 'last-pane' : 'last-window')
+    return focusControlPanelByOffset(-1, method === 'pane.last' ? 'last-pane' : 'last-window')
+  }
+  if (method === 'workspace.select') {
+    const panel = resolveControlSelectablePanel(controlTargetValue(params))
+    if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
+    return focusControlPanel(panel, 'select-window')
+  }
+  if (method === 'pane.focus') {
+    const panel = resolveControlPanePanel(params)
+    if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    return focusControlPanel(panel, 'select-pane')
+  }
+  if (method === 'workspace.find') {
+    const query = controlText(params.query || params.q || params.text)
+    const includeContent = controlBool(params.content ?? params.includeContent ?? params.include_content, false)
+    const queryLower = query.toLowerCase()
+    const matches = selectableControlPanels()
+      .map((panel, index) => {
+        const titleMatch = !queryLower || panel.title.toLowerCase().includes(queryLower)
+        const cwdMatch = Boolean(queryLower && panel.cwd.toLowerCase().includes(queryLower))
+        const view = terminalViews.get(panel.id)
+        const content = includeContent ? `${panel.output || ''}\n${view ? terminalBufferText(view, Math.max(1, view.terminal.rows || 30)) : ''}` : ''
+        const contentMatch = Boolean(queryLower && includeContent && content.toLowerCase().includes(queryLower))
+        const reason = titleMatch ? 'title' : cwdMatch ? 'cwd' : contentMatch ? 'content' : ''
+        if (!reason) return null
+        return {
+          index: index + 1,
+          panelId: panel.id,
+          id: panel.id,
+          title: panel.title,
+          kind: panel.kind,
+          surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
+          active: panel.id === workspace.activePanelId,
+          cwd: panel.cwd,
+          reason
+        }
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    if (controlBool(params.select, false) && matches[0]) {
+      const panel = workspace.panels.find((item) => item.id === matches[0].panelId)
+      if (panel) {
+        const selected = await focusControlPanel(panel, 'find-window')
+        return controlOk({ ...(selected.data || {}), matches, selected: matches[0], count: matches.length })
+      }
+    }
+    return controlOk({ matches, count: matches.length, query, includeContent })
+  }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
 
 const normalizePaneLayoutDirection = (value: unknown) => {
   const direction = controlText(value).toLowerCase()
@@ -2036,6 +2154,9 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   if (request.method === 'session.restore') return restoreSessionSnapshotForControl(params)
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
+  if (['workspace.next', 'workspace.previous', 'workspace.last', 'workspace.select', 'workspace.find', 'pane.focus', 'pane.last'].includes(request.method)) {
+    return handlePaneNavigationControlRequest(request.method, params)
+  }
   if (request.method.startsWith('pane.')) return handlePaneLayoutControlRequest(request.method, params)
   if (request.method === 'surface.respawn' || request.method === 'terminal.respawn') return handleSurfaceRespawnControlRequest(params)
   if (request.method.startsWith('agent.team.')) return handleAgentTeamControlRequest(request.method, params)
@@ -3898,7 +4019,10 @@ watch(
 
 watch(
   () => workspace.activePanelId,
-  (panelId) => {
+  (panelId, previousPanelId) => {
+    if (previousPanelId && previousPanelId !== panelId && workspace.panels.some((panel) => panel.id === previousPanelId)) {
+      lastActiveControlPanelId.value = previousPanelId
+    }
     if (commandDialog.visible && commandDialog.panelId !== panelId) {
       resetCommandDialog()
       commandDialog.visible = false

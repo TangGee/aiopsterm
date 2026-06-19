@@ -7510,6 +7510,74 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('navigates and finds shared work-panel panes through tmux-compatible control commands', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const firstPanelId = store.activePanelId
+    store.renamePanel(firstPanelId, 'Main Shell')
+    const deployPanel = store.createPanel()
+    deployPanel.title = 'Deploy Shell'
+    deployPanel.output = 'rollout deploy pending'
+    const deployPanelId = deployPanel.id
+    const logsPanel = store.createPanel()
+    logsPanel.title = 'Logs Shell'
+    const logsPanelId = logsPanel.id
+    store.activePanelId = firstPanelId
+    await wrapper.vm.$nextTick()
+
+    const nextResponse = await invokeControlHandler({ id: 'next-window', method: 'workspace.next', params: {} })
+    expect(nextResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activePanelId: deployPanelId, action: 'next' }) }))
+    expect(store.activePanelId).toBe(deployPanelId)
+
+    const previousResponse = await invokeControlHandler({ id: 'previous-window', method: 'workspace.previous', params: {} })
+    expect(previousResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activePanelId: firstPanelId, action: 'previous' }) }))
+    expect(store.activePanelId).toBe(firstPanelId)
+
+    await invokeControlHandler({ id: 'select-pane', method: 'pane.focus', params: { paneId: logsPanelId } })
+    expect(store.activePanelId).toBe(logsPanelId)
+    const lastPaneResponse = await invokeControlHandler({ id: 'last-pane', method: 'pane.last', params: {} })
+    expect(lastPaneResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activePanelId: firstPanelId, action: 'last-pane' }) }))
+    expect(store.activePanelId).toBe(firstPanelId)
+
+    const selectWindowResponse = await invokeControlHandler({ id: 'select-window', method: 'workspace.select', params: { workspaceId: '2' } })
+    expect(selectWindowResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activePanelId: deployPanelId, action: 'select-window' }) }))
+    expect(store.activePanelId).toBe(deployPanelId)
+
+    const findResponse = await invokeControlHandler({ id: 'find-window', method: 'workspace.find', params: { query: 'rollout', content: true, select: true } })
+    expect(findResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: 1,
+          selected: expect.objectContaining({ panelId: deployPanelId, reason: 'content' }),
+          activePanelId: deployPanelId
+        })
+      })
+    )
+    expect(store.activePanelId).toBe(deployPanelId)
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
