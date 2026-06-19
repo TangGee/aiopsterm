@@ -472,7 +472,16 @@ import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
-import type { RuntimeLogLevel, TerminalCommandSuggestion, TerminalCommandSuggestionContext, TerminalDataEvent, TerminalKillResult } from '@shared/preload'
+import type {
+  ControlRequest,
+  ControlResponse,
+  ControlTerminalSummary,
+  RuntimeLogLevel,
+  TerminalCommandSuggestion,
+  TerminalCommandSuggestionContext,
+  TerminalDataEvent,
+  TerminalKillResult
+} from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
@@ -509,6 +518,7 @@ const commandLinePanelId = ref('')
 let offData: (() => void) | null = null
 let offLifecycle: (() => void) | null = null
 let offExit: (() => void) | null = null
+let offControlRequest: (() => void) | null = null
 let zmodemProgressHideTimer: number | null = null
 const closeTerminalMenusFromDocument = () => {
   menu.visible = false
@@ -558,6 +568,103 @@ const commandDialog = reactive({
 type TerminalSuggestion = TerminalCommandSuggestion
 
 const terminalSuggestionSources = new Set<TerminalSuggestion['source']>(['base', 'history', 'ai'])
+
+const controlOk = (data: Record<string, unknown> = {}): ControlResponse => ({ ok: true, data })
+
+const controlFail = (errorCode: string, errorMessage: string, data?: Record<string, unknown>): ControlResponse => ({
+  ok: false,
+  errorCode,
+  errorMessage,
+  ...(data ? { data } : {})
+})
+
+const controlText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const controlNumber = (value: unknown, fallback: number, min: number, max: number) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(numberValue)))
+}
+
+const terminalKindForControl = (panel: TerminalPanel): ControlTerminalSummary['kind'] => {
+  if (panel.sshSession) return 'ssh'
+  if (panel.sessionId || panel.terminalLifecycle?.kind === 'local') return 'local'
+  return 'unknown'
+}
+
+const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary => {
+  const view = terminalViews.get(panel.id)
+  return {
+    panelId: panel.id,
+    ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
+    title: panel.title,
+    kind: terminalKindForControl(panel),
+    active: panel.id === workspace.activePanelId,
+    connected: Boolean(panel.sessionId),
+    status: panel.status,
+    cwd: panel.cwd,
+    ...(panel.sshSession?.host ? { host: panel.sshSession.host } : {}),
+    ...(panel.sshSession?.port ? { port: panel.sshSession.port } : {}),
+    ...(panel.sshSession?.username ? { username: panel.sshSession.username } : {}),
+    ...(panel.sshSession?.assetId ? { assetId: panel.sshSession.assetId } : {}),
+    ...(panel.sshSession?.assetName ? { assetName: panel.sshSession.assetName } : {}),
+    ...(view ? { cols: view.terminal.cols, rows: view.terminal.rows } : {})
+  }
+}
+
+const resolveControlTerminalPanel = (params: Record<string, unknown> = {}) => {
+  const panelId = controlText(params.panelId || params.surfaceId)
+  const sessionId = controlText(params.sessionId || params.terminalSessionId)
+  if (panelId || sessionId) {
+    return workspace.panels.find((panel) => panel.kind !== 'knowledge' && (panel.id === panelId || panel.sessionId === sessionId)) || null
+  }
+  const active = workspace.panels.find((panel) => panel.kind !== 'knowledge' && panel.id === workspace.activePanelId)
+  return active || workspace.panels.find((panel) => panel.kind !== 'knowledge' && panel.sessionId) || null
+}
+
+const terminalBufferText = (view: TerminalView, tailLines: number) => {
+  const buffer = view.terminal.buffer.active
+  const start = Math.max(0, buffer.length - tailLines)
+  const lines: string[] = []
+  for (let index = start; index < buffer.length; index += 1) {
+    lines.push(buffer.getLine(index)?.translateToString(true) || '')
+  }
+  return lines.join('\n').replace(/\s+$/g, '')
+}
+
+const handleControlRequest = async (request: ControlRequest): Promise<ControlResponse> => {
+  const params = request.params || {}
+  if (request.method === 'terminal.list') {
+    const terminals = workspace.panels.filter((panel) => panel.kind !== 'knowledge').map(terminalSummaryForControl)
+    return controlOk({
+      terminals,
+      count: terminals.length,
+      activePanelId: workspace.activePanelId
+    })
+  }
+  if (request.method === 'terminal.focus') {
+    const panel = resolveControlTerminalPanel(params)
+    if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
+    workspace.activeModule = 'workspace'
+    workspace.activePanelId = panel.id
+    await nextTick()
+    terminalViews.get(panel.id)?.terminal.focus()
+    return controlOk({ terminal: terminalSummaryForControl(panel) })
+  }
+  if (request.method === 'terminal.read_screen') {
+    const panel = resolveControlTerminalPanel(params)
+    if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
+    const view = terminalViews.get(panel.id)
+    if (!view) return controlFail('TERMINAL_VIEW_NOT_READY', 'Terminal view is not ready.', { panelId: panel.id, sessionId: panel.sessionId })
+    const tailLines = controlNumber(params.tailLines || params.lines, view.terminal.rows || 30, 1, Math.max(1, workspace.terminalSettings.scrollBack || 1000))
+    return controlOk({
+      terminal: terminalSummaryForControl(panel),
+      text: terminalBufferText(view, tailLines),
+      tailLines
+    })
+  }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${request.method}`)
+}
 const terminalContentPaddingTop = 10
 const terminalContentPaddingBottom = 16
 const terminalAiButtonHeight = 32
@@ -2197,6 +2304,7 @@ onMounted(() => {
   offData = window.aiops?.onTerminalData(handleTerminalData) || null
   offLifecycle = window.aiops?.onTerminalLifecycle((event) => workspace.applyTerminalLifecycle(event)) || null
   offExit = window.aiops?.onTerminalExit((event) => workspace.applyTerminalExit(event)) || null
+  offControlRequest = window.aiops?.onControlRequest(handleControlRequest) || null
   document.addEventListener('click', closeTerminalMenusFromDocument)
   window.addEventListener('keydown', handleShortcut)
 })
@@ -2205,6 +2313,7 @@ onUnmounted(() => {
   offData?.()
   offLifecycle?.()
   offExit?.()
+  offControlRequest?.()
   terminalZmodemRuntime.dispose()
   if (zmodemProgressHideTimer !== null) {
     window.clearTimeout(zmodemProgressHideTimer)

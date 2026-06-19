@@ -31,6 +31,7 @@ type LocalTerminalRuntimeConfig = {
   getEnv?: () => NodeJS.ProcessEnv
   getAgentSocketPath?: () => string
   getAgentHookScriptPath?: () => string
+  getControlSocketPath?: () => string
   getPlatform?: () => NodeJS.Platform
   loadPty?: () => LocalPtyRuntime | null
   processRuntime?: LocalProcessRuntime
@@ -74,6 +75,7 @@ export const configureLocalTerminalBackendRuntime = (config: LocalTerminalRuntim
   runtimeConfig.getEnv = config.getEnv
   runtimeConfig.getAgentSocketPath = config.getAgentSocketPath
   runtimeConfig.getAgentHookScriptPath = config.getAgentHookScriptPath
+  runtimeConfig.getControlSocketPath = config.getControlSocketPath
   runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
@@ -97,6 +99,7 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
   const workspaceId = cleanManagedContextValue(options.workspaceId) || 'local'
   const agentSocketPath = cleanManagedContextValue(runtimeConfig.getAgentSocketPath?.())
   const agentHookScriptPath = cleanManagedContextValue(runtimeConfig.getAgentHookScriptPath?.())
+  const controlSocketPath = cleanManagedContextValue(runtimeConfig.getControlSocketPath?.())
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
     AIOPSTERM_TERMINAL_SESSION_ID: id,
@@ -109,6 +112,7 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
   }
   if (agentSocketPath) env.AIOPSTERM_AGENT_SOCKET_PATH = agentSocketPath
   if (agentHookScriptPath) env.AIOPSTERM_AGENT_HOOK_PATH = agentHookScriptPath
+  if (controlSocketPath) env.AIOPSTERM_CONTROL_SOCKET = controlSocketPath
   return env
 }
 

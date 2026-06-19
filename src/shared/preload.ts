@@ -139,6 +139,34 @@ export type TerminalKillResult = AiopsMutationResult<{
   id: string
 }>
 
+export type ControlTerminalSummary = {
+  panelId: string
+  sessionId?: string
+  title: string
+  kind: 'local' | 'ssh' | 'unknown'
+  active: boolean
+  connected: boolean
+  status?: string
+  cwd?: string
+  host?: string
+  port?: number
+  username?: string
+  assetId?: string
+  assetName?: string
+  cols?: number
+  rows?: number
+}
+
+export type ControlRequest = {
+  id: string
+  method: string
+  params?: Record<string, unknown>
+}
+
+export type ControlResponse = AiopsMutationResult<Record<string, unknown>>
+
+export type ControlRequestHandler = (request: ControlRequest) => Promise<ControlResponse> | ControlResponse
+
 export type TerminalDataEvent = {
   id: string
   data: string
@@ -3694,6 +3722,8 @@ export type AiopsPreloadApi = {
   clearManagedAiNotifications: () => Promise<ManagedAiNotificationClearResult>
   openManagedAiNotification: (input: ManagedAiNotificationOpenInput) => Promise<ManagedAiNotificationMutationResult>
   jumpToUnreadManagedAiNotification: () => Promise<ManagedAiNotificationMutationResult>
+  respondControlRequest: (id: string, response: ControlResponse) => void
+  onControlRequest: (listener: ControlRequestHandler) => () => void
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void
   cancelTerminalKeyboardInteractive: (id: string) => void
   pickZmodemUploadFiles: () => Promise<ZmodemUploadPickResult>

@@ -219,6 +219,13 @@ import { checkModelProvider, listAiModels } from './backend/modelProviders'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
 import { configureLocalTerminalBackendRuntime, createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
 import {
+  closeControlSocketServer,
+  configureControlSocketRuntime,
+  ensureControlSocketServer,
+  getControlSocketPath,
+  registerControlSocketIpc
+} from './backend/controlSocket'
+import {
   configureQuickCommandBackendRuntime,
   deleteQuickCommandGroup,
   deleteQuickCommandSnippet,
@@ -472,6 +479,30 @@ const registerTerminalForCodexBridge = (session: TerminalSession, target?: Codex
       }
     }
   })
+}
+
+const writeTerminalBySessionId = async (id: string, data: string) => {
+  const session = sessions.get(id)
+  const bytes = Buffer.byteLength(String(data || ''), 'utf8')
+  if (!session) {
+    logRuntimeEvent('warn', 'control.terminal-write.missing-session', { id, bytes })
+    return {
+      ok: false,
+      errorCode: 'TERMINAL_SESSION_NOT_FOUND',
+      errorMessage: `Terminal session not found: ${id}`
+    }
+  }
+  logRuntimeEvent('debug', 'control.terminal-write.request', { id, kind: session.kind, bytes })
+  if (session.kind === 'ssh') {
+    ;(session.process as SshTerminalSession).write(data)
+  } else {
+    ;(session.process as LocalTerminalSession).write(data)
+  }
+  terminalHistoryLinesFromWrite(data).forEach((command) => recordTerminalCommandHistory(command, { host: session.host }))
+  return {
+    ok: true,
+    data: { id, bytes }
+  }
 }
 
 type KnowledgeBaseEntry = {
@@ -1517,7 +1548,13 @@ configureLocalTerminalBackendRuntime({
   getDefaultCwd: () => app.getPath('home'),
   getEnv: () => process.env,
   getAgentSocketPath: getAiAgentSessionSocketPath,
-  getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '')
+  getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || ''),
+  getControlSocketPath
+})
+configureControlSocketRuntime({
+  getWindows: () => BrowserWindow.getAllWindows(),
+  focusWindow,
+  writeTerminal: writeTerminalBySessionId
 })
 configureAgentHookInstallerRuntime({
   getHomeDir: () => app.getPath('home'),
@@ -3001,6 +3038,7 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
 }
 
 const registerIpc = () => {
+  registerControlSocketIpc(ipcMain)
   ipcMain.handle('app:platform', () => process.platform)
   ipcMain.handle('app:shell', () => getDefaultShell())
   ipcMain.handle('app:check-update', () => checkAppUpdate(app.getVersion()))
@@ -4302,6 +4340,7 @@ app.whenReady().then(async () => {
   registerUserAvatarProtocol()
   registerCustomBackgroundProtocol()
   registerIpc()
+  await ensureControlSocketServer(app.getPath('userData'))
   await ensureAiAgentSessionServer({
     userDataPath: app.getPath('userData'),
     emit: broadcastAiAgentSessionEvent
@@ -4320,6 +4359,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   closeAiAgentSessionServer()
+  closeControlSocketServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()
   sessions.forEach((session) => {
@@ -4336,6 +4376,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  closeControlSocketServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()
   securityConfigWatcher?.close()

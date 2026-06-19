@@ -239,6 +239,22 @@ const api: AiopsPreloadApi = {
   clearManagedAiNotifications: () => ipcRenderer.invoke('ai-agent:notifications:clear'),
   openManagedAiNotification: (input) => ipcRenderer.invoke('ai-agent:notifications:open', input),
   jumpToUnreadManagedAiNotification: () => ipcRenderer.invoke('ai-agent:notifications:jump-unread'),
+  respondControlRequest: (id, response) => ipcRenderer.invoke('control:response', id, response),
+  onControlRequest: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => {
+      void Promise.resolve(listener(payload))
+        .then((response) => ipcRenderer.invoke('control:response', payload.id, response))
+        .catch((error) =>
+          ipcRenderer.invoke('control:response', payload.id, {
+            ok: false,
+            errorCode: 'CONTROL_RENDERER_HANDLER_FAILED',
+            errorMessage: error instanceof Error ? error.message : String(error)
+          })
+        )
+    }
+    ipcRenderer.on('control:request', wrapped)
+    return () => ipcRenderer.off('control:request', wrapped)
+  },
   respondTerminalKeyboardInteractive: (id: string, response) => ipcRenderer.send(`terminal:keyboard-interactive:response:${id}`, response),
   cancelTerminalKeyboardInteractive: (id: string) => ipcRenderer.send(`terminal:keyboard-interactive:cancel:${id}`),
   pickZmodemUploadFiles: () => ipcRenderer.invoke('zmodem:pick-upload-files'),
